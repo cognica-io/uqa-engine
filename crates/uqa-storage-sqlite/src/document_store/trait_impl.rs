@@ -24,6 +24,7 @@ impl DocumentStore for SQLiteDocumentStore {
                     doc_id,
                     &document,
                     read.metadata(doc_id)?.unwrap_or_default(),
+                    None,
                 )
             })?
             .is_some()
@@ -31,7 +32,7 @@ impl DocumentStore for SQLiteDocumentStore {
             return Ok(());
         }
         let metadata = self.get_metadata(doc_id)?.unwrap_or_default();
-        self.put_stored_inner(doc_id, &document, metadata)?;
+        self.put_stored_inner(doc_id, &document, metadata, None)?;
         Ok(())
     }
 
@@ -41,7 +42,18 @@ impl DocumentStore for SQLiteDocumentStore {
 
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
         let (fields, metadata) = document.into_parts();
-        self.put_stored_inner(doc_id, &fields, metadata)?;
+        self.put_stored_inner(doc_id, &fields, metadata, None)?;
+        Ok(())
+    }
+
+    fn put_stored_unused(
+        &mut self,
+        doc_id: DocId,
+        document: StoredDocument,
+        namespace: uqa_storage::document_store::identifiers::DocumentIdNamespace,
+    ) -> StorageBackendResult<()> {
+        let (fields, metadata) = document.into_parts();
+        self.put_stored_inner(doc_id, &fields, metadata, Some(namespace))?;
         Ok(())
     }
 

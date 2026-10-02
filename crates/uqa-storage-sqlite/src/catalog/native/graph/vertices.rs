@@ -4,12 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Caller-ordered vertex decoding shares one native physical read window.
+//! Caller-ordered vertex decoding shares one native physical read window. At a snapshot that is the latest commit, an ascending batch reads the vertices' physical projection in one B-tree pass instead of resolving each record's version.
 
+use uqa_core::memory::BudgetedVec;
 use uqa_storage::mvcc::VersionError;
 
 use super::{
-    encode_catalog_id, owner, vertex_row, Family, GraphVertexRow, NativeSnapshot, Result, ValueRef,
+    decode_catalog_id, encode_catalog_id, owner, vertex_row, Family, GraphVertexRow,
+    NativeSnapshot, Result, ValueRef,
 };
 use crate::mvcc::native::{decode_record, NativeRecordIdentity};
 
@@ -19,6 +21,29 @@ pub(in crate::catalog) fn for_each_vertex_borrowed(
     visit: &mut dyn FnMut(u64, Option<&GraphVertexRow>) -> bool,
 ) -> Result<usize> {
     snapshot.control.check()?;
+    // An identity outside SQLite's range is reported only when the visitor reaches it, so such a batch keeps the record path.
+    let mut encoded = BudgetedVec::new(snapshot.control.memory());
+    encoded.reserve(ids.len())?;
+    let mut encodable = true;
+    for id in ids {
+        let Ok(id) = encode_catalog_id("vertex", *id) else {
+            encodable = false;
+            break;
+        };
+        encoded.push(id)?;
+    }
+    if encodable {
+        let latest =
+            snapshot.visit_latest_vertices(&encoded, &snapshot.control, &mut |id, row| {
+                let row = row.map(vertex_row).transpose()?;
+                Ok(visit(decode_catalog_id("vertex", id)?, row.as_ref()))
+            })?;
+        if let Some(count) = latest {
+            snapshot.control.check()?;
+            return Ok(count);
+        }
+    }
+    drop(encoded);
     let identity = NativeRecordIdentity::new(Family::GraphVertices, owner(snapshot))?;
     let mut keys = ids.iter().map(|id| {
         let encoded = encode_catalog_id("vertex", *id)

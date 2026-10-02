@@ -12,7 +12,7 @@ use super::{
     SequenceRow, SequenceSetValueResult, StorageBackendError, StorageBackendResult, StoredSequence,
     TAG_RELATION, TAG_SCHEMA, TAG_SEQUENCE,
 };
-use crate::catalog::{sequence_value_reservation, SequenceValuePosition};
+use crate::catalog::{sequence_value_reservation, SequenceLogResult, SequenceValuePosition};
 use crate::key_value::index_view::{evaluate_mutation, read_view};
 
 fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
@@ -104,10 +104,19 @@ impl KeyValueCatalog {
         validate_sequence_persistence(&sequence.persistence)?;
         let key = relation_key(TAG_SEQUENCE, &sequence.relation)?;
         evaluate_mutation(self.store.as_ref(), |read, batch| {
-            if read.get(&key)?.is_none() {
+            let Some(encoded) = read.get(&key)? else {
                 return Ok(false);
+            };
+            let previous: StoredSequence = decode_value(&encoded)?;
+            let mut replacement = stored_sequence(sequence);
+            if previous.object_id == replacement.object_id
+                && previous.definition_generation == replacement.definition_generation
+            {
+                replacement.current = previous.current;
+                replacement.called = previous.called;
+                replacement.log_count = previous.log_count;
             }
-            batch.put(&key, &encode_value(&stored_sequence(sequence))?)?;
+            batch.put(&key, &encode_value(&replacement)?)?;
             Ok(true)
         })
     }
@@ -273,6 +282,48 @@ impl KeyValueCatalog {
             stored.log_count = log_count;
             batch.put(&key, &encode_value(&stored)?)?;
             Ok(SequenceSetValueResult::Set(value))
+        })
+    }
+
+    pub(super) fn log_sequence_values_impl(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+        expected: (i64, bool),
+        logged: SequenceValuePosition,
+    ) -> StorageBackendResult<SequenceLogResult> {
+        let relation =
+            RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
+        let key = relation_key(TAG_SEQUENCE, &relation)?;
+        evaluate_mutation(self.store.as_ref(), |read, batch| {
+            let Some(encoded) = read.get(&key)? else {
+                return Ok(SequenceLogResult::Missing);
+            };
+            let mut stored: StoredSequence = decode_value(&encoded)?;
+            if stored.object_id != object_id {
+                return Ok(SequenceLogResult::Missing);
+            }
+            if stored.definition_generation != definition_generation {
+                return Ok(SequenceLogResult::DefinitionChanged);
+            }
+            if logged.log_count < 0 {
+                return Err(StorageBackendError::Other(
+                    "sequence log count cannot be negative".into(),
+                ));
+            }
+            if (stored.current, stored.called) != expected {
+                return Ok(SequenceLogResult::Changed(SequenceValuePosition {
+                    current: stored.current,
+                    called: stored.called,
+                    log_count: stored.log_count,
+                }));
+            }
+            stored.current = logged.current;
+            stored.called = logged.called;
+            stored.log_count = logged.log_count;
+            batch.put(&key, &encode_value(&stored)?)?;
+            Ok(SequenceLogResult::Logged)
         })
     }
 }

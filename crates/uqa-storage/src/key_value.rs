@@ -130,6 +130,10 @@ pub trait KeyValueBatch {
             "atomic serializable write observations are not supported".into(),
         ))
     }
+    /// Write a record at a key that never had one, as the caller has established. Such a key has no committed revision, so the write expects none without reading one, and a record that exists after all fails the commit as a write conflict instead of being replaced. The default reads the revision as `put` does; capable wrappers must forward this method to keep the write blind.
+    fn put_unused(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
+        self.put(key, value)
+    }
     /// Require this record's original committed revision at publication without replacing it. This permits independent data writers to share a definition. Stores without commit-time read validation reject this operation; capable wrappers must forward it.
     fn require_unchanged(&mut self, _key: &[u8]) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(

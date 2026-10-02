@@ -19,6 +19,7 @@ mod identity;
 mod physical_changes;
 mod registry;
 mod relation;
+mod sequence_positions;
 pub mod shared_objects;
 pub mod temporary_roles;
 mod waits;
@@ -65,6 +66,9 @@ use identity::{LockRelationIdentity, ManagerIdentity};
 pub use registry::{shared_backend_manager, shared_provider_manager};
 use relation::RelationLockGrant;
 pub use relation::{RelationLockMode, ScopedRelationLock};
+pub use sequence_positions::{
+    RecordedSequencePosition, SequencePosition, SequencePositionGuard, SequencePositionKey,
+};
 #[cfg(test)]
 use waits::deadlock_exists;
 use waits::{deadlock_detected, relation_deadlock_exists, CrossWaitGuard};
@@ -85,6 +89,8 @@ pub struct RowLockManager {
     change_gate: RwLock<()>,
     state: Mutex<LockTable>,
     temporary_roles: Mutex<HashMap<u64, std::collections::BTreeSet<u32>>>,
+    /// Held while one sequence's position is read and advanced; it also holds the positions of a database without a lock sidecar.
+    sequence_positions: Mutex<sequence_positions::LocalSequencePositions>,
     wake: Condvar,
     cross: Option<CrossAttachment>,
 }

@@ -259,11 +259,21 @@ impl Engine {
             || self.storage.tables.read().clone(),
             |tables| (**tables).clone(),
         );
-        Self::catalog_read_view_from(&durable, table_sources)
+        self.with_sequence_positions(Self::catalog_read_view_from(&durable, table_sources))
     }
 
     pub(crate) fn restored_catalog_read_view(&self) -> CatalogReadView {
-        Self::catalog_read_view_from(&self.durable.snapshot(), self.storage.tables.read().clone())
+        self.with_sequence_positions(Self::catalog_read_view_from(
+            &self.durable.snapshot(),
+            self.storage.tables.read().clone(),
+        ))
+    }
+
+    fn with_sequence_positions(&self, view: CatalogReadView) -> CatalogReadView {
+        match self.shared_sequence_positions() {
+            Some(positions) => view.with_sequence_positions(positions.clone()),
+            None => view,
+        }
     }
 
     fn catalog_read_view_from(
@@ -384,7 +394,9 @@ pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("session_replication_role") {
         return Some("origin");
     }
-    if name.eq_ignore_ascii_case("plpgsql.check_asserts") {
+    if name.eq_ignore_ascii_case("plpgsql.check_asserts")
+        || name.eq_ignore_ascii_case("enable_indexonlyscan")
+    {
         return Some("on");
     }
     if name.eq_ignore_ascii_case("default_transaction_isolation")
@@ -418,6 +430,7 @@ pub(super) fn is_mutable_runtime_parameter(name: &str) -> bool {
         || name.eq_ignore_ascii_case("plan_cache_mode")
         || name.eq_ignore_ascii_case("session_replication_role")
         || name.eq_ignore_ascii_case("plpgsql.check_asserts")
+        || name.eq_ignore_ascii_case("enable_indexonlyscan")
         || name.eq_ignore_ascii_case("default_transaction_isolation")
         || name.eq_ignore_ascii_case("default_transaction_read_only")
         || name.eq_ignore_ascii_case("default_transaction_deferrable")

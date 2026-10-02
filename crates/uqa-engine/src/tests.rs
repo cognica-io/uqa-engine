@@ -40,6 +40,8 @@ mod storage_consistency;
 mod search_and_vectors;
 
 mod catalog;
+mod index_columns;
+mod index_only;
 mod prepared;
 mod queries;
 mod system_catalog_locks;

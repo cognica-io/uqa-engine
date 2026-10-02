@@ -352,6 +352,7 @@ impl Engine {
             snapshot_change_baseline,
             row_changes: Vec::new(),
             statistics_changes: crate::statistics::StatisticsChanges::new(),
+            statistics_settlement: crate::statistics::StatisticsSettlement::default(),
             deferred_foreign_key_checks,
             deferred_constraint_trigger_events,
             pending_listen_actions: Vec::new(),

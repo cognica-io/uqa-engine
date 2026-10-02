@@ -550,6 +550,18 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(())
     }
 
+    /// Write the index entries of a document whose identity no document of the table ever had, as the caller has established from the identity watermark of `namespace`. A provider that keys its entries by that namespace may write them without reading what they would replace; the default writes them as any other document's.
+    fn apply_unused_btree_index_write(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        values: &BTreeMap<crate::ValueIndexKey, Value>,
+        namespace: crate::document_store::identifiers::DocumentIdNamespace,
+    ) -> StorageBackendResult<()> {
+        let _ = namespace;
+        self.apply_btree_index_write(table, doc_id, Some(values))
+    }
+
     fn drop_btree_index(
         &self,
         _table: &str,
@@ -617,6 +629,11 @@ pub trait PersistentStorageBackend: Send + Sync {
     fn read_view_revision(
         &self,
     ) -> StorageBackendResult<Option<crate::key_value::KeyValueReadRevision>> {
+        Ok(None)
+    }
+
+    /// A value that changes whenever any session or process commits to this database, read without a transaction of this session. Two equal values prove that no commit lies between the two reads, so whatever was read from the committed state in between still is that state. `None` when the backend has no such monitor; a caller then reads the committed state again.
+    fn commit_monitor_version(&self) -> StorageBackendResult<Option<u64>> {
         Ok(None)
     }
 

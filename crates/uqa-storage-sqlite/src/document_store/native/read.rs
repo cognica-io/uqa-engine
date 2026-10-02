@@ -213,6 +213,20 @@ impl NativeDocumentRead<'_> {
     }
 
     pub(crate) fn len(&self) -> SQLiteResult<usize> {
+        if let Some(owner) = self.owner {
+            // The latest committed rows are counted where they are stored; any other snapshot counts its records.
+            let latest = self.snapshot.read_latest_documents(
+                self.table,
+                owner,
+                self.control,
+                &mut |latest| latest.count(),
+            )?;
+            if let Some(count) = latest {
+                return usize::try_from(count).map_err(|_| {
+                    SQLiteError::StorageBackend("native document count overflow".into())
+                });
+            }
+        }
         let mut count: usize = 0;
         self.visit_ids(None, usize::MAX, &self.snapshot.control, |_| {
             count = count.checked_add(1).ok_or_else(|| {

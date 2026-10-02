@@ -24,6 +24,9 @@ enum Layout {
 
 const LAYOUTS: [Layout; 3] = [Layout::Native, Layout::KeyValue, Layout::Redb];
 
+#[path = "identifiers/unused.rs"]
+mod unused;
+
 fn open(layout: Layout, path: &Path) -> Engine {
     Engine::from_persistent_provider(provider(layout, path)).unwrap()
 }

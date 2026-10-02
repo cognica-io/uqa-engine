@@ -88,6 +88,21 @@ pub trait CommittedRecordSnapshot: Send + Sync {
         None
     }
 
+    /// The provider's own snapshot type, which its native read paths may serve from physical projections at the same boundary. Wrappers must forward the original provider snapshot.
+    fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+
+    /// The value [`VersionedPersistence::commit_monitor_version`](super::VersionedPersistence::commit_monitor_version) returned before this snapshot was captured. While the monitor still returns it, nothing was committed after the capture began, so this snapshot is the latest one. `None` when the provider has no monitor. Wrappers must forward the original value.
+    fn commit_monitor(&self) -> Option<u64> {
+        None
+    }
+
+    /// Take the monitor value another snapshot of this same sequence was captured at. Nothing was committed between the two captures, so this snapshot is the latest one for as long as the monitor returns that value. Returns false when the snapshot cannot change its value, and its holder then keeps the other snapshot instead. Keeping this one keeps what it has already read of its records.
+    fn adopt_commit_monitor(&self, _monitor: u64) -> bool {
+        false
+    }
+
     /// Read a revision and tombstone marker without materializing its value when the provider supports key-only access.
     fn metadata(
         &self,
@@ -268,6 +283,15 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
     }
     fn reclamation_epoch(&self) -> Option<u64> {
         self.snapshot.reclamation_epoch()
+    }
+    fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
+        self.snapshot.provider_snapshot()
+    }
+    fn commit_monitor(&self) -> Option<u64> {
+        self.snapshot.commit_monitor()
+    }
+    fn adopt_commit_monitor(&self, monitor: u64) -> bool {
+        self.snapshot.adopt_commit_monitor(monitor)
     }
     fn visit_last_key(
         &self,
@@ -614,6 +638,15 @@ impl MergedRecordSnapshot {
             control,
             visit,
         )
+    }
+
+    /// Whether this view holds a private change of `key`, whose committed record is then not what a read of the key returns.
+    pub fn has_private_change(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<bool> {
+        Ok(self.private.get(key, control)?.is_some())
     }
 
     pub fn get(

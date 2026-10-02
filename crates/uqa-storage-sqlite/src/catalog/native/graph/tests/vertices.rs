@@ -202,3 +202,89 @@ fn native_graph_handle_borrowing_preserves_cypher_errors_and_overlay_values() {
     assert_eq!(rows[0]["n.n"], uqa_core::Value::Int(9));
     connection.rollback_transaction().unwrap();
 }
+
+type Read = Vec<(u64, Option<(u64, String, String)>)>;
+
+/// Read `ids` with `limit` visits, recording which physical tables the read used.
+fn read_vertices(
+    connection: &ManagedConnection,
+    snapshot: &NativeSnapshot,
+    ids: &[u64],
+    limit: usize,
+) -> (Read, std::collections::BTreeSet<String>) {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use std::sync::{Arc, Mutex};
+    let tables = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
+    let seen_tables = Arc::clone(&tables);
+    connection
+        .with_physical(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.authorizer(Some(move |context: AuthContext<'_>| {
+                if let AuthAction::Read { table_name, .. } = context.action {
+                    seen_tables.lock().unwrap().insert(table_name.to_owned());
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    let mut seen = Vec::new();
+    let count = for_each_vertex_borrowed(snapshot, ids, &mut |id, row| {
+        seen.push((
+            id,
+            row.map(|row| {
+                (
+                    row.vertex_id,
+                    row.label.clone(),
+                    row.properties_json.clone(),
+                )
+            }),
+        ));
+        seen.len() < limit
+    })
+    .unwrap();
+    assert_eq!(count, seen.len());
+    connection
+        .with_physical(|sqlite| {
+            sqlite.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
+            Ok(())
+        })
+        .unwrap();
+    let tables = tables.lock().unwrap().clone();
+    (seen, tables)
+}
+
+#[test]
+fn latest_ascending_batches_read_the_vertex_projection_and_match_the_records() {
+    let connection = connection(300);
+    let catalog = Catalog::open(connection.clone()).unwrap();
+    // Properties above the inline limit are admitted and read by themselves.
+    let wide = format!("{{\"text\":\"{}\"}}", "x".repeat(20_000));
+    catalog.save_vertex(150, "wide", &wide).unwrap();
+    let snapshot = connection.native_snapshot().unwrap().unwrap();
+    let dense = (1..=300).chain([400]).collect::<Vec<_>>();
+    let sparse = [5, 150, 290, 1_000, 5_000];
+    let batches = [
+        (&dense[..], usize::MAX),
+        (&sparse[..], usize::MAX),
+        (&dense[..], 3),
+    ];
+    let mut latest = Vec::new();
+    for (ids, limit) in batches {
+        let (seen, tables) = read_vertices(&connection, &snapshot, ids, limit);
+        assert!(tables.contains("_graph_vertices"), "{tables:?}");
+        latest.push(seen);
+    }
+    // A later commit leaves the snapshot behind, so the same reads resolve its records.
+    catalog.save_vertex(301, "later", "{}").unwrap();
+    for ((ids, limit), expected) in batches.into_iter().zip(latest) {
+        let (seen, tables) = read_vertices(&connection, &snapshot, ids, limit);
+        assert!(!tables.contains("_graph_vertices"), "{tables:?}");
+        assert_eq!(seen, expected);
+    }
+    let (seen, _) = read_vertices(&connection, &snapshot, &[150], usize::MAX);
+    assert_eq!(seen, [(150, Some((150, "wide".into(), wide)))]);
+}

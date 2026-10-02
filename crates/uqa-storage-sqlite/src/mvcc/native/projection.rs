@@ -7,6 +7,7 @@
 //! Apply evaluated native records and verify every trigger/cascade result before publishing their history. Cache generations are provider-owned additive effects, captured at the same commit sequence.
 
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
+use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     mvcc::{CommitSequence, DatabaseId, PreparedRecordCommit, VersionError},
     read_control::StorageReadControl,
@@ -117,8 +118,12 @@ fn apply(
         },
     )?;
     validate_retired_owners(connection, prepared, control)?;
-    // Release changed name bindings before installing any new ones so identity reuse does not depend on lexical name order.
+    // Release changed name bindings before installing any new ones so identity reuse does not depend on lexical name order. Most commits replace no physical key, so the families that do are read first.
+    let replaced = replaced_families(connection)?;
     for family in ORDER.into_iter().rev() {
+        if !replaced.contains(&family.id()) {
+            continue;
+        }
         let filter = format!(
             "family = {} AND old_key IS NOT NULL AND (old_key IS NOT new_key OR family = {})",
             family.id(),
@@ -132,67 +137,125 @@ fn apply(
             |family, key| physical::remove(connection, family.layout(), key, control),
         )?;
     }
-    for family in ORDER {
-        for record in prepared.records() {
-            if NativeRecordIdentity::decode(record.key())?.family() != family {
-                continue;
-            }
-            let Some(row) = record.value() else { continue };
-            let (_, values) = decode_record(record.key(), row, control)?;
-            publish_row(connection, family, &values, control)?;
-        }
+    for (_, index) in publication_order(prepared, control)?.iter() {
+        let record = &prepared.records()[*index];
+        let Some(row) = record.value() else { continue };
+        let (identity, values) = decode_record(record.key(), row, control)?;
+        publish_row(connection, identity.family(), &values, control)?;
     }
     super::graph_lookup::validate_deletions(connection, prepared, control)?;
+    // Every owner binding of the commit is published by now, so the rows of one table share one read of its binding.
+    let mut table_owners = owners::TableOwners::default();
     for record in prepared.records() {
         if let Some(row) = record.value() {
             let (identity, values) = decode_record(record.key(), row, control)?;
-            owners::validate(connection, database, identity, &values, control)?;
+            owners::validate_among(
+                &mut table_owners,
+                connection,
+                database,
+                identity,
+                &values,
+                control,
+            )?;
         }
+    }
+    verify_changes(connection, database, sequence, control)?;
+    connection
+        .prepare_cached("DELETE FROM _uqa_mvcc_native_expected")?
+        .execute([])?;
+    connection
+        .prepare_cached("DELETE FROM _uqa_mvcc_native_changes")?
+        .execute([])?;
+    control.cancellation().check().map_err(VersionError::from)?;
+    Ok(())
+}
+
+/// Verify what publishing the commit's rows changed, and stage the cache generations those changes produced.
+fn verify_changes(
+    connection: &Connection,
+    database: DatabaseId,
+    sequence: CommitSequence,
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    // A trigger or cascade may change only rows the commit prepared. The last pass verifies that every prepared row holds its prepared value, so this one only looks for a changed row that was not prepared. Cache generations are provider-owned effects of the changes and are staged at this sequence.
+    let unprepared: bool = connection
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_native_changes AS changed WHERE changed.family != ?1 AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_expected AS expected WHERE expected.family = changed.family AND expected.physical_key = changed.physical_key))")?
+        .query_row([Family::CacheRevisions.id()], |row| row.get(0))?;
+    if unprepared {
+        return Err(invalid("native trigger or cascade changed an unprepared record").into());
     }
     queue::visit(
         connection,
         "_uqa_mvcc_native_changes",
-        "1",
+        &format!("family = {}", Family::CacheRevisions.id()),
         control,
         |family, key| {
-            let row = physical::get(connection, family.layout(), key, control)?;
-            if family == Family::CacheRevisions {
-                let row =
-                    row.ok_or_else(|| invalid("native trigger deleted a cache generation"))?;
-                let values = decode_row(&row, family.layout().columns.len(), control)?;
-                let record = NativeRecord::encode(
-                    family,
-                    NativeRecordOwner::Database(database),
-                    &values,
-                    control,
-                )?;
-                write::stage_record(
-                    connection,
-                    record.key(),
-                    Some(record.row()),
-                    sequence,
-                    control,
-                )
-            } else {
-                verify_expected(connection, family, key, row.as_deref(), control)
-            }
+            let row = physical::get(connection, family.layout(), key, control)?
+                .ok_or_else(|| invalid("native trigger deleted a cache generation"))?;
+            let values = decode_row(&row, family.layout().columns.len(), control)?;
+            let record = NativeRecord::encode(
+                family,
+                NativeRecordOwner::Database(database),
+                &values,
+                control,
+            )?;
+            write::stage_record(
+                connection,
+                record.key(),
+                Some(record.row()),
+                sequence,
+                control,
+            )
         },
     )?;
-    queue::visit(
+    queue::visit_with_value(
         connection,
         "_uqa_mvcc_native_expected",
         "1",
+        "new_value",
         control,
-        |family, key| {
+        |family, key, expected| {
             let row = physical::get(connection, family.layout(), key, control)?;
-            verify_expected(connection, family, key, row.as_deref(), control)
+            match expected {
+                queue::QueuedValue::Read(expected) if expected == row.as_deref() => Ok(()),
+                queue::QueuedValue::Read(_) => {
+                    Err(invalid("native trigger or cascade changed an unprepared record").into())
+                }
+                queue::QueuedValue::Unread => {
+                    verify_expected(connection, family, key, row.as_deref(), control)
+                }
+            }
         },
     )?;
-    connection.execute_batch(
-        "DELETE FROM _uqa_mvcc_native_expected; DELETE FROM _uqa_mvcc_native_changes;",
-    )?;
-    control.cancellation().check().map_err(VersionError::from)?;
     Ok(())
+}
+
+/// The families with a physical key the commit removes before it publishes its rows.
+fn replaced_families(connection: &Connection) -> PhysicalResult<Vec<u16>> {
+    let mut statement = connection.prepare_cached("SELECT DISTINCT family FROM _uqa_mvcc_native_expected WHERE old_key IS NOT NULL AND (old_key IS NOT new_key OR family = ?1)")?;
+    let families = statement
+        .query_map([Family::TableOwners.id()], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<u16>>>()?;
+    Ok(families)
+}
+
+/// The positions of the records of `prepared` in publication order: by family in [`ORDER`], and within a family as prepared. A family outside the order is not published.
+fn publication_order(
+    prepared: &PreparedRecordCommit,
+    control: &StorageReadControl,
+) -> PhysicalResult<BudgetedVec<(usize, usize)>> {
+    let mut ordered = BudgetedVec::new(control.memory());
+    for (index, record) in prepared.records().iter().enumerate() {
+        control.cancellation().check().map_err(VersionError::from)?;
+        let family = NativeRecordIdentity::decode(record.key())?.family();
+        if let Some(position) = ORDER.iter().position(|ordered| *ordered == family) {
+            ordered
+                .push((position, index))
+                .map_err(VersionError::from)?;
+        }
+    }
+    ordered.sort_unstable();
+    Ok(ordered)
 }
 
 fn seed_originals(
@@ -201,6 +264,8 @@ fn seed_originals(
     prepared: &PreparedRecordCommit,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
+    // Nothing is published yet, so the rows of one table share one read of its owner binding.
+    let mut table_owners = owners::TableOwners::default();
     for record in prepared.records() {
         let identity = NativeRecordIdentity::decode_full(record.key(), control)?;
         if matches!(identity.owner(), NativeRecordOwner::Database(id) if id != database) {
@@ -217,7 +282,7 @@ fn seed_originals(
             CommitSequence::from_u64(u64::MAX),
             control,
             &mut |previous| {
-                let validate = || -> PhysicalResult<()> {
+                let mut validate = || -> PhysicalResult<()> {
                     let Some(row) = previous.and_then(|record| record.value) else {
                         return Ok(());
                     };
@@ -228,7 +293,14 @@ fn seed_originals(
                             invalid("standalone graph namespace bindings are immutable").into()
                         );
                     }
-                    owners::validate(connection, database, identity, &values, control)?;
+                    owners::validate_among(
+                        &mut table_owners,
+                        connection,
+                        database,
+                        identity,
+                        &values,
+                        control,
+                    )?;
                     let key = physical::physical_key(family.layout(), &values, control)?;
                     if physical::get(connection, family.layout(), &key, control)?.as_deref()
                         != Some(row)

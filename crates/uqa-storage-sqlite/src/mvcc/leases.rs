@@ -34,6 +34,12 @@ const LEASE_BASE: u64 = 1 << 20;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+thread_local! {
+    /// How many lease files this thread opened, as opposed to found open.
+    pub(super) static OPENED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LeaseNamespace {
     pub(crate) magic: [u8; 8],
@@ -107,6 +113,8 @@ impl NativeLeaseFile {
             .truncate(false)
             .open(&path)
             .map_err(io_error)?;
+        #[cfg(test)]
+        OPENED.with(|opened| opened.set(opened.get() + 1));
         let state = Arc::new(State {
             file,
             namespace,

@@ -51,7 +51,7 @@ fn a_rolled_back_write_does_not_block_an_independent_writer_while_waiting_for_a_
     });
     let blocker_result = blocker.sql("UPDATE savepoint_writer SET value = 1 WHERE id = 3", &[]);
     blocker.sql("ROLLBACK", &[]).ok();
-    let writer_result = writer_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let writer_result = writer_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     assert_eq!(blocker_result.unwrap().affected_rows, 1);
     assert_eq!(writer_result.unwrap().rows.len(), 1);
     writer_wait.join().unwrap();
@@ -90,13 +90,13 @@ fn for_share_lock_rechecks_after_a_conflicting_non_key_update() {
             ))
             .unwrap();
     });
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    entered_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     updater
         .sql("UPDATE accounts SET balance = 777 WHERE id = 1", &[])
         .unwrap();
     gate.wait();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     reader_thread.join().unwrap();
@@ -136,7 +136,7 @@ fn insert_select_for_update_lets_the_row_lock_holder_commit_first() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -175,7 +175,7 @@ fn multi_table_truncate_locks_every_target_before_becoming_the_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     truncate_thread.join().unwrap();
@@ -221,7 +221,7 @@ fn mutating_locking_select_does_not_hold_the_data_writer_while_waiting() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -260,7 +260,7 @@ fn insert_values_locks_scalar_subquery_before_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -309,7 +309,7 @@ fn insert_returning_locking_subquery_precedes_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -345,7 +345,7 @@ fn unreachable_returning_locking_subquery_does_not_lock_its_rows() {
             .unwrap();
     });
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -395,7 +395,7 @@ fn correlated_insert_returning_rechecks_with_the_same_outer_row_before_the_data_
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -439,7 +439,7 @@ fn on_conflict_do_nothing_releases_its_key_reservation_after_the_statement() {
             .unwrap();
     });
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     second_thread.join().unwrap();
@@ -489,7 +489,7 @@ fn nested_uncorrelated_lock_recheck_does_not_inherit_a_correlated_outer_row() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -533,7 +533,7 @@ fn update_returning_locking_subquery_precedes_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();
@@ -931,7 +931,7 @@ fn delete_returning_locking_subquery_precedes_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     delete_thread.join().unwrap();
@@ -975,7 +975,7 @@ fn merge_returning_locking_subquery_precedes_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     merge_thread.join().unwrap();

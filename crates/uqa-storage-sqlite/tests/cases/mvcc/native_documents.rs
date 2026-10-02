@@ -6,6 +6,8 @@
 
 //! Public native document APIs use the connection's common logical transaction and retained snapshots.
 
+#[path = "native_documents/bindings.rs"]
+mod bindings;
 #[path = "native_documents/identifiers.rs"]
 mod identifiers;
 

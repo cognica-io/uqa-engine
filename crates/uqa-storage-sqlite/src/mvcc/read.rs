@@ -8,6 +8,8 @@
 
 mod last;
 mod ordered;
+pub(crate) mod row_presence;
+pub(crate) mod table_owners;
 mod values;
 
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
@@ -27,6 +29,10 @@ pub(super) struct Snapshot {
     pub(super) store: SQLiteRecordStore,
     pub(super) sequence: CommitSequence,
     pub(super) reclamation_epoch: u64,
+    /// The commit monitor's value before this snapshot, or a later one of the same sequence, was captured.
+    pub(super) monitor: Option<std::sync::atomic::AtomicU64>,
+    pub(crate) table_owners: table_owners::TableOwners,
+    pub(crate) row_presence: row_presence::RowPresence,
     pub(super) _lease: std::sync::Arc<uqa_storage::mvcc::SnapshotLease>,
 }
 
@@ -35,13 +41,19 @@ impl Snapshot {
         &self,
         operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
     ) -> VersionResult<T> {
-        self.store.with(|connection| {
-            let transaction = connection.unchecked_transaction()?;
-            super::native::check_mapping(&transaction, self.store.native)?;
-            codec::header(&transaction, self.store.identity)?;
-            let result = operation(&transaction)?;
-            transaction.commit()?;
-            Ok(result)
+        self.store.read(operation)
+    }
+
+    /// Run `operation` in one physical read when this snapshot's boundary is the database's latest commit, so the native projections, which each commit materializes in its own transaction, hold exactly this snapshot's committed records. Returns `None` when a newer commit exists.
+    pub(super) fn read_latest<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> PhysicalResult<Option<T>>,
+    ) -> VersionResult<Option<T>> {
+        self.read(|connection| {
+            if codec::header(connection, self.store.identity)?.sequence != self.sequence {
+                return Ok(None);
+            }
+            operation(connection)
         })
     }
 }
@@ -49,6 +61,23 @@ impl Snapshot {
 impl CommittedRecordSnapshot for Snapshot {
     fn reclamation_epoch(&self) -> Option<u64> {
         Some(self.reclamation_epoch)
+    }
+    fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+    fn commit_monitor(&self) -> Option<u64> {
+        self.monitor
+            .as_ref()
+            .map(|monitor| monitor.load(std::sync::atomic::Ordering::Relaxed))
+    }
+    fn adopt_commit_monitor(&self, monitor: u64) -> bool {
+        match &self.monitor {
+            Some(current) => {
+                current.store(monitor, std::sync::atomic::Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
     }
     fn sequence(&self) -> CommitSequence {
         self.sequence
@@ -334,6 +363,21 @@ pub(super) const POINT_METADATA_SQL: &str = concat!(
     "ORDER BY v.sequence DESC LIMIT 1"
 );
 
+/// Version payloads of at most this many bytes are read with their metadata in one statement. The metadata length bounds `SQLite`'s copy before the payload is evaluated, and the payload is admitted against the read's memory budget before it is exposed; larger payloads keep the separate admitted read.
+pub(super) const INLINE_PAYLOAD_BYTES: u16 = 16 * 1024;
+
+/// [`POINT_METADATA_SQL`] with the selected version's payload when its length is at most `?3`. The metadata row is limited before the payload expression is evaluated, so at most one payload is copied.
+pub(super) const POINT_VALUE_SQL: &str = concat!(
+    "SELECT m.head, m.compacted, m.sequence, m.payload_length, ",
+    "CASE WHEN m.payload_length <= ?3 THEN ",
+    "(SELECT value FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence = m.sequence) END ",
+    "FROM (SELECT h.sequence AS head, h.compacted AS compacted, v.sequence AS sequence, ",
+    "v.payload_length AS payload_length ",
+    "FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_version_metadata v ",
+    "ON v.key = h.key AND v.sequence <= ?2 WHERE h.key = ?1 ",
+    "ORDER BY v.sequence DESC LIMIT 1) m"
+);
+
 pub(super) fn info(
     connection: &Connection,
     key: &[u8],
@@ -344,15 +388,24 @@ pub(super) fn info(
     let mut statement = connection.prepare_cached(POINT_METADATA_SQL)?;
     let mut rows = statement.query(params![key, boundary.as_u64().to_be_bytes().as_slice()])?;
     let Some(row) = rows.next()? else {
-        return Ok(runs::info(connection, key)?
-            .filter(|(sequence, _)| *sequence <= boundary)
-            .map(|(sequence, length)| Info {
-                revision: sequence.as_u64(),
-                length,
-                run: true,
-            }));
+        return run_info(connection, key, boundary);
     };
     point_info(row, boundary)
+}
+
+/// A key without a point head can only be stored in a compacted run.
+fn run_info(
+    connection: &Connection,
+    key: &[u8],
+    boundary: CommitSequence,
+) -> PhysicalResult<Option<Info>> {
+    Ok(runs::info(connection, key)?
+        .filter(|(sequence, _)| *sequence <= boundary)
+        .map(|(sequence, length)| Info {
+            revision: sequence.as_u64(),
+            length,
+            run: true,
+        }))
 }
 
 fn point_info(row: &rusqlite::Row<'_>, boundary: CommitSequence) -> PhysicalResult<Option<Info>> {
@@ -418,7 +471,32 @@ fn value_bounded(
     visit: &mut RecordValueVisitor<'_>,
 ) -> PhysicalResult<()> {
     let bindings = reserve_bindings(control, &[key])?;
-    let info = info(connection, key, boundary)?;
+    let mut statement = connection.prepare_cached(POINT_VALUE_SQL)?;
+    let selected = {
+        let mut rows = statement.query(params![
+            key,
+            boundary.as_u64().to_be_bytes().as_slice(),
+            i64::from(INLINE_PAYLOAD_BYTES)
+        ])?;
+        match rows.next()? {
+            Some(row) => {
+                let info = point_info(row, boundary)?;
+                if let Some(info) = info.filter(|info| {
+                    info.length
+                        .is_some_and(|length| length <= usize::from(INLINE_PAYLOAD_BYTES))
+                }) {
+                    return inline_value(row, info, max_bytes, control, visit);
+                }
+                Some(info)
+            }
+            None => None,
+        }
+    };
+    drop(statement);
+    let info = match selected {
+        Some(info) => info,
+        None => run_info(connection, key, boundary)?,
+    };
     drop(bindings);
     let Some(info) = info else {
         control.cancellation().check().map_err(VersionError::from)?;
@@ -427,6 +505,40 @@ fn value_bounded(
         return Ok(());
     };
     value_from_info(connection, key, info, boundary, max_bytes, control, visit)
+}
+
+/// Visit a point payload that [`POINT_VALUE_SQL`] selected with its metadata. The admission order matches [`value_from_info`]: the declared length is checked and reserved before the payload's bytes are borrowed.
+fn inline_value(
+    row: &rusqlite::Row<'_>,
+    info: Info,
+    max_bytes: usize,
+    control: &StorageReadControl,
+    visit: &mut RecordValueVisitor<'_>,
+) -> PhysicalResult<()> {
+    let length = info.length.expect("inline payloads have a length");
+    control
+        .check_value_size(length, max_bytes)
+        .map_err(VersionError::from)?;
+    control.cancellation().check().map_err(VersionError::from)?;
+    let _payload = control
+        .memory()
+        .reserve(length)
+        .map_err(VersionError::from)?;
+    let value = match row.get_ref(4)? {
+        ValueRef::Blob(bytes) if bytes.len() == length => bytes,
+        _ => {
+            return Err(
+                VersionError::InvalidEncoding("version size or type changed within a read").into(),
+            )
+        }
+    };
+    control.cancellation().check().map_err(VersionError::from)?;
+    visit(Some(BorrowedRecord {
+        revision: Some(CommitSequence::from_u64(info.revision)),
+        value: Some(value),
+    }))?;
+    control.cancellation().check().map_err(VersionError::from)?;
+    Ok(())
 }
 
 fn value_from_info(

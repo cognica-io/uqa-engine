@@ -6,8 +6,6 @@
 
 //! Durable identifier watermarks share `SQLite`'s physical commit admission, independently of logical records.
 
-use std::sync::Arc;
-
 use rusqlite::{params, Connection, OptionalExtension};
 use uqa_storage::key_value::diskann_identifiers;
 use uqa_storage::mvcc::{
@@ -15,8 +13,7 @@ use uqa_storage::mvcc::{
 };
 use uqa_storage::read_control::StorageReadControl;
 
-use super::connection_functions::ConnectionFunctions;
-use super::schema::WritePermit;
+use super::synchronization::RelaxedSynchronization;
 use super::{admission, codec, native, PhysicalResult};
 
 pub(super) const TABLE: (&str, &str) = (
@@ -68,11 +65,10 @@ pub(super) fn consolidate_diskann_generations(connection: &Connection) -> Physic
 
 pub(super) fn watermark(connection: &Connection, namespace: &[u8]) -> PhysicalResult<Option<u64>> {
     connection
-        .query_row(
-            "SELECT watermark FROM _uqa_mvcc_identifiers WHERE namespace = ?1",
-            [namespace],
-            |row| Ok(codec::bytes(row, 0).and_then(codec::integer)),
-        )
+        .prepare_cached("SELECT watermark FROM _uqa_mvcc_identifiers WHERE namespace = ?1")?
+        .query_row([namespace], |row| {
+            Ok(codec::bytes(row, 0).and_then(codec::integer))
+        })
         .optional()?
         .transpose()
 }
@@ -107,8 +103,9 @@ pub(super) fn allocate(
 ) -> PhysicalResult<IdentifierAllocation> {
     let _workspace = request.reserve_workspace(namespace, control)?;
     let permit = admission::permit(connection, control)?;
+    // An observation must be durable before a row carrying the observed identifier is published, and must survive the rollback of the transaction that observed it. The record commit that publishes the row makes the earlier observation durable, so a power loss can discard only observations that no durable commit follows, together with every other unpublished write. A reservation hands out identifiers before any record commit, so it keeps its own sync.
     let _synchronization = match request {
-        IdentifierRequest::Observe(_) => ObservationSynchronization::relax(connection, &permit)?,
+        IdentifierRequest::Observe(_) => RelaxedSynchronization::relax(connection, &permit)?,
         IdentifierRequest::Reserve { .. } => None,
     };
     let transaction = admission::begin(connection, control)?;
@@ -117,10 +114,9 @@ pub(super) fn allocate(
     let previous = watermark(&transaction, namespace)?;
     let allocation = request.prepare(previous)?;
     if previous != Some(allocation.watermark()) {
-        transaction.execute(
-            "INSERT INTO _uqa_mvcc_identifiers VALUES (?1, ?2) ON CONFLICT(namespace) DO UPDATE SET watermark = excluded.watermark",
-            params![namespace, allocation.watermark().to_be_bytes().as_slice()],
-        )?;
+        transaction
+            .prepare_cached("INSERT INTO _uqa_mvcc_identifiers VALUES (?1, ?2) ON CONFLICT(namespace) DO UPDATE SET watermark = excluded.watermark")?
+            .execute(params![namespace, allocation.watermark().to_be_bytes().as_slice()])?;
     }
     control
         .cancellation()
@@ -128,39 +124,4 @@ pub(super) fn allocate(
         .map_err(uqa_storage::mvcc::VersionError::from)?;
     admission::commit(transaction, control)?;
     Ok(allocation)
-}
-
-/// Commits an identifier observation without its own sync in WAL mode, and restores full synchronization when dropped.
-///
-/// An observation must be durable before a row carrying the observed identifier is published, and must survive the rollback of the transaction that observed it. In WAL mode every fully synchronized commit, and every checkpoint, first syncs the whole log, so the durable state is always a prefix of the commit order: the record commit that publishes the row also makes the earlier observation durable, and a power loss can discard only observations that no durable commit follows, together with every other unpublished write. A process failure loses no committed observation. A reservation hands out identifiers before any record commit, and a rollback journal is not safe against power loss without full synchronization, so both keep their own sync.
-pub(super) struct ObservationSynchronization<'a> {
-    connection: &'a Connection,
-    functions: Arc<ConnectionFunctions>,
-}
-
-impl<'a> ObservationSynchronization<'a> {
-    pub(super) fn relax(
-        connection: &'a Connection,
-        permit: &WritePermit,
-    ) -> PhysicalResult<Option<Self>> {
-        let mode: String = connection
-            .prepare_cached("PRAGMA journal_mode")?
-            .query_row([], |row| row.get(0))?;
-        if !mode.eq_ignore_ascii_case("wal") {
-            return Ok(None);
-        }
-        let functions = Arc::clone(permit.functions());
-        functions.relax_synchronization(connection)?;
-        Ok(Some(Self {
-            connection,
-            functions,
-        }))
-    }
-}
-
-impl Drop for ObservationSynchronization<'_> {
-    fn drop(&mut self) {
-        // A failed restoration stays recorded, and the next write admission restores full synchronization or fails before writing.
-        let _ = self.functions.require_full_synchronization(self.connection);
-    }
 }

@@ -111,6 +111,7 @@ mod schema_security;
 mod search;
 mod sequence_catalog;
 mod sequence_session;
+mod sequence_snapshot;
 mod sequences;
 mod session;
 mod sql_registry;
@@ -346,6 +347,8 @@ struct TransactionFrame {
     snapshot_change_baseline: row_locks::RowChangeBaseline,
     row_changes: Vec<TransactionRowChange>,
     statistics_changes: statistics::StatisticsChanges,
+    /// What this frame's commit did with its statistics changes, for the session to take over when the commit has succeeded.
+    statistics_settlement: statistics::StatisticsSettlement,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events:
         Vec<uqa_execution::mutation::triggers::DeferredConstraintTriggerEvent>,
@@ -639,6 +642,16 @@ impl TableState {
 
     fn object_id(&self) -> [u8; 16] {
         self.object_id
+    }
+
+    /// The namespace this table's document identities are allocated and observed in.
+    fn document_id_namespace(
+        &self,
+    ) -> uqa_storage::document_store::identifiers::DocumentIdNamespace {
+        uqa_storage::document_store::identifiers::DocumentIdNamespace {
+            object: self.object_id(),
+            generation: self.storage_generation(),
+        }
     }
 
     fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {

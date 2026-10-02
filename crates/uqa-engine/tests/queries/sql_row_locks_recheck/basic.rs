@@ -33,7 +33,7 @@ fn blocking_wait_rechecks_predicate_against_a_fresh_snapshot() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -67,7 +67,7 @@ fn blocking_wait_returns_the_current_row_version_when_it_still_qualifies() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -108,13 +108,13 @@ fn row_changed_after_scan_is_rechecked_without_a_lock_wait() {
             ))
             .unwrap();
     });
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    entered_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     updater
         .sql("UPDATE accounts SET balance = 777 WHERE id = 1", &[])
         .unwrap();
     gate.wait();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     reader_thread.join().unwrap();
@@ -161,7 +161,7 @@ fn stronger_later_lock_scope_refetches_after_a_key_share_compatible_update() {
             ))
             .unwrap();
     });
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    entered_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     updater
         .sql(
             "UPDATE lock_strength_scope SET value = 99 WHERE id = 1",
@@ -170,7 +170,7 @@ fn stronger_later_lock_scope_refetches_after_a_key_share_compatible_update() {
         .unwrap();
     gate.wait();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     reader_thread.join().unwrap();
@@ -188,6 +188,18 @@ fn row_lock_recheck_keeps_the_original_unmarked_join_partner() {
         &[],
     )
     .unwrap();
+    // The waiter has to read the row before the holder commits: a statement that begins afterwards joins the new version with that version's own partner and returns it.
+    let (scanned_tx, scanned_rx) = mpsc::channel();
+    root.register_scalar_function_with_options(
+        "epq_join_partner_scanned",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+        move |_args: &[Value]| {
+            // The recheck evaluates the qualifier again after the receiver is gone.
+            let _ = scanned_tx.send(());
+            Ok(Value::Bool(true))
+        },
+    )
+    .unwrap();
     let holder = root.new_session().unwrap();
     let waiter = root.new_session().unwrap();
     holder.sql("BEGIN", &[]).unwrap();
@@ -198,15 +210,16 @@ fn row_lock_recheck_keeps_the_original_unmarked_join_partner() {
     let waiting_thread = std::thread::spawn(move || {
         done_tx
             .send(waiter.sql(
-                "SELECT target.match_key, source.label FROM epq_target AS target JOIN epq_source AS source ON target.match_key = source.match_key WHERE target.id = 1 FOR UPDATE OF target",
+                "SELECT target.match_key, source.label FROM epq_target AS target JOIN epq_source AS source ON target.match_key = source.match_key WHERE target.id = 1 AND epq_join_partner_scanned() FOR UPDATE OF target",
                 &[],
             ))
             .unwrap();
     });
+    scanned_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -240,7 +253,7 @@ fn row_lock_recheck_keeps_each_original_values_partner() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -281,7 +294,7 @@ fn update_from_recheck_keeps_the_original_source_tuple() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -330,7 +343,7 @@ fn delete_using_recheck_keeps_the_original_source_tuple() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -369,7 +382,7 @@ fn pure_lock_wait_keeps_concurrent_inserts_out_of_the_command_snapshot() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -410,7 +423,7 @@ fn explicit_transaction_wait_rechecks_with_a_fresh_snapshot() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -615,7 +628,7 @@ fn order_by_limit_retains_the_original_candidate_after_a_concurrent_reorder() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -657,7 +670,7 @@ fn order_by_limit_surfaces_the_next_candidate_when_the_recheck_drops_the_row() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -693,7 +706,7 @@ fn blocking_wait_follows_a_primary_key_rewrite_to_the_successor_row() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -735,13 +748,13 @@ fn key_share_lock_returns_snapshot_values_after_a_compatible_non_key_update() {
             ))
             .unwrap();
     });
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    entered_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     updater
         .sql("UPDATE accounts SET balance = 777 WHERE id = 1", &[])
         .unwrap();
     gate.wait();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     reader_thread.join().unwrap();

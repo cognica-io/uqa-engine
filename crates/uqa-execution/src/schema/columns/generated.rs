@@ -83,7 +83,11 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
                 },
                 document,
                 vectors,
-                remaps_primary_key,
+                if remaps_primary_key {
+                    crate::mutation::publication::InsertedIdentity::Vacant
+                } else {
+                    crate::mutation::publication::InsertedIdentity::Unknown
+                },
             )?;
             if remaps_primary_key {
                 context

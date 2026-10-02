@@ -57,21 +57,7 @@ impl Engine {
             self.prepare_transaction_publication(stack, storage_savepoint.is_none())?;
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
         if let Some(statistics_changes) = statistics_changes {
-            // Maintenance counters are derived at publication, after any earlier publisher. A savepoint can restore an older command base, and concurrent commands must not overwrite each other's accumulated maintenance state.
-            let refresh = if statistics_changes.is_empty() {
-                Ok(())
-            } else {
-                self.storage
-                    .backend
-                    .as_ref()
-                    .filter(|backend| backend.transaction_model().is_versioned())
-                    .map_or(Ok(()), |backend| {
-                        backend.refresh_transaction_snapshot(&self.runtime.cancellation)
-                    })
-            };
-            if let Err(error) =
-                refresh.and_then(|()| self.persist_statistics_changes(&statistics_changes))
-            {
+            if let Err(error) = self.prepare_statistics_changes(stack, &statistics_changes) {
                 drop(publication);
                 return Err(self.rollback_failed_statistics_preparation(stack, &error));
             }
@@ -129,6 +115,29 @@ impl Engine {
             publication.notifications,
             wrote_records,
         )
+    }
+
+    /// Maintenance counters are derived at publication, after any earlier publisher. A savepoint can restore an older command base, and concurrent commands must not overwrite each other's accumulated maintenance state. The committing frame keeps what the session takes over once the commit has succeeded.
+    fn prepare_statistics_changes(
+        &self,
+        stack: &mut [TransactionFrame],
+        statistics_changes: &crate::statistics::StatisticsChanges,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        if !statistics_changes.is_empty() {
+            if let Some(backend) = self
+                .storage
+                .backend
+                .as_ref()
+                .filter(|backend| backend.transaction_model().is_versioned())
+            {
+                backend.refresh_transaction_snapshot(&self.runtime.cancellation)?;
+            }
+        }
+        let settlement = self.persist_statistics_changes(statistics_changes)?;
+        if let Some(frame) = stack.last_mut() {
+            frame.statistics_settlement = settlement;
+        }
+        Ok(())
     }
 
     fn prepare_transaction_publication<'a>(

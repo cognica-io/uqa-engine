@@ -12,7 +12,7 @@ use uqa_core::{
     DocId, Value,
 };
 use uqa_storage::{
-    document_store::{decoding::decode_legacy_document_fields_budgeted, Document},
+    document_store::{decoding::decode_legacy_document_text_fields_budgeted, Document},
     read_control::StorageReadControl,
     DocumentMetadata, RetainedDocumentFields, RetainedDocumentPage, RetainedStoredDocument,
 };
@@ -86,7 +86,7 @@ fn read_legacy(
         .get_ref(0)?
         .as_str()
         .map_err(|_| SQLiteError::StorageBackend("document body must be text".into()))?;
-    let fields = decode_legacy_document_fields_budgeted(body.as_bytes(), control)?;
+    let fields = decode_legacy_document_text_fields_budgeted(body, control)?;
     let metadata = match row.get::<_, Option<i64>>(1)? {
         None => DocumentMetadata::default(),
         Some(xmin) => DocumentMetadata::with_tuple_xmin(u32::try_from(xmin).map_err(|_| {

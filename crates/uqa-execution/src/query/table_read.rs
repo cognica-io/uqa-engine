@@ -7,6 +7,7 @@
 //! Read-only access retained by physical table sources.
 
 use parking_lot::RwLockReadGuard;
+use uqa_core::{DocId, Value};
 use uqa_sql::ast::ColumnDef;
 use uqa_storage::document_store::DocumentStore;
 
@@ -27,10 +28,21 @@ pub fn bind_direct_table_read<T>(
     )
 }
 
-/// Only column definitions and shared document reads are exposed. A scan cannot mutate catalog state, obtain an engine, or acquire a storage write guard.
+/// Only column definitions, shared document reads and the stored values that indexes hold are exposed. A scan cannot mutate catalog state, obtain an engine, or acquire a storage write guard.
 pub trait TableRead: Send + Sync {
     fn column_definitions(&self) -> Vec<ColumnDef>;
     fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>>;
+
+    /// Visit `fields` of the rows `ids` from index entries alone, in `ids` order and as a document store's point projection reports them: each row, whether it exists, and its values when it does, while `visitor` returns true. Returns the rows visited, or `None` without visiting when the indexes do not hold every field. `visitor` runs while the index entries are lent and must not call back into the engine.
+    fn for_each_indexed_fields(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> Option<usize> {
+        let _ = (ids, fields, visitor);
+        None
+    }
 }
 
 /// The chosen transaction snapshot supplies a table generation and the command's row overlay separately.
@@ -41,6 +53,17 @@ pub trait QueryTableAccess: Sync {
     ) -> Result<Option<crate::serializable::SerializableRelationRead>, uqa_sql::SQLError>;
 
     fn table(&self, name: &str) -> Result<std::sync::Arc<dyn TableRead>, uqa_sql::SQLError>;
+
+    /// Whether the indexes of `table`, the handle [`Self::table`] returned for `name`, hold `fields` for every row, loading or building what the catalog provides. An index-only read then projects those fields without reading a document.
+    fn index_holds_fields(
+        &self,
+        name: &str,
+        table: &std::sync::Arc<dyn TableRead>,
+        fields: &[String],
+    ) -> Result<bool, uqa_sql::SQLError> {
+        let _ = (name, table, fields);
+        Ok(false)
+    }
     fn command_overlay_changes(
         &self,
         name: &str,

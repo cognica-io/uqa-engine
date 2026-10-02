@@ -179,7 +179,9 @@ impl Engine {
             }
             value = normalized;
         }
-        if name.eq_ignore_ascii_case("plpgsql.check_asserts") {
+        if name.eq_ignore_ascii_case("plpgsql.check_asserts")
+            || name.eq_ignore_ascii_case("enable_indexonlyscan")
+        {
             value = if crate::capabilities::parse_boolean_runtime_parameter(name, &value)? {
                 "on".into()
             } else {
@@ -389,6 +391,17 @@ impl Engine {
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case("session_replication_role"))
             .is_some_and(|(_, value)| value == "replica")
+    }
+
+    /// Whether a query may project the values that indexes hold instead of reading documents, as `PostgreSQL`'s `enable_indexonlyscan` does.
+    pub(crate) fn index_only_scans_enabled(&self) -> bool {
+        self.session
+            .state
+            .read()
+            .session_vars
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("enable_indexonlyscan"))
+            .is_none_or(|(_, value)| value == "on")
     }
 
     pub(crate) fn plpgsql_asserts_enabled(&self) -> bool {

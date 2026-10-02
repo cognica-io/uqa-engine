@@ -187,6 +187,7 @@ Known settings include:
 | `timezone` | Mutable, default `UTC` |
 | `work_mem` | Mutable, default `64MB` |
 | `plan_cache_mode` | `auto`, `force_generic_plan`, or `force_custom_plan`; default `auto` |
+| `enable_indexonlyscan` | Mutable Boolean, default `on`; `off` makes every query read its rows instead of [index entries](02-ddl.md#relational-b-tree-indexes) |
 | `default_transaction_isolation` | Mutable transaction default, `read committed` |
 | `default_transaction_read_only` | Mutable transaction default, `off` |
 | `default_transaction_deferrable` | Mutable transaction default, `off` |

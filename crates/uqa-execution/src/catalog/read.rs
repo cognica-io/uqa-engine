@@ -329,14 +329,22 @@ impl CatalogReadView {
         )>,
         SQLError,
     > {
+        let positions = match self.sequence_positions.as_ref() {
+            Some(positions) => positions.sequence_positions()?,
+            None => std::collections::HashMap::new(),
+        };
+        let object_ids = &self.snapshot.definitions.sequence_object_ids;
         self.snapshot
             .definitions
             .sequences
             .iter()
             .map(|(identity, state)| {
+                let position = object_ids
+                    .get(identity)
+                    .and_then(|object_id| positions.get(&state.position_key(*object_id)));
                 Ok((
                     identity.clone(),
-                    *state,
+                    state.at_position(position.copied()),
                     self.snapshot
                         .definitions
                         .sequence_persistence
@@ -347,6 +355,21 @@ impl CatalogReadView {
                 ))
             })
             .collect()
+    }
+
+    /// The state of one sequence at its exact position.
+    fn sequence_state_at_position(
+        &self,
+        relation: &uqa_core::RelationIdentity,
+        state: crate::catalog::sequence::SequenceState,
+    ) -> Result<crate::catalog::sequence::SequenceState, SQLError> {
+        let (Some(positions), Some(object_id)) = (
+            self.sequence_positions.as_ref(),
+            self.snapshot.definitions.sequence_object_ids.get(relation),
+        ) else {
+            return Ok(state);
+        };
+        Ok(state.at_position(positions.sequence_position(state.position_key(*object_id))?))
     }
 
     fn sequence_security(
@@ -414,9 +437,9 @@ impl CatalogReadView {
         for relation in self.relation_lookup_candidates(resolution, name)? {
             if let Some(state) = self.snapshot.definitions.sequences.get(&relation) {
                 return Ok(Some(CatalogSequenceSnapshot {
-                    relation: relation.clone(),
-                    state: *state,
+                    state: self.sequence_state_at_position(&relation, *state)?,
                     security: self.sequence_security(&relation)?,
+                    relation,
                 }));
             }
             if self.relation_exists(&relation) {

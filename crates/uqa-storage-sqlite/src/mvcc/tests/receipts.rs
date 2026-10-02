@@ -74,6 +74,115 @@ fn value_format_upgrade_preserves_receipt_capacity_acknowledgement_and_live_owne
     }
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+#[test]
+fn a_store_opens_its_receipt_lease_file_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = ManagedConnection::open(&directory.path().join("leased.db")).unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    let opened = || crate::mvcc::leases::OPENED.with(std::cell::Cell::get);
+    let before = opened();
+    // Each transaction's lease is gone before the next one is allocated, which leaves the file to the store alone.
+    for _ in 0..3 {
+        let owner = store.allocate_managed_transaction(&control).unwrap();
+        store.abort(owner.transaction(), &control).unwrap();
+        store
+            .acknowledge_transaction(
+                ReceiptAcknowledgement::Aborted(owner.transaction()),
+                &control,
+            )
+            .unwrap();
+    }
+    assert_eq!(opened() - before, 1);
+    // A clone of the store, as a snapshot holds one, shares the file; another store of the database finds it open.
+    drop(
+        store
+            .clone()
+            .allocate_managed_transaction(&control)
+            .unwrap(),
+    );
+    let peer = SQLiteRecordStore::new(&connection).unwrap();
+    drop(peer.allocate_managed_transaction(&control).unwrap());
+    assert_eq!(opened() - before, 1);
+}
+
+/// Whether each commit of the store's connection ran without its own sync, in commit order.
+fn record_commits(store: &SQLiteRecordStore) -> Arc<parking_lot::Mutex<Vec<bool>>> {
+    use crate::mvcc::connection_functions::ConnectionFunctions;
+    let commits = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&commits);
+    store
+        .with(|connection| {
+            let functions = ConnectionFunctions::of(connection)?;
+            connection.commit_hook(Some(move || {
+                recorded.lock().push(functions.synchronization_is_relaxed());
+                false
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    commits
+}
+
+#[test]
+fn only_a_managed_owners_acknowledgement_commits_without_its_own_sync() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = ManagedConnection::open(&directory.path().join("acknowledged.db")).unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    let commits = record_commits(&store);
+    let synchronous = |expected: i64| {
+        store
+            .with(|connection| {
+                assert_eq!(
+                    connection
+                        .pragma_query_value(None, "synchronous", |row| row.get::<_, i64>(0))?,
+                    expected
+                );
+                Ok(())
+            })
+            .unwrap();
+    };
+
+    // The allocation and the commit of a managed owner keep their sync; its acknowledgement does not need one.
+    let owner = store.allocate_managed_transaction(&control).unwrap();
+    let receipt = store
+        .commit(owner.transaction(), &empty(&control), &control)
+        .unwrap();
+    assert_eq!(std::mem::take(&mut *commits.lock()), [false, false]);
+    store
+        .acknowledge_transaction(ReceiptAcknowledgement::Committed(receipt), &control)
+        .unwrap();
+    assert_eq!(std::mem::take(&mut *commits.lock()), [true]);
+    synchronous(2);
+    drop(owner);
+    assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 1);
+
+    // An aborted managed owner is acknowledged the same way.
+    let aborted = store.allocate_managed_transaction(&control).unwrap();
+    store.abort(aborted.transaction(), &control).unwrap();
+    commits.lock().clear();
+    store
+        .acknowledge_transaction(
+            ReceiptAcknowledgement::Aborted(aborted.transaction()),
+            &control,
+        )
+        .unwrap();
+    assert_eq!(std::mem::take(&mut *commits.lock()), [true]);
+    synchronous(2);
+
+    // Nothing acknowledges a manual owner on its behalf, so its acknowledgement stays durable by itself.
+    let manual = store.allocate_transaction(&control).unwrap();
+    let receipt = store.commit(manual, &empty(&control), &control).unwrap();
+    commits.lock().clear();
+    store
+        .acknowledge_transaction(ReceiptAcknowledgement::Committed(receipt), &control)
+        .unwrap();
+    assert_eq!(std::mem::take(&mut *commits.lock()), [false]);
+    synchronous(2);
+}
+
 #[test]
 fn manual_receipts_require_exact_acknowledgement_and_keep_the_durable_limit() {
     for mode in 0..5 {
@@ -296,6 +405,50 @@ fn cancelled_or_exhausted_collection_keeps_acknowledgements_for_a_bounded_retry(
     );
     assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 1);
     assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 0);
+}
+
+#[test]
+fn the_receipt_limit_counts_receipts_and_not_the_distance_between_them() {
+    let control = control();
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    store.set_receipt_retention_limit(3, &control).unwrap();
+    let exhausted = |store: &SQLiteRecordStore| {
+        matches!(
+            store.allocate_transaction(&control),
+            Err(VersionError::ReceiptRetentionExhausted { limit: 3 })
+        )
+    };
+    // An old pending receipt stays while later ones are acknowledged and reclaimed, which leaves a gap behind it wider than the limit.
+    let old = store.allocate_transaction(&control).unwrap();
+    for _ in 0..5 {
+        let id = store.allocate_transaction(&control).unwrap();
+        let receipt = store.commit(id, &empty(&control), &control).unwrap();
+        store
+            .acknowledge_transaction(ReceiptAcknowledgement::Committed(receipt), &control)
+            .unwrap();
+        assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 1);
+    }
+    let second = store.allocate_transaction(&control).unwrap();
+    assert_eq!(second.allocation(), old.allocation() + 6);
+    let third = store.allocate_transaction(&control).unwrap();
+    assert!(exhausted(&store));
+    // Releasing one receipt makes room for exactly one.
+    store.abort(third, &control).unwrap();
+    store
+        .acknowledge_transaction(ReceiptAcknowledgement::Aborted(third), &control)
+        .unwrap();
+    assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 1);
+    store.allocate_transaction(&control).unwrap();
+    assert!(exhausted(&store));
+
+    // Receipts without gaps reach the limit at the same count.
+    let dense = SQLiteRecordStore::new(&ManagedConnection::open_in_memory().unwrap()).unwrap();
+    dense.set_receipt_retention_limit(3, &control).unwrap();
+    for _ in 0..3 {
+        dense.allocate_transaction(&control).unwrap();
+    }
+    assert!(exhausted(&dense));
 }
 
 #[test]

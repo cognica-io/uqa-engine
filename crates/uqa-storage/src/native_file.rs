@@ -29,8 +29,34 @@ pub fn unlock_byte(file: &std::fs::File, offset: u64) -> std::io::Result<()> {
     unix_byte_mode(file, offset, libc::F_UNLCK as libc::c_short)
 }
 
+/// Lock one byte, waiting for conflicting holders in other processes. The caller must never wait while holding a byte that a holder of this one may wait for.
+#[cfg(unix)]
+pub fn lock_byte(file: &std::fs::File, offset: u64, write: bool) -> std::io::Result<()> {
+    let mode = if write {
+        libc::F_WRLCK as libc::c_short
+    } else {
+        libc::F_RDLCK as libc::c_short
+    };
+    loop {
+        match unix_byte_command(file, offset, mode, libc::F_SETLKW) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            result => return result,
+        }
+    }
+}
+
 #[cfg(unix)]
 fn unix_byte_mode(file: &std::fs::File, offset: u64, mode: libc::c_short) -> std::io::Result<()> {
+    unix_byte_command(file, offset, mode, libc::F_SETLK)
+}
+
+#[cfg(unix)]
+fn unix_byte_command(
+    file: &std::fs::File,
+    offset: u64,
+    mode: libc::c_short,
+    command: libc::c_int,
+) -> std::io::Result<()> {
     // SAFETY: flock is initialized before fcntl borrows it, and File owns the descriptor for the call.
     let mut flock: libc::flock = unsafe { std::mem::zeroed() };
     flock.l_type = mode;
@@ -42,7 +68,7 @@ fn unix_byte_mode(file: &std::fs::File, offset: u64, mode: libc::c_short) -> std
         )
     })?;
     flock.l_len = 1;
-    let result = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &flock) };
+    let result = unsafe { libc::fcntl(file.as_raw_fd(), command, &flock) };
     if result == -1 {
         return Err(std::io::Error::last_os_error());
     }
@@ -57,6 +83,35 @@ pub fn read_exact_at(file: &std::fs::File, bytes: &mut [u8], offset: u64) -> std
 #[cfg(unix)]
 pub fn write_all_at(file: &std::fs::File, bytes: &[u8], offset: u64) -> std::io::Result<()> {
     file.write_all_at(bytes, offset)
+}
+
+/// Fill `bytes` from `offset`, reading as zero whatever lies after the end of the file.
+pub fn read_zero_extended_at(
+    file: &std::fs::File,
+    bytes: &mut [u8],
+    offset: u64,
+) -> std::io::Result<()> {
+    let mut consumed = 0usize;
+    while consumed < bytes.len() {
+        #[cfg(unix)]
+        let read = file.read_at(
+            &mut bytes[consumed..],
+            offset.saturating_add(consumed as u64),
+        );
+        #[cfg(windows)]
+        let read = file.seek_read(
+            &mut bytes[consumed..],
+            offset.saturating_add(consumed as u64),
+        );
+        match read {
+            Ok(0) => break,
+            Ok(read) => consumed += read,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    bytes[consumed..].fill(0);
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -120,11 +175,30 @@ fn windows_overlapped(offset: u64) -> windows_sys::Win32::System::IO::OVERLAPPED
 
 #[cfg(windows)]
 pub fn try_lock_byte(file: &std::fs::File, offset: u64, write: bool) -> std::io::Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::{
-        LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
-    };
+    windows_lock_byte(
+        file,
+        offset,
+        write,
+        windows_sys::Win32::Storage::FileSystem::LOCKFILE_FAIL_IMMEDIATELY,
+    )
+}
+
+/// Lock one byte, waiting for conflicting holders in other processes. The caller must never wait while holding a byte that a holder of this one may wait for.
+#[cfg(windows)]
+pub fn lock_byte(file: &std::fs::File, offset: u64, write: bool) -> std::io::Result<()> {
+    windows_lock_byte(file, offset, write, 0)
+}
+
+#[cfg(windows)]
+fn windows_lock_byte(
+    file: &std::fs::File,
+    offset: u64,
+    write: bool,
+    wait: u32,
+) -> std::io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{LockFileEx, LOCKFILE_EXCLUSIVE_LOCK};
     let mut overlapped = windows_overlapped(offset);
-    let flags = LOCKFILE_FAIL_IMMEDIATELY | if write { LOCKFILE_EXCLUSIVE_LOCK } else { 0 };
+    let flags = wait | if write { LOCKFILE_EXCLUSIVE_LOCK } else { 0 };
     let result = unsafe { LockFileEx(file.as_raw_handle(), flags, 0, 1, 0, &raw mut overlapped) };
     if result == 0 {
         return Err(std::io::Error::last_os_error());

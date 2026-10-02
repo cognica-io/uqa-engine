@@ -217,6 +217,8 @@ pub struct ScoredDocumentSource {
     table_oid: Option<i64>,
     ordering: Vec<crate::PhysicalOrder>,
     input_guarantees_presence: bool,
+    /// The table's indexes hold every projected field, so rows are projected from index entries without reading a document.
+    index_only: bool,
     lock_origin: Option<(Arc<str>, Arc<str>)>,
     recheck_pinned: bool,
     recheck_documents: std::collections::BTreeMap<DocId, Arc<uqa_storage::StoredDocument>>,
@@ -520,6 +522,7 @@ impl ScoredDocumentSource {
             table_oid: None,
             ordering,
             input_guarantees_presence,
+            index_only: false,
             lock_origin: None,
             recheck_pinned: false,
             recheck_documents: std::collections::BTreeMap::new(),
@@ -540,6 +543,12 @@ impl ScoredDocumentSource {
         read: Option<crate::serializable::SerializableRelationRead>,
     ) -> Self {
         self.serializable = crate::serializable::SerializableScan::new(read);
+        self
+    }
+
+    /// Project rows from the index entries the table holds for every projected field. A row-locking read and a pinned recheck still read their documents.
+    pub fn with_index_only(mut self, index_only: bool) -> Self {
+        self.index_only = index_only;
         self
     }
 

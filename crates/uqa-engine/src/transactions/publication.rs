@@ -38,7 +38,10 @@ impl Engine {
             if data_only {
                 self.adopt_own_commit_revisions();
             }
-            if !committed.statistics_changes.is_empty() {
+            let recorded = committed.statistics_settlement.recorded();
+            self.settle_statistics_changes(committed.statistics_settlement.clone());
+            // A commit that wrote no maintenance record changed nothing the worker decides by.
+            if recorded {
                 self.wake_automatic_statistics();
             }
             let notification_result = notification_commit.map_or(Ok(()), |notification_commit| {

@@ -9,8 +9,9 @@
 use std::sync::Arc;
 
 use crate::{
-    CatalogFacade, KeyValueCatalog, KeyValueStore, RelationIdentity, SequenceOptions,
-    SequenceReservationResult, SequenceRow, SequenceValueReservation, StorageBackendResult,
+    CatalogFacade, KeyValueCatalog, KeyValueStore, RelationIdentity, SequenceLogResult,
+    SequenceOptions, SequenceReservationResult, SequenceRow, SequenceValuePosition,
+    SequenceValueReservation, StorageBackendResult,
 };
 
 fn sequence(name: &str, id: u8) -> SequenceRow {
@@ -105,6 +106,7 @@ pub fn verify_sequence_concurrency(
     first.drop_sequence_row("sequence_b")?;
 
     verify_sequence_conflicts(a, b, &first, &second)?;
+    verify_sequence_records(&first)?;
 
     let row = sequence("sequence_saved", 6);
     first.create_sequence_row(&row)?;
@@ -210,6 +212,102 @@ fn verify_sequence_conflicts(
         first.drop_sequence_row("sequence_claim")?;
     }
 
+    Ok(())
+}
+
+/// A record moves ahead only from the position its caller read, and a replacement that keeps the allocation generation keeps the record's value state.
+fn verify_sequence_records(catalog: &KeyValueCatalog) -> StorageBackendResult<()> {
+    let row = sequence("sequence_record", 8);
+    assert!(catalog.create_sequence_row(&row)?);
+    let name = row.relation.qualified_name();
+    let logged = |value| SequenceValuePosition {
+        current: value,
+        called: true,
+        log_count: 0,
+    };
+    let log = |expected, value| {
+        catalog.log_sequence_values(
+            &name,
+            row.object_id,
+            row.definition_generation,
+            expected,
+            logged(value),
+        )
+    };
+    let stored = || -> StorageBackendResult<SequenceRow> {
+        Ok(catalog
+            .load_sequence_rows()?
+            .into_iter()
+            .find(|stored| stored.relation == row.relation)
+            .expect("the sequence row"))
+    };
+    assert_eq!(log((1, false), 33)?, SequenceLogResult::Logged);
+    // The record is no longer the one this caller read: nothing is written, and the record it holds is reported.
+    assert_eq!(log((1, false), 99)?, SequenceLogResult::Changed(logged(33)));
+    assert_eq!(
+        log((33, false), 99)?,
+        SequenceLogResult::Changed(logged(33))
+    );
+    assert_eq!(log((33, true), 66)?, SequenceLogResult::Logged);
+    assert_eq!(
+        catalog.log_sequence_values(&name, row.object_id, [200; 16], (66, true), logged(99))?,
+        SequenceLogResult::DefinitionChanged
+    );
+    for (name, object_id) in [
+        (name.as_str(), [201; 16]),
+        ("public.sequence_absent", row.object_id),
+    ] {
+        assert_eq!(
+            catalog.log_sequence_values(
+                name,
+                object_id,
+                row.definition_generation,
+                (66, true),
+                logged(99)
+            )?,
+            SequenceLogResult::Missing
+        );
+    }
+    assert!(catalog
+        .log_sequence_values(
+            &name,
+            row.object_id,
+            row.definition_generation,
+            (66, true),
+            SequenceValuePosition {
+                log_count: -1,
+                ..logged(99)
+            },
+        )
+        .is_err());
+    let record = stored()?;
+    assert_eq!(
+        (record.current, record.called, record.log_count),
+        (66, true, 0)
+    );
+
+    // A replacement of the same allocation generation changes the definition and leaves the value state, which a session's registry does not hold.
+    let mut replaced = row.clone();
+    replaced.start = 7;
+    replaced.current = 5;
+    replaced.called = false;
+    replaced.log_count = 9;
+    assert!(catalog.replace_sequence_row(&replaced)?);
+    let record = stored()?;
+    assert_eq!(
+        (
+            record.start,
+            record.current,
+            record.called,
+            record.log_count
+        ),
+        (7, 66, true, 0)
+    );
+    // A new allocation generation is stored with the value state it comes with.
+    replaced.definition_generation = [202; 16];
+    assert!(catalog.replace_sequence_row(&replaced)?);
+    assert_eq!(stored()?, replaced);
+    assert!(catalog.drop_sequence_row(&name)?);
     Ok(())
 }
 

@@ -7,12 +7,12 @@
 //! Explicit acknowledgement and managed owner recovery preserve durable SSI references.
 
 mod liveness;
-#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-pub(in crate::mvcc) use liveness::lease_file;
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 pub(in crate::mvcc) use liveness::local_file_registry;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(in crate::mvcc) use liveness::{lease_file, ReceiptLeaseFile};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     mvcc::{
@@ -23,6 +23,7 @@ use uqa_storage::{
     read_control::StorageReadControl,
 };
 
+use super::synchronization::RelaxedSynchronization;
 use super::{admission, codec, native, write, PhysicalResult, SQLiteRecordStore};
 
 impl SQLiteRecordStore {
@@ -40,10 +41,11 @@ impl SQLiteRecordStore {
             let transaction = admission::begin(connection, control)?;
             native::check_mapping(&transaction, self.native)?;
             codec::header(&transaction, self.identity)?;
-            transaction.execute(
-                "UPDATE _uqa_mvcc_metadata SET receipt_limit = ?1 WHERE singleton = 1",
-                [limit],
-            )?;
+            transaction
+                .prepare_cached(
+                    "UPDATE _uqa_mvcc_metadata SET receipt_limit = ?1 WHERE singleton = 1",
+                )?
+                .execute([limit])?;
             admission::commit(transaction, control)
         })
     }
@@ -102,16 +104,30 @@ pub(super) fn acknowledge(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     control.check().map_err(VersionError::from)?;
-    let _permit = admission::permit(connection, control)?;
+    let permit = admission::permit(connection, control)?;
+    let id = acknowledgement.transaction();
+    // An acknowledgement only releases its owner's right to resolve an outcome. A power loss that discards it leaves the receipt of a managed owner that is dead, which reclamation acknowledges on the owner's behalf. A manual owner is never acknowledged implicitly, so its acknowledgement keeps its own sync. The owner kind of an allocation never changes, and it is read before the transaction because the synchronization level cannot change inside one. Under a rollback journal that read waits for a writer that holds the database, so it is admitted as the transaction is: a busy database is waited for, not reported.
+    let managed = admission::retry(connection, true, control, || {
+        Ok(connection
+            .prepare_cached("SELECT managed FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+            .query_row([id.allocation().to_be_bytes().as_slice()], |row| {
+                row.get::<_, bool>(0)
+            })
+            .optional()?)
+    })?;
+    let _synchronization = if managed == Some(true) {
+        RelaxedSynchronization::relax(connection, &permit)?
+    } else {
+        None
+    };
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
-    let id = acknowledgement.transaction();
     let header = codec::header(&transaction, id.database())?;
     if id.allocation() > header.allocated {
         return Err(VersionError::UnknownTransaction.into());
     }
     acknowledgement.validate(codec::status(&transaction, id)?)?;
-    transaction.execute("UPDATE _uqa_mvcc_transactions SET status = CASE status WHEN 1 THEN 3 WHEN 2 THEN 4 ELSE status END WHERE allocation = ?1", [id.allocation().to_be_bytes().as_slice()])?;
+    transaction.prepare_cached("UPDATE _uqa_mvcc_transactions SET status = CASE status WHEN 1 THEN 3 WHEN 2 THEN 4 ELSE status END WHERE allocation = ?1")?.execute([id.allocation().to_be_bytes().as_slice()])?;
     admission::commit(transaction, control)
 }
 
@@ -130,7 +146,7 @@ fn reclaim(
     let header = codec::header(&transaction, identity)?;
     let mut selected = BudgetedVec::new(control.memory());
     {
-        let mut statement = transaction.prepare("SELECT allocation, status, managed FROM _uqa_mvcc_transactions WHERE status IN (3, 4) OR managed = 1 ORDER BY allocation")?;
+        let mut statement = transaction.prepare_cached("SELECT allocation, status, managed FROM _uqa_mvcc_transactions WHERE status IN (3, 4) OR managed = 1 ORDER BY allocation")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             control.check().map_err(VersionError::from)?;
@@ -170,16 +186,19 @@ fn reclaim(
     for (allocation, delete, committed) in selected.iter() {
         control.check().map_err(VersionError::from)?;
         if *delete {
-            transaction.execute(
-                "DELETE FROM _uqa_mvcc_transactions WHERE allocation = ?1",
-                [allocation.as_slice()],
-            )?;
+            transaction
+                .prepare_cached("DELETE FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+                .execute([allocation.as_slice()])?;
             removed += 1;
         } else {
-            transaction.execute(
-                "UPDATE _uqa_mvcc_transactions SET status = ?2 WHERE allocation = ?1",
-                rusqlite::params![allocation.as_slice(), if *committed { 4 } else { 3 }],
-            )?;
+            transaction
+                .prepare_cached(
+                    "UPDATE _uqa_mvcc_transactions SET status = ?2 WHERE allocation = ?1",
+                )?
+                .execute(rusqlite::params![
+                    allocation.as_slice(),
+                    if *committed { 4 } else { 3 }
+                ])?;
         }
     }
     admission::commit(transaction, control)?;

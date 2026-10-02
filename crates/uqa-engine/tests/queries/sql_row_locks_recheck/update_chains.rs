@@ -44,7 +44,7 @@ fn ranked_text_match_lock_rechecks_the_changed_document() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -84,7 +84,7 @@ fn blocking_wait_drops_a_candidate_the_holder_deleted() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -125,7 +125,7 @@ fn self_join_recheck_substitutes_the_committed_image_for_every_alias() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -317,7 +317,7 @@ fn merge_treats_a_target_deleted_during_the_wait_as_not_matched() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     merge_thread.join().unwrap();
@@ -352,7 +352,7 @@ fn full_path_non_key_update_does_not_conflict_with_key_share() {
             .unwrap();
     });
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("a non-key UPDATE must not wait for FOR KEY SHARE")
         .unwrap();
     update_thread.join().unwrap();
@@ -383,7 +383,7 @@ fn update_follows_a_primary_key_rewrite_committed_during_the_wait() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();
@@ -419,7 +419,7 @@ fn update_does_not_capture_a_row_reinserted_with_the_same_primary_key() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();
@@ -454,7 +454,7 @@ fn update_follows_an_ordered_chain_of_primary_key_rewrites() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();
@@ -527,7 +527,7 @@ fn derived_table_self_join_recheck_pins_each_inner_scan_separately() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -582,7 +582,7 @@ fn spilled_derived_self_join_recheck_preserves_each_inner_scan_qualifier() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -668,7 +668,7 @@ fn ranked_text_match_recheck_drops_a_document_that_no_longer_matches() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -866,7 +866,7 @@ fn foreign_key_insert_holds_key_share_on_the_parent_row() {
     });
     assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
     inserter.sql("COMMIT", &[]).unwrap();
-    let outcome = done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let outcome = done_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     delete_thread.join().unwrap();
     assert!(
         outcome.is_err(),
@@ -903,7 +903,7 @@ fn on_conflict_do_nothing_waits_for_the_conflicting_transaction() {
     assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
     deleter.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -949,7 +949,7 @@ fn preselected_update_requalifies_rows_after_the_snapshot_advances() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();

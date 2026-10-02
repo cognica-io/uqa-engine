@@ -522,7 +522,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             crate::mutation::publication::publish_prepared_mutation_action(
                 context.mutation.publication,
                 action,
-                false,
+                crate::mutation::publication::InsertedIdentity::Unknown,
                 &mut publication,
             )?;
             events.append_after_rows(after_rows);

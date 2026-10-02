@@ -103,20 +103,28 @@ fn validate_virtual_column_envelope(
     if column.primary_key
         || key_constraints.iter().any(|constraint| {
             constraint.kind == crate::ast::TableKeyConstraintKind::PrimaryKey
-                && constraint.columns.iter().any(|name| name == &column.name)
+                && constraint
+                    .columns
+                    .iter()
+                    .chain(&constraint.included_columns)
+                    .any(|name| name == &column.name)
         })
     {
-        return Err(SQLError::TypeMismatch(
+        return Err(SQLError::Unsupported(
             "primary keys on virtual generated columns are not supported".into(),
         ));
     }
     if column.unique
         || key_constraints.iter().any(|constraint| {
             constraint.kind == crate::ast::TableKeyConstraintKind::Unique
-                && constraint.columns.iter().any(|name| name == &column.name)
+                && constraint
+                    .columns
+                    .iter()
+                    .chain(&constraint.included_columns)
+                    .any(|name| name == &column.name)
         })
     {
-        return Err(SQLError::TypeMismatch(
+        return Err(SQLError::Unsupported(
             "unique constraints on virtual generated columns are not supported".into(),
         ));
     }
@@ -128,7 +136,7 @@ fn validate_virtual_column_envelope(
                 .any(|name| name == &column.name)
         })
     {
-        return Err(SQLError::TypeMismatch(
+        return Err(SQLError::Unsupported(
             "foreign key constraints on virtual generated columns are not supported".into(),
         ));
     }

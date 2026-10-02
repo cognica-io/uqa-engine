@@ -405,6 +405,17 @@ impl CatalogFacade for KeyValueCatalog {
         )
     }
 
+    fn log_sequence_values(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+        expected: (i64, bool),
+        logged: crate::catalog::SequenceValuePosition,
+    ) -> StorageBackendResult<crate::catalog::SequenceLogResult> {
+        self.log_sequence_values_impl(name, object_id, definition_generation, expected, logged)
+    }
+
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()> {
         self.save_view_impl(view)
     }

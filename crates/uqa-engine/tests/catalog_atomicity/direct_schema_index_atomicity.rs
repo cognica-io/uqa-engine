@@ -46,6 +46,7 @@ fn direct_constraint_replacement_publishes_only_after_catalog_success() {
         name: Some("constrained_id_key".to_string()),
         kind: uqa_sql::ast::TableKeyConstraintKind::Unique,
         columns: vec!["id".to_string()],
+        included_columns: Vec::new(),
         nulls_not_distinct: false,
         without_overlaps: false,
     };

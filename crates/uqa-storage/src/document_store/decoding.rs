@@ -20,7 +20,16 @@ pub fn decode_legacy_document_fields_budgeted(
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<Document>> {
     control.check()?;
-    let fields = legacy::fields(text(bytes)?, control)?;
+    decode_legacy_document_text_fields_budgeted(text(bytes)?, control)
+}
+
+/// [`decode_legacy_document_fields_budgeted`] for a body its owner already holds as validated text.
+pub fn decode_legacy_document_text_fields_budgeted(
+    input: &str,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<Document>> {
+    control.check()?;
+    let fields = legacy::fields(input, control)?;
     control.check()?;
     Ok(fields)
 }
@@ -32,7 +41,16 @@ pub fn decode_legacy_document_projection_budgeted(
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<Document>> {
     control.check()?;
-    let input = text(bytes)?;
+    decode_legacy_document_text_projection_budgeted(text(bytes)?, fields, control)
+}
+
+/// [`decode_legacy_document_projection_budgeted`] for a body its owner already holds as validated text.
+pub fn decode_legacy_document_text_projection_budgeted(
+    input: &str,
+    fields: &[&str],
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<Document>> {
+    control.check()?;
     let result = if let Some(selected) = projected::fields(input, fields, control)? {
         selected
     } else {

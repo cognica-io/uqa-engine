@@ -15,7 +15,8 @@ use uqa_core::{
 use uqa_storage::{
     document_store::{
         decoding::{
-            decode_legacy_document_fields_budgeted, decode_legacy_document_projection_budgeted,
+            decode_legacy_document_text_fields_budgeted,
+            decode_legacy_document_text_projection_budgeted,
         },
         Document,
     },
@@ -84,9 +85,9 @@ impl NativeDocumentRead<'_> {
             .as_str()
             .map_err(|_| SQLiteError::StorageBackend("native document body must be text".into()))?;
         let fields = if let Some(fields) = projection {
-            decode_legacy_document_projection_budgeted(body.as_bytes(), fields, self.control)?
+            decode_legacy_document_text_projection_budgeted(body, fields, self.control)?
         } else {
-            decode_legacy_document_fields_budgeted(body.as_bytes(), self.control)?
+            decode_legacy_document_text_fields_budgeted(body, self.control)?
         };
         let metadata = super::read::metadata(row[3], self.table, id)?;
         let (fields, memory) = fields.into_parts();

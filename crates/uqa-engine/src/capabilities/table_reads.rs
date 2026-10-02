@@ -17,6 +17,39 @@ impl TableRead for TableState {
     ) -> parking_lot::RwLockReadGuard<'_, Box<dyn uqa_storage::DocumentStore>> {
         self.document_store.read()
     }
+
+    fn for_each_indexed_fields(
+        &self,
+        ids: &[uqa_core::DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(uqa_core::DocId, bool, &[&uqa_core::Value]) -> bool,
+    ) -> Option<usize> {
+        let indexes = self.value_indexes.read();
+        let columns = fields
+            .iter()
+            .map(|field| indexes.get(&uqa_storage::ValueIndexKey::Column((*field).to_owned())))
+            .collect::<Option<Vec<_>>>()?;
+        // Every accelerator indexes every row, so without a field to project any of them tells whether a row exists.
+        let presence = match columns.first() {
+            Some(column) => *column,
+            None => indexes.values().next()?,
+        };
+        let mut values = Vec::with_capacity(columns.len());
+        let mut visited = 0;
+        for &id in ids {
+            values.clear();
+            values.extend(columns.iter().map_while(|column| column.stored_value(id)));
+            let exists = values.len() == columns.len() && presence.contains(id);
+            if !exists {
+                values.clear();
+            }
+            visited += 1;
+            if !visitor(id, exists, &values) {
+                break;
+            }
+        }
+        Some(visited)
+    }
 }
 
 use crate::Engine;
@@ -53,6 +86,14 @@ impl QueryTableAccess for Engine {
     fn table(&self, name: &str) -> Result<std::sync::Arc<dyn TableRead>, SQLError> {
         self.require_query_table(name)
             .map(|table| table as std::sync::Arc<dyn TableRead>)
+    }
+    fn index_holds_fields(
+        &self,
+        name: &str,
+        table: &std::sync::Arc<dyn TableRead>,
+        fields: &[String],
+    ) -> Result<bool, SQLError> {
+        self.prepare_index_only_read(name, table, fields)
     }
     fn command_overlay_changes(
         &self,

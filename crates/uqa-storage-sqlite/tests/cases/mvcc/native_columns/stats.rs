@@ -121,7 +121,7 @@ fn native_statistics_maintenance_preserves_concurrent_changes_and_closed_reopen(
                 let connection = open(mode, &path);
                 let catalog = Catalog::open(connection.clone()).unwrap();
                 bind(&connection);
-                StatisticsMaintenance::analyzed_for(&catalog, TABLE, object, 100, 1).unwrap();
+                StatisticsMaintenance::analyzed_for(&catalog, TABLE, object, 100, 1, None).unwrap();
                 let mut pending = StatisticsMaintenance::load(&catalog, TABLE).unwrap();
                 pending.record_changes(object, 5, Some(100), 100).unwrap();
                 pending.save(&catalog, TABLE).unwrap();
@@ -132,7 +132,7 @@ fn native_statistics_maintenance_preserves_concurrent_changes_and_closed_reopen(
                 catalog
                     .save_column_stats(statistic(TABLE, "n", 10))
                     .unwrap();
-                StatisticsMaintenance::analyzed_for(&catalog, TABLE, object, 105, 1).unwrap();
+                StatisticsMaintenance::analyzed_for(&catalog, TABLE, object, 105, 1, None).unwrap();
                 let mut pending = StatisticsMaintenance::load(&writer, TABLE).unwrap();
                 pending.record_changes(object, 2, Some(100), 200).unwrap();
                 pending.save(&writer, TABLE).unwrap();

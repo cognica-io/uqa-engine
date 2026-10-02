@@ -71,6 +71,9 @@ impl SequenceValueRuntime for RuntimeObserver<'_> {
         }
         SequenceValueRuntime::prepare_explicit_transaction_writer(self.engine)
     }
+    fn sequence_positions(&self) -> Option<&crate::row_locks::RowLockManager> {
+        SequenceValueRuntime::sequence_positions(self.engine)
+    }
     fn record_nontransactional_sequence_value(
         &self,
         definition_generation: [u8; 16],

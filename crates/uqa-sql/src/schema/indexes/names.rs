@@ -77,7 +77,7 @@ pub fn name_constraint_indexes(
         let component = if key.kind == TableKeyConstraintKind::PrimaryKey {
             String::new()
         } else {
-            key.columns.join("_")
+            super::keys::key_names(&constraint_index_attributes(key)).join("_")
         };
         for number in 0_u64.. {
             let label = if number == 0 {
@@ -98,6 +98,16 @@ pub fn name_constraint_indexes(
         }
     }
     Ok(())
+}
+
+/// The attributes of a constraint's supporting index: its key columns followed by the columns it includes.
+pub fn constraint_index_attributes(key: &TableKeyConstraint) -> Vec<crate::ast::IndexKey> {
+    key.columns
+        .iter()
+        .chain(&key.included_columns)
+        .cloned()
+        .map(crate::ast::IndexKey::Column)
+        .collect()
 }
 
 fn available(

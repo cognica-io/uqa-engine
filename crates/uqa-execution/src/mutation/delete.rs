@@ -651,7 +651,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                     crate::mutation::publication::publish_prepared_mutation_action(
                         context.mutation.publication,
                         action,
-                        false,
+                        crate::mutation::publication::InsertedIdentity::Unknown,
                         &mut publication,
                     )?;
                 }

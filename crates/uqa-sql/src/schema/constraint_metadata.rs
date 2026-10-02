@@ -320,6 +320,7 @@ pub fn materialize_column_key_constraints(
                     name: None,
                     kind,
                     columns: vec![column.name.clone()],
+                    included_columns: Vec::new(),
                     nulls_not_distinct: false,
                     without_overlaps: false,
                 });

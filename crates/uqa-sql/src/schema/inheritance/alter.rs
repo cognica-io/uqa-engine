@@ -247,6 +247,7 @@ pub fn append_inherited_keys_matching(
 pub fn key_equivalent(left: &TableKeyConstraint, right: &TableKeyConstraint) -> bool {
     left.kind == right.kind
         && left.columns == right.columns
+        && left.included_columns == right.included_columns
         && left.nulls_not_distinct == right.nulls_not_distinct
         && left.without_overlaps == right.without_overlaps
 }

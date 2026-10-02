@@ -152,7 +152,7 @@ fn run_volatile_lock_wait(
     wait_for_calls(calls, 3);
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -317,7 +317,7 @@ fn for_update_waits_until_the_holder_commits() {
         let result = waiter.sql("SELECT id FROM accounts WHERE id = 2 FOR UPDATE", &[]);
         done_tx.send(result).unwrap();
     });
-    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    started_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     let early = done_rx.recv_timeout(Duration::from_millis(150));
     holder.sql("COMMIT", &[]).unwrap();
     let (was_blocked, outcome) = receive_after_unblock(early, &done_rx, Duration::from_secs(2));
@@ -546,7 +546,7 @@ fn deadlock_victim_aborts_and_releases_its_row_locks() {
         let result = first.sql("SELECT id FROM accounts WHERE id = 2 FOR UPDATE", &[]);
         done_tx.send((first, result)).unwrap();
     });
-    blocked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    blocked_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     // The first waiter must have registered its wait before the victim closes the cycle; the detector aborts whichever request closes it, so give the spawned request time to block without assuming timing.
     assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
 
@@ -620,7 +620,7 @@ fn for_update_cancel_during_wait_is_57014() {
         let result = waiter.sql("SELECT id FROM accounts WHERE id = 1 FOR UPDATE", &[]);
         done_tx.send(result).unwrap();
     });
-    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    started_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     let early = done_rx.recv_timeout(Duration::from_millis(150));
     cancel.cancel();
     let (was_blocked, outcome) = receive_after_unblock(early, &done_rx, Duration::from_secs(2));

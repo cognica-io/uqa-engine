@@ -23,6 +23,7 @@ pub fn validate_added_key_columns(
             )));
         }
     }
+    validate_included_key_columns(constraint, &column_names)?;
     if constraint.without_overlaps {
         let period_column = constraint.columns.last().ok_or_else(|| {
             SQLError::TypeMismatch(
@@ -54,6 +55,24 @@ pub fn validate_added_key_columns(
 
     Ok(())
 }
+/// The columns a key constraint includes must exist; as in `PostgreSQL`, they may repeat and may be key columns.
+pub fn validate_included_key_columns(
+    constraint: &TableKeyConstraint,
+    column_names: &std::collections::BTreeSet<&str>,
+) -> Result<(), SQLError> {
+    match constraint
+        .included_columns
+        .iter()
+        .find(|column| !column_names.contains(column.as_str()))
+    {
+        Some(column) => Err(SQLError::Routine {
+            sqlstate: "42703".into(),
+            message: format!("column \"{column}\" named in key does not exist"),
+        }),
+        None => Ok(()),
+    }
+}
+
 pub fn validate_added_key_identity(
     table: &str,
     constraint: &TableKeyConstraint,

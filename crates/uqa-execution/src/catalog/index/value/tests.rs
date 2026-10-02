@@ -164,3 +164,67 @@ fn legacy_vector_index_probes_preserve_operator_failures_without_rejecting_singl
         Some("42804")
     );
 }
+
+#[test]
+fn a_carried_column_holds_stored_values_and_answers_no_predicate() {
+    let values = vec![(1, Value::Int(10)), (2, Value::Null), (3, Value::Int(10))];
+    let mut carried = ColumnValueIndex::build_carried(values.clone().into_iter());
+    assert!(carried.is_carried());
+    assert_eq!(carried.stored_value(1), Some(&Value::Int(10)));
+    assert_eq!(carried.stored_value(2), Some(&Value::Null));
+    assert!(carried.contains(3) && !carried.contains(4));
+    for predicate in [
+        Predicate::Equals(Value::Int(10)),
+        Predicate::IsNull,
+        Predicate::IsNotNull,
+    ] {
+        assert!(!carried.supports(&predicate));
+        assert!(carried.scan(&predicate).is_none());
+        assert!(carried.estimate_cardinality(&predicate).is_none());
+        let mut observed = false;
+        assert!(carried
+            .scan_observing(&predicate, || {
+                observed = true;
+                Ok(())
+            })
+            .unwrap()
+            .is_none());
+        assert!(!observed, "a declined predicate registers no read");
+    }
+    carried.insert(4, &Value::Int(40));
+    carried.insert(1, &Value::Int(11));
+    carried.remove(3, &Value::Int(10));
+    assert_eq!(carried.stored_value(1), Some(&Value::Int(11)));
+    assert_eq!(carried.stored_value(3), None);
+    assert_eq!(carried.stored_value(4), Some(&Value::Int(40)));
+    carried.clear();
+    assert!(!carried.contains(1));
+}
+
+#[test]
+fn changing_the_use_of_a_column_keeps_its_stored_values() {
+    let values = vec![
+        (1, Value::Int(10)),
+        (2, Value::Null),
+        (3, Value::Int(10)),
+        (4, Value::Int(5)),
+    ];
+    let key = ColumnValueIndex::build_carried(values.clone().into_iter()).with_use("qty", false);
+    assert!(!key.is_carried());
+    assert_eq!(
+        ids(&key.scan(&Predicate::Equals(Value::Int(10))).unwrap()),
+        vec![1, 3]
+    );
+    assert_eq!(ids(&key.scan(&Predicate::IsNull).unwrap()), vec![2]);
+    assert_eq!(
+        ids(&key.scan(&Predicate::LessThan(Value::Int(10))).unwrap()),
+        vec![4]
+    );
+    let carried = key.with_use("qty", true);
+    assert!(carried.is_carried());
+    for (id, value) in &values {
+        assert_eq!(carried.stored_value(*id), Some(value));
+    }
+    // A column already used as asked is returned as it is.
+    assert!(carried.with_use("qty", true).is_carried());
+}

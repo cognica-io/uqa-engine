@@ -118,12 +118,25 @@ impl PhysicalIndexDefinitions {
         Ok(Self { indexes })
     }
 
+    /// Every field with an accelerator: the search keys and the columns that indexes only carry.
     pub fn indexable_fields(
         &self,
         table: &str,
         columns: &[ColumnDef],
         constraints: &[TableKeyConstraint],
     ) -> StorageBackendResult<Vec<ValueIndexKey>> {
+        let mut fields = self.search_fields(table, columns, constraints);
+        fields.extend(self.included_columns(table));
+        Ok(fields.into_iter().collect())
+    }
+
+    /// Fields whose accelerators answer predicates: the columns of declared keys, every plain key column of a btree index, and each btree index with an expression key.
+    pub fn search_fields(
+        &self,
+        table: &str,
+        columns: &[ColumnDef],
+        constraints: &[TableKeyConstraint],
+    ) -> BTreeSet<ValueIndexKey> {
         let mut fields = BTreeSet::new();
         for column in columns
             .iter()
@@ -140,21 +153,55 @@ impl PhysicalIndexDefinitions {
                     .map(ValueIndexKey::Column),
             );
         }
-        for ((_, physical_key), index) in &self.indexes {
-            if !index.method.eq_ignore_ascii_case("btree") {
-                continue;
-            }
-            if index.table != table {
-                continue;
-            }
+        for (physical_key, index) in self.btree_indexes(table) {
             if index.keys.iter().any(|key| key.column().is_none()) {
                 fields.insert(ValueIndexKey::Index(physical_key.clone()));
             }
-            if let Some(IndexKey::Column(column)) = index.keys.first() {
-                fields.insert(ValueIndexKey::Column(column.clone()));
-            }
+            fields.extend(
+                index
+                    .keys
+                    .iter()
+                    .filter_map(IndexKey::column)
+                    .map(|column| ValueIndexKey::Column(column.to_owned())),
+            );
         }
-        Ok(fields.into_iter().collect())
+        fields
+    }
+
+    /// Fields that btree indexes carry beside their keys and that are no search key. Their accelerators hold the stored values for index-only reads and answer no predicate.
+    pub fn carried_fields(
+        &self,
+        table: &str,
+        columns: &[ColumnDef],
+        constraints: &[TableKeyConstraint],
+    ) -> BTreeSet<ValueIndexKey> {
+        let search = self.search_fields(table, columns, constraints);
+        self.included_columns(table)
+            .filter(|field| !search.contains(field))
+            .collect()
+    }
+
+    fn btree_indexes<'a>(
+        &'a self,
+        table: &'a str,
+    ) -> impl Iterator<Item = (&'a String, &'a PreparedIndex)> + 'a {
+        self.indexes
+            .iter()
+            .filter(move |(_, index)| {
+                index.method.eq_ignore_ascii_case("btree") && index.table == table
+            })
+            .map(|((_, physical_key), index)| (physical_key, index))
+    }
+
+    fn included_columns<'a>(&'a self, table: &'a str) -> impl Iterator<Item = ValueIndexKey> + 'a {
+        self.btree_indexes(table).flat_map(|(_, index)| {
+            index
+                .definition
+                .included_columns
+                .iter()
+                .cloned()
+                .map(ValueIndexKey::Column)
+        })
     }
 
     pub fn document_values(

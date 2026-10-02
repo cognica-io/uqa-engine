@@ -187,6 +187,8 @@ impl VacuumStatistics for SavedVacuumStatistics<'_> {
                     .values()
                     .next()
                     .map_or(0, |stats| stats.row_count),
+                // Statistics saved from before are no new sample.
+                None,
             )?;
         }
         Ok(())
@@ -225,6 +227,7 @@ impl VacuumTable for VacuumTableBinding<'_> {
         Engine::document_vector_values(&self.table, document)
     }
     fn clear_documents(&self) -> StorageBackendResult<()> {
+        self.table.discard_document_count();
         self.table.document_store.write().clear()
     }
     fn clear_text_index(&self) -> StorageBackendResult<()> {
@@ -240,7 +243,7 @@ impl VacuumTable for VacuumTableBinding<'_> {
         self.table.persistence
     }
     fn mark_doc_count_dirty(&self) {
-        self.table.doc_count_dirty.store(true, Ordering::Release);
+        self.table.discard_document_count();
     }
 }
 impl VacuumLocks for Engine {
@@ -281,7 +284,11 @@ impl VacuumRows for Engine {
         vectors: DocumentVectors,
     ) -> Result<(), SQLError> {
         self.add_prepared_stored_document_with_vector_values_inner(
-            table, id, document, vectors, true,
+            table,
+            id,
+            document,
+            vectors,
+            uqa_execution::mutation::publication::InsertedIdentity::Vacant,
         )
     }
     fn refresh_indexes(&self, table: &str) -> StorageBackendResult<()> {

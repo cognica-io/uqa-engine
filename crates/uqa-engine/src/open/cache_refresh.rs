@@ -44,19 +44,32 @@ impl Engine {
         }
         // Observed before the view: a sibling that publishes later remains unobserved.
         let data_epoch = self.epochs.table_data.published.load(Ordering::Acquire);
-        let Ok(version) = backend.change_version() else {
-            return;
+        // A versioned session's pinned view reports its own change version, which costs no further read of the latest commit. Any other session asks the monitor first: inside its read transaction the monitor could wait behind a writer that waits for this reader.
+        let pinned_version = backend.transaction_model().is_versioned();
+        let before = if pinned_version {
+            None
+        } else {
+            match backend.change_version() {
+                Ok(version) => Some(version),
+                Err(_) => return,
+            }
         };
         if backend.begin_read_transaction().is_err() {
             return;
         }
-        let observed = backend
-            .read_view_revision()
-            .and_then(|view| Ok((view, catalog.cache_revisions()?)));
+        let observed = before
+            .map_or_else(|| backend.change_version(), Ok)
+            .and_then(|version| {
+                Ok((
+                    version,
+                    backend.read_view_revision()?,
+                    catalog.cache_revisions()?,
+                ))
+            });
         if backend.rollback_transaction().is_err() {
             return;
         }
-        let Ok((Some(view), Some(current))) = observed else {
+        let Ok((version, Some(view), Some(current))) = observed else {
             return;
         };
         if !view.follows_by_one_commit(&previous_view)

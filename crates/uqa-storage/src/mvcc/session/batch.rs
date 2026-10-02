@@ -42,6 +42,8 @@ enum Operation {
         value: Option<SharedRecordValue>,
         kind: RecordWriteKind,
     },
+    /// A canonical record at a key that never had one.
+    UnusedRecord(RecordKey, SharedRecordValue),
 }
 
 pub(super) struct Batch<'a> {
@@ -162,30 +164,13 @@ impl<'a> Batch<'a> {
                     transaction.vector_mutation(mutation)?;
                 }
                 Operation::VectorFence(kind, prefix) => {
-                    let view = transaction.view()?;
-                    let mut guards = BudgetedVec::new(self.store.control.memory());
-                    view.visit_keys(prefix, None, usize::MAX, control, &mut |key, record| {
-                        if record.live {
-                            let layout = kind.layout(&*self.store.persistence)?;
-                            let metadata = layout.metadata_key(key, control)?.ok_or(
-                                VersionError::InvalidEncoding("invalid vector metadata prefix"),
-                            )?;
-                            if &*metadata != key {
-                                return Err(VersionError::InvalidEncoding(
-                                    "vector fence selected derived rows",
-                                ));
-                            }
-                            let guard = layout.key(key, Key::Structure, control)?;
-                            guards.push(guard)?;
-                        }
-                        Ok(true)
-                    })?;
-                    for guard in guards.iter() {
-                        transaction.fence_record(guard, control)?;
-                    }
+                    self.fence_vector_structures(transaction, *kind, prefix)?;
                 }
                 Operation::TypedRecord { key, value, kind } => {
                     transaction.write_shared_record(key, value.as_ref(), *kind, control)?;
+                }
+                Operation::UnusedRecord(key, value) => {
+                    transaction.write_unused_record(key, value, control)?;
                 }
             }
         }
@@ -195,6 +180,41 @@ impl<'a> Batch<'a> {
         // Validate and stage every record first. Allocation uses persistence directly because the session's mutation boundary already holds its active-transaction lock.
         self.apply_identifiers()?;
         self.observe_writes(transaction)
+    }
+
+    /// Fence the structure guard of every live vector index whose metadata lies under `prefix`.
+    fn fence_vector_structures(
+        &self,
+        transaction: &mut Transaction,
+        kind: IndexKind,
+        prefix: &[u8],
+    ) -> Result<(), VersionError> {
+        let control = &self.store.control;
+        let view = transaction.view()?;
+        let mut guards = BudgetedVec::new(control.memory());
+        view.visit_keys(prefix, None, usize::MAX, control, &mut |key, record| {
+            if record.live {
+                let layout = kind.layout(&*self.store.persistence)?;
+                let metadata =
+                    layout
+                        .metadata_key(key, control)?
+                        .ok_or(VersionError::InvalidEncoding(
+                            "invalid vector metadata prefix",
+                        ))?;
+                if &*metadata != key {
+                    return Err(VersionError::InvalidEncoding(
+                        "vector fence selected derived rows",
+                    ));
+                }
+                let guard = layout.key(key, Key::Structure, control)?;
+                guards.push(guard)?;
+            }
+            Ok(true)
+        })?;
+        for guard in guards.iter() {
+            transaction.fence_record(guard, control)?;
+        }
+        Ok(())
     }
 
     fn apply_populations(
@@ -252,11 +272,23 @@ impl<'a> Batch<'a> {
     fn apply_identifiers(&self) -> Result<(), VersionError> {
         let write_control = self.store.write_control();
         let observe = |namespace: &[u8], value: u64| {
-            self.store.persistence.allocate_identifiers(
+            let allocation = self.store.persistence.allocate_identifiers(
                 namespace,
                 crate::mvcc::IdentifierRequest::Observe(value),
                 &write_control,
-            )
+            )?;
+            self.store
+                .observed
+                .lock()
+                .record(namespace, allocation.watermark());
+            Ok::<_, VersionError>(allocation)
+        };
+        // An observation at or below a watermark this session has read raises nothing, so it needs no allocation.
+        let raise = |namespace: &[u8], value: u64| {
+            if self.store.observed.lock().covers(namespace, value) {
+                return Ok(());
+            }
+            observe(namespace, value).map(|_| ())
         };
         // An observation only raises its namespace's watermark to the maximum observed value, so a run of observations of one namespace needs a single physical allocation. An inheritance reads its source watermark and ends the run.
         let mut run: Option<(&[u8], u64)> = None;
@@ -268,22 +300,23 @@ impl<'a> Batch<'a> {
                     }
                     _ => {
                         if let Some((namespace, value)) = run.replace((namespace, *value)) {
-                            observe(namespace, value)?;
+                            raise(namespace, value)?;
                         }
                     }
                 },
                 Operation::IdentifierInheritance(from, to) => {
                     if let Some((namespace, value)) = run.take() {
-                        observe(namespace, value)?;
+                        raise(namespace, value)?;
                     }
+                    // The source watermark must be the current one, which only an allocation reads.
                     let source = observe(from, 0)?;
-                    observe(to, source.watermark())?;
+                    raise(to, source.watermark())?;
                 }
                 _ => {}
             }
         }
         if let Some((namespace, value)) = run {
-            observe(namespace, value)?;
+            raise(namespace, value)?;
         }
         Ok(())
     }
@@ -466,6 +499,15 @@ impl KeyValueBatch for Batch<'_> {
     }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.typed_record(key, Some(value), RecordWriteKind::Canonical)
+    }
+
+    fn put_unused(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
+        self.operations.push(Operation::UnusedRecord(
+            RecordKey::new(key, self.store.control.memory())
+                .map_err(VersionError::into_storage_error)?,
+            Arc::new(self.copy(value)?),
+        ))?;
+        Ok(())
     }
 
     fn replace_diskann_origin(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {

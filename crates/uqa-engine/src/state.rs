@@ -262,6 +262,11 @@ pub(super) struct SessionContext {
     /// `PostgreSQL` sequence reservations are session-local and nontransactional. They are intentionally kept outside `SessionStateSnapshot` so rollback never rewinds consumption or restores blocks discarded by `ALTER SEQUENCE`.
     pub(super) sequence_caches:
         Mutex<BTreeMap<super::RelationIdentity, super::SessionSequenceCache>>,
+    /// The sequence catalog as this session last read it from the latest commit, kept while nothing it was read from has changed.
+    pub(super) sequence_snapshot: Mutex<Option<crate::sequence_snapshot::SequenceSnapshotMemo>>,
+    /// How many times this session read the sequence catalog instead of reusing its last read.
+    #[cfg(test)]
+    pub(super) sequence_snapshot_reads: std::sync::atomic::AtomicU64,
     /// `PostgreSQL`'s session PRNG is not transactional: failed statements and
     /// transaction or savepoint rollback leave every consumed draw in place.
     pub(super) random_state: Mutex<super::SessionRandomState>,
@@ -279,6 +284,8 @@ pub(super) struct SessionContext {
     pub(super) next_portal_transaction_origin: Mutex<u64>,
     pub(crate) statistics_worker: AtomicBool,
     pub(crate) statistics_client: AtomicBool,
+    /// Row changes of this session's commits that no maintenance record counts yet.
+    pub(crate) kept_statistics: Mutex<crate::statistics::StatisticsChanges>,
 }
 
 #[derive(Clone)]
@@ -316,6 +323,9 @@ impl SessionContext {
             state: RwLock::new(state),
             prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
+            sequence_snapshot: Mutex::new(None),
+            #[cfg(test)]
+            sequence_snapshot_reads: std::sync::atomic::AtomicU64::new(0),
             random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),
             query_retention: uqa_core::memory::MemoryBudget::new(
@@ -331,6 +341,7 @@ impl SessionContext {
             next_portal_transaction_origin: Mutex::new(1),
             statistics_worker: AtomicBool::new(false),
             statistics_client: AtomicBool::new(false),
+            kept_statistics: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -467,6 +478,7 @@ pub(super) struct QueryRuntime {
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
     pub(super) regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache,
     pub(super) physical_index_cache: uqa_execution::catalog::index::physical::PhysicalIndexCache,
+    pub(super) enforced_key_cache: uqa_execution::catalog::index::EnforcedKeyCache,
 }
 
 impl QueryRuntime {
@@ -491,6 +503,7 @@ impl QueryRuntime {
             regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache::default(),
             physical_index_cache:
                 uqa_execution::catalog::index::physical::PhysicalIndexCache::default(),
+            enforced_key_cache: uqa_execution::catalog::index::EnforcedKeyCache::default(),
         }
     }
 }

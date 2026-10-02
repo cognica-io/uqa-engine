@@ -151,9 +151,23 @@ fn nesting_reserves_before_growth_and_releases_after_failure() {
         JsonToken::Number(_)
     ));
     assert!(scalar.next_event().unwrap().is_none());
+    // Ordinary nesting stays inline and needs no allowance.
     let mut container = JsonReader::new("[]", &memory, &cancellation);
     assert!(matches!(
-        container.next_event(),
+        container.next_event().unwrap().unwrap().token,
+        JsonToken::StartArray
+    ));
+    assert_eq!(memory.used(), 0);
+    let deep = format!("{}{}", "[".repeat(17), "]".repeat(17));
+    let mut nested = JsonReader::new(&deep, &memory, &cancellation);
+    for _ in 0..16 {
+        assert!(matches!(
+            nested.next_event().unwrap().unwrap().token,
+            JsonToken::StartArray
+        ));
+    }
+    assert!(matches!(
+        nested.next_event(),
         Err(JsonReadError::Memory(MemoryError::Limit { .. }))
     ));
     assert_eq!(memory.used(), 0);
@@ -165,8 +179,12 @@ fn cancellation_keeps_prior_retained_strings_and_releases_reader_scratch() {
     let cancellation = CancellationToken::new();
     let retained = decode_json_string(r#""prior""#, &memory, &cancellation).unwrap();
     let before = memory.used();
-    let mut reader = JsonReader::new("[1,2]", &memory, &cancellation);
-    reader.next_event().unwrap();
+    // Nesting beyond the inline stack charges reader scratch.
+    let deep = format!("{}1{}", "[".repeat(17), "]".repeat(17));
+    let mut reader = JsonReader::new(&deep, &memory, &cancellation);
+    for _ in 0..17 {
+        reader.next_event().unwrap();
+    }
     assert!(memory.used() > before);
     cancellation.cancel();
     assert!(matches!(

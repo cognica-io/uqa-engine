@@ -73,12 +73,49 @@ impl uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource for Engi
     ) -> uqa_storage::StorageBackendResult<
         uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
     > {
-        let session = self.open_independent_catalog_session(None)?;
-        self.sequence_snapshot_from_catalog(session.as_ref())
+        self.latest_sequence_snapshot()
+    }
+
+    fn sequence_position(
+        &self,
+        key: crate::row_locks::SequencePositionKey,
+    ) -> uqa_storage::StorageBackendResult<Option<crate::row_locks::RecordedSequencePosition>> {
+        let Some(positions) = self.shared_sequence_positions() else {
+            return Ok(None);
+        };
+        positions
+            .sequence_position(key)
+            .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))
     }
 }
 
 impl Engine {
+    /// The sequences of `snapshot` at their exact positions, by qualified name.
+    pub(crate) fn sequence_states_at_positions(
+        &self,
+        snapshot: &uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
+    ) -> uqa_storage::StorageBackendResult<
+        std::collections::BTreeMap<uqa_core::RelationIdentity, crate::SequenceState>,
+    > {
+        let Some(positions) = self.shared_sequence_positions() else {
+            return Ok((*snapshot.sequences).clone());
+        };
+        let positions = positions
+            .sequence_positions()
+            .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))?;
+        Ok(snapshot
+            .sequences
+            .iter()
+            .map(|(relation, state)| {
+                let position = snapshot
+                    .object_ids
+                    .get(relation)
+                    .and_then(|object_id| positions.get(&state.position_key(*object_id)));
+                (relation.clone(), state.at_position(position.copied()))
+            })
+            .collect())
+    }
+
     /// Public sequence metadata retains an attached or query-owned catalog; ordinary value operations use the independent sequence source.
     pub(crate) fn query_sequence_snapshot(
         &self,
@@ -109,21 +146,8 @@ impl Engine {
     ) -> uqa_storage::StorageBackendResult<
         uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
     > {
-        use uqa_execution::catalog::{
-            security::roles::persistence::RoleCatalogSnapshot,
-            sequence::snapshot::{read_sequence_snapshot, SequenceReadSnapshot},
-        };
-        read_sequence_snapshot(
-            SequenceReadSnapshot {
-                sequences: self.durable.sequences.snapshot(),
-                object_ids: self.durable.sequence_object_ids.snapshot(),
-                persistence: self.durable.sequence_persistence.snapshot(),
-                security: self.durable.sequence_security.snapshot(),
-                roles: RoleCatalogSnapshot {
-                    roles: self.durable.roles.snapshot(),
-                    memberships: self.durable.role_memberships.snapshot(),
-                },
-            },
+        uqa_execution::catalog::sequence::snapshot::read_sequence_snapshot(
+            self.sequence_registries(),
             self.storage.catalog.as_deref(),
             independent,
             self.versioned_backend_transactions(),

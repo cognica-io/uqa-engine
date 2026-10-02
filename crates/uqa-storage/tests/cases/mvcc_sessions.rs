@@ -34,6 +34,8 @@ mod identifiers;
 mod maintenance;
 #[path = "mvcc_sessions/metadata.rs"]
 mod metadata;
+#[path = "mvcc_sessions/monitor.rs"]
+mod monitor;
 #[path = "mvcc_sessions/notifications.rs"]
 mod notifications;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
@@ -161,6 +163,11 @@ struct State {
     required_keys: Vec<Vec<u8>>,
     acknowledgements: Vec<ReceiptAcknowledgement>,
     acknowledgement_fault: bool,
+    /// The commit monitor's value, for a test that gives the persistence one.
+    monitor: Option<u64>,
+    captures: usize,
+    /// Counts the monitor values its snapshots adopt, for a test whose snapshots can.
+    adoptions: Option<Arc<std::sync::atomic::AtomicUsize>>,
 }
 struct Persistence {
     store: MemoryVersionStore,
@@ -187,6 +194,9 @@ impl Persistence {
                 required_keys: Vec::new(),
                 acknowledgements: Vec::new(),
                 acknowledgement_fault: false,
+                monitor: None,
+                captures: 0,
+                adoptions: None,
             }),
         })
     }
@@ -316,7 +326,26 @@ impl VersionedPersistence for Persistence {
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
-        retain_record_snapshot(self.store.snapshot()?, control)
+        let (monitor, adoptions) = {
+            let mut state = self.state.lock();
+            state.captures += 1;
+            (state.monitor, state.adoptions.clone())
+        };
+        let source = self.store.snapshot()?;
+        match monitor {
+            Some(monitor) => retain_record_snapshot(
+                monitor::MonitoredSnapshot {
+                    source,
+                    monitor: std::sync::atomic::AtomicU64::new(monitor),
+                    adoptions,
+                },
+                control,
+            ),
+            None => retain_record_snapshot(source, control),
+        }
+    }
+    fn commit_monitor_version(&self) -> VersionResult<Option<u64>> {
+        Ok(self.state.lock().monitor)
     }
     fn commit(
         &self,
@@ -387,6 +416,8 @@ impl VersionedPersistence for Persistence {
             sequence: self.store.commit_prepared(prepared, control)?,
             fingerprint: prepared.fingerprint(),
         };
+        // A provider's monitor moves with every commit.
+        state.monitor = state.monitor.map(|monitor| monitor + 1);
         state
             .receipts
             .insert(transaction.allocation(), CommitStatus::Committed(receipt));

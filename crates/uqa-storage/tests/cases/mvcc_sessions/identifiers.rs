@@ -132,12 +132,12 @@ fn batch_observations_allocate_once_for_each_run_of_one_namespace() {
         .iter()
         .map(|(namespace, value)| (namespace.as_slice(), *value))
         .collect::<Vec<_>>();
+    // The second run of `rows` observes a value its first run already covers. An inheritance reads its source through an allocation.
     assert_eq!(
         requests,
         [
             (&b"rows"[..], Some(9)),
             (&b"other"[..], Some(3)),
-            (&b"rows"[..], Some(4)),
             (&b"rows"[..], Some(0)),
             (&b"successor"[..], Some(9)),
             (&b"successor"[..], Some(20)),
@@ -146,6 +146,142 @@ fn batch_observations_allocate_once_for_each_run_of_one_namespace() {
     assert_eq!(state.identifiers[b"rows".as_slice()], 9);
     assert_eq!(state.identifiers[b"other".as_slice()], 3);
     assert_eq!(state.identifiers[b"successor".as_slice()], 20);
+}
+
+#[test]
+fn an_observation_its_session_already_covers_allocates_nothing() {
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    let other = persistence.session(1 << 20);
+    let observe = |store: &VersionedKeyValueStore, value: u64| {
+        let mut batch = store.batch();
+        batch.observe_identifier(b"rows", value).unwrap();
+        batch.put(b"row", &value.to_be_bytes()).unwrap();
+        batch.commit().unwrap();
+    };
+    let requests = || {
+        persistence
+            .state
+            .lock()
+            .identifier_requests
+            .iter()
+            .map(|(_, value)| *value)
+            .collect::<Vec<_>>()
+    };
+    // A row rewrite observes the identity its row already has, and a lower identity is covered as well.
+    observe(&store, 10);
+    observe(&store, 10);
+    observe(&store, 3);
+    assert_eq!(requests(), [Some(10)]);
+
+    // What a session knows is a lower bound: a larger value allocates, and reads back what another session reserved.
+    assert_eq!(
+        other
+            .allocate_identifiers(b"rows", one())
+            .unwrap()
+            .watermark(),
+        11
+    );
+    observe(&store, 11);
+    observe(&store, 11);
+    assert_eq!(requests(), [Some(10), None, Some(11)]);
+
+    // The reserving session covers what it reserved. A third session knows nothing, and its observation never lowers the watermark.
+    observe(&other, 5);
+    assert_eq!(requests(), [Some(10), None, Some(11)]);
+    observe(&persistence.session(1 << 20), 5);
+    assert_eq!(requests(), [Some(10), None, Some(11), Some(5)]);
+    assert_eq!(persistence.state.lock().identifiers[b"rows".as_slice()], 11);
+
+    // A rolled back transaction keeps its observation, so the session still covers it.
+    store.begin_transaction().unwrap();
+    store
+        .with_mutation(&mut |_, batch| batch.observe_identifier(b"rows", 12))
+        .unwrap();
+    store.rollback_transaction().unwrap();
+    observe(&store, 12);
+    assert_eq!(requests(), [Some(10), None, Some(11), Some(5), Some(12)]);
+    assert_eq!(persistence.state.lock().identifiers[b"rows".as_slice()], 12);
+
+    // A reservation of this session covers the identities it returned.
+    let reserved = store
+        .allocate_identifiers(b"rows", one())
+        .unwrap()
+        .watermark();
+    assert_eq!(reserved, 13);
+    observe(&store, reserved);
+    assert_eq!(
+        requests(),
+        [Some(10), None, Some(11), Some(5), Some(12), None]
+    );
+
+    // A failed observation is not remembered.
+    persistence.state.lock().identifier_fault = true;
+    let mut failed = store.batch();
+    failed.observe_identifier(b"rows", 14).unwrap();
+    assert!(failed.commit().is_err());
+    persistence.state.lock().identifier_fault = false;
+    observe(&store, 14);
+    assert_eq!(persistence.state.lock().identifiers[b"rows".as_slice()], 14);
+}
+
+#[test]
+fn an_observation_ahead_of_its_rows_covers_them_under_the_admission_of_an_allocation() {
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    let requests = || {
+        persistence
+            .state
+            .lock()
+            .identifier_requests
+            .iter()
+            .map(|(_, value)| *value)
+            .collect::<Vec<_>>()
+    };
+    // A statement raises the watermark to the greatest identity it supplies, and the rows it then writes observe identities that covers. A namespace without a watermark had no identity in use.
+    let first = store.observe_identifier(b"rows", 50).unwrap();
+    assert_eq!(first, ObservedIdentifier::Observed { previous: None });
+    assert!(first.unused_before(1) && first.unused_before(50));
+    let mut batch = store.batch();
+    for value in [1, 25, 50] {
+        batch.observe_identifier(b"rows", value).unwrap();
+    }
+    batch.put(b"row", b"value").unwrap();
+    batch.commit().unwrap();
+    assert_eq!(requests(), [Some(50)]);
+
+    // A covered identity is answered from what the session has read, which does not tell where the watermark stood before; an allocation reports the current watermark and stays physical.
+    let covered = store.observe_identifier(b"rows", 20).unwrap();
+    assert_eq!(covered, ObservedIdentifier::Covered);
+    assert!(!covered.unused_before(20) && !covered.unused_before(u64::MAX));
+    assert_eq!(requests(), [Some(50)]);
+    assert_eq!(
+        store
+            .allocate_identifiers(b"rows", IdentifierRequest::Observe(20))
+            .unwrap()
+            .watermark(),
+        50
+    );
+    // An observation that raises the watermark tells where it stood: only identities above that were unused.
+    let raised = store.observe_identifier(b"rows", 51).unwrap();
+    assert_eq!(raised, ObservedIdentifier::Observed { previous: Some(50) });
+    assert!(raised.unused_before(51) && !raised.unused_before(50));
+    assert_eq!(requests(), [Some(50), Some(20), Some(51)]);
+    assert_eq!(persistence.state.lock().identifiers[b"rows".as_slice()], 51);
+
+    // A covered identity is refused wherever an allocation is refused.
+    store.begin_read_transaction().unwrap();
+    let error = store.observe_identifier(b"rows", 20).unwrap_err();
+    assert!(error.to_string().contains("read-only"), "{error}");
+    store.commit_transaction().unwrap();
+    assert_eq!(requests(), [Some(50), Some(20), Some(51)]);
+
+    // A failed observation is not remembered.
+    persistence.state.lock().identifier_fault = true;
+    assert!(store.observe_identifier(b"rows", 60).is_err());
+    persistence.state.lock().identifier_fault = false;
+    store.observe_identifier(b"rows", 60).unwrap();
+    assert_eq!(persistence.state.lock().identifiers[b"rows".as_slice()], 60);
 }
 
 #[test]

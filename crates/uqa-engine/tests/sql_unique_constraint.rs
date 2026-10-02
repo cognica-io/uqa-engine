@@ -525,3 +525,6 @@ mod indexes;
 
 #[path = "sql_unique_constraint/expressions.rs"]
 mod expressions;
+
+#[path = "sql_unique_constraint/included.rs"]
+mod included;

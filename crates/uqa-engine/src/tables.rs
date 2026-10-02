@@ -739,8 +739,13 @@ impl Engine {
             doc_id,
             uqa_sql::ast::LockStrength::ForUpdate,
             |engine| {
-                engine
-                    .add_document_with_vector_values_inner(table, doc_id, document, vectors, false)
+                engine.add_document_with_vector_values_inner(
+                    table,
+                    doc_id,
+                    document,
+                    vectors,
+                    uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+                )
             },
         )
     }
@@ -751,10 +756,10 @@ impl Engine {
         doc_id: DocId,
         document: Document,
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         self.validate_vector_values(table, &vectors)?;
-        self.add_document_impl(table, doc_id, document, known_new)?;
+        self.add_document_impl(table, doc_id, document, inserted)?;
         for (field, vectors) in vectors {
             self.add_vector_values_inner(table, doc_id, &field, vectors)?;
         }
@@ -767,7 +772,7 @@ impl Engine {
         doc_id: DocId,
         document: Document,
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         self.with_implicit_row_write_transaction(
             table,
@@ -775,7 +780,7 @@ impl Engine {
             uqa_sql::ast::LockStrength::ForUpdate,
             |engine| {
                 engine.add_prepared_document_with_vector_values_inner(
-                    table, doc_id, document, vectors, known_new,
+                    table, doc_id, document, vectors, inserted,
                 )
             },
         )
@@ -787,7 +792,7 @@ impl Engine {
         doc_id: DocId,
         document: Document,
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         self.with_implicit_row_write_transaction(
             table,
@@ -795,7 +800,7 @@ impl Engine {
             uqa_sql::ast::LockStrength::ForUpdate,
             |engine| {
                 engine.add_prepared_document_with_vector_values_deferred_fts_inner(
-                    table, doc_id, document, vectors, known_new,
+                    table, doc_id, document, vectors, inserted,
                 )
             },
         )
@@ -807,10 +812,10 @@ impl Engine {
         doc_id: DocId,
         document: Document,
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         self.validate_vector_values(table, &vectors)?;
-        self.add_prepared_document_without_fts_impl(table, doc_id, document, known_new)?;
+        self.add_prepared_document_without_fts_impl(table, doc_id, document, inserted)?;
         for (field, vectors) in vectors {
             self.add_vector_values_inner(table, doc_id, &field, vectors)?;
         }
@@ -823,10 +828,10 @@ impl Engine {
         doc_id: DocId,
         document: Document,
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         self.validate_vector_values(table, &vectors)?;
-        self.add_prepared_document_impl(table, doc_id, document, known_new)?;
+        self.add_prepared_document_impl(table, doc_id, document, inserted)?;
         for (field, vectors) in vectors {
             self.add_vector_values_inner(table, doc_id, &field, vectors)?;
         }
@@ -839,10 +844,10 @@ impl Engine {
         doc_id: DocId,
         document: uqa_storage::StoredDocument,
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         self.validate_vector_values(table, &vectors)?;
-        self.add_prepared_stored_document_impl(table, doc_id, document, known_new)?;
+        self.add_prepared_stored_document_impl(table, doc_id, document, inserted)?;
         for (field, vectors) in vectors {
             self.add_vector_values_inner(table, doc_id, &field, vectors)?;
         }

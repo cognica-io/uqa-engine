@@ -20,11 +20,16 @@ const CHANGE_JOURNAL_LOCK_BYTE: u64 = 10;
 const SLOT_METADATA_LOCK_BYTE: u64 = 11;
 #[cfg(windows)]
 const MODE_TRANSITION_LOCK_BYTE: u64 = 12;
+const TRANSACTION_XID_ATTACHMENT_BYTE: u64 = 8;
 const TRANSACTION_XID_LOCK_BYTE: u64 = 13;
 const TRANSACTION_XID_STATE_OFFSET: u64 = 16;
 const TRANSACTION_XID_STATE_SIZE: usize = 16;
 const TRANSACTION_XID_STATE_MAGIC: u32 = 0x5551_5849;
 const TRANSACTION_XID_STATE_VERSION: u32 = 1;
+const TRANSACTION_XID_CURSOR_OFFSET: u64 = 32;
+const TRANSACTION_XID_CURSOR_SIZE: usize = 24;
+const TRANSACTION_XID_CURSOR_MAGIC: u32 = 0x5551_5843;
+const TRANSACTION_XID_CURSOR_VERSION: u32 = 1;
 const WAIT_SLOT_BASE: u64 = 64;
 const WAIT_SLOT_SIZE: u64 = 32;
 const WAIT_SLOT_COUNT: u64 = 256;
@@ -72,14 +77,18 @@ struct CoordinatorState {
     released_holder_slots: Vec<u64>,
     /// Next holder slot to probe. Advancing past each allocation avoids restarting every acquisition at an unrelated hash location and repeatedly reading slots already known to be occupied by this process.
     next_holder_slot: u64,
+    /// Row claims of local sessions, which live in the shared claim table instead of record locks and holder slots.
+    rows: row_claims::RowClaims,
 }
 
 /// Process-wide coordinator for one durable database. All engine sessions of this process share one descriptor while the in-process lock table arbitrates between local sessions. On POSIX, nothing else in the process may open the sidecar path because closing another descriptor to it would drop this process's record locks.
 pub(in crate::row_locks) struct FileLockCoordinator {
     file: std::fs::File,
     change_file: std::fs::File,
+    claim_file: std::fs::File,
+    sequence_file: std::fs::File,
     change_journal: Mutex<()>,
-    transaction_xids: Mutex<()>,
+    transaction_xids: Mutex<xids::TransactionXids>,
     temporary_role_slots: Mutex<temporary_roles::Slots>,
     state: Mutex<CoordinatorState>,
 }
@@ -88,6 +97,8 @@ mod claims;
 mod journal;
 mod platform;
 mod relations;
+mod row_claims;
+mod sequence_positions;
 mod temporary_roles;
 mod waits;
 mod xids;
@@ -124,12 +135,42 @@ impl FileLockCoordinator {
                     Path::new(&change_sidecar).display()
                 )
             })?;
+        let mut claim_sidecar = database_path.as_os_str().to_owned();
+        claim_sidecar.push(".uqa-row-claims");
+        let claim_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&claim_sidecar)
+            .map_err(|error| {
+                format!(
+                    "open cross-process row claim table `{}`: {error}",
+                    Path::new(&claim_sidecar).display()
+                )
+            })?;
+        let mut sequence_sidecar = database_path.as_os_str().to_owned();
+        sequence_sidecar.push(".uqa-sequences");
+        let sequence_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&sequence_sidecar)
+            .map_err(|error| {
+                format!(
+                    "open cross-process sequence positions `{}`: {error}",
+                    Path::new(&sequence_sidecar).display()
+                )
+            })?;
         let pid = std::process::id();
         let coordinator = Self {
             file,
             change_file,
+            claim_file,
+            sequence_file,
             change_journal: Mutex::new(()),
-            transaction_xids: Mutex::new(()),
+            transaction_xids: Mutex::new(xids::TransactionXids::new()),
             temporary_role_slots: Mutex::new(temporary_roles::Slots::default()),
             state: Mutex::new(CoordinatorState {
                 claims: HashMap::new(),
@@ -142,9 +183,25 @@ impl FileLockCoordinator {
                 occupied_holder_slots: vec![false; HOLDER_SLOT_COUNT as usize],
                 released_holder_slots: Vec::new(),
                 next_holder_slot: u64::from(pid).wrapping_mul(31) % HOLDER_SLOT_COUNT,
+                rows: row_claims::RowClaims::default(),
             }),
         };
         Ok(coordinator)
+    }
+}
+
+impl FileLockCoordinator {
+    /// Whether sequence positions are kept in a sidecar every attached process reads.
+    #[allow(clippy::unused_self)]
+    pub(in crate::row_locks) const fn shares_sequence_positions(&self) -> bool {
+        true
+    }
+}
+
+impl Drop for FileLockCoordinator {
+    fn drop(&mut self) {
+        self.detach_transaction_xids();
+        self.detach_row_claims_process();
     }
 }
 

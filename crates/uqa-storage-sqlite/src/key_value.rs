@@ -84,6 +84,15 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
         self.conn
             .with_records(|store| store.allocate_identifiers(namespace, request))
     }
+
+    fn observe_identifier(
+        &self,
+        namespace: &[u8],
+        value: u64,
+    ) -> StorageBackendResult<uqa_storage::mvcc::ObservedIdentifier> {
+        self.conn
+            .with_records(|store| store.observe_identifier(namespace, value))
+    }
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
@@ -365,6 +374,9 @@ struct SQLiteKeyValueBatch<'a> {
 impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn serializable_participant(&self) -> Option<uqa_storage::mvcc::SerializableTransactionId> {
         self.batch.serializable_participant()
+    }
+    fn put_unused(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
+        self.batch.put_unused(key, value)
     }
     fn observe_serializable_write(
         &mut self,

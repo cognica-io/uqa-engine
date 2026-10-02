@@ -18,6 +18,7 @@ mod hash_set;
 mod heap;
 mod map;
 mod production;
+mod small_vec;
 mod string;
 mod vec;
 
@@ -30,6 +31,7 @@ pub use map::{
     OwnedSetIter, PreparedMapEntry,
 };
 pub use production::{Produced, ProductionControl, ProductionString, ProductionVec};
+pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;
 

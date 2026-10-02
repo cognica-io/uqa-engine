@@ -81,7 +81,7 @@ pub fn alter_sequence_role_owner(
             let mut security = security.resolve(roles).map_err(SQLError::Internal)?;
             let state = context
                 .metadata
-                .state(relation)
+                .state(relation)?
                 .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
             ownership::reject_owned_sequence_role_change(&relation.name, state.owner.is_some())?;
             let authority = OwnerChangeAuthority {

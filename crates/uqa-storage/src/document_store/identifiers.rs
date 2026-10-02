@@ -8,13 +8,20 @@
 
 use std::num::NonZeroU64;
 
-use crate::mvcc::{IdentifierAllocator, IdentifierRequest};
+use crate::mvcc::{IdentifierAllocator, IdentifierRequest, ObservedIdentifier};
 use crate::{CatalogFacade, KeyValueBatch, StorageBackendError, StorageBackendResult};
 
 pub mod conformance;
 
 #[cfg(test)]
 mod tests;
+
+/// The durable object and storage generation of a table, which name the namespace of its document identities. A claim about a table's identities, such as that one was never used, holds for the namespace its watermark was read in and for no other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DocumentIdNamespace {
+    pub object: [u8; 16],
+    pub generation: [u8; 16],
+}
 
 /// A document namespace follows a table's durable object and storage generation through renames. A missing durable allocator retains the caller's serialized in-memory watermark contract.
 pub struct DocumentIdAllocator<'a> {
@@ -65,6 +72,14 @@ impl<'a> DocumentIdAllocator<'a> {
         watermark_identity(*next)?;
         *next = (*next).max(u128::from(id) + 1);
         Ok(())
+    }
+
+    /// Observe a supplied document identity durably now, ahead of the rows that will observe it when they are written. A statement that supplies ascending identities observes the greatest one this way, which covers the observation of each row. The answer tells which identities no document of this table ever had; a table without a durable allocator cannot tell.
+    pub fn observe_durably(&self, id: u64) -> StorageBackendResult<ObservedIdentifier> {
+        match self.durable {
+            Some(allocator) => allocator.observe_identifier(&self.namespace, id),
+            None => Ok(ObservedIdentifier::Covered),
+        }
     }
 
     /// Seed existing data and legacy reservations before exposing a migrated table to new sessions. The one-past-last representation preserves the exhausted full-width domain.

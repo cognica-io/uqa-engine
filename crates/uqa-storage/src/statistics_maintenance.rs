@@ -10,6 +10,13 @@ use crate::{CatalogFacade, StorageBackendResult};
 use serde::{Deserialize, Serialize};
 
 const MAX_DIRTY_AGE_MS: u64 = 60_000;
+/// What a session may keep to itself of a small table, whose analysis threshold is fifty changes.
+const MIN_KEPT_CHANGES: u64 = 16;
+
+/// The changes that make an analysis due: the analyze threshold of 50 rows and the scale factor of a tenth of the analyzed rows that `PostgreSQL` uses.
+const fn change_threshold(analyzed_rows: u64) -> u64 {
+    50 + analyzed_rows / 10
+}
 
 #[cfg(test)]
 mod tests;
@@ -25,6 +32,9 @@ pub struct StatisticsMaintenance {
     dirty_since_ms: u64,
     analyzed_rows: Option<u64>,
     statistics_format: u32,
+    /// The commit sequence the last analysis sampled at, where its provider numbers commits: every commit up to it is in the statistics. A record without it says nothing about what its analysis saw.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    analyzed_at: Option<u64>,
 }
 
 impl StatisticsMaintenance {
@@ -80,8 +90,28 @@ impl StatisticsMaintenance {
             || missing
             || (self.dirty()
                 && (self.analyzed_rows == Some(0)
-                    || self.changes >= 50 + self.analyzed_rows.unwrap_or(0) / 10
+                    || self.changes >= change_threshold(self.analyzed_rows.unwrap_or(0))
                     || now.saturating_sub(self.dirty_since_ms) >= MAX_DIRTY_AGE_MS))
+    }
+
+    /// Whether a session may keep `unrecorded` changes of its commits to itself instead of recording them now. A record written by every commit is a write of two records to each of them, and the count decides only when an analysis becomes due, so a session records the changes that decide something: the first one after an analysis, which marks the statistics stale and starts their age, and the ones that make an analysis due. Otherwise it keeps up to a quarter of what makes one due, or sixteen changes of a small table, which bounds what sessions hide from one another and what a session loses when it ends. While an analysis is due already, more changes decide nothing.
+    pub fn defers(&self, unrecorded: u64, now: u64) -> bool {
+        if !self.dirty() {
+            return false;
+        }
+        let Some(analyzed_rows) = self.analyzed_rows else {
+            // Changes without analyzed rows are those of a table without statistics, whose analysis is due whatever it counts.
+            return true;
+        };
+        let threshold = change_threshold(analyzed_rows);
+        if analyzed_rows == 0
+            || self.changes >= threshold
+            || now.saturating_sub(self.dirty_since_ms) >= MAX_DIRTY_AGE_MS
+        {
+            return true;
+        }
+        self.changes.saturating_add(unrecorded) < threshold
+            && unrecorded < (threshold / 4).max(MIN_KEPT_CHANGES)
     }
 
     pub fn analyzed_for(
@@ -90,18 +120,20 @@ impl StatisticsMaintenance {
         object_id: [u8; 16],
         rows: u64,
         statistics_format: u32,
+        sampled_at: Option<u64>,
     ) -> StorageBackendResult<()> {
         let mut state = Self::load_for(catalog, table, object_id)?;
-        state.analyzed(object_id, rows, statistics_format)?;
+        state.analyzed(object_id, rows, statistics_format, sampled_at)?;
         state.save(catalog, table)
     }
 
-    /// Record a completed analysis of `rows` rows, which covers every change counted before it.
+    /// Record a completed analysis of `rows` rows, which covers every change counted before it. `sampled_at` is the commit sequence its sample read at, or `None` when that is not known.
     pub fn analyzed(
         &mut self,
         object_id: [u8; 16],
         rows: u64,
         statistics_format: u32,
+        sampled_at: Option<u64>,
     ) -> StorageBackendResult<()> {
         self.object_id = Some(object_id);
         self.advance_generation()?;
@@ -109,7 +141,13 @@ impl StatisticsMaintenance {
         self.dirty_since_ms = 0;
         self.analyzed_rows = Some(rows);
         self.statistics_format = statistics_format;
+        self.analyzed_at = sampled_at;
         Ok(())
+    }
+
+    /// Whether the last analysis sampled every commit up to `through`, so that changes a session kept of commits up to there need no counting.
+    pub fn covers(&self, through: Option<u64>) -> bool {
+        matches!((self.analyzed_at, through), (Some(at), Some(through)) if through <= at)
     }
 
     fn advance_generation(&mut self) -> StorageBackendResult<()> {
@@ -203,6 +241,12 @@ impl StatisticsMaintenance {
                 after.statistics_format
             } else {
                 current.statistics_format
+            },
+            // An analysis of the merged transaction is the one whose statistics it publishes.
+            analyzed_at: if after.analyzed_at == before.analyzed_at {
+                current.analyzed_at
+            } else {
+                after.analyzed_at
             },
         }))
     }

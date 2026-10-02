@@ -9,6 +9,7 @@
 mod batch;
 mod evaluation;
 mod notifications;
+mod observed;
 mod read;
 pub use read::RecordRead;
 mod serializable;
@@ -22,7 +23,7 @@ pub use vector_fields::VectorFieldGuardMaintenance;
 
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
 use crate::{
@@ -60,6 +61,9 @@ pub struct VersionedKeyValueStore {
     write_cancellation: uqa_core::CancellationToken,
     retained: Option<MergedRecordSnapshot>,
     active: Mutex<Option<Transaction>>,
+    observed: Mutex<observed::ObservedWatermarks>,
+    /// The commit monitor value and the committed sequence of this session's last capture. While the monitor returns that value nothing was committed since, so the sequence is still the latest and a caller that asks only for it needs no capture.
+    latest: Mutex<Option<(u64, super::CommitSequence)>>,
 }
 
 impl VersionedKeyValueStore {
@@ -116,6 +120,30 @@ impl VersionedKeyValueStore {
         namespace: &[u8],
         request: super::IdentifierRequest,
     ) -> StorageBackendResult<super::IdentifierAllocation> {
+        let _active = self.admit_identifier_allocation()?;
+        self.allocate_admitted_identifiers(namespace, request)
+    }
+
+    /// Raise the watermark of `namespace` to at least `value` without reporting it. An allocation reports the current watermark and so is always physical; this answers from a watermark the session has already read when that covers `value`. The admission of an allocation applies either way.
+    pub fn observe_identifier(
+        &self,
+        namespace: &[u8],
+        value: u64,
+    ) -> StorageBackendResult<super::ObservedIdentifier> {
+        let _active = self.admit_identifier_allocation()?;
+        if self.observed.lock().covers(namespace, value) {
+            return Ok(super::ObservedIdentifier::Covered);
+        }
+        self.allocate_admitted_identifiers(namespace, super::IdentifierRequest::Observe(value))
+            .map(|allocation| super::ObservedIdentifier::Observed {
+                previous: allocation.previous(),
+            })
+    }
+
+    /// Admit an identifier allocation: the session can write and its transaction, when it has one, has not been sealed. The guard keeps the transaction from changing while the allocation runs.
+    fn admit_identifier_allocation(
+        &self,
+    ) -> StorageBackendResult<MutexGuard<'_, Option<Transaction>>> {
         self.require_mutable_session()?;
         let active = self.active.lock();
         if let Some(transaction) = active.as_ref() {
@@ -123,9 +151,23 @@ impl VersionedKeyValueStore {
                 .writable()
                 .map_err(VersionError::into_storage_error)?;
         }
-        self.persistence
+        Ok(active)
+    }
+
+    fn allocate_admitted_identifiers(
+        &self,
+        namespace: &[u8],
+        request: super::IdentifierRequest,
+    ) -> StorageBackendResult<super::IdentifierAllocation> {
+        let allocation = self
+            .persistence
             .allocate_identifiers(namespace, request, &self.write_control())
-            .map_err(VersionError::into_storage_error)
+            .map_err(VersionError::into_storage_error)?;
+        // A row written with a reserved identity observes it again; the reservation already covers that.
+        self.observed
+            .lock()
+            .record(namespace, allocation.watermark());
+        Ok(allocation)
     }
 
     pub fn new(
@@ -157,6 +199,8 @@ impl VersionedKeyValueStore {
             write_cancellation,
             retained: None,
             active: Mutex::new(None),
+            observed: Mutex::default(),
+            latest: Mutex::new(None),
         }
     }
 
@@ -313,10 +357,32 @@ impl VersionedKeyValueStore {
         }
         *active = Some(match self.retained.as_ref() {
             Some(view) => Transaction::at_snapshot(view.retain_committed(), true, &self.control),
-            None => Transaction::new(&*self.persistence, read_only, &self.control)
+            None => self
+                .capture(read_only)
                 .map_err(VersionError::into_storage_error)?,
         });
         Ok(())
+    }
+
+    /// Begin a transaction at the latest commit, and remember what the capture found for [`Self::latest_sequence`].
+    fn capture(&self, read_only: bool) -> VersionResult<Transaction> {
+        let transaction = Transaction::new(&*self.persistence, read_only, &self.control)?;
+        *self.latest.lock() = transaction.captured();
+        Ok(transaction)
+    }
+
+    /// The sequence of the latest commit, as a capture would read it. A capture is a physical read with a lease registration; the monitor is one counter read.
+    fn latest_sequence(&self) -> VersionResult<super::CommitSequence> {
+        if let Some(monitor) = self.persistence.commit_monitor_version()? {
+            if let Some((_, sequence)) = self
+                .latest
+                .lock()
+                .filter(|(captured_at, _)| *captured_at == monitor)
+            {
+                return Ok(sequence);
+            }
+        }
+        Ok(self.capture(true)?.view()?.sequence())
     }
 
     fn view(&self) -> VersionResult<MergedRecordSnapshot> {
@@ -327,7 +393,7 @@ impl VersionedKeyValueStore {
         if let Some(transaction) = active.as_ref() {
             transaction.view()
         } else {
-            Transaction::new(&*self.persistence, true, &self.control)?.view()
+            self.capture(true)?.view()
         }
     }
 
@@ -381,6 +447,14 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
         request: super::IdentifierRequest,
     ) -> StorageBackendResult<super::IdentifierAllocation> {
         Self::allocate_identifiers(self, namespace, request)
+    }
+
+    fn observe_identifier(
+        &self,
+        namespace: &[u8],
+        value: u64,
+    ) -> StorageBackendResult<super::ObservedIdentifier> {
+        Self::observe_identifier(self, namespace, value)
     }
 }
 
@@ -701,12 +775,24 @@ impl KeyValueStore for VersionedKeyValueStore {
         }))
     }
     fn change_version(&self) -> StorageBackendResult<Option<u64>> {
-        Ok(Some(
-            self.view()
+        let pinned = match self.retained.as_ref() {
+            Some(view) => Some(view.sequence()),
+            None => self
+                .active
+                .lock()
+                .as_ref()
+                .map(Transaction::view)
+                .transpose()
                 .map_err(VersionError::into_storage_error)?
-                .sequence()
-                .as_u64(),
-        ))
+                .map(|view| view.sequence()),
+        };
+        let sequence = match pinned {
+            Some(sequence) => sequence,
+            None => self
+                .latest_sequence()
+                .map_err(VersionError::into_storage_error)?,
+        };
+        Ok(Some(sequence.as_u64()))
     }
 
     fn read_view_revision(

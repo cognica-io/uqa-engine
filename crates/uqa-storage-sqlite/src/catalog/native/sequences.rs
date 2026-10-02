@@ -80,10 +80,28 @@ impl Catalog {
             if !replace {
                 snapshot.claim_relation(batch, &sequence.relation, RelationKind::Sequence)?;
             }
-            if let Some(old) = previous.filter(|old| *old != owner) {
-                snapshot.delete_prefix(batch, Family::Sequences, old, &[])?;
+            let mut sequence = std::borrow::Cow::Borrowed(sequence);
+            match previous {
+                // The allocation generation is unchanged, so the stored value state is.
+                Some(old) if old == owner => {
+                    let stored = snapshot.read_row(Family::Sequences, old, &[], |row| {
+                        Ok((
+                            values::integer(row[5]),
+                            values::integer(row[6]) != 0,
+                            values::integer(row[20]),
+                        ))
+                    })?;
+                    if let Some((current, called, log_count)) = stored {
+                        let kept = sequence.to_mut();
+                        kept.current = current;
+                        kept.called = called;
+                        kept.log_count = log_count;
+                    }
+                }
+                Some(old) => snapshot.delete_prefix(batch, Family::Sequences, old, &[])?,
+                None => {}
             }
-            snapshot.put_sequence(batch, sequence, owner)?;
+            snapshot.put_sequence(batch, &sequence, owner)?;
             Ok(true)
         })
     }

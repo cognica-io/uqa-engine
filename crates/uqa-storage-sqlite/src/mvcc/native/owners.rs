@@ -106,8 +106,9 @@ pub(super) fn lookup(
     control: &StorageReadControl,
 ) -> PhysicalResult<Option<NativeRecordOwner>> {
     let _bindings = physical::reserve_values(&[name], control)?;
-    let mut statement = connection
-        .prepare("SELECT object_id, generation FROM _uqa_mvcc_native_owners WHERE name = ?1")?;
+    let mut statement = connection.prepare_cached(
+        "SELECT object_id, generation FROM _uqa_mvcc_native_owners WHERE name = ?1",
+    )?;
     let mut rows = statement.query(params![ToSqlOutput::Borrowed(name)])?;
     rows.next()?
         .map(|row| {
@@ -119,7 +120,57 @@ pub(super) fn lookup(
         .transpose()
 }
 
+/// The owner bindings of table names read while the binding table does not change, so the rows of one table share one read.
+#[derive(Default)]
+pub(super) struct TableOwners {
+    known: Vec<(Box<[u8]>, Option<NativeRecordOwner>)>,
+}
+
+impl TableOwners {
+    /// Names remembered at once. A commit writes few tables; a later name is read each time.
+    const NAMES: usize = 8;
+    /// A longer name is read each time, which bounds what the bindings retain.
+    const NAME_BYTES: usize = 256;
+
+    fn lookup(
+        &mut self,
+        connection: &Connection,
+        name: ValueRef<'_>,
+        control: &StorageReadControl,
+    ) -> PhysicalResult<Option<NativeRecordOwner>> {
+        let ValueRef::Text(bytes) = name else {
+            return lookup(connection, name, control);
+        };
+        if let Some((_, owner)) = self.known.iter().find(|(known, _)| **known == *bytes) {
+            return Ok(*owner);
+        }
+        let owner = lookup(connection, name, control)?;
+        if self.known.len() < Self::NAMES && bytes.len() <= Self::NAME_BYTES {
+            self.known.push((bytes.into(), owner));
+        }
+        Ok(owner)
+    }
+}
+
 pub(super) fn for_row(
+    connection: &Connection,
+    database: DatabaseId,
+    family: Family,
+    values: &[ValueRef<'_>],
+    control: &StorageReadControl,
+) -> PhysicalResult<NativeRecordOwner> {
+    table_owner(
+        &mut TableOwners::default(),
+        connection,
+        database,
+        family,
+        values,
+        control,
+    )
+}
+
+fn table_owner(
+    owners: &mut TableOwners,
     connection: &Connection,
     database: DatabaseId,
     family: Family,
@@ -138,11 +189,31 @@ pub(super) fn for_row(
         .iter()
         .position(|column| *column == "table_name")
         .expect("table-owned layout");
-    lookup(connection, values[column], control)?
+    owners
+        .lookup(connection, values[column], control)?
         .ok_or_else(|| invalid("native row has no table owner").into())
 }
 
 pub(super) fn validate(
+    connection: &Connection,
+    database: DatabaseId,
+    identity: NativeRecordIdentity,
+    values: &[ValueRef<'_>],
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    validate_among(
+        &mut TableOwners::default(),
+        connection,
+        database,
+        identity,
+        values,
+        control,
+    )
+}
+
+/// [`validate`] for one of many rows validated while the owner bindings do not change.
+pub(super) fn validate_among(
+    owners: &mut TableOwners,
     connection: &Connection,
     database: DatabaseId,
     identity: NativeRecordIdentity,
@@ -159,7 +230,7 @@ pub(super) fn validate(
     ) {
         super::graph_lookup::validate_row(connection, family, values, control)?;
     }
-    if for_row(connection, database, family, values, control)? != identity.owner() {
+    if table_owner(owners, connection, database, family, values, control)? != identity.owner() {
         return Err(invalid("native row targets a different active owner generation").into());
     }
     if family == Family::Tables {

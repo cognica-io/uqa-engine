@@ -23,7 +23,7 @@ pub trait MutationStorage {
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: super::InsertedIdentity,
     ) -> Result<(), SQLError>;
     fn insert_document_deferred_text(
         &self,
@@ -31,7 +31,7 @@ pub trait MutationStorage {
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: super::InsertedIdentity,
     ) -> Result<(), SQLError>;
     fn rewrite_document(
         &self,
@@ -46,6 +46,12 @@ pub trait MutationStorage {
         doc_id: DocId,
         document: Document,
     ) -> Result<(), SQLError>;
+    /// Raise the table's document identity watermark to a supplied identity before the rows that carry identities up to it are published. The answer tells which identities no document of the table ever had.
+    fn observe_document_identity(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<uqa_storage::mvcc::ObservedIdentifier, SQLError>;
 }
 pub trait MutationTextIndex {
     fn text_fields(

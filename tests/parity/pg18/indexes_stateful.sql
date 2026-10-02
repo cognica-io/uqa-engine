@@ -654,3 +654,85 @@ VACUUM FULL __UQA_STATEFUL_SCHEMA__.expression_runtime_errors;
 -- @case expression_runtime_update_error error
 UPDATE expression_runtime_errors SET n=0;
 -- @end
+
+-- @case included_constraints ok
+CREATE TABLE included_u(a int,b int,c int,UNIQUE(a) INCLUDE(b));
+CREATE TABLE included_x(a int,b int,c int,UNIQUE(a,b) INCLUDE(c),PRIMARY KEY(c) INCLUDE(a));
+CREATE TABLE included_m(a int,b int);
+ALTER TABLE included_m ADD CONSTRAINT included_m_named UNIQUE(a) INCLUDE(b);
+ALTER TABLE included_m ADD UNIQUE(a) INCLUDE(b);
+ALTER TABLE included_m ADD UNIQUE(b) INCLUDE(a,a);
+-- @end
+
+-- @case included_constraint_catalog rows
+SELECT conname,contype,conkey FROM pg_constraint WHERE conrelid IN('included_u'::regclass,'included_x'::regclass,'included_m'::regclass) AND contype IN('u','p') ORDER BY conname;
+-- @end
+
+-- @case included_constraint_indexes rows
+SELECT c.relname,i.indnatts,i.indnkeyatts,i.indkey,i.indisunique,i.indisprimary,replace(pg_get_indexdef(i.indexrelid),current_schema()||'.','fixture.') FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid IN('included_u'::regclass,'included_x'::regclass,'included_m'::regclass) ORDER BY c.relname;
+-- @end
+
+-- @case included_constraint_attributes rows
+SELECT c.relname,a.attnum,a.attname FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid WHERE a.attrelid IN('included_x_a_b_c_key'::regclass,'included_x_pkey'::regclass,'included_m_b_a_a1_key'::regclass) ORDER BY c.relname,a.attnum;
+-- @end
+
+-- @case included_constraint_unique_key error
+INSERT INTO included_u VALUES(1,1,1),(1,2,2);
+-- @end
+
+-- @case included_constraint_missing_column error
+ALTER TABLE included_m ADD UNIQUE(a) INCLUDE(absent);
+-- @end
+
+-- @case included_constraint_virtual_column error
+CREATE TABLE included_g(a int,v int GENERATED ALWAYS AS(a+1) VIRTUAL,UNIQUE(a) INCLUDE(v));
+-- @end
+
+-- @case included_primary_virtual_column error
+CREATE TABLE included_g(a int,v int GENERATED ALWAYS AS(a+1) VIRTUAL,PRIMARY KEY(a) INCLUDE(v));
+-- @end
+
+-- @case included_constraint_rename ok
+ALTER TABLE included_u RENAME COLUMN b TO bb;
+-- @end
+
+-- @case included_constraint_renamed rows
+SELECT replace(pg_get_indexdef('included_u_a_b_key'::regclass),current_schema()||'.','fixture.');
+-- @end
+
+-- @case included_constraint_drop_column ok
+ALTER TABLE included_u DROP COLUMN bb;
+-- @end
+
+-- @case included_constraint_dropped rows
+SELECT count(*),to_regclass('included_u_a_b_key') IS NULL FROM pg_constraint WHERE conrelid='included_u'::regclass AND contype='u';
+-- @end
+
+-- @case included_primary_drop_column ok
+ALTER TABLE included_x DROP COLUMN a;
+-- @end
+
+-- @case included_primary_dropped rows
+SELECT conname,contype FROM pg_constraint WHERE conrelid='included_x'::regclass ORDER BY conname;
+-- @end
+
+-- @case included_constraint_reference ok
+CREATE TABLE included_parent(a int,b int,UNIQUE(a) INCLUDE(b));
+CREATE TABLE included_child(x int REFERENCES included_parent(a));
+-- @end
+
+-- @case included_constraint_reference_restrict error
+ALTER TABLE included_parent DROP COLUMN b;
+-- @end
+
+-- @case included_constraint_reference_kept rows
+SELECT conname FROM pg_constraint WHERE conrelid IN('included_parent'::regclass,'included_child'::regclass) ORDER BY conname;
+-- @end
+
+-- @case included_constraint_reference_cascade ok
+ALTER TABLE included_parent DROP COLUMN b CASCADE;
+-- @end
+
+-- @case included_constraint_reference_cascaded rows
+SELECT count(*) FROM pg_constraint WHERE conrelid IN('included_parent'::regclass,'included_child'::regclass);
+-- @end

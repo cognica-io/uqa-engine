@@ -372,7 +372,13 @@ impl Engine {
         // Each index's replacement path validates/stages before publishing.
         // Never delete the old row/index state first: an analyzer or backend
         // failure must leave the prior version queryable.
-        self.add_document_with_vector_values_inner(table, doc_id, doc, replacement_vectors, false)?;
+        self.add_document_with_vector_values_inner(
+            table,
+            doc_id,
+            doc,
+            replacement_vectors,
+            uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+        )?;
         Ok(true)
     }
 
@@ -464,7 +470,7 @@ impl Engine {
             doc_id,
             document,
             replacement_vectors,
-            false,
+            uqa_execution::mutation::publication::InsertedIdentity::Unknown,
         )?;
         Ok(true)
     }
@@ -511,7 +517,7 @@ impl Engine {
                     doc_id,
                     document,
                     vectors,
-                    false,
+                    uqa_execution::mutation::publication::InsertedIdentity::Unknown,
                 )
             } else {
                 engine.add_prepared_document_with_vector_values_deferred_fts_inner(
@@ -519,7 +525,7 @@ impl Engine {
                     doc_id,
                     document,
                     vectors,
-                    false,
+                    uqa_execution::mutation::publication::InsertedIdentity::Unknown,
                 )
             }
         })
@@ -595,7 +601,7 @@ impl Engine {
                 .add_many(doc_id, vectors.remove(field).unwrap_or_default())
                 .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
         }
-        self.mark_column_stats_dirty(&table_name, &t)
+        self.mark_row_write(&table_name, &t, super::DocumentCountChange::Unchanged)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         self.note_row_changed(&table_name, doc_id)?;
         Ok(())
@@ -674,7 +680,7 @@ impl Engine {
         store
             .delete(doc_id)
             .map_err(|err| document_store_write_error(&err))?;
-        self.persist_value_indexes_apply_write(&table_name, doc_id, None)?;
+        self.persist_value_indexes_apply_write(&table_name, doc_id, None, None)?;
         if let Some(old) = old_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
@@ -701,7 +707,12 @@ impl Engine {
                 .delete(doc_id)
                 .map_err(|error| SQLError::Internal(format!("delete indexed vector: {error}")))?;
         }
-        self.mark_column_stats_dirty(&table_name, &t)
+        let documents = if existed {
+            super::DocumentCountChange::Removed
+        } else {
+            super::DocumentCountChange::Unchanged
+        };
+        self.mark_row_write(&table_name, &t, documents)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         if existed {
             self.note_row_deleted(&table_name, doc_id)?;

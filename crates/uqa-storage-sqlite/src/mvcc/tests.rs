@@ -12,11 +12,13 @@ use super::*;
 mod admission;
 mod diskann;
 mod identifiers;
+mod monitor;
 mod ordered;
 mod points;
 mod receipts;
 mod reclamation;
 mod runs;
+mod unused;
 
 #[test]
 fn bounded_value_reads_preserve_sqlite_record_limits_and_retained_versions() {
