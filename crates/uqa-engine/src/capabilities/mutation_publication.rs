@@ -40,6 +40,21 @@ impl MutationIdentifiers for Engine {
     fn persist_next_id(&self, table: &str) -> uqa_storage::StorageBackendResult<()> {
         Engine::persist_next_id(self, table)
     }
+    fn generates_unused_identities(&self, table: &str) -> Result<bool, SQLError> {
+        // A member of a partition hierarchy draws its identities from the hierarchy's owner, whose watermark is not this table's.
+        if uqa_sql::semantics::partition::partition_hierarchy_root(self, table)?.is_some() {
+            return Ok(false);
+        }
+        let state = self
+            .try_table(table)
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+        self.table_identifier_allocator(&state)
+            .map(|allocator| allocator.is_durable())
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("inspect document identities", &error)
+            })
+    }
 }
 impl MutationStorage for Engine {
     fn can_defer_document_text(&self, table: &str) -> Result<bool, SQLError> {
@@ -80,9 +95,9 @@ impl MutationStorage for Engine {
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
-        self.add_prepared_document_with_vector_values(table, doc_id, document, vectors, known_new)
+        self.add_prepared_document_with_vector_values(table, doc_id, document, vectors, inserted)
     }
     fn insert_document_deferred_text(
         &self,
@@ -90,10 +105,10 @@ impl MutationStorage for Engine {
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         self.add_prepared_document_with_vector_values_deferred_fts(
-            table, doc_id, document, vectors, known_new,
+            table, doc_id, document, vectors, inserted,
         )
     }
     fn rewrite_document(

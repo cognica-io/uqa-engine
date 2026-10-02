@@ -184,6 +184,17 @@ pub trait DocumentStore: Send + Sync {
     /// Persist one typed storage record. Every backend owns the physical representation of tuple metadata and must keep it outside the public field map.
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()>;
 
+    /// Persist a document whose identity no document of the table ever had, as the caller has established from the identity watermark of `namespace`. A provider that keys its records by that namespace may write them without reading what they would replace, and only while it stores the table under that namespace; a record that exists after all fails the commit. The default replaces as `put_stored` does.
+    fn put_stored_unused(
+        &mut self,
+        doc_id: DocId,
+        document: StoredDocument,
+        namespace: identifiers::DocumentIdNamespace,
+    ) -> StorageBackendResult<()> {
+        let _ = namespace;
+        self.put_stored(doc_id, document)
+    }
+
     /// Read one typed storage record without projecting metadata into user fields.
     fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>>;
 

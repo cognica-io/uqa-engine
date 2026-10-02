@@ -325,7 +325,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         )?;
                     }
                     drop(conflict_locks);
-                    supplied_identities.observe(mutation.publication.storage)?;
+                    let observed = supplied_identities.observe(mutation.publication.storage)?;
                     let cancel = context.query.source.relational.runtime.cancellation_token();
                     let apply_reader = prepared_rows
                         .read_rows()
@@ -345,13 +345,18 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                             document,
                             conflict: prepared,
                         } = decode_prepared_insert_spill_row(prepared_row)?;
-                        let known_new = known_new.contains(&target_table, &prepared)?;
+                        let inserted = known_new.identity(
+                            &target_table,
+                            &prepared,
+                            &observed,
+                            mutation.publication.identifiers,
+                        )?;
                         apply_validated_prepared_insert(
                             mutation.publication,
                             &target_table,
                             document,
                             prepared,
-                            known_new,
+                            inserted,
                             &mut publication,
                         )?;
                     }
@@ -746,7 +751,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             for (target_table, prepared) in target_tables.iter().zip(&prepared_conflicts) {
                 supplied_identities.note(target_table, prepared);
             }
-            supplied_identities.observe(mutation.publication.storage)?;
+            let observed = supplied_identities.observe(mutation.publication.storage)?;
             let mut publication = MutationPublicationBatch::default();
             let mut known_new = KnownNewInserts::new(
                 preparation.referential.constraints.catalog,
@@ -759,7 +764,12 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 .zip(prepared_conflicts)
             {
                 cancel.check()?;
-                let known_new = known_new.contains(&target_table, &prepared)?;
+                let inserted = known_new.identity(
+                    &target_table,
+                    &prepared,
+                    &observed,
+                    mutation.publication.identifiers,
+                )?;
                 let document = Arc::try_unwrap(document).map_err(|_| {
                     SQLError::Internal("INSERT command overlay retained a staged document".into())
                 })?;
@@ -768,7 +778,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     &target_table,
                     document,
                     prepared,
-                    known_new,
+                    inserted,
                     &mut publication,
                 )?;
             }

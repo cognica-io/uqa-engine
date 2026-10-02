@@ -550,6 +550,18 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(())
     }
 
+    /// Write the index entries of a document whose identity no document of the table ever had, as the caller has established from the identity watermark of `namespace`. A provider that keys its entries by that namespace may write them without reading what they would replace; the default writes them as any other document's.
+    fn apply_unused_btree_index_write(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        values: &BTreeMap<crate::ValueIndexKey, Value>,
+        namespace: crate::document_store::identifiers::DocumentIdNamespace,
+    ) -> StorageBackendResult<()> {
+        let _ = namespace;
+        self.apply_btree_index_write(table, doc_id, Some(values))
+    }
+
     fn drop_btree_index(
         &self,
         _table: &str,

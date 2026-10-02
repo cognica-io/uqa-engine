@@ -937,7 +937,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 publish_prepared_mutation_action(
                     mutation.publication,
                     action,
-                    false,
+                    crate::mutation::publication::InsertedIdentity::Unknown,
                     &mut publication,
                 )?;
             }

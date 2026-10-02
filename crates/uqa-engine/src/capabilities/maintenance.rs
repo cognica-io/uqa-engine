@@ -284,7 +284,11 @@ impl VacuumRows for Engine {
         vectors: DocumentVectors,
     ) -> Result<(), SQLError> {
         self.add_prepared_stored_document_with_vector_values_inner(
-            table, id, document, vectors, true,
+            table,
+            id,
+            document,
+            vectors,
+            uqa_execution::mutation::publication::InsertedIdentity::Vacant,
         )
     }
     fn refresh_indexes(&self, table: &str) -> StorageBackendResult<()> {

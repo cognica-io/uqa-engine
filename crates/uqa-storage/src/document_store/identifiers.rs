@@ -16,6 +16,13 @@ pub mod conformance;
 #[cfg(test)]
 mod tests;
 
+/// The durable object and storage generation of a table, which name the namespace of its document identities. A claim about a table's identities, such as that one was never used, holds for the namespace its watermark was read in and for no other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DocumentIdNamespace {
+    pub object: [u8; 16],
+    pub generation: [u8; 16],
+}
+
 /// A document namespace follows a table's durable object and storage generation through renames. A missing durable allocator retains the caller's serialized in-memory watermark contract.
 pub struct DocumentIdAllocator<'a> {
     durable: Option<&'a dyn IdentifierAllocator>,

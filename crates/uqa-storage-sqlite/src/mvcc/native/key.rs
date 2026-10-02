@@ -25,6 +25,19 @@ pub enum NativeRecordOwner {
     },
 }
 
+impl NativeRecordOwner {
+    /// Whether this owner's rows are the documents of `namespace`. An object's identity and storage generation key its rows and name the namespace of its document identities alike, so what the namespace's watermark shows about an identity holds for the rows of this owner and of no other.
+    pub(crate) fn stores(
+        self,
+        namespace: uqa_storage::document_store::identifiers::DocumentIdNamespace,
+    ) -> bool {
+        self == Self::Object {
+            identity: namespace.object,
+            generation: namespace.generation,
+        }
+    }
+}
+
 /// A provider-assigned physical family and stable owner. The durable family number must come from a fixed format registry, never schema enumeration order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeRecordIdentity {

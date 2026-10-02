@@ -10,7 +10,12 @@ use std::collections::HashMap;
 
 use uqa_sql::{semantics::constraint_catalog::ConstraintCatalog, SQLError};
 
-use crate::mutation::{errors::dml_storage_error, prepared::PreparedInsertConflict};
+use crate::mutation::{
+    errors::dml_storage_error, identity::MutationIdentifiers, prepared::PreparedInsertConflict,
+    publication::InsertedIdentity,
+};
+
+use super::supplied_identities::ObservedIdentities;
 
 /// An insert creates its document when the statement resolves no conflict by rewriting a row and the document identity is either generated or a unique key, whose conflict check has already found no row.
 pub(super) struct KnownNewInserts<'a> {
@@ -19,6 +24,8 @@ pub(super) struct KnownNewInserts<'a> {
     resolves_conflicts: bool,
     /// Whether the identity column is a unique key of each target table seen so far.
     unique_identity: HashMap<String, bool>,
+    /// Whether each target table seen so far generates identities no document of it ever had.
+    generates_unused: HashMap<String, bool>,
 }
 
 impl<'a> KnownNewInserts<'a> {
@@ -32,10 +39,47 @@ impl<'a> KnownNewInserts<'a> {
             id_column,
             resolves_conflicts,
             unique_identity: HashMap::new(),
+            generates_unused: HashMap::new(),
         }
     }
 
-    pub(super) fn contains(
+    /// What the statement knows about the identity of a prepared insert. A new document's identity is unused when its table generated it above every identity in use, or when the statement's observation found the table's watermark below it.
+    pub(super) fn identity(
+        &mut self,
+        target_table: &str,
+        prepared: &PreparedInsertConflict,
+        observed: &ObservedIdentities,
+        identifiers: &dyn MutationIdentifiers,
+    ) -> Result<InsertedIdentity, SQLError> {
+        if !self.contains(target_table, prepared)? {
+            return Ok(InsertedIdentity::Unknown);
+        }
+        let PreparedInsertConflict::Insert { doc_id, supplied } = prepared else {
+            return Ok(InsertedIdentity::Vacant);
+        };
+        if observed.unused(target_table, *doc_id) {
+            return Ok(InsertedIdentity::Unused);
+        }
+        if *supplied {
+            return Ok(InsertedIdentity::Vacant);
+        }
+        let generates_unused = match self.generates_unused.get(target_table) {
+            Some(generates_unused) => *generates_unused,
+            None => {
+                let generates_unused = identifiers.generates_unused_identities(target_table)?;
+                self.generates_unused
+                    .insert(target_table.to_owned(), generates_unused);
+                generates_unused
+            }
+        };
+        Ok(if generates_unused {
+            InsertedIdentity::Unused
+        } else {
+            InsertedIdentity::Vacant
+        })
+    }
+
+    fn contains(
         &mut self,
         target_table: &str,
         prepared: &PreparedInsertConflict,

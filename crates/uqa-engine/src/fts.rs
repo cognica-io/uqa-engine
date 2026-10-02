@@ -224,7 +224,14 @@ impl Engine {
             table,
             doc_id,
             uqa_sql::ast::LockStrength::ForUpdate,
-            |engine| engine.add_document_impl(table, doc_id, document, false),
+            |engine| {
+                engine.add_document_impl(
+                    table,
+                    doc_id,
+                    document,
+                    uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+                )
+            },
         )
     }
 
@@ -233,7 +240,7 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         mut document: Document,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         uqa_execution::mutation::assignment::refresh_stored_generated_columns(
             self.mutation_assignment_context(),
@@ -241,7 +248,7 @@ impl Engine {
             &mut document,
         )?;
         uqa_execution::serializable::observe_row_write(self, table, doc_id)?;
-        self.add_prepared_document_impl(table, doc_id, document, known_new)
+        self.add_prepared_document_impl(table, doc_id, document, inserted)
     }
 
     pub(crate) fn add_prepared_document_impl(
@@ -249,9 +256,9 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         document: Document,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
-        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, true, None)
+        self.add_prepared_document_impl_with_fts(table, doc_id, document, inserted, true, None)
     }
 
     pub(crate) fn add_prepared_document_without_fts_impl(
@@ -259,9 +266,9 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         document: Document,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
-        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, false, None)
+        self.add_prepared_document_impl_with_fts(table, doc_id, document, inserted, false, None)
     }
 
     pub(crate) fn add_prepared_stored_document_impl(
@@ -269,14 +276,14 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         document: uqa_storage::StoredDocument,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         let (fields, metadata) = document.into_parts();
         self.add_prepared_document_impl_with_fts(
             table,
             doc_id,
             fields,
-            known_new,
+            inserted,
             true,
             Some(metadata),
         )
@@ -353,10 +360,11 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         mut document: Document,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
         index_fts: bool,
         metadata: Option<uqa_storage::DocumentMetadata>,
     ) -> Result<(), SQLError> {
+        let known_new = inserted.is_vacant();
         let Some(table_name) = self
             .try_resolve_table_name(table)
             .map_err(|err| SQLError::Internal(format!("resolve table `{table}`: {err}")))?
@@ -430,15 +438,17 @@ impl Engine {
                 &error,
             )
         })?;
+        // An identity no document ever had has no earlier records in the namespace its watermark was read in, so a store that keeps the table under that namespace writes without reading what it replaces.
+        let unused = inserted.is_unused().then(|| t.document_id_namespace());
         let mut store = t.document_store.write();
-        store
-            .put_stored(
-                doc_id,
-                uqa_storage::StoredDocument::with_metadata(document, metadata),
-            )
-            .map_err(|err| crate::table_storage::document_store_write_error(&err))?;
+        let stored = uqa_storage::StoredDocument::with_metadata(document, metadata);
+        match unused {
+            Some(namespace) => store.put_stored_unused(doc_id, stored, namespace),
+            None => store.put_stored(doc_id, stored),
+        }
+        .map_err(|err| crate::table_storage::document_store_write_error(&err))?;
         if let Some(new) = persistent_indexed.as_ref() {
-            self.persist_value_indexes_apply_write(&table_name, doc_id, Some(new))?;
+            self.persist_value_indexes_apply_write(&table_name, doc_id, Some(new), unused)?;
         }
         if let Some(new) = new_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, old_indexed.as_ref(), Some(new));

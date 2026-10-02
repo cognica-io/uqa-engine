@@ -23,7 +23,7 @@ pub trait MutationStorage {
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: super::InsertedIdentity,
     ) -> Result<(), SQLError>;
     fn insert_document_deferred_text(
         &self,
@@ -31,7 +31,7 @@ pub trait MutationStorage {
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: super::InsertedIdentity,
     ) -> Result<(), SQLError>;
     fn rewrite_document(
         &self,

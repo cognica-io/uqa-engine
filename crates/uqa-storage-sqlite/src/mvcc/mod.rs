@@ -95,6 +95,8 @@ pub struct SQLiteRecordStore {
 thread_local! {
     /// How many reads of this thread ran the full validation.
     static READ_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many record reads this thread ran, each in its own physical transaction.
+    static RECORD_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl SQLiteRecordStore {
@@ -211,6 +213,8 @@ impl SQLiteRecordStore {
         &self,
         operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
     ) -> VersionResult<T> {
+        #[cfg(test)]
+        RECORD_READS.with(|count| count.set(count.get() + 1));
         self.connection
             .with_record_read(|connection, validated| {
                 Ok((|| {

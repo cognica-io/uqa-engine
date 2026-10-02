@@ -582,11 +582,13 @@ impl crate::Engine {
         Ok(())
     }
 
+    /// `unused` names the namespace in which no document ever had `doc_id`, so that the document's entries replace none.
     pub(crate) fn persist_value_indexes_apply_write(
         &self,
         table: &str,
         doc_id: DocId,
         new: Option<&BTreeMap<ValueIndexKey, Value>>,
+        unused: Option<uqa_storage::document_store::identifiers::DocumentIdNamespace>,
     ) -> Result<(), SQLError> {
         let Some(backend) = self
             .storage
@@ -603,9 +605,13 @@ impl crate::Engine {
         if self.value_index_table_is_temporary(&table_name)? {
             return Ok(());
         }
-        backend
-            .apply_btree_index_write(&table_name, doc_id, new)
-            .map_err(|err| SQLError::Internal(format!("btree index write failed: {err}")))
+        match (new, unused) {
+            (Some(new), Some(namespace)) => {
+                backend.apply_unused_btree_index_write(&table_name, doc_id, new, namespace)
+            }
+            (new, _) => backend.apply_btree_index_write(&table_name, doc_id, new),
+        }
+        .map_err(|err| SQLError::Internal(format!("btree index write failed: {err}")))
     }
 
     /// TRUNCATE keeps index definitions installed but removes all postings.

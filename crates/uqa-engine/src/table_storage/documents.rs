@@ -372,7 +372,13 @@ impl Engine {
         // Each index's replacement path validates/stages before publishing.
         // Never delete the old row/index state first: an analyzer or backend
         // failure must leave the prior version queryable.
-        self.add_document_with_vector_values_inner(table, doc_id, doc, replacement_vectors, false)?;
+        self.add_document_with_vector_values_inner(
+            table,
+            doc_id,
+            doc,
+            replacement_vectors,
+            uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+        )?;
         Ok(true)
     }
 
@@ -464,7 +470,7 @@ impl Engine {
             doc_id,
             document,
             replacement_vectors,
-            false,
+            uqa_execution::mutation::publication::InsertedIdentity::Unknown,
         )?;
         Ok(true)
     }
@@ -511,7 +517,7 @@ impl Engine {
                     doc_id,
                     document,
                     vectors,
-                    false,
+                    uqa_execution::mutation::publication::InsertedIdentity::Unknown,
                 )
             } else {
                 engine.add_prepared_document_with_vector_values_deferred_fts_inner(
@@ -519,7 +525,7 @@ impl Engine {
                     doc_id,
                     document,
                     vectors,
-                    false,
+                    uqa_execution::mutation::publication::InsertedIdentity::Unknown,
                 )
             }
         })
@@ -674,7 +680,7 @@ impl Engine {
         store
             .delete(doc_id)
             .map_err(|err| document_store_write_error(&err))?;
-        self.persist_value_indexes_apply_write(&table_name, doc_id, None)?;
+        self.persist_value_indexes_apply_write(&table_name, doc_id, None, None)?;
         if let Some(old) = old_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }

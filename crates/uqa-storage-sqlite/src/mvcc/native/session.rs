@@ -430,6 +430,21 @@ impl NativeSnapshot {
         Ok(())
     }
 
+    /// Stage a row at a key that never had a record, as its caller has established: the write then reads no earlier revision of the key.
+    pub(crate) fn put_unused_row(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        family: Family,
+        owner: NativeRecordOwner,
+        row: &[ValueRef<'_>],
+    ) -> Result<()> {
+        let record = NativeRecord::encode(family, owner, row, &self.control)?;
+        self.observe_graph_definition_put(batch, family, owner, row)?;
+        self.observe_graph_labels_put(batch, family, owner, row)?;
+        batch.put_unused(record.key(), record.row())?;
+        Ok(())
+    }
+
     pub(crate) fn delete_prefix(
         &self,
         batch: &mut dyn KeyValueBatch,

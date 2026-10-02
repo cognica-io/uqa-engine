@@ -19,6 +19,8 @@ use super::prepared::{
 use super::{identity::integer_primary_key_doc_id, vectors::document_vectors};
 mod context;
 pub use context::*;
+mod identity;
+pub use identity::InsertedIdentity;
 
 const PREPARED_FTS_BATCH_DOCUMENTS: usize = 4_096;
 type PreparedFtsDocuments = Vec<(DocId, BTreeMap<String, String>)>;
@@ -86,7 +88,7 @@ impl MutationPublicationBatch {
 pub fn publish_prepared_mutation_action(
     context: PublicationContext<'_>,
     action: PreparedMutationAction,
-    insert_known_new: bool,
+    inserted: InsertedIdentity,
     batch: &mut MutationPublicationBatch,
 ) -> Result<(), SQLError> {
     match action {
@@ -101,24 +103,16 @@ pub fn publish_prepared_mutation_action(
             observe_row_write(context.observations, &table, doc_id)?;
             if !context.storage.can_defer_document_text(&table)? {
                 batch.flush_fts(context.text)?;
-                context.storage.insert_document(
-                    &table,
-                    doc_id,
-                    document,
-                    vectors,
-                    insert_known_new,
-                )?;
+                context
+                    .storage
+                    .insert_document(&table, doc_id, document, vectors, inserted)?;
                 return context.deferrals.inserted(&table, doc_id);
             }
-            context.storage.insert_document_deferred_text(
-                &table,
-                doc_id,
-                document,
-                vectors,
-                insert_known_new,
-            )?;
+            context
+                .storage
+                .insert_document_deferred_text(&table, doc_id, document, vectors, inserted)?;
             context.deferrals.inserted(&table, doc_id)?;
-            if document_changes_text_index(insert_known_new, &text_fields) {
+            if document_changes_text_index(inserted.is_vacant(), &text_fields) {
                 batch.push_fts(table, doc_id, text_fields);
                 if batch.fts_is_full() {
                     batch.flush_fts(context.text)?;
@@ -195,7 +189,7 @@ fn apply_document_rewrite(
             *destination_doc_id,
             prepared.new_document.clone(),
             document_vectors(context.catalog, destination_table, &prepared.new_document)?,
-            true,
+            InsertedIdentity::Vacant,
         )?;
         context
             .identifiers
@@ -238,7 +232,7 @@ fn apply_document_rewrite(
                     new_id,
                     prepared.new_document.clone(),
                     document_vectors(context.catalog, &prepared.table, &prepared.new_document)?,
-                    true,
+                    InsertedIdentity::Vacant,
                 )?;
                 context
                     .identifiers
@@ -336,7 +330,7 @@ pub fn apply_validated_prepared_insert(
     table: &str,
     document: Document,
     prepared: PreparedInsertConflict,
-    known_new: bool,
+    inserted: InsertedIdentity,
     publication: &mut MutationPublicationBatch,
 ) -> Result<bool, SQLError> {
     match prepared {
@@ -345,7 +339,7 @@ pub fn apply_validated_prepared_insert(
             publish_prepared_mutation_action(
                 context,
                 PreparedMutationAction::Rewrite(rewrite),
-                false,
+                InsertedIdentity::Unknown,
                 publication,
             )?;
             Ok(true)
@@ -358,7 +352,7 @@ pub fn apply_validated_prepared_insert(
                     doc_id,
                     document,
                 }),
-                known_new,
+                inserted,
                 publication,
             )?;
             Ok(true)

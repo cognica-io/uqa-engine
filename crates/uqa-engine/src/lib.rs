@@ -644,6 +644,16 @@ impl TableState {
         self.object_id
     }
 
+    /// The namespace this table's document identities are allocated and observed in.
+    fn document_id_namespace(
+        &self,
+    ) -> uqa_storage::document_store::identifiers::DocumentIdNamespace {
+        uqa_storage::document_store::identifiers::DocumentIdNamespace {
+            object: self.object_id(),
+            generation: self.storage_generation(),
+        }
+    }
+
     fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {
         self.security.read().role_owner
     }

@@ -19,6 +19,8 @@ pub trait MutationIdentifiers {
     fn allocate_next_id(&self, table: &str) -> Result<DocId, SQLError>;
     fn advance_next_id(&self, table: &str, doc_id: DocId) -> uqa_storage::StorageBackendResult<()>;
     fn persist_next_id(&self, table: &str) -> uqa_storage::StorageBackendResult<()>;
+    /// Whether every identity `allocate_next_id` returns for `table` is one no document of the table ever had. That holds where the table reserves identities in its own durable namespace, whose watermark every write of the table raises. A table that draws from another table's namespace, as a partition does, or keeps only a local counter cannot say.
+    fn generates_unused_identities(&self, table: &str) -> Result<bool, SQLError>;
 }
 pub fn integer_primary_key_doc_id(
     catalog: &dyn ConstraintCatalog,

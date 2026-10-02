@@ -473,6 +473,18 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(())
     }
 
+    fn apply_unused_btree_index_write(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        values: &BTreeMap<uqa_storage::ValueIndexKey, Value>,
+        namespace: uqa_storage::document_store::identifiers::DocumentIdNamespace,
+    ) -> StorageBackendResult<()> {
+        SQLiteBTreeIndexStore::new(self.conn.clone())
+            .apply_unused_write(table, doc_id, values, namespace)?;
+        Ok(())
+    }
+
     fn drop_btree_index(
         &self,
         table: &str,
