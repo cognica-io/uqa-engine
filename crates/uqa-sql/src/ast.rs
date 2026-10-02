@@ -275,6 +275,32 @@ pub enum AlterTableAction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         using: Option<Expr>,
     },
+    /// `ALTER COLUMN name ADD GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY [ ( options ) ]`.
+    AddIdentity {
+        name: String,
+        kind: AutoIncrementKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declaration: Option<Box<IdentitySequenceDeclaration>>,
+    },
+    /// `ALTER COLUMN name` followed by `SET GENERATED { ALWAYS | BY DEFAULT }`, `RESTART [ [ WITH ] value ]` and `SET sequence_option` in any combination.
+    SetIdentity {
+        name: String,
+        /// The generation `SET GENERATED` gives the column.
+        kind: Option<AutoIncrementKind>,
+        /// Whether `SET GENERATED` is repeated, which `PostgreSQL` reports after it has changed the sequence.
+        repeated_kind: bool,
+        /// The sequence options, kept as written: `PostgreSQL` reads them as `ALTER SEQUENCE` reads its options, and only for an identity column.
+        #[serde(default)]
+        sequence: SequenceDeclaration,
+        /// The first error collecting the sequence options raised, which waits until they are read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<DeferredSQLError>,
+    },
+    /// `ALTER COLUMN name DROP IDENTITY [ IF EXISTS ]`.
+    DropIdentity {
+        name: String,
+        if_exists: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

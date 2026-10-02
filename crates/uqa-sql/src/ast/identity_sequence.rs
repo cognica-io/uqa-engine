@@ -8,9 +8,10 @@
 
 use super::{RelationPersistence, SequenceDeclaration};
 use crate::SQLError;
+use serde::{Deserialize, Serialize};
 
 /// The sequence options an identity column declaration writes, `GENERATED ... AS IDENTITY (options)`. They create the column's sequence, which keeps them; the column does not.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdentitySequenceDeclaration {
     /// `SEQUENCE NAME`.
     pub name: Option<IdentitySequenceName>,
@@ -23,14 +24,14 @@ pub struct IdentitySequenceDeclaration {
 }
 
 /// The name `SEQUENCE NAME` gives an identity sequence: its schema, when written, and its name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdentitySequenceName {
     pub schema: Option<String>,
     pub name: String,
 }
 
 /// An error a statement found while compiling, which it raises later, where `PostgreSQL` raises it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeferredSQLError {
     pub sqlstate: String,
     pub message: String,

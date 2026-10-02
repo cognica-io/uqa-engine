@@ -17,6 +17,7 @@ use uqa_sql::{
 pub mod binding;
 mod context;
 pub mod entry;
+pub mod identity;
 mod locking;
 mod recursion;
 pub use context::*;
@@ -477,6 +478,7 @@ fn run_alter_table_action<S: Clone + 'static>(
             }
         }
         AlterTableAction::AlterColumnType { name, ty, using } => {
+            identity::retype_identity_sequence(context, &stmt.table, &name, &ty)?;
             crate::schema::columns::alteration::alter_type(
                 &context.columns,
                 &stmt.table,
@@ -486,6 +488,50 @@ fn run_alter_table_action<S: Clone + 'static>(
                 using.as_ref(),
             )?;
         }
+        AlterTableAction::AddIdentity {
+            name,
+            kind,
+            declaration,
+        } => identity::add_identity(
+            context,
+            identity::IdentityTarget {
+                table: &stmt.table,
+                recurse: stmt.recurse,
+                recursing,
+            },
+            &name,
+            kind,
+            declaration,
+        )?,
+        AlterTableAction::SetIdentity {
+            name,
+            kind,
+            repeated_kind,
+            sequence,
+            error,
+        } => identity::set_identity(
+            context,
+            identity::IdentityTarget {
+                table: &stmt.table,
+                recurse: stmt.recurse,
+                recursing,
+            },
+            &name,
+            kind,
+            repeated_kind,
+            &sequence,
+            error.as_ref(),
+        )?,
+        AlterTableAction::DropIdentity { name, if_exists } => identity::drop_identity(
+            context,
+            identity::IdentityTarget {
+                table: &stmt.table,
+                recurse: stmt.recurse,
+                recursing,
+            },
+            &name,
+            if_exists,
+        )?,
     }
     Ok(())
 }

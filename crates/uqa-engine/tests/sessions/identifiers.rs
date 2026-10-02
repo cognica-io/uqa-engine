@@ -24,6 +24,8 @@ enum Layout {
 
 const LAYOUTS: [Layout; 3] = [Layout::Native, Layout::KeyValue, Layout::Redb];
 
+#[path = "identifiers/identity_alterations.rs"]
+mod identity_alterations;
 #[path = "identifiers/identity_sequences.rs"]
 mod identity_sequences;
 #[path = "identifiers/identity_values.rs"]

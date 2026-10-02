@@ -172,7 +172,7 @@ pub(super) fn compile_alter_sequence(
 }
 
 /// Collect sequence options in their written order, as `PostgreSQL`'s `init_params` does before it reads their values: repeating an option conflicts with its first occurrence. An identity column's sequence counts in its column's type, which `PostgreSQL` supplies as a first `AS`, so a written `AS` conflicts with it.
-fn collect_sequence_options<'a>(
+pub(super) fn collect_sequence_options<'a>(
     elements: impl IntoIterator<Item = &'a DefElem>,
     statement: &str,
     identity: bool,

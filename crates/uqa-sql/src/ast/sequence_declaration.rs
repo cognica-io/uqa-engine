@@ -7,9 +7,10 @@
 //! The options a sequence declaration writes, as written.
 
 use super::ColumnType;
+use serde::{Deserialize, Serialize};
 
 /// The options a `CREATE SEQUENCE`, or the declaration of an identity column, writes, kept as written. `PostgreSQL` reads their values and derives the omitted ones when it creates the sequence, in an order of its own.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceDeclaration {
     /// `AS type`.
     pub data_type: Option<ColumnType>,
@@ -32,7 +33,7 @@ pub struct SequenceDeclaration {
 }
 
 /// A sequence option's value as the parser keeps it, before it is read as a 64-bit integer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SequenceOptionValue {
     /// No value: `NO MINVALUE`, `NO MAXVALUE` or a bare `RESTART`.
     Absent,

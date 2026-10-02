@@ -64,6 +64,11 @@ impl Engine {
             addition: self.column_addition_context(),
             columns: self.column_alter_context(),
             removal: self.column_removal_context(),
+            identities: uqa_execution::schema::table_alteration::identity::IdentityAlterContext {
+                definitions: self.sequence_definition_context(),
+                catalog: self,
+                removal: self,
+            },
             lifecycle: self,
             events: self,
         }

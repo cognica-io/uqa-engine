@@ -43,6 +43,19 @@ pub fn set_column_type(
 ) -> StorageBackendResult<bool> {
     set_column_property(context, table, column, ColumnProperty::Type(ty))
 }
+pub fn set_column_auto_increment(
+    context: &SchemaPublicationContext<'_>,
+    table: &str,
+    column: &str,
+    provenance: Option<uqa_sql::ast::AutoIncrement>,
+) -> StorageBackendResult<bool> {
+    set_column_property(
+        context,
+        table,
+        column,
+        ColumnProperty::AutoIncrement(provenance),
+    )
+}
 fn set_column_property(
     context: &SchemaPublicationContext<'_>,
     table: &str,

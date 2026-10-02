@@ -147,3 +147,82 @@ fn an_identity_sequence_reports_its_column_type() {
         "22023 sequence type must be smallint, integer, or bigint"
     );
 }
+
+#[test]
+fn a_change_keeps_what_it_omits_and_checks_the_current_value() {
+    let base = declare_sequence(&SequenceDeclaration::default(), &ColumnType::Integer, true)
+        .unwrap()
+        .definition;
+    let restarted = alter_declared_sequence(
+        &SequenceDeclaration {
+            restart: Some(Integer(40)),
+            ..SequenceDeclaration::default()
+        },
+        &base,
+        1,
+        true,
+    )
+    .unwrap();
+    assert_eq!((restarted.definition, restarted.current), (base, 40));
+    // A new type takes its own bounds for the bounds that were the old type's.
+    let retyped = alter_declared_sequence(
+        &SequenceDeclaration {
+            data_type: Some(ColumnType::BigInteger),
+            ..SequenceDeclaration::default()
+        },
+        &base,
+        5,
+        true,
+    )
+    .unwrap()
+    .definition;
+    assert_eq!(
+        (retyped.data_type, retyped.min_value, retyped.max_value),
+        (SequenceDataType::BigInt, 1, i64::MAX)
+    );
+    let error = alter_declared_sequence(
+        &SequenceDeclaration {
+            data_type: Some(ColumnType::SmallInteger),
+            ..SequenceDeclaration::default()
+        },
+        &base,
+        40_000,
+        true,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "RESTART value (40000) cannot be greater than MAXVALUE (32767)"
+    );
+    // `NO MAXVALUE` and `NO MINVALUE` take the defaults of the new direction, and the start is checked before the current value.
+    let error = alter_declared_sequence(
+        &SequenceDeclaration {
+            increment: Some(Integer(-1)),
+            max_value: Some(Absent),
+            min_value: Some(Absent),
+            ..SequenceDeclaration::default()
+        },
+        &base,
+        1,
+        true,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "START value (1) cannot be greater than MAXVALUE (-1)"
+    );
+    assert_eq!(
+        alter_declared_sequence(
+            &SequenceDeclaration {
+                data_type: Some(ColumnType::Text),
+                ..SequenceDeclaration::default()
+            },
+            &base,
+            1,
+            true,
+        )
+        .unwrap_err()
+        .to_string(),
+        "identity column type must be smallint, integer, or bigint"
+    );
+}

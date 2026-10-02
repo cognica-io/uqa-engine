@@ -58,17 +58,47 @@ pub fn append_registered_column(
     Ok(())
 }
 
-pub fn reject_default_change_on_generated_column(
+/// Reject `SET DEFAULT`, when `setting`, or `DROP DEFAULT` on an identity or generated column, as `PostgreSQL`'s `ATExecColumnDefault` does: its hint names the command that changes such a column.
+pub fn reject_default_change(
     catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
     table: &str,
     column: &str,
+    setting: bool,
 ) -> Result<(), SQLError> {
-    if crate::assignment::columns::generated_column_kind(catalog, table, column)?.is_some() {
-        return Err(SQLError::TypeMismatch(format!(
-            "column `{column}` of relation `{table}` is a generated column; use SET EXPRESSION or DROP EXPRESSION"
-        )));
-    }
-    Ok(())
+    let Some(shape) = catalog
+        .try_column_shape(table, column)
+        .map_err(|error| SQLError::Internal(format!("read column `{column}`: {error}")))?
+        .flatten()
+    else {
+        return Ok(());
+    };
+    let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+        .map_err(|error| SQLError::Internal(format!("resolve ALTER TABLE target: {error}")))?
+        .name;
+    let (kind, hint) = if shape.identity_sequence.is_some() {
+        (
+            "an identity column",
+            (!setting).then_some("ALTER TABLE ... ALTER COLUMN ... DROP IDENTITY"),
+        )
+    } else if let Some(generated) = shape.generated {
+        (
+            "a generated column",
+            if setting {
+                Some("ALTER TABLE ... ALTER COLUMN ... SET EXPRESSION")
+            } else {
+                (generated == crate::ast::GeneratedColumnKind::Stored)
+                    .then_some("ALTER TABLE ... ALTER COLUMN ... DROP EXPRESSION")
+            },
+        )
+    } else {
+        return Ok(());
+    };
+    Err(SQLError::Diagnostic {
+        sqlstate: "42601".into(),
+        message: format!("column \"{column}\" of relation \"{relation}\" is {kind}"),
+        detail: None,
+        hint: hint.map(|command| format!("Use {command} instead.")),
+    })
 }
 
 pub mod addition;
