@@ -87,6 +87,8 @@ pub struct SQLiteRecordStore {
     identity: DatabaseId,
     native: Option<native::NativeRecordNamespace>,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    receipt_leases: receipts::ReceiptLeaseFile,
 }
 
 #[cfg(test)]
@@ -112,6 +114,8 @@ impl SQLiteRecordStore {
         } = native::initialize_in(transaction, control).map_err(Error::into_version)?;
         Ok(Self {
             snapshots: retention::registry(connection, identity)?,
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+            receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection: connection.record_connection(),
             identity,
             native: Some(namespace),
@@ -131,6 +135,8 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)?;
         Ok(Self {
             snapshots: retention::registry(&connection, identity)?,
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+            receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection,
             identity,
             native: None,
@@ -157,6 +163,8 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)?;
         Ok(Self {
             snapshots: retention::registry(&connection, identity)?,
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+            receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection,
             identity,
             native: Some(namespace),
@@ -174,6 +182,8 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)?;
         Ok(Self {
             snapshots: retention::registry(&connection, identity)?,
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+            receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection,
             identity,
             native: None,

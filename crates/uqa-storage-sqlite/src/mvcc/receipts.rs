@@ -7,10 +7,10 @@
 //! Explicit acknowledgement and managed owner recovery preserve durable SSI references.
 
 mod liveness;
-#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-pub(in crate::mvcc) use liveness::lease_file;
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 pub(in crate::mvcc) use liveness::local_file_registry;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(in crate::mvcc) use liveness::{lease_file, ReceiptLeaseFile};
 
 use rusqlite::{Connection, OptionalExtension};
 use uqa_core::memory::BudgetedVec;

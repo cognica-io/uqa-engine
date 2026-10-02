@@ -38,6 +38,29 @@ pub(in crate::mvcc) fn lease_file(
     )
 }
 
+/// The receipt lease file of one store, opened by its first receipt admission and kept while the store or a snapshot of it lives, as its snapshot registry keeps the snapshot lease file. An admission that opens the file itself resolves the database path twice and opens the sidecar, and the registry of lease files closes it again as soon as the transaction's lease is gone, so every write transaction paid for both.
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+#[derive(Clone, Default)]
+pub(in crate::mvcc) struct ReceiptLeaseFile {
+    file: std::sync::Arc<std::sync::OnceLock<NativeLeaseFile>>,
+}
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+impl ReceiptLeaseFile {
+    fn open(
+        &self,
+        path: &std::path::Path,
+        database: uqa_storage::mvcc::DatabaseId,
+    ) -> VersionResult<NativeLeaseFile> {
+        if let Some(file) = self.file.get() {
+            return Ok(file.clone());
+        }
+        let file = lease_file(path, database)?;
+        // A concurrent first admission opened the same descriptor through the registry, so either handle serves.
+        Ok(self.file.get_or_init(|| file).clone())
+    }
+}
+
 impl SQLiteRecordStore {
     pub(in crate::mvcc) fn with_receipt_admission<T>(
         &self,
@@ -47,7 +70,7 @@ impl SQLiteRecordStore {
         #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
         if let Some(path) = self.connection.database_path() {
             use uqa_core::memory::BudgetedVec;
-            let file = lease_file(path, self.identity)?;
+            let file = self.receipt_leases.open(path, self.identity)?;
             let _admission = file.admit(control)?;
             let mut live = BudgetedVec::new(control.memory());
             file.visit(control, &mut |allocation| {

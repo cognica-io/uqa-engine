@@ -74,6 +74,39 @@ fn value_format_upgrade_preserves_receipt_capacity_acknowledgement_and_live_owne
     }
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+#[test]
+fn a_store_opens_its_receipt_lease_file_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = ManagedConnection::open(&directory.path().join("leased.db")).unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    let opened = || crate::mvcc::leases::OPENED.with(std::cell::Cell::get);
+    let before = opened();
+    // Each transaction's lease is gone before the next one is allocated, which leaves the file to the store alone.
+    for _ in 0..3 {
+        let owner = store.allocate_managed_transaction(&control).unwrap();
+        store.abort(owner.transaction(), &control).unwrap();
+        store
+            .acknowledge_transaction(
+                ReceiptAcknowledgement::Aborted(owner.transaction()),
+                &control,
+            )
+            .unwrap();
+    }
+    assert_eq!(opened() - before, 1);
+    // A clone of the store, as a snapshot holds one, shares the file; another store of the database finds it open.
+    drop(
+        store
+            .clone()
+            .allocate_managed_transaction(&control)
+            .unwrap(),
+    );
+    let peer = SQLiteRecordStore::new(&connection).unwrap();
+    drop(peer.allocate_managed_transaction(&control).unwrap());
+    assert_eq!(opened() - before, 1);
+}
+
 /// Whether each commit of the store's connection ran without its own sync, in commit order.
 fn record_commits(store: &SQLiteRecordStore) -> Arc<parking_lot::Mutex<Vec<bool>>> {
     use crate::mvcc::connection_functions::ConnectionFunctions;
