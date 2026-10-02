@@ -420,6 +420,177 @@ fn bytea_column_accepts_text_input() {
 }
 
 #[test]
+fn bytea_columns_read_text_as_postgresql_byteain_does() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE binary_values (id int PRIMARY KEY, b bytea)",
+    );
+    // An untyped literal or parameter reaches the column through `byteain`, whatever writes it.
+    for statement in [
+        "INSERT INTO binary_values VALUES (1, '\\x0102')",
+        "INSERT INTO binary_values VALUES (2, '\\x01 02\t0a')",
+        "INSERT INTO binary_values VALUES (3, '\\x')",
+        "INSERT INTO binary_values VALUES (4, 'abc\\\\def')",
+        "INSERT INTO binary_values VALUES (5, '\\001\\002')",
+        "INSERT INTO binary_values SELECT 6, '\\xe282ac'",
+        "INSERT INTO binary_values VALUES (7, 'plain')",
+        "UPDATE binary_values SET b = '\\x0a' WHERE id = 7",
+        "INSERT INTO binary_values VALUES (1, '\\x00') ON CONFLICT (id) DO UPDATE SET b = '\\x0b0c'",
+        "MERGE INTO binary_values USING (SELECT 8 AS id) AS s ON binary_values.id = s.id WHEN NOT MATCHED THEN INSERT VALUES (s.id, '\\xff')",
+    ] {
+        exec(&engine, statement);
+    }
+    engine
+        .sql(
+            "INSERT INTO binary_values VALUES ($1, $2)",
+            &[
+                uqa_sql::SQLParam::Scalar(Value::Int(9)),
+                uqa_sql::SQLParam::Scalar(Value::Str("\\x0d0e".into())),
+            ],
+        )
+        .unwrap();
+    // COPY's text format removes its own escapes before the value reaches `byteain`.
+    engine
+        .copy_from(
+            "COPY binary_values FROM STDIN",
+            b"10\t\\\\x0a0b\n11\tabc\\\\\\\\def\n".as_slice(),
+        )
+        .unwrap();
+    let rows = exec(
+        &engine,
+        "SELECT id, encode(b, 'hex') AS hex FROM binary_values ORDER BY id",
+    );
+    let stored = rows
+        .rows
+        .iter()
+        .map(|row| match (&row["id"], &row["hex"]) {
+            (Value::Int(id), Value::Str(hex)) => (*id, hex.clone()),
+            other => panic!("unexpected row {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        stored,
+        [
+            (1, "0b0c"),
+            (2, "01020a"),
+            (3, ""),
+            (4, "6162635c646566"),
+            (5, "0102"),
+            (6, "e282ac"),
+            (7, "0a"),
+            (8, "ff"),
+            (9, "0d0e"),
+            (10, "0a0b"),
+            (11, "6162635c646566"),
+        ]
+        .map(|(id, hex)| (id, hex.to_string()))
+    );
+    for (statement, sqlstate, message) in [
+        (
+            "INSERT INTO binary_values VALUES (20, '\\x0')",
+            "22023",
+            "invalid hexadecimal data: odd number of digits",
+        ),
+        (
+            "INSERT INTO binary_values VALUES (20, '\\xGG')",
+            "22023",
+            "invalid hexadecimal digit: \"G\"",
+        ),
+        (
+            "INSERT INTO binary_values VALUES (20, '\\8')",
+            "22P02",
+            "invalid input syntax for type bytea",
+        ),
+        (
+            "UPDATE binary_values SET b = 'a\\' WHERE id = 1",
+            "22P02",
+            "invalid input syntax for type bytea",
+        ),
+        (
+            "INSERT INTO binary_values VALUES (20, 12)",
+            "42804",
+            "column \"b\" is of type bytea but expression is of type integer",
+        ),
+    ] {
+        let error = engine.sql(statement, &[]).unwrap_err();
+        assert_eq!(
+            (error.sqlstate(), error.to_string().as_str()),
+            (Some(sqlstate), message),
+            "{statement}"
+        );
+    }
+}
+
+#[test]
+fn encode_and_decode_use_postgresql_text_formats() {
+    let engine = Engine::new();
+    let row = exec(
+        &engine,
+        "SELECT encode(decode('01 02\t0a', 'hex'), 'hex') AS hex, \
+                encode(decode('ABcd', 'HEX'), 'hex') AS upper, \
+                encode(decode('a\\\\b\\001', 'escape'), 'hex') AS unescaped, \
+                encode('\\x5c0001ff7f41'::bytea, 'escape') AS escaped, \
+                encode('\\x0102ff'::bytea, 'base64') AS base64, \
+                encode(decode(' AQL/\n', 'base64'), 'hex') AS spaced",
+    );
+    let text = |column: &str| match &row.rows[0][column] {
+        Value::Str(text) => text.clone(),
+        other => panic!("{column}: {other:?}"),
+    };
+    assert_eq!(text("hex"), "01020a");
+    assert_eq!(text("upper"), "abcd");
+    assert_eq!(text("unescaped"), "615c6201");
+    assert_eq!(text("escaped"), "\\\\\\000\u{1}\\377\u{7f}A");
+    assert_eq!(text("base64"), "AQL/");
+    assert_eq!(text("spaced"), "0102ff");
+    for (statement, sqlstate, message) in [
+        (
+            "SELECT decode('zz', 'hex')",
+            "22023",
+            "invalid hexadecimal digit: \"z\"",
+        ),
+        (
+            "SELECT decode('0', 'hex')",
+            "22023",
+            "invalid hexadecimal data: odd number of digits",
+        ),
+        (
+            "SELECT decode('a\\8', 'escape')",
+            "22P02",
+            "invalid input syntax for type bytea",
+        ),
+        (
+            "SELECT decode('A?==', 'base64')",
+            "22023",
+            "invalid symbol \"?\" found while decoding base64 sequence",
+        ),
+        (
+            "SELECT decode('AQ', 'base64')",
+            "22023",
+            "invalid base64 end sequence",
+        ),
+        (
+            "SELECT decode('ab', 'nope')",
+            "22023",
+            "unrecognized encoding: \"nope\"",
+        ),
+        (
+            "SELECT encode('\\x01'::bytea, 'nope')",
+            "22023",
+            "unrecognized encoding: \"nope\"",
+        ),
+    ] {
+        let error = engine.sql(statement, &[]).unwrap_err();
+        assert_eq!(
+            (error.sqlstate(), error.to_string().as_str()),
+            (Some(sqlstate), message),
+            "{statement}"
+        );
+    }
+}
+
+#[test]
 fn cast_text_to_bytea_returns_bytes() {
     let engine = engine_with_table();
     let result = exec(&engine, "SELECT 'hello'::bytea AS v FROM t WHERE id = 1");

@@ -115,6 +115,19 @@ pub(super) fn load(
         return Ok(None);
     }
     let mut values = Vec::new();
+    // The latest committed entries are read where they are stored, with the session's private entries merged in; any other snapshot visits its records.
+    if snapshot.visit_latest_index_entries(
+        table,
+        owner,
+        field.as_value_ref(),
+        &snapshot.control,
+        &mut |doc_id, value| {
+            values.push((decode_doc_id(doc_id)?, decode_value(value)?));
+            Ok(true)
+        },
+    )? {
+        return Ok(Some(values));
+    }
     snapshot.visit_rows(
         Family::BtreeIndexEntries,
         Some(owner),

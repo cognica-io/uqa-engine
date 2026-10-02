@@ -49,11 +49,12 @@ mod tests {
     #[test]
     fn mutation_overlay_scope_cleans_up_on_drop() {
         let engine = Engine::new();
-        assert!(!engine.command_mutation_overlay_active());
+        let overlays = || engine.session.command_mutation_overlays.lock().len();
+        assert_eq!(overlays(), 0);
         {
             let _overlay = MutationOverlayScope::new(&engine);
-            assert!(engine.command_mutation_overlay_active());
+            assert_eq!(overlays(), 1);
         }
-        assert!(!engine.command_mutation_overlay_active());
+        assert_eq!(overlays(), 0);
     }
 }

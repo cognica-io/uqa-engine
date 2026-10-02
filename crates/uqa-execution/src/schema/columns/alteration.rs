@@ -61,6 +61,9 @@ fn publish_property(
                 publication::set_column_generated(context, table, column, generated)?
             }
             ColumnProperty::Type(ty) => publication::set_column_type(context, table, column, ty)?,
+            ColumnProperty::AutoIncrement(provenance) => {
+                publication::set_column_auto_increment(context, table, column, provenance)?
+            }
         };
         Ok(())
     }))?;
@@ -91,16 +94,32 @@ pub fn set_default<S: Clone + 'static>(
         .map_err(|error| ddl_storage_error("ALTER TABLE ALTER COLUMN", error))?;
     Ok(())
 }
+/// Give the column `name` of `table` the `SERIAL` or identity provenance `provenance`, or none.
+pub fn set_auto_increment<S: Clone + 'static>(
+    context: &ColumnAlterContext<'_, S>,
+    table: &str,
+    name: &str,
+    provenance: Option<uqa_sql::ast::AutoIncrement>,
+) -> Result<(), SQLError> {
+    publish_property(
+        context.transactions,
+        table,
+        name,
+        ColumnProperty::AutoIncrement(provenance),
+    )
+    .map_err(|error| ddl_storage_error("ALTER COLUMN identity", error))?;
+    context
+        .fields
+        .persist_schema(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ALTER COLUMN", error))?;
+    Ok(())
+}
 pub fn drop_default<S: Clone + 'static>(
     context: &ColumnAlterContext<'_, S>,
     table: &str,
     name: &str,
 ) -> Result<(), SQLError> {
-    uqa_sql::schema::columns::reject_default_change_on_generated_column(
-        context.analysis.columns,
-        table,
-        name,
-    )?;
+    uqa_sql::schema::columns::reject_default_change(context.analysis.columns, table, name, false)?;
     if !publish_property(
         context.transactions,
         table,

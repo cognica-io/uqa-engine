@@ -45,6 +45,7 @@ impl Engine {
         }
         self.synchronize_partition_identity_watermarks()?;
         if mode.allows_migration() {
+            self.verify_integer_key_identities(catalog, backend)?;
             for (relation, table) in self.storage.tables.read().iter() {
                 let allocator = self.table_identifier_allocator(table)?;
                 if allocator.is_durable() {
@@ -181,6 +182,7 @@ impl Engine {
             max_id,
             persisted_next_id,
         );
+        let maps_integer_keys = Self::restored_key_mapping(catalog, &columns, schema.object_id)?;
         Ok(Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: schema.object_id,
@@ -195,6 +197,7 @@ impl Engine {
             ),
             columns: crate::state::CatalogCell::new(columns),
             next_id: parking_lot::Mutex::new(next_id),
+            maps_integer_keys: AtomicBool::new(maps_integer_keys),
             analyzer: crate::state::CatalogCell::new(analyzer),
             column_stats: crate::state::CatalogCell::new(column_stats),
             column_stats_loaded: AtomicBool::new(true),

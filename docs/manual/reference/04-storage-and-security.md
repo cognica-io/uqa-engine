@@ -105,6 +105,8 @@ sequenceDiagram
 
 Use explicit transactions for multi-statement invariants. Use savepoints when part of a larger transaction may be retried or abandoned independently.
 
+A SQLite database writes a transaction when it commits. While the commit is written, its connection may keep the pages the commit changes in SQLite's page cache: up to eight times the size of the transaction's records and never more than 256 MiB, in addition to the session's allowance for the uncommitted changes themselves. The memory is released when the commit ends. A transaction of a few hundred rows stays within the 2 MiB a connection ordinarily keeps.
+
 ## Schema and index migrations
 
 Opening an older supported database can run provider migrations. Clustered full-text postings, for example, replace older per-document posting storage atomically and idempotently. A failed migration leaves the old representation unchanged.

@@ -35,9 +35,11 @@ fn multi_sequence_identity_preflight_prevents_removing_an_earlier_unowned_sequen
         })
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("2BP01"));
-    assert!(error
-        .to_string()
-        .contains("column id of table public.items requires it"));
+    // `PostgreSQL` names a relation the search path finds by its own name.
+    assert_eq!(
+        error.to_string(),
+        "cannot drop sequence items_id_seq because column id of table items requires it"
+    );
     assert_eq!(engine.sequence_state("plain").unwrap().unwrap().1, plain);
     assert_eq!(
         engine.sequence_state("items_id_seq").unwrap().unwrap().1,

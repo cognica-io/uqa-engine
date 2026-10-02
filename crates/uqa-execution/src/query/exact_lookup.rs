@@ -155,19 +155,21 @@ enum IndexConflictProbe {
     Conflict(DocId),
 }
 
-/// A nonnegative integer primary key uses the existing document identity mapping.
-fn primary_key_doc_id(columns: &[ColumnDef], column: &str, value: &Value) -> Option<DocId> {
-    let Value::Int(id) = value else {
-        return None;
-    };
-    if *id < 0
+/// The identity a key value names in a table that maps its single integer primary key, which holds the key's row or no row at all. `None` leaves the key to its index: a value that names no identity, or a table that does not map its keys.
+fn primary_key_doc_id(
+    maps_keys: bool,
+    columns: &[ColumnDef],
+    column: &str,
+    value: &Value,
+) -> Option<DocId> {
+    if !maps_keys
         || !columns.iter().any(|candidate| {
             candidate.name == column && candidate.primary_key && candidate.ty.is_integer()
         })
     {
         return None;
     }
-    Some(*id as DocId)
+    uqa_sql::semantics::key_identity::key_document_id(value)
 }
 
 pub struct ExactLookup<'a> {
@@ -197,7 +199,12 @@ impl ExactLookup<'_> {
             return Ok(None);
         }
         if columns.len() == 1 {
-            if let Some(id) = primary_key_doc_id(schema_columns, &columns[0], &values[0]) {
+            if let Some(id) = primary_key_doc_id(
+                self.table.maps_integer_keys(),
+                schema_columns,
+                &columns[0],
+                &values[0],
+            ) {
                 if let Some(read) = self.read {
                     read.observe_row(id)?;
                 }

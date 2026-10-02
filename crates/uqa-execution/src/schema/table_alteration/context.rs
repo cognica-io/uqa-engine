@@ -45,6 +45,7 @@ pub struct TableAlterContext<'a, S: Clone + 'static> {
     pub addition: ColumnAdditionContext<'a, S>,
     pub columns: ColumnAlterContext<'a, S>,
     pub removal: ColumnRemovalContext<'a>,
+    pub identities: super::identity::IdentityAlterContext<'a>,
     pub lifecycle: &'a dyn TableLifecycle,
     pub events: &'a dyn TableEventLifecycle,
 }

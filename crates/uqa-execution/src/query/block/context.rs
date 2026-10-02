@@ -21,7 +21,8 @@ pub trait QueryDocumentRead: Sync {
         fields: &[&str],
     ) -> Result<BTreeMap<DocId, Vec<Value>>, SQLError>;
     fn column_definitions(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
-    fn command_overlay_active(&self) -> bool;
+    /// Whether a read of `table` merges changes from the command overlay that the table's storage view does not show. A read of a table for which this is false sees exactly its storage view.
+    fn command_overlay_holds(&self, table: &str) -> Result<bool, SQLError>;
 }
 
 /// Retrieval planning and execution against the caller's selected relation generation.

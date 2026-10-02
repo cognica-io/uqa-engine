@@ -151,6 +151,9 @@ pub struct CreateSequence {
     pub cache_size: i64,
     #[serde(default)]
     pub ownership: SequenceOwnership,
+    /// `RESTART [WITH value]`: the value the first `nextval` returns, instead of the start.
+    #[serde(default)]
+    pub restart: SequenceRestart,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

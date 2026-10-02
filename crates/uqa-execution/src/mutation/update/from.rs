@@ -52,6 +52,14 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         .iter()
         .map(|assignment| assignment.target.column.clone())
         .collect::<Vec<_>>();
+    let statement_relation = crate::mutation::constraints::statement_relation(
+        context.mutation.preparation.referential.constraints,
+        &target,
+    )?;
+    let statement = crate::mutation::constraints::ConstraintStatement::new(
+        &statement_relation,
+        &assigned_columns,
+    );
     let update_rules = context
         .mutation
         .rules
@@ -263,6 +271,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                                 .iter()
                                 .any(|next| next.target.column == assignment.target.column),
                             action: "UPDATE FROM",
+                            new_row: false,
                         },
                         &assignment.value,
                         Some(&joined),
@@ -412,6 +421,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         };
         let Some(route) = crate::mutation::referential::prepare_partition_update_route(
             &context.mutation.preparation.referential,
+            statement,
             &candidate.identity.table,
             candidate.identity.doc_id,
             &candidate.old_document,
@@ -433,11 +443,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             events.referential_actions_mut(),
         )? {
             let row_affected = !prepared.is_partition_move_delete();
-            let primary_key_doc_id = crate::mutation::identity::integer_primary_key_doc_id(
-                context.mutation.preparation.referential.constraints.catalog,
-                &stmt.table,
-                &prepared.new_document,
-            )?;
+            let primary_key_doc_id = prepared.relocation;
             let rewritten_doc_id = prepared
                 .destination
                 .as_ref()
@@ -479,6 +485,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                 context.mutation.preparation.staging,
                 &mut prepared,
                 params,
+                statement,
                 Some(&assigned_columns),
                 &mut after_row_events,
             )?;

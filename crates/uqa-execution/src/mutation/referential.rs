@@ -10,14 +10,16 @@ use super::{
     candidate::{MutationLockTarget, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     constraints::{
         lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-        lock_existing_document_rewrite_foreign_key_dependencies,
-        period::period_foreign_key_coverage,
+        lock_existing_document_rewrite_foreign_key_dependencies, partition_insert_target,
+        period::period_foreign_key_coverage, validate_partition_constraint, ConstraintStatement,
     },
     errors::{dml_storage_error, missing_document_error},
     events::{ReferentialActionContext, ReferentialRewritePreparation},
-    identity::integer_primary_key_doc_id,
+    identity::{arriving_key_identity, key_relocation},
     locking::{lock_mutation_row, lock_mutation_target, lock_physical_mutation_target},
-    prepared::{PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentRewrite},
+    prepared::{
+        PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentRewrite, ReferentialRewrite,
+    },
 };
 use crate::query::locking::context::update_lock_strength;
 use std::collections::BTreeSet;
@@ -29,7 +31,6 @@ use uqa_sql::{
             foreign_key_comparison_types, foreign_key_lookup_values, foreign_key_relation_name,
             ForeignKeyComparison,
         },
-        partition::partition_insert_target,
         referential::referrers_to_for_actions,
     },
     SQLError, SQLParam,

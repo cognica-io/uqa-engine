@@ -161,6 +161,12 @@ impl MutationIdentifiers for Identifiers {
     fn allocate_next_id(&self, _: &str) -> Result<DocId, SQLError> {
         unreachable!("the decision allocates nothing")
     }
+    fn allocate_unmapped_id(&self, _: &str) -> Result<DocId, SQLError> {
+        unreachable!("the decision allocates nothing")
+    }
+    fn maps_integer_keys(&self, _: &str) -> Result<bool, SQLError> {
+        unreachable!("the decision maps no key")
+    }
     fn advance_next_id(&self, _: &str, _: DocId) -> uqa_storage::StorageBackendResult<()> {
         unreachable!("the decision allocates nothing")
     }

@@ -34,7 +34,7 @@ mod session;
 mod standalone_graph;
 mod vector_guards;
 
-pub(crate) use session::NativeSnapshot;
+pub(crate) use session::{NativeSnapshot, PrivateRows};
 
 pub(super) use capture::{capture_key, CapturedKey};
 pub(super) use format::{check_mapping, initialize, initialize_in, present, reject_mapped};

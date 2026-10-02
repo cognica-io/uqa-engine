@@ -60,14 +60,16 @@ mod column_shapes {
             shape("a"),
             Some(Some(ColumnShape {
                 ty: ColumnType::Integer,
-                generated: None
+                generated: None,
+                identity_sequence: None
             }))
         );
         assert_eq!(
             shape("b"),
             Some(Some(ColumnShape {
                 ty: ColumnType::Text,
-                generated: Some(GeneratedColumnKind::Stored)
+                generated: Some(GeneratedColumnKind::Stored),
+                identity_sequence: None
             }))
         );
         assert_eq!(

@@ -182,61 +182,13 @@ pub(super) fn cast_bytea(
     }
 }
 
+/// Read the text input of a `bytea` value as `byteain` does: the hex format after `\\x`, otherwise the escape format.
 fn parse_bytea_input(text: &str, control: &ProductionControl<'_>) -> Result<Produced<Value>> {
-    if let Some(hex) = text.strip_prefix("\\x") {
-        if !hex.len().is_multiple_of(2) {
-            return Err(invalid_bytea(
-                "invalid hexadecimal data: odd number of digits",
-            ));
-        }
-        let mut bytes = ProductionVec::new(*control);
-        bytes.reserve(hex.len() / 2)?;
-        for pair in hex.as_bytes().chunks_exact(2) {
-            let hi = (pair[0] as char)
-                .to_digit(16)
-                .ok_or_else(|| invalid_bytea("invalid hexadecimal digit"))?;
-            let lo = (pair[1] as char)
-                .to_digit(16)
-                .ok_or_else(|| invalid_bytea("invalid hexadecimal digit"))?;
-            bytes.push_copy((hi * 16 + lo) as u8)?;
-        }
-        return finish_bytes(bytes.finish()?, control);
-    }
-
-    let input = text.as_bytes();
-    let mut output = ProductionVec::new(*control);
-    output.reserve(input.len())?;
-    let mut index = 0;
-    while index < input.len() {
-        if input[index] != b'\\' {
-            output.push_copy(input[index])?;
-            index += 1;
-            continue;
-        }
-        if input.get(index + 1) == Some(&b'\\') {
-            output.push_copy(b'\\')?;
-            index += 2;
-            continue;
-        }
-        let Some(octal) = input.get(index + 1..index + 4) else {
-            return Err(invalid_bytea("invalid input syntax for type bytea"));
-        };
-        if !matches!(octal[0], b'0'..=b'3')
-            || !octal[1..].iter().all(|byte| matches!(byte, b'0'..=b'7'))
-        {
-            return Err(invalid_bytea("invalid input syntax for type bytea"));
-        }
-        output.push_copy((octal[0] - b'0') * 64 + (octal[1] - b'0') * 8 + (octal[2] - b'0'))?;
-        index += 4;
-    }
-    finish_bytes(output.finish()?, control)
-}
-
-fn invalid_bytea(message: &str) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "22023".into(),
-        message: message.into(),
-    }
+    let bytes = match text.strip_prefix("\\x") {
+        Some(hex) => crate::expr::encoding::hex_decode_with_control(hex, control)?,
+        None => crate::expr::encoding::escape_decode_with_control(text, control)?,
+    };
+    finish_bytes(bytes, control)
 }
 
 fn parse_uint32_input(text: &str, target: &str, control: &ProductionControl<'_>) -> Result<Value> {

@@ -139,6 +139,7 @@ fn constraint_names_and_sequence_owners_charge_their_actual_string_capacities() 
             table: spare_text("owner", 8219),
             column: spare_text("id", 16411),
         }),
+        declaration: None,
     });
     let reference = column.references.as_mut().unwrap();
     reference.name = Some(spare_text("fk", 32771));

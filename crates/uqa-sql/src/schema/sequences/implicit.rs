@@ -108,14 +108,20 @@ pub fn apply_implicit_sequence_metadata(
         column: column.name.clone(),
     });
     if auto_increment.kind == crate::ast::AutoIncrementKind::Serial {
-        column.default = Some(crate::ast::Expr::Func {
-            name: "nextval".into(),
-            binding: None,
-            args: vec![crate::ast::Expr::Literal(Value::Str(sequence))],
-            distinct: false,
-            order_by: Vec::new(),
-            filter: None,
-        });
+        column.default = Some(sequence_next_value(&sequence));
     }
     Ok(())
+}
+
+/// The value a sequence-backed column draws: `nextval` of its sequence, the default `SERIAL` writes and the value of an identity column.
+#[must_use]
+pub fn sequence_next_value(sequence: &str) -> crate::ast::Expr {
+    crate::ast::Expr::Func {
+        name: "nextval".into(),
+        binding: None,
+        args: vec![crate::ast::Expr::Literal(Value::Str(sequence.to_string()))],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    }
 }

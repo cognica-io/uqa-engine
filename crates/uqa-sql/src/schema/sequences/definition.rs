@@ -105,12 +105,6 @@ pub fn validate_sequence_definition(
     if state.increment == 0 {
         return Err(invalid("INCREMENT must not be zero".into()));
     }
-    if state.cache_size <= 0 {
-        return Err(invalid(format!(
-            "CACHE ({}) must be greater than zero",
-            state.cache_size
-        )));
-    }
     let (type_min, type_max) = state.data_type.bounds();
     if !(type_min..=type_max).contains(&state.max_value) {
         return Err(invalid(format!(
@@ -154,6 +148,12 @@ pub fn validate_sequence_definition(
         return Err(invalid(format!(
             "RESTART value ({}) cannot be greater than MAXVALUE ({})",
             current, state.max_value
+        )));
+    }
+    if state.cache_size <= 0 {
+        return Err(invalid(format!(
+            "CACHE ({}) must be greater than zero",
+            state.cache_size
         )));
     }
     Ok(())

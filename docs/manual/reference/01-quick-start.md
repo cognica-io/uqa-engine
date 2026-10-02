@@ -89,6 +89,8 @@ From a separate Rust application project, add the released dependency:
 cargo add uqa@0.4.7
 ```
 
+Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.4.7 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers; see [text analyzer pipelines](06-text-analyzers.md). The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
+
 ```rust
 use uqa::{Engine, SQLParam, Value};
 

@@ -18,6 +18,7 @@ use crate::tests::native_storage;
 mod cache_refresh;
 mod external_refresh;
 mod internal_reads;
+mod key_identities;
 mod own_commits;
 mod read_view;
 

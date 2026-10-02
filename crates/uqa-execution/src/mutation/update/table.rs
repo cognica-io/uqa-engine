@@ -34,7 +34,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<SQLResult, SQLError> {
-    let _transition_capture_scope = crate::mutation::triggers::TransitionCaptureScope::enter();
+    let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     context.query.source.locking.session.lock_relation(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,
@@ -62,6 +62,16 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             "UPDATE",
             false,
         )?;
+        uqa_sql::semantics::generated_values::GeneratedValueColumns::of(
+            context.mutation.preparation.referential.assignment.columns,
+            &stmt.table,
+        )?
+        .validate_update(stmt.assignments.iter().map(|assignment| {
+            (
+                assignment.target.column.as_str(),
+                matches!(assignment.value, crate::ScalarExpr::Default),
+            )
+        }))?;
     }
     let privilege_expressions =
         uqa_sql::semantics::mutation_privileges::ensure_update_target_privileges(
@@ -73,6 +83,14 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
         .iter()
         .map(|assignment| assignment.target.column.clone())
         .collect::<Vec<_>>();
+    let statement_relation = crate::mutation::constraints::statement_relation(
+        context.mutation.preparation.referential.constraints,
+        &stmt.table,
+    )?;
+    let statement = crate::mutation::constraints::ConstraintStatement::new(
+        &statement_relation,
+        &assigned_columns,
+    );
     let update_rules = context
         .mutation
         .rules
@@ -450,6 +468,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                                         .iter()
                                         .any(|next| next.target.column == assignment.target.column),
                                     action: "UPDATE",
+                                    new_row: false,
                                 },
                                 &assignment.value,
                                 Some(&target_row),
@@ -488,7 +507,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     stmt,
                     params,
                     &snapshot_ctes,
-                    &assigned_columns,
+                    statement,
                     &storage_table,
                     doc_id,
                     original_doc,
@@ -616,7 +635,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         stmt,
                         params,
                         &snapshot_ctes,
-                        &assigned_columns,
+                        statement,
                         &candidate.identity.table,
                         candidate.identity.doc_id,
                         candidate.old_document,

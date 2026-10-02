@@ -138,3 +138,21 @@ pub fn resolve_relation_rename_source(
 pub mod candidates;
 
 pub mod creation;
+
+/// The name `PostgreSQL`'s object descriptions give `relation`: its own name, quoted as an identifier needs, when the search path finds that relation by it, and its schema-qualified name otherwise.
+pub fn described_relation_name(
+    relation: &uqa_core::RelationIdentity,
+    resolve: impl FnOnce(&str) -> Result<RelationResolution, SQLError>,
+) -> Result<String, SQLError> {
+    let local = crate::expr::quote_ident(&relation.name);
+    let visible = match resolve(&local)? {
+        RelationResolution::Found(found, _) => uqa_core::RelationIdentity::from_legacy_name(&found)
+            .is_ok_and(|found| found == *relation),
+        RelationResolution::MissingRelation | RelationResolution::MissingSchema(_) => false,
+    };
+    Ok(if visible {
+        local
+    } else {
+        format!("{}.{local}", crate::expr::quote_ident(&relation.schema))
+    })
+}

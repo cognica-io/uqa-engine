@@ -96,7 +96,9 @@ impl SequenceValueContext<'_> {
                 SequenceReservationResult::Missing => {
                     Err(SequenceValueError::Undefined(target.name.clone()))
                 }
-                SequenceReservationResult::Exhausted => Err(exhausted(&target.name, target.state)),
+                SequenceReservationResult::Exhausted => {
+                    Err(exhausted(&target.relation.name, target.state))
+                }
             };
         }
         let mut sequences = self.runtime.states_write();
@@ -118,7 +120,7 @@ impl SequenceValueContext<'_> {
             sequence.cycle,
             sequence.cache_size,
         )
-        .ok_or_else(|| exhausted(&target.name, *sequence))?;
+        .ok_or_else(|| exhausted(&target.relation.name, *sequence))?;
         sequence.current = reservation.last_value;
         sequence.called = true;
         sequence.log_count = reservation.log_count;

@@ -166,7 +166,7 @@ impl Engine {
             .map(|c| c.name.clone()))
     }
 
-    /// Sequence-generating columns and their durable provenance, in schema order. More than one `SERIAL`/identity column may exist on a table even though only the first one is used as the engine's physical document id.
+    /// Sequence-generating columns and their durable provenance, in schema order. More than one `SERIAL`/identity column may exist on a table; none of them names a row's physical document unless it is the table's single primary key.
     pub(crate) fn auto_increment_columns(
         &self,
         table: &str,

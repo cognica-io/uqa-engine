@@ -7,6 +7,7 @@
 //! Physical SELECT query blocks over local, foreign, and composed sources.
 
 pub mod context;
+mod document_ids;
 mod execution;
 mod facets;
 pub mod foreign;

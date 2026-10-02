@@ -34,6 +34,15 @@ impl MutationIdentifiers for Engine {
     fn allocate_next_id(&self, table: &str) -> Result<DocId, SQLError> {
         Engine::allocate_next_id(self, table)
     }
+    fn allocate_unmapped_id(&self, table: &str) -> Result<DocId, SQLError> {
+        Engine::allocate_unmapped_id(self, table)
+    }
+    fn maps_integer_keys(&self, table: &str) -> Result<bool, SQLError> {
+        Ok(self
+            .require_table(table)?
+            .maps_integer_keys
+            .load(std::sync::atomic::Ordering::Acquire))
+    }
     fn advance_next_id(&self, table: &str, doc_id: DocId) -> uqa_storage::StorageBackendResult<()> {
         Engine::advance_next_id(self, table, doc_id)
     }

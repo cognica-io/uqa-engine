@@ -26,7 +26,7 @@ fn changed_names(
 }
 
 impl Engine {
-    /// After this session's own data commit, keep its table caches when that commit is the only one since the view they reflect. Its writes already maintained them, so the next statement need not rebuild them as it must after another writer. Any other commit, or a catalog, registry, graph or schema revision change, leaves the observed state behind for the ordinary refresh. A failure to observe the committed view has the same effect: the next statement's refresh reads it again and reports any persistent error.
+    /// After this session's own data commit, keep its table caches when that commit is the only one since the view they reflect. Its writes already maintained them, so the next statement need not rebuild them as it must after another writer. Any other commit, or a catalog, registry, graph or schema revision change, leaves the observed state behind for the ordinary refresh. A catalog that reports no cache revisions, before as after, relies on the caller, which adopts only a commit whose dirty state shows data changes alone. A failure to observe the committed view has the same effect as another commit: the next statement's refresh reads it again and reports any persistent error.
     pub(crate) fn adopt_own_commit_revisions(&self) {
         let Some(backend) = self.storage.backend.as_ref() else {
             return;
@@ -36,7 +36,7 @@ impl Engine {
         };
         let previous_view = self.epochs.seen_storage_read_view.lock().clone();
         let previous = self.epochs.storage_cache_revisions.lock().clone();
-        let (Some(previous_view), Some(previous)) = (previous_view, previous) else {
+        let Some(previous_view) = previous_view else {
             return;
         };
         if backend.in_transaction() {
@@ -69,18 +69,26 @@ impl Engine {
         if backend.rollback_transaction().is_err() {
             return;
         }
-        let Ok((version, Some(view), Some(current))) = observed else {
+        let Ok((version, Some(view), current)) = observed else {
             return;
         };
-        if !view.follows_by_one_commit(&previous_view)
-            || current.table_catalog != previous.table_catalog
-            || current.registries != previous.registries
-            || current.graphs != previous.graphs
-            || current.storage_schema != previous.storage_schema
-        {
+        if !view.follows_by_one_commit(&previous_view) {
             return;
         }
-        *self.epochs.storage_cache_revisions.lock() = Some(current);
+        match (&previous, &current) {
+            (Some(previous), Some(current)) => {
+                if current.table_catalog != previous.table_catalog
+                    || current.registries != previous.registries
+                    || current.graphs != previous.graphs
+                    || current.storage_schema != previous.storage_schema
+                {
+                    return;
+                }
+            }
+            (None, None) => {}
+            _ => return,
+        }
+        *self.epochs.storage_cache_revisions.lock() = current;
         *self.epochs.seen_storage_read_view.lock() = Some(view);
         if let Some(version) = version {
             self.epochs

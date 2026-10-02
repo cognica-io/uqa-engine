@@ -130,10 +130,12 @@ pub fn validate_check_rows(
             .expressions
             .evaluate_row(expression, &document, &schema, &[])?;
         if !matches!(value, Value::Null) && !uqa_sql::expr::truthy(&value) {
+            let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+                .map_or_else(|_| table.to_string(), |identity| identity.name);
             return Err(constraint_error(
                 "23514",
                 format!(
-                    "check constraint \"{name}\" of relation \"{table}\" is violated by some row"
+                    "check constraint \"{name}\" of relation \"{relation}\" is violated by some row"
                 ),
             ));
         }

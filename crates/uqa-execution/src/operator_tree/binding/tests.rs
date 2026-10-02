@@ -56,6 +56,7 @@ fn logical_attention_binds_callbacks_once_before_physical_model_construction() {
         &RetrievalConstants {
             params: &[],
             evaluate: &evaluate_constant,
+            stores: &|_: &str| false,
         },
     )
     .unwrap()
@@ -147,6 +148,7 @@ fn logical_attention_defers_checked_model_capacity_to_execution() {
         &RetrievalConstants {
             params: &[],
             evaluate: &evaluate_constant,
+            stores: &|_: &str| false,
         },
     )
     .unwrap()

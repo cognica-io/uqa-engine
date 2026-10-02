@@ -174,11 +174,19 @@ fn stage(
         let mut heads = connection.prepare_cached("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
         for write in prepared.records() {
             control.cancellation().check().map_err(VersionError::from)?;
-            if has_runs {
-                super::runs::extract(connection, write.key(), control)?;
+            // Validation found the head each write expects. A key that expects none has no head, so it is in no run and has no compacted tombstone to restore before its first version.
+            if write.expected().is_some() {
+                if has_runs {
+                    super::runs::extract(connection, write.key(), control)?;
+                }
+                previous.execute([write.key()])?;
+                previous.clear_bindings();
+            } else {
+                debug_assert!(
+                    codec::head(connection, write.key())?.is_none(),
+                    "a write that expects no revision was staged over a head"
+                );
             }
-            previous.execute([write.key()])?;
-            previous.clear_bindings();
             versions.execute(params![write.key(), sequence.as_slice(), write.value()])?;
             versions.clear_bindings();
             heads.execute(params![write.key(), sequence.as_slice()])?;

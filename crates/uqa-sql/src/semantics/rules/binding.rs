@@ -54,6 +54,7 @@ impl RuntimeRuleResolver<'_> {
             value
         } else if metadata.uses_document_id {
             doc_id
+                .filter(|doc_id| crate::semantics::key_identity::is_key_document_id(*doc_id))
                 .map(i64::try_from)
                 .transpose()
                 .map_err(|_| {

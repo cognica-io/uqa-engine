@@ -64,24 +64,24 @@ pub fn relation_columns(
                 });
             };
             if column.generated.is_some() {
-                return Err(SQLError::Routine {
-                        sqlstate: "42P10".into(),
-                        message: format!(
-                            "column \"{requested}\" is a generated column\nDETAIL: Generated columns cannot be used in COPY."
-                        ),
-                    });
+                return Err(SQLError::Diagnostic {
+                    sqlstate: "42P10".into(),
+                    message: format!("column \"{requested}\" is a generated column"),
+                    detail: Some("Generated columns cannot be used in COPY.".into()),
+                    hint: None,
+                });
             }
             columns.push(requested.clone());
         }
         columns
     };
     if reject_partitioned_output && table.is_partitioned() {
-        return Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!(
-                    "cannot copy from partitioned table \"{display_name}\"\nHINT: Try the COPY (SELECT ...) TO variant."
-                ),
-            });
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42809".into(),
+            message: format!("cannot copy from partitioned table \"{display_name}\""),
+            detail: None,
+            hint: Some("Try the COPY (SELECT ...) TO variant.".into()),
+        });
     }
     Ok((canonical, columns))
 }

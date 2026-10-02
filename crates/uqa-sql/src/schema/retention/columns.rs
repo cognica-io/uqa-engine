@@ -48,10 +48,12 @@ impl<'a> Walker<'a> {
         self.optional_text(check_name.as_ref())?;
         self.optional_expr(default.as_ref())?;
         self.optional_expr(check.as_ref())?;
+        // Creating an identity column's sequence consumes its declaration, so a catalog generation holds none.
         if let Some(AutoIncrement {
             kind: _,
             sequence,
             owner,
+            declaration: _,
         }) = auto_increment
         {
             self.optional_text(sequence.as_ref())?;

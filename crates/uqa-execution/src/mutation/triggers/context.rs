@@ -33,6 +33,14 @@ pub trait TriggerCatalog {
         row: bool,
         updated_columns: &[String],
     ) -> Result<Vec<StoredTrigger>, SQLError>;
+    /// The row triggers of `table` for a timing and an event, whatever replication role fires them. A statement resolves them once and applies the role at each firing.
+    fn row_trigger_definitions(
+        &self,
+        table: &str,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+        updated_columns: &[String],
+    ) -> Result<Vec<StoredTrigger>, SQLError>;
     fn has_trigger_definition(
         &self,
         table: &str,

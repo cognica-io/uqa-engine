@@ -122,6 +122,10 @@ impl TableRead for Table {
     fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
         self.0.read()
     }
+
+    fn maps_integer_keys(&self) -> bool {
+        true
+    }
 }
 
 fn table() -> Arc<dyn TableRead> {

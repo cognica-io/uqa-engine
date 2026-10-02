@@ -19,6 +19,17 @@ pub type ColumnCatalogError = Box<dyn std::error::Error>;
 pub struct ColumnShape {
     pub ty: ColumnType,
     pub generated: Option<GeneratedColumnKind>,
+    /// The sequence of an identity column, which `DEFAULT` draws its value from.
+    pub identity_sequence: Option<String>,
+}
+
+/// The sequence an identity column draws its values from: `None` for any other column.
+fn identity_sequence(definition: &ColumnDef) -> Option<String> {
+    definition
+        .auto_increment
+        .as_ref()
+        .filter(|provenance| provenance.is_identity())
+        .and_then(|provenance| provenance.sequence.clone())
 }
 
 pub trait AssignmentColumnCatalog {
@@ -41,6 +52,7 @@ pub trait AssignmentColumnCatalog {
                 .into_iter()
                 .find(|definition| definition.name == column)
                 .map(|definition| ColumnShape {
+                    identity_sequence: identity_sequence(&definition),
                     ty: definition.ty,
                     generated: definition.generated.map(|generated| generated.kind),
                 })
@@ -126,6 +138,19 @@ pub fn validate_mutation_columns<'a>(
         }
     }
     Ok(())
+}
+
+/// The sequence `DEFAULT` draws an identity column's value from, or `None` for a column that is not an identity column.
+pub fn identity_column_sequence(
+    catalog: &dyn AssignmentColumnCatalog,
+    table: &str,
+    column: &str,
+) -> Result<Option<String>, SQLError> {
+    Ok(catalog
+        .try_column_shape(table, column)
+        .map_err(|error| SQLError::Internal(format!("read identity column: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?
+        .and_then(|shape| shape.identity_sequence))
 }
 
 pub fn generated_column_kind(

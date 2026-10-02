@@ -39,6 +39,7 @@ impl Collector<'_> {
         let constants = RetrievalConstants {
             params: self.params,
             evaluate: self.context.evaluate,
+            stores: &|_: &str| false,
         };
         predicate.try_visit(&mut |expression| -> Result<bool, SQLError> {
             if let Some(description) = describe_vector_call(expression, &constants, &|expr| {

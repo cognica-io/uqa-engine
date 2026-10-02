@@ -10,6 +10,8 @@
 mod analyzer_revisions;
 #[path = "catalog/capability_boundaries.rs"]
 mod capability_boundaries;
+#[path = "catalog/constraint_violation_reports.rs"]
+mod constraint_violation_reports;
 #[path = "catalog/pg18_constraint_lifecycle.rs"]
 mod pg18_constraint_lifecycle;
 #[path = "sql_analyze_persistence.rs"]

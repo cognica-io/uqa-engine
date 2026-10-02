@@ -287,15 +287,92 @@ fn the_latest_document_count_reads_stored_rows_and_other_snapshots_count_records
     );
     connection.begin_transaction().unwrap();
     documents.delete(1).unwrap();
+    documents.put(102, BTreeMap::new()).unwrap();
+    documents.delete(103).unwrap();
     stored_reads.store(0, Ordering::Relaxed);
-    assert_eq!(documents.len().unwrap(), 64);
-    assert_eq!(
-        stored_reads.swap(0, Ordering::Relaxed),
-        0,
-        "a transaction's own records were counted from the latest stored rows"
+    // The stored rows are counted, and the transaction's own records add or remove what they insert or delete; deleting a document that was never stored removes nothing.
+    assert_eq!(documents.len().unwrap(), 65);
+    assert!(
+        stored_reads.swap(0, Ordering::Relaxed) > 0,
+        "the count of a transaction that changed the table read no stored rows"
     );
     connection.rollback_transaction().unwrap();
     assert_eq!(documents.len().unwrap(), 65);
+    connection
+        .with_physical(|sqlite| {
+            sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn latest_document_ids_read_the_stored_rows_with_private_records_merged() {
+    use rusqlite::hooks::{AuthAction, Authorization};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let mut documents = SQLiteDocumentStore::new(connection.clone(), "docs");
+    for id in [10, 20, 30, 40] {
+        documents.put(id, BTreeMap::new()).unwrap();
+    }
+    let stored_reads = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&stored_reads);
+    connection
+        .with_physical(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                if matches!(
+                    context.action,
+                    AuthAction::Read {
+                        table_name: "_documents",
+                        ..
+                    }
+                ) {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    connection.begin_transaction().unwrap();
+    // Identities before, between and after the stored rows, and a deletion of one of them.
+    documents.delete(20).unwrap();
+    for id in [5, 35, 50] {
+        documents.put(id, BTreeMap::new()).unwrap();
+    }
+    stored_reads.store(0, Ordering::Relaxed);
+    assert_eq!(documents.doc_ids().unwrap(), [5, 10, 30, 35, 40, 50]);
+    assert!(
+        stored_reads.swap(0, Ordering::Relaxed) > 0,
+        "the identities were not read from the stored rows"
+    );
+    // A page resumes after the last identity it visited, stored or private.
+    let page = |after, limit| {
+        let mut ids = Vec::new();
+        documents
+            .for_each_next_fields_borrowed(after, limit, &[], &mut |id, _| {
+                ids.push(id);
+                true
+            })
+            .unwrap();
+        ids
+    };
+    assert_eq!(page(Some(10), 2), [30, 35]);
+    assert_eq!(page(Some(40), 5), [50]);
+    assert_eq!(page(None, 1), [5]);
+    connection.rollback_transaction().unwrap();
+    assert_eq!(documents.doc_ids().unwrap(), [10, 20, 30, 40]);
     connection
         .with_physical(|sqlite| {
             sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;

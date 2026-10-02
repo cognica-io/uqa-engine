@@ -14,7 +14,10 @@ mod graph_selection;
 mod identity_presence;
 mod latest;
 mod latest_documents;
+mod latest_index_entries;
 mod latest_vertices;
+mod private_rows;
+pub(crate) use private_rows::PrivateRows;
 
 use rusqlite::types::ValueRef;
 use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionError, VersionedKeyValueStore};

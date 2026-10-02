@@ -35,6 +35,9 @@ pub struct AutoIncrement {
     pub sequence: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<AutoIncrementOwner>,
+    /// The sequence options an identity declaration writes, which create its sequence. Creating the sequence consumes them, so a stored column holds none: the sequence keeps them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declaration: Option<Box<super::IdentitySequenceDeclaration>>,
 }
 
 impl AutoIncrement {
@@ -44,6 +47,7 @@ impl AutoIncrement {
             kind: AutoIncrementKind::Serial,
             sequence: None,
             owner: None,
+            declaration: None,
         }
     }
 
@@ -53,6 +57,7 @@ impl AutoIncrement {
             kind: AutoIncrementKind::IdentityAlways,
             sequence: None,
             owner: None,
+            declaration: None,
         }
     }
 
@@ -62,6 +67,7 @@ impl AutoIncrement {
             kind: AutoIncrementKind::IdentityByDefault,
             sequence: None,
             owner: None,
+            declaration: None,
         }
     }
 
@@ -71,6 +77,7 @@ impl AutoIncrement {
             kind: AutoIncrementKind::Legacy,
             sequence: None,
             owner: None,
+            declaration: None,
         }
     }
 

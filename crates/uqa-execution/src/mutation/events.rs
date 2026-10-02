@@ -119,6 +119,8 @@ impl ReferentialActionContext {
 }
 
 pub struct ReferentialRewritePreparation<'a> {
+    /// The table of the foreign key whose action rewrites the row.
+    pub constraint_table: &'a str,
     pub table: &'a str,
     pub doc_id: DocId,
     pub old_document: Document,

@@ -59,6 +59,21 @@ impl TriggerCatalog for Engine {
         self.event_lookup_context()
             .triggers_for(table, timing, event, row, updated_columns)
     }
+    fn row_trigger_definitions(
+        &self,
+        table: &str,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+        updated_columns: &[String],
+    ) -> Result<Vec<StoredTrigger>, SQLError> {
+        self.event_lookup_context().trigger_definitions_for(
+            table,
+            timing,
+            event,
+            true,
+            updated_columns,
+        )
+    }
     fn has_trigger_definition(
         &self,
         table: &str,

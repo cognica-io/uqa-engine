@@ -59,6 +59,11 @@ impl AssignmentColumnCatalog for Engine {
                         .generated
                         .as_ref()
                         .map(|generated| generated.kind),
+                    identity_sequence: definition
+                        .auto_increment
+                        .as_ref()
+                        .filter(|provenance| provenance.is_identity())
+                        .and_then(|provenance| provenance.sequence.clone()),
                 })
         }))
     }

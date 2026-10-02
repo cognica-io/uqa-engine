@@ -11,6 +11,9 @@ mod diagnostics;
 pub mod index_keys;
 mod keys;
 pub mod period;
+mod routing;
+mod statement;
+mod violations;
 use crate::mutation::{
     candidate::{MutationLockTarget, PhysicalDocumentIdentity},
     errors::{dml_storage_error, missing_document_error},
@@ -25,6 +28,8 @@ pub use keys::{
     validate_key_constraints_with_previous, without_overlaps_conflict,
 };
 use period::period_foreign_key_coverage;
+pub use routing::{partition_insert_target, validate_partition_constraint};
+pub use statement::{statement_relation, ConstraintStatement};
 use uqa_core::{DocId, Value};
 use uqa_sql::{
     ast::{ForeignKey, TableKeyConstraint},
@@ -35,20 +40,25 @@ use uqa_sql::{
     SQLError, SQLParam,
 };
 use uqa_storage::document_store::Document;
+pub use violations::partition_rejection_error;
 
+/// Check the constraints of a row that `statement` inserts into `table`, or of an existing row that a table alteration validates when `statement` is `None`.
 pub fn validate_document_constraints(
     context: ConstraintContext<'_>,
+    statement: Option<ConstraintStatement<'_>>,
     table: &str,
     document: &Document,
     params: &[SQLParam],
     ignored_doc_id: Option<DocId>,
 ) -> Result<(), SQLError> {
-    validate_document_non_key_constraints(context, table, document, params)?;
+    validate_document_non_key_constraints(context, statement, table, document, params)?;
     validate_key_constraints(context, table, document, ignored_doc_id)
 }
 
+/// Check the constraints of the row that `statement` writes in place of `old_document`.
 pub fn validate_document_rewrite_constraints(
     context: ConstraintContext<'_>,
+    statement: ConstraintStatement<'_>,
     table: &str,
     old_document: &Document,
     new_document: &Document,
@@ -57,6 +67,7 @@ pub fn validate_document_rewrite_constraints(
 ) -> Result<(), SQLError> {
     validate_document_non_key_constraints_with_old(
         context,
+        Some(statement),
         table,
         new_document,
         params,
@@ -71,17 +82,22 @@ pub fn validate_document_rewrite_constraints(
     )
 }
 
+/// Check the NOT NULL, CHECK, partition and foreign key constraints of a row that `statement` inserts into `table`, or of an existing row that a table alteration validates when `statement` is `None`.
 pub fn validate_document_non_key_constraints(
     context: ConstraintContext<'_>,
+    statement: Option<ConstraintStatement<'_>>,
     table: &str,
     document: &Document,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    validate_document_non_key_constraints_with_old(context, table, document, params, None)
+    validate_document_non_key_constraints_with_old(
+        context, statement, table, document, params, None,
+    )
 }
 
 fn validate_document_non_key_constraints_with_old(
     context: ConstraintContext<'_>,
+    statement: Option<ConstraintStatement<'_>>,
     table: &str,
     document: &Document,
     params: &[SQLParam],
@@ -141,8 +157,11 @@ fn validate_document_non_key_constraints_with_old(
     };
     let document = logical_document.as_ref().unwrap_or(document);
 
-    validate_not_null_columns(&definitions, table, document)?;
+    validate_not_null_columns(context, statement, &definitions, table, document)?;
 
+    // `PostgreSQL` evaluates a relation's CHECK constraints in the order of their names (`CheckConstraintFetch`), so a row that fails several reports the first.
+    let mut check_constraints = check_constraints;
+    check_constraints.sort_by(|left, right| left.name.cmp(&right.name));
     for constraint in check_constraints {
         if !constraint.enforced {
             continue;
@@ -166,14 +185,16 @@ fn validate_document_non_key_constraints_with_old(
         };
         if !accepted {
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
-            let relation = uqa_core::RelationIdentity::from_legacy_name(table)
-                .map_or_else(|_| table.to_string(), |identity| identity.name);
-            return Err(SQLError::Routine {
-                sqlstate: "23514".into(),
-                message: format!(
-                    "new row for relation \"{relation}\" violates check constraint \"{label}\""
-                ),
-            });
+            return Err(violations::check_violation(
+                context, statement, table, &label, document,
+            ));
+        }
+    }
+
+    // A partition that an INSERT names checks its partition constraint after its other constraints; a row routed to it from a partitioned table it belongs to was checked by routing (`ExecInsert`).
+    if let Some(statement) = statement {
+        if old_document.is_none() && statement.relation == table {
+            validate_partition_constraint(context, statement, table, document, params)?;
         }
     }
 
@@ -344,12 +365,23 @@ fn foreign_key_parent_index(
     Ok(keys)
 }
 
+/// `PostgreSQL` checks the NOT NULL columns in column order, those of virtual generated columns after the others (`ExecConstraints`).
 fn validate_not_null_columns(
+    context: ConstraintContext<'_>,
+    statement: Option<ConstraintStatement<'_>>,
     definitions: &[uqa_sql::ast::ColumnDef],
     table: &str,
     document: &Document,
 ) -> Result<(), SQLError> {
-    for col_def in definitions {
+    let is_virtual = |column: &uqa_sql::ast::ColumnDef| {
+        column
+            .generated
+            .as_ref()
+            .is_some_and(|generated| generated.kind == uqa_sql::ast::GeneratedColumnKind::Virtual)
+    };
+    let stored = definitions.iter().filter(|column| !is_virtual(column));
+    let virtual_columns = definitions.iter().filter(|column| is_virtual(column));
+    for col_def in stored.chain(virtual_columns) {
         if !col_def.not_null
             || col_def.auto_increment.as_ref().is_some_and(|provenance| {
                 provenance.kind == uqa_sql::ast::AutoIncrementKind::Legacy
@@ -357,17 +389,14 @@ fn validate_not_null_columns(
         {
             continue;
         }
-        match document.get(&col_def.name) {
-            Some(Value::Null) | None => {
-                return Err(SQLError::Routine {
-                    sqlstate: "23502".into(),
-                    message: format!(
-                        "null value in column \"{}\" of relation \"{table}\" violates not-null constraint",
-                        col_def.name
-                    ),
-                });
-            }
-            _ => {}
+        if matches!(document.get(&col_def.name), Some(Value::Null) | None) {
+            return Err(violations::not_null_violation(
+                context,
+                statement,
+                table,
+                &col_def.name,
+                document,
+            ));
         }
     }
 

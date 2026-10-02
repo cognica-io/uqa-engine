@@ -131,12 +131,26 @@ impl NativeDocumentRead<'_> {
         let Some(owner) = self.owner else {
             return Ok(());
         };
+        // The latest committed rows are read where they are stored, with the session's private records merged in; any other snapshot visits its records.
+        let mut count = 0;
+        let latest =
+            self.snapshot
+                .read_latest_documents(self.table, owner, control, &mut |latest| {
+                    latest.visit_ids(after, &mut |id| {
+                        control.check()?;
+                        visit(document_id_from_sqlite(id)?)?;
+                        count += 1;
+                        Ok(count < limit)
+                    })
+                })?;
+        if latest.is_some() {
+            return Ok(());
+        }
         let identity = NativeRecordIdentity::new(Family::Documents, owner)?;
         let prefix = identity.encode_prefix(&[], control)?;
         let after = after
             .map(|id| identity.encode_key(&[ValueRef::Integer(id)], control))
             .transpose()?;
-        let mut count = 0;
         self.snapshot.view.visit_keys(
             &prefix,
             after.as_deref(),

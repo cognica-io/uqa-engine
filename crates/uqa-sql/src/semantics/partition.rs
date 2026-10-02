@@ -326,13 +326,32 @@ fn invalid_partition_bound(message: impl Into<String>) -> SQLError {
     }
 }
 
-pub fn partition_insert_target(
+/// Why partition routing rejects a row. The executor reports each with a description of the row, which depends on the statement and the role that writes it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PartitionRejection {
+    /// The row does not satisfy the partition constraint of `relation`, which a statement names and routes from: `new row for relation "x" violates partition constraint`.
+    Constraint { relation: String },
+    /// No partition of `relation` accepts the row, whose partition key has the values `keys`: `no partition of relation "x" found for row`.
+    NoPartition { relation: String, keys: Vec<Value> },
+}
+
+/// Where a row that a statement writes through a relation is stored.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PartitionRoute {
+    /// The relation that stores the row.
+    Target(String),
+    /// Routing rejects the row.
+    Rejected(PartitionRejection),
+}
+
+/// Route a row that an `INSERT` writes through `requested_table`, as `ExecFindPartition` does: a partitioned table that is itself a partition first checks its own partition constraint, and each level then selects the partition whose bound accepts the row. A relation that is not partitioned stores the row itself, without a check: `ExecInsert` checks the partition constraint of a partition that the statement names after its other constraints, which the caller does with [`partition_constraint_accepts_row`].
+pub fn route_partition_insert(
     context: &PartitionContext<'_>,
     requested_table: &str,
     document: &ResultRow,
     params: &[SQLParam],
     include_descendants: bool,
-) -> Result<String, SQLError> {
+) -> Result<PartitionRoute, SQLError> {
     let table = context
         .catalog
         .try_resolve_table_name(requested_table)
@@ -342,28 +361,30 @@ pub fn partition_insert_target(
         .catalog
         .try_table_hierarchy(&table)
         .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
-    validate_partition_ancestor_path(context, requested_table, &table, document, params)?;
-    if let Some(spec) = hierarchy.partition_spec.as_ref() {
-        if !include_descendants {
-            return Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!("cannot insert into partitioned table \"{requested_table}\""),
-            });
-        }
-        let child = select_direct_partition_with_spec(context, &table, spec, document, params)?
-            .ok_or_else(|| no_partition_for_row(requested_table))?;
-        return route_partition_tree(context, &child, document, params);
+    let Some(spec) = hierarchy.partition_spec.as_ref() else {
+        return Ok(PartitionRoute::Target(table));
+    };
+    if !include_descendants {
+        return Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("cannot insert into partitioned table \"{requested_table}\""),
+        });
     }
-    Ok(table)
+    if !partition_constraint_accepts_row(context, &table, document, params)? {
+        return Ok(PartitionRoute::Rejected(PartitionRejection::Constraint {
+            relation: table,
+        }));
+    }
+    route_partition_tree(context, &table, spec, document, params)
 }
 
-fn validate_partition_ancestor_path(
+/// Whether the row satisfies the partition constraint of `table`, which holds the bounds of the partition and of each of its partition ancestors (`ExecPartitionCheck`). A relation that is not a partition accepts every row.
+pub fn partition_constraint_accepts_row(
     context: &PartitionContext<'_>,
-    requested_table: &str,
     table: &str,
     document: &ResultRow,
     params: &[SQLParam],
-) -> Result<(), SQLError> {
+) -> Result<bool, SQLError> {
     let mut child = table.to_string();
     let mut visited = std::collections::BTreeSet::new();
     loop {
@@ -377,19 +398,23 @@ fn validate_partition_ancestor_path(
             .try_table_hierarchy(&child)
             .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
         if hierarchy.partition_bound.is_none() {
-            return Ok(());
+            return Ok(true);
         }
         let parent = hierarchy.parents.first().ok_or_else(|| {
             SQLError::Internal(format!("partition `{child}` has no parent relation"))
         })?;
-        let selected = select_direct_partition(context, parent, document, params)?;
-        if selected.as_deref() != Some(child.as_str()) {
-            return Err(SQLError::Routine {
-                sqlstate: "23514".into(),
-                message: format!(
-                    "new row for relation \"{requested_table}\" violates partition constraint"
-                ),
-            });
+        let parent_hierarchy = context
+            .catalog
+            .try_table_hierarchy(parent)
+            .map_err(|error| {
+                SQLError::Internal(format!("read parent partition metadata: {error}"))
+            })?;
+        let spec = parent_hierarchy.partition_spec.as_ref().ok_or_else(|| {
+            SQLError::Internal(format!("partition parent `{parent}` has no partition key"))
+        })?;
+        match select_direct_partition(context, parent, spec, document, params)? {
+            DirectPartition::Child(selected) if selected == child => {}
+            DirectPartition::Child(_) | DirectPartition::None { .. } => return Ok(false),
         }
         child.clone_from(parent);
     }
@@ -398,44 +423,42 @@ fn validate_partition_ancestor_path(
 fn route_partition_tree(
     context: &PartitionContext<'_>,
     table: &str,
+    spec: &crate::ast::PartitionSpec,
     document: &ResultRow,
     params: &[SQLParam],
-) -> Result<String, SQLError> {
+) -> Result<PartitionRoute, SQLError> {
+    let child = match select_direct_partition(context, table, spec, document, params)? {
+        DirectPartition::Child(child) => child,
+        DirectPartition::None { keys } => {
+            return Ok(PartitionRoute::Rejected(PartitionRejection::NoPartition {
+                relation: table.to_string(),
+                keys,
+            }))
+        }
+    };
     let hierarchy = context
         .catalog
-        .try_table_hierarchy(table)
+        .try_table_hierarchy(&child)
         .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
-    let Some(spec) = hierarchy.partition_spec.as_ref() else {
-        return Ok(table.to_string());
-    };
-    let child = select_direct_partition_with_spec(context, table, spec, document, params)?
-        .ok_or_else(|| no_partition_for_row(table))?;
-    route_partition_tree(context, &child, document, params)
+    match hierarchy.partition_spec.as_ref() {
+        Some(spec) => route_partition_tree(context, &child, spec, document, params),
+        None => Ok(PartitionRoute::Target(child)),
+    }
+}
+
+/// The direct partition of a partitioned table that accepts a row, or the row's partition key values when none does.
+enum DirectPartition {
+    Child(String),
+    None { keys: Vec<Value> },
 }
 
 fn select_direct_partition(
     context: &PartitionContext<'_>,
     parent: &str,
-    document: &ResultRow,
-    params: &[SQLParam],
-) -> Result<Option<String>, SQLError> {
-    let hierarchy = context
-        .catalog
-        .try_table_hierarchy(parent)
-        .map_err(|error| SQLError::Internal(format!("read parent partition metadata: {error}")))?;
-    let spec = hierarchy.partition_spec.as_ref().ok_or_else(|| {
-        SQLError::Internal(format!("partition parent `{parent}` has no partition key"))
-    })?;
-    select_direct_partition_with_spec(context, parent, spec, document, params)
-}
-
-fn select_direct_partition_with_spec(
-    context: &PartitionContext<'_>,
-    parent: &str,
     spec: &crate::ast::PartitionSpec,
     document: &ResultRow,
     params: &[SQLParam],
-) -> Result<Option<String>, SQLError> {
+) -> Result<DirectPartition, SQLError> {
     let (keys, definitions) =
         evaluate_partition_keys(context, parent, &spec.keys, document, params)?;
     let row_hash = (spec.strategy == crate::ast::PartitionStrategy::Hash)
@@ -459,10 +482,10 @@ fn select_direct_partition_with_spec(
             continue;
         }
         if partition_bound_matches(context, bound, &keys, params, row_hash)? {
-            return Ok(Some(child));
+            return Ok(DirectPartition::Child(child));
         }
     }
-    Ok(default)
+    Ok(default.map_or(DirectPartition::None { keys }, DirectPartition::Child))
 }
 
 fn evaluate_partition_keys(
@@ -566,13 +589,6 @@ fn compare_key_to_bound(
         }
     }
     Ok(Ordering::Equal)
-}
-
-fn no_partition_for_row(table: &str) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "23514".into(),
-        message: format!("no partition of relation \"{table}\" found for row"),
-    }
 }
 
 mod identity;

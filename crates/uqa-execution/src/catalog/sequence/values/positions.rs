@@ -135,7 +135,7 @@ impl SequenceValueContext<'_> {
                 state.cycle,
                 state.cache_size,
             )
-            .ok_or_else(|| exhausted(&target.name, state))?;
+            .ok_or_else(|| exhausted(&target.relation.name, state))?;
             let mut logged = position.map_or((record.current, record.called), |held| held.logged);
             if let Some(value) = allocation.record_value(
                 base,
@@ -206,7 +206,9 @@ impl SequenceValueContext<'_> {
             SequenceReservationResult::Missing => {
                 Err(SequenceValueError::Undefined(target.name.clone()))
             }
-            SequenceReservationResult::Exhausted => Err(exhausted(&target.name, target.state)),
+            SequenceReservationResult::Exhausted => {
+                Err(exhausted(&target.relation.name, target.state))
+            }
         }
     }
 

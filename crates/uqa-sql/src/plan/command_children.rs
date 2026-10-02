@@ -180,6 +180,7 @@ impl CommandPlan {
                             condition,
                             columns,
                             values,
+                            ..
                         } => {
                             expressions.extend(condition.as_ref());
                             expressions.extend(
@@ -299,6 +300,7 @@ impl CommandPlan {
                             condition,
                             columns,
                             values,
+                            ..
                         } => {
                             expressions.extend(condition.as_mut());
                             expressions.extend(

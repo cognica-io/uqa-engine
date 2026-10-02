@@ -429,21 +429,34 @@ impl Engine {
         self.prepare_transaction_writer()
     }
 
+    /// Prepare storage for a write that waited for no lock and whose records no other transaction can have written, as the write of a row at an identity that was never used. The storage target then needs no refresh; a deferred frame is promoted to a writer as for any other write.
+    pub(crate) fn prepare_unrefreshed_transaction_writer(&self) -> Result<bool, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        self.prepare_serializable_transaction_snapshot()?;
+        self.promote_transaction_writer(false)
+    }
+
     /// Prepare storage from the active statement or one of its workers without reentering the parent's thread-owned gate.
     pub(crate) fn prepare_transaction_writer(&self) -> Result<bool, SQLError> {
+        self.promote_transaction_writer(true)
+    }
+
+    fn promote_transaction_writer(&self, refresh: bool) -> Result<bool, SQLError> {
         let mut stack = self.session.transactions.lock();
         if stack
             .first()
             .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Versioned)
         {
             drop(stack);
-            // Logical locks can wait while another writer commits. Refresh the storage target without replacing command caches: a compound DDL operation may have staged only part of its private catalog changes when it prepares another write. Command boundaries own catalog restoration, and retained source snapshots and the original row-change baseline stay fixed here.
-            self.storage
-                .backend
-                .as_ref()
-                .expect("versioned transaction frame requires a backend")
-                .refresh_transaction_snapshot(&self.runtime.cancellation)
-                .map_err(|error| Self::storage_tx_error("refresh write target", &error))?;
+            if refresh {
+                // Logical locks can wait while another writer commits. Refresh the storage target without replacing command caches: a compound DDL operation may have staged only part of its private catalog changes when it prepares another write. Command boundaries own catalog restoration, and retained source snapshots and the original row-change baseline stay fixed here.
+                self.storage
+                    .backend
+                    .as_ref()
+                    .expect("versioned transaction frame requires a backend")
+                    .refresh_transaction_snapshot(&self.runtime.cancellation)
+                    .map_err(|error| Self::storage_tx_error("refresh write target", &error))?;
+            }
             return Ok(false);
         }
         if !stack

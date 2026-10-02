@@ -518,6 +518,7 @@ where
             value
         } else if metadata.uses_document_id {
             doc_id
+                .filter(|doc_id| uqa_sql::semantics::key_identity::is_key_document_id(*doc_id))
                 .map(i64::try_from)
                 .transpose()
                 .map_err(|_| {

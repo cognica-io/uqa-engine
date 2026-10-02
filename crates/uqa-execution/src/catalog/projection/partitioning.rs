@@ -197,12 +197,12 @@ pub fn pg_get_partkeydef_value(
             .table(&resolution, &table)?
             .ok_or_else(|| SQLError::UnknownTable(table.clone()))?
             .hierarchy;
-        return Ok(hierarchy
+        return hierarchy
             .partition_spec
             .as_ref()
-            .map_or(Value::Null, |spec| {
-                str_value(partition_key_definition(spec))
-            }));
+            .map_or(Ok(Value::Null), |spec| {
+                partition_key_definition(&catalog, &resolution, spec).map(str_value)
+            });
     }
     Ok(Value::Null)
 }
@@ -311,25 +311,51 @@ pub fn partition_bound_expression(bound: &PartitionBound) -> String {
     }
 }
 
-pub fn partition_key_definition(spec: &PartitionSpec) -> String {
+/// The partition key as `pg_get_partkeydef` prints it.
+pub fn partition_key_definition(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    spec: &PartitionSpec,
+) -> Result<String, SQLError> {
     let strategy = match spec.strategy {
         PartitionStrategy::List => "LIST",
         PartitionStrategy::Range => "RANGE",
         PartitionStrategy::Hash => "HASH",
     };
-    let keys = spec
-        .keys
-        .iter()
-        .map(|key| match key {
-            Expr::Column(column) => uqa_sql::expr::quote_ident(column),
-            expression => schema_expr_text(expression),
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("{strategy} ({keys})")
+    let keys = partition_key_columns(catalog, resolution, spec, false)?;
+    Ok(format!("{strategy} ({keys})"))
 }
 
-fn partition_key_types_for_table(
+/// The keys of a partition key as `pg_get_partkeydef_columns` prints them: each column by its quoted name, each expression deparsed, in parentheses unless it reads as a function call. `pretty` drops the parentheses that precedence makes redundant, as an error detail prints them.
+pub fn partition_key_columns(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    spec: &PartitionSpec,
+    pretty: bool,
+) -> Result<String, SQLError> {
+    spec.keys
+        .iter()
+        .map(|key| match key {
+            Expr::Column(column) => Ok(uqa_sql::expr::quote_ident(column)),
+            expression => {
+                let text = super::view_definition::stored_expression_definition(
+                    catalog, resolution, expression, pretty,
+                )?;
+                Ok(
+                    if super::view_definition::stored_expression_prints_as_call(expression) {
+                        text
+                    } else {
+                        format!("({text})")
+                    },
+                )
+            }
+        })
+        .collect::<Result<Vec<_>, SQLError>>()
+        .map(|keys| keys.join(", "))
+}
+
+/// The type of each key of the partition key of `table`.
+pub fn partition_key_types_for_table(
     context: &CatalogContext<'_>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,

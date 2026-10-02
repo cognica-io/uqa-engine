@@ -55,7 +55,7 @@ pub fn validate_column_default(
     column: &str,
     default: &mut Expr,
 ) -> Result<(), SQLError> {
-    super::reject_default_change_on_generated_column(context.columns, table, column)?;
+    super::reject_default_change(context.columns, table, column, true)?;
     let target = context
         .state
         .column_type(table, column)

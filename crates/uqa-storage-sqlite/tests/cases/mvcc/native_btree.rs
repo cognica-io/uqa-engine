@@ -390,3 +390,59 @@ fn native_index_failure_rolls_back_document_and_index_materialization_before_exa
         }
     }
 }
+
+#[test]
+fn loaded_postings_and_document_ids_merge_a_transactions_private_rows() {
+    let stored = [10_u64, 20, 30, 40];
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let connection = open(mode, &directory.path().join("merged-load.db"));
+        Catalog::open(connection.clone()).unwrap();
+        let mut documents = SQLiteDocumentStore::new(connection.clone(), "docs");
+        let indexes = SQLiteBTreeIndexStore::new(connection.clone());
+        for id in stored {
+            documents.put(id, fields(id as i64)).unwrap();
+        }
+        for key in keys() {
+            let postings = stored.map(|id| (id, values(id as i64)[&key].clone()));
+            indexes.replace("docs", &key, &postings).unwrap();
+        }
+        bind(&connection);
+        let backend = SQLiteStorageBackend::new(connection.clone());
+        let mut docs = backend.document_store("docs");
+        let expect = |rows: &[(u64, i64)], key: &ValueIndexKey| {
+            rows.iter()
+                .map(|(id, n)| (*id, values(*n)[key].clone()))
+                .collect::<Vec<_>>()
+        };
+        connection.begin_transaction().unwrap();
+        // Rows before, between and after the stored ones, a replacement and a deletion.
+        for (id, n) in [(5, 5), (20, 200), (35, 35), (50, 50)] {
+            docs.put(id, fields(n)).unwrap();
+            backend
+                .apply_btree_index_write("docs", id, Some(&values(n)))
+                .unwrap();
+        }
+        docs.delete(30).unwrap();
+        backend.apply_btree_index_write("docs", 30, None).unwrap();
+        let merged = [(5, 5), (10, 10), (20, 200), (35, 35), (40, 40), (50, 50)];
+        for key in keys() {
+            assert_eq!(
+                backend.load_btree_index("docs", &key).unwrap().unwrap(),
+                expect(&merged, &key),
+                "{mode:?} {key:?}"
+            );
+        }
+        assert_eq!(docs.doc_ids().unwrap(), merged.map(|(id, _)| id));
+        connection.rollback_transaction().unwrap();
+        let committed = stored.map(|id| (id, id as i64));
+        for key in keys() {
+            assert_eq!(
+                backend.load_btree_index("docs", &key).unwrap().unwrap(),
+                expect(&committed, &key),
+                "{mode:?} {key:?}"
+            );
+        }
+        assert_eq!(docs.doc_ids().unwrap(), stored);
+    }
+}

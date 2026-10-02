@@ -22,6 +22,8 @@ mod privileges;
 mod review_regressions;
 #[path = "sql_triggers/row_images.rs"]
 mod row_images;
+#[path = "sql_triggers/statement_scope.rs"]
+mod statement_scope;
 #[path = "sql_triggers/transition.rs"]
 mod transition;
 

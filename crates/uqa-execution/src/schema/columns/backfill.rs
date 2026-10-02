@@ -28,6 +28,15 @@ pub struct ColumnBackfillContext<'a> {
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
 }
+/// An existing row that the added NOT NULL column would leave NULL (`ATRewriteTable`).
+fn null_values(table: &str, column: &str) -> SQLError {
+    let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+        .map_or_else(|_| table.to_string(), |identity| identity.name);
+    SQLError::Routine {
+        sqlstate: "23502".into(),
+        message: format!("column \"{column}\" of relation \"{relation}\" contains null values"),
+    }
+}
 /// Apply the new column's default to rows that existed before `ADD COLUMN`. `PostgreSQL` stores one missing value for a non-volatile default, including on an empty table, while volatile defaults are evaluated independently for every existing row and do not populate `attmissingval`.
 pub fn backfill_added_column(
     context: &ColumnBackfillContext<'_>,
@@ -39,12 +48,7 @@ pub fn backfill_added_column(
     let doc_ids = context.rewrite.reads.live_table_doc_ids(table)?;
     let Some(default_expr) = default_expr else {
         if not_null && !doc_ids.is_empty() {
-            return Err(SQLError::Routine {
-                sqlstate: "23502".into(),
-                message: format!(
-                    "column \"{column}\" of relation \"{table}\" contains null values"
-                ),
-            });
+            return Err(null_values(table, column));
         }
         return Ok(None);
     };
@@ -71,12 +75,7 @@ pub fn backfill_added_column(
                 value,
             )?;
             if not_null && value == Value::Null {
-                return Err(SQLError::Routine {
-                    sqlstate: "23502".into(),
-                    message: format!(
-                        "null value in column \"{column}\" of relation \"{table}\" violates not-null constraint"
-                    ),
-                });
+                return Err(null_values(table, column));
             }
             let mut vectors: RowUpdateVectors = BTreeMap::new();
             if let Some(ty) = column_type
@@ -106,12 +105,7 @@ pub fn backfill_added_column(
             .evaluate_bound(default_expr, &[])?,
     )?;
     if not_null && default_value == Value::Null && !doc_ids.is_empty() {
-        return Err(SQLError::Routine {
-            sqlstate: "23502".into(),
-            message: format!(
-                "null value in column \"{column}\" of relation \"{table}\" violates not-null constraint"
-            ),
-        });
+        return Err(null_values(table, column));
     }
     let vector_value = match column_type.as_ref() {
         Some(ty) if matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) => {

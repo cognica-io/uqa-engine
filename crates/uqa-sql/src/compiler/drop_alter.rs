@@ -8,6 +8,7 @@
 
 mod columns;
 mod domains;
+mod identity;
 
 use super::relations::{
     collect_def_elem_options, validate_materialized_view_options, validate_view_options,
@@ -752,6 +753,9 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     using,
                 }
             }
+            AlterTableType::AtAddIdentity => identity::add_identity(cmd)?,
+            AlterTableType::AtSetIdentity => identity::set_identity(cmd)?,
+            AlterTableType::AtDropIdentity => identity::drop_identity(cmd),
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE action {other:?}"

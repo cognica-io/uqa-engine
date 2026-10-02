@@ -35,10 +35,12 @@ pub fn without_overlaps_conflict(
     }
     let (_, candidate_ranges) = period_ranges(&candidate_period, &period_type)?;
     if candidate_ranges.is_empty() {
+        let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+            .map_or_else(|_| table.to_string(), |identity| identity.name);
         return Err(SQLError::Routine {
             sqlstate: "23514".into(),
             message: format!(
-                "empty WITHOUT OVERLAPS value found in column \"{period_column}\" in relation \"{table}\""
+                "empty WITHOUT OVERLAPS value found in column \"{period_column}\" in relation \"{relation}\""
             ),
         });
     }

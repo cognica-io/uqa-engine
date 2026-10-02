@@ -328,15 +328,8 @@ impl Engine {
             }
         }
         if self.storage.backend.is_some() {
-            if let Err(error) = self.reload_persistent_value_indexes() {
-                cleanup_errors.push(format!("btree restore: {error}"));
-            }
-            if let Err(error) = self.reload_table_catalog_after_rollback() {
-                cleanup_errors.push(format!("table catalog restore: {error}"));
-            }
-            if let Err(error) = self.reload_catalog_registries_after_rollback() {
-                cleanup_errors.push(format!("registry restore: {error}"));
-            }
+            self.drop_persistent_value_indexes();
+            self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         if session_snapshot.is_some() {
             if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
@@ -526,16 +519,9 @@ impl Engine {
             .last()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
         self.restore_transaction_dirty_state(dirty_at_begin);
-        if let Err(error) = self.reload_persistent_value_indexes() {
-            cleanup_errors.push(format!("btree restore: {error}"));
-        }
+        self.drop_persistent_value_indexes();
         if self.storage.backend.is_some() {
-            if let Err(error) = self.reload_table_catalog_after_rollback() {
-                cleanup_errors.push(format!("table catalog restore: {error}"));
-            }
-            if let Err(error) = self.reload_catalog_registries_after_rollback() {
-                cleanup_errors.push(format!("registry restore: {error}"));
-            }
+            self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
             &nontransactional_sequence_values,

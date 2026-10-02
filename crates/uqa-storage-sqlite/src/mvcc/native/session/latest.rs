@@ -6,7 +6,7 @@
 
 //! Physical reads of the native projection at a snapshot that is the database's latest commit.
 //!
-//! Each record commit materializes the native projection in its own physical transaction and advances the database header in that transaction, so a read whose header sequence equals a snapshot's boundary sees the projection of exactly that boundary. A session's private records are not projected, so the projection stands in for the snapshot only when the session holds none.
+//! Each record commit materializes the native projection in its own physical transaction and advances the database header in that transaction, so a read whose header sequence equals a snapshot's boundary sees the projection of exactly that boundary. A session's private records are not projected: the projection stands in for the snapshot when the session holds none, and a read that knows which private records concern it merges them into the projection.
 
 use rusqlite::Connection;
 use uqa_storage::read_control::StorageReadControl;
@@ -15,7 +15,7 @@ use super::NativeSnapshot;
 use crate::connection::Result;
 
 impl NativeSnapshot {
-    /// Run `read` in one physical read when the native projection holds exactly this snapshot's committed records. Returns `None` without running it otherwise; the caller then reads the records. `read` must not read this snapshot.
+    /// Run `read` in one physical read when the native projection holds exactly this snapshot's records. Returns `None` without running it otherwise; the caller then reads the records. `read` must not read this snapshot.
     pub(crate) fn read_latest_projection<T>(
         &self,
         control: &StorageReadControl,
@@ -26,6 +26,15 @@ impl NativeSnapshot {
         if self.view.private_revision().is_some() {
             return Ok(None);
         }
+        self.read_latest_committed(control, read)
+    }
+
+    /// Run `read` in one physical read when this snapshot's committed records are the latest ones, whatever private records the session holds; `read` merges those it concerns itself. Returns `None` without running it otherwise.
+    pub(super) fn read_latest_committed<T>(
+        &self,
+        control: &StorageReadControl,
+        read: &mut dyn FnMut(&Connection) -> Result<Option<T>>,
+    ) -> Result<Option<T>> {
         let Some(snapshot) = self
             .view
             .committed()

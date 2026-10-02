@@ -7,10 +7,12 @@
 //! Virtual `information_schema` relation builders.
 
 mod foreign_tables;
+mod identity;
 
 use std::collections::BTreeSet;
 
 use foreign_tables::insert_foreign_table_column_privileges;
+use identity::{owned_identity_sequence, IdentityAttributes};
 
 use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::{default_expr_text, schema_expr_text};
@@ -179,7 +181,9 @@ fn information_schema_column_row(
     index: usize,
     column: &SQLColumnDef,
     updatable: bool,
+    sequence: Option<&crate::catalog::sequence::SequenceState>,
 ) -> Result<ResultRow, SQLError> {
+    let identity = IdentityAttributes::of(column, sequence);
     Ok(row([
         ("table_catalog", catalog_name()),
         ("table_schema", str_value(schema)),
@@ -263,33 +267,11 @@ fn information_schema_column_row(
                 _ => Value::Null,
             },
         ),
-        (
-            "identity_start",
-            if column
-                .auto_increment
-                .as_ref()
-                .is_some_and(|provenance| provenance.is_identity() || provenance.is_legacy())
-            {
-                str_value("1")
-            } else {
-                Value::Null
-            },
-        ),
-        (
-            "identity_increment",
-            if column
-                .auto_increment
-                .as_ref()
-                .is_some_and(|provenance| provenance.is_identity() || provenance.is_legacy())
-            {
-                str_value("1")
-            } else {
-                Value::Null
-            },
-        ),
-        ("identity_maximum", Value::Null),
-        ("identity_minimum", Value::Null),
-        ("identity_cycle", str_value("NO")),
+        ("identity_start", identity.start),
+        ("identity_increment", identity.increment),
+        ("identity_maximum", identity.maximum),
+        ("identity_minimum", identity.minimum),
+        ("identity_cycle", identity.cycle),
         (
             "is_generated",
             str_value(if column.generated.is_some() {
@@ -317,6 +299,11 @@ pub fn build_info_columns(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
+    let sequences = catalog
+        .sequence_states()?
+        .into_iter()
+        .map(|(relation, state, _, _)| (relation.qualified_name(), state))
+        .collect::<std::collections::BTreeMap<_, _>>();
     for tname in catalog.table_names() {
         let table_snapshot = catalog
             .table(resolution, &tname)?
@@ -340,6 +327,7 @@ pub fn build_info_columns(
                 idx,
                 col,
                 true,
+                owned_identity_sequence(&sequences, &tname, col)?,
             )?);
         }
     }
@@ -365,6 +353,7 @@ pub fn build_info_columns(
                     .get(idx)
                     .copied()
                     .unwrap_or(false),
+                None,
             )?);
         }
     }
@@ -387,6 +376,7 @@ pub fn build_info_columns(
                 idx,
                 column,
                 false,
+                owned_identity_sequence(&sequences, &foreign_name, column)?,
             )?);
         }
     }

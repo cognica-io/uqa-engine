@@ -512,15 +512,8 @@ impl Engine {
             cleanup_errors.push(format!("storage rollback: {error}"));
         } else {
             self.restore_graph_transaction_overlay(session_snapshot);
-            if let Err(error) = self.reload_persistent_value_indexes() {
-                cleanup_errors.push(format!("btree restore: {error}"));
-            }
-            if let Err(error) = self.reload_table_catalog_after_rollback() {
-                cleanup_errors.push(format!("table catalog restore: {error}"));
-            }
-            if let Err(error) = self.reload_catalog_registries_after_rollback() {
-                cleanup_errors.push(format!("registry restore: {error}"));
-            }
+            self.drop_persistent_value_indexes();
+            self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         self.restore_session_state(session_snapshot);
         if cleanup_errors.is_empty() {

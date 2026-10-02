@@ -11,6 +11,8 @@ pub enum ColumnProperty<'a> {
     Default(Option<Expr>),
     Generated(Option<GeneratedColumn>),
     Type(&'a ColumnType),
+    /// The `SERIAL` or identity provenance of the column.
+    AutoIncrement(Option<crate::ast::AutoIncrement>),
 }
 pub fn column_mut<'a>(
     columns: &'a mut [ColumnDef],
@@ -33,6 +35,7 @@ pub fn apply_property(
         ColumnProperty::Default(default) => definition.default = default,
         ColumnProperty::Generated(generated) => definition.generated = generated,
         ColumnProperty::Type(ty) => definition.ty.clone_from(ty),
+        ColumnProperty::AutoIncrement(provenance) => definition.auto_increment = provenance,
     }
     Ok(())
 }

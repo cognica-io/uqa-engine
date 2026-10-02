@@ -79,16 +79,14 @@ impl Engine {
     pub(crate) fn create_implicit_sequence_with_persistence(
         &self,
         name: &str,
-        start: i64,
-        increment: i64,
-        data_type: SequenceDataType,
+        state: SequenceState,
         persistence: uqa_sql::ast::RelationPersistence,
     ) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| {
             uqa_execution::schema::sequences::creation::create_sequence(
                 &engine.sequence_creation_context(),
                 name,
-                SequenceState::initial(start, increment, data_type),
+                state,
                 false,
                 persistence,
                 &uqa_sql::ast::SequenceOwnership::Unchanged,

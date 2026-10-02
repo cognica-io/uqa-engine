@@ -145,7 +145,11 @@ jobs:
 
   test-fdw-linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
+    env:
+      # Optimized test binaries that keep debug assertions, as in the workspace tests.
+      CARGO_PROFILE_DEV_OPT_LEVEL: "2"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "2"
     steps:
       - uses: actions/checkout@v4
         with:

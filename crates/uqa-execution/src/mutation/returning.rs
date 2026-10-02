@@ -81,14 +81,12 @@ pub fn returning_image_values<S: Clone + 'static>(
     columns
         .iter()
         .map(|column| {
-            if super::rows::is_virtual_document_id_column(column, definitions)
-                || definitions.iter().any(|definition| {
-                    definition.name == *column
-                        && definition.primary_key
-                        && definition.ty.is_integer()
-                })
-            {
+            if super::rows::is_virtual_document_id_column(column, definitions) {
                 doc_id_value(image.doc_id)
+            } else if definitions.iter().any(|definition| {
+                definition.name == *column && definition.primary_key && definition.ty.is_integer()
+            }) {
+                super::rows::integer_key_value(&document, column, Some(image.doc_id))
             } else if column == TABLE_OID_COLUMN {
                 Ok(Value::Int(crate::catalog::projection::table_relation_oid(
                     &services.rows.catalog,

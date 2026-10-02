@@ -150,6 +150,7 @@ fn build_conflict_update<S: Clone + 'static>(
                     .iter()
                     .any(|next| next.target.column == assignment.target.column),
                 action: "INSERT ON CONFLICT DO UPDATE",
+                new_row: false,
             },
             &assignment.value,
             Some(&conflict_row),
@@ -379,12 +380,7 @@ impl InsertConflictLocks {
                         "INSERT ON CONFLICT rewrite dependency tree was cyclic at its root".into(),
                     )
                 })?;
-                if let Some(root) = uqa_sql::semantics::partition::partition_hierarchy_root(
-                    context.constraints.partitions.catalog,
-                    &prepared.table,
-                )? {
-                    reject_partition_rewrite(&context, &prepared, &root, params, true)?;
-                }
+                reject_partition_rewrite(&context, &prepared, params)?;
                 self.overlay
                     .as_mut()
                     .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?

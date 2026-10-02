@@ -18,18 +18,55 @@ impl Engine {
             .map(|resolved| resolved.unwrap_or_else(|| table.to_string()))
     }
 
-    pub(crate) fn command_mutation_overlay_active(&self) -> bool {
-        if !self.session.command_mutation_overlays.lock().is_empty() {
-            return true;
+    /// Whether a read of `table` merges changes that its storage view does not show, as [`Self::command_overlay_changes`] would return them: documents the running command staged for the table, changes a portal's transaction overlay holds for it, or rows of it that this transaction changed while its reads see a fixed snapshot. A read of any other table sees exactly its storage view.
+    pub(crate) fn command_overlay_holds(&self, table: &str) -> Result<bool, SQLError> {
+        // A statement outside a transaction, or before the transaction's first write, has nothing staged, held or changed, and needs no name resolution to know it.
+        let staging = !self.session.command_mutation_overlays.lock().is_empty();
+        let holding = self
+            .query_transaction_overlay
+            .as_ref()
+            .is_some_and(|overlay| !overlay.is_empty());
+        if !staging
+            && !holding
+            && self
+                .session
+                .transactions
+                .lock()
+                .iter()
+                .all(|frame| frame.row_changes.is_empty())
+        {
+            return Ok(false);
         }
-        if let Some(overlay) = self.query_transaction_overlay.as_ref() {
-            return !overlay.is_empty();
-        }
-        self.session
-            .transactions
+        let canonical = self.command_overlay_table_name(table)?;
+        let staged = self
+            .session
+            .command_mutation_overlays
             .lock()
             .iter()
-            .any(|frame| !frame.row_changes.is_empty())
+            .any(|overlay| {
+                overlay
+                    .documents(&canonical)
+                    .is_some_and(|documents| !documents.is_empty())
+            })
+            || self
+                .query_transaction_overlay
+                .as_ref()
+                .and_then(|overlay| overlay.get(&canonical))
+                .is_some_and(DocumentChanges::has_changes);
+        if staged
+            || (self.query_transaction_overlay.is_some() && self.query_transaction_origin.is_none())
+        {
+            return Ok(staged);
+        }
+        let Some(generation) = self.query_relation_generation(&canonical)? else {
+            return Ok(false);
+        };
+        let mut changed = false;
+        self.visit_fixed_transaction_rows(generation, &mut |_, _| {
+            changed = true;
+            Ok(false)
+        })?;
+        Ok(changed)
     }
 
     pub(crate) fn stage_command_document(
@@ -158,61 +195,20 @@ impl Engine {
         if self.query_transaction_overlay.is_some() && self.query_transaction_origin.is_none() {
             return Ok(changes.has_changes().then_some(changes));
         }
-        let relation = crate::RelationIdentity::from_legacy_name(canonical_table)
-            .map_err(SQLError::Internal)?;
-        let query_table = self
-            .query_table_snapshots
-            .as_ref()
-            .and_then(|snapshots| snapshots.get(&relation))
-            .cloned()
-            .or_else(|| self.storage.tables.read().get(&relation).cloned());
-        let generation = query_table.map(|table| table.storage_generation());
-        let Some(generation) = generation else {
+        let Some(generation) = self.query_relation_generation(canonical_table)? else {
             return Ok(changes.has_changes().then_some(changes));
         };
         let control = self.query_retention_control()?;
-        let desired = {
-            let stack = self.session.transactions.lock();
-            if self.query_transaction_overlay.is_none()
-                && stack
-                    .first()
-                    .is_none_or(|frame| frame.fixed_snapshot.is_none())
-            {
-                return Ok(None);
-            }
-            let mut desired = DocumentSelection::new(&control);
-            for change in stack.iter().flat_map(|frame| frame.row_changes.iter()) {
-                if self
-                    .query_transaction_origin
-                    .is_some_and(|origin| change.query_origin != Some(origin))
-                {
-                    continue;
-                }
-                if change.source_generation == generation {
-                    desired
-                        .insert(
-                            change.pending.key.doc_id,
-                            !matches!(
-                                change.pending.kind,
-                                crate::row_locks::PendingRowChangeKind::Delete
-                                    | crate::row_locks::PendingRowChangeKind::Rewrite(_)
-                            ),
-                            &control,
-                        )
-                        .map_err(|error| storage_error("select private query rows", &error))?;
-                }
-                if let crate::row_locks::PendingRowChangeKind::Rewrite(successor) =
-                    change.pending.kind
-                {
-                    if change.successor_generation == Some(generation) {
-                        desired
-                            .insert(successor.doc_id, true, &control)
-                            .map_err(|error| storage_error("select private query rows", &error))?;
-                    }
-                }
-            }
+        let mut desired = DocumentSelection::new(&control);
+        let fixed = self.visit_fixed_transaction_rows(generation, &mut |doc_id, live| {
             desired
-        };
+                .insert(doc_id, live, &control)
+                .map_err(|error| storage_error("select private query rows", &error))?;
+            Ok(true)
+        })?;
+        if !fixed {
+            return Ok(None);
+        }
         if desired.is_empty() {
             return Ok(changes.has_changes().then_some(changes));
         }
@@ -235,5 +231,66 @@ impl Engine {
             )
             .map_err(|error| storage_error("merge private query rows", &error))?;
         Ok(Some(changes))
+    }
+
+    /// The storage generation of the relation a read of `canonical_table` sees, or `None` when no such relation is loaded.
+    fn query_relation_generation(
+        &self,
+        canonical_table: &str,
+    ) -> Result<Option<[u8; 16]>, SQLError> {
+        let relation = crate::RelationIdentity::from_legacy_name(canonical_table)
+            .map_err(SQLError::Internal)?;
+        let query_table = self
+            .query_table_snapshots
+            .as_ref()
+            .and_then(|snapshots| snapshots.get(&relation))
+            .cloned()
+            .or_else(|| self.storage.tables.read().get(&relation).cloned());
+        Ok(query_table.map(|table| table.storage_generation()))
+    }
+
+    /// Visit the rows of relation generation `generation` that this transaction changed and a read of a fixed snapshot merges, each with whether it is live afterwards, while `visit` returns true. Returns false without visiting a row when the transaction's reads see its changes in storage.
+    fn visit_fixed_transaction_rows(
+        &self,
+        generation: [u8; 16],
+        visit: &mut dyn FnMut(DocId, bool) -> Result<bool, SQLError>,
+    ) -> Result<bool, SQLError> {
+        let stack = self.session.transactions.lock();
+        if self.query_transaction_overlay.is_none()
+            && stack
+                .first()
+                .is_none_or(|frame| frame.fixed_snapshot.is_none())
+        {
+            return Ok(false);
+        }
+        for change in stack.iter().flat_map(|frame| frame.row_changes.iter()) {
+            if self
+                .query_transaction_origin
+                .is_some_and(|origin| change.query_origin != Some(origin))
+            {
+                continue;
+            }
+            if change.source_generation == generation
+                && !visit(
+                    change.pending.key.doc_id,
+                    !matches!(
+                        change.pending.kind,
+                        crate::row_locks::PendingRowChangeKind::Delete
+                            | crate::row_locks::PendingRowChangeKind::Rewrite(_)
+                    ),
+                )?
+            {
+                break;
+            }
+            if let crate::row_locks::PendingRowChangeKind::Rewrite(successor) = change.pending.kind
+            {
+                if change.successor_generation == Some(generation)
+                    && !visit(successor.doc_id, true)?
+                {
+                    break;
+                }
+            }
+        }
+        Ok(true)
     }
 }

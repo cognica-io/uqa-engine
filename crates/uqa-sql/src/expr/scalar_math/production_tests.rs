@@ -89,11 +89,12 @@ fn controlled_result_cases() -> [(&'static str, Vec<Value>, Value); 21] {
         (
             "encode",
             vec![Value::Bytes(vec![b'A', 255, b'\n']), text("escape")],
-            text("A\\u{fffd}\\n"),
+            // `esc_enc` writes a high-bit byte as three octal digits and keeps the line feed.
+            text("A\\377\n"),
         ),
         (
             "decode",
-            vec![text("61 \u{2003} 62"), text("hex")],
+            vec![text("61 \t\r\n 62"), text("hex")],
             Value::Bytes(b"ab".to_vec()),
         ),
         (
