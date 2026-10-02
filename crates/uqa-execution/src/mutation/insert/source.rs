@@ -285,10 +285,11 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             )?
             .is_some()
             {
-                return Err(SQLError::TypeMismatch(format!(
-                    "column `{}` is a generated column; only DEFAULT may be assigned",
-                    column.column
-                )));
+                return Err(
+                    uqa_sql::semantics::generated_values::generated_column_insert_error(
+                        &column.column,
+                    ),
+                );
             }
             let value = source_row
                 .value_at(index)

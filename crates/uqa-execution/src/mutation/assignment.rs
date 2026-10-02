@@ -112,9 +112,11 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
         .map(Some);
     }
     if generated.is_some() {
-        return Err(SQLError::TypeMismatch(format!(
-            "column `{column}` is a generated column; only DEFAULT may be assigned"
-        )));
+        return Err(if new_row {
+            uqa_sql::semantics::generated_values::generated_column_insert_error(column)
+        } else {
+            uqa_sql::semantics::generated_values::generated_column_update_error(column)
+        });
     }
     let empty_schema = RowSchema::default();
     let schema = row.map_or(&empty_schema, |row| &row.schema);

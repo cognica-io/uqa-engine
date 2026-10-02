@@ -188,7 +188,7 @@ pub fn prepare_auto_increment_identity(
                 && overriding != Some(OverridingKind::SystemValue)
             {
                 return Err(
-                    uqa_sql::semantics::identity_columns::generated_always_insert_error(column),
+                    uqa_sql::semantics::generated_values::generated_always_insert_error(column),
                 );
             }
             continue;

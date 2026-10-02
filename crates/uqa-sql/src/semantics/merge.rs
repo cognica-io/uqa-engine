@@ -425,7 +425,7 @@ fn validate_merge_identity_targets(
     catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
     stmt: &MergePlan,
 ) -> Result<(), SQLError> {
-    let identity = super::identity_columns::IdentityColumns::of(catalog, &stmt.target)?;
+    let identity = super::generated_values::GeneratedValueColumns::of(catalog, &stmt.target)?;
     for clause in &stmt.when_clauses {
         match clause {
             MergeWhenPlan::UpdateMatched { assignments, .. }

@@ -34,6 +34,10 @@ An identity column's sequence now takes the options its declaration writes, `GEN
 
 Text converted to `smallint`, `integer` or `bigint`, by a cast, an assignment or a comparison, now reads the forms PostgreSQL reads: `0x`, `0o` and `0b` prefixes and underscores between digits, as in `'0x1F'` and `'1_000'`, which earlier versions rejected. A text outside the type's range now reports `22003`, `value "40000" is out of range for type smallint`; earlier versions reported `22P02` for one beyond the 64-bit range and `smallint out of range`, the message of a number converted to a narrower type, for one within it.
 
+## Generated column writes
+
+A value other than `DEFAULT` written to a generated column now reports PostgreSQL's `428C9`, `cannot insert a non-DEFAULT value into column "name"` or `column "name" can only be updated to DEFAULT` with the detail `Column "name" is a generated column.`, before the statement reads a row; earlier versions reported `42804` while writing the first row, so a statement whose source yields no row succeeded. `COPY` diagnostics carry their detail and hint separately from their message.
+
 ## Integer key identities
 
 A row whose single integer primary key is negative, or at or above 2^62, now takes a document identity at or above 2^62, where no key value names one; earlier versions gave it the table's next identity, which a later key names. A later row with that key therefore inserts, a foreign key no longer finds a parent its key does not name, and `ORDER BY` the key returns such rows in key order, as PostgreSQL does. A negative value for a serial or identity primary key is accepted instead of failing with SQLSTATE `42804`. Rows with keys from 0 up to 2^62 keep the identity equal to their key, so their `_doc_id` and `_meta.doc_id` are unchanged.

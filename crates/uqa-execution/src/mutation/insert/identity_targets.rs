@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use uqa_sql::{
     ast::OverridingKind,
     plan::{ConflictActionPlan, ConflictPlan, InsertPlan},
-    semantics::identity_columns::IdentityColumns,
+    semantics::generated_values::GeneratedValueColumns,
     SQLError, ScalarExpr,
 };
 
@@ -58,7 +58,7 @@ pub(super) fn validate_insert_identity_targets(
             })
             .collect(),
     };
-    let identity = IdentityColumns::of(identities.columns, &stmt.table)?;
+    let identity = GeneratedValueColumns::of(identities.columns, &stmt.table)?;
     identity.validate_insert(
         targets.iter().map(String::as_str).zip(supplied),
         stmt.overriding,
@@ -87,7 +87,7 @@ pub fn user_value_identity_columns(
     if stmt.overriding != Some(OverridingKind::UserValue) || !stmt.view_rule_relations.is_empty() {
         return Ok(BTreeSet::new());
     }
-    let identity = IdentityColumns::of(identities.columns, &stmt.table)?;
+    let identity = GeneratedValueColumns::of(identities.columns, &stmt.table)?;
     Ok(columns
         .into_iter()
         .filter(|column| identity.contains(column.as_ref()))

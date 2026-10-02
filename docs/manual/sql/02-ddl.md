@@ -234,6 +234,8 @@ Virtual generated columns cannot use user-defined routines or UQA Engine engine-
 
 `ALTER TABLE ADD COLUMN` supports both generated kinds, and `ALTER COLUMN ... SET EXPRESSION AS (...)` replaces a generation expression. `DROP EXPRESSION` is available for a stored generated column and retains its last stored values; PostgreSQL 18 rejects that operation for a virtual generated column.
 
+A statement that writes a value other than `DEFAULT` to a generated column fails with `428C9` before it reads or writes a row, as PostgreSQL's rewriter rejects it: an `INSERT`, including one whose source yields no row, reports `cannot insert a non-DEFAULT value into column "name"`, and an `UPDATE`, an `ON CONFLICT DO UPDATE` or a `MERGE` update reports `column "name" can only be updated to DEFAULT`, each with the detail `Column "name" is a generated column.`. `OVERRIDING SYSTEM VALUE` admits only an identity column's value, and a statement writing several such columns reports the first in table order. `COPY` naming a generated column reports `42P10`.
+
 ## Key and uniqueness constraints
 
 Primary keys and unique constraints can cover one or more columns:

@@ -62,7 +62,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             "UPDATE",
             false,
         )?;
-        uqa_sql::semantics::identity_columns::IdentityColumns::of(
+        uqa_sql::semantics::generated_values::GeneratedValueColumns::of(
             context.mutation.preparation.referential.assignment.columns,
             &stmt.table,
         )?
