@@ -6,13 +6,16 @@
 
 //! A session keeps its committed snapshot while the commit monitor shows that nothing was committed.
 
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
 use super::*;
 use uqa_core::memory::BudgetedVec;
 
-/// A snapshot that reports the monitor value it was captured at.
+/// A snapshot that reports the monitor value it was captured at, and adopts a later value when it has a counter for that.
 pub(super) struct MonitoredSnapshot {
     pub(super) source: MemoryRecordSnapshot,
-    pub(super) monitor: u64,
+    pub(super) monitor: AtomicU64,
+    pub(super) adoptions: Option<Arc<AtomicUsize>>,
 }
 
 impl CommittedRecordSnapshot for MonitoredSnapshot {
@@ -23,7 +26,15 @@ impl CommittedRecordSnapshot for MonitoredSnapshot {
         CommittedRecordSnapshot::reclamation_epoch(&self.source)
     }
     fn commit_monitor(&self) -> Option<u64> {
-        Some(self.monitor)
+        Some(self.monitor.load(Ordering::Relaxed))
+    }
+    fn adopt_commit_monitor(&self, monitor: u64) -> bool {
+        let Some(adoptions) = &self.adoptions else {
+            return false;
+        };
+        self.monitor.store(monitor, Ordering::Relaxed);
+        adoptions.fetch_add(1, Ordering::Relaxed);
+        true
     }
     fn get(
         &self,
@@ -96,6 +107,34 @@ fn a_refresh_captures_no_snapshot_while_the_monitor_shows_no_commit() {
     assert_eq!(captures(&persistence), committed + 2);
     assert_eq!(session.get(b"own").unwrap().unwrap(), b"private");
     session.commit_transaction().unwrap();
+}
+
+#[test]
+fn a_snapshot_that_adopts_the_monitor_value_stays_in_place() {
+    let persistence = monitored(7);
+    let adoptions = Arc::new(AtomicUsize::new(0));
+    persistence.state.lock().adoptions = Some(Arc::clone(&adoptions));
+    let session = persistence.session(1 << 20);
+    session.begin_transaction().unwrap();
+    session.put(b"own", b"private").unwrap();
+    let begun = captures(&persistence);
+    // The monitor moves without a record commit. One capture finds the same sequence, and the session's snapshot takes the newer value instead of being replaced.
+    persistence.state.lock().monitor = Some(100);
+    refresh(&session);
+    assert_eq!(captures(&persistence), begun + 1);
+    assert_eq!(adoptions.load(Ordering::Relaxed), 1);
+    refresh(&session);
+    assert_eq!(captures(&persistence), begun + 1);
+    assert_eq!(adoptions.load(Ordering::Relaxed), 1);
+    // A record commit is a new boundary, which a snapshot of the earlier one cannot adopt.
+    commit_elsewhere(&persistence, b"peer", b"committed");
+    let committed = captures(&persistence);
+    refresh(&session);
+    assert_eq!(captures(&persistence), committed + 1);
+    assert_eq!(adoptions.load(Ordering::Relaxed), 1);
+    assert_eq!(session.get(b"peer").unwrap().unwrap(), b"committed");
+    assert_eq!(session.get(b"own").unwrap().unwrap(), b"private");
+    session.rollback_transaction().unwrap();
 }
 
 #[test]

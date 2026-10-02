@@ -28,9 +28,11 @@ impl Transaction {
         }
         let current = persistence.snapshot(control)?;
         if current.sequence() == self.committed.sequence() {
-            if current.commit_monitor().is_some() {
+            if let Some(monitor) = current.commit_monitor() {
                 // The same records under the monitor's current value, which spares the next refresh this capture.
-                self.committed = current;
+                if !self.committed.adopt_commit_monitor(monitor) {
+                    self.committed = current;
+                }
             }
             return Ok(());
         }

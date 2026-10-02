@@ -166,6 +166,8 @@ struct State {
     /// The commit monitor's value, for a test that gives the persistence one.
     monitor: Option<u64>,
     captures: usize,
+    /// Counts the monitor values its snapshots adopt, for a test whose snapshots can.
+    adoptions: Option<Arc<std::sync::atomic::AtomicUsize>>,
 }
 struct Persistence {
     store: MemoryVersionStore,
@@ -194,6 +196,7 @@ impl Persistence {
                 acknowledgement_fault: false,
                 monitor: None,
                 captures: 0,
+                adoptions: None,
             }),
         })
     }
@@ -323,16 +326,21 @@ impl VersionedPersistence for Persistence {
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
-        let monitor = {
+        let (monitor, adoptions) = {
             let mut state = self.state.lock();
             state.captures += 1;
-            state.monitor
+            (state.monitor, state.adoptions.clone())
         };
         let source = self.store.snapshot()?;
         match monitor {
-            Some(monitor) => {
-                retain_record_snapshot(monitor::MonitoredSnapshot { source, monitor }, control)
-            }
+            Some(monitor) => retain_record_snapshot(
+                monitor::MonitoredSnapshot {
+                    source,
+                    monitor: std::sync::atomic::AtomicU64::new(monitor),
+                    adoptions,
+                },
+                control,
+            ),
             None => retain_record_snapshot(source, control),
         }
     }

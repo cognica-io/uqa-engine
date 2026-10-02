@@ -40,7 +40,33 @@ fn a_snapshot_carries_the_monitor_value_it_was_captured_at() {
     // An in-memory database has no connection that could watch another one commit.
     let memory = SQLiteRecordStore::new(&ManagedConnection::open_in_memory().unwrap()).unwrap();
     assert_eq!(memory.commit_monitor_version().unwrap(), None);
-    assert_eq!(memory.snapshot(&control).unwrap().commit_monitor(), None);
+    let unmonitored = memory.snapshot(&control).unwrap();
+    assert_eq!(unmonitored.commit_monitor(), None);
+    assert!(!unmonitored.adopt_commit_monitor(1));
+}
+
+#[test]
+fn a_snapshot_adopts_the_monitor_value_of_a_later_capture_of_its_sequence() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = ManagedConnection::open(&directory.path().join("adopted.db")).unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    let first = store.snapshot(&control).unwrap();
+    // An identifier observation is a physical commit that leaves the record sequence where it is.
+    store
+        .allocate_identifiers(
+            b"rows",
+            uqa_storage::mvcc::IdentifierRequest::Observe(5),
+            &control,
+        )
+        .unwrap();
+    let moved = store.commit_monitor_version().unwrap().unwrap();
+    assert_ne!(first.commit_monitor(), Some(moved));
+    let second = store.snapshot(&control).unwrap();
+    assert_eq!(second.sequence(), first.sequence());
+    assert_eq!(second.commit_monitor(), Some(moved));
+    assert!(first.adopt_commit_monitor(moved));
+    assert_eq!(first.commit_monitor(), Some(moved));
 }
 
 #[test]

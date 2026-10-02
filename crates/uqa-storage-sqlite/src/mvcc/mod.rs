@@ -413,7 +413,7 @@ impl VersionedPersistence for SQLiteRecordStore {
                 store: self.clone(),
                 sequence: lease.sequence(),
                 reclamation_epoch,
-                monitor,
+                monitor: monitor.map(std::sync::atomic::AtomicU64::new),
                 table_owners: read::table_owners::TableOwners::default(),
                 _lease: lease,
             },

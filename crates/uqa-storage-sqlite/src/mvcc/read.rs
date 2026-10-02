@@ -28,8 +28,8 @@ pub(super) struct Snapshot {
     pub(super) store: SQLiteRecordStore,
     pub(super) sequence: CommitSequence,
     pub(super) reclamation_epoch: u64,
-    /// The commit monitor's value before this snapshot was captured.
-    pub(super) monitor: Option<u64>,
+    /// The commit monitor's value before this snapshot, or a later one of the same sequence, was captured.
+    pub(super) monitor: Option<std::sync::atomic::AtomicU64>,
     pub(crate) table_owners: table_owners::TableOwners,
     pub(super) _lease: std::sync::Arc<uqa_storage::mvcc::SnapshotLease>,
 }
@@ -65,6 +65,17 @@ impl CommittedRecordSnapshot for Snapshot {
     }
     fn commit_monitor(&self) -> Option<u64> {
         self.monitor
+            .as_ref()
+            .map(|monitor| monitor.load(std::sync::atomic::Ordering::Relaxed))
+    }
+    fn adopt_commit_monitor(&self, monitor: u64) -> bool {
+        match &self.monitor {
+            Some(current) => {
+                current.store(monitor, std::sync::atomic::Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
     }
     fn sequence(&self) -> CommitSequence {
         self.sequence
