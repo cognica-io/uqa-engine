@@ -20,6 +20,7 @@ use crate::result::ResultRow;
 mod array_transform;
 mod encoding;
 mod floating;
+pub(crate) mod integer_input;
 mod json;
 mod json_strip;
 mod random;

@@ -482,7 +482,7 @@ pub(in crate::compiler) fn compile_column_def(
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrIdentity => {
-                    auto_increment = Some(match cstr.generated_when.as_str() {
+                    let mut identity = match cstr.generated_when.as_str() {
                         "a" => AutoIncrement::identity_always(),
                         "d" => AutoIncrement::identity_by_default(),
                         other => {
@@ -490,7 +490,10 @@ pub(in crate::compiler) fn compile_column_def(
                                 "identity constraint has unknown generation {other:?}"
                             )));
                         }
-                    });
+                    };
+                    identity.declaration =
+                        super::super::sequences::compile_identity_declaration(&cstr.options)?;
+                    auto_increment = Some(identity);
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrDefault => {

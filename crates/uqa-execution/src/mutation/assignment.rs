@@ -75,14 +75,7 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
             let next = crate::query::catalog_expression::eval_lowered_expression(
                 services.expressions.expressions,
                 services.scopes.current_routine_scope(),
-                &uqa_sql::ast::Expr::Func {
-                    name: "nextval".into(),
-                    binding: None,
-                    args: vec![uqa_sql::ast::Expr::Literal(Value::Str(sequence))],
-                    distinct: false,
-                    order_by: Vec::new(),
-                    filter: None,
-                },
+                &uqa_sql::schema::sequences::implicit::sequence_next_value(&sequence),
                 None,
                 params,
             )?;

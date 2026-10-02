@@ -6,6 +6,7 @@
 
 //! SQL sequence declarations, names, and ownership binding.
 pub mod actions;
+pub mod declaration;
 pub mod definition;
 pub mod implicit;
 pub mod ownership;

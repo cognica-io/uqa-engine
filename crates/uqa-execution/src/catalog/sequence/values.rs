@@ -141,7 +141,7 @@ impl SequenceValueContext<'_> {
             let (min, max) = (target.state.min_value, target.state.max_value);
             if !(min..=max).contains(&value) {
                 return Err(SequenceValueError::SetvalOutOfBounds {
-                    name: target.name,
+                    name: target.relation.name,
                     value,
                     min,
                     max,

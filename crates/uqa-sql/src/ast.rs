@@ -20,6 +20,7 @@ mod events;
 mod expressions;
 mod from;
 mod function_binding;
+mod identity_sequence;
 mod indexes;
 mod interval;
 mod locking;
@@ -32,6 +33,7 @@ mod role_specification;
 mod routine_security;
 mod routines;
 mod sequence;
+mod sequence_declaration;
 mod types;
 
 pub use acl_role_specification::AclRoleSpecification;
@@ -43,6 +45,7 @@ pub use events::*;
 pub use expressions::*;
 pub use from::*;
 pub use function_binding::*;
+pub use identity_sequence::{DeferredSQLError, IdentitySequenceDeclaration, IdentitySequenceName};
 pub use indexes::*;
 pub use interval::*;
 pub use locking::*;
@@ -55,6 +58,7 @@ pub use role_specification::RoleSpecification;
 pub use routine_security::*;
 pub use routines::*;
 pub use sequence::*;
+pub use sequence_declaration::{SequenceDeclaration, SequenceOptionValue};
 pub use types::*;
 
 const fn default_include_descendants() -> bool {
