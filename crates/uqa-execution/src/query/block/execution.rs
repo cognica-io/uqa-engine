@@ -137,8 +137,13 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                 && catalog
                     .table_resolved(&resolution, name)?
                     .is_some_and(|table| table.columns.is_empty());
-            let command_overlay =
-                ctes.reads_command_overlay() && context.documents.command_overlay_active();
+            // Only the overlay of this block's own table changes what it reads; changes of other tables leave its storage view as the single-table path reads it.
+            let command_overlay = match local_table.as_deref() {
+                Some(table) if ctes.reads_command_overlay() => {
+                    context.documents.command_overlay_holds(table)?
+                }
+                _ => false,
+            };
             let has_hierarchy_descendants = local_table.is_some()
                 && catalog
                     .hierarchy_scan_tables(&resolution, name, *include_descendants)?

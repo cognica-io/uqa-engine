@@ -175,8 +175,8 @@ impl uqa_execution::query::block::context::QueryDocumentRead for Engine {
         self.try_describe_query_table(table)
             .map_err(|error| error.to_string())
     }
-    fn command_overlay_active(&self) -> bool {
-        self.command_mutation_overlay_active()
+    fn command_overlay_holds(&self, table: &str) -> Result<bool, SQLError> {
+        self.command_overlay_holds(table)
     }
 }
 
