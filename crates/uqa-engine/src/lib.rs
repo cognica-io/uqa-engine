@@ -347,6 +347,8 @@ struct TransactionFrame {
     snapshot_change_baseline: row_locks::RowChangeBaseline,
     row_changes: Vec<TransactionRowChange>,
     statistics_changes: statistics::StatisticsChanges,
+    /// What this frame's commit did with its statistics changes, for the session to take over when the commit has succeeded.
+    statistics_settlement: statistics::StatisticsSettlement,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events:
         Vec<uqa_execution::mutation::triggers::DeferredConstraintTriggerEvent>,

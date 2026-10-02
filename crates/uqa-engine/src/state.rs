@@ -284,6 +284,8 @@ pub(super) struct SessionContext {
     pub(super) next_portal_transaction_origin: Mutex<u64>,
     pub(crate) statistics_worker: AtomicBool,
     pub(crate) statistics_client: AtomicBool,
+    /// Row changes of this session's commits that no maintenance record counts yet.
+    pub(crate) kept_statistics: Mutex<crate::statistics::StatisticsChanges>,
 }
 
 #[derive(Clone)]
@@ -339,6 +341,7 @@ impl SessionContext {
             next_portal_transaction_origin: Mutex::new(1),
             statistics_worker: AtomicBool::new(false),
             statistics_client: AtomicBool::new(false),
+            kept_statistics: Mutex::new(BTreeMap::new()),
         }
     }
 

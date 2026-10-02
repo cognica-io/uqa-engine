@@ -242,6 +242,8 @@ impl Engine {
                 "column `{column}` of relation `{canonical_table_name}` does not exist"
             )));
         }
+        // Read before the sample, which reads at this sequence or a later one.
+        let sampled_at = self.statistics_sample_sequence();
         let inputs = self.collect_hierarchy_analyze_inputs(
             canonical_table_name,
             &columns,
@@ -265,6 +267,7 @@ impl Engine {
                     &stats_out,
                     t.object_id(),
                     row_count,
+                    sampled_at,
                 )?;
             }
         }
@@ -275,6 +278,7 @@ impl Engine {
             t.object_id(),
             row_count,
             crate::statistics::value_size::FORMAT_VERSION,
+            None,
         )?;
         self.clear_pending_statistics_changes(canonical_table_name, t.object_id());
         Ok(())
@@ -347,12 +351,14 @@ impl Engine {
         })
     }
 
+    /// `sampled_at` is the commit sequence the statistics were sampled at, or `None` when it is not known.
     pub(crate) fn persist_column_stats(
         catalog: &dyn CatalogFacade,
         table_name: &str,
         stats: &BTreeMap<String, uqa_planner::ColumnStats>,
         object_id: [u8; 16],
         row_count: u64,
+        sampled_at: Option<u64>,
     ) -> StorageBackendResult<()> {
         struct EncodedColumnStats {
             column_name: String,
@@ -415,6 +421,7 @@ impl Engine {
             object_id,
             row_count,
             crate::statistics::value_size::FORMAT_VERSION,
+            sampled_at,
         )
     }
 

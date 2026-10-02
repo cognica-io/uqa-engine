@@ -117,6 +117,61 @@ fn sampling_read_snapshot_allows_writes_and_rejects_obsolete_statistics() {
 }
 
 #[test]
+fn a_change_its_session_keeps_still_makes_an_inflight_sample_obsolete() {
+    let (_directory, writer, worker) = sessions();
+    let changes = |engine: &Engine| {
+        let json = engine
+            .storage
+            .catalog
+            .as_deref()
+            .unwrap()
+            .get_metadata("uqa.statistics.maintenance.v1:public.t")
+            .unwrap()
+            .unwrap();
+        serde_json::from_str::<serde_json::Value>(&json).unwrap()["changes"].clone()
+    };
+    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    // Sixty changes make an analysis of one row due, and their statement records them.
+    writer
+        .sql(
+            "INSERT INTO t SELECT n FROM generate_series(2, 61) AS g(n)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(changes(&writer), 60);
+    let backend = worker.storage.backend.as_ref().unwrap();
+    backend.begin_read_transaction().unwrap();
+    worker.refresh_pinned_transaction_snapshot().unwrap();
+    let sampled = worker
+        .collect_automatic_analysis("public.t")
+        .unwrap()
+        .unwrap();
+    assert_eq!(sampled.row_count, 61);
+    // The analysis is due already, so the writer keeps this change to itself: the record stays as the sample saw it, and only the table's data generation tells of the write.
+    writer.sql("INSERT INTO t VALUES (62)", &[]).unwrap();
+    backend.rollback_transaction().unwrap();
+    assert_eq!(changes(&writer), 60);
+    assert!(!worker
+        .publish_automatic_analysis("public.t", sampled)
+        .unwrap());
+    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 62);
+    assert_eq!(changes(&writer), 0);
+    // That analysis sampled the change the writer kept, so the writer's next change is recorded alone.
+    writer.sql("INSERT INTO t VALUES (63)", &[]).unwrap();
+    assert_eq!(changes(&writer), 1);
+
+    // An analysis that sampled before a kept change was committed has not seen it. The writer records it with its next change.
+    worker.sql("BEGIN; ANALYZE t", &[]).unwrap();
+    writer.sql("INSERT INTO t VALUES (64)", &[]).unwrap();
+    assert_eq!(changes(&writer), 1);
+    worker.sql("COMMIT", &[]).unwrap();
+    assert_eq!(changes(&writer), 0);
+    writer.sql("INSERT INTO t VALUES (65)", &[]).unwrap();
+    assert_eq!(changes(&writer), 2);
+}
+
+#[test]
 fn compressed_statistics_publication_can_finish_during_an_uncommitted_row_write() {
     let directory = tempfile::tempdir().unwrap();
     let writer = Engine::open_compressed(

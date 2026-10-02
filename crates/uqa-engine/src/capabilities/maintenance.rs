@@ -187,6 +187,8 @@ impl VacuumStatistics for SavedVacuumStatistics<'_> {
                     .values()
                     .next()
                     .map_or(0, |stats| stats.row_count),
+                // Statistics saved from before are no new sample.
+                None,
             )?;
         }
         Ok(())
