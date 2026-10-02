@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use uqa_sql::{semantics::constraint_catalog::ConstraintCatalog, SQLError};
+use uqa_sql::{ast::IndexKey, semantics::constraint_catalog::ConstraintCatalog, SQLError};
 
 use crate::mutation::{
     errors::dml_storage_error, identity::MutationIdentifiers, prepared::PreparedInsertConflict,
@@ -17,7 +17,7 @@ use crate::mutation::{
 
 use super::supplied_identities::ObservedIdentities;
 
-/// An insert creates its document when the statement resolves no conflict by rewriting a row and the document identity is either generated or a unique key, whose conflict check has already found no row.
+/// An insert creates its document when the statement resolves no conflict by rewriting a row and the document identity is either generated or a unique key, whose validation has already found no row. The identity column is such a key when one enforced key of the table consists of it alone and covers every row. That includes a serial or identity column declared a key, which the catalog's list of unique columns leaves out although its key is validated as any other.
 pub(super) struct KnownNewInserts<'a> {
     catalog: &'a dyn ConstraintCatalog,
     id_column: &'a str,
@@ -98,10 +98,14 @@ impl<'a> KnownNewInserts<'a> {
         }
         let unique = self
             .catalog
-            .try_unique_columns(target_table)
+            .enforced_keys(target_table)
             .map_err(|error| dml_storage_error("INSERT", error))?
             .iter()
-            .any(|column| column == self.id_column);
+            .any(|key| {
+                key.predicate.is_none()
+                    && !key.without_overlaps
+                    && matches!(key.keys.as_slice(), [IndexKey::Column(column)] if column == self.id_column)
+            });
         self.unique_identity.insert(target_table.to_owned(), unique);
         Ok(unique)
     }

@@ -10,7 +10,10 @@ use std::cell::RefCell;
 
 use uqa_core::DocId;
 use uqa_sql::{
-    ast::{ColumnDef, ColumnType, ForeignKey, TableCheck, TableConstraintSet},
+    ast::{
+        ColumnDef, ColumnType, Expr, ForeignKey, TableCheck, TableConstraintSet,
+        TableKeyConstraint, TableKeyConstraintKind,
+    },
     catalog::index::EnforcedKey,
     semantics::conflict::ConflictCatalog,
 };
@@ -19,44 +22,76 @@ use uqa_storage::mvcc::ObservedIdentifier;
 
 use super::*;
 
-/// Unique scalar columns by table, recording each table the decision asks about.
+/// Enforced keys by table, recording each table the decision asks about.
 #[derive(Default)]
 struct Catalog {
     asked: RefCell<Vec<String>>,
 }
 
+fn key(kind: TableKeyConstraintKind, columns: &[&str]) -> EnforcedKey {
+    EnforcedKey::from(TableKeyConstraint {
+        catalog_identity: None,
+        name: None,
+        kind,
+        columns: columns.iter().map(|column| (*column).to_owned()).collect(),
+        included_columns: Vec::new(),
+        nulls_not_distinct: false,
+        without_overlaps: false,
+    })
+}
+
 impl ConflictCatalog for Catalog {
     fn try_describe_table(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        unreachable!("the decision reads only unique columns")
+        unreachable!("the decision reads only enforced keys")
     }
-    fn enforced_keys(&self, _: &str) -> Result<Vec<EnforcedKey>, String> {
-        unreachable!("the decision reads only unique columns")
+    fn enforced_keys(&self, table: &str) -> Result<Vec<EnforcedKey>, String> {
+        self.asked.borrow_mut().push(table.to_owned());
+        let unique = |columns: &[&str]| key(TableKeyConstraintKind::Unique, columns);
+        match table {
+            "keyed" => Ok(vec![
+                unique(&["code"]),
+                key(TableKeyConstraintKind::PrimaryKey, &["id"]),
+            ]),
+            "unkeyed" => Ok(vec![unique(&["code"])]),
+            // A key over the identity and another column admits two rows with one identity.
+            "compound" => Ok(vec![unique(&["id", "code"])]),
+            // A partial key leaves the rows outside its predicate unchecked.
+            "partial" => Ok(vec![EnforcedKey {
+                predicate: Some(Box::new(Expr::Column("active".into()))),
+                ..unique(&["id"])
+            }]),
+            // A key over an expression of the identity is not a key over the identity.
+            "expression" => Ok(vec![EnforcedKey {
+                keys: vec![IndexKey::Expression(Box::new(Expr::Column("id".into())))],
+                ..unique(&["id"])
+            }]),
+            "overlapping" => Ok(vec![EnforcedKey::from(TableKeyConstraint {
+                without_overlaps: true,
+                ..unique(&["id"]).constraint
+            })]),
+            _ => Err(format!("unknown table {table}")),
+        }
     }
     fn try_declared_table_constraints(&self, _: &str) -> Result<TableConstraintSet, String> {
-        unreachable!("the decision reads only unique columns")
+        unreachable!("the decision reads only enforced keys")
     }
 }
 
 impl ConstraintCatalog for Catalog {
-    fn try_unique_columns(&self, table: &str) -> Result<Vec<String>, String> {
-        self.asked.borrow_mut().push(table.to_owned());
-        match table {
-            "keyed" => Ok(vec!["code".into(), "id".into()]),
-            "unkeyed" => Ok(vec!["code".into()]),
-            _ => Err(format!("unknown table {table}")),
-        }
+    fn try_unique_columns(&self, _: &str) -> Result<Vec<String>, String> {
+        unreachable!("the list of unique columns leaves out auto-increment keys")
     }
     fn try_check_constraint_definitions(&self, _: &str) -> Result<Vec<TableCheck>, String> {
-        unreachable!("the decision reads only unique columns")
+        unreachable!("the decision reads only enforced keys")
     }
     fn try_foreign_keys(&self, _: &str) -> Result<Vec<ForeignKey>, String> {
-        unreachable!("the decision reads only unique columns")
+        unreachable!("the decision reads only enforced keys")
     }
     fn column_type(&self, _: &str, _: &str) -> Result<Option<ColumnType>, String> {
-        unreachable!("the decision reads only unique columns")
+        unreachable!("the decision reads only enforced keys")
     }
     fn hierarchy_scan_tables(&self, _: &str, _: bool) -> Result<Vec<String>, SQLError> {
-        unreachable!("the decision reads only unique columns")
+        unreachable!("the decision reads only enforced keys")
     }
 }
 
@@ -90,6 +125,21 @@ fn a_supplied_identity_is_new_only_when_it_is_a_unique_key() {
     // Each target table is read once, however many rows it receives.
     assert_eq!(*catalog.asked.borrow(), ["keyed", "unkeyed"]);
     assert!(known_new.contains("missing", &SUPPLIED).is_err());
+}
+
+#[test]
+fn a_key_makes_the_identity_unique_only_when_it_is_that_column_alone_for_every_row() {
+    let catalog = Catalog::default();
+    let mut known_new = KnownNewInserts::new(&catalog, "id", false);
+    for table in ["compound", "partial", "expression", "overlapping"] {
+        assert!(!known_new.contains(table, &SUPPLIED).unwrap(), "{table}");
+        // A generated identity needs no key.
+        assert!(known_new.contains(table, &GENERATED).unwrap(), "{table}");
+    }
+    // The key is the one named by the identity column, whatever the column is called.
+    let mut by_code = KnownNewInserts::new(&catalog, "code", false);
+    assert!(by_code.contains("unkeyed", &SUPPLIED).unwrap());
+    assert!(!by_code.contains("compound", &SUPPLIED).unwrap());
 }
 
 #[test]
