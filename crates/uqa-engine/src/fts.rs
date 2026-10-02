@@ -323,6 +323,31 @@ impl Engine {
         result
     }
 
+    /// Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails. Only a document known to be new has no previous version, and without indexed text it leaves the index alone.
+    fn publish_prepared_document_text(
+        &self,
+        table_name: &str,
+        table: &TableState,
+        doc_id: DocId,
+        text_fields: BTreeMap<FieldName, String>,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
+        if !uqa_execution::mutation::publication::document_changes_text_index(
+            known_new,
+            &text_fields,
+        ) {
+            return Ok(());
+        }
+        uqa_execution::serializable::text::add_document(
+            self,
+            table_name,
+            table.columns.snapshot(),
+            table.inverted_index.write().as_mut(),
+            doc_id,
+            text_fields,
+        )
+    }
+
     fn add_prepared_document_impl_with_fts(
         &self,
         table: &str,
@@ -391,15 +416,7 @@ impl Engine {
         )?;
         if index_fts {
             let text_fields = self.prepared_document_text_fields(table, &document)?;
-            // Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails.
-            uqa_execution::serializable::text::add_document(
-                self,
-                &table_name,
-                t.columns.snapshot(),
-                t.inverted_index.write().as_mut(),
-                doc_id,
-                text_fields,
-            )?;
+            self.publish_prepared_document_text(&table_name, &t, doc_id, text_fields, known_new)?;
         }
         let columns = t.columns.read().clone();
         crate::generated::strip_virtual_generated_columns(&columns, &mut document);

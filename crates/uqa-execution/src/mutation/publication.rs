@@ -24,6 +24,14 @@ const PREPARED_FTS_BATCH_DOCUMENTS: usize = 4_096;
 type PreparedFtsDocuments = Vec<(DocId, BTreeMap<String, String>)>;
 type PreparedFtsTables = BTreeMap<String, PreparedFtsDocuments>;
 
+/// Whether writing a document changes its table's text index. A document known to be new that has no indexed text does not: no earlier version left postings to remove, and it adds none. A document that may replace an earlier version always does, because that version's postings go even when no text replaces them.
+pub fn document_changes_text_index(
+    known_new: bool,
+    text_fields: &BTreeMap<String, String>,
+) -> bool {
+    !(known_new && text_fields.is_empty())
+}
+
 #[derive(Default)]
 pub struct MutationPublicationBatch {
     fts_tables: PreparedFtsTables,
@@ -110,9 +118,11 @@ pub fn publish_prepared_mutation_action(
                 insert_known_new,
             )?;
             context.deferrals.inserted(&table, doc_id)?;
-            batch.push_fts(table, doc_id, text_fields);
-            if batch.fts_is_full() {
-                batch.flush_fts(context.text)?;
+            if document_changes_text_index(insert_known_new, &text_fields) {
+                batch.push_fts(table, doc_id, text_fields);
+                if batch.fts_is_full() {
+                    batch.flush_fts(context.text)?;
+                }
             }
         }
         PreparedMutationAction::Rewrite(mut rewrite) => {

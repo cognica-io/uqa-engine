@@ -78,3 +78,13 @@ fn bounded_batches_retain_empty_replacements_and_reset_identity_tracking() {
     assert_eq!(published[1].1.len(), 1);
     assert!(published[0].1.iter().all(|(_, fields)| fields.is_empty()));
 }
+
+#[test]
+fn a_new_document_without_indexed_text_leaves_the_text_index_alone() {
+    let text = BTreeMap::from([("body".to_string(), "text".to_string())]);
+    assert!(!document_changes_text_index(true, &BTreeMap::new()));
+    assert!(document_changes_text_index(true, &text));
+    // A document that may replace an earlier version removes that version's postings even when it has no text itself.
+    assert!(document_changes_text_index(false, &BTreeMap::new()));
+    assert!(document_changes_text_index(false, &text));
+}

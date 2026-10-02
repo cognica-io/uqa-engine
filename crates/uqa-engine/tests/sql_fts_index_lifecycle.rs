@@ -22,6 +22,8 @@ use uqa_storage_sqlite::ManagedConnection;
 mod deletion_publication;
 #[path = "sql_fts_index_lifecycle/initial_restore.rs"]
 mod initial_restore;
+#[path = "sql_fts_index_lifecycle/new_rows.rs"]
+mod new_rows;
 #[path = "sql_fts_index_lifecycle/occurrences.rs"]
 mod occurrences;
 #[path = "sql_fts_index_lifecycle/rewrite_publication.rs"]
