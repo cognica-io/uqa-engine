@@ -62,6 +62,8 @@ pub struct VersionedKeyValueStore {
     retained: Option<MergedRecordSnapshot>,
     active: Mutex<Option<Transaction>>,
     observed: Mutex<observed::ObservedWatermarks>,
+    /// The commit monitor value and the committed sequence of this session's last capture. While the monitor returns that value nothing was committed since, so the sequence is still the latest and a caller that asks only for it needs no capture.
+    latest: Mutex<Option<(u64, super::CommitSequence)>>,
 }
 
 impl VersionedKeyValueStore {
@@ -192,6 +194,7 @@ impl VersionedKeyValueStore {
             retained: None,
             active: Mutex::new(None),
             observed: Mutex::default(),
+            latest: Mutex::new(None),
         }
     }
 
@@ -348,10 +351,32 @@ impl VersionedKeyValueStore {
         }
         *active = Some(match self.retained.as_ref() {
             Some(view) => Transaction::at_snapshot(view.retain_committed(), true, &self.control),
-            None => Transaction::new(&*self.persistence, read_only, &self.control)
+            None => self
+                .capture(read_only)
                 .map_err(VersionError::into_storage_error)?,
         });
         Ok(())
+    }
+
+    /// Begin a transaction at the latest commit, and remember what the capture found for [`Self::latest_sequence`].
+    fn capture(&self, read_only: bool) -> VersionResult<Transaction> {
+        let transaction = Transaction::new(&*self.persistence, read_only, &self.control)?;
+        *self.latest.lock() = transaction.captured();
+        Ok(transaction)
+    }
+
+    /// The sequence of the latest commit, as a capture would read it. A capture is a physical read with a lease registration; the monitor is one counter read.
+    fn latest_sequence(&self) -> VersionResult<super::CommitSequence> {
+        if let Some(monitor) = self.persistence.commit_monitor_version()? {
+            if let Some((_, sequence)) = self
+                .latest
+                .lock()
+                .filter(|(captured_at, _)| *captured_at == monitor)
+            {
+                return Ok(sequence);
+            }
+        }
+        Ok(self.capture(true)?.view()?.sequence())
     }
 
     fn view(&self) -> VersionResult<MergedRecordSnapshot> {
@@ -362,7 +387,7 @@ impl VersionedKeyValueStore {
         if let Some(transaction) = active.as_ref() {
             transaction.view()
         } else {
-            Transaction::new(&*self.persistence, true, &self.control)?.view()
+            self.capture(true)?.view()
         }
     }
 
@@ -740,12 +765,24 @@ impl KeyValueStore for VersionedKeyValueStore {
         }))
     }
     fn change_version(&self) -> StorageBackendResult<Option<u64>> {
-        Ok(Some(
-            self.view()
+        let pinned = match self.retained.as_ref() {
+            Some(view) => Some(view.sequence()),
+            None => self
+                .active
+                .lock()
+                .as_ref()
+                .map(Transaction::view)
+                .transpose()
                 .map_err(VersionError::into_storage_error)?
-                .sequence()
-                .as_u64(),
-        ))
+                .map(|view| view.sequence()),
+        };
+        let sequence = match pinned {
+            Some(sequence) => sequence,
+            None => self
+                .latest_sequence()
+                .map_err(VersionError::into_storage_error)?,
+        };
+        Ok(Some(sequence.as_u64()))
     }
 
     fn read_view_revision(

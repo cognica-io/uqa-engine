@@ -70,11 +70,9 @@ fn refresh(session: &VersionedKeyValueStore) {
         .unwrap();
 }
 
-/// Commit through another session and move the monitor, as a provider's monitor moves with every commit.
+/// Commit through another session, which moves the monitor as every commit does.
 fn commit_elsewhere(persistence: &Arc<Persistence>, key: &[u8], value: &[u8]) {
     persistence.session(1 << 20).put(key, value).unwrap();
-    let mut state = persistence.state.lock();
-    state.monitor = state.monitor.map(|monitor| monitor + 1);
 }
 
 #[test]
@@ -107,6 +105,52 @@ fn a_refresh_captures_no_snapshot_while_the_monitor_shows_no_commit() {
     assert_eq!(captures(&persistence), committed + 2);
     assert_eq!(session.get(b"own").unwrap().unwrap(), b"private");
     session.commit_transaction().unwrap();
+}
+
+#[test]
+fn the_latest_sequence_is_read_from_the_monitor_while_nothing_was_committed() {
+    let persistence = monitored(7);
+    let session = persistence.session(1 << 20);
+    let first = session.change_version().unwrap();
+    let captured = captures(&persistence);
+    assert_eq!(session.change_version().unwrap(), first);
+    assert_eq!(captures(&persistence), captured);
+
+    // A commit moves the monitor, and the next answer takes one capture.
+    commit_elsewhere(&persistence, b"peer", b"committed");
+    let committed = captures(&persistence);
+    let second = session.change_version().unwrap();
+    assert!(second > first);
+    assert_eq!(captures(&persistence), committed + 1);
+    assert_eq!(session.change_version().unwrap(), second);
+    assert_eq!(captures(&persistence), committed + 1);
+
+    // A transaction answers with its own view, whatever was committed since it began, and its capture serves the session afterwards.
+    commit_elsewhere(&persistence, b"peer", b"again");
+    session.begin_transaction().unwrap();
+    let begun = captures(&persistence);
+    let third = session.change_version().unwrap();
+    assert!(third > second);
+    commit_elsewhere(&persistence, b"peer", b"later");
+    assert_eq!(session.change_version().unwrap(), third);
+    session.rollback_transaction().unwrap();
+    let rolled_back = captures(&persistence);
+    assert!(session.change_version().unwrap() > third);
+    assert_eq!(captures(&persistence), rolled_back + 1);
+    assert!(rolled_back > begun);
+
+    // The session's own commit moves the monitor as well.
+    let before = session.change_version().unwrap();
+    session.put(b"own", b"committed").unwrap();
+    assert!(session.change_version().unwrap() > before);
+
+    // Without a monitor every answer captures.
+    let unmonitored = Persistence::new();
+    let session = unmonitored.session(1 << 20);
+    session.change_version().unwrap();
+    let captured = captures(&unmonitored);
+    session.change_version().unwrap();
+    assert_eq!(captures(&unmonitored), captured + 1);
 }
 
 #[test]

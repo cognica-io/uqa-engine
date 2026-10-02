@@ -75,6 +75,13 @@ impl Transaction {
         ))
     }
 
+    /// The commit monitor value and sequence of this transaction's committed snapshot, when its provider has a monitor.
+    pub(super) fn captured(&self) -> Option<(u64, crate::mvcc::CommitSequence)> {
+        self.committed
+            .commit_monitor()
+            .map(|monitor| (monitor, self.committed.sequence()))
+    }
+
     pub(super) fn at_snapshot(
         committed: Arc<dyn CommittedRecordSnapshot>,
         read_only: bool,

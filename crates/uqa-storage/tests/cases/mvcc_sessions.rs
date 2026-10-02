@@ -416,6 +416,8 @@ impl VersionedPersistence for Persistence {
             sequence: self.store.commit_prepared(prepared, control)?,
             fingerprint: prepared.fingerprint(),
         };
+        // A provider's monitor moves with every commit.
+        state.monitor = state.monitor.map(|monitor| monitor + 1);
         state
             .receipts
             .insert(transaction.allocation(), CommitStatus::Committed(receipt));
