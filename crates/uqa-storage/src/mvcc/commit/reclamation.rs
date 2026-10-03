@@ -7,7 +7,6 @@
 //! A prepared absence observation cannot cross physical tombstone retirement.
 
 use sha2::{Digest, Sha256};
-use uqa_core::CancellationToken;
 
 use crate::mvcc::{CommittedRecordSnapshot, RecordWrite, VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
@@ -42,9 +41,9 @@ impl PreparedRecordCommit {
         prefix: &[u8],
         minimum: u64,
         current: u64,
-        cancellation: &CancellationToken,
+        control: &StorageReadControl,
     ) -> VersionResult<()> {
-        cancellation.check()?;
+        control.cancellation().check()?;
         if prefix.is_empty() || minimum == 0 || minimum > current {
             return Err(VersionError::InvalidEncoding(
                 "invalid tombstone reclamation domain",
@@ -56,25 +55,27 @@ impl PreparedRecordCommit {
         {
             return Ok(());
         }
-        let absent = self
-            .records()
-            .iter()
-            .filter(|write| write.expected().is_none())
-            .map(super::PreparedRecordWrite::key)
-            .chain(self.requirements.iter().flat_map(|requirements| {
-                requirements
-                    .iter()
-                    .filter(|requirement| requirement.expected.is_none())
-                    .map(|requirement| requirement.key.bytes())
-            }));
-        for key in absent {
-            cancellation.check()?;
+        let reclaimed = || VersionError::ReclaimedObservation {
+            observed: self.reclamation_epoch,
+            minimum,
+            current,
+        };
+        let mut writes = self.writes();
+        while let Some(write) = writes.next_metadata(control)? {
+            if write.expected().is_none() && write.key().starts_with(prefix) {
+                return Err(reclaimed());
+            }
+        }
+        let required = self.requirements.iter().flat_map(|requirements| {
+            requirements
+                .iter()
+                .filter(|requirement| requirement.expected.is_none())
+                .map(|requirement| requirement.key.bytes())
+        });
+        for key in required {
+            control.cancellation().check()?;
             if key.starts_with(prefix) {
-                return Err(VersionError::ReclaimedObservation {
-                    observed: self.reclamation_epoch,
-                    minimum,
-                    current,
-                });
+                return Err(reclaimed());
             }
         }
         Ok(())

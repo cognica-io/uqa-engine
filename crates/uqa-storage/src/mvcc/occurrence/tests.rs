@@ -69,7 +69,7 @@ fn prepare(
     )
     .unwrap();
     let mut writes = BudgetedVec::new(control.memory());
-    for write in canonical.records() {
+    for write in canonical.resident().unwrap() {
         writes
             .push(write.clone().with_kind(RecordWriteKind::Occurrence))
             .unwrap();
@@ -97,12 +97,14 @@ fn unchanged_publication_shares_validated_cluster_buffers() {
         .unwrap();
         for key in &keys[..2] {
             let before = original
-                .records()
+                .resident()
+                .unwrap()
                 .iter()
                 .find(|row| row.key() == key)
                 .unwrap();
             let after = resolved
-                .records()
+                .resident()
+                .unwrap()
                 .iter()
                 .find(|row| row.key() == key)
                 .unwrap();
@@ -282,13 +284,15 @@ fn unchanged_publication_borrows_large_stored_graphs_with_a_small_decode_allowan
         for key in &keys[..2] {
             assert_eq!(
                 resolved
-                    .records()
+                    .resident()
+                    .unwrap()
                     .iter()
                     .find(|row| row.key() == key)
                     .unwrap()
                     .value(),
                 original
-                    .records()
+                    .resident()
+                    .unwrap()
                     .iter()
                     .find(|row| row.key() == key)
                     .unwrap()
@@ -309,7 +313,7 @@ fn publication_preserves_canonical_guards_for_atomic_admission() {
     let base = store.snapshot().unwrap();
     let original = prepare(&keys, &values, None, &control);
     let mut writes = BudgetedVec::new(control.memory());
-    for write in original.records() {
+    for write in original.resident().unwrap() {
         writes.push(write.clone()).unwrap();
     }
     writes

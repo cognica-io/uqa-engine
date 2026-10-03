@@ -402,7 +402,10 @@ fn prepared_values_survive_their_inputs_and_discard_does_not_restore_old_state()
     let prepared = PreparedRecordCommit::new(&[write(b"a", None, &bytes)], &preparation).unwrap();
     bytes.fill(b'x');
     drop(bytes);
-    assert_eq!(prepared.records()[0].value(), Some(b"original".as_slice()));
+    assert_eq!(
+        prepared.resident().unwrap()[0].value(),
+        Some(b"original".as_slice())
+    );
     let discarded =
         PreparedRecordCommit::new(&[write(b"b", None, b"discarded")], &preparation).unwrap();
     store
@@ -511,14 +514,14 @@ fn revision_validation_preserves_provider_errors_and_stops_after_cancellation() 
     .unwrap();
     let read = control();
     let mut observed = 0;
-    let result = prepared.validate(read.cancellation(), |_| {
+    let result = prepared.validate(&read, |_| {
         observed += 1;
         read.cancellation().cancel();
         Ok(None)
     });
     assert!(matches!(result, Err(VersionError::Cancelled(_))));
     assert_eq!(observed, 1);
-    let result = prepared.validate(control().cancellation(), |_| {
+    let result = prepared.validate(&control(), |_| {
         Err(uqa_storage::StorageBackendError::Other("read failed".into()).into())
     });
     assert!(matches!(result, Err(VersionError::Storage(_))));

@@ -37,7 +37,7 @@ use super::{
 };
 use transaction::Transaction;
 
-/// Retention allowance for one logical session, including private history, savepoints, batches and retained views. Exhaustion is an error; this implementation does not spill.
+/// Retention allowance for one logical session, including private history, savepoints, batches and retained views. Once more than half of it is used, the private changes of a transaction move into sorted runs in encrypted temporary files, so the size of a transaction is bounded by disk; a single value or batch that does not fit in it is still an error.
 #[derive(Debug, Clone, Copy)]
 pub struct VersionedSessionOptions {
     pub retained_bytes: usize,

@@ -20,7 +20,6 @@ use crate::mvcc::{
 use crate::read_control::StorageReadControl;
 use uqa_core::memory::{BudgetedMap, BudgetedVec};
 
-pub(super) type StructuralRecords<'a> = BudgetedMap<&'a [u8], &'a PreparedRecordWrite>;
 type PopulationLifecycle<'a> = BudgetedMap<&'a [u8], &'a OwnedPopulationMutation>;
 type RecordVisitor<'a> = dyn FnMut(&[u8], &[u8]) -> VersionResult<()> + 'a;
 
@@ -31,7 +30,7 @@ pub(super) struct Reconciliation<'a> {
     pub(super) history: DatabaseId,
     pub(super) control: &'a StorageReadControl,
     /// Final preparation preserves explicit structural writes. An ordinary mutation preview updates its preceding private header directly.
-    pub(super) structural: Option<&'a StructuralRecords<'a>>,
+    pub(super) structural: Option<&'a super::structural::StructuralRecords<'a>>,
 }
 
 impl Reconciliation<'_> {
@@ -69,7 +68,7 @@ impl Reconciliation<'_> {
         self.validate_invalidations(origins, &latest)?;
         for (&key, operation) in &latest {
             control.check()?;
-            if self.structural_header(key).is_some_and(|write| {
+            if self.structural_header(key)?.is_some_and(|write| {
                 write.value().is_some()
                     || matches!(operation, OwnedPopulationMutation::Publish { .. })
             }) {
@@ -105,7 +104,7 @@ impl Reconciliation<'_> {
             })?;
             let prefix = self.layout.header_prefix(field, control)?;
             visit(self.after, &prefix, control, &mut |key, template| {
-                if latest.contains_key(key) || self.structural_header(key).is_some() {
+                if latest.contains_key(key) || self.structural_header(key)?.is_some() {
                     return Ok(());
                 }
                 let header = self.layout.header(key, template, control)?;
@@ -231,8 +230,11 @@ impl Reconciliation<'_> {
         output.apply_owned(&[write], self.control)
     }
 
-    fn structural_header(&self, key: &[u8]) -> Option<&PreparedRecordWrite> {
-        self.structural?.get(key).copied()
+    fn structural_header(&self, key: &[u8]) -> VersionResult<Option<PreparedRecordWrite>> {
+        match self.structural {
+            Some(structural) => structural.get(key, self.control),
+            None => Ok(None),
+        }
     }
 
     fn with_source(

@@ -7,11 +7,11 @@
 //! Explicit internal cleanup tolerates an already absent key, never a live replacement.
 
 use super::{
-    commit::RecordWriteKind, resolution::ResolutionMode, CommittedRecordSnapshot,
-    PreparedRecordCommit, VersionError, VersionResult,
+    commit::{PreparedWritesBuilder, RecordWriteKind},
+    resolution::ResolutionMode,
+    CommittedRecordSnapshot, PreparedRecordCommit, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
-use uqa_core::memory::BudgetedVec;
 
 pub(super) fn resolve(
     original: &PreparedRecordCommit,
@@ -19,12 +19,14 @@ pub(super) fn resolve(
     mode: ResolutionMode,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
-    let mut writes = BudgetedVec::new(control.memory());
-    writes.reserve(original.records().len())?;
-    for (mutation, write) in original.records().iter().enumerate() {
+    let mut writes = PreparedWritesBuilder::like(original, control)?;
+    let mut originals = original.writes();
+    let mut mutation = 0;
+    while let Some(write) = originals.next(control)? {
         control.check()?;
+        mutation += 1;
         if write.kind() != RecordWriteKind::IdempotentDelete {
-            writes.push(write.clone())?;
+            writes.push(write, control)?;
             continue;
         }
         if write.value().is_some() {
@@ -36,18 +38,19 @@ pub(super) fn resolve(
         let actual = record.and_then(|record| record.revision);
         if record.is_some_and(|record| record.live) && write.expected() != actual {
             return Err(VersionError::WriteConflict {
-                mutation,
+                mutation: mutation - 1,
                 expected: write.expected(),
                 actual,
             });
         }
         writes.push(
             write
-                .clone()
                 .rebase(actual)
                 .with_kind(mode.kind(RecordWriteKind::IdempotentDelete)),
+            control,
         )?;
     }
-    Ok(PreparedRecordCommit::from_unique_owned(writes, control)?
+    Ok(writes
+        .finish(control)?
         .resolved(original, current.sequence()))
 }

@@ -6,16 +6,25 @@
 
 //! Private evaluated changes and provider-independent revision validation.
 
+mod builder;
+mod cursor;
+mod lookup;
+mod metadata;
 mod reclamation;
 mod requirements;
+mod writes;
+pub(super) use builder::PreparedWritesBuilder;
+pub use cursor::PreparedWriteCursor;
+pub(super) use lookup::PreparedLookup;
+pub use metadata::PreparedWriteMetadata;
 pub(super) use requirements::RecordRequirement;
+use writes::PreparedWrites;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 use uqa_core::memory::{BudgetedVec, MemoryError};
-use uqa_core::CancellationToken;
 
 use crate::read_control::StorageReadControl;
 
@@ -48,6 +57,45 @@ pub(crate) enum RecordWriteKind {
     // A value is a complete typed replacement; absence is a raw invalidation that must not leave a stale population.
     DiskANNOrigin,
     DiskANNPopulationPreview,
+}
+
+impl RecordWriteKind {
+    /// The kind's code, which the commit fingerprint and spill files record.
+    pub(crate) const fn code(self) -> u8 {
+        match self {
+            Self::Canonical => 0,
+            Self::GraphCache => 1,
+            Self::GraphPreview => 2,
+            Self::Occurrence => 3,
+            Self::OccurrenceCache => 4,
+            Self::IVFPreview => 5,
+            Self::HNSWPreview => 6,
+            Self::Marker => 7,
+            Self::StatisticsMaintenance => 8,
+            Self::IdempotentDelete => 9,
+            Self::DiskANNOrigin => 10,
+            Self::DiskANNPopulationPreview => 11,
+        }
+    }
+
+    /// The kind whose code is `code`.
+    pub(crate) fn from_code(code: u8) -> VersionResult<Self> {
+        Ok(match code {
+            0 => Self::Canonical,
+            1 => Self::GraphCache,
+            2 => Self::GraphPreview,
+            3 => Self::Occurrence,
+            4 => Self::OccurrenceCache,
+            5 => Self::IVFPreview,
+            6 => Self::HNSWPreview,
+            7 => Self::Marker,
+            8 => Self::StatisticsMaintenance,
+            9 => Self::IdempotentDelete,
+            10 => Self::DiskANNOrigin,
+            11 => Self::DiskANNPopulationPreview,
+            _ => return Err(VersionError::InvalidEncoding("unknown record write kind")),
+        })
+    }
 }
 
 impl PreparedRecordWrite {
@@ -121,9 +169,9 @@ impl PreparedRecordWrite {
     }
 }
 
-/// Immutable prepared replacements. Construct before opening a physical writer.
+/// Immutable prepared replacements. Construct before opening a physical writer. The writes of a transaction larger than its allowance are in a spilled run ordered by key; the others are in memory in the order they were supplied.
 pub struct PreparedRecordCommit {
-    writes: BudgetedVec<PreparedRecordWrite>,
+    writes: PreparedWrites,
     fingerprint: CommitFingerprint,
     pub(super) graph: Option<GraphEffects>,
     pub(super) vector: Option<super::vector::VectorEffects>,
@@ -170,8 +218,73 @@ impl PreparedRecordCommit {
         Self::from_unique_owned(prepared, control)
     }
 
-    pub fn records(&self) -> &[PreparedRecordWrite] {
-        &self.writes
+    /// The number of writes.
+    pub fn len(&self) -> usize {
+        self.writes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.writes.len() == 0
+    }
+
+    /// Visit the writes in order.
+    pub fn writes(&self) -> PreparedWriteCursor<'_> {
+        self.writes.cursor()
+    }
+
+    /// Visit the writes of a spilled batch in key order from `start`; `None` for a batch in memory, whose writes `resident` returns in the order they were supplied.
+    pub fn spilled_writes_from(&self, start: &[u8]) -> Option<PreparedWriteCursor<'_>> {
+        match &self.writes {
+            PreparedWrites::Resident(_) => None,
+            PreparedWrites::Spilled(run) => Some(PreparedWriteCursor::spilled_from(run, start)),
+        }
+    }
+
+    /// The writes, when they are in memory; a transaction larger than its allowance has spilled them.
+    pub fn resident(&self) -> Option<&[PreparedRecordWrite]> {
+        match &self.writes {
+            PreparedWrites::Resident(writes) => Some(writes),
+            PreparedWrites::Spilled(_) => None,
+        }
+    }
+
+    /// Every write, in memory: for the inputs of one provider batch, which its operations already hold.
+    pub(crate) fn collect(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<PreparedRecordWrite>> {
+        let mut writes = BudgetedVec::new(control.memory());
+        writes.reserve(self.len())?;
+        let mut cursor = self.writes();
+        while let Some(write) = cursor.next(control)? {
+            writes.push(write)?;
+        }
+        Ok(writes)
+    }
+
+    /// Whether some write replaces `key`.
+    pub(crate) fn contains_key(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<bool> {
+        match &self.writes {
+            PreparedWrites::Resident(writes) => Ok(writes.iter().any(|write| write.key() == key)),
+            PreparedWrites::Spilled(run) => Ok(run.get(key, control)?.is_some()),
+        }
+    }
+
+    /// Whether some write is not canonical: such a batch has derived effects to resolve.
+    pub(crate) fn typed(&self) -> bool {
+        self.writes.typed()
+    }
+
+    /// Whether some write is of `kind`.
+    pub(crate) fn has_kind(&self, kind: RecordWriteKind) -> bool {
+        match &self.writes {
+            PreparedWrites::Resident(writes) => writes.iter().any(|write| write.kind == kind),
+            PreparedWrites::Spilled(run) => run.has_kind(kind),
+        }
     }
 
     /// The caller supplies exactly one final replacement for each identity.
@@ -179,55 +292,73 @@ impl PreparedRecordCommit {
         writes: BudgetedVec<PreparedRecordWrite>,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
-        let mut digest = Sha256::new();
         let typed = writes
             .iter()
             .any(|write| write.kind != RecordWriteKind::Canonical);
-        if typed {
-            digest.update(b"UQA prepared record kinds 1");
-        } else {
-            digest.update(b"UQA prepared records 1");
-        }
-        digest.update((writes.len() as u64).to_be_bytes());
+        let mut digest = fingerprint_header(typed, writes.len() as u64);
         for write in writes.iter() {
             control.cancellation().check()?;
-            if typed {
-                digest.update([match write.kind {
-                    RecordWriteKind::Canonical => 0,
-                    RecordWriteKind::GraphCache => 1,
-                    RecordWriteKind::GraphPreview => 2,
-                    RecordWriteKind::Occurrence => 3,
-                    RecordWriteKind::OccurrenceCache => 4,
-                    RecordWriteKind::IVFPreview => 5,
-                    RecordWriteKind::HNSWPreview => 6,
-                    RecordWriteKind::Marker => 7,
-                    RecordWriteKind::StatisticsMaintenance => 8,
-                    RecordWriteKind::IdempotentDelete => 9,
-                    RecordWriteKind::DiskANNOrigin => 10,
-                    RecordWriteKind::DiskANNPopulationPreview => 11,
-                }]);
-            }
-            digest.update((write.key().len() as u64).to_be_bytes());
-            hash_bytes(&mut digest, write.key(), control)?;
-            digest.update(
-                write
-                    .expected()
-                    .map_or(0, CommitSequence::as_u64)
-                    .to_be_bytes(),
-            );
-            digest.update([
-                u8::from(write.expected().is_some()),
-                u8::from(write.value().is_some()),
-            ]);
+            fingerprint_write(
+                &mut digest,
+                typed,
+                write.kind,
+                write.key(),
+                write.expected(),
+                write.value().map(|value| value.len() as u64),
+                control,
+            )?;
             if let Some(value) = write.value() {
-                digest.update((value.len() as u64).to_be_bytes());
                 hash_bytes(&mut digest, value, control)?;
             }
         }
         control.cancellation().check()?;
-        Ok(Self {
+        Ok(Self::with_fingerprint(
+            PreparedWrites::Resident(writes),
+            digest.finalize().into(),
+        ))
+    }
+
+    /// The writes of `run`, which holds exactly one final replacement for each identity, fingerprinted as the same writes in memory are.
+    pub(super) fn from_spilled_run(
+        run: super::overlay::run::SpilledRun,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        let run = Arc::new(run);
+        let typed = run.typed();
+        let mut digest = fingerprint_header(typed, run.len());
+        let mut cursor = run.cursor(std::ops::Bound::Unbounded);
+        while let Some(entry) = cursor.next(control)? {
+            fingerprint_write(
+                &mut digest,
+                typed,
+                entry.kind,
+                entry.key.bytes(),
+                entry.expected,
+                entry.value.map(|location| location.len),
+                control,
+            )?;
+            if let Some(location) = entry.value {
+                run.copy_value(
+                    location,
+                    &mut |chunk| {
+                        digest.update(chunk);
+                        Ok(())
+                    },
+                    control,
+                )?;
+            }
+        }
+        control.cancellation().check()?;
+        Ok(Self::with_fingerprint(
+            PreparedWrites::Spilled(run),
+            digest.finalize().into(),
+        ))
+    }
+
+    fn with_fingerprint(writes: PreparedWrites, fingerprint: CommitFingerprint) -> Self {
+        Self {
             writes,
-            fingerprint: digest.finalize().into(),
+            fingerprint,
             graph: None,
             vector: None,
             populations: None,
@@ -235,7 +366,7 @@ impl PreparedRecordCommit {
             resolved_at: None,
             requirements: None,
             reclamation_epoch: None,
-        })
+        }
     }
 
     pub(super) fn with_graph_effects(
@@ -245,12 +376,8 @@ impl PreparedRecordCommit {
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
         if operations.is_empty()
-            && self.writes.iter().all(|write| {
-                !matches!(
-                    write.kind,
-                    RecordWriteKind::GraphCache | RecordWriteKind::GraphPreview
-                )
-            })
+            && !self.has_kind(RecordWriteKind::GraphCache)
+            && !self.has_kind(RecordWriteKind::GraphPreview)
         {
             return Ok(self);
         }
@@ -356,10 +483,7 @@ impl PreparedRecordCommit {
             || self.vector.is_some()
             || self.populations.is_some()
             || self.notification.is_some()
-            || self
-                .writes
-                .iter()
-                .any(|write| write.kind != RecordWriteKind::Canonical)
+            || self.writes.typed()
         {
             return Err(VersionError::InvalidEncoding(
                 "unresolved storage commit effects",
@@ -383,38 +507,71 @@ impl PreparedRecordCommit {
     /// Check all preconditions under the provider's exclusive commit boundary. The callback reads current committed heads, not the caller's old snapshot.
     pub fn validate(
         &self,
-        cancellation: &CancellationToken,
+        control: &StorageReadControl,
         mut head_revision: impl FnMut(&[u8]) -> VersionResult<Option<CommitSequence>>,
     ) -> VersionResult<()> {
-        cancellation.check()?;
+        control.cancellation().check()?;
         if self.graph.is_some()
             || self.vector.is_some()
             || self.populations.is_some()
             || self.notification.is_some()
-            || self
-                .writes
-                .iter()
-                .any(|write| write.kind != RecordWriteKind::Canonical)
+            || self.writes.typed()
         {
             return Err(VersionError::InvalidEncoding(
                 "unresolved storage commit effects",
             ));
         }
-        for (index, write) in self.writes.iter().enumerate() {
-            cancellation.check()?;
+        let mut writes = self.writes();
+        let mut index = 0;
+        while let Some(write) = writes.next_metadata(control)? {
             let actual = head_revision(write.key())?;
-            if write.expected != actual {
+            if write.expected() != actual {
                 return Err(VersionError::WriteConflict {
                     mutation: index,
-                    expected: write.expected,
+                    expected: write.expected(),
                     actual,
                 });
             }
+            index += 1;
         }
-        self.validate_requirements(cancellation, head_revision)?;
-        cancellation.check()?;
+        self.validate_requirements(control.cancellation(), head_revision)?;
+        control.cancellation().check()?;
         Ok(())
     }
+}
+
+fn fingerprint_header(typed: bool, len: u64) -> Sha256 {
+    let mut digest = Sha256::new();
+    if typed {
+        digest.update(b"UQA prepared record kinds 1");
+    } else {
+        digest.update(b"UQA prepared records 1");
+    }
+    digest.update(len.to_be_bytes());
+    digest
+}
+
+/// Hash one write up to its value, whose `value_len` bytes the caller hashes next.
+fn fingerprint_write(
+    digest: &mut Sha256,
+    typed: bool,
+    kind: RecordWriteKind,
+    key: &[u8],
+    expected: Option<CommitSequence>,
+    value_len: Option<u64>,
+    control: &StorageReadControl,
+) -> VersionResult<()> {
+    if typed {
+        digest.update([kind.code()]);
+    }
+    digest.update((key.len() as u64).to_be_bytes());
+    hash_bytes(digest, key, control)?;
+    digest.update(expected.map_or(0, CommitSequence::as_u64).to_be_bytes());
+    digest.update([u8::from(expected.is_some()), u8::from(value_len.is_some())]);
+    if let Some(len) = value_len {
+        digest.update(len.to_be_bytes());
+    }
+    Ok(())
 }
 
 fn hash_bytes(

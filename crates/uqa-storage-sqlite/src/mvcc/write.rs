@@ -19,21 +19,21 @@ pub(super) fn reserve_bindings(
     prepared: &PreparedRecordCommit,
     control: &StorageReadControl,
 ) -> VersionResult<MemoryReservation> {
-    let mut peak = 96;
-    for (key, value) in prepared
-        .records()
-        .iter()
-        .map(|record| (record.key(), record.value()))
-        .chain(prepared.required_keys().map(|key| (key, None)))
-    {
-        control.cancellation().check()?;
-        let bytes = key
-            .len()
-            .checked_mul(2)
-            .and_then(|key| key.checked_add(value.map_or(0, <[u8]>::len)))
+    let binding = |key: usize, value: u64| {
+        usize::try_from(value)
+            .ok()
+            .and_then(|value| key.checked_mul(2)?.checked_add(value))
             .and_then(|length| length.checked_add(96))
-            .ok_or(MemoryError::SizeOverflow)?;
-        peak = peak.max(bytes);
+            .ok_or(MemoryError::SizeOverflow)
+    };
+    let mut peak = 96;
+    let mut writes = prepared.writes();
+    while let Some(write) = writes.next_metadata(control)? {
+        peak = peak.max(binding(write.key().len(), write.value_len().unwrap_or(0))?);
+    }
+    for key in prepared.required_keys() {
+        control.cancellation().check()?;
+        peak = peak.max(binding(key.len(), 0)?);
     }
     Ok(control.memory().reserve(peak)?)
 }
@@ -128,10 +128,10 @@ pub(super) fn commit(
     }
     prepared.validate_snapshot(current.sequence)?;
     super::tombstones::validate(&transaction, prepared, control).map_err(rejected)?;
-    prepared.validate(control.cancellation(), |key| {
+    prepared.validate(control, |key| {
         codec::head(&transaction, key).map_err(Error::into_version)
     })?;
-    let sequence = if prepared.records().is_empty() {
+    let sequence = if prepared.is_empty() {
         current.sequence
     } else {
         current.sequence.successor()?
@@ -172,8 +172,8 @@ fn stage(
         )?;
         let mut previous = connection.prepare_cached("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?;
         let mut heads = connection.prepare_cached("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
-        for write in prepared.records() {
-            control.cancellation().check().map_err(VersionError::from)?;
+        let mut writes = prepared.writes();
+        while let Some(write) = writes.next(control)? {
             // Validation found the head each write expects. A key that expects none has no head, so it is in no run and has no compacted tombstone to restore before its first version.
             if write.expected().is_some() {
                 if has_runs {

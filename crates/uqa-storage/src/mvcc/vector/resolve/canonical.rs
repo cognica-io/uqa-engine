@@ -6,13 +6,11 @@
 
 //! Verify that the journal describes the canonical tensors actually being published.
 
-use std::collections::BTreeMap;
-
 use super::super::{layout::Layout, Key, Mutation};
 use crate::{
     mvcc::{
-        commit::RecordWriteKind, CommittedRecordSnapshot, PreparedRecordWrite, VersionError,
-        VersionResult,
+        commit::{PreparedLookup, RecordWriteKind},
+        CommittedRecordSnapshot, VersionError, VersionResult,
     },
     read_control::StorageReadControl,
 };
@@ -21,7 +19,7 @@ use uqa_core::{memory::BudgetedVec, DocId};
 pub(super) fn validate(
     metadata: &[u8],
     operations: &[Mutation<'_>],
-    writes: &BTreeMap<&[u8], &PreparedRecordWrite>,
+    writes: &PreparedLookup<'_>,
     base: &dyn CommittedRecordSnapshot,
     layout: Layout<'_>,
     control: &StorageReadControl,
@@ -46,14 +44,8 @@ pub(super) fn validate(
     };
     let prefix = layout.key(metadata, Key::Vectors, control)?;
     let mut count = 0;
-    for (key, write) in writes.range::<[u8], _>((
-        std::ops::Bound::Included(&*prefix),
-        std::ops::Bound::Unbounded,
-    )) {
-        control.cancellation().check()?;
-        if !key.starts_with(&prefix) {
-            break;
-        }
+    writes.visit_prefix(&prefix, control, &mut |write| {
+        let key = write.key();
         if write.kind() != RecordWriteKind::Canonical {
             return Err(invalid());
         }
@@ -76,7 +68,8 @@ pub(super) fn validate(
             None if (ordinal as usize) < expected.len() => return Err(invalid()),
             None => {}
         }
-    }
+        Ok(true)
+    })?;
     let mut required = 0_usize;
     for (position, (document, _, vectors)) in ordered.iter().enumerate() {
         control.cancellation().check()?;
@@ -95,7 +88,9 @@ pub(super) fn validate(
         if record.live {
             let (document, ordinal) = layout.vector_id(key, control)?;
             if latest(document).is_some_and(|vectors| ordinal as usize >= vectors.len())
-                && writes.get(key).is_none_or(|write| write.value().is_some())
+                && writes
+                    .get(key, control)?
+                    .is_none_or(|write| write.value().is_some())
             {
                 return Err(invalid());
             }

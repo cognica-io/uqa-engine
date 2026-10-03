@@ -8,6 +8,7 @@
 
 use rusqlite::Connection;
 use uqa_storage::mvcc::PreparedRecordCommit;
+use uqa_storage::read_control::StorageReadControl;
 
 use super::PhysicalResult;
 
@@ -31,12 +32,15 @@ impl<'a> CommitCache<'a> {
     pub(super) fn grow(
         connection: &'a Connection,
         prepared: &PreparedRecordCommit,
+        control: &StorageReadControl,
     ) -> PhysicalResult<Option<Self>> {
-        let records = prepared
-            .records()
-            .iter()
-            .map(|record| record.key().len() + record.value().map_or(0, <[u8]>::len))
-            .fold(0_u64, |bytes, record| bytes.saturating_add(record as u64));
+        let mut records = 0_u64;
+        let mut writes = prepared.writes();
+        while let Some(write) = writes.next_metadata(control)? {
+            records = records
+                .saturating_add(write.key().len() as u64)
+                .saturating_add(write.value_len().unwrap_or(0));
+        }
         let wanted = (records.saturating_mul(DIRTIED_FOR_EACH_RECORD_BYTE) / 1024).min(LIMIT_KIB);
         if wanted <= ORDINARY_KIB {
             return Ok(None);
