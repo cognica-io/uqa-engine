@@ -44,10 +44,10 @@ pub fn period_foreign_key_coverage(
     let ordinary_columns = &foreign_key.ref_columns[..foreign_key.ref_columns.len() - 1];
     let mut parent_ranges = Vec::new();
     let mut parent_ids = Vec::new();
-    for physical_table in context
-        .catalog
-        .hierarchy_scan_tables(&foreign_key.ref_table, true)?
-    {
+    for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+        context.partitions.catalog,
+        &foreign_key.ref_table,
+    )? {
         for doc_id in context.reads.table_doc_ids(&physical_table)? {
             let identity = PhysicalDocumentIdentity {
                 table: physical_table.clone(),

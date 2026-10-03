@@ -23,6 +23,8 @@ mod fk_conflict;
 mod hash;
 #[path = "sql_relation_hierarchy/identity_provenance.rs"]
 mod identity_provenance;
+#[path = "sql_relation_hierarchy/inherited_references.rs"]
+mod inherited_references;
 #[path = "sql_relation_hierarchy/merge.rs"]
 mod merge;
 #[path = "sql_relation_hierarchy/movement.rs"]

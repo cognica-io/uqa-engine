@@ -65,11 +65,10 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                 table: table.to_string(),
                 doc_id: parent_doc_id,
             };
-            for physical_table in context
-                .constraints
-                .catalog
-                .hierarchy_scan_tables(&ref_table, true)?
-            {
+            for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+                context.constraints.partitions.catalog,
+                &ref_table,
+            )? {
                 let rows = snapshot.table(&physical_table)?;
                 for child_id in rows.doc_ids()? {
                     let Some(child_doc) = rows.document(child_id)? else {
@@ -319,11 +318,10 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
             if !excluded_parents.contains(&parent_identity) {
                 excluded_parents.push(parent_identity);
             }
-            for physical_table in context
-                .constraints
-                .catalog
-                .hierarchy_scan_tables(&ref_table, true)?
-            {
+            for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+                context.constraints.partitions.catalog,
+                &ref_table,
+            )? {
                 let rows = snapshot.table(&physical_table)?;
                 for child_id in rows.doc_ids()? {
                     if root_deletes.contains(&(physical_table.clone(), child_id)) {

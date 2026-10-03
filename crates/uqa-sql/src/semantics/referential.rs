@@ -9,7 +9,8 @@ use crate::{ast::ForeignKey, SQLError};
 
 pub trait ReferentialCatalog {
     fn session_replication_role_is_replica(&self) -> bool;
-    fn hierarchy_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError>;
+    /// The relation followed by each partitioned table it is a partition of, nearest first, as [`crate::semantics::partition::partition_ancestor_tables`] returns them.
+    fn partition_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError>;
     fn try_referrers_to(&self, table: &str) -> Result<Vec<(String, ForeignKey)>, String>;
     fn partition_hierarchy_root(&self, table: &str) -> Result<Option<String>, SQLError>;
 }
@@ -23,7 +24,8 @@ pub fn referrers_to_for_actions(
         return Ok(Vec::new());
     }
     let mut output = Vec::new();
-    for target in catalog.hierarchy_ancestor_tables(table)? {
+    // A row belongs to its partitions' ancestors, which foreign keys may reference; a foreign key referencing a plain inheritance parent reads only that parent's own rows.
+    for target in catalog.partition_ancestor_tables(table)? {
         let referrers = catalog
             .try_referrers_to(&target)
             .map_err(|err| dml_storage_error("foreign-key lookup", err))?;

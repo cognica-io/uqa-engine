@@ -124,8 +124,8 @@ impl ReferentialCatalog for Engine {
     fn session_replication_role_is_replica(&self) -> bool {
         Engine::session_replication_role_is_replica(self)
     }
-    fn hierarchy_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
-        Engine::hierarchy_ancestor_tables(self, table)
+    fn partition_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
+        uqa_sql::semantics::partition::partition_ancestor_tables(self, table)
     }
     fn try_referrers_to(&self, table: &str) -> Result<Vec<(String, ForeignKey)>, String> {
         Engine::referrers_in_execution(self, table).map_err(|error| error.to_string())

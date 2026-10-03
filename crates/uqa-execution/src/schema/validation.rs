@@ -92,7 +92,7 @@ pub fn validate_rewritten_foreign_keys(
         validate_foreign_key_rows(context, table, &name, &foreign_key)?;
     }
     let mut checked = std::collections::BTreeSet::new();
-    for target in context.referrers.hierarchy_ancestor_tables(table)? {
+    for target in context.referrers.partition_ancestor_tables(table)? {
         let referrers = context
             .referrers
             .try_referrers_to(&target)
@@ -111,10 +111,10 @@ pub fn validate_rewritten_foreign_keys(
                 .name
                 .clone()
                 .unwrap_or_else(|| "<unnamed>".into());
-            for physical_table in context
-                .catalog
-                .hierarchy_scan_tables(&declaring_table, true)?
-            {
+            for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+                context.partitions.catalog,
+                &declaring_table,
+            )? {
                 if checked.insert((physical_table.clone(), name.clone())) {
                     validate_foreign_key_rows(context, &physical_table, &name, &foreign_key)?;
                 }

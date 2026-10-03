@@ -37,6 +37,7 @@ use uqa_sql::{
         foreign_key_comparison_types, foreign_key_lookup_values, foreign_key_parent_values,
         foreign_key_relation_name, foreign_key_values, ForeignKeyComparison, ForeignKeyLookup,
     },
+    semantics::partition::foreign_key_scan_tables,
     SQLError, SQLParam,
 };
 use uqa_storage::document_store::Document;
@@ -360,7 +361,7 @@ pub fn find_foreign_key_parent(
     if lookup.comparison.exact_reference_lookup {
         return find_exact_foreign_key_parent(context, fk, &lookup.values);
     }
-    for physical_table in context.catalog.hierarchy_scan_tables(&fk.ref_table, true)? {
+    for physical_table in foreign_key_scan_tables(context.partitions.catalog, &fk.ref_table)? {
         for doc_id in context.reads.table_doc_ids(&physical_table)? {
             let Some(document) = context.reads.get_document(&physical_table, doc_id)? else {
                 continue;
@@ -399,7 +400,7 @@ fn find_exact_foreign_key_parent(
     fk: &ForeignKey,
     values: &[Value],
 ) -> Result<Option<PhysicalDocumentIdentity>, SQLError> {
-    for physical_table in context.catalog.hierarchy_scan_tables(&fk.ref_table, true)? {
+    for physical_table in foreign_key_scan_tables(context.partitions.catalog, &fk.ref_table)? {
         if let Some(doc_id) =
             context
                 .indexes
@@ -420,7 +421,7 @@ fn foreign_key_parent_index(
     comparison: &ForeignKeyComparison,
 ) -> Result<std::collections::BTreeSet<Vec<Value>>, SQLError> {
     let mut keys = std::collections::BTreeSet::new();
-    for physical_table in context.catalog.hierarchy_scan_tables(&fk.ref_table, true)? {
+    for physical_table in foreign_key_scan_tables(context.partitions.catalog, &fk.ref_table)? {
         for doc_id in context.reads.table_doc_ids(&physical_table)? {
             let Some(document) = context.reads.get_document(&physical_table, doc_id)? else {
                 continue;

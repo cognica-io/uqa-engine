@@ -592,4 +592,7 @@ fn compare_key_to_bound(
 }
 
 mod identity;
-pub use identity::{partition_hierarchy_root, partition_identity_owner};
+pub use identity::{
+    foreign_key_scan_tables, partition_ancestor_tables, partition_hierarchy_root,
+    partition_identity_owner,
+};

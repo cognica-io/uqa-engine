@@ -84,11 +84,10 @@ pub fn referencing_rows<S: Clone + 'static>(
 ) -> Result<Vec<(PhysicalDocumentIdentity, Document)>, SQLError> {
     let mut out = Vec::new();
     let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
-    for physical_table in context
-        .constraints
-        .catalog
-        .hierarchy_scan_tables(table, true)?
-    {
+    for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+        context.constraints.partitions.catalog,
+        table,
+    )? {
         let rows = snapshot.table(&physical_table)?;
         for doc_id in rows.doc_ids()? {
             let identity = PhysicalDocumentIdentity {
