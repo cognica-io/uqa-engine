@@ -116,6 +116,47 @@ impl SQLiteVectorIndex {
             .with(|connection| self.load_all_with_ordinals_from(connection))
     }
 
+    pub(super) fn visit_ordered_vectors_from(
+        &self,
+        connection: &rusqlite::Connection,
+        control: &StorageReadControl,
+        mut visit: impl FnMut(DocId, u32, &[f32]) -> SQLiteResult<()>,
+    ) -> SQLiteResult<()> {
+        control.check()?;
+        let mut statement = connection.prepare(
+            "SELECT doc_id, vector_ordinal, vector FROM _vectors
+             WHERE table_name = ?1 AND field = ?2 ORDER BY doc_id, vector_ordinal",
+        )?;
+        let mut rows = statement.query(params![self.table, self.field])?;
+        let mut ordinals = super::codec::PersistedOrdinalSequence::default();
+        while let Some(row) = rows.next()? {
+            control.check()?;
+            let document = decode_doc_id(row.get(0)?)?;
+            let ordinal: i64 = row.get(1)?;
+            let ordinal = u32::try_from(ordinal).map_err(|_| {
+                SQLiteError::StorageBackend(format!(
+                    "invalid vector ordinal {ordinal} for {}.{}",
+                    self.table, self.field
+                ))
+            })?;
+            let bytes = row
+                .get_ref(2)?
+                .as_blob()
+                .map_err(|_| SQLiteError::StorageBackend("invalid vector payload".into()))?;
+            let mut payload = control.memory().reserve(bytes.len())?;
+            let vector = blob_to_vector(bytes)?;
+            let capacity = vector
+                .capacity()
+                .checked_mul(size_of::<f32>())
+                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+            payload.grow(capacity.saturating_sub(bytes.len()))?;
+            self.validate_dimensions_sqlite(&vector)?;
+            ordinals.push(document, ordinal)?;
+            visit(document, ordinal, &vector)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn load_all_with_ordinals_from(
         &self,
         connection: &rusqlite::Connection,

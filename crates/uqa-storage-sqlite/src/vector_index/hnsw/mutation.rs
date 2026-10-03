@@ -6,17 +6,15 @@
 
 //! HNSW candidates are read, evaluated and persisted inside the same physical view.
 
-use std::collections::BTreeMap;
-
 use rusqlite::{params, Connection};
-use uqa_core::DocId;
+use uqa_core::{memory::Budgeted, DocId};
 
 use super::{loading::load_meta_from, SQLiteHNSWIndex};
 use crate::vector_index::{encode_doc_id, EncodedVector};
 use crate::Result;
-use uqa_storage::hnsw_index::{HNSWIndex, HNSWMutation};
+use uqa_storage::hnsw_index::{HNSWCanonicalBuilder, HNSWIndex, HNSWMutation};
 use uqa_storage::vector_index::VectorIndex;
-use uqa_storage::{StorageBackendError, StorageBackendResult};
+use uqa_storage::{ReadOnlySnapshot, StorageBackendError, StorageBackendResult};
 
 impl SQLiteHNSWIndex {
     pub(super) fn initialize_graph(&self) -> StorageBackendResult<()> {
@@ -34,20 +32,19 @@ impl SQLiteHNSWIndex {
                 if self.require_persisted_graph && expected.is_none() {
                     return Err(missing_metadata(self).into());
                 }
-                let entries = self.persistent.load_all_with_ordinals_from(connection)?;
-                let mut graph = HNSWIndex::with_params(self.persistent.dimensions, self.params)?;
-                let mut by_doc = BTreeMap::<DocId, Vec<(u32, Vec<f32>)>>::new();
-                for (doc_id, ordinal, vector) in entries {
-                    by_doc.entry(doc_id).or_default().push((ordinal, vector));
-                }
-                for (doc_id, mut vectors) in by_doc {
-                    vectors.sort_by_key(|(ordinal, _)| *ordinal);
-                    graph.add_many(
-                        doc_id,
-                        vectors.into_iter().map(|(_, vector)| vector).collect(),
-                    )?;
-                }
+                let mut builder = HNSWCanonicalBuilder::new(
+                    self.persistent.dimensions,
+                    self.params,
+                    &self.physical_control,
+                )?;
+                self.persistent.visit_ordered_vectors_from(
+                    connection,
+                    &self.physical_control,
+                    |document, ordinal, vector| Ok(builder.push(document, ordinal, vector)?),
+                )?;
+                let (mut graph, memory) = builder.finish()?.into_parts();
                 let delta = graph.take_persistence_delta();
+                let graph = ReadOnlySnapshot::from_budgeted(Budgeted::new(graph, memory))?;
                 let revision = next_revision(expected)?;
                 self.persist_delta(connection, &delta, expected, revision)?;
                 Ok((graph, revision))
@@ -147,10 +144,15 @@ impl SQLiteHNSWIndex {
                     return Ok(None);
                 };
                 let cached = self.cached_graph_at(connection, identity, revision)?;
+                let memory = self
+                    .physical_control
+                    .memory()
+                    .reserve(size_of::<HNSWIndex>())?;
                 let mut graph = (*cached.graph).clone();
                 mutate(&mut graph)?;
                 let delta = graph.take_persistence_delta();
                 let next = next_revision(Some(revision))?;
+                let graph = ReadOnlySnapshot::from_budgeted(Budgeted::new(graph, memory))?;
                 write_canonical(connection)?;
                 self.persist_delta(connection, &delta, Some(revision), next)?;
                 Ok(Some((graph, next)))

@@ -8,6 +8,7 @@
 
 mod access;
 mod canonical;
+mod consistency;
 mod construction;
 mod index;
 mod metric;
@@ -24,6 +25,7 @@ mod types;
 mod validation;
 mod visited;
 
+pub use consistency::HNSWCanonicalValidator;
 pub use metric::MAX_HNSW_LEVEL;
 pub use persistence::{HNSWDeltaNodes, HNSWGraphDelta};
 pub use prepare::{HNSWCanonicalBuilder, HNSWMutation};

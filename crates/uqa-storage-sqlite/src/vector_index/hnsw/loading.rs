@@ -6,16 +6,16 @@
 
 //! HNSW graph metadata, nodes, and adjacency loading.
 
-use std::collections::BTreeMap;
-
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::consistency::validate_canonical_vectors;
 use super::encoding::{checked_hnsw_level, checked_u64, decode_meta, invalid_metadata, RawMeta};
 use super::SQLiteHNSWIndex;
 use crate::vector_index::{blob_to_vector, decode_doc_id};
 use crate::{Result as SQLiteResult, SQLiteError};
-use uqa_storage::hnsw_index::{HNSWGraphMeta, HNSWIndex, HNSWNodeSnapshot};
+use uqa_core::memory::{Budgeted, MemoryError};
+use uqa_storage::hnsw_index::{
+    HNSWCanonicalValidator, HNSWGraphMeta, HNSWIndex, HNSWNodeSnapshot, HNSWRestoreBuilder,
+};
 use uqa_storage::vector_index::HNSWIndexParams;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
@@ -33,19 +33,24 @@ impl SQLiteHNSWIndex {
     pub(super) fn load_graph_from(
         &self,
         connection: &Connection,
-    ) -> SQLiteResult<(u64, HNSWIndex)> {
+    ) -> SQLiteResult<(u64, Budgeted<HNSWIndex>)> {
         let Some((dimensions, params, meta, revision)) = load_meta_from(connection, self)? else {
             return Err(super::mutation::missing_metadata(self).into());
         };
-        let mut nodes = load_nodes_from(connection, self)?;
-        load_edges_into(connection, self, &mut nodes)?;
-        let canonical = self.persistent.load_all_with_ordinals_from(connection)?;
-        validate_canonical_vectors(&canonical, &nodes)?;
         self.validate_header(dimensions, params)?;
-        Ok((
-            revision,
-            HNSWIndex::from_persistence(dimensions, params, meta, nodes)?,
-        ))
+        let control = &self.physical_control;
+        let mut builder = HNSWRestoreBuilder::new(dimensions, params, meta, control)?;
+        load_nodes_into(connection, self, &mut builder)?;
+        load_edges_into(connection, self, &mut builder)?;
+        let graph = builder.finish()?;
+        let mut canonical = HNSWCanonicalValidator::new(&graph, control);
+        self.persistent.visit_ordered_vectors_from(
+            connection,
+            control,
+            |document, ordinal, vector| Ok(canonical.push(document, ordinal, vector)?),
+        )?;
+        canonical.finish()?;
+        Ok((revision, graph))
     }
 
     pub(super) fn load_meta(
@@ -114,92 +119,71 @@ pub(super) fn load_meta_from(
     row.map(decode_meta).transpose()
 }
 
-fn load_nodes_from(
+fn load_nodes_into(
     connection: &Connection,
     index: &SQLiteHNSWIndex,
-) -> SQLiteResult<Vec<HNSWNodeSnapshot>> {
+    builder: &mut HNSWRestoreBuilder,
+) -> SQLiteResult<()> {
     let mut statement = connection.prepare(
         "SELECT node_id, doc_id, vector_ordinal, level, deleted, vector
-           FROM _hnsw_nodes
-          WHERE table_name = ?1 AND field = ?2 ORDER BY node_id",
+         FROM _hnsw_nodes WHERE table_name = ?1 AND field = ?2 ORDER BY node_id",
     )?;
-    let rows = statement.query_map(
-        params![index.persistent.table, index.persistent.field],
-        |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, Vec<u8>>(5)?,
-            ))
-        },
-    )?;
-    let mut nodes = Vec::new();
-    for row in rows {
-        let (node_id, doc_id, ordinal, level, deleted, vector) = row?;
-        let level = checked_hnsw_level("level", level)?;
-        nodes.push(HNSWNodeSnapshot {
-            node_id: checked_u64("node_id", node_id)?,
-            doc_id: decode_doc_id(doc_id)?,
+    let mut rows = statement.query(params![index.persistent.table, index.persistent.field])?;
+    while let Some(row) = rows.next()? {
+        index.physical_control.check()?;
+        let level = checked_hnsw_level("level", row.get(3)?)?;
+        let bytes = row
+            .get_ref(5)?
+            .as_blob()
+            .map_err(|_| SQLiteError::StorageBackend("invalid HNSW vector blob".into()))?;
+        let size = bytes
+            .len()
+            .checked_add(size_of::<HNSWNodeSnapshot>())
+            .and_then(|size| size.checked_add((level + 1) * size_of::<Vec<u64>>()))
+            .ok_or(MemoryError::SizeOverflow)?;
+        let mut payload = index.physical_control.memory().reserve(size)?;
+        let vector = blob_to_vector(bytes)?;
+        let capacity = vector
+            .capacity()
+            .checked_mul(size_of::<f32>())
+            .ok_or(MemoryError::SizeOverflow)?;
+        payload.grow(capacity.saturating_sub(bytes.len()))?;
+        let ordinal: i64 = row.get(2)?;
+        builder.push(HNSWNodeSnapshot {
+            node_id: checked_u64("node_id", row.get(0)?)?,
+            doc_id: decode_doc_id(row.get(1)?)?,
             vector_ordinal: u32::try_from(ordinal)
                 .map_err(|_| invalid_metadata("vector_ordinal", &ordinal.to_string()))?,
-            raw_vector: blob_to_vector(&vector)?,
+            raw_vector: vector,
             level,
-            deleted: match deleted {
+            deleted: match row.get::<_, i64>(4)? {
                 0 => false,
                 1 => true,
                 other => return Err(invalid_metadata("deleted", &other.to_string())),
             },
             neighbors: vec![Vec::new(); level + 1],
-        });
+        })?;
     }
-    Ok(nodes)
+    Ok(())
 }
 
 fn load_edges_into(
     connection: &Connection,
     index: &SQLiteHNSWIndex,
-    nodes: &mut [HNSWNodeSnapshot],
+    builder: &mut HNSWRestoreBuilder,
 ) -> SQLiteResult<()> {
-    let positions = nodes
-        .iter()
-        .enumerate()
-        .map(|(position, node)| (node.node_id, position))
-        .collect::<BTreeMap<_, _>>();
     let mut statement = connection.prepare(
         "SELECT source_node_id, layer, target_node_id FROM _hnsw_edges
-          WHERE table_name = ?1 AND field = ?2
-          ORDER BY source_node_id, layer, target_node_id",
+         WHERE table_name = ?1 AND field = ?2 ORDER BY source_node_id, layer, target_node_id",
     )?;
-    let rows = statement.query_map(
-        params![index.persistent.table, index.persistent.field],
-        |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        },
-    )?;
-    for row in rows {
-        let (source, layer, target) = row?;
-        let source = checked_u64("source_node_id", source)?;
-        let Some(position) = positions.get(&source).copied() else {
-            return Err(SQLiteError::StorageBackend(format!(
-                "corrupt HNSW graph: edge source {source} is missing"
-            )));
-        };
-        let layer = checked_hnsw_level("layer", layer)?;
-        let node = &mut nodes[position];
-        if layer > node.level {
-            return Err(SQLiteError::StorageBackend(format!(
-                "corrupt HNSW graph: node {source} has an edge at layer {layer} above level {}",
-                node.level
-            )));
-        }
-        node.neighbors[layer].push(checked_u64("target_node_id", target)?);
+    let mut rows = statement.query(params![index.persistent.table, index.persistent.field])?;
+    while let Some(row) = rows.next()? {
+        index.physical_control.check()?;
+        builder.edge(
+            checked_u64("source_node_id", row.get(0)?)?,
+            checked_hnsw_level("layer", row.get(1)?)?,
+            checked_u64("target_node_id", row.get(2)?)?,
+        )?;
     }
     Ok(())
 }

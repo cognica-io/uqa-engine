@@ -6,19 +6,17 @@
 
 //! Versioned HNSW graph encoding, restoration, and dirty-node persistence.
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
-use uqa_core::{
-    memory::{Budgeted, BudgetedVec},
-    DocId,
-};
+use uqa_core::memory::Budgeted;
 
 use super::codec::{decode_value, other_error, usize_to_u64};
 use super::hnsw_records::KeyValueHNSWRecords;
 use super::index_keys::{hnsw_metadata_key, hnsw_node_prefix};
 use super::{KeyValueRead, KeyValueVectorIndex};
-use crate::hnsw_index::{HNSWGraphMeta, HNSWIndex, HNSWNodeSnapshot, MAX_HNSW_LEVEL};
+use crate::hnsw_index::{
+    HNSWCanonicalValidator, HNSWGraphMeta, HNSWIndex, HNSWNodeSnapshot, HNSWRestoreBuilder,
+    MAX_HNSW_LEVEL,
+};
 use crate::mvcc::{HNSWRecordHeader, HNSWRecordLayout, VersionError};
 use crate::vector_index::HNSWIndexParams;
 use crate::{StorageBackendError, StorageBackendResult};
@@ -67,17 +65,21 @@ pub(super) fn restore_graph(
         ))
     })?;
     validate_metadata(&metadata, table, field, dimensions, params)?;
-    let nodes = load_nodes(store, table, field)?;
-    validate_canonical_vectors(&raw.load_all_from(store)?, &nodes)?;
     let header = metadata_header(&metadata)?;
-    let (nodes, _decoded) = nodes.into_parts();
-    let graph = HNSWIndex::from_persistence_controlled(
-        dimensions,
-        params,
-        header.meta,
-        nodes,
-        store.control(),
-    )?;
+    let mut builder = HNSWRestoreBuilder::new(dimensions, params, header.meta, store.control())?;
+    store.visit_prefix(&hnsw_node_prefix(table, field)?, &mut |key, value| {
+        let (node, _memory) = KeyValueHNSWRecords
+            .node(key, value, store.control())
+            .map_err(VersionError::into_storage_error)?
+            .into_parts();
+        builder.push(node)
+    })?;
+    let graph = builder.finish()?;
+    let mut canonical = HNSWCanonicalValidator::new(&graph, store.control());
+    raw.visit_canonical_from(store, |document, ordinal, vector| {
+        canonical.push(document, ordinal, vector)
+    })?;
+    canonical.finish()?;
     Ok((graph, metadata.revision))
 }
 
@@ -98,31 +100,6 @@ fn load_metadata(
         .get(&hnsw_metadata_key(table, field)?)?
         .map(|bytes| decode_value(&bytes))
         .transpose()
-}
-
-fn load_nodes(
-    store: &dyn KeyValueRead,
-    table: &str,
-    field: &str,
-) -> StorageBackendResult<Budgeted<Vec<HNSWNodeSnapshot>>> {
-    let prefix = hnsw_node_prefix(table, field)?;
-    let mut output = (
-        BudgetedVec::new(store.control().memory()),
-        store.control().memory().empty_reservation(),
-    );
-    store.visit_prefix(&prefix, &mut |key, value| {
-        output.0.reserve(1)?;
-        let node = KeyValueHNSWRecords
-            .node(key, value, store.control())
-            .map_err(VersionError::into_storage_error)?;
-        let (node, memory) = node.into_parts();
-        output.1.absorb(memory);
-        output.0.push(node)?;
-        Ok(())
-    })?;
-    let (nodes, memory) = output.0.into_parts();
-    output.1.absorb(memory);
-    Ok(Budgeted::new(nodes, output.1))
 }
 
 pub(super) fn metadata_from_graph(
@@ -189,50 +166,6 @@ pub(super) fn metadata_header(
         },
         revision: Some(meta.revision),
     })
-}
-
-fn validate_canonical_vectors(
-    canonical: &[(DocId, u32, Vec<f32>)],
-    nodes: &[HNSWNodeSnapshot],
-) -> StorageBackendResult<()> {
-    let mut live = BTreeMap::<(DocId, u32), &[f32]>::new();
-    for node in nodes.iter().filter(|node| !node.deleted) {
-        if live
-            .insert((node.doc_id, node.vector_ordinal), &node.raw_vector)
-            .is_some()
-        {
-            return Err(corrupt(format!(
-                "duplicate live graph vector {}:{}",
-                node.doc_id, node.vector_ordinal
-            )));
-        }
-    }
-    for (doc_id, ordinal, vector) in canonical {
-        let graph_vector = live.remove(&(*doc_id, *ordinal)).ok_or_else(|| {
-            corrupt(format!(
-                "canonical vector {doc_id}:{ordinal} has no live graph node"
-            ))
-        })?;
-        if !same_bits(graph_vector, vector) {
-            return Err(corrupt(format!(
-                "canonical vector {doc_id}:{ordinal} differs from its live graph node"
-            )));
-        }
-    }
-    if let Some(((doc_id, ordinal), _)) = live.first_key_value() {
-        return Err(corrupt(format!(
-            "live graph node {doc_id}:{ordinal} has no canonical vector"
-        )));
-    }
-    Ok(())
-}
-
-fn same_bits(left: &[f32], right: &[f32]) -> bool {
-    left.len() == right.len()
-        && left
-            .iter()
-            .zip(right)
-            .all(|(left, right)| left.to_bits() == right.to_bits())
 }
 
 pub(super) fn checked_level(value: u64, field: &str) -> StorageBackendResult<usize> {

@@ -195,24 +195,40 @@ impl<'a> NativeVectorRead<'a> {
         &self,
         mut visit: impl FnMut(DocId, &[f32], &StorageReadControl) -> Result<()>,
     ) -> Result<()> {
-        let mut ordinals = BudgetedVec::new(self.snapshot.control.memory());
+        self.visit_ordered_vectors(|document, _, vector| {
+            visit(document, vector, &self.snapshot.control)
+        })
+    }
+
+    /// Native vector keys order the field's nonnegative document and ordinal identities lexicographically.
+    pub(super) fn visit_ordered_vectors(
+        &self,
+        mut visit: impl FnMut(DocId, u32, &[f32]) -> Result<()>,
+    ) -> Result<()> {
+        let mut ordinals = super::codec::PersistedOrdinalSequence::default();
+        self.snapshot.control.check()?;
         if let Some(owner) = self.owner {
             self.snapshot
                 .visit_rows(Family::Vectors, Some(owner), &[self.field()], |row| {
                     let blob = blob(row[4])?;
-                    let _payload = self.snapshot.control.memory().reserve(blob.len())?;
+                    let mut payload = self.snapshot.control.memory().reserve(blob.len())?;
                     let vector = blob_to_vector(blob)?;
+                    let capacity = vector
+                        .capacity()
+                        .checked_mul(size_of::<f32>())
+                        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+                    payload.grow(capacity.saturating_sub(blob.len()))?;
                     self.index.validate_dimensions_sqlite(&vector)?;
                     let ordinal = u32::try_from(integer(row[3])?).map_err(|_| {
                         SQLiteError::StorageBackend("invalid native vector ordinal".into())
                     })?;
                     let id = decode_doc_id(integer(row[2])?)?;
-                    ordinals.push((id, ordinal))?;
-                    visit(id, &vector, &self.snapshot.control)?;
+                    ordinals.push(id, ordinal)?;
+                    visit(id, ordinal, &vector)?;
                     Ok(())
                 })?;
         }
-        super::codec::validate_persisted_ordinals(ordinals.iter().copied())
+        Ok(())
     }
 
     pub(super) fn contains_document(&self, doc_id: i64) -> Result<bool> {

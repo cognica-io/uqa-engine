@@ -199,13 +199,17 @@ impl HNSWRestoreBuilder {
         let node = self
             .index
             .node(source)?
-            .ok_or_else(|| corrupt("edge source is missing"))?;
-        let neighbors = node
-            .neighbors
-            .get(layer)
-            .ok_or_else(|| corrupt("edge above node level"))?;
+            .ok_or_else(|| corrupt(&format!("edge source {source} is missing")))?;
+        let neighbors = node.neighbors.get(layer).ok_or_else(|| {
+            corrupt(&format!(
+                "node {source} has an edge at layer {layer} above level {}",
+                node.level
+            ))
+        })?;
         if neighbors.len() >= self.index.max_connections(layer) {
-            return Err(corrupt("node exceeds the degree bound"));
+            return Err(corrupt(&format!(
+                "node {source} layer {layer} exceeds the degree bound"
+            )));
         }
         drop(node);
         self.index.modify_node(source, Some(&self.control), |node| {
