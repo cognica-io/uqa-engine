@@ -15,10 +15,15 @@ use super::{
     ReferentialRewrite, ReferentialRewritePreparation, SQLError, SQLParam,
 };
 
-/// Build the complete tuple-lock dependency tree for one rewrite while the backend transaction is still deferred. The prepared documents retain volatile SET DEFAULT results so the apply phase never re-evaluates them.
+/// Build the complete tuple-lock dependency tree for one rewrite while the backend transaction is still deferred. The prepared documents retain volatile SET DEFAULT results so the apply phase never re-evaluates them. `referenced_relation` is the relation whose constraints a change to the row's referenced key fires: the row's table, or the relation an `UPDATE` names when the row moves to another partition.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps DML row-image inputs aligned"
+)]
 pub fn prepare_document_rewrite<S: Clone + 'static>(
     context: &ReferentialContext<'_, S>,
     table: &str,
+    referenced_relation: &str,
     doc_id: DocId,
     old_document: Document,
     mut new_document: Document,
@@ -65,6 +70,7 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
     let actions = prepare_referenced_key_update_actions(
         context,
         table,
+        referenced_relation,
         doc_id,
         &old_document,
         &new_document,
@@ -143,6 +149,7 @@ pub fn prepare_referential_document_rewrite<S: Clone + 'static>(
         PartitionUpdateRoute::Rewrite {
             document: new_document,
             destination: None,
+            moved_through: None,
         }
     };
     let Some(mut prepared) = prepare_routed_document_rewrite(
@@ -236,6 +243,7 @@ pub fn prepare_partition_update_route<S: Clone + 'static>(
         return Ok(Some(PartitionUpdateRoute::Rewrite {
             document,
             destination: None,
+            moved_through: None,
         }));
     }
     let destination = partition_insert_target(
@@ -260,6 +268,7 @@ pub fn prepare_partition_update_route<S: Clone + 'static>(
         return Ok(Some(PartitionUpdateRoute::Rewrite {
             document,
             destination: None,
+            moved_through: None,
         }));
     }
     if crate::mutation::triggers::fire_before_row_triggers(
@@ -303,6 +312,7 @@ pub fn prepare_partition_update_route<S: Clone + 'static>(
     Ok(Some(PartitionUpdateRoute::Rewrite {
         document: triggered_document,
         destination: Some(destination),
+        moved_through: Some(routing_table.to_string()),
     }))
 }
 
@@ -319,10 +329,12 @@ pub fn prepare_routed_document_rewrite<S: Clone + 'static>(
         PartitionUpdateRoute::Rewrite {
             document,
             destination,
+            moved_through,
         } => {
             let Some(mut prepared) = prepare_document_rewrite(
                 context,
                 table,
+                moved_through.as_deref().unwrap_or(table),
                 doc_id,
                 old_document,
                 document,

@@ -374,6 +374,7 @@ impl InsertConflictLocks {
                 let prepared = prepare_document_rewrite(
                     &context,
                     &existing.table,
+                    &existing.table,
                     existing.doc_id,
                     old_document,
                     new_document,

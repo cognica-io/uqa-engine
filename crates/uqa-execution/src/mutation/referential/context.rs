@@ -36,6 +36,7 @@ pub trait ReferentialSnapshots {
         doc_id: DocId,
     ) -> Result<Option<uqa_storage::DocumentMetadata>, SQLError>;
 }
+/// The deferral of the checks a change to a referenced row fires, under the constraint `derived` names when the foreign key derives one on the firing partition.
 pub trait ReferentialDeferrals {
     fn defer_foreign_key_check(
         &self,
@@ -44,12 +45,14 @@ pub trait ReferentialDeferrals {
         row_table: &str,
         doc_id: DocId,
         foreign_key: &ForeignKey,
+        derived: Option<&uqa_sql::ast::ReferencedPartitionConstraint>,
     ) -> Result<(), SQLError>;
     fn defer_foreign_key_parent_event(
         &self,
         constraint_table: &str,
         firing_table: &str,
         foreign_key: &ForeignKey,
+        derived: Option<&uqa_sql::ast::ReferencedPartitionConstraint>,
     ) -> Result<(), SQLError>;
 }
 #[derive(Clone)]

@@ -327,3 +327,147 @@ fn reopening_derives_the_constraints_that_earlier_releases_did_not_record() {
         ])
     );
 }
+
+fn referenced_rows(engine: &Engine) {
+    for sql in [
+        "CREATE TABLE pk (a integer PRIMARY KEY) PARTITION BY RANGE (a)",
+        "CREATE TABLE pk1 PARTITION OF pk FOR VALUES FROM (0) TO (10)",
+        "CREATE TABLE pk2 PARTITION OF pk FOR VALUES FROM (10) TO (20) PARTITION BY RANGE (a)",
+        "CREATE TABLE pk21 PARTITION OF pk2 FOR VALUES FROM (10) TO (15)",
+        "CREATE TABLE pk22 PARTITION OF pk2 FOR VALUES FROM (15) TO (20)",
+        "CREATE TABLE fk (a integer REFERENCES pk, b integer) PARTITION BY RANGE (b)",
+        "CREATE TABLE fk1 PARTITION OF fk FOR VALUES FROM (0) TO (100)",
+        "INSERT INTO pk VALUES (1), (12)",
+        "INSERT INTO fk VALUES (1, 1), (12, 2)",
+    ] {
+        exec(engine, sql);
+    }
+}
+
+fn violation(engine: &Engine, sql: &str) -> String {
+    let error = engine.sql(sql, &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("23503"), "{sql}: {error}");
+    error.to_string()
+}
+
+fn names(relation: &str, constraint: &str) -> String {
+    format!(
+        "update or delete on table \"{relation}\" violates foreign key constraint \"{constraint}\" on table \"fk\""
+    )
+}
+
+#[test]
+fn changes_to_referenced_rows_name_the_constraint_derived_on_their_partition() {
+    let engine = Engine::new();
+    referenced_rows(&engine);
+    for (sql, relation, constraint) in [
+        ("DELETE FROM pk WHERE a = 1", "pk1", "fk_a_fkey_1"),
+        ("DELETE FROM pk1 WHERE a = 1", "pk1", "fk_a_fkey_1"),
+        ("DELETE FROM pk WHERE a = 12", "pk21", "fk_a_fkey_3"),
+        ("UPDATE pk SET a = 2 WHERE a = 1", "pk1", "fk_a_fkey_1"),
+        ("UPDATE pk SET a = 13 WHERE a = 12", "pk21", "fk_a_fkey_3"),
+        // A row that moves to another partition names the relation the UPDATE names.
+        ("UPDATE pk SET a = 5 WHERE a = 12", "pk", "fk_a_fkey"),
+        ("UPDATE pk2 SET a = 16 WHERE a = 12", "pk2", "fk_a_fkey_2"),
+    ] {
+        let message = violation(&engine, sql);
+        assert!(
+            message.contains(&names(relation, constraint)),
+            "{sql}: {message}"
+        );
+    }
+}
+
+#[test]
+fn set_constraints_governs_the_checks_of_a_derived_constraints_partition() {
+    let check = |statements: &[&str], expected: Option<(&str, &str)>| {
+        let engine = Engine::new();
+        referenced_rows(&engine);
+        exec(
+            &engine,
+            "ALTER TABLE fk ALTER CONSTRAINT fk_a_fkey DEFERRABLE INITIALLY DEFERRED",
+        );
+        exec(&engine, "BEGIN");
+        let (last, leading) = statements.split_last().unwrap();
+        for sql in leading {
+            exec(&engine, sql);
+        }
+        match expected {
+            Some((relation, constraint)) => {
+                let message = violation(&engine, last);
+                assert!(
+                    message.contains(&names(relation, constraint)),
+                    "{statements:?}: {message}"
+                );
+            }
+            None => exec(&engine, last),
+        }
+    };
+    // The derived constraint of pk1 checks at once while pk21's stays deferred.
+    check(
+        &[
+            "SET CONSTRAINTS fk_a_fkey_1 IMMEDIATE",
+            "DELETE FROM pk WHERE a = 12",
+        ],
+        None,
+    );
+    check(
+        &[
+            "SET CONSTRAINTS fk_a_fkey_1 IMMEDIATE",
+            "DELETE FROM pk WHERE a = 1",
+        ],
+        Some(("pk1", "fk_a_fkey_1")),
+    );
+    // The derived constraint of pk2 governs those of its partitions, and so does the foreign key.
+    check(
+        &[
+            "SET CONSTRAINTS fk_a_fkey_2 IMMEDIATE",
+            "DELETE FROM pk WHERE a = 12",
+        ],
+        Some(("pk21", "fk_a_fkey_3")),
+    );
+    check(
+        &[
+            "SET CONSTRAINTS fk_a_fkey IMMEDIATE",
+            "DELETE FROM pk WHERE a = 12",
+        ],
+        Some(("pk21", "fk_a_fkey_3")),
+    );
+    // A check deferred under a derived constraint fires when that constraint becomes immediate, and at commit.
+    check(
+        &[
+            "SET CONSTRAINTS ALL IMMEDIATE",
+            "SET CONSTRAINTS fk_a_fkey_2 DEFERRED",
+            "DELETE FROM pk WHERE a = 12",
+            "SET CONSTRAINTS fk_a_fkey_3 IMMEDIATE",
+        ],
+        Some(("pk21", "fk_a_fkey_3")),
+    );
+    check(
+        &["DELETE FROM pk WHERE a = 1", "COMMIT"],
+        Some(("pk1", "fk_a_fkey_1")),
+    );
+}
+
+#[test]
+fn a_deferred_check_of_a_referenced_row_reports_the_referenced_side() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE TABLE pk (a integer PRIMARY KEY)",
+        "CREATE TABLE fk (a integer REFERENCES pk DEFERRABLE INITIALLY DEFERRED)",
+        "INSERT INTO pk VALUES (1)",
+        "INSERT INTO fk VALUES (1)",
+        "BEGIN",
+        "DELETE FROM pk WHERE a = 1",
+    ] {
+        exec(&engine, sql);
+    }
+    assert!(violation(&engine, "COMMIT").contains(
+        "update or delete on table \"pk\" violates foreign key constraint \"fk_a_fkey\" on table \"fk\""
+    ));
+    exec(&engine, "BEGIN");
+    exec(&engine, "INSERT INTO fk VALUES (5)");
+    assert!(violation(&engine, "COMMIT").contains(
+        "insert or update on table \"fk\" violates foreign key constraint \"fk_a_fkey\""
+    ));
+}

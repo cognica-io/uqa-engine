@@ -196,3 +196,63 @@ pub fn reconcile_table_referenced_partition_constraints(
     }
     Ok(changed)
 }
+
+/// The constraint whose triggers a change to a referenced row fires, and the relation that holds it.
+#[derive(Debug, Clone, Copy)]
+pub struct FiringConstraint<'a> {
+    /// The partition that holds the row, or the relation an `UPDATE` names when the row moves to another partition.
+    pub relation: &'a str,
+    /// The constraint the foreign key derives on `relation`, or `None` for the foreign key's own.
+    pub derived: Option<&'a ReferencedPartitionConstraint>,
+}
+
+impl FiringConstraint<'_> {
+    /// The name of the constraint, given the foreign key's own.
+    pub fn name<'n>(&'n self, foreign_key: &'n crate::ast::ForeignKey) -> &'n str {
+        self.derived.map_or_else(
+            || foreign_key.name.as_deref().unwrap_or("<unnamed>"),
+            |derived| derived.name.as_str(),
+        )
+    }
+}
+
+/// The constraint of `foreign_key` whose triggers a change to a referenced row of `relation`, the partition that holds it, fires: the constraint it derives on `relation`, or the foreign key's own when the foreign key references `relation`. A row that moves to another partition fires the constraint at `moved_through`, the relation the `UPDATE` names, when the foreign key references it or a table it is a partition of, as `PostgreSQL` fires the update triggers of the update's root for a moved row.
+pub fn firing_constraint<'a>(
+    catalog: &dyn crate::semantics::partition::PartitionCatalog,
+    relation: &'a str,
+    moved_through: Option<&'a str>,
+    foreign_key: &'a crate::ast::ForeignKey,
+) -> Result<FiringConstraint<'a>, SQLError> {
+    let object_id = |table: &str| {
+        catalog
+            .try_table_object_id(table)
+            .map_err(SQLError::Internal)
+    };
+    let derived_on = |table: &str| -> Result<Option<&'a ReferencedPartitionConstraint>, SQLError> {
+        Ok(object_id(table)?.and_then(|object_id| {
+            foreign_key
+                .referenced_partitions
+                .iter()
+                .find(|constraint| constraint.partition == object_id)
+        }))
+    };
+    if let Some(target) = moved_through {
+        let referenced = object_id(&foreign_key.ref_table)?;
+        if referenced.is_some() && object_id(target)? == referenced {
+            return Ok(FiringConstraint {
+                relation: target,
+                derived: None,
+            });
+        }
+        if let Some(derived) = derived_on(target)? {
+            return Ok(FiringConstraint {
+                relation: target,
+                derived: Some(derived),
+            });
+        }
+    }
+    Ok(FiringConstraint {
+        relation,
+        derived: derived_on(relation)?,
+    })
+}

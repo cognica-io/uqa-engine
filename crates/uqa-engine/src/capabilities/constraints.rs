@@ -118,6 +118,14 @@ impl ConstraintTransactions for Engine {
     fn foreign_key_is_deferred(&self, table: &str, key: &ForeignKey) -> Result<bool, SQLError> {
         Engine::foreign_key_is_deferred(self, table, key)
     }
+    fn referenced_key_is_deferred(
+        &self,
+        table: &str,
+        key: &ForeignKey,
+        derived: Option<&uqa_sql::ast::ReferencedPartitionConstraint>,
+    ) -> Result<bool, SQLError> {
+        Engine::referenced_key_is_deferred(self, table, key, derived)
+    }
     fn refresh_explicit_statement_snapshot(&self) -> Result<(), SQLError> {
         Engine::refresh_explicit_statement_snapshot(self)
     }

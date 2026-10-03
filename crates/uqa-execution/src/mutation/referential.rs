@@ -58,6 +58,8 @@ pub enum PartitionUpdateRoute {
     Rewrite {
         document: Document,
         destination: Option<String>,
+        /// The relation the `UPDATE` names when the row moves to another partition, whose constraints a change to a referenced key fires, as `PostgreSQL` fires the update triggers of the update's root for a moved row.
+        moved_through: Option<String>,
     },
     Delete {
         attempted_document: Document,
