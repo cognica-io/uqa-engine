@@ -109,13 +109,15 @@ impl HNSWIndex {
         reachable.insert(u128::from(entry_point), 0_u64, control)?;
         pending.insert(0, entry_point, control)?;
         let mut sequence = 1_u128;
+        let mut cursor = None;
         loop {
             check(control)?;
-            let next = pending.next(None)?.map(|(key, value)| (key, *value));
+            let next = pending.next(cursor)?.map(|(key, value)| (key, *value));
             let Some((key, node_id)) = next else {
                 break;
             };
             pending.remove(key, control)?;
+            cursor = Some(key);
             let node = self
                 .node(node_id)?
                 .ok_or_else(|| corrupt("reachability references missing node"))?;
