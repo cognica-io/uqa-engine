@@ -1,0 +1,66 @@
+name: Release Benchmarks
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_BENCH_DEBUG: "0"
+
+jobs:
+  measurements:
+    name: record release benchmarks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          key: release-benchmarks
+      - name: Run the release inventory once
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python3 scripts/run-release-benchmarks.py --tag "$RELEASE_TAG" --output "$RUNNER_TEMP/release-benchmarks"
+      - name: Add the measurement summary
+        if: always()
+        run: |
+          shopt -s nullglob
+          for report in "$RUNNER_TEMP"/release-benchmarks/reports/*.md; do
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Retain compact release reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-benchmarks-${{ inputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-benchmarks/reports/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Retain Criterion samples and diagnostics
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-benchmark-diagnostics-${{ inputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-benchmarks/*.log
+            ${{ runner.temp }}/release-benchmarks/criterion/**/new/*.json
+          if-no-files-found: warn
+          retention-days: 30
