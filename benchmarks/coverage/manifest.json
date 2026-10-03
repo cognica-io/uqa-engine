@@ -121,7 +121,7 @@
     },
     {
       "path": "crates/uqa-engine/benches/sql_sqlite_e2e.rs",
-      "tokens": ["sqlite_e2e", "indexed_filter_order_limit_10k"]
+      "tokens": ["sqlite_e2e", "indexed_filter_order_limit_10k", "Provider::selected", "verify_and_reopen", "new_session_select_one_10k"]
     },
     {
       "path": "crates/uqa-engine/benches/sql_workloads.rs",
