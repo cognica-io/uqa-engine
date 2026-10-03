@@ -61,7 +61,7 @@ impl Engine {
         &self,
         operation: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(super::graph_store_error)?;

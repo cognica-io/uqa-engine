@@ -394,3 +394,26 @@ fn startup_reports_every_reported_parameter_and_reset_restores_client_settings()
         json!([["client"]])
     );
 }
+
+#[test]
+fn a_startup_idle_session_timeout_terminates_the_connection_at_fatal() {
+    let fixture = Fixture::new();
+    let (mut client, startup) = Client::connect_with(
+        fixture.server.local_addr(),
+        "uqa",
+        "uqa",
+        196_610,
+        &[("options", "-c idle_session_timeout=100")],
+    );
+    assert_eq!(startup.last().map(|message| message.0), Some(b'Z'));
+    let (tag, body) = client.receive();
+    assert_eq!(tag, b'E');
+    let fields = fields(&body);
+    assert_eq!(fields[&b'S'], "FATAL");
+    assert_eq!(fields[&b'C'], "57P05");
+    assert_eq!(
+        fields[&b'M'],
+        "terminating connection due to idle-session timeout"
+    );
+    assert!(client.try_receive().is_err());
+}

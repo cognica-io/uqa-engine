@@ -262,6 +262,8 @@ pub(super) struct SessionContext {
     pub(super) parameters: Mutex<crate::session::SessionParameterRegistry>,
     /// The bytes a query workspace may hold before it spills when the host bounds it below `work_mem`; 0 leaves `work_mem` in effect.
     pub(super) query_memory_limit: std::sync::atomic::AtomicUsize,
+    /// Whether a terminated session has rolled back its transaction and dropped what it held.
+    pub(super) termination_finished: AtomicBool,
     /// Prepared definitions belong to the connection and survive transaction or
     /// savepoint rollback, including definitions created or removed after a boundary.
     pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
@@ -329,6 +331,7 @@ impl SessionContext {
             state: SessionStateLock::new(state),
             parameters: Mutex::new(crate::session::SessionParameterRegistry::default()),
             query_memory_limit: std::sync::atomic::AtomicUsize::new(0),
+            termination_finished: AtomicBool::new(false),
             prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
             sequence_snapshot: Mutex::new(None),
@@ -426,6 +429,11 @@ impl StatementGate {
         (!delegated).then(|| self.mutex.lock())
     }
 
+    /// Hold the gate only if no other thread holds it.
+    pub(super) fn try_lock(&self) -> Option<parking_lot::ReentrantMutexGuard<'_, ()>> {
+        self.mutex.try_lock()
+    }
+
     pub(super) fn lock_with_cancellation(
         &self,
         cancellation: &uqa_core::CancellationToken,
@@ -481,6 +489,8 @@ pub(super) struct QueryRuntime {
     pub(super) cancellation: uqa_core::CancellationToken,
     pub(super) notices: Arc<uqa_execution::query::NoticeQueue>,
     pub(super) notifications: Arc<Mutex<VecDeque<crate::SQLNotification>>>,
+    /// The terminations the session has scheduled for its idle period and transaction.
+    pub(super) terminations: crate::session::SessionTerminations,
     pub(super) notification_wake: Arc<parking_lot::Condvar>,
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
@@ -514,6 +524,7 @@ impl QueryRuntime {
             cancellation,
             notices: Arc::new(uqa_execution::query::NoticeQueue::new(client_level)),
             notifications: Arc::new(Mutex::new(VecDeque::new())),
+            terminations: crate::session::SessionTerminations::new(true),
             notification_wake: Arc::new(parking_lot::Condvar::new()),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),

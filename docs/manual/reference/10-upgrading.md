@@ -638,3 +638,7 @@ Settings now follow PostgreSQL 18's parameter definitions. The default `search_p
 ## Statement and lock timeouts
 
 `statement_timeout` and `lock_timeout` are new and have PostgreSQL's effect: a statement that runs longer than `statement_timeout` is canceled with `57014`, and a lock wait longer than `lock_timeout` fails with `55P03`, `canceling statement due to lock timeout`. A cancellation now carries its reason, so `uqa_core::QueryCancelled` is a struct with a `reason` field rather than a unit struct, `QueryCancelled::USER_REQUEST` is the value a client cancel produced before, and `SQLError::sqlstate` reports `55P03` for a lock timeout. A PL/pgSQL handler that names `query_canceled` now catches a cancellation and consumes it, where earlier versions let no handler catch one. `pg_sleep`, `pg_sleep_for` and `pg_sleep_until` are new.
+
+## Session timeouts
+
+`idle_in_transaction_session_timeout`, `idle_session_timeout` and `transaction_timeout` are new and terminate a session as PostgreSQL does: its transaction is rolled back at once and every later statement reports `25P03`, `57P05` or `25P04`. A terminated session cannot be used again, also not after `reset_cancellation`; a host that sets one of these timeouts opens a new session after a termination. `uqa_core::CancellationReason` has the three termination reasons, and `Engine::session_termination` reports a termination.

@@ -82,7 +82,7 @@ impl Engine {
         query: impl FnOnce(&Self) -> Result<R, E>,
         map_transaction_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
         self.with_query_transaction_snapshot(!nested, read_only, query, map_transaction_error)
     }
@@ -94,7 +94,7 @@ impl Engine {
         params: &[SQLParam],
         mut consume: impl FnMut(&SQLResult) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
         self.synchronize_table_catalog()
             .map_err(|error| SQLError::Internal(format!("refresh table catalog: {error}")))?;
@@ -115,7 +115,7 @@ impl Engine {
 
     /// Run a single SQL statement against the engine.
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
@@ -140,7 +140,7 @@ impl Engine {
     /// result as `Vec<ResultRow>` in memory. The statement finishes and its
     /// snapshot is committed before the cursor is returned.
     pub fn sql_cursor(&self, query: &str, params: &[SQLParam]) -> Result<SQLCursor, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let (_execution, _) = SQLExecutionScope::enter(self);
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;

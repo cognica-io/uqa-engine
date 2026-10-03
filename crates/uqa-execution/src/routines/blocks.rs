@@ -47,6 +47,11 @@ impl Interpreter<'_> {
                         "PL/pgSQL exception-block rollback failed: {rollback_error}; original error: {error}"
                     )));
                 }
+                // A termination of the session is reported at FATAL, which no handler catches.
+                if matches!(&error, SQLError::Cancelled(cancelled) if cancelled.reason.terminates_session())
+                {
+                    return Err(error);
+                }
                 let state = error
                     .sqlstate()
                     .ok_or_else(|| {

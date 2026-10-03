@@ -65,6 +65,17 @@ impl Client {
         database: &str,
         version: i32,
     ) -> (Self, Vec<Message>) {
+        Self::connect_with(address, user, database, version, &[])
+    }
+
+    /// Connect with `extra` startup parameters after the user, database and application name.
+    pub fn connect_with(
+        address: SocketAddr,
+        user: &str,
+        database: &str,
+        version: i32,
+        extra: &[(&str, &str)],
+    ) -> (Self, Vec<Message>) {
         let socket = TcpStream::connect(address).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(20)))
@@ -78,7 +89,10 @@ impl Client {
             ("user", user),
             ("database", database),
             ("application_name", "wire-test"),
-        ] {
+        ]
+        .into_iter()
+        .chain(extra.iter().copied())
+        {
             startup.extend_from_slice(key.as_bytes());
             startup.push(0);
             startup.extend_from_slice(value.as_bytes());
@@ -117,7 +131,7 @@ impl Client {
         self.try_receive().expect("receive PostgreSQL message")
     }
 
-    fn try_receive(&mut self) -> std::io::Result<Message> {
+    pub fn try_receive(&mut self) -> std::io::Result<Message> {
         let mut header = [0; 5];
         self.socket.read_exact(&mut header)?;
         let length = i32::from_be_bytes(header[1..].try_into().unwrap());

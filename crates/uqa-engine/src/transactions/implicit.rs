@@ -25,7 +25,7 @@ impl Engine {
         f: impl FnOnce(&Self) -> Result<R, E>,
         map_transaction_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let scope = TransactionScope::begin(self).map_err(&map_transaction_error)?;
         self.run_transaction_scope(scope, f, map_transaction_error)
     }
@@ -133,7 +133,7 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if self.current_transaction_is_read_only() {
             return Err(SQLError::Routine {
                 sqlstate: "25006".into(),
@@ -171,7 +171,7 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if self.current_transaction_is_read_only() {
             return Err(SQLError::Routine {
                 sqlstate: "25006".into(),
@@ -207,7 +207,7 @@ impl Engine {
     where
         E: std::fmt::Display,
     {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if self.current_transaction_is_read_only() {
             return Err(map_transaction_error(SQLError::Routine {
                 sqlstate: "25006".into(),
@@ -343,7 +343,7 @@ impl Engine {
         promote_writer: bool,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| StorageBackendError::backend("storage transaction", error))?;
@@ -418,7 +418,7 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> Result<R, String>,
     ) -> Result<R, String> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| error.to_string())?;

@@ -236,6 +236,14 @@ static PARAMETERS: &[ParameterDefinition] = &[
         None,
         ParameterFlags::NONE,
     ),
+    timeout(
+        "idle_in_transaction_session_timeout",
+        "Sets the maximum allowed idle time between queries, when in a transaction.",
+    ),
+    timeout(
+        "idle_session_timeout",
+        "Sets the maximum allowed idle time between queries, when not in a transaction.",
+    ),
     define(
         "in_hot_standby",
         boolean(false),
@@ -418,6 +426,10 @@ static PARAMETERS: &[ParameterDefinition] = &[
         "Sets the current transaction's read-only status.",
         None,
         NO_RESET,
+    ),
+    timeout(
+        "transaction_timeout",
+        "Sets the maximum allowed duration of any transaction within a session (not a prepared transaction).",
     ),
     ParameterDefinition {
         name: "work_mem",

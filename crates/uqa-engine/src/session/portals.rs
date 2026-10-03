@@ -599,6 +599,7 @@ impl Engine {
         runtime.cancellation = self.runtime.cancellation.clone();
         runtime.notices = std::sync::Arc::clone(&self.runtime.notices);
         runtime.notifications = std::sync::Arc::clone(&self.runtime.notifications);
+        runtime.terminations = crate::session::SessionTerminations::new(false);
         Engine {
             storage: StorageContext::shared_from(&self.storage),
             durable: std::sync::Arc::clone(&self.durable),

@@ -222,7 +222,7 @@ impl Engine {
     /// must return catalog and data handles bound to one session transaction
     /// so every durable mutation commits atomically.
     pub fn new_session(&self) -> StorageBackendResult<Self> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         self.new_sibling_session(false, None)
     }
 

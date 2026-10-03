@@ -216,7 +216,7 @@ impl Engine {
                 )))
             }
         };
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         Self::apply_transaction_characteristics(&mut stack, options)
     }

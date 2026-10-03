@@ -38,7 +38,7 @@ mod cancelled;
 mod deadlines;
 
 pub use cancelled::{CancellationReason, QueryCancelled};
-pub use deadlines::CancellationDeadline;
+pub use deadlines::{schedule, CancellationDeadline, ScheduledAction};
 
 /// `PostgreSQL` SQLSTATE `57014` (`query_canceled`).
 pub const SQLSTATE_QUERY_CANCELED: &str = "57014";
@@ -48,6 +48,8 @@ pub const SQLSTATE_QUERY_CANCELED: &str = "57014";
 struct TokenState {
     /// 0 while not canceled, otherwise the code of the reason.
     reason: AtomicU8,
+    /// 0 while the session lives, otherwise the code of the reason that terminated it, which nothing clears.
+    terminated: AtomicU8,
     /// The session's `lock_timeout` in milliseconds; 0 lets a lock wait last until the lock is granted.
     lock_timeout_ms: AtomicU64,
     sleepers: Mutex<()>,
@@ -55,11 +57,14 @@ struct TokenState {
 }
 
 impl TokenState {
-    /// Cancel with `reason` unless already canceled, and wake every sleeper.
+    /// Cancel with `reason` unless already canceled, or terminate the session for a reason that terminates it, and wake every sleeper.
     fn cancel(&self, reason: CancellationReason) {
-        let _ = self
-            .reason
-            .compare_exchange(0, reason.code(), Ordering::AcqRel, Ordering::Acquire);
+        let signal = if reason.terminates_session() {
+            &self.terminated
+        } else {
+            &self.reason
+        };
+        let _ = signal.compare_exchange(0, reason.code(), Ordering::AcqRel, Ordering::Acquire);
         let _sleepers = self
             .sleepers
             .lock()
@@ -75,8 +80,11 @@ impl TokenState {
     }
 
     fn check(&self) -> Result<(), QueryCancelled> {
-        match self.reason.load(Ordering::Acquire) {
-            0 => Ok(()),
+        match self.terminated.load(Ordering::Acquire) {
+            0 => match self.reason.load(Ordering::Acquire) {
+                0 => Ok(()),
+                code => Err(QueryCancelled::new(CancellationReason::from_code(code))),
+            },
             code => Err(QueryCancelled::new(CancellationReason::from_code(code))),
         }
     }
@@ -104,16 +112,24 @@ impl CancellationToken {
         self.cancel_with(CancellationReason::UserRequest);
     }
 
-    /// Signal cancellation for `reason`, unless the token is already canceled.
+    /// Signal cancellation for `reason`, unless the token is already canceled; a reason that terminates the session terminates it for good.
     pub fn cancel_with(&self, reason: CancellationReason) {
         self.state.cancel(reason);
     }
 
     /// Clear the cancellation signal for the next query. Operators
     /// holding a clone of this token through their lifetime see the
-    /// reset on the next `check`.
+    /// reset on the next `check`. A terminated session stays terminated.
     pub fn reset(&self) {
         self.state.reason.store(0, Ordering::Release);
+    }
+
+    /// The reason that terminated the session, if one did.
+    pub fn termination(&self) -> Option<CancellationReason> {
+        match self.state.terminated.load(Ordering::Acquire) {
+            0 => None,
+            code => Some(CancellationReason::from_code(code)),
+        }
     }
 
     /// Clear a cancellation of `reason`, leaving any other in place, as a `PL/pgSQL` handler that catches `query_canceled` consumes the cancellation it caught.
@@ -122,7 +138,7 @@ impl CancellationToken {
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.state.reason.load(Ordering::Acquire) != 0
+        self.state.check().is_err()
     }
 
     /// The reason the token was canceled for, if it was.
@@ -369,5 +385,53 @@ mod tests {
         );
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         handle.join().unwrap();
+    }
+    #[test]
+    fn a_termination_outlasts_reset_and_reports_its_fatal_reason() {
+        let token = CancellationToken::new();
+        token.cancel_with(CancellationReason::IdleInTransactionSessionTimeout);
+        assert_eq!(
+            token.termination(),
+            Some(CancellationReason::IdleInTransactionSessionTimeout)
+        );
+        token.reset();
+        token.clear(CancellationReason::IdleInTransactionSessionTimeout);
+        let cancelled = token.check().unwrap_err();
+        assert_eq!(cancelled.sqlstate(), "25P03");
+        assert_eq!(
+            cancelled.to_string(),
+            "terminating connection due to idle-in-transaction timeout"
+        );
+        assert!(cancelled.reason.terminates_session());
+        assert!(token.is_cancelled());
+        assert_eq!(
+            QueryCancelled::new(CancellationReason::IdleSessionTimeout).sqlstate(),
+            "57P05"
+        );
+        assert_eq!(
+            QueryCancelled::new(CancellationReason::TransactionTimeout).sqlstate(),
+            "25P04"
+        );
+        assert!(!CancellationReason::StatementTimeout.terminates_session());
+    }
+
+    #[test]
+    fn a_scheduled_action_runs_once_unless_dropped_first() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let ran = super::schedule(std::time::Duration::from_millis(10), move || {
+            sender.send(()).unwrap();
+        });
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        drop(ran);
+        let (sender, receiver) = std::sync::mpsc::channel::<()>();
+        let dropped = super::schedule(std::time::Duration::from_millis(50), move || {
+            sender.send(()).unwrap();
+        });
+        drop(dropped);
+        assert!(receiver
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .is_err());
     }
 }

@@ -128,7 +128,7 @@ impl Engine {
         &self,
         operation: impl FnOnce(SequenceValueContext<'_>) -> Result<i64, SequenceValueError>,
     ) -> Result<i64, String> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let outside_statement = self
             .runtime
             .sql_execution_depth

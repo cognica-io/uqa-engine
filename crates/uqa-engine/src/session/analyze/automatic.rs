@@ -49,7 +49,7 @@ fn automatic_column(ty: &ColumnType) -> bool {
 
 impl Engine {
     pub(crate) fn run_automatic_analyze(&self, name: &str) -> StorageBackendResult<bool> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if self.storage.backend.is_none() {
             return Ok(false);
         }

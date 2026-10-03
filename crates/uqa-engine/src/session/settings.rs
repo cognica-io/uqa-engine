@@ -268,7 +268,7 @@ impl Engine {
     /// variants are scoped accordingly.
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) -> Result<(), SQLError> {
         use uqa_sql::ast::DiscardTarget;
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if target == DiscardTarget::All && self.in_explicit_transaction_block() {
             return Err(SQLError::Routine {
                 sqlstate: "25001".into(),

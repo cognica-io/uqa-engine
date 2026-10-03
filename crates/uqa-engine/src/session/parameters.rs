@@ -279,6 +279,16 @@ impl Engine {
                     .parameters
                     .lock()
                     .set_client_setting(definition.name, setting);
+                // A client that sets a session timeout at startup is idle from then on, as a backend that waits for its first query is.
+                if matches!(
+                    definition.name,
+                    "idle_session_timeout"
+                        | "idle_in_transaction_session_timeout"
+                        | "transaction_timeout"
+                ) && self.runtime.terminations.is_idle()
+                {
+                    self.session_became_idle();
+                }
                 Ok(())
             }
             Some(SessionParameter::Placeholder(placeholder)) => {

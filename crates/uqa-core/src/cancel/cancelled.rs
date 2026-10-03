@@ -18,6 +18,12 @@ pub enum CancellationReason {
     StatementTimeout,
     /// A lock wait outlasted the session's `lock_timeout` (`55P03`).
     LockTimeout,
+    /// The session stayed idle in a transaction longer than its `idle_in_transaction_session_timeout` (`25P03`), which terminates it.
+    IdleInTransactionSessionTimeout,
+    /// The session stayed idle outside a transaction longer than its `idle_session_timeout` (`57P05`), which terminates it.
+    IdleSessionTimeout,
+    /// A transaction outlasted the session's `transaction_timeout` (`25P04`), which terminates the session.
+    TransactionTimeout,
 }
 
 impl CancellationReason {
@@ -27,7 +33,22 @@ impl CancellationReason {
             Self::UserRequest => "canceling statement due to user request",
             Self::StatementTimeout => "canceling statement due to statement timeout",
             Self::LockTimeout => "canceling statement due to lock timeout",
+            Self::IdleInTransactionSessionTimeout => {
+                "terminating connection due to idle-in-transaction timeout"
+            }
+            Self::IdleSessionTimeout => "terminating connection due to idle-session timeout",
+            Self::TransactionTimeout => "terminating connection due to transaction timeout",
         }
+    }
+
+    /// Whether the reason terminates the session, which `PostgreSQL` reports at `FATAL` and no exception handler catches.
+    pub const fn terminates_session(self) -> bool {
+        matches!(
+            self,
+            Self::IdleInTransactionSessionTimeout
+                | Self::IdleSessionTimeout
+                | Self::TransactionTimeout
+        )
     }
 
     /// The SQLSTATE `PostgreSQL` reports: `57014` (`query_canceled`), or `55P03` (`lock_not_available`) for a lock timeout.
@@ -35,6 +56,9 @@ impl CancellationReason {
         match self {
             Self::UserRequest | Self::StatementTimeout => super::SQLSTATE_QUERY_CANCELED,
             Self::LockTimeout => "55P03",
+            Self::IdleInTransactionSessionTimeout => "25P03",
+            Self::IdleSessionTimeout => "57P05",
+            Self::TransactionTimeout => "25P04",
         }
     }
 
@@ -43,6 +67,9 @@ impl CancellationReason {
             Self::UserRequest => 1,
             Self::StatementTimeout => 2,
             Self::LockTimeout => 3,
+            Self::IdleInTransactionSessionTimeout => 4,
+            Self::IdleSessionTimeout => 5,
+            Self::TransactionTimeout => 6,
         }
     }
 
@@ -50,6 +77,9 @@ impl CancellationReason {
         match code {
             2 => Self::StatementTimeout,
             3 => Self::LockTimeout,
+            4 => Self::IdleInTransactionSessionTimeout,
+            5 => Self::IdleSessionTimeout,
+            6 => Self::TransactionTimeout,
             _ => Self::UserRequest,
         }
     }
