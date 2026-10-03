@@ -22,6 +22,24 @@ pub trait TruncateCatalog {
         descendants: bool,
     ) -> Result<Vec<String>, SQLError>;
     fn referrers_to(&self, table: &str) -> Result<Vec<String>, String>;
+    /// The relation followed by each partitioned table it is a partition of, nearest first.
+    fn partition_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError>;
+}
+
+/// The tables whose foreign keys reference `table`'s rows: those that reference it and those that reference a partitioned table it is a partition of, as `PostgreSQL` derives a constraint on each referenced partition.
+fn referencing_tables(catalog: &dyn TruncateCatalog, table: &str) -> Result<Vec<String>, SQLError> {
+    let mut referencing = Vec::new();
+    for ancestor in catalog.partition_ancestor_tables(table)? {
+        for referrer in catalog
+            .referrers_to(&ancestor)
+            .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
+        {
+            if !referencing.contains(&referrer) {
+                referencing.push(referrer);
+            }
+        }
+    }
+    Ok(referencing)
 }
 
 #[cfg(test)]
@@ -32,6 +50,8 @@ pub struct TruncateTargets {
     pub all: BTreeSet<String>,
     pub trigger_order: Vec<String>,
     pub privilege_targets: BTreeSet<String>,
+    /// The tables `CASCADE` added because their foreign keys reference a target, in the order they were added.
+    pub cascaded: Vec<String>,
 }
 
 pub fn resolve_truncate_targets(
@@ -66,16 +86,15 @@ pub fn resolve_truncate_targets(
             }
         }
     }
+    let mut cascaded = Vec::new();
     if cascade {
         let mut cursor = 0;
         while let Some(table) = trigger_targets.get(cursor).cloned() {
             cursor += 1;
-            for referrer in catalog
-                .referrers_to(&table)
-                .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
-            {
+            for referrer in referencing_tables(catalog, &table)? {
                 if targets.insert(referrer.clone()) {
                     privilege_targets.insert(referrer.clone());
+                    cascaded.push(referrer.clone());
                     trigger_targets.push(referrer);
                 }
             }
@@ -85,23 +104,32 @@ pub fn resolve_truncate_targets(
         all: targets,
         trigger_order: trigger_targets,
         privilege_targets,
+        cascaded,
     })
 }
 
+/// Reject truncating a table that a table outside the targets references, naming the first such pair in target order, as `PostgreSQL`'s `heap_truncate_check_FKs` does.
 pub fn validate_truncate_references(
     catalog: &dyn TruncateCatalog,
     targets: &TruncateTargets,
 ) -> Result<(), SQLError> {
-    for table in &targets.all {
-        if let Some(referrer) = catalog
-            .referrers_to(table)
-            .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
+    for table in &targets.trigger_order {
+        if let Some(referrer) = referencing_tables(catalog, table)?
             .into_iter()
             .find(|referrer| !targets.all.contains(referrer))
         {
-            return Err(SQLError::TypeMismatch(format!(
-                    "cannot truncate `{table}` because `{referrer}` references it; truncate both tables or use CASCADE"
-                )));
+            let referrer = crate::semantics::foreign_keys::foreign_key_relation_name(&referrer);
+            return Err(SQLError::Diagnostic {
+                sqlstate: "0A000".into(),
+                message: "cannot truncate a table referenced in a foreign key constraint".into(),
+                detail: Some(format!(
+                    "Table \"{referrer}\" references \"{}\".",
+                    crate::semantics::foreign_keys::foreign_key_relation_name(table)
+                )),
+                hint: Some(format!(
+                    "Truncate table \"{referrer}\" at the same time, or use TRUNCATE ... CASCADE."
+                )),
+            });
         }
     }
     Ok(())
@@ -139,10 +167,7 @@ fn visit_truncate_target(
     if visited.contains(table) || !visiting.insert(table.to_string()) {
         return Ok(());
     }
-    for referrer in catalog
-        .referrers_to(table)
-        .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
-    {
+    for referrer in referencing_tables(catalog, table)? {
         if targets.contains(&referrer) {
             visit_truncate_target(catalog, &referrer, targets, visiting, visited, ordered)?;
         }

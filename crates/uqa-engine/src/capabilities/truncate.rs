@@ -26,6 +26,7 @@ impl Engine {
             triggers: self,
             storage: self,
             transactions: self,
+            notices: &self.runtime.notices,
         }
     }
 }
@@ -52,6 +53,9 @@ impl TruncateCatalog for Engine {
         Engine::referrers_to(self, table)
             .map(|references| references.into_iter().map(|(name, _)| name).collect())
             .map_err(|error| error.to_string())
+    }
+    fn partition_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
+        uqa_sql::semantics::partition::partition_ancestor_tables(self, table)
     }
 }
 impl TruncateAccess for Engine {

@@ -12,6 +12,7 @@ use std::{cell::RefCell, collections::BTreeMap};
 struct Catalog {
     hierarchy: BTreeMap<String, Vec<String>>,
     references: BTreeMap<String, Vec<String>>,
+    ancestors: BTreeMap<String, Vec<String>>,
     partitioned: BTreeSet<String>,
     events: RefCell<Vec<String>>,
     reference_error: Option<String>,
@@ -49,6 +50,13 @@ impl TruncateCatalog for Catalog {
             return Err("catalog read failed".into());
         }
         Ok(self.references.get(table).cloned().unwrap_or_default())
+    }
+    fn partition_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
+        Ok(self
+            .ancestors
+            .get(table)
+            .cloned()
+            .unwrap_or_else(|| vec![table.into()]))
     }
 }
 fn target(table: &str, include_descendants: bool) -> TruncateTarget {
@@ -144,11 +152,36 @@ fn restrict_and_dependency_reads_preserve_the_first_catalog_diagnostic() {
         resolve_truncate_targets(&catalog, &[target("z", true), target("a", true)], false).unwrap();
     let error = validate_truncate_references(&catalog, &targets).unwrap_err();
     assert!(
-        matches!(error, SQLError::TypeMismatch(message) if message == "cannot truncate `a` because `external` references it; truncate both tables or use CASCADE")
+        matches!(&error, SQLError::Diagnostic { sqlstate, message, detail, hint } if sqlstate == "0A000"
+            && message == "cannot truncate a table referenced in a foreign key constraint"
+            && detail.as_deref() == Some("Table \"external\" references \"a\".")
+            && hint.as_deref() == Some("Truncate table \"external\" at the same time, or use TRUNCATE ... CASCADE.")),
+        "{error:?}"
     );
     catalog.reference_error = Some("a".into());
     let error = truncate_dependency_order(&catalog, &targets).unwrap_err();
     assert!(
         matches!(error, SQLError::Internal(message) if message == "read foreign keys: catalog read failed")
     );
+}
+
+#[test]
+fn a_partition_is_referenced_by_the_foreign_keys_of_its_partitioned_ancestors() {
+    let mut catalog = catalog(&["public.pk", "public.pk1", "public.fk"]);
+    catalog.ancestors.insert(
+        "public.pk1".into(),
+        vec!["public.pk1".into(), "public.pk".into()],
+    );
+    catalog
+        .references
+        .insert("public.pk".into(), vec!["public.fk".into()]);
+    let targets = resolve_truncate_targets(&catalog, &[target("public.pk1", true)], false).unwrap();
+    let error = validate_truncate_references(&catalog, &targets).unwrap_err();
+    assert!(
+        matches!(&error, SQLError::Diagnostic { detail, .. } if detail.as_deref() == Some("Table \"fk\" references \"pk1\".")),
+        "{error:?}"
+    );
+    let cascaded = resolve_truncate_targets(&catalog, &[target("public.pk1", true)], true).unwrap();
+    assert_eq!(cascaded.cascaded, ["public.fk"]);
+    assert_eq!(cascaded.trigger_order, ["public.pk1", "public.fk"]);
 }

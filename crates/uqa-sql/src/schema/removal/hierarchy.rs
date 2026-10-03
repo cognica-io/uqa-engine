@@ -61,3 +61,38 @@ pub fn hierarchy_drop_targets(
 
 #[cfg(test)]
 mod tests;
+
+/// The partitioned tables outside `targets` that a dropped partition is a partition of, nearest first. Their rows include the dropped partition's rows, so a foreign key that references one of them references dropped rows, as the constraint `PostgreSQL` derives on each referenced partition does.
+pub fn surviving_partition_ancestors(
+    catalog: &dyn HierarchyDropCatalog,
+    targets: &[String],
+) -> Vec<String> {
+    let tables = catalog.tables();
+    let parents = tables
+        .iter()
+        .filter_map(|(identity, table)| {
+            let hierarchy = table.hierarchy();
+            hierarchy
+                .is_partition()
+                .then(|| hierarchy.parents.first().cloned())
+                .flatten()
+                .map(|parent| (identity.qualified_name(), parent))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let dropped = targets.iter().collect::<BTreeSet<_>>();
+    let mut ancestors = Vec::new();
+    for target in targets {
+        let mut visited = BTreeSet::new();
+        let mut current = target;
+        while let Some(parent) = parents.get(current) {
+            if !visited.insert(parent) {
+                break;
+            }
+            if !dropped.contains(parent) && !ancestors.contains(parent) {
+                ancestors.push(parent.clone());
+            }
+            current = parent;
+        }
+    }
+    ancestors
+}

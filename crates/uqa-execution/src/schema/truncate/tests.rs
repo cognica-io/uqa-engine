@@ -17,6 +17,7 @@ struct Inputs {
     references: RefCell<BTreeMap<String, Vec<String>>>,
     fail: Option<&'static str>,
     change_references_before: bool,
+    notices: parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
 }
 impl Inputs {
     fn context(&self) -> TruncateContext<'_> {
@@ -26,6 +27,7 @@ impl Inputs {
             triggers: self,
             storage: self,
             transactions: self,
+            notices: &self.notices,
         }
     }
     fn event(&self, event: String) {
@@ -63,6 +65,9 @@ impl TruncateCatalog for Inputs {
             .get(table)
             .cloned()
             .unwrap_or_default())
+    }
+    fn partition_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
+        Ok(vec![table.into()])
     }
 }
 impl TruncateAccess for Inputs {
