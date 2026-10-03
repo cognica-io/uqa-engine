@@ -44,7 +44,7 @@ impl RedbStorage {
         Self::open_with_options(path, VersionedSessionOptions::default())
     }
 
-    /// Open with an explicit per-session retention limit. Private changes are held in bounded memory; no plaintext spill files are created.
+    /// Open with an explicit per-session retention limit. Private changes beyond half of it move into temporary files encrypted with a key that exists only in memory; no plaintext reaches disk.
     pub fn open_with_options(
         path: impl AsRef<Path>,
         options: VersionedSessionOptions,

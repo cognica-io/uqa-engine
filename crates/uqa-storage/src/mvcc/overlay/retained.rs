@@ -35,16 +35,17 @@ impl PrivateRecordChanges {
         }
         let mut state = self.owner.state.lock();
         if let Some(previous) = state
-            .records
-            .get(write.key())
-            .filter(|previous| previous.write.expected() != write.expected())
+            .change(write.key(), control)?
+            .filter(|previous| previous.expected() != write.expected())
         {
             return Err(VersionError::WriteConflict {
                 mutation: 0,
                 expected: write.expected(),
-                actual: previous.write.expected(),
+                actual: previous.expected(),
             });
         }
+        let incoming = super::resident_bytes(&write);
+        state.make_room(control)?;
         let identity = PrivateRecordRevision::allocate()?;
         let key = write.shared_key();
         let records = state
@@ -54,6 +55,7 @@ impl PrivateRecordChanges {
         control.check()?;
         state.records = records;
         state.sources = sources;
+        state.resident = state.resident.saturating_add(incoming);
         state.revision = Some(identity);
         Ok(())
     }
@@ -65,26 +67,33 @@ impl PrivateRecordChanges {
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         control.check()?;
-        let (previous_records, previous_sources) = {
+        let (previous_records, previous_runs, previous_sources) = {
             let previous = previous.owner.state.lock();
             if previous.sources.is_empty() {
                 return Ok(());
             }
-            (previous.records.clone(), previous.sources.clone())
+            (
+                previous.records.clone(),
+                previous.runs.clone(),
+                previous.sources.clone(),
+            )
         };
         let mut state = self.owner.state.lock();
         let mut sources = state.sources.clone();
         for (key, source) in &previous_sources {
             control.check()?;
             let Some(source) = source else { continue };
-            let original = previous_records
-                .get(key.bytes())
-                .expect("source has selecting write");
-            if state
-                .records
-                .get(key.bytes())
-                .is_some_and(|current| current.write.value() == original.write.value())
-            {
+            let original =
+                super::tiers::lookup(&previous_records, &previous_runs, key.bytes(), control)?
+                    .ok_or(VersionError::InvalidEncoding(
+                        "retained source has no selecting write",
+                    ))?
+                    .write(control)?;
+            let current = state
+                .change(key.bytes(), control)?
+                .map(|current| current.write(control))
+                .transpose()?;
+            if current.is_some_and(|current| current.value() == original.value()) {
                 sources.try_insert(key.clone(), Some(source.clone()))?;
             }
         }

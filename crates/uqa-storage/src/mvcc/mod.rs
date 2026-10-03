@@ -43,7 +43,9 @@ mod view;
 pub use session::VectorFieldGuardMaintenance;
 pub use vector_fields::{VectorFieldGuard, VectorFieldGuardLayout};
 
-pub use commit::{PreparedRecordCommit, PreparedRecordWrite};
+pub use commit::{
+    PreparedRecordCommit, PreparedRecordWrite, PreparedWriteCursor, PreparedWriteMetadata,
+};
 pub use graph::{GraphMutation, GraphRecordKey, GraphRecordLayout};
 pub use guards::verify_revision_guards;
 pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue};

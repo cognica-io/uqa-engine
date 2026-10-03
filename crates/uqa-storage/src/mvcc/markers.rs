@@ -6,11 +6,10 @@
 
 //! Immutable marker revisions coordinate structural changes without conflicting independent data writes.
 
-use uqa_core::memory::BudgetedVec;
-
 use super::{
-    commit::RecordWriteKind, resolution::ResolutionMode, CommittedRecordSnapshot,
-    PreparedRecordCommit, RecordVersion, VersionError, VersionResult,
+    commit::{PreparedWritesBuilder, RecordWriteKind},
+    resolution::ResolutionMode,
+    CommittedRecordSnapshot, PreparedRecordCommit, RecordVersion, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 
@@ -20,12 +19,11 @@ pub(super) fn resolve(
     mode: ResolutionMode,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
-    let mut writes = BudgetedVec::new(control.memory());
-    writes.reserve(original.records().len())?;
-    for write in original.records() {
-        control.cancellation().check()?;
+    let mut writes = PreparedWritesBuilder::like(original, control)?;
+    let mut originals = original.writes();
+    while let Some(write) = originals.next(control)? {
         if write.kind() != RecordWriteKind::Marker {
-            writes.push(write.clone())?;
+            writes.push(write, control)?;
             continue;
         }
         let value = write.value().ok_or(VersionError::InvalidEncoding(
@@ -43,11 +41,12 @@ pub(super) fn resolve(
         }
         writes.push(
             write
-                .clone()
                 .rebase(record.as_ref().map(RecordVersion::sequence))
                 .with_kind(mode.kind(RecordWriteKind::Marker)),
+            control,
         )?;
     }
-    Ok(PreparedRecordCommit::from_unique_owned(writes, control)?
+    Ok(writes
+        .finish(control)?
         .resolved(original, current.sequence()))
 }

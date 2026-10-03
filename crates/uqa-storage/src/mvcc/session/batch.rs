@@ -248,17 +248,18 @@ impl<'a> Batch<'a> {
                 _ => {}
             }
         }
-        let origins = origins.prepare(control)?;
+        let origins = origins.prepare(control)?.collect(control)?;
         let after = transaction.view()?;
         let generated = crate::mvcc::populations::stage(
-            origins.records(),
+            &origins,
             &lifecycle,
             before,
             &after,
             &*self.store.persistence,
             control,
         )?;
-        for write in generated.records() {
+        let mut generated_writes = generated.writes();
+        while let Some(write) = generated_writes.next(control)? {
             transaction.write_shared_record(
                 &write.shared_key(),
                 write.shared_value().as_ref(),

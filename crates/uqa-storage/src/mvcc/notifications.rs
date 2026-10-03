@@ -97,7 +97,7 @@ pub(super) fn resolve(
 ) -> VersionResult<PreparedRecordCommit> {
     control.check()?;
     let key = effect.key.bytes();
-    if original.records().iter().any(|record| record.key() == key) {
+    if original.contains_key(key, control)? {
         return Err(VersionError::InvalidEncoding(
             "notification publication conflicts with an ordinary record write",
         ));
@@ -118,25 +118,29 @@ pub(super) fn resolve(
     } else {
         pending.is_some_and(|publication| publication.fingerprint() == effect.publication)
     };
-    let mut writes = BudgetedVec::new(control.memory());
-    writes.reserve(
-        original
-            .records()
-            .len()
-            .checked_add(usize::from(replace))
-            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?,
-    )?;
-    for write in original.records() {
-        control.check()?;
-        writes.push(write.clone())?;
-    }
-    if replace {
-        writes.push(PreparedRecordWrite::from_shared(
+    // The publication takes its place in key order, which a spilled batch keeps.
+    let mut publication = replace.then(|| {
+        PreparedRecordWrite::from_shared(
             effect.key.clone(),
             latest.as_ref().map(super::RecordVersion::sequence),
             effect.record.clone(),
-        ))?;
+        )
+    });
+    let mut writes = super::commit::PreparedWritesBuilder::like(original, control)?;
+    let mut originals = original.writes();
+    while let Some(write) = originals.next(control)? {
+        control.check()?;
+        if write.key() > key {
+            if let Some(publication) = publication.take() {
+                writes.push(publication, control)?;
+            }
+        }
+        writes.push(write, control)?;
     }
-    Ok(PreparedRecordCommit::from_unique_owned(writes, control)?
+    if let Some(publication) = publication {
+        writes.push(publication, control)?;
+    }
+    Ok(writes
+        .finish(control)?
         .resolved(original, current.sequence()))
 }

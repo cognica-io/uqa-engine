@@ -34,9 +34,10 @@ pub(super) fn validate_prepared(
     prepared: &PreparedRecordCommit,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    for record in prepared.records() {
+    let mut records = prepared.writes();
+    while let Some(record) = records.next_metadata(control)? {
         let identity = NativeRecordIdentity::decode(record.key())?;
-        if identity.family() != Family::Sequences || record.value().is_none() {
+        if identity.family() != Family::Sequences || !record.live() {
             continue;
         }
         let NativeRecordOwner::Object { identity, .. } = identity.owner() else {

@@ -12,6 +12,8 @@ mod catalog_atomicity;
 mod concurrency;
 #[path = "direct_rmw_concurrency.rs"]
 mod direct_rmw_concurrency;
+#[path = "large_transactions.rs"]
+mod large_transactions;
 #[path = "python_db_migration.rs"]
 mod python_db_migration;
 #[path = "redb_backend.rs"]

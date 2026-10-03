@@ -37,7 +37,7 @@ fn canonical_only_records_cannot_hide_unresolved_vector_effects() {
         ));
         let mut called = false;
         assert!(matches!(
-            prepared.validate(control.cancellation(), |_| {
+            prepared.validate(&control, |_| {
                 called = true;
                 Ok(None)
             }),

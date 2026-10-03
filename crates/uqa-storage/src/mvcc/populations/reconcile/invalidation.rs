@@ -30,7 +30,7 @@ impl Reconciliation<'_> {
                 self.control,
                 &mut |key, record| {
                     self.control.check()?;
-                    if self.population_requires_origin(key, record.live, lifecycle) {
+                    if self.population_requires_origin(key, record.live, lifecycle)? {
                         return Err(reject());
                     }
                     Ok(true)
@@ -45,16 +45,16 @@ impl Reconciliation<'_> {
         key: &[u8],
         live: bool,
         lifecycle: &PopulationLifecycle<'_>,
-    ) -> bool {
-        if let Some(write) = self.structural_header(key) {
-            return write.value().is_some();
+    ) -> VersionResult<bool> {
+        if let Some(write) = self.structural_header(key)? {
+            return Ok(write.value().is_some());
         }
-        match lifecycle.get(key) {
+        Ok(match lifecycle.get(key) {
             // A new publication validates the entire final canonical view in its census. A structural copy above does not perform that validation.
             Some(
                 OwnedPopulationMutation::Publish { .. } | OwnedPopulationMutation::Retire { .. },
             ) => false,
             None => live,
-        }
+        })
     }
 }

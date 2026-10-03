@@ -488,7 +488,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control.cancellation().check().map_err(VersionError::from)?;
         let _bindings = write::reserve_bindings(prepared, control)?;
         self.with_write(control, |connection| {
-            let _cache = commit_cache::CommitCache::grow(connection, prepared)?;
+            let _cache = commit_cache::CommitCache::grow(connection, prepared, control)?;
             Ok(write::commit(
                 connection,
                 transaction,

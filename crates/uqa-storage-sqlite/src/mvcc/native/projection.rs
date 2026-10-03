@@ -9,7 +9,7 @@
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
-    mvcc::{CommitSequence, DatabaseId, PreparedRecordCommit, VersionError},
+    mvcc::{CommitSequence, DatabaseId, PreparedRecordCommit, PreparedRecordWrite, VersionError},
     read_control::StorageReadControl,
 };
 
@@ -137,16 +137,12 @@ fn apply(
             |family, key| physical::remove(connection, family.layout(), key, control),
         )?;
     }
-    for (_, index) in publication_order(prepared, control)?.iter() {
-        let record = &prepared.records()[*index];
-        let Some(row) = record.value() else { continue };
-        let (identity, values) = decode_record(record.key(), row, control)?;
-        publish_row(connection, identity.family(), &values, control)?;
-    }
+    publish_rows(connection, prepared, control)?;
     super::graph_lookup::validate_deletions(connection, prepared, control)?;
     // Every owner binding of the commit is published by now, so the rows of one table share one read of its binding.
     let mut table_owners = owners::TableOwners::default();
-    for record in prepared.records() {
+    let mut records = prepared.writes();
+    while let Some(record) = records.next(control)? {
         if let Some(row) = record.value() {
             let (identity, values) = decode_record(record.key(), row, control)?;
             owners::validate_among(
@@ -240,12 +236,45 @@ fn replaced_families(connection: &Connection) -> PhysicalResult<Vec<u16>> {
 }
 
 /// The positions of the records of `prepared` in publication order: by family in [`ORDER`], and within a family as prepared. A family outside the order is not published.
-fn publication_order(
+/// Publish the rows of the commit's records, families in `ORDER` and each family's rows in the order of its records.
+fn publish_rows(
+    connection: &Connection,
     prepared: &PreparedRecordCommit,
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    if let Some(records) = prepared.resident() {
+        for (_, index) in publication_order(records, control)?.iter() {
+            let record = &records[*index];
+            let Some(row) = record.value() else { continue };
+            let (identity, values) = decode_record(record.key(), row, control)?;
+            publish_row(connection, identity.family(), &values, control)?;
+        }
+        return Ok(());
+    }
+    // A spilled commit is ordered by key, and the key of a native record begins with its family, so each family is one range of it.
+    for family in ORDER {
+        let prefix = NativeRecordIdentity::family_prefix(family, control)?;
+        let mut records = prepared
+            .spilled_writes_from(&prefix)
+            .expect("a commit without resident writes is spilled");
+        while let Some(record) = records.next(control)? {
+            if !record.key().starts_with(&prefix) {
+                break;
+            }
+            let Some(row) = record.value() else { continue };
+            let (identity, values) = decode_record(record.key(), row, control)?;
+            publish_row(connection, identity.family(), &values, control)?;
+        }
+    }
+    Ok(())
+}
+
+fn publication_order(
+    records: &[PreparedRecordWrite],
     control: &StorageReadControl,
 ) -> PhysicalResult<BudgetedVec<(usize, usize)>> {
     let mut ordered = BudgetedVec::new(control.memory());
-    for (index, record) in prepared.records().iter().enumerate() {
+    for (index, record) in records.iter().enumerate() {
         control.cancellation().check().map_err(VersionError::from)?;
         let family = NativeRecordIdentity::decode(record.key())?.family();
         if let Some(position) = ORDER.iter().position(|ordered| *ordered == family) {
@@ -266,7 +295,9 @@ fn seed_originals(
 ) -> PhysicalResult<()> {
     // Nothing is published yet, so the rows of one table share one read of its owner binding.
     let mut table_owners = owners::TableOwners::default();
-    for record in prepared.records() {
+    let mut records = prepared.writes();
+    while let Some(record) = records.next(control)? {
+        let record = &record;
         let identity = NativeRecordIdentity::decode_full(record.key(), control)?;
         if matches!(identity.owner(), NativeRecordOwner::Database(id) if id != database) {
             return Err(VersionError::WrongDatabase.into());
@@ -336,7 +367,8 @@ fn seed_targets(
     prepared: &PreparedRecordCommit,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    for record in prepared.records() {
+    let mut records = prepared.writes();
+    while let Some(record) = records.next(control)? {
         let Some(row) = record.value() else { continue };
         let (identity, values) = decode_record(record.key(), row, control)?;
         let family = identity.family();
@@ -366,7 +398,9 @@ fn validate_retired_owners(
     prepared: &PreparedRecordCommit,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    for record in prepared.records() {
+    let mut records = prepared.writes();
+    while let Some(record) = records.next(control)? {
+        let record = &record;
         if NativeRecordIdentity::decode(record.key())?.family() != Family::TableOwners {
             continue;
         }

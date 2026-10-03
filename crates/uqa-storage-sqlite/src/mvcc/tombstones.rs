@@ -47,7 +47,7 @@ pub(super) fn validate(
             prefix,
             codec::integer(codec::bytes(row, 1)?)?,
             current,
-            control.cancellation(),
+            control,
         )?;
     }
     Ok(())
