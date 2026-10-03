@@ -255,10 +255,7 @@ fn trigger_drop_and_alter_derive_authority_from_the_target_relation() {
     );
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "NOTICE".into(),
-            "trigger \"missing_trigger\" for relation \"trigger_privilege.missing_drop_items\" does not exist, skipping".into()
-        )]
+        [uqa_engine::SQLNotice::notice("trigger \"missing_trigger\" for relation \"trigger_privilege.missing_drop_items\" does not exist, skipping")]
     );
     exec(&engine, "RESET ROLE");
 

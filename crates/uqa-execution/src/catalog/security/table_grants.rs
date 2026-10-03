@@ -99,8 +99,8 @@ impl TableGrantContext<'_> {
         drop(roles);
 
         self.grant_table_syntax_sequence_privileges(statement, &targets, &mut command_roles)?;
-        for (level, message) in notices {
-            self.notices.notice(level, &message);
+        for notice in notices {
+            self.notices.notice(notice);
         }
         if table_changed || view_changed || foreign_changed || system_changed {
             self.changes.table_catalog_changed();
@@ -125,11 +125,11 @@ impl TableGrantContext<'_> {
             if has_inapplicable {
                 for target in targets.iter().filter(|target| target.kind == "sequence") {
                     self.notices.notice(
-                        "WARNING",
-                        &format!(
+                        uqa_sql::SQLNotice::warning(format!(
                             "sequence \"{}\" only supports USAGE, SELECT, and UPDATE privileges",
                             target.relation.name
-                        ),
+                        ))
+                        .with_sqlstate("0LP01"),
                     );
                 }
             }

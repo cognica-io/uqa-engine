@@ -6,7 +6,7 @@
 
 //! A persistent sequence hands out the values `PostgreSQL` does while its durable record runs ahead of them.
 
-use crate::tests::relation_lock_support::{reopen, sessions, sql};
+use crate::tests::relation_lock_support::{error, reopen, sessions, sql};
 use crate::Engine;
 use uqa_core::{RelationIdentity, Value};
 use uqa_execution::row_locks::{SequencePosition, SequencePositionKey};
@@ -302,6 +302,49 @@ fn a_sequence_changed_by_a_transaction_continues_exactly_in_it_and_after_it() {
             assert_eq!(next(&peer, name), 6, "{provider}: {finish}");
             assert_eq!(next(&peer, "ids"), 5, "{provider}: {finish}");
             assert_eq!(next(&engine, "ids"), 6, "{provider}: {finish}");
+        }
+    }
+}
+
+#[test]
+fn values_drawn_while_a_transaction_changes_privileges_are_never_drawn_twice() {
+    for provider in 0..3 {
+        for finish in ["COMMIT", "ROLLBACK"] {
+            let (_directory, engine, peer) = sessions(provider);
+            sql(&engine, "CREATE ROLE reader; CREATE SEQUENCE ids");
+            assert_eq!(next(&peer, "ids"), 1, "{provider}: {finish}");
+            sql(&engine, "BEGIN; GRANT USAGE ON SEQUENCE ids TO reader");
+            let mut drawn: Vec<i64> = (0..40).map(|_| next(&engine, "ids")).collect();
+            drawn.extend((0..40).map(|_| next(&peer, "ids")));
+            drawn.extend((0..5).map(|_| next(&engine, "ids")));
+            sql(&engine, finish);
+            drawn.extend((0..40).map(|_| next(&peer, "ids")));
+            drawn.extend((0..40).map(|_| next(&engine, "ids")));
+            // A sequence hands out each value once, in the order the sessions draw them, whatever happens to the transaction.
+            assert_eq!(drawn, (2..=166).collect::<Vec<_>>(), "{provider}: {finish}");
+        }
+    }
+}
+
+#[test]
+fn a_transaction_replaces_or_drops_a_sequence_whose_values_moved_after_its_snapshot() {
+    for provider in 0..3 {
+        for change in ["ALTER SEQUENCE ids RESTART WITH 500", "DROP SEQUENCE ids"] {
+            let (_directory, engine, peer) = sessions(provider);
+            sql(&engine, "CREATE SEQUENCE ids");
+            sql(&engine, "BEGIN ISOLATION LEVEL REPEATABLE READ");
+            assert_eq!(next(&engine, "ids"), 1, "{provider}: {change}");
+            // The value record moves past the transaction's snapshot, outside every transaction.
+            for expected in 2..=41 {
+                assert_eq!(next(&peer, "ids"), expected, "{provider}: {change}");
+            }
+            sql(&engine, change);
+            sql(&engine, "COMMIT");
+            if change.starts_with("DROP") {
+                error(&peer, "SELECT nextval('ids')", "42P01");
+            } else {
+                assert_eq!(next(&peer, "ids"), 500, "{provider}: {change}");
+            }
         }
     }
 }

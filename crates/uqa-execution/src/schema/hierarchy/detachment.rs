@@ -21,6 +21,136 @@ pub trait DetachedConstraintModes {
     ) -> Result<(), SQLError>;
 }
 
+/// Refuse to detach `partition` while a row of a referencing table references a key in its subtree through a constraint derived on it, as `PostgreSQL`'s `ATDetachCheckNoForeignKeyRefs` does, whether the foreign key is enforced or not. Each such referencing table is locked `Share` until the transaction ends, and the rows are read in their latest committed state with the transaction's own changes.
+pub(super) fn ensure_no_referencing_rows(
+    context: &super::HierarchyContext<'_>,
+    partition: &str,
+) -> Result<(), SQLError> {
+    use crate::schema::publication::referenced_partitions::{
+        declared_foreign_keys, declared_state,
+    };
+    let partition_id = context
+        .partitions
+        .catalog
+        .try_table_object_id(partition)
+        .map_err(SQLError::Internal)?
+        .ok_or_else(|| SQLError::UnknownTable(partition.to_string()))?;
+    let tables = context
+        .publication
+        .referencing
+        .table_names()
+        .map_err(|error| super::ddl_storage_error("DETACH PARTITION foreign keys", error))?;
+    for table in tables {
+        let (columns, constraints) = declared_state(&context.publication, &table)?;
+        for foreign_key in declared_foreign_keys(&context.publication, &columns, &constraints)? {
+            let Some(derived) = foreign_key
+                .referenced_partitions
+                .iter()
+                .find(|derived| derived.partition == partition_id)
+            else {
+                continue;
+            };
+            context
+                .namespace
+                .lock_relation(&table, uqa_sql::ast::TableLockMode::Share)?;
+            if let Some((physical_table, values)) =
+                referencing_row(context, &table, &foreign_key, partition)?
+            {
+                let detail = crate::mutation::constraints::foreign_key_key(
+                    context.constraints,
+                    partition,
+                    &foreign_key.ref_columns,
+                    &physical_table,
+                    &foreign_key.local_columns,
+                    &values,
+                )?
+                .map(|key| {
+                    format!(
+                        "{key} is still referenced from table \"{}\".",
+                        super::local_relation_name(&table)
+                    )
+                });
+                return Err(SQLError::Diagnostic {
+                    sqlstate: "23503".into(),
+                    message: format!(
+                        "removing partition \"{}\" violates foreign key constraint \"{}\"",
+                        super::local_relation_name(partition),
+                        derived.name
+                    ),
+                    detail,
+                    hint: None,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The first row of `table`, a referencing table, and its key values, whose key the subtree of `partition` holds.
+fn referencing_row(
+    context: &super::HierarchyContext<'_>,
+    table: &str,
+    foreign_key: &uqa_sql::ast::ForeignKey,
+    partition: &str,
+) -> Result<Option<(String, Vec<uqa_core::Value>)>, SQLError> {
+    let mut scoped = foreign_key.clone();
+    scoped.ref_table = partition.to_string();
+    for physical_table in
+        uqa_sql::semantics::partition::foreign_key_scan_tables(context.partitions.catalog, table)?
+    {
+        for doc_id in context
+            .constraints
+            .reads
+            .live_table_doc_ids(&physical_table)?
+        {
+            let Some(document) = context
+                .constraints
+                .reads
+                .get_document(&physical_table, doc_id)?
+            else {
+                continue;
+            };
+            let Some(lookup) = uqa_sql::semantics::foreign_keys::foreign_key_lookup_values(
+                context.partitions.catalog,
+                &physical_table,
+                &scoped,
+                &document,
+            )?
+            else {
+                continue;
+            };
+            let referenced = if scoped.period {
+                crate::mutation::constraints::period::period_foreign_key_overlap(
+                    context.constraints,
+                    &scoped,
+                    &lookup.values,
+                )?
+            } else {
+                crate::mutation::constraints::find_foreign_key_parent(
+                    context.constraints,
+                    &scoped,
+                    &lookup,
+                )?
+                .is_some()
+            };
+            if referenced {
+                let values = foreign_key
+                    .local_columns
+                    .iter()
+                    .map(|column| {
+                        document
+                            .get(column)
+                            .cloned()
+                            .unwrap_or(uqa_core::Value::Null)
+                    })
+                    .collect();
+                return Ok(Some((physical_table, values)));
+            }
+        }
+    }
+    Ok(None)
+}
+
 pub(super) struct DetachedFamilies {
     pub retained: Vec<ConstraintIdentity>,
     pub families: BTreeMap<[u8; 16], [u8; 16]>,
@@ -147,5 +277,10 @@ pub(super) fn publish(
     context
         .constraint_modes
         .preserve_split_modes(&split.retained, &mode_changes)?;
-    Ok(())
+    // The constraints the foreign keys referencing the parent or its ancestors derived on the detached subtree go with it.
+    crate::schema::publication::referenced_partitions::republish_referencing_tables(
+        &context.publication,
+        parent,
+        crate::row_locks::RelationLockMode::AccessExclusive,
+    )
 }

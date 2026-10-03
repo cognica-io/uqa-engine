@@ -8,7 +8,7 @@ use uqa_core::Value;
 use uqa_engine::sql::{format_postgres_text, postgres_result_type};
 use uqa_engine::Engine;
 use uqa_pg_wire::{BackendMessage, ErrorOrNotice, FieldDescription, FormatCode, NoticeSeverity};
-use uqa_sql::{SQLError, SQLResult, SQLResultKind};
+use uqa_sql::{NoticeLevel, SQLError, SQLResult, SQLResultKind};
 
 use crate::transport::Transport;
 use crate::ServerError;
@@ -78,19 +78,18 @@ pub(crate) fn send_result(
 }
 
 pub(crate) fn send_notices(transport: &mut Transport, engine: &Engine) -> Result<(), ServerError> {
-    for (level, message) in engine.take_sql_notices() {
-        let mut notice = ErrorOrNotice::error("00000", message);
-        notice.severity = match level.as_str() {
-            "WARNING" => {
-                notice.code = "01000".into();
-                NoticeSeverity::Warning
-            }
-            "INFO" => NoticeSeverity::Info,
-            "LOG" => NoticeSeverity::Log,
-            "DEBUG" => NoticeSeverity::Debug,
-            _ => NoticeSeverity::Notice,
+    for notice in engine.take_sql_notices() {
+        let mut response = ErrorOrNotice::error(notice.sqlstate, notice.message);
+        response.severity = match notice.level {
+            NoticeLevel::Debug => NoticeSeverity::Debug,
+            NoticeLevel::Log => NoticeSeverity::Log,
+            NoticeLevel::Info => NoticeSeverity::Info,
+            NoticeLevel::Notice => NoticeSeverity::Notice,
+            NoticeLevel::Warning => NoticeSeverity::Warning,
         };
-        transport.send(&BackendMessage::NoticeResponse(notice))?;
+        response.detail = notice.detail;
+        response.hint = notice.hint;
+        transport.send(&BackendMessage::NoticeResponse(response))?;
     }
     Ok(())
 }

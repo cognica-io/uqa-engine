@@ -15,11 +15,13 @@ use super::{
 
 #[expect(
     clippy::too_many_lines,
-    reason = "preserves cascade lock and recheck order"
+    clippy::too_many_arguments,
+    reason = "preserves cascade lock and recheck order and keeps DML row-image inputs aligned"
 )]
 pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
     context: &ReferentialContext<'_, S>,
     table: &str,
+    referenced_relation: &str,
     parent_doc_id: DocId,
     old_doc: &Document,
     new_doc: &Document,
@@ -48,15 +50,24 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
         let comparison =
             foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
         let expected = comparison.normalize(old_values.clone())?;
+        let firing = uqa_sql::schema::referenced_partitions::firing_constraint(
+            context.constraints.partitions.catalog,
+            table,
+            (referenced_relation != table).then_some(referenced_relation),
+            &fk,
+        )?;
         let defer_no_action = matches!(fk.on_update, ForeignKeyAction::NoAction)
             && context
                 .constraints
                 .transactions
-                .foreign_key_is_deferred(&ref_table, &fk)?;
+                .referenced_key_is_deferred(&ref_table, &fk, firing.derived)?;
         if defer_no_action {
-            context
-                .deferrals
-                .defer_foreign_key_parent_event(&ref_table, table, &fk)?;
+            context.deferrals.defer_foreign_key_parent_event(
+                &ref_table,
+                firing.relation,
+                &fk,
+                firing.derived,
+            )?;
         }
         if fk.period {
             let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
@@ -65,11 +76,10 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                 table: table.to_string(),
                 doc_id: parent_doc_id,
             };
-            for physical_table in context
-                .constraints
-                .catalog
-                .hierarchy_scan_tables(&ref_table, true)?
-            {
+            for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+                context.constraints.partitions.catalog,
+                &ref_table,
+            )? {
                 let rows = snapshot.table(&physical_table)?;
                 for child_id in rows.doc_ids()? {
                     let Some(child_doc) = rows.document(child_id)? else {
@@ -100,10 +110,11 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                     if defer_no_action {
                         context.deferrals.defer_foreign_key_check(
                             &ref_table,
-                            table,
+                            firing.relation,
                             &physical_table,
                             child_id,
                             &fk,
+                            firing.derived,
                         )?;
                         continue;
                     }
@@ -112,8 +123,8 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                         sqlstate: "23503".into(),
                         message: format!(
                             "update on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
-                            super::foreign_key_relation_name(table),
-                            fk.name.as_deref().unwrap_or("<unnamed>")
+                            super::foreign_key_relation_name(firing.relation),
+                            firing.name(&fk)
                         ),
                     });
                 }
@@ -152,10 +163,11 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                 ForeignKeyAction::NoAction if defer_no_action => {
                     context.deferrals.defer_foreign_key_check(
                         &ref_table,
-                        table,
+                        firing.relation,
                         &child.table,
                         child.doc_id,
                         &fk,
+                        firing.derived,
                     )?;
                 }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
@@ -164,8 +176,8 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                         sqlstate: "23503".into(),
                         message: format!(
                             "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
-                            super::foreign_key_relation_name(table),
-                            fk.name.as_deref().unwrap_or("<unnamed>")
+                            super::foreign_key_relation_name(firing.relation),
+                            firing.name(&fk)
                         ),
                     });
                 }
@@ -292,15 +304,24 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
         let comparison =
             foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
         let expected = comparison.normalize(key_values)?;
+        let firing = uqa_sql::schema::referenced_partitions::firing_constraint(
+            context.constraints.partitions.catalog,
+            parent_table,
+            None,
+            &fk,
+        )?;
         let defer_no_action = matches!(fk.on_delete, ForeignKeyAction::NoAction)
             && context
                 .constraints
                 .transactions
-                .foreign_key_is_deferred(&ref_table, &fk)?;
+                .referenced_key_is_deferred(&ref_table, &fk, firing.derived)?;
         if defer_no_action {
-            context
-                .deferrals
-                .defer_foreign_key_parent_event(&ref_table, parent_table, &fk)?;
+            context.deferrals.defer_foreign_key_parent_event(
+                &ref_table,
+                parent_table,
+                &fk,
+                firing.derived,
+            )?;
         }
         if fk.period {
             let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
@@ -319,11 +340,10 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
             if !excluded_parents.contains(&parent_identity) {
                 excluded_parents.push(parent_identity);
             }
-            for physical_table in context
-                .constraints
-                .catalog
-                .hierarchy_scan_tables(&ref_table, true)?
-            {
+            for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+                context.constraints.partitions.catalog,
+                &ref_table,
+            )? {
                 let rows = snapshot.table(&physical_table)?;
                 for child_id in rows.doc_ids()? {
                     if root_deletes.contains(&(physical_table.clone(), child_id)) {
@@ -362,6 +382,7 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                             &physical_table,
                             child_id,
                             &fk,
+                            firing.derived,
                         )?;
                         continue;
                     }
@@ -371,7 +392,7 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                         message: format!(
                             "delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
                             super::foreign_key_relation_name(parent_table),
-                            fk.name.as_deref().unwrap_or("<unnamed>")
+                            firing.name(&fk)
                         ),
                     });
                 }
@@ -425,6 +446,7 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                         &child.table,
                         child.doc_id,
                         &fk,
+                        firing.derived,
                     )?;
                 }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
@@ -434,7 +456,7 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                         message: format!(
                             "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
                             super::foreign_key_relation_name(parent_table),
-                            fk.name.as_deref().unwrap_or("<unnamed>")
+                            firing.name(&fk)
                         ),
                     });
                 }

@@ -86,7 +86,7 @@ impl RoleReferenceNames for Inputs {
 }
 
 impl RoleNotices for Inputs {
-    fn notice(&self, _: &str, _: &str) {
+    fn notice(&self, _: crate::SQLNotice) {
         panic!("role rename has no notices without password state");
     }
 }

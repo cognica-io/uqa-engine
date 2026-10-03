@@ -135,6 +135,9 @@ pub struct ForeignKeyRef {
     /// `REFERENCES table (..., PERIOD column)` temporal coverage semantics.
     #[serde(default)]
     pub period: bool,
+    /// The constraints derived on the partitions of a partitioned referenced table, as [`ForeignKey::referenced_partitions`] holds them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub referenced_partitions: Vec<super::ReferencedPartitionConstraint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,6 +312,9 @@ pub struct ForeignKey {
     /// The final local and referenced columns use `PostgreSQL` PERIOD coverage.
     #[serde(default)]
     pub period: bool,
+    /// The constraints derived on the partitions of a partitioned referenced table, parents before their partitions, in the order `PostgreSQL` creates them. Only the foreign key a referencing relation declares holds them; the copies on its partitions hold none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub referenced_partitions: Vec<super::ReferencedPartitionConstraint>,
 }
 
 const fn default_true() -> bool {

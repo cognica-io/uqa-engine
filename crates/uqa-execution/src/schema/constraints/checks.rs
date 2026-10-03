@@ -98,9 +98,11 @@ pub fn merge_added_check(
     if existing.is_local != was_local || existing.enforced != was_enforced {
         replace_check(context, table, &name, existing)?;
     }
-    context.notices.lock().push((
-        "NOTICE".to_string(),
-        format!("merging constraint \"{name}\" with inherited definition"),
-    ));
+    context
+        .notices
+        .lock()
+        .push(uqa_sql::SQLNotice::notice(format!(
+            "merging constraint \"{name}\" with inherited definition"
+        )));
     Ok(true)
 }

@@ -51,13 +51,13 @@ pub fn run_alter_table<S: Clone + 'static>(
                 .has_column(&table, &column.name)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
             {
-                context.constraints.notices.lock().push((
-                    "NOTICE".into(),
-                    format!(
+                context.constraints.notices.lock().push(
+                    uqa_sql::SQLNotice::notice(format!(
                         "column \"{}\" of relation \"{qualifier}\" already exists, skipping",
                         column.name
-                    ),
-                ));
+                    ))
+                    .with_sqlstate("42701"),
+                );
                 continue;
             }
         }
@@ -291,9 +291,13 @@ fn run_alter_table_action<S: Clone + 'static>(
                 &context.constraints,
                 &stmt.table,
                 &name,
-                enforceability,
-                deferrability,
-                no_inherit,
+                uqa_sql::schema::constraint_changes::ConstraintAlterOptions {
+                    enforceability,
+                    deferrability,
+                    no_inherit,
+                    ancestor: None,
+                },
+                stmt.recurse,
             )?;
         }
         AlterTableAction::DropConstraint {

@@ -80,7 +80,10 @@ pub(super) fn search_hits(entries: Vec<ScoredEntry>) -> Result<Vec<SearchHit>> {
 #[napi(object, js_name = "SQLNotice")]
 pub struct SQLNotice {
     pub level: String,
+    pub sqlstate: String,
     pub message: String,
+    pub detail: Option<String>,
+    pub hint: Option<String>,
 }
 
 #[napi(object)]

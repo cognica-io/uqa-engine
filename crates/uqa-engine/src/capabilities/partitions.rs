@@ -37,6 +37,11 @@ impl PartitionCatalog for Engine {
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Engine::describe_table_in_execution(self, table).map_err(|error| error.to_string())
     }
+    fn try_table_object_id(&self, table: &str) -> Result<Option<[u8; 16]>, String> {
+        Engine::try_table(self, table)
+            .map(|table| table.map(|table| table.object_id()))
+            .map_err(|error| error.to_string())
+    }
 }
 
 impl PartitionExpressions for Engine {

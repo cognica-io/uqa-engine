@@ -44,6 +44,13 @@ pub trait MutationIndexRead {
 }
 pub trait ConstraintTransactions {
     fn foreign_key_is_deferred(&self, table: &str, key: &ForeignKey) -> Result<bool, SQLError>;
+    /// Whether the checks that a change to a referenced row fires are deferred, under the constraint `derived` names when the foreign key derives one on the firing partition.
+    fn referenced_key_is_deferred(
+        &self,
+        table: &str,
+        key: &ForeignKey,
+        derived: Option<&uqa_sql::ast::ReferencedPartitionConstraint>,
+    ) -> Result<bool, SQLError>;
     fn refresh_explicit_statement_snapshot(&self) -> Result<(), SQLError>;
     fn lock_key_reservation(&self, key: [u8; 32], table: &str) -> Result<LockAcquire, SQLError>;
 }

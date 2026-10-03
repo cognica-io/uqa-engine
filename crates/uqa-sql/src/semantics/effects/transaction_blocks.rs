@@ -34,6 +34,22 @@ pub fn no_active_transaction_error(transaction: &crate::ast::TransactionStmt) ->
     }
 }
 
+/// The warning of `command`, a command whose effect lasts only until the end of its transaction, outside a transaction block, as `PostgreSQL`'s `WarnNoTransactionBlock` reports it: such a command lasts only for its own statement. A command inside a function, or inside a block, has a transaction to last for and is not warned about.
+pub fn no_transaction_block_warning(command: &str) -> crate::SQLNotice {
+    crate::SQLNotice::warning(format!("{command} can only be used in transaction blocks"))
+        .with_sqlstate("25P01")
+}
+
+/// The warning of a `BEGIN` inside a transaction block, or inside one of its subtransactions, which `PostgreSQL`'s `BeginTransactionBlock` reports and otherwise ignores.
+pub fn transaction_in_progress_warning() -> crate::SQLNotice {
+    crate::SQLNotice::warning("there is already a transaction in progress").with_sqlstate("25001")
+}
+
+/// The warning of a `COMMIT` or `ROLLBACK` outside a transaction block, which `PostgreSQL`'s `EndTransactionBlock` and `UserAbortTransactionBlock` report and otherwise ignore.
+pub fn no_transaction_in_progress_warning() -> crate::SQLNotice {
+    crate::SQLNotice::warning("there is no transaction in progress").with_sqlstate("25P01")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{no_active_transaction_error, transaction_requires_explicit_block};

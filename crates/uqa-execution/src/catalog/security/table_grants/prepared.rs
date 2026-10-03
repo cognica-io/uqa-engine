@@ -37,7 +37,7 @@ pub(super) struct PreparedTableGrant<'a> {
     pub foreign_updates: Vec<ForeignTablePrivilegeUpdate>,
     pub system_updates: Vec<SystemPrivilegeUpdate>,
     pub acl_updates: Vec<super::tuples::RelationPrivilegeUpdate>,
-    pub notices: Vec<(&'static str, String)>,
+    pub notices: Vec<uqa_sql::SQLNotice>,
 }
 
 pub(super) fn resolve_roles(

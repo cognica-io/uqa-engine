@@ -28,6 +28,7 @@ use scope::TransactionScope;
 mod snapshots;
 
 mod constraints;
+pub(crate) use constraints::DeferredReferencedKey;
 mod row_locks_session;
 
 #[cfg(test)]

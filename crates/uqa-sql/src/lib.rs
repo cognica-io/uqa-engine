@@ -37,6 +37,7 @@ pub mod error;
 pub mod expr;
 pub mod fts_query;
 pub mod ir;
+pub mod notice;
 pub mod params;
 pub mod plan;
 pub mod plpgsql;
@@ -58,6 +59,7 @@ pub use compiler::{
 pub use error::SQLError;
 pub use fts_query::{parse_query_string as parse_fts_query_string, tokenize as fts_tokenize};
 pub use fts_query::{FTSNode, FTSParser, FTSToken, FTSTokenType};
+pub use notice::{NoticeLevel, SQLNotice};
 pub use params::SQLParam;
 pub use result::{ResultRow, SQLResult, SQLResultKind};
 

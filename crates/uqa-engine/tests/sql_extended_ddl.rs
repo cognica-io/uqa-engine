@@ -11,6 +11,40 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+/// `PostgreSQL`'s error for truncating `referenced`, which `referencing` references.
+fn assert_truncate_rejected(error: uqa_sql::SQLError, referencing: &str, referenced: &str) {
+    match error {
+        uqa_sql::SQLError::Diagnostic {
+            sqlstate,
+            message,
+            detail,
+            hint,
+        } => {
+            assert_eq!(
+                (sqlstate.as_str(), message.as_str()),
+                (
+                    "0A000",
+                    "cannot truncate a table referenced in a foreign key constraint"
+                )
+            );
+            assert_eq!(
+                detail.as_deref(),
+                Some(format!("Table \"{referencing}\" references \"{referenced}\".").as_str())
+            );
+            assert_eq!(
+                hint.as_deref(),
+                Some(
+                    format!(
+                        "Truncate table \"{referencing}\" at the same time, or use TRUNCATE ... CASCADE."
+                    )
+                    .as_str()
+                )
+            );
+        }
+        other => panic!("expected the TRUNCATE foreign key error: {other:?}"),
+    }
+}
+
 #[test]
 fn insert_from_select_copies_rows() {
     let eng = Engine::new();
@@ -114,8 +148,11 @@ fn truncate_honors_foreign_key_boundaries_and_cascade() {
     eng.sql("INSERT INTO child (id, parent_id) VALUES (10, 1)", &[])
         .unwrap();
 
-    let error = eng.sql("TRUNCATE parent", &[]).unwrap_err();
-    assert!(error.to_string().contains("references"), "{error}");
+    assert_truncate_rejected(
+        eng.sql("TRUNCATE parent", &[]).unwrap_err(),
+        "child",
+        "parent",
+    );
     eng.sql("TRUNCATE parent, public.parent, child", &[])
         .unwrap();
     assert!(eng
@@ -190,10 +227,10 @@ fn truncate_uses_the_foreign_keys_creation_schema() {
         delete_error.to_string().contains("on table \"child\""),
         "{delete_error}"
     );
-    let truncate_error = eng.sql("TRUNCATE app.parent", &[]).unwrap_err();
-    assert!(
-        truncate_error.to_string().contains("app.child"),
-        "{truncate_error}"
+    assert_truncate_rejected(
+        eng.sql("TRUNCATE app.parent", &[]).unwrap_err(),
+        "child",
+        "parent",
     );
     eng.sql("TRUNCATE app.parent, app.child", &[]).unwrap();
 }
@@ -230,9 +267,18 @@ fn canonical_foreign_keys_and_truncate_cascade_survive_reopen() {
         reopened.foreign_keys("app.child").unwrap()[0].ref_table,
         "app.parent"
     );
-    let error = reopened.sql("TRUNCATE app.parent", &[]).unwrap_err();
-    assert!(error.to_string().contains("app.child"), "{error}");
+    assert_truncate_rejected(
+        reopened.sql("TRUNCATE app.parent", &[]).unwrap_err(),
+        "child",
+        "parent",
+    );
     reopened.sql("TRUNCATE app.parent CASCADE", &[]).unwrap();
+    assert_eq!(
+        reopened.take_sql_notices(),
+        [uqa_engine::SQLNotice::notice(
+            "truncate cascades to table \"child\""
+        )]
+    );
     assert!(reopened
         .sql("SELECT id FROM app.parent", &[])
         .unwrap()

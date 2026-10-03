@@ -317,11 +317,11 @@ impl TableGrantApplication<'_> {
         &self,
         grantable: usize,
         relation: &RelationIdentity,
-        notices: &mut Vec<(&'static str, String)>,
+        notices: &mut Vec<crate::SQLNotice>,
     ) {
         let requested = self.requested.table.len() + self.requested.columns.len();
         if grantable != requested {
-            notices.push(table_acl_warning(
+            notices.push(super::acl_warning::acl_warning(
                 self.statement.is_grant,
                 grantable != 0,
                 &relation.name,
@@ -462,19 +462,10 @@ pub fn table_sequence_privileges(
     (mapped, inapplicable)
 }
 
-fn table_acl_warning(is_grant: bool, partial: bool, name: &str) -> (&'static str, String) {
-    let message = match (is_grant, partial) {
-        (true, true) => format!("not all privileges were granted for \"{name}\""),
-        (true, false) => format!("no privileges were granted for \"{name}\""),
-        (false, true) => format!("not all privileges could be revoked for \"{name}\""),
-        (false, false) => format!("no privileges could be revoked for \"{name}\""),
-    };
-    ("WARNING", message)
-}
 pub fn view_privilege_updates(
     targets: Vec<(&ResolvedTableGrantTarget, StoredView)>,
     application: &TableGrantApplication<'_>,
-    notices: &mut Vec<(&'static str, String)>,
+    notices: &mut Vec<crate::SQLNotice>,
     dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<ViewPrivilegeUpdate>, SQLError> {
     let mut updates = Vec::new();
@@ -520,7 +511,7 @@ pub fn view_privilege_updates(
 pub fn foreign_table_privilege_updates(
     targets: Vec<ForeignTableGrantTarget<'_>>,
     application: &TableGrantApplication<'_>,
-    notices: &mut Vec<(&'static str, String)>,
+    notices: &mut Vec<crate::SQLNotice>,
     dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<ForeignTablePrivilegeUpdate>, SQLError> {
     let mut updates = Vec::new();

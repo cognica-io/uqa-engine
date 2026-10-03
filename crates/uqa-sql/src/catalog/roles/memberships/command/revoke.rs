@@ -40,7 +40,7 @@ impl<'a> MembershipRevocation<'a> {
         &mut self,
         roles: &BTreeMap<String, RoleDefinition>,
         member: &RoleBinding,
-    ) -> Result<Option<String>, SQLError> {
+    ) -> Result<Option<crate::SQLNotice>, SQLError> {
         let key = RoleMembershipKey {
             role: self.target.role.identity(),
             member: member.identity(),
@@ -50,7 +50,7 @@ impl<'a> MembershipRevocation<'a> {
             return self
                 .target
                 .membership_notice(roles, member, "has not been granted")
-                .map(Some);
+                .map(|message| Some(crate::SQLNotice::warning(message)));
         }
         let options = self.target.options;
         if options == RoleMembershipOptions::default() {

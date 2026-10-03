@@ -19,6 +19,8 @@ use super::sql_row_locks::{seed_accounts, sqlstate};
 
 #[path = "sql_row_locks_recheck/basic.rs"]
 mod basic;
+#[path = "sql_row_locks_recheck/nested_frames.rs"]
+mod nested_frames;
 #[path = "sql_row_locks_recheck/update_chains.rs"]
 mod update_chains;
 #[path = "sql_row_locks_recheck/writer_order.rs"]

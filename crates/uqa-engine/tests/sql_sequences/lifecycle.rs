@@ -215,9 +215,8 @@ fn drop_sequence_sql_matches_missing_wrong_kind_and_multi_target_semantics() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![(
-            "NOTICE".to_string(),
-            "sequence \"missing_ids\" does not exist, skipping".to_string()
+        vec![uqa_engine::SQLNotice::notice(
+            "sequence \"missing_ids\" does not exist, skipping"
         )]
     );
 
@@ -330,7 +329,9 @@ fn drop_sequence_tracks_column_and_table_check_dependencies() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![("NOTICE".into(), "drop cascades to 2 other objects".into())]
+        vec![uqa_engine::SQLNotice::notice(
+            "drop cascades to 2 other objects"
+        )]
     );
     let result = engine
         .sql(

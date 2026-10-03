@@ -11,6 +11,13 @@ use super::{
 };
 use uqa_sql::{expr::multirange_from_ranges, semantics::period::period_ranges};
 
+/// The child's period ranges, the periods of the referenced rows whose ordinary key matches the child's, and the identities of those rows.
+struct PeriodParents {
+    child_ranges: Vec<uqa_sql::expr::CanonicalRange>,
+    coverage: uqa_sql::expr::CanonicalMultirange,
+    parent_ids: Vec<PhysicalDocumentIdentity>,
+}
+
 pub fn period_foreign_key_coverage(
     context: ConstraintContext<'_>,
     foreign_key: &ForeignKey,
@@ -18,6 +25,48 @@ pub fn period_foreign_key_coverage(
     excluded_parents: &[PhysicalDocumentIdentity],
     replacement_parent: Option<(&PhysicalDocumentIdentity, &Document)>,
 ) -> Result<(bool, Vec<PhysicalDocumentIdentity>), SQLError> {
+    let Some(parents) = period_parents(
+        context,
+        foreign_key,
+        local_values,
+        excluded_parents,
+        replacement_parent,
+    )?
+    else {
+        return Ok((false, Vec::new()));
+    };
+    Ok((
+        parents
+            .child_ranges
+            .iter()
+            .all(|range| parents.coverage.contains_range(range)),
+        parents.parent_ids,
+    ))
+}
+
+/// Whether a referenced row whose ordinary key matches the child's has a period that overlaps the child's, as `PostgreSQL`'s partition removal check joins a temporal foreign key's rows.
+pub fn period_foreign_key_overlap(
+    context: ConstraintContext<'_>,
+    foreign_key: &ForeignKey,
+    local_values: &[Value],
+) -> Result<bool, SQLError> {
+    Ok(
+        period_parents(context, foreign_key, local_values, &[], None)?.is_some_and(|parents| {
+            parents
+                .child_ranges
+                .iter()
+                .any(|range| parents.coverage.overlaps_range(range))
+        }),
+    )
+}
+
+fn period_parents(
+    context: ConstraintContext<'_>,
+    foreign_key: &ForeignKey,
+    local_values: &[Value],
+    excluded_parents: &[PhysicalDocumentIdentity],
+    replacement_parent: Option<(&PhysicalDocumentIdentity, &Document)>,
+) -> Result<Option<PeriodParents>, SQLError> {
     super::authorize_foreign_key_parent_namespace(context, foreign_key)?;
     let Some(period_column) = foreign_key.ref_columns.last() else {
         return Err(SQLError::Internal(
@@ -38,16 +87,16 @@ pub fn period_foreign_key_coverage(
     };
     let (child_subtype, child_ranges) = period_ranges(child_period, &parent_type)?;
     if child_ranges.is_empty() {
-        return Ok((false, Vec::new()));
+        return Ok(None);
     }
     let ordinary_values = &local_values[..local_values.len() - 1];
     let ordinary_columns = &foreign_key.ref_columns[..foreign_key.ref_columns.len() - 1];
     let mut parent_ranges = Vec::new();
     let mut parent_ids = Vec::new();
-    for physical_table in context
-        .catalog
-        .hierarchy_scan_tables(&foreign_key.ref_table, true)?
-    {
+    for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+        context.partitions.catalog,
+        &foreign_key.ref_table,
+    )? {
         for doc_id in context.reads.table_doc_ids(&physical_table)? {
             let identity = PhysicalDocumentIdentity {
                 table: physical_table.clone(),
@@ -96,11 +145,9 @@ pub fn period_foreign_key_coverage(
             parent_ids.push(identity);
         }
     }
-    let coverage = multirange_from_ranges(child_subtype, parent_ranges);
-    Ok((
-        child_ranges
-            .iter()
-            .all(|range| coverage.contains_range(range)),
+    Ok(Some(PeriodParents {
+        child_ranges,
+        coverage: multirange_from_ranges(child_subtype, parent_ranges),
         parent_ids,
-    ))
+    }))
 }

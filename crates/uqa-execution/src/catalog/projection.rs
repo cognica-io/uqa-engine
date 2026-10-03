@@ -142,6 +142,9 @@ mod schema;
 pub struct RuntimeConstraint {
     pub identity: ConstraintIdentity,
     pub deferrable: bool,
+    pub catalog_oid: Option<i64>,
+    /// The catalog row of the constraint this one derives from, whose `SET CONSTRAINTS` mode it follows.
+    pub parent_oid: Option<i64>,
 }
 
 pub fn runtime_constraints(
@@ -159,6 +162,8 @@ pub fn runtime_constraints(
                     object_id: constraint.object_id,
                 },
                 deferrable: constraint.state.deferrable(),
+                catalog_oid: constraint.catalog_oid,
+                parent_oid: constraint.parent_oid,
             })
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
@@ -183,6 +188,8 @@ pub fn runtime_constraints(
                 object_id: trigger.object_id,
             },
             deferrable: trigger.definition.deferrability.is_deferrable(),
+            catalog_oid: None,
+            parent_oid: None,
         });
     }
     Ok(constraints)

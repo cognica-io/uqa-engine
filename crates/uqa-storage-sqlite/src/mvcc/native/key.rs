@@ -146,7 +146,9 @@ impl NativeRecordIdentity {
         }
         let generation_column = match self.family {
             NativeRecordFamily::Tables => "storage_generation",
-            NativeRecordFamily::Sequences => "definition_generation",
+            NativeRecordFamily::Sequences | NativeRecordFamily::SequenceValues => {
+                "definition_generation"
+            }
             _ => return Ok(()),
         };
         let NativeRecordOwner::Object {

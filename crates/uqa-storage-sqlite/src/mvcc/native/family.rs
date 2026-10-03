@@ -72,6 +72,7 @@ pub enum NativeRecordFamily {
     VectorChanges = 59,
     VectorPopulations = 60,
     VectorPopulationWitnesses = 61,
+    SequenceValues = 62,
 }
 
 impl NativeRecordFamily {
@@ -80,6 +81,9 @@ impl NativeRecordFamily {
     }
 
     pub fn from_id(id: u16) -> Option<Self> {
+        if id == Self::SequenceValues.id() {
+            return Some(Self::SequenceValues);
+        }
         if id == Self::VectorPopulationWitnesses.id() {
             return Some(Self::VectorPopulationWitnesses);
         }
@@ -108,6 +112,9 @@ impl NativeRecordFamily {
     }
 
     pub fn layout(self) -> &'static NativeRecordLayout {
+        if self == Self::SequenceValues {
+            return &super::sequence_values::LAYOUT;
+        }
         if self == Self::VectorPopulationWitnesses {
             return &super::populations::schema::WITNESS;
         }
@@ -136,7 +143,6 @@ impl NativeRecordFamily {
     }
 
     pub fn all() -> impl ExactSizeIterator<Item = Self> {
-        (1..=Self::VectorPopulationWitnesses.id())
-            .map(|id| Self::from_id(id).expect("assigned native family"))
+        (1..=Self::SequenceValues.id()).map(|id| Self::from_id(id).expect("assigned native family"))
     }
 }

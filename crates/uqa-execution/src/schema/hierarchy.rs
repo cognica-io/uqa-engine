@@ -5,12 +5,14 @@
 //
 
 //! Execute inheritance changes and partition attachment against active catalog and row state.
+use super::constraints::partition_foreign_keys::{
+    PartitionForeignKeyInheritance, PartitionForeignKeyTables,
+};
 use super::publication::{hierarchy::HierarchySchemaChange, SchemaPublicationContext};
 use crate::catalog::RelationResolution;
 use crate::mutation::constraints::context::ConstraintContext;
 use uqa_sql::schema::inheritance::alter::{
-    append_inherited_foreign_keys, append_inherited_keys, install_inherited_identity,
-    normalize_parent_sequence_numbers,
+    append_inherited_keys, install_inherited_identity, normalize_parent_sequence_numbers,
 };
 use uqa_sql::semantics::partition::PartitionContext;
 use uqa_sql::{
@@ -227,7 +229,12 @@ fn attach_partition(
         validate_existing_constraints(context, &target)?;
     }
     let _ = parent_spec;
-    Ok(())
+    // The foreign keys referencing the parent or its ancestors derive constraints on the attached subtree.
+    super::publication::referenced_partitions::republish_referencing_tables(
+        &context.publication,
+        parent,
+        crate::row_locks::RelationLockMode::ShareRowExclusive,
+    )
 }
 
 fn inherit_partition_schema(
@@ -255,17 +262,29 @@ fn inherit_partition_schema(
         .catalog
         .try_foreign_keys(parent)
         .map_err(|error| ddl_storage_error("ATTACH PARTITION constraints", error))?;
-    let subtree = context
-        .constraints
-        .catalog
-        .hierarchy_scan_tables(partition, true)?;
-    for target in &subtree {
+    // The partition first, then its own partitions, each after its parent, as the foreign keys recurse.
+    let mut subtree = vec![(partition.to_string(), parent.to_string())];
+    subtree.extend(
+        uqa_sql::semantics::partition::partition_tree(&context.partitions, partition, false)?
+            .into_iter()
+            .map(|node| (node.table, node.parent)),
+    );
+    let mut foreign_keys = PartitionForeignKeyInheritance::default();
+    for (target, target_parent) in &subtree {
         let mut columns = table_columns(context, target, "ATTACH PARTITION")?;
         let identity_overrides = install_inherited_identity(&mut columns, &inherited_identity)?;
         let mut constraints = declared_constraints(context, target, "ATTACH PARTITION")?;
         let inherited_keys = append_inherited_keys(&mut constraints.key_constraints, &parent_keys);
-        let inherited_foreign_keys =
-            append_inherited_foreign_keys(&mut constraints.foreign_keys, &parent_foreign_keys);
+        let inherited_foreign_keys = foreign_keys
+            .inherit(
+                context,
+                target,
+                target_parent,
+                &parent_foreign_keys,
+                &mut columns,
+                &mut constraints,
+            )?
+            .copies;
         let mut hierarchy = constraints.hierarchy.clone();
         hierarchy.partition_identity_overrides = identity_overrides;
         hierarchy.partition_inherited_key_constraints = inherited_keys;
@@ -289,7 +308,49 @@ fn inherit_partition_schema(
         )
         .map_err(|error| ddl_storage_error("ATTACH PARTITION", error))?;
     }
-    Ok(subtree)
+    foreign_keys.validate(context)?;
+    Ok(subtree.into_iter().map(|(table, _)| table).collect())
+}
+
+impl PartitionForeignKeyTables for HierarchyContext<'_> {
+    fn declared(&self, table: &str) -> Result<(Vec<ColumnDef>, TableConstraintSet), SQLError> {
+        Ok((
+            table_columns(self, table, "ALTER TABLE hierarchy")?,
+            declared_constraints(self, table, "ALTER TABLE hierarchy")?,
+        ))
+    }
+    fn bound_foreign_keys(&self, table: &str) -> Result<Vec<ForeignKey>, SQLError> {
+        self.catalog
+            .try_foreign_keys(table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE hierarchy foreign keys", error))
+    }
+    fn publish(
+        &self,
+        table: &str,
+        columns: Vec<ColumnDef>,
+        constraints: TableConstraintSet,
+    ) -> Result<(), SQLError> {
+        super::publication::replace_constraint_state(&self.publication, table, columns, constraints)
+            .map_err(|error| ddl_storage_error("ALTER TABLE hierarchy constraints", error))
+    }
+    fn constraint_names(
+        &self,
+        table: &str,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        self.publication.constraint_names().existing_names(table)
+    }
+    fn schema_constraint_names(
+        &self,
+        table: &str,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        self.publication.constraint_names().automatic_names(table)
+    }
+    fn partitions(&self) -> PartitionContext<'_> {
+        self.partitions
+    }
+    fn rows(&self) -> ConstraintContext<'_> {
+        self.constraints
+    }
 }
 
 fn detach_partition(
@@ -315,19 +376,22 @@ fn detach_partition(
             .first()
             .is_some_and(|edge| edge == parent);
     if finalize {
-        return Err(routine(
-            "55000",
-            format!(
-                "cannot complete detaching partition \"{}\"\nDETAIL: There's no pending concurrent detach.",
+        return Err(SQLError::Diagnostic {
+            sqlstate: "55000".into(),
+            message: format!(
+                "cannot complete detaching partition \"{}\"",
                 local_relation_name(&partition)
             ),
-        ));
+            detail: Some("There's no pending concurrent detach.".into()),
+            hint: None,
+        });
     }
     if !attached {
         return Err(routine(
             "42P01",
             format!(
-                "relation \"{requested_partition}\" is not a partition of relation \"{}\"",
+                "relation \"{}\" is not a partition of relation \"{}\"",
+                local_relation_name(requested_partition),
                 local_relation_name(parent)
             ),
         ));
@@ -343,6 +407,7 @@ fn detach_partition(
         .as_ref()
         .ok_or_else(|| SQLError::Internal("attached partition lost its bound".into()))?
         .clone();
+    detachment::ensure_no_referencing_rows(context, &partition)?;
     detachment::publish(
         context,
         parent,

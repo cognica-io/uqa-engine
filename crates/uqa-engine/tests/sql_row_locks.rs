@@ -661,13 +661,15 @@ fn committed_nested_frame_lock_survives_later_nested_rollback() {
     let holder = root.new_session().unwrap();
     let waiter = root.new_session().unwrap();
     holder.sql("BEGIN", &[]).unwrap();
-    holder.sql("BEGIN", &[]).unwrap();
+    // A SQL BEGIN inside the block changes nothing; Engine::begin opens a nested frame.
+    holder.begin().unwrap();
     holder
         .sql("SELECT id FROM accounts WHERE id = 1 FOR UPDATE", &[])
         .unwrap();
-    holder.sql("COMMIT", &[]).unwrap();
-    holder.sql("BEGIN", &[]).unwrap();
-    holder.sql("ROLLBACK", &[]).unwrap();
+    holder.commit().unwrap();
+    holder.begin().unwrap();
+    holder.rollback().unwrap();
+    assert_eq!(holder.transaction_depth(), 1);
 
     let error = waiter
         .sql(

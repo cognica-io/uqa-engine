@@ -435,13 +435,14 @@ pub(super) fn drop_identity<S: Clone + 'static>(
     let definition = column(context, table, name)?;
     if !is_identity(&definition) {
         if if_exists {
-            context.constraints.notices.lock().push((
-                "NOTICE".into(),
-                format!(
+            context
+                .constraints
+                .notices
+                .lock()
+                .push(uqa_sql::SQLNotice::notice(format!(
                     "column \"{name}\" of relation \"{}\" is not an identity column, skipping",
                     local_name(table)?
-                ),
-            ));
+                )));
             return Ok(());
         }
         return Err(column_error(

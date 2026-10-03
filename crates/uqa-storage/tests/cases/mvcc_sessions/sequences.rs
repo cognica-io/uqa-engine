@@ -162,7 +162,7 @@ fn sequence_value_mutations_cannot_overwrite_an_intervening_definition() {
 
 #[test]
 fn sequence_lifecycle_keeps_original_claim_and_value_preconditions() {
-    for operation in ["create", "rename", "drop"] {
+    for operation in ["create", "drop"] {
         let persistence = Persistence::new();
         let a = Arc::new(persistence.session(1 << 22));
         let other = KeyValueCatalog::new(Arc::new(persistence.session(1 << 22)));
@@ -216,6 +216,30 @@ fn sequence_lifecycle_keeps_original_claim_and_value_preconditions() {
         destination.object_id = [4; 16];
         assert!(catalog.create_sequence_row(&destination).unwrap());
     }
+}
+
+#[test]
+fn a_sequence_rename_leaves_the_value_record_to_value_operations() {
+    let persistence = Persistence::new();
+    let a = Arc::new(persistence.session(1 << 22));
+    let other = KeyValueCatalog::new(Arc::new(persistence.session(1 << 22)));
+    other.save_schema("public").unwrap();
+    other.create_sequence_row(&sequence()).unwrap();
+    let wrapper = Arc::new(InterleavedStore::new(a.clone()));
+    let catalog = KeyValueCatalog::new(wrapper.clone());
+    *wrapper.after_evaluation.lock() = Some(Box::new(move || {
+        assert_eq!(
+            other
+                .set_sequence_value("ids", [1; 16], [2; 16], 100, false, 0)
+                .unwrap(),
+            uqa_storage::SequenceSetValueResult::Set(100)
+        );
+    }));
+    // The rename changes the definition and the value assignment the value record, so neither overwrites the other.
+    assert!(catalog.rename_sequence_row("ids", "renamed").unwrap());
+    let saved = catalog.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(saved.relation, RelationIdentity::new("public", "renamed"));
+    assert_eq!((saved.object_id, saved.current), ([1; 16], 100));
 }
 
 #[test]

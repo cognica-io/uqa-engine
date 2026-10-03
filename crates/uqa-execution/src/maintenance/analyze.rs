@@ -31,7 +31,7 @@ pub trait AnalyzeLocks {
 }
 
 pub trait AnalyzeNotices {
-    fn warning(&self, message: &str);
+    fn notice(&self, notice: uqa_sql::SQLNotice);
 }
 
 pub struct AnalyzeContext<'a> {
@@ -71,10 +71,13 @@ fn lock_identity(
         context.locks.refresh_after_wait()?;
         let Some(current) = context.catalog.current_target(target.object_id) else {
             if warn_missing {
-                context.notices.warning(&format!(
-                    "skipping analyze of \"{}\" --- relation no longer exists",
-                    target.name
-                ));
+                context.notices.notice(
+                    uqa_sql::SQLNotice::warning(format!(
+                        "skipping analyze of \"{}\" --- relation no longer exists",
+                        target.name
+                    ))
+                    .with_sqlstate("42P01"),
+                );
             }
             return Ok(None);
         };

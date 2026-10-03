@@ -48,8 +48,8 @@ fn raise_notice_formatting_and_sink() {
     assert_eq!(
         notices,
         vec![
-            ("NOTICE".to_string(), "v=1 w=% x=two".to_string()),
-            ("WARNING".to_string(), "v=<NULL>".to_string()),
+            uqa_engine::SQLNotice::notice("v=1 w=% x=two"),
+            uqa_engine::SQLNotice::warning("v=<NULL>"),
         ]
     );
     assert!(eng.take_sql_notices().is_empty());

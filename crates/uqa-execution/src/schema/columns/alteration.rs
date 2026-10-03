@@ -214,7 +214,11 @@ pub fn alter_type<S: Clone + 'static>(
     publish_property(context.transactions, table, name, ColumnProperty::Type(ty))
         .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
     if target_generated_kind.is_none() {
-        super::rewrite_column_values_to_type(&context.rewrite, table, name, &old_ty, ty, using)?;
+        let rows = super::converted_column_rows(&context.rewrite, table, name, &old_ty, ty, using)?;
+        let mut changed =
+            super::generated::stored_generated_columns(context.generated.keys.constraints, table)?;
+        changed.push(name.to_string());
+        super::generated::rewrite_table_rows(&context.generated, table, rows, true, &changed)?;
     }
     match ty {
         ColumnType::Text if target_generated_kind != Some(GeneratedColumnKind::Virtual) => {
@@ -235,10 +239,6 @@ pub fn alter_type<S: Clone + 'static>(
             kind == GeneratedColumnKind::Stored,
         )?;
     }
-    super::generated::validate_all_table_rows(
-        context.generated.state,
-        context.generated.keys.constraints,
-    )?;
     context
         .fields
         .persist_schema(table)

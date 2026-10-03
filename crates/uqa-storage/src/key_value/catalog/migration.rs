@@ -22,7 +22,7 @@ use super::{
     posting_cluster_score_key_prefix, posting_document_key_prefix, posting_key_prefix,
     register_migration_relation, relation_key, reverse_posting_key_prefix, single_str_key,
     string_value, table_field_analyzer_prefix, vector_key_prefix, CatalogFacade, KeyValueBatch,
-    KeyValueCatalog, KeyValueStore, RelationIdentity, RelationKind, SequenceOptions, SequenceRow,
+    KeyValueCatalog, KeyValueStore, RelationIdentity, RelationKind, SequenceOptions,
     StorageBackendError, StorageBackendResult, TableSchema, ViewRow, TAG_CATALOG_INDEX,
     TAG_FOREIGN_TABLE, TAG_METADATA, TAG_RELATION, TAG_SCHEMA, TAG_SEQUENCE, TAG_TABLE, TAG_VIEW,
 };
@@ -38,7 +38,8 @@ pub(super) struct TableMigration {
 
 pub(super) struct SequenceMigration {
     old_key: Option<Vec<u8>>,
-    row: SequenceRow,
+    relation: RelationIdentity,
+    stored: StoredSequence,
 }
 
 pub(super) struct ForeignMigration {
@@ -145,20 +146,8 @@ pub(super) fn collect_sequence_migrations(
         register_migration_relation(seen, &relation, RelationKind::Sequence, source)?;
         sequences.push(SequenceMigration {
             old_key: Some(key),
-            row: SequenceRow {
-                relation,
-                security: stored.security,
-                object_id: stored.object_id,
-                definition_generation: stored.definition_generation,
-                start: stored.start,
-                increment: stored.increment,
-                current: stored.current,
-                called: stored.called,
-                log_count: stored.log_count,
-                persistence: stored.persistence,
-                owner: stored.owner,
-                options: stored.options,
-            },
+            relation,
+            stored,
         });
     }
     if let Some(json) = catalog.get_metadata(LEGACY_SEQUENCES_METADATA_KEY)? {
@@ -173,18 +162,19 @@ pub(super) fn collect_sequence_migrations(
                 RelationKind::Sequence,
                 format!("legacy metadata `{name}`"),
             )?;
+            // The value state stays in the definition, as in every definition of this era, until the value migration of the initial open moves it.
             sequences.push(SequenceMigration {
                 old_key: None,
-                row: SequenceRow {
-                    relation,
+                relation,
+                stored: StoredSequence {
                     security: crate::catalog::SequenceSecurityRow::bootstrap(),
                     object_id: [0; 16],
                     definition_generation: [0; 16],
                     start: state.start,
                     increment: state.increment,
-                    current: state.current,
-                    called: true,
-                    log_count: 0,
+                    current: Some(state.current),
+                    called: Some(true),
+                    log_count: Some(0),
                     persistence: "p".into(),
                     owner: None,
                     options: SequenceOptions::default(),
@@ -498,23 +488,8 @@ pub(super) fn put_sequence_migrations(
     sequences: Vec<SequenceMigration>,
 ) -> StorageBackendResult<()> {
     for sequence in sequences {
-        let key = relation_key(TAG_SEQUENCE, &sequence.row.relation)?;
-        batch.put(
-            &key,
-            &encode_value(&StoredSequence {
-                security: sequence.row.security,
-                object_id: sequence.row.object_id,
-                definition_generation: sequence.row.definition_generation,
-                start: sequence.row.start,
-                increment: sequence.row.increment,
-                current: sequence.row.current,
-                called: sequence.row.called,
-                log_count: sequence.row.log_count,
-                persistence: sequence.row.persistence,
-                owner: sequence.row.owner,
-                options: sequence.row.options,
-            })?,
-        )?;
+        let key = relation_key(TAG_SEQUENCE, &sequence.relation)?;
+        batch.put(&key, &encode_value(&sequence.stored)?)?;
         if let Some(old_key) = sequence.old_key {
             if old_key != key {
                 batch.delete(&old_key)?;

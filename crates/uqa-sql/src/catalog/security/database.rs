@@ -506,16 +506,6 @@ pub fn validate_database_acl_roles(
     Ok(())
 }
 
-pub fn database_acl_warning(is_grant: bool, partial: bool, name: &str) -> (&'static str, String) {
-    let message = match (is_grant, partial) {
-        (true, true) => format!("not all privileges were granted for \"{name}\""),
-        (true, false) => format!("no privileges were granted for \"{name}\""),
-        (false, true) => format!("not all privileges could be revoked for \"{name}\""),
-        (false, false) => format!("no privileges could be revoked for \"{name}\""),
-    };
-    ("WARNING", message)
-}
-
 pub fn validate_stored_database_security(
     security: &DatabaseSecurity,
     roles: &BTreeMap<String, RoleDefinition>,

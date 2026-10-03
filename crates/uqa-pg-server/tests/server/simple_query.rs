@@ -162,6 +162,29 @@ fn virtual_generated_function_error_preserves_postgresql_diagnostic_fields() {
 }
 
 #[test]
+fn notices_carry_postgresql_severity_and_sqlstate_fields() {
+    let fixture = Fixture::new();
+    let mut client = fixture.connect();
+    let response = client.query(
+        "CREATE TABLE wire_notice(a integer); CREATE TABLE IF NOT EXISTS wire_notice(a integer)",
+    );
+    let notice = fields(&response.iter().find(|message| message.0 == b'N').unwrap().1);
+    assert_eq!(notice[&b'S'], "NOTICE");
+    assert_eq!(notice[&b'V'], "NOTICE");
+    assert_eq!(notice[&b'C'], "42P07");
+    assert_eq!(
+        notice[&b'M'],
+        "relation \"wire_notice\" already exists, skipping"
+    );
+    let response = client.query("COMMIT");
+    let warning = fields(&response.iter().find(|message| message.0 == b'N').unwrap().1);
+    assert_eq!(warning[&b'S'], "WARNING");
+    assert_eq!(warning[&b'C'], "25P01");
+    assert_eq!(warning[&b'M'], "there is no transaction in progress");
+    assert_eq!(response.last().unwrap(), &(b'Z', vec![b'I']));
+}
+
+#[test]
 fn empty_descriptors_differ_from_command_only_results() {
     let fixture = Fixture::new();
     let mut client = fixture.connect();

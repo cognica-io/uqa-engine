@@ -29,7 +29,7 @@ use uqa_sql::{
 #[derive(Default)]
 struct Inputs {
     cancellation: CancellationToken,
-    notices: Mutex<Vec<(String, String)>>,
+    notices: Mutex<Vec<uqa_sql::SQLNotice>>,
     events: RefCell<Vec<String>>,
     depth: Cell<usize>,
     guarded: Cell<bool>,
@@ -312,10 +312,8 @@ fn out_of_block_completions_and_notices_keep_statement_order() {
     assert_eq!(
         &*inputs.notices.lock(),
         &vec![
-            (
-                "WARNING".into(),
-                "there is no transaction in progress".into()
-            );
+            uqa_sql::SQLNotice::warning("there is no transaction in progress")
+                .with_sqlstate("25P01");
             2
         ]
     );

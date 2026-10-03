@@ -117,8 +117,8 @@ impl AnalyzeLocks for Engine {
 }
 
 impl AnalyzeNotices for Engine {
-    fn warning(&self, message: &str) {
-        self.push_sql_notice("WARNING", message);
+    fn notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }
 struct VacuumMetadata(Arc<TableState>);

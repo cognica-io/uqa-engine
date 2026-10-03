@@ -120,7 +120,7 @@ pub trait RoutineEventRemoval {
     fn drop_trigger(&self, statement: &DropTrigger) -> Result<(), SQLError>;
 }
 pub trait RoutineDropNotices {
-    fn routine_drop_notice(&self, level: &str, message: &str);
+    fn routine_drop_notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct RoutineRemovalContext<'a> {
     pub locks: &'a dyn crate::row_locks::binding::RelationDefinitionSession,

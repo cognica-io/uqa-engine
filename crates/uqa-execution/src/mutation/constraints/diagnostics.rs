@@ -95,6 +95,48 @@ fn index_key_detail(
     Ok(Some(format!("Key ({names})=({values})")))
 }
 
+/// `Key (columns)=(values)` for values of the columns of a foreign key, named as `table`'s columns and printed with the types of `value_table`'s `value_columns`, as `PostgreSQL`'s `ri_ReportViolation` prints a foreign key's key; `None` when the current role may not read every one of `table`'s columns.
+pub(crate) fn foreign_key_key(
+    context: ConstraintContext<'_>,
+    table: &str,
+    columns: &[String],
+    value_table: &str,
+    value_columns: &[String],
+    values: &[Value],
+) -> Result<Option<String>, SQLError> {
+    let diagnostics = context.diagnostics.diagnostic_context();
+    let keys = columns
+        .iter()
+        .map(|column| uqa_sql::ast::IndexKey::Column(column.clone()))
+        .collect::<Vec<_>>();
+    if !diagnostics.authorization.can_view_index_key(table, &keys)? {
+        return Ok(None);
+    }
+    let output = OutputNames(diagnostics.catalog);
+    let names = columns
+        .iter()
+        .map(|column| uqa_sql::expr::quote_ident(column))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let values = value_columns
+        .iter()
+        .zip(values)
+        .map(|(column, value)| {
+            if *value == Value::Null {
+                return Ok("null".into());
+            }
+            let ty = context
+                .catalog
+                .column_type(value_table, column)
+                .map_err(SQLError::Internal)?
+                .ok_or_else(|| SQLError::UnknownColumn(column.clone()))?;
+            uqa_sql::catalog::index::format_key_value(value, &ty, Some(&output))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?
+        .join(", ");
+    Ok(Some(format!("Key ({names})=({values})")))
+}
+
 /// Prints values with the catalog's names for the types that print them, as type output functions do.
 pub(super) struct OutputNames<'a>(pub(super) CatalogContext<'a>);
 

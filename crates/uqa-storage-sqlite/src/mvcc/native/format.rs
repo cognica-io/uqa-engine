@@ -44,13 +44,18 @@ const FORMAT_ELEVEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INT
 
 const FORMAT_TWELVE: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 12), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
 
-const CURRENT_VERSION: u32 = 13;
+const FORMAT_THIRTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 13), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
+
+const CURRENT_VERSION: u32 = 14;
+
+/// The first format that keeps sequence value state in value records of its own.
+const SEQUENCE_VALUES_VERSION: u32 = 14;
 
 #[cfg(test)]
 mod tests;
 
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 13), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 14), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
@@ -220,16 +225,7 @@ pub(in crate::mvcc) fn initialize_in(
             ))?;
         }
     }
-    for (_, sql) in TABLES {
-        transaction.execute_batch(sql)?;
-    }
-    transaction.execute_batch(OWNER_INDEX)?;
-    transaction.execute_batch(graph_lookup::SQL)?;
-    transaction.execute_batch(super::occurrence_guards::SQL)?;
-    transaction.execute_batch(super::vector_guards::SQL)?;
-    for (_, _, sql) in DISKANN_TABLES {
-        transaction.execute_batch(sql)?;
-    }
+    create_provider_tables(transaction)?;
     occurrence_accelerators::create(transaction)?;
     occurrence_accelerators::import(transaction, control)?;
     crate::Catalog::upgrade_metadata_cache_triggers(transaction)?;
@@ -237,6 +233,8 @@ pub(in crate::mvcc) fn initialize_in(
     validate_cache_triggers(transaction, CURRENT_VERSION)?;
     owners::seed(transaction, control)?;
     super::sequences::validate_source(transaction)?;
+    // Sequence definitions now have their identities; their value state moves into value records keyed by them.
+    super::sequence_values::seed(transaction)?;
     graph_lookup::seed(transaction, control)?;
     transaction.execute(
         "UPDATE _metadata SET value = '49' WHERE key = 'schema_version'",
@@ -285,6 +283,22 @@ pub(in crate::mvcc) fn initialize_in(
     })
 }
 
+/// Create the provider-owned tables of the current format, which hold no catalog rows of their own when a catalog is converted.
+fn create_provider_tables(transaction: &Connection) -> PhysicalResult<()> {
+    for (_, sql) in TABLES {
+        transaction.execute_batch(sql)?;
+    }
+    transaction.execute_batch(OWNER_INDEX)?;
+    transaction.execute_batch(graph_lookup::SQL)?;
+    transaction.execute_batch(super::occurrence_guards::SQL)?;
+    transaction.execute_batch(super::vector_guards::SQL)?;
+    for (_, _, sql) in DISKANN_TABLES {
+        transaction.execute_batch(sql)?;
+    }
+    transaction.execute_batch(super::sequence_values::SQL)?;
+    Ok(())
+}
+
 /// Upgrade a pending restore only inside the restore owner's existing transaction, preserving its durable intent and stable data namespace.
 pub(in crate::mvcc) fn initialize_restoration(
     connection: &Connection,
@@ -316,6 +330,7 @@ fn stored_version(connection: &Connection) -> PhysicalResult<u32> {
         FORMAT_TEN,
         FORMAT_ELEVEN,
         FORMAT_TWELVE,
+        FORMAT_THIRTEEN,
     ]) {
         if schema::definition_matches(connection, TABLES[0].0, definition)? == Some(true) {
             return Ok(version);
@@ -394,6 +409,12 @@ fn reopen(
             install_family_guards(connection, family)?;
         }
     }
+    if version < SEQUENCE_VALUES_VERSION {
+        // The backfill writes the history and the materialization itself, before the family's capture triggers exist.
+        connection.execute_batch(super::sequence_values::SQL)?;
+        super::sequence_values::backfill(connection, identity, control)?;
+        install_family_guards(connection, Family::SequenceValues)?;
+    }
     if version < CURRENT_VERSION {
         upgrade_format(connection, version, identity)?;
     }
@@ -466,6 +487,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
                 10 => FORMAT_TEN,
                 11 => FORMAT_ELEVEN,
                 12 => FORMAT_TWELVE,
+                13 => FORMAT_THIRTEEN,
                 _ => sql,
             }
         } else {
@@ -509,6 +531,13 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
         if version >= minimum {
             require_definition(connection, family.layout().table, sql)?;
         }
+    }
+    if version >= SEQUENCE_VALUES_VERSION {
+        require_definition(
+            connection,
+            Family::SequenceValues.layout().table,
+            super::sequence_values::SQL,
+        )?;
     }
     for family in families(version) {
         for action in ["INSERT", "UPDATE", "DELETE"] {
@@ -561,6 +590,7 @@ fn validate_cache_triggers(connection: &Connection, version: u32) -> PhysicalRes
                     | Family::VectorChanges
                     | Family::VectorPopulations
                     | Family::VectorPopulationWitnesses
+                    | Family::SequenceValues
             )
     }) {
         let layout = family.layout();
@@ -587,6 +617,7 @@ fn families(version: u32) -> impl Iterator<Item = Family> {
         Family::VectorOrigins => version >= 11,
         Family::VectorChanges => version >= 12,
         Family::VectorPopulations | Family::VectorPopulationWitnesses => version >= 13,
+        Family::SequenceValues => version >= SEQUENCE_VALUES_VERSION,
         _ => true,
     })
 }

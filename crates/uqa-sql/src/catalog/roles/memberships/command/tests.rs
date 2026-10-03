@@ -181,26 +181,29 @@ fn unchanged_grants_and_absent_revokes_return_distinct_notices_without_an_oid_re
     };
     let membership = insert.with_oid(42_000).unwrap();
     let memberships = BTreeMap::from([(membership.key(), membership)]);
-    let MembershipChange::Notice { level, message } = bound
+    let MembershipChange::Notice(notice) = bound
         .change_for_member(&roles, &memberships, &bound.members[0])
         .unwrap()
     else {
         panic!("notice")
     };
-    assert_eq!(level, "NOTICE");
     assert_eq!(
-        message,
-        "role \"member\" has already been granted membership in role \"target\" by role \"uqa\""
+        notice,
+        crate::SQLNotice::notice(
+            "role \"member\" has already been granted membership in role \"target\" by role \"uqa\""
+        )
     );
     statement.is_grant = false;
     let bound = bind(&roles, &statement);
-    let message = MembershipRevocation::new(&bound, &BTreeMap::new())
+    let notice = MembershipRevocation::new(&bound, &BTreeMap::new())
         .member(&roles, &bound.members[0])
         .unwrap()
         .unwrap();
     assert_eq!(
-        message,
-        "role \"member\" has not been granted membership in role \"target\" by role \"uqa\""
+        notice,
+        crate::SQLNotice::warning(
+            "role \"member\" has not been granted membership in role \"target\" by role \"uqa\""
+        )
     );
 }
 

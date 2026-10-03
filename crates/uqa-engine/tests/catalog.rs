@@ -12,6 +12,8 @@ mod analyzer_revisions;
 mod capability_boundaries;
 #[path = "catalog/constraint_violation_reports.rs"]
 mod constraint_violation_reports;
+#[path = "catalog/diagnostic_fields.rs"]
+mod diagnostic_fields;
 #[path = "catalog/pg18_constraint_lifecycle.rs"]
 mod pg18_constraint_lifecycle;
 #[path = "sql_analyze_persistence.rs"]

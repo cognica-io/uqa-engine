@@ -236,7 +236,10 @@ export interface SQLFunctionOptions {
 
 export interface SQLNotice {
   level: string
+  sqlstate: string
   message: string
+  detail?: string
+  hint?: string
 }
 
 export interface SQLResult {

@@ -50,8 +50,8 @@ pub fn commit_sql_function_drop(
     commit_routine_registry_drop(context, &targets)?;
     crate::routines::rewrites::publish_stored_routine_body_rewrites(&context.bodies, rewritten)?;
     crate::routines::rewrites::refresh_stored_merge_target_plans(&context.bodies)?;
-    for (level, message) in notices {
-        context.notices.routine_drop_notice(level, &message);
+    for notice in notices {
+        context.notices.routine_drop_notice(notice);
     }
     Ok(())
 }

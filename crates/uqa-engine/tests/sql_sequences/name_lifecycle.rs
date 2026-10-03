@@ -332,14 +332,8 @@ fn sequence_name_lifecycle_supports_historical_temp_notice_and_read_only_paths()
     assert_eq!(
         engine.take_sql_notices(),
         vec![
-            (
-                "NOTICE".to_string(),
-                "relation \"missing_ids\" does not exist, skipping".to_string()
-            ),
-            (
-                "NOTICE".to_string(),
-                "relation \"missing_ids\" does not exist, skipping".to_string()
-            )
+            uqa_engine::SQLNotice::notice("relation \"missing_ids\" does not exist, skipping"),
+            uqa_engine::SQLNotice::notice("relation \"missing_ids\" does not exist, skipping")
         ]
     );
 

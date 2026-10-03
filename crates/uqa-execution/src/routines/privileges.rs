@@ -28,7 +28,7 @@ use uqa_sql::{
 };
 
 pub trait RoutinePrivilegeNotices {
-    fn routine_privilege_notice(&self, level: &str, message: &str);
+    fn routine_privilege_notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct RoutinePrivilegeContext<'a> {
     pub catalog: RoutineMutationContext<'a>,
@@ -73,8 +73,8 @@ pub fn grant_sql_routine(
     drop(registry);
     drop(memberships);
     drop(roles);
-    for (level, message) in notices {
-        context.notices.routine_privilege_notice(level, &message);
+    for notice in notices {
+        context.notices.routine_privilege_notice(notice);
     }
     context.catalog.changes.catalog_registry_changed();
     Ok(())
@@ -83,7 +83,7 @@ pub fn grant_sql_routine(
 struct RoutinePrivilegeCandidate<'a> {
     registry: RoutineRegistryWrite<'a>,
     next: RoutineRegistry,
-    notices: Vec<(&'static str, String)>,
+    notices: Vec<uqa_sql::SQLNotice>,
 }
 
 fn prepare_privileges<'a>(

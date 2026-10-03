@@ -145,10 +145,10 @@ fn schema_if_not_exists_checks_authorization_and_keeps_the_existing_owner() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "NOTICE".into(),
-            "schema \"existing\" already exists, skipping".into()
-        )]
+        [
+            uqa_engine::SQLNotice::notice("schema \"existing\" already exists, skipping")
+                .with_sqlstate("42P06")
+        ]
     );
     assert_eq!(owner(&engine, "existing"), "uqa");
     assert_error(

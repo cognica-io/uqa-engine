@@ -65,6 +65,65 @@ pub fn validate_foreign_key_rows(
     Ok(())
 }
 
+/// Validate the foreign keys that a rewrite of `table` rebuilds because they involve one of its `changed` columns: those of `table`, against the rows they reference, and those of other tables that reference `table`, against its rewritten rows. `PostgreSQL` validates a rebuilt foreign key whatever the replication role and leaves a `NOT VALID` one unvalidated.
+pub fn validate_rewritten_foreign_keys(
+    context: ConstraintContext<'_>,
+    table: &str,
+    changed: &[String],
+) -> Result<(), SQLError> {
+    for foreign_key in context
+        .catalog
+        .try_foreign_keys(table)
+        .map_err(|error| SQLError::Internal(format!("foreign key lookup: {error}")))?
+    {
+        if !foreign_key.enforced
+            || !foreign_key.validated
+            || !foreign_key
+                .local_columns
+                .iter()
+                .any(|column| changed.contains(column))
+        {
+            continue;
+        }
+        let name = foreign_key
+            .name
+            .clone()
+            .unwrap_or_else(|| "<unnamed>".into());
+        validate_foreign_key_rows(context, table, &name, &foreign_key)?;
+    }
+    let mut checked = std::collections::BTreeSet::new();
+    for target in context.referrers.partition_ancestor_tables(table)? {
+        let referrers = context
+            .referrers
+            .try_referrers_to(&target)
+            .map_err(|error| SQLError::Internal(format!("foreign key lookup: {error}")))?;
+        for (declaring_table, foreign_key) in referrers {
+            if !foreign_key.enforced
+                || !foreign_key.validated
+                || !foreign_key
+                    .ref_columns
+                    .iter()
+                    .any(|column| changed.contains(column))
+            {
+                continue;
+            }
+            let name = foreign_key
+                .name
+                .clone()
+                .unwrap_or_else(|| "<unnamed>".into());
+            for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+                context.partitions.catalog,
+                &declaring_table,
+            )? {
+                if checked.insert((physical_table.clone(), name.clone())) {
+                    validate_foreign_key_rows(context, &physical_table, &name, &foreign_key)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn foreign_key_violation(table: &str, name: &str) -> SQLError {
     let table = uqa_sql::semantics::foreign_keys::foreign_key_relation_name(table);
     constraint_error(

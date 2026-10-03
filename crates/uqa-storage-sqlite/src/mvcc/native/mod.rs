@@ -29,6 +29,7 @@ pub(crate) mod populations;
 mod projection;
 mod queue;
 mod row;
+mod sequence_values;
 mod sequences;
 mod session;
 mod standalone_graph;

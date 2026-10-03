@@ -87,7 +87,10 @@ export interface SearchHit {
 
 export interface SQLNotice {
   level: string;
+  sqlstate: string;
   message: string;
+  detail?: string;
+  hint?: string;
 }
 
 export interface ReliabilityBin {

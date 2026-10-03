@@ -158,8 +158,11 @@ impl SequenceValueContext<'_> {
         value: i64,
         is_called: bool,
     ) -> Result<Option<i64>, SequenceValueError> {
-        let private =
-            self.sequence_is_private(target.temporary, &target.relation, target.object_id)?;
+        let private = self.sequence_value_is_private(
+            target.temporary,
+            target.object_id,
+            target.state.definition_generation,
+        )?;
         // The assigned value replaces the position, which no session may advance meanwhile.
         let mut position = self.discard_position(&target)?;
         let NextvalTarget {

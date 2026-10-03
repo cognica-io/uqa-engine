@@ -80,9 +80,14 @@ pub fn build_pg_constraint(
                 None => 0,
             };
             let index_oid = constraint_index_oid(&constraint, &indexes);
-            let parent_index_constraint_oid = key_parent_oid(catalog, &constraint, &indexes);
-            let (inheritance_count, is_local) =
-                constraint_inheritance_state(catalog, resolution, &constraint)?;
+            let parent_index_constraint_oid = constraint
+                .parent_oid
+                .unwrap_or_else(|| key_parent_oid(catalog, &constraint, &indexes));
+            let (inheritance_count, is_local) = if constraint.parent_oid.is_some() {
+                (1, false)
+            } else {
+                constraint_inheritance_state(catalog, resolution, &constraint)?
+            };
             Ok(row([
                 (
                     "oid",

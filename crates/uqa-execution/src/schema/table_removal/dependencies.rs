@@ -39,6 +39,21 @@ impl TableRemovalContext<'_> {
             .collect::<StorageBackendResult<Vec<_>>>()?;
         Ok((target_names, targets))
     }
+    /// The relations whose referencing foreign keys reference rows the drop removes: the targets, and the partitioned tables outside them that a dropped partition is a partition of.
+    pub(super) fn reference_targets(
+        &self,
+        canonical_names: &[String],
+        targets: &[RelationIdentity],
+    ) -> StorageBackendResult<Vec<RelationIdentity>> {
+        let mut referenced = targets.to_vec();
+        for ancestor in uqa_sql::schema::removal::hierarchy::surviving_partition_ancestors(
+            self.hierarchy,
+            canonical_names,
+        ) {
+            referenced.push(resolved_relation_identity(&ancestor)?);
+        }
+        Ok(referenced)
+    }
     pub(super) fn ensure_no_drop_view_dependencies(
         &self,
         canonical_names: &[String],
@@ -66,6 +81,7 @@ impl TableRemovalContext<'_> {
                 .map(|view| format!("view {view}")),
             );
         }
+        let referenced = self.reference_targets(canonical_names, targets)?;
         dependents.extend(
             self.events
                 .lookup
@@ -85,13 +101,13 @@ impl TableRemovalContext<'_> {
                 dependents.push(format!("schema expression on {candidate_name}"));
             }
             let table_foreign_key = table.foreign_keys().iter().any(|foreign_key| {
-                targets
+                referenced
                     .iter()
                     .any(|target| foreign_key_targets(foreign_key, target))
             });
             let column_foreign_key = table.columns().iter().any(|column| {
                 column.references.as_ref().is_some_and(|reference| {
-                    targets
+                    referenced
                         .iter()
                         .any(|target| stored_relation_reference_matches(&reference.table, target))
                 })

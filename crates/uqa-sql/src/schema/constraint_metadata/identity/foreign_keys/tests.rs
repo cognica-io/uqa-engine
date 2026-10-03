@@ -79,11 +79,15 @@ fn partition_copies_share_enforcement_but_receive_distinct_catalog_identities() 
     )
     .unwrap();
     let mut child = TableConstraintSet::default();
-    child.hierarchy.partition_inherited_foreign_keys =
-        crate::schema::inheritance::alter::append_inherited_foreign_keys(
-            &mut child.foreign_keys,
-            &parent.foreign_keys,
-        );
+    child.foreign_keys.push(
+        crate::schema::inheritance::foreign_keys::partition_foreign_key_copy(
+            &parent.foreign_keys[0],
+            &std::collections::BTreeSet::new(),
+            &mut std::collections::BTreeSet::new(),
+        )
+        .unwrap(),
+    );
+    child.hierarchy.partition_inherited_foreign_keys = child.foreign_keys.clone();
     assert!(child.foreign_keys[0].catalog_identity.is_none());
     materialize_constraint_metadata(
         &RelationIdentity::new("public", "child"),

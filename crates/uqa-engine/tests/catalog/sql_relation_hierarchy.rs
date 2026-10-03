@@ -17,12 +17,16 @@ mod catalog;
 mod checks;
 #[path = "sql_relation_hierarchy/copy_io.rs"]
 mod copy_io;
+#[path = "sql_relation_hierarchy/derived_constraints.rs"]
+mod derived_constraints;
 #[path = "sql_relation_hierarchy/fk_conflict.rs"]
 mod fk_conflict;
 #[path = "sql_relation_hierarchy/hash.rs"]
 mod hash;
 #[path = "sql_relation_hierarchy/identity_provenance.rs"]
 mod identity_provenance;
+#[path = "sql_relation_hierarchy/inherited_references.rs"]
+mod inherited_references;
 #[path = "sql_relation_hierarchy/merge.rs"]
 mod merge;
 #[path = "sql_relation_hierarchy/movement.rs"]
@@ -33,6 +37,12 @@ mod not_null;
 mod not_null_origin;
 #[path = "sql_relation_hierarchy/ownership.rs"]
 mod ownership;
+#[path = "sql_relation_hierarchy/partition_foreign_keys.rs"]
+mod partition_foreign_keys;
+#[path = "sql_relation_hierarchy/referenced_partitions.rs"]
+mod referenced_partitions;
+#[path = "sql_relation_hierarchy/referencing_partitions.rs"]
+mod referencing_partitions;
 #[path = "sql_relation_hierarchy/regressions.rs"]
 mod regressions;
 #[path = "sql_relation_hierarchy/retrieval.rs"]

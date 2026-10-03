@@ -56,7 +56,7 @@ pub struct CreateTableContext<'a> {
     pub ownership: ImplicitOwnershipContext<'a>,
     pub schema_transactions: &'a dyn SchemaWriteTransaction,
     pub publication: &'a dyn TableCreationPublication,
-    pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
+    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
 }
 fn storage_error(action: &str, error: StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
@@ -107,10 +107,12 @@ fn preflight(
             .map_err(SQLError::Internal)?
             .name;
         if if_not_exists {
-            context.notices.lock().push((
-                "NOTICE".into(),
-                format!("relation \"{local}\" already exists, skipping"),
-            ));
+            context.notices.lock().push(
+                uqa_sql::SQLNotice::notice(format!(
+                    "relation \"{local}\" already exists, skipping"
+                ))
+                .with_sqlstate("42P07"),
+            );
             return Ok(None);
         }
         return Err(SQLError::Routine {
@@ -189,6 +191,28 @@ fn create_after_preflight(
         .publication
         .install_hierarchy(&table.name, table.hierarchy.clone())
         .map_err(|error| storage_error("CREATE TABLE hierarchy", error))?;
+    if let Some(parent) = table
+        .hierarchy
+        .parents
+        .first()
+        .filter(|_| table.hierarchy.is_partition())
+    {
+        // The foreign keys referencing the new partition's ancestors derive constraints on it.
+        let parent = parent.clone();
+        context
+            .schema_transactions
+            .with_schema_write(Box::new(move |schema| {
+                publication::referenced_partitions::republish_referencing_tables(
+                    schema,
+                    &parent,
+                    crate::row_locks::RelationLockMode::ShareRowExclusive,
+                )
+                .map_err(|error| {
+                    StorageBackendError::backend("CREATE TABLE derived constraints", error)
+                })
+            }))
+            .map_err(|error| storage_error("CREATE TABLE derived constraints", error))?;
+    }
     context
         .publication
         .persist_schema(&table.name)

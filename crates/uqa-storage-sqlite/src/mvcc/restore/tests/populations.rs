@@ -34,7 +34,9 @@ fn interrupted_native_population_upgrade_preserves_restore_intent_and_original_h
             .with(|sqlite| {
                 let _permit = schema::WritePermit::acquire(sqlite)?;
                 let transaction = schema::begin(sqlite)?;
+                // Format 12 had neither DiskANN populations nor sequence value records.
                 for table in [
+                    "_uqa_mvcc_native_sequence_values",
                     "_uqa_mvcc_native_vector_populations",
                     "_uqa_mvcc_native_vector_population_witnesses",
                 ] {
@@ -88,7 +90,7 @@ fn interrupted_native_population_upgrade_preserves_restore_intent_and_original_h
             "SELECT n.format, m.receipt_limit, m.restore_target FROM _uqa_mvcc_native_format n CROSS JOIN _uqa_mvcc_metadata m", [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
-        assert_eq!((format, limit, pending), (13, 123, None));
+        assert_eq!((format, limit, pending), (14, 123, None));
         Ok(())
     }).unwrap();
     drop(connection);

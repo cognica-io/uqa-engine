@@ -87,12 +87,19 @@ impl<'a> Walker<'a> {
             deferrable: _,
             initially_deferred: _,
             period: _,
+            referenced_partitions,
         }) = references
         {
             self.optional_text(referenced_key.as_ref())?;
             self.optional_text(name.as_ref())?;
             self.text(table)?;
             self.optional_text(column.as_ref())?;
+            self.buffer::<crate::ast::ReferencedPartitionConstraint>(
+                referenced_partitions.capacity(),
+            )?;
+            for constraint in referenced_partitions {
+                self.text(&constraint.name)?;
+            }
         }
         Ok(())
     }

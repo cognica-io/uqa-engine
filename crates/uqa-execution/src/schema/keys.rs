@@ -17,6 +17,7 @@ pub struct KeyValidationContext<'a> {
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
 }
+/// Check the key constraints of `table` across the rows a rewrite produced, as rebuilding their indexes does: a NULL in a primary key column reports the column's NOT NULL violation, and a repeated key `could not create unique index` with the repeated key.
 pub fn validate_key_constraint_rows(
     context: &KeyValidationContext<'_>,
     table: &str,
@@ -25,8 +26,11 @@ pub fn validate_key_constraint_rows(
     for constraint in context
         .catalog
         .try_key_constraints(table)
-        .map_err(|error| ddl_storage_error("generated-column validation", error))?
+        .map_err(|error| ddl_storage_error("table rewrite", error))?
     {
+        if constraint.without_overlaps {
+            continue;
+        }
         let mut seen = std::collections::BTreeSet::new();
         for (_, document) in rows {
             let values = constraint
@@ -34,31 +38,76 @@ pub fn validate_key_constraint_rows(
                 .iter()
                 .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
                 .collect::<Vec<_>>();
-            let contains_null = values.iter().any(|value| matches!(value, Value::Null));
-            if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey && contains_null
-            {
-                return Err(SQLError::TypeMismatch(format!(
-                    "PRIMARY KEY constraint contains NULL values on table `{table}`"
-                )));
+            if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey {
+                if let Some(column) = constraint
+                    .columns
+                    .iter()
+                    .zip(&values)
+                    .find_map(|(column, value)| matches!(value, Value::Null).then_some(column))
+                {
+                    let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+                        .map_or_else(|_| table.to_string(), |identity| identity.name);
+                    return Err(SQLError::Routine {
+                        sqlstate: "23502".into(),
+                        message: format!(
+                            "column \"{column}\" of relation \"{relation}\" contains null values"
+                        ),
+                    });
+                }
             }
             if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::Unique
-                && contains_null
+                && values.iter().any(|value| matches!(value, Value::Null))
                 && !constraint.nulls_not_distinct
             {
                 continue;
             }
-            if !seen.insert(values) {
-                return Err(SQLError::TypeMismatch(format!(
-                    "{} constraint would be violated by generated values on table `{table}`",
-                    match constraint.kind {
-                        uqa_sql::ast::TableKeyConstraintKind::PrimaryKey => "PRIMARY KEY",
-                        uqa_sql::ast::TableKeyConstraintKind::Unique => "UNIQUE",
-                    }
-                )));
+            if seen.contains(&values) {
+                return Err(duplicated_key(context, table, &constraint, &values)?);
             }
+            seen.insert(values);
         }
     }
     Ok(())
+}
+
+/// Check the `WITHOUT OVERLAPS` keys of `table` across its stored rows, once a rewrite has written them; their overlap is not an equality of key values.
+pub fn validate_temporal_key_rows(
+    context: &KeyValidationContext<'_>,
+    table: &str,
+) -> Result<(), SQLError> {
+    for constraint in context
+        .catalog
+        .try_key_constraints(table)
+        .map_err(|error| ddl_storage_error("table rewrite", error))?
+    {
+        if constraint.without_overlaps {
+            validate_key_constraint_data(context, table, &constraint)?;
+        }
+    }
+    Ok(())
+}
+
+/// `could not create unique index "x"` with `Key (a)=(1) is duplicated.`, for a key constraint whose index finds a repeated key.
+fn duplicated_key(
+    context: &KeyValidationContext<'_>,
+    table: &str,
+    constraint: &uqa_sql::ast::TableKeyConstraint,
+    values: &[Value],
+) -> Result<SQLError, SQLError> {
+    let name = constraint.name.as_deref().ok_or_else(|| {
+        SQLError::Internal("key validation requires its reserved index name".into())
+    })?;
+    Ok(SQLError::Diagnostic {
+        sqlstate: "23505".into(),
+        message: format!("could not create unique index \"{name}\""),
+        detail: crate::mutation::constraints::duplicate_index_key_detail(
+            context.constraints,
+            table,
+            &constraint.clone().into(),
+            values,
+        )?,
+        hint: None,
+    })
 }
 
 pub fn validate_added_key_constraint(
@@ -116,20 +165,7 @@ pub(super) fn validate_key_constraint_data(
             continue;
         }
         if seen.contains(&values) {
-            let name = constraint.name.as_deref().ok_or_else(|| {
-                SQLError::Internal("key validation requires its reserved index name".into())
-            })?;
-            return Err(SQLError::Diagnostic {
-                sqlstate: "23505".into(),
-                message: format!("could not create unique index \"{name}\""),
-                detail: crate::mutation::constraints::duplicate_index_key_detail(
-                    context.constraints,
-                    table,
-                    &constraint.clone().into(),
-                    &values,
-                )?,
-                hint: None,
-            });
+            return Err(duplicated_key(context, table, constraint, &values)?);
         }
         seen.insert(values);
     }

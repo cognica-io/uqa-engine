@@ -48,7 +48,7 @@ pub(crate) fn apply_change(
                 update.apply(memberships)?;
             }
         }
-        MembershipChange::Notice { .. } => {}
+        MembershipChange::Notice(_) => {}
     }
     Ok(())
 }

@@ -69,8 +69,8 @@ impl SequencePrivilegePublication for Engine {
     fn catalog_changed(&self) {
         self.note_catalog_registry_changed();
     }
-    fn notice(&self, level: &str, message: &str) {
-        self.push_sql_notice(level, message);
+    fn notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }
 impl Engine {

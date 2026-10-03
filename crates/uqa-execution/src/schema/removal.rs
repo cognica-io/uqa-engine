@@ -29,7 +29,7 @@ pub fn run_drop(
                 context
                     .notices
                     .lock()
-                    .push(("NOTICE".into(), message.into()));
+                    .push(uqa_sql::SQLNotice::notice(message));
             })?;
             if names.is_empty() {
                 return Ok(SQLResult::empty());

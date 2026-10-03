@@ -14,6 +14,8 @@ mod concurrency;
 mod direct_rmw_concurrency;
 #[path = "storage/hnsw_spill.rs"]
 mod hnsw_spill;
+#[path = "large_transactions.rs"]
+mod large_transactions;
 #[path = "python_db_migration.rs"]
 mod python_db_migration;
 #[path = "redb_backend.rs"]

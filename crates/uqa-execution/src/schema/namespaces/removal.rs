@@ -43,7 +43,7 @@ pub trait SchemaRemovalPublication {
     fn drop_empty_schema(&self, name: &str) -> StorageBackendResult<()>;
 }
 pub trait SchemaDropNotices {
-    fn schema_drop_notice(&self, message: &str);
+    fn schema_drop_notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct SchemaRemovalContext<'a> {
     pub tuples: super::locking::SchemaLockContext<'a>,
@@ -132,7 +132,9 @@ pub fn drop_schemas(
             BoundSchemaDrop::Graph => {
                 graphs.insert(name.clone());
             }
-            BoundSchemaDrop::Skipped(message) => context.notices.schema_drop_notice(&message),
+            BoundSchemaDrop::Skipped(message) => context
+                .notices
+                .schema_drop_notice(uqa_sql::SQLNotice::notice(message)),
         }
     }
     if !statement.cascade {

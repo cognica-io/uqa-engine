@@ -417,6 +417,7 @@ impl Engine {
                     constraint: self.foreign_key_constraint_identity(table, &foreign_key)?,
                     firing_relation: firing_relation.clone(),
                     row: Some(row),
+                    referenced: false,
                 });
             }
         }
@@ -539,29 +540,22 @@ impl Engine {
         Ok(())
     }
 
+    /// Defer the check of a referencing row that a change to a referenced row fired, under the constraint whose deferral governs it.
     pub(crate) fn defer_foreign_key_check(
         &self,
-        constraint_table: &str,
-        firing_table: &str,
+        event: super::DeferredReferencedKey<'_>,
         row_table: &str,
         doc_id: uqa_core::DocId,
-        foreign_key: &uqa_sql::ast::ForeignKey,
     ) -> Result<(), SQLError> {
         let canonical_row_table = self.row_lock_table_name(row_table)?;
-        let canonical_firing_table = self.row_lock_table_name(firing_table)?;
-        let firing_relation = crate::RelationIdentity::from_legacy_name(&canonical_firing_table)
-            .map_err(|error| {
-                SQLError::Internal(format!(
-                    "decode deferred foreign-key firing relation '{canonical_firing_table}': {error}"
-                ))
-            })?;
         let check = crate::DeferredForeignKeyCheck {
-            constraint: self.foreign_key_constraint_identity(constraint_table, foreign_key)?,
-            firing_relation,
+            constraint: self.referenced_key_constraint_identity(&event)?,
+            firing_relation: self.deferred_firing_relation(event.firing_table)?,
             row: Some(crate::row_locks::RowLockKey {
                 table: self.row_locks.table_key(&canonical_row_table),
                 doc_id,
             }),
+            referenced: true,
         };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
@@ -571,23 +565,27 @@ impl Engine {
         Ok(())
     }
 
+    fn deferred_firing_relation(
+        &self,
+        firing_table: &str,
+    ) -> Result<crate::RelationIdentity, SQLError> {
+        let canonical_firing_table = self.row_lock_table_name(firing_table)?;
+        crate::RelationIdentity::from_legacy_name(&canonical_firing_table).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode deferred foreign-key firing relation '{canonical_firing_table}': {error}"
+            ))
+        })
+    }
+
     pub(crate) fn defer_foreign_key_parent_event(
         &self,
-        constraint_table: &str,
-        firing_table: &str,
-        foreign_key: &uqa_sql::ast::ForeignKey,
+        event: super::DeferredReferencedKey<'_>,
     ) -> Result<(), SQLError> {
-        let canonical_firing_table = self.row_lock_table_name(firing_table)?;
-        let firing_relation = crate::RelationIdentity::from_legacy_name(&canonical_firing_table)
-            .map_err(|error| {
-                SQLError::Internal(format!(
-                    "decode deferred foreign-key firing relation '{canonical_firing_table}': {error}"
-                ))
-            })?;
         let check = crate::DeferredForeignKeyCheck {
-            constraint: self.foreign_key_constraint_identity(constraint_table, foreign_key)?,
-            firing_relation,
+            constraint: self.referenced_key_constraint_identity(&event)?,
+            firing_relation: self.deferred_firing_relation(event.firing_table)?,
             row: None,
+            referenced: true,
         };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {

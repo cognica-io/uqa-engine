@@ -670,3 +670,140 @@ fn a_role_sees_a_partition_key_only_when_it_may_read_each_key() {
         )],
     );
 }
+
+#[test]
+fn table_rewrites_check_the_rewritten_rows_against_valid_constraints_only() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE unrelated (a int);
+             INSERT INTO unrelated VALUES (-1);
+             ALTER TABLE unrelated ADD CONSTRAINT unrelated_positive CHECK (a > 0) NOT VALID;
+             CREATE TABLE widened (a int, CONSTRAINT widened_small CHECK (a < 100));
+             INSERT INTO widened VALUES (50);
+             CREATE TABLE unchecked (a int, b int);
+             INSERT INTO unchecked VALUES (-1, NULL);
+             ALTER TABLE unchecked ADD CONSTRAINT unchecked_positive CHECK (a > 0) NOT VALID;
+             ALTER TABLE unchecked ADD CONSTRAINT unchecked_b_present NOT NULL b NOT VALID;
+             CREATE TABLE parent (id int PRIMARY KEY);
+             INSERT INTO parent VALUES (1), (2);
+             CREATE TABLE child (id int, parent_id int REFERENCES parent);
+             INSERT INTO child VALUES (10, 1);
+             CREATE TABLE orphans (id int, parent_id int);
+             INSERT INTO orphans VALUES (1, 99);
+             ALTER TABLE orphans ADD CONSTRAINT orphans_parent FOREIGN KEY (parent_id) REFERENCES parent NOT VALID",
+            &[],
+        )
+        .unwrap();
+    // Another table's NOT VALID constraint takes no part in a rewrite, and neither do the rewritten table's own.
+    for statement in [
+        "ALTER TABLE widened ALTER COLUMN a TYPE bigint",
+        "ALTER TABLE unchecked ALTER COLUMN a TYPE bigint USING a * 2",
+        "ALTER TABLE unchecked ALTER COLUMN b TYPE bigint",
+        "ALTER TABLE orphans ALTER COLUMN parent_id TYPE bigint",
+    ] {
+        engine
+            .sql(statement, &[])
+            .unwrap_or_else(|error| panic!("{statement}: {error}"));
+    }
+    let rows = engine.sql("SELECT a, b FROM unchecked", &[]).unwrap().rows;
+    assert_eq!(rows[0]["a"], uqa_core::Value::Int(-2));
+    assert_eq!(rows[0]["b"], uqa_core::Value::Null);
+    assert_reports(
+        &engine,
+        &[(
+            "ALTER TABLE widened ALTER COLUMN a TYPE int USING a * 3",
+            "23514",
+            "check constraint \"widened_small\" of relation \"widened\" is violated by some row",
+            None,
+        )],
+    );
+    // A rewrite of a referenced key validates the foreign keys that reference it, whatever the replication role.
+    for setting in ["origin", "replica"] {
+        engine
+            .sql(&format!("SET session_replication_role = {setting}"), &[])
+            .unwrap();
+        let error = engine
+            .sql(
+                "ALTER TABLE parent ALTER COLUMN id TYPE bigint USING id + 1",
+                &[],
+            )
+            .unwrap_err();
+        assert_eq!(
+            (error.sqlstate(), error.to_string().as_str()),
+            (
+                Some("23503"),
+                "insert or update on table \"child\" violates foreign key constraint \"child_parent_id_fkey\""
+            ),
+            "{setting}"
+        );
+    }
+}
+
+#[test]
+fn table_rewrites_check_keys_across_the_rewritten_rows() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE shifted (id int PRIMARY KEY);
+             INSERT INTO shifted VALUES (1), (2);
+             CREATE TABLE halved (id int PRIMARY KEY);
+             INSERT INTO halved VALUES (1), (2);
+             CREATE TABLE uniq (a int UNIQUE, b int);
+             INSERT INTO uniq VALUES (1, 1), (2, 2);
+             CREATE TABLE gen (a int, g int GENERATED ALWAYS AS (a) STORED UNIQUE);
+             INSERT INTO gen (a) VALUES (1), (2)",
+            &[],
+        )
+        .unwrap();
+    // Keys move together, so a row may take a key another row is giving up.
+    for statement in [
+        "ALTER TABLE shifted ALTER COLUMN id TYPE bigint USING id + 1",
+        "ALTER TABLE halved ALTER COLUMN id TYPE bigint USING id / 2",
+        "ALTER TABLE uniq ALTER COLUMN a TYPE bigint USING a + 1",
+        "ALTER TABLE gen ALTER COLUMN g SET EXPRESSION AS (a + 1)",
+    ] {
+        engine
+            .sql(statement, &[])
+            .unwrap_or_else(|error| panic!("{statement}: {error}"));
+    }
+    let shifted = engine
+        .sql("SELECT id FROM shifted WHERE id = 3", &[])
+        .unwrap();
+    assert_eq!(shifted.rows.len(), 1);
+    assert_reports(
+        &engine,
+        &[
+            (
+                "ALTER TABLE halved ALTER COLUMN id TYPE int USING id / 10",
+                "23505",
+                "could not create unique index \"halved_pkey\"",
+                Some("Key (id)=(0) is duplicated."),
+            ),
+            (
+                "ALTER TABLE halved ALTER COLUMN id TYPE int USING NULL",
+                "23502",
+                "column \"id\" of relation \"halved\" contains null values",
+                None,
+            ),
+            (
+                "ALTER TABLE uniq ALTER COLUMN a TYPE bigint USING 7",
+                "23505",
+                "could not create unique index \"uniq_a_key\"",
+                Some("Key (a)=(7) is duplicated."),
+            ),
+            (
+                "ALTER TABLE uniq ADD COLUMN g int GENERATED ALWAYS AS (1) STORED UNIQUE",
+                "23505",
+                "could not create unique index \"uniq_g_key\"",
+                Some("Key (g)=(1) is duplicated."),
+            ),
+            (
+                "ALTER TABLE gen ALTER COLUMN g SET EXPRESSION AS (5)",
+                "23505",
+                "could not create unique index \"gen_g_key\"",
+                Some("Key (g)=(5) is duplicated."),
+            ),
+        ],
+    );
+}

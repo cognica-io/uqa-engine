@@ -79,8 +79,9 @@ impl TableRemovalContext<'_> {
         Self::ensure_drop_targets_unreferenced(&target_names, &targets, &entries)?;
         let owned_sequences = self.owned_sequences_for_drop(&target_names, &entries)?;
 
+        let referenced = self.reference_targets(&canonical_names, &targets)?;
         let (mut inbound, updates) =
-            Self::prepare_inbound_candidates(entries, &target_names, &targets);
+            Self::prepare_inbound_candidates(entries, &target_names, &referenced);
         if !cascade && !inbound.is_empty() {
             inbound.sort_unstable();
             inbound.dedup();

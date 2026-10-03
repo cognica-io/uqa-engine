@@ -734,17 +734,15 @@ fn catalog_wide_analyze_and_vacuum_skip_tables_without_maintain_privilege() {
     execute(&engine, "ANALYZE");
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "WARNING".into(),
-            "permission denied to analyze \"maintenance_denied\", skipping it".into()
+        [uqa_engine::SQLNotice::warning(
+            "permission denied to analyze \"maintenance_denied\", skipping it"
         )]
     );
     execute(&engine, "VACUUM (ANALYZE)");
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "WARNING".into(),
-            "permission denied to vacuum \"maintenance_denied\", skipping it".into()
+        [uqa_engine::SQLNotice::warning(
+            "permission denied to vacuum \"maintenance_denied\", skipping it"
         )]
     );
 }
@@ -814,10 +812,10 @@ fn public_table_acl_controls_information_schema_and_non_grantors_only_warn() {
     );
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "WARNING".into(),
-            "no privileges were granted for \"public_acl_items\"".into()
-        )]
+        [
+            uqa_engine::SQLNotice::warning("no privileges were granted for \"public_acl_items\"")
+                .with_sqlstate("01007")
+        ]
     );
     assert_eq!(
         scalar(

@@ -180,7 +180,10 @@ fn table_owner(
     if !family.layout().object_owned {
         return Ok(NativeRecordOwner::Database(database));
     }
-    if matches!(family, Family::Tables | Family::Sequences) {
+    if matches!(
+        family,
+        Family::Tables | Family::Sequences | Family::SequenceValues
+    ) {
         return definition(family, values);
     }
     let column = family

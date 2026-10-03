@@ -351,16 +351,10 @@ pub fn rewrite_routine_acl_owner(
     *acl = merged;
 }
 
-pub fn routine_acl_warning(is_grant: bool, name: &str) -> (&'static str, String) {
+/// The warning of a `GRANT` or `REVOKE` on the routine `name` whose grantor holds the grant option for none of its privileges, which names the routine by its local name.
+pub fn routine_acl_warning(is_grant: bool, name: &str) -> crate::SQLNotice {
     let local_name = name.rsplit('.').next().unwrap_or(name);
-    (
-        "WARNING",
-        if is_grant {
-            format!("no privileges were granted for \"{local_name}\"")
-        } else {
-            format!("no privileges could be revoked for \"{local_name}\"")
-        },
-    )
+    crate::catalog::security::acl_warning::acl_warning(is_grant, false, local_name)
 }
 
 #[cfg(test)]

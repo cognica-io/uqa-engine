@@ -113,6 +113,8 @@ The lock manager separates stable identities, in-process grants, relation locks,
 
 Cancellation tokens and SQL notices belong to `QueryRuntime`, so one session does not cancel or drain another session's work. Cancellation is cooperative and is checked at execution boundaries. Resetting the token is explicit before later work proceeds.
 
+A notice is a [`uqa_sql::SQLNotice`](../../../crates/uqa-sql/src/notice.rs) with PostgreSQL's level, SQLSTATE, message, detail and hint. The code that reports one names its SQLSTATE where PostgreSQL's `ereport` names one, and otherwise takes the level's default, `00000` or `01000` for a warning. The PostgreSQL server and `usql` render the fields separately, as they do for a `SQLError::Diagnostic`.
+
 ## Adding mutable state
 
 Every new mutable field must answer:

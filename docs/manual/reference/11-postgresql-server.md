@@ -15,7 +15,7 @@ psql 'host=127.0.0.1 port=5433 dbname=uqa user=uqa sslmode=disable'
 
 ## Query and session behavior
 
-A connection owns an independent engine session, including its search path, configuration, transaction state, prepared SQL statements, and notification registrations. A Simple Query message can contain multiple SQL statements. Statements produce ordered row descriptions, text rows, PostgreSQL command tags, notices, and errors, followed by the session's actual transaction status. Empty messages and zero-column queries retain their distinct protocol responses.
+A connection owns an independent engine session, including its search path, configuration, transaction state, prepared SQL statements, and notification registrations. A Simple Query message can contain multiple SQL statements. Statements produce ordered row descriptions, text rows, PostgreSQL command tags, notices, and errors, followed by the session's actual transaction status. Notices and errors carry their SQLSTATE, detail and hint as separate fields. Empty messages and zero-column queries retain their distinct protocol responses.
 
 Complete-message parsing and implicit transaction segments follow the [Simple Query engine contract](02-rust-engine-api.md#simple-query-messages). Disconnecting rolls back an open transaction. A cancellation request must present that connection's process identifier and secret; it cancels active work without authorizing queries. `LISTEN` and `NOTIFY` messages are delivered on the owning connection.
 

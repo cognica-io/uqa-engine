@@ -34,14 +34,18 @@ impl ReferentialDeferrals for Engine {
         row_table: &str,
         doc_id: DocId,
         foreign_key: &ForeignKey,
+        derived: Option<&uqa_sql::ast::ReferencedPartitionConstraint>,
     ) -> Result<(), SQLError> {
         Engine::defer_foreign_key_check(
             self,
-            constraint_table,
-            firing_table,
+            crate::transactions::DeferredReferencedKey {
+                constraint_table,
+                firing_table,
+                foreign_key,
+                derived,
+            },
             row_table,
             doc_id,
-            foreign_key,
         )
     }
     fn defer_foreign_key_parent_event(
@@ -49,8 +53,17 @@ impl ReferentialDeferrals for Engine {
         constraint_table: &str,
         firing_table: &str,
         foreign_key: &ForeignKey,
+        derived: Option<&uqa_sql::ast::ReferencedPartitionConstraint>,
     ) -> Result<(), SQLError> {
-        Engine::defer_foreign_key_parent_event(self, constraint_table, firing_table, foreign_key)
+        Engine::defer_foreign_key_parent_event(
+            self,
+            crate::transactions::DeferredReferencedKey {
+                constraint_table,
+                firing_table,
+                foreign_key,
+                derived,
+            },
+        )
     }
 }
 

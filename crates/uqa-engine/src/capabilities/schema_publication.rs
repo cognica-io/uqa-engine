@@ -14,6 +14,26 @@ use uqa_sql::ast::{ColumnDef, TableConstraintSet};
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
+    /// Give the foreign keys that reference partitioned tables the constraints they derive on the referenced partitions, which earlier releases did not record, when a writer opens the database.
+    pub(crate) fn repair_derived_constraints_on_open(&self) -> StorageBackendResult<()> {
+        let needed =
+            uqa_execution::schema::publication::referenced_partitions::derived_constraints_need_repair(
+                &self.schema_publication_context(),
+            )
+            .map_err(|error| uqa_storage::StorageBackendError::backend("derived constraint repair", error))?;
+        if !needed {
+            return Ok(());
+        }
+        self.with_implicit_storage_transaction(|engine| {
+            uqa_execution::schema::publication::referenced_partitions::repair_derived_constraints(
+                &engine.schema_publication_context(),
+            )
+            .map_err(|error| {
+                uqa_storage::StorageBackendError::backend("derived constraint repair", error)
+            })
+        })
+    }
+
     pub(crate) fn schema_publication_context(&self) -> SchemaPublicationContext<'_> {
         SchemaPublicationContext {
             catalog: self,
@@ -21,7 +41,21 @@ impl Engine {
             bindings: self.schema_dependency_binding_context(),
             identities: self.catalog_identity_reservation_context(),
             indexes: self.index_registry_context(),
+            partitions: self.partition_context(),
+            referencing: self,
         }
+    }
+}
+impl uqa_execution::schema::publication::referenced_partitions::ReferencingTableAccess for Engine {
+    fn table_names(&self) -> StorageBackendResult<Vec<String>> {
+        self.table_names_in_execution()
+    }
+    fn lock_relation(
+        &self,
+        table: &str,
+        mode: uqa_execution::row_locks::RelationLockMode,
+    ) -> Result<(), uqa_sql::SQLError> {
+        Engine::lock_relation(self, table, mode)
     }
 }
 struct SchemaTableBinding<'a> {

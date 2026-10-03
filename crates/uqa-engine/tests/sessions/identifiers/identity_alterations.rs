@@ -176,9 +176,8 @@ fn identity_actions_fail_as_postgresql_does() {
     );
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "NOTICE".to_owned(),
-            "column \"v\" of relation \"t\" is not an identity column, skipping".to_owned()
+        [uqa_engine::SQLNotice::notice(
+            "column \"v\" of relation \"t\" is not an identity column, skipping"
         )]
     );
     for (statement, message, hint) in [

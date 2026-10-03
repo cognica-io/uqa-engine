@@ -15,6 +15,14 @@ pub(crate) use uqa_sql::catalog::constraints::constraint_identities_match;
 
 use uqa_sql::catalog::constraints::find_live_constraint_identity;
 
+/// A referenced key check: the foreign key of `constraint_table` whose check a change to a referenced row of `firing_table` fires, and the constraint it derives on that partition when it derives one.
+pub(crate) struct DeferredReferencedKey<'a> {
+    pub(crate) constraint_table: &'a str,
+    pub(crate) firing_table: &'a str,
+    pub(crate) foreign_key: &'a ForeignKey,
+    pub(crate) derived: Option<&'a uqa_sql::ast::ReferencedPartitionConstraint>,
+}
+
 fn constraint_is_deferred(
     modes: &ConstraintModeState,
     identity: &ConstraintIdentity,
@@ -166,8 +174,36 @@ impl Engine {
                     message: format!("constraint \"{}\" is not deferrable", requested_name.name),
                 });
             }
+            // The constraints deriving from a named one follow it, as `SET CONSTRAINTS` adds the descendants of the constraints it names.
+            let mut named = matches
+                .iter()
+                .filter_map(|constraint| constraint.catalog_oid)
+                .collect::<BTreeSet<_>>();
+            let mut selected = matches;
+            loop {
+                let descendants = constraints
+                    .iter()
+                    .filter(|constraint| {
+                        constraint
+                            .parent_oid
+                            .is_some_and(|parent| named.contains(&parent))
+                            && constraint
+                                .catalog_oid
+                                .is_some_and(|oid| !named.contains(&oid))
+                    })
+                    .collect::<Vec<_>>();
+                if descendants.is_empty() {
+                    break;
+                }
+                named.extend(
+                    descendants
+                        .iter()
+                        .filter_map(|constraint| constraint.catalog_oid),
+                );
+                selected.extend(descendants);
+            }
             targets.extend(
-                matches
+                selected
                     .into_iter()
                     .filter(|constraint| constraint.deferrable)
                     .map(|constraint| constraint.identity.clone()),
@@ -187,8 +223,9 @@ impl Engine {
             transaction_block || (nested_statement && self.transaction_depth() != 0);
         if !transaction_active {
             self.push_sql_notice(
-                "WARNING",
-                "SET CONSTRAINTS can only be used in transaction blocks",
+                uqa_sql::semantics::effects::transaction_blocks::no_transaction_block_warning(
+                    "SET CONSTRAINTS",
+                ),
             );
         }
 
@@ -355,6 +392,51 @@ impl Engine {
         })?;
         frame.deferred_constraint_trigger_events.push(event);
         Ok(())
+    }
+
+    /// Whether the checks a change to a referenced row fires are deferred: the mode `SET CONSTRAINTS` gave the constraint the foreign key derives on the firing partition, or the foreign key's own.
+    pub(crate) fn referenced_key_is_deferred(
+        &self,
+        table: &str,
+        foreign_key: &ForeignKey,
+        derived: Option<&uqa_sql::ast::ReferencedPartitionConstraint>,
+    ) -> Result<bool, SQLError> {
+        if !foreign_key.deferrable {
+            return Ok(false);
+        }
+        let identity = self.referenced_key_constraint_identity(&super::DeferredReferencedKey {
+            constraint_table: table,
+            firing_table: table,
+            foreign_key,
+            derived,
+        })?;
+        let stack = self.session.transactions.lock();
+        Ok(stack
+            .last()
+            .map_or(foreign_key.initially_deferred, |frame| {
+                constraint_is_deferred(
+                    &frame.constraint_modes,
+                    &identity,
+                    foreign_key.initially_deferred,
+                )
+            }))
+    }
+
+    /// The identity of the constraint whose deferral governs a referenced key check: the constraint the foreign key derives on the firing partition, or the foreign key.
+    pub(crate) fn referenced_key_constraint_identity(
+        &self,
+        event: &super::DeferredReferencedKey<'_>,
+    ) -> Result<ConstraintIdentity, SQLError> {
+        let identity =
+            self.foreign_key_constraint_identity(event.constraint_table, event.foreign_key)?;
+        Ok(match event.derived {
+            Some(derived) => ConstraintIdentity {
+                relation: identity.relation,
+                name: derived.name.clone(),
+                object_id: Some(derived.catalog_identity.object_id),
+            },
+            None => identity,
+        })
     }
 
     pub(crate) fn foreign_key_constraint_identity(

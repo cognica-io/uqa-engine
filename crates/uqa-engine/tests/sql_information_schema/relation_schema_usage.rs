@@ -184,14 +184,10 @@ fn pg18_index_drop_binds_one_visible_schema_identity() {
     assert_eq!(
         engine.take_sql_notices(),
         [
-            (
-                "NOTICE".into(),
-                "schema \"relation_schema_missing\" does not exist, skipping".into(),
+            uqa_engine::SQLNotice::notice(
+                "schema \"relation_schema_missing\" does not exist, skipping"
             ),
-            (
-                "NOTICE".into(),
-                "index \"absent\" does not exist, skipping".into(),
-            ),
+            uqa_engine::SQLNotice::notice("index \"absent\" does not exist, skipping"),
         ]
     );
 
@@ -304,23 +300,17 @@ fn pg18_trigger_and_rule_names_resolve_through_the_effective_namespace_once() {
     assert_eq!(
         engine.take_sql_notices(),
         [
-            (
-                "NOTICE".into(),
-                "schema \"relation_schema_missing\" does not exist, skipping".into(),
+            uqa_engine::SQLNotice::notice(
+                "schema \"relation_schema_missing\" does not exist, skipping"
             ),
-            (
-                "NOTICE".into(),
-                "schema \"relation_schema_missing\" does not exist, skipping".into(),
+            uqa_engine::SQLNotice::notice(
+                "schema \"relation_schema_missing\" does not exist, skipping"
             ),
-            (
-                "NOTICE".into(),
+            uqa_engine::SQLNotice::notice(
                 "relation \"relation_schema_visible.missing_items\" does not exist, skipping"
-                    .into(),
             ),
-            (
-                "NOTICE".into(),
+            uqa_engine::SQLNotice::notice(
                 "relation \"relation_schema_visible.missing_items\" does not exist, skipping"
-                    .into(),
             ),
         ]
     );

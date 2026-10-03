@@ -495,8 +495,20 @@ def test_sql_notices_and_function_depth_limit() -> None:
     engine.sql("DO $$ BEGIN RAISE NOTICE 'v=% w=%% x=%', 1, 'two'; END $$")
     engine.sql("DO $$ BEGIN RAISE WARNING 'careful'; END $$")
     assert engine.take_sql_notices() == [
-        ("NOTICE", "v=1 w=% x=two"),
-        ("WARNING", "careful"),
+        {
+            "level": "NOTICE",
+            "sqlstate": "00000",
+            "message": "v=1 w=% x=two",
+            "detail": None,
+            "hint": None,
+        },
+        {
+            "level": "WARNING",
+            "sqlstate": "01000",
+            "message": "careful",
+            "detail": None,
+            "hint": None,
+        },
     ]
     assert engine.take_sql_notices() == []
 

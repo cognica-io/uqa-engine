@@ -213,10 +213,10 @@ fn create_sequence_reads_its_options_as_postgresql_does() {
     run(&engine, "CREATE SEQUENCE IF NOT EXISTS public.restarted");
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "NOTICE".to_owned(),
-            "relation \"restarted\" already exists, skipping".to_owned()
-        )]
+        [
+            uqa_engine::SQLNotice::notice("relation \"restarted\" already exists, skipping")
+                .with_sqlstate("42P07")
+        ]
     );
     run(&engine, "CREATE SEQUENCE capped MAXVALUE 2");
     run(

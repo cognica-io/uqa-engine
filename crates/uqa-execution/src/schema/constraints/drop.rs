@@ -35,17 +35,18 @@ pub fn drop_constraint(
                 "decode constraint-trigger relation `{table}`: {error}"
             ))
         })?;
-        return Err(constraint_error(
-            "2BP01",
-            format!(
-                "cannot drop constraint {name} on table {} because trigger {} on table {} requires it\nHINT: You can drop trigger {} on table {} instead.",
-                relation.name,
-                trigger,
-                relation.name,
-                trigger,
-                relation.name
+        return Err(SQLError::Diagnostic {
+            sqlstate: "2BP01".into(),
+            message: format!(
+                "cannot drop constraint {name} on table {} because trigger {trigger} on table {} requires it",
+                relation.name, relation.name
             ),
-        ));
+            detail: None,
+            hint: Some(format!(
+                "You can drop trigger {trigger} on table {} instead.",
+                relation.name
+            )),
+        });
     }
     if super::inheritance::drop_inherited_constraint(context, &table, name, recurse, cascade)? {
         return Ok(());
@@ -122,6 +123,10 @@ pub fn drop_constraint_one(
             format!("constraint \"{name}\" of relation \"{table}\" does not exist"),
         ));
     };
+    // A constraint derived on a referenced partition belongs to its foreign key, as an inherited constraint belongs to its parent's.
+    if matches!(location, ConstraintLocation::ReferencedPartition(..)) {
+        return uqa_sql::schema::constraint_changes::inheritance::ensure_inherited_constraint_removable(table, name, 1);
+    }
     if let Some(target) = ForeignKeyTarget::by_name(&columns, &constraints, name)? {
         return foreign_keys::drop_one(context, table, target.object_id);
     }
@@ -139,6 +144,9 @@ pub fn drop_constraint_one(
         SQLError::Internal("locked constraint disappeared during dependent removal".into())
     })?;
     match location {
+        ConstraintLocation::ReferencedPartition(..) => {
+            return uqa_sql::schema::constraint_changes::inheritance::ensure_inherited_constraint_removable(table, name, 1);
+        }
         ConstraintLocation::NotNull(index) => {
             uqa_sql::schema::constraint_changes::not_null_removal::validate_constraint_removal(
                 table,

@@ -654,9 +654,8 @@ fn alter_sequence_options_are_transactional_and_validate_atomically() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![(
-            "NOTICE".to_string(),
-            "relation \"absent_sequence\" does not exist, skipping".to_string()
+        vec![uqa_engine::SQLNotice::notice(
+            "relation \"absent_sequence\" does not exist, skipping"
         )]
     );
 }

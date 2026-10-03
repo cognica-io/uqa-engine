@@ -93,7 +93,7 @@ pub(super) fn optional_value_to_display_value(value: Option<&Value>) -> Result<V
     Ok(match value {
         Some(value) => Value::Str(
             value_to_display(Some(value))
-                .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?,
+                .map_err(|error| super::diagnostics::sql_error_text(&error))?,
         ),
         None => Value::Str(String::new()),
     })

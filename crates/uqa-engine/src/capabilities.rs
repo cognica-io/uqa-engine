@@ -270,8 +270,17 @@ impl Engine {
     }
 
     fn with_sequence_positions(&self, view: CatalogReadView) -> CatalogReadView {
-        match self.shared_sequence_positions() {
-            Some(positions) => view.with_sequence_positions(positions.clone()),
+        let Some(positions) = self.shared_sequence_positions() else {
+            return view;
+        };
+        let view = view.with_sequence_positions(positions.clone());
+        // Value records move outside every transaction, so readers of a sequence's state take them from the latest commit.
+        match self.storage.provider.as_ref() {
+            Some(provider) => view.with_latest_sequence_values(Arc::new(
+                uqa_execution::catalog::sequence::latest_values::ProviderSequenceValues::new(
+                    Arc::clone(provider),
+                ),
+            )),
             None => view,
         }
     }
