@@ -6,7 +6,9 @@
 
 use super::*;
 use crate::{Catalog, ManagedConnection, SQLiteVectorIndex};
-use uqa_storage::{mvcc::VersionedSessionOptions, vector_index::HNSWIndexParams};
+use uqa_storage::{
+    hnsw_index::HNSWIndex, mvcc::VersionedSessionOptions, vector_index::HNSWIndexParams,
+};
 use uqa_storage::{ReadOnlySnapshot, VectorIndex};
 
 mod retention;

@@ -14,7 +14,7 @@ use super::codec::{other_error, vector_field_prefix};
 use super::hnsw_persistence::{self, metadata_from_graph, PersistedHNSWNode};
 use super::index_keys::{hnsw_metadata_key, hnsw_node_key, hnsw_node_prefix};
 use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
-use crate::hnsw_index::{HNSWGraphDelta, HNSWIndex, HNSWMutation};
+use crate::hnsw_index::{HNSWCanonicalBuilder, HNSWGraphDelta, HNSWIndex, HNSWMutation};
 use crate::vector_index::{HNSWIndexParams, VectorIndex};
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -137,13 +137,7 @@ impl KeyValueHNSWIndex {
                     self.table, self.field
                 )));
             }
-            let vectors = self.raw.load_all_from(read)?;
-            let delta = HNSWIndex::prepare_canonical(
-                self.dimensions,
-                self.params,
-                &vectors,
-                read.control(),
-            )?;
+            let delta = self.canonical_builder(read)?.finish_delta()?;
             self.stage_delta(batch, &delta, next_revision(revision)?, false)
         })
     }
@@ -152,8 +146,19 @@ impl KeyValueHNSWIndex {
         &self,
         read: &dyn KeyValueRead,
     ) -> StorageBackendResult<Budgeted<HNSWIndex>> {
-        let entries = self.raw.load_all_from(read)?;
-        HNSWIndex::from_canonical_controlled(self.dimensions, self.params, &entries, read.control())
+        self.canonical_builder(read)?.finish()
+    }
+
+    fn canonical_builder(
+        &self,
+        read: &dyn KeyValueRead,
+    ) -> StorageBackendResult<HNSWCanonicalBuilder> {
+        let mut builder = HNSWCanonicalBuilder::new(self.dimensions, self.params, read.control())?;
+        self.raw
+            .visit_canonical_from(read, |document, ordinal, vector| {
+                builder.push(document, ordinal, vector)
+            })?;
+        Ok(builder)
     }
 
     fn stage_delta(
