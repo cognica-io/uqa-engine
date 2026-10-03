@@ -374,7 +374,7 @@ fn dynamic_command_cursor_shapes_match_postgresql() {
             &engine,
             "SELECT run_command_cursor('SHOW search_path') AS value"
         ),
-        Value::Str("public".into())
+        Value::Str("\"$user\", public".into())
     );
     let explain = scalar(
         &engine,

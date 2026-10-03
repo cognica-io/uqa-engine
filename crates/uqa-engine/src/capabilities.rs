@@ -123,6 +123,10 @@ pub(crate) use uqa_execution::query::runtime::QueryRuntimeView;
 
 impl uqa_execution::query::runtime::QueryMemorySettings for SessionContext {
     fn work_mem_bytes(&self) -> Result<usize, SQLError> {
+        let limit = self.query_memory_limit.load(Ordering::Acquire);
+        if limit != 0 {
+            return Ok(limit);
+        }
         let setting = self.setting("work_mem");
         let kilobytes = setting.parse::<usize>().map_err(|_| {
             SQLError::Internal(format!(

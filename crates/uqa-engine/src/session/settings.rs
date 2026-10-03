@@ -110,6 +110,14 @@ impl Engine {
         self.set_runtime_parameter("search_path", Some(&setting), false)
     }
 
+    /// Bound the memory each query workspace of this session may hold before it spills, in place of `work_mem`; `None` returns to `work_mem`. Unlike `work_mem`, whose minimum is `PostgreSQL`'s 64 kB, the bound may be as small as one byte, so that a host can make queries over little data spill.
+    pub fn set_query_memory_limit(&self, bytes: Option<usize>) {
+        self.session.query_memory_limit.store(
+            bytes.map_or(0, |bytes| bytes.max(1)),
+            std::sync::atomic::Ordering::Release,
+        );
+    }
+
     /// Apply `SET <name> [TO|=] <value>` for the session.
     pub fn set_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
         self.set_runtime_parameter(name, Some(value), false)

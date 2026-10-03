@@ -62,12 +62,13 @@ fn verify_memory(engine: &Engine, name: &str) {
         "SELECT analysis FROM analyze_text($1, $2)",
         "SELECT uqa_highlight($2, '東京', NULL, NULL, NULL, NULL, $1) AS snippet",
     ] {
-        execute(engine, "SET work_mem = '32kB'");
+        engine.set_query_memory_limit(Some(32 * 1024));
         assert_eq!(
             engine.sql(sql, &params).unwrap_err().sqlstate(),
             Some("53200"),
             "{name}: {sql}"
         );
+        engine.set_query_memory_limit(None);
         execute(engine, "SET work_mem = '16MB'");
         assert_eq!(engine.sql(sql, &params).unwrap().rows.len(), 1);
         assert_eq!(retained.rows[0]["analysis"], original);

@@ -260,6 +260,8 @@ pub(super) struct SessionContext {
     pub(super) state: SessionStateLock,
     /// Configuration state that transactions do not restore: custom parameter placeholders, loaded libraries and the values the client set at startup.
     pub(super) parameters: Mutex<crate::session::SessionParameterRegistry>,
+    /// The bytes a query workspace may hold before it spills when the host bounds it below `work_mem`; 0 leaves `work_mem` in effect.
+    pub(super) query_memory_limit: std::sync::atomic::AtomicUsize,
     /// Prepared definitions belong to the connection and survive transaction or
     /// savepoint rollback, including definitions created or removed after a boundary.
     pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
@@ -326,6 +328,7 @@ impl SessionContext {
             notification_subscriptions_required: AtomicBool::new(false),
             state: SessionStateLock::new(state),
             parameters: Mutex::new(crate::session::SessionParameterRegistry::default()),
+            query_memory_limit: std::sync::atomic::AtomicUsize::new(0),
             prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
             sequence_snapshot: Mutex::new(None),

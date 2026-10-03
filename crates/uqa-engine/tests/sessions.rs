@@ -156,7 +156,7 @@ fn persistent_sessions_isolate_all_session_state() {
     beta.sql("SET work_mem TO '8MB'", &[]).unwrap();
     assert_eq!(alpha.search_path(), vec!["alpha", "public"]);
     assert_eq!(beta.search_path(), vec!["beta", "public"]);
-    assert_eq!(root.search_path(), vec!["public"]);
+    assert_eq!(root.search_path(), vec!["$user", "public"]);
     assert_eq!(alpha.show_variable("work_mem").unwrap(), "64MB");
     assert_eq!(beta.show_variable("work_mem").unwrap(), "8MB");
     assert_eq!(root.show_variable("work_mem").unwrap(), "64MB");

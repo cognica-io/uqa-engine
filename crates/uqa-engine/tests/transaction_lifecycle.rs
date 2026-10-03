@@ -490,7 +490,7 @@ fn explicit_memory_rollback_restores_every_sql_owned_registry() {
         work_mem.rows[0]["work_mem"],
         uqa_core::Value::Str("8MB".into())
     );
-    assert_eq!(eng.search_path(), vec!["public"]);
+    assert_eq!(eng.search_path(), vec!["$user", "public"]);
 }
 
 #[test]
