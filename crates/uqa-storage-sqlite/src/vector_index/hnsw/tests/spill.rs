@@ -26,6 +26,36 @@ fn native_hnsw_spill_builds_mutates_rolls_back_and_reopens() {
     lifecycle(true);
 }
 
+#[test]
+fn native_hnsw_loading_spills_a_decoded_graph_beyond_the_session_allowance() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    let mut index = SQLiteHNSWIndex::new(connection.clone(), "docs", "embedding", 64);
+    for doc in 0..256 {
+        index.add(doc, vec![1.0; 64]).unwrap();
+    }
+    index.initialize().unwrap();
+    crate::SQLiteRecordStore::for_native(&connection, &StorageReadControl::with_limit(16 << 20))
+        .unwrap();
+    connection
+        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions {
+            retained_bytes: 64 << 10,
+        })
+        .unwrap();
+    let control = connection.retention_control().unwrap();
+    assert!(256 * 64 * size_of::<f32>() >= control.memory().limit());
+    assert_eq!(index.count().unwrap(), 256);
+    let found = index.search_knn(&[1.0; 64], 1).unwrap();
+    assert_eq!(found.doc_ids().count(), 1);
+    assert!(found.doc_ids().all(|doc| doc < 256));
+    let snapshot = index.snapshot().unwrap();
+    assert_eq!(snapshot.count().unwrap(), 256);
+    drop(snapshot);
+    assert_eq!(index.count().unwrap(), 256);
+    assert!(control.memory().peak() <= control.memory().limit());
+    assert!(!connection.in_transaction());
+}
+
 fn lifecycle(native: bool) {
     let dimensions = if native { 4096 } else { 1024 };
     let vector = |document| vector(document, dimensions);
