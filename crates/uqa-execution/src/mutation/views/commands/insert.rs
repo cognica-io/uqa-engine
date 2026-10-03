@@ -84,21 +84,29 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             &[],
         )?;
     }
-    let execute_read =
+    let mut statement_scope = None;
+    let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
-            let mut ctes = read_context.mutation.scopes.command_scope(
+            let ctes = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
-            )?;
+            )?);
             if let Some(parent) = inherited_ctes {
                 ctes.inherit_cte_bindings(parent);
             }
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
-            crate::query::cte::materialize_plan_ctes(
+            crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
                 &stmt.ctes,
+                || {
+                    uqa_sql::semantics::primary_command_cte_references(
+                        &stmt.ctes,
+                        &stmt.query_inputs(),
+                        None,
+                    )
+                },
                 params,
-                &mut ctes,
+                ctes,
             )?;
             ctes.scalar_subqueries.clone_from(&stmt.subqueries);
             let suppressed_source_is_unused = stmt.source.is_some()
@@ -121,7 +129,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     &columns,
                     implicit_columns,
                     params,
-                    &ctes,
+                    ctes,
                 );
             }
             let input_rows = if let Some(source) = stmt.source.as_deref() {
@@ -198,7 +206,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                         new[target_position] =
                             crate::mutation::assignment::coerce_typed_assignment(
                                 read_context.mutation.preparation.referential.assignment,
-                                &ctes,
+                                ctes,
                                 crate::mutation::assignment::TypedAssignmentTarget {
                                     target: &columns[input_position],
                                     ty: target.types[target_position].as_ref(),
@@ -237,7 +245,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     event: uqa_sql::ast::RuleEvent::Insert,
                     rows: &rule_rows,
                     params,
-                    scope: &ctes,
+                    scope: ctes,
                     insert_plans: &stmt.view_rule_insert_plans,
                     update_plans: &[],
                     document_relation: Some(&target.canonical_name),
@@ -281,17 +289,24 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                         },
                         &stmt.returning,
                         params,
-                        &ctes,
+                        ctes,
                     )?);
                 }
             }
             if original_query_survives {
-                crate::mutation::triggers::fire_statement_triggers(
+                let view = target.canonical_name.clone();
+                crate::mutation::statement_end::fire_after_events(
+                    ctes,
                     &context.mutation.preparation.referential.triggers,
-                    &target.canonical_name,
-                    uqa_sql::ast::TriggerTiming::After,
-                    uqa_sql::ast::TriggerEvent::Insert,
-                    &[],
+                    move |context| {
+                        crate::mutation::triggers::fire_statement_triggers(
+                            context,
+                            &view,
+                            uqa_sql::ast::TriggerTiming::After,
+                            uqa_sql::ast::TriggerEvent::Insert,
+                            &[],
+                        )
+                    },
                 )?;
             }
             let mut result = finish_view_dml(
@@ -302,7 +317,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     aliases: &stmt.returning_aliases,
                     returning: &stmt.returning,
                     params,
-                    ctes: &ctes,
+                    ctes,
                     supplemental_schema: None,
                 },
                 returning_rows,
@@ -335,7 +350,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                         aliases: &stmt.returning_aliases,
                         returning: &stmt.returning,
                         params,
-                        ctes: &ctes,
+                        ctes,
                         supplemental_schema: None,
                     },
                 );
@@ -344,7 +359,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 return outer_returning.project(
                     context.mutation.preparation.returning,
                     params,
-                    &ctes,
+                    ctes,
                     None,
                 );
             }
@@ -356,8 +371,15 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             }
             Ok(result)
         };
-    match statement_snapshot.as_deref() {
+    let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
         None => execute_read(context),
-    }
+    }?;
+    crate::mutation::statement_end::finish_statement(
+        context,
+        params,
+        &stmt.ctes,
+        statement_scope.as_mut(),
+    )?;
+    Ok(result)
 }

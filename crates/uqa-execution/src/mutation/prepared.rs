@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use super::candidate::PhysicalDocumentIdentity;
 use uqa_core::{DocId, Value};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
@@ -80,6 +81,33 @@ pub enum PreparedMutationAction {
     Insert(PreparedDocumentInsert),
     Rewrite(PreparedDocumentRewrite),
     Delete(PreparedDocumentDelete),
+}
+
+impl PreparedMutationAction {
+    /// The rows the action itself writes: the row it inserts or deletes, or the row it rewrites with the identity a moved row takes. The referential actions it carries write rows of their own statements.
+    pub fn written_rows(&self) -> Vec<PhysicalDocumentIdentity> {
+        let identity = |table: &str, doc_id: DocId| PhysicalDocumentIdentity {
+            table: table.to_string(),
+            doc_id,
+        };
+        match self {
+            Self::Insert(insert) => vec![identity(&insert.table, insert.doc_id)],
+            Self::Delete(delete) => vec![identity(&delete.table, delete.doc_id)],
+            Self::Rewrite(rewrite) => std::iter::once(identity(&rewrite.table, rewrite.doc_id))
+                .chain(
+                    rewrite
+                        .destination
+                        .as_ref()
+                        .map(|(table, doc_id)| identity(table, *doc_id)),
+                )
+                .chain(
+                    rewrite
+                        .relocation
+                        .map(|doc_id| identity(&rewrite.table, doc_id)),
+                )
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

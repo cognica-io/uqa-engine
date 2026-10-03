@@ -11,10 +11,10 @@ use crate::mutation::{
     candidate::{MutationRewriteCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     command_scope::MutationOverlayScope,
     prepared::PreparedMutationAction,
-    publication::MutationPublicationBatch,
     returning::{DmlReturningShape, ReturningProjectionRow},
     row_images::{MutationRowImage, MutationRowImages},
     rows::join_rows as dml_join_rows,
+    statement_end,
 };
 use crate::query::CteScope;
 use uqa_sql::{
@@ -201,6 +201,10 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         else {
             continue;
         };
+        // Another command of the statement already wrote the row, which `PostgreSQL`'s `ExecUpdate` skips as `TM_SelfModified`.
+        if ctes.statement_wrote(&identity) {
+            continue;
+        }
         let storage_table = identity.table;
         let doc_id = identity.doc_id;
         if !locked_ids.insert((storage_table.clone(), doc_id)) {
@@ -524,7 +528,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     drop(overlay);
     if !prepared_updates.is_empty() {
         context.mutation.state.prepare_writer()?;
-        let mut publication = MutationPublicationBatch::default();
+        let mut publication = statement_end::publication_batch(ctes);
         for (action, after_rows) in prepared_updates {
             crate::mutation::publication::publish_prepared_mutation_action(
                 context.mutation.publication,
@@ -538,51 +542,23 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             context.mutation.publication,
             &mut publication,
         )?;
+        statement_end::note_written_rows(ctes, &mut publication);
     }
-    let transition_tables = if update_original_query {
-        crate::mutation::triggers::build_transition_tables(
-            &context.mutation.preparation.referential.triggers,
-            &target,
-            uqa_sql::ast::TriggerEvent::Update,
-            &assigned_columns,
-            events.after_rows(),
-        )?
-    } else {
-        Vec::new()
-    };
-    let referential_transition =
-        events.referential_transition_tables(&context.mutation.preparation.referential.triggers)?;
-    let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
-    transition_refs.extend(referential_transition.iter());
-    let root_events = update_original_query
-        .then_some(uqa_sql::ast::TriggerEvent::Update)
-        .into_iter()
-        .collect::<Vec<_>>();
-    for generation in crate::mutation::triggers::after_trigger_generations(&transition_refs) {
-        crate::mutation::triggers::fire_after_row_trigger_events_for_generation(
-            &context.mutation.preparation.referential.triggers,
-            events.after_rows(),
-            &transition_refs,
-            generation,
-        )?;
-        events.fire_referential_after_statement_triggers(
-            &context.mutation.preparation.referential.triggers,
-            &referential_transition,
-            &target,
-            &root_events,
-            generation,
-        )?;
-        if update_original_query {
-            crate::mutation::triggers::fire_after_statement_trigger_generation_for_root(
-                &context.mutation.preparation.referential.triggers,
-                &target,
-                uqa_sql::ast::TriggerEvent::Update,
-                &assigned_columns,
-                &transition_tables,
-                generation,
-            )?;
-        }
-    }
+    let table = target.clone();
+    let columns = assigned_columns.clone();
+    statement_end::fire_after_events(
+        ctes,
+        &context.mutation.preparation.referential.triggers,
+        move |triggers| {
+            super::triggers::fire_update_after_triggers(
+                triggers,
+                &table,
+                update_original_query,
+                &columns,
+                &events,
+            )
+        },
+    )?;
     if !stmt.returning.is_empty() {
         if let Some(view_rule_returning) = view_rule_returning {
             return view_rule_returning.project(

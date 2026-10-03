@@ -53,6 +53,7 @@ pub mod command_scope;
 pub mod point_update;
 
 pub mod statement;
+pub mod statement_end;
 
 pub mod delete;
 

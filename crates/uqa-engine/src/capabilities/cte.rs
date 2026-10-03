@@ -68,6 +68,13 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
             ctes,
         )
     }
+    fn fire_after_events(
+        &self,
+        events: Vec<uqa_execution::query::scope::AfterEventFiring>,
+    ) -> Result<(), SQLError> {
+        let triggers = self.trigger_execution_context();
+        events.into_iter().try_for_each(|fire| fire(&triggers))
+    }
 }
 impl QueryOutputRewriter for Engine {
     fn push_output_filter(

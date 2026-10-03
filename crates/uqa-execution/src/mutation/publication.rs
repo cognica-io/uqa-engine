@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::mutation::candidate::PhysicalDocumentIdentity;
 use crate::serializable::observe_row_write;
 use uqa_core::DocId;
 use uqa_sql::SQLError;
@@ -39,9 +40,24 @@ pub struct MutationPublicationBatch {
     fts_tables: PreparedFtsTables,
     fts_identities: BTreeMap<String, BTreeSet<DocId>>,
     fts_document_count: usize,
+    /// The rows the batch's actions wrote, kept for a statement whose other commands treat them as rows the statement already modified.
+    written: Option<Vec<PhysicalDocumentIdentity>>,
 }
 
 impl MutationPublicationBatch {
+    /// A batch that keeps the identity of every row its actions write when `record` holds.
+    pub fn recording_writes(record: bool) -> Self {
+        Self {
+            written: record.then(Vec::new),
+            ..Self::default()
+        }
+    }
+
+    /// The rows the batch's actions wrote, when it keeps them.
+    pub fn take_written(&mut self) -> Vec<PhysicalDocumentIdentity> {
+        self.written.take().unwrap_or_default()
+    }
+
     fn push_fts(&mut self, table: String, doc_id: DocId, fields: BTreeMap<String, String>) {
         self.fts_identities
             .entry(table.clone())
@@ -91,6 +107,9 @@ pub fn publish_prepared_mutation_action(
     inserted: InsertedIdentity,
     batch: &mut MutationPublicationBatch,
 ) -> Result<(), SQLError> {
+    if let Some(written) = batch.written.as_mut() {
+        written.extend(action.written_rows());
+    }
     match action {
         PreparedMutationAction::Insert(PreparedDocumentInsert {
             table,

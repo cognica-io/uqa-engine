@@ -170,3 +170,5 @@ pub fn prepare_update_row<S: Clone + 'static>(
 pub mod from;
 
 pub mod table;
+
+pub mod triggers;

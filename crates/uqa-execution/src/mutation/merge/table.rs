@@ -6,21 +6,22 @@
 
 //! Table MERGE pairing, lock rechecks, row staging, publication, and trigger ordering.
 use super::{
-    actions::{ensure_merge_target_is_modified_once, select_merge_action},
-    analysis::merge_target_lock_strength,
+    actions::{
+        ensure_merge_target_is_modified_once, ensure_merge_target_is_unwritten, select_merge_action,
+    },
     codec::{
         decode_merge_pair, decode_prepared_mutation_action_row, encode_merge_pair,
         merge_pair_schema, merge_source_index_value, prepared_mutation_action_schema,
         push_prepared_mutation_action, MergePairKind,
     },
-    model::{MergeTargetIdentity, SelectedMergeAction},
+    model::SelectedMergeAction,
     returning::{build_merge_returning_row, MergeReturningRow},
+    targets::{lock_merge_targets, LockedMergeTargets},
 };
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::{
     mutation::{
         assignment::{refresh_stored_generated_columns, validate_view_checks, ViewCheckContext},
-        candidate::PhysicalMutationLockTarget,
         command_scope::MutationOverlayScope,
         constraints::{
             lock_document_key_dependencies, partition_insert_target, validate_document_constraints,
@@ -33,11 +34,8 @@ use crate::{
             prepare_auto_increment_identity, prepare_insert_identity,
             refresh_insert_identity_after_trigger, IdentityAllocationContext,
         },
-        locking::lock_physical_mutation_target,
         prepared::{PreparedDocumentInsert, PreparedMutationAction},
-        publication::{
-            finish_mutation_publication, publish_prepared_mutation_action, MutationPublicationBatch,
-        },
+        publication::{finish_mutation_publication, publish_prepared_mutation_action},
         referential::{
             prepare_document_delete, prepare_partition_update_route,
             prepare_routed_document_rewrite,
@@ -50,10 +48,11 @@ use crate::{
             target_row_for_storage as dml_target_row_for_storage,
         },
         staging::{stage_prepared_document_delete, stage_prepared_document_rewrite},
+        statement_end,
     },
     query::{sources::build_join_spill_with_ctes, CteScope},
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_sql::{
     plan::{MergePlan, MergeWhenPlan},
     semantics::{
@@ -141,7 +140,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     uqa_sql::semantics::merge::validate_merge_target_columns(assignment.columns, stmt)?;
     let statement_snapshot = ctes.command_cte_snapshot();
-    let mut execute_read =
+    let execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
             let read_referential = &read_context.mutation.preparation.referential;
             let read_assignment = read_referential.assignment;
@@ -179,9 +178,16 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 &crate::query::binding::binding_context(&analysis_scope)?,
             )?;
             statement_events.fire_before(&triggers, &target_table)?;
-            crate::query::cte::materialize_plan_ctes(
+            crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
                 &stmt.ctes,
+                || {
+                    uqa_sql::semantics::primary_command_cte_references(
+                        &stmt.ctes,
+                        &stmt.query_inputs(),
+                        stmt.source_input(),
+                    )
+                },
                 params,
                 &mut ctes,
             )?;
@@ -343,58 +349,11 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             let pairings = pairings
                 .into_shared(pair_schema)
                 .map_err(crate::physical::physical_exec_error)?;
-            let mut recheck_matches = false;
-            // A paired target may have been moved to a successor identity by a primary-key rewrite another transaction committed while this statement waited; PostgreSQL 18 follows the update chain, so the pairing is redirected to the successor before the actions run.
-            let mut successors: BTreeMap<MergeTargetIdentity, MergeTargetIdentity> =
-                BTreeMap::new();
-            let mut rechecked_target_ids = BTreeSet::new();
-            let mut deleted_targets = BTreeSet::new();
-            for (storage_table, doc_id) in lock_target_ids {
-                let original_identity = (storage_table.clone(), doc_id);
-                let target = lock_physical_mutation_target(
-                    referential.locking.session,
-                    &storage_table,
-                    &target_qual,
-                    doc_id,
-                    merge_target_lock_strength(referential.locking.catalog, stmt, &storage_table),
-                )?;
-                match target {
-                    PhysicalMutationLockTarget::Present { identity, recheck } => {
-                        recheck_matches |= recheck;
-                        let locked_identity = (identity.table, identity.doc_id);
-                        if recheck || locked_identity != original_identity {
-                            rechecked_target_ids.insert(original_identity.clone());
-                        }
-                        if locked_identity != original_identity {
-                            successors.insert(original_identity, locked_identity);
-                        }
-                    }
-                    PhysicalMutationLockTarget::Deleted => {
-                        recheck_matches = true;
-                        deleted_targets.insert(original_identity);
-                    }
-                }
-            }
-            if recheck_matches {
-                constraints
-                    .transactions
-                    .refresh_explicit_statement_snapshot()?;
-            }
-            let mut refreshed_targets = BTreeMap::new();
-            for original_identity in rechecked_target_ids {
-                let locked_identity = successors
-                    .get(&original_identity)
-                    .cloned()
-                    .unwrap_or_else(|| original_identity.clone());
-                if let Some(document) = constraints
-                    .reads
-                    .get_document(&locked_identity.0, locked_identity.1)?
-                {
-                    refreshed_targets.insert(original_identity, (locked_identity, document));
-                } else {
-                    deleted_targets.insert(original_identity);
-                }
-            }
+            let LockedMergeTargets {
+                recheck_matches,
+                deleted: deleted_targets,
+                refreshed: refreshed_targets,
+            } = lock_merge_targets(referential, stmt, &target_qual, lock_target_ids)?;
             let action_schema = prepared_mutation_action_schema();
             let mut prepared_actions = crate::SpillBuffer::new(work_mem);
             let mut events = crate::mutation::events::MutationEventQueue::default();
@@ -524,6 +483,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         let storage_table = pair.storage_table.as_deref().ok_or_else(|| {
                             SQLError::Internal("MERGE update lost its physical target table".into())
                         })?;
+                        ensure_merge_target_is_unwritten(&snapshot_ctes, storage_table, doc_id)?;
                         let Some(triggered_document) =
                             crate::mutation::triggers::fire_before_row_triggers(
                                 &triggers,
@@ -655,6 +615,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         let old_document = pair.target_document.as_ref().ok_or_else(|| {
                             SQLError::Internal("MERGE delete lost its target row".into())
                         })?;
+                        ensure_merge_target_is_unwritten(&snapshot_ctes, storage_table, doc_id)?;
                         if crate::mutation::triggers::fire_before_row_triggers(
                             &triggers,
                             storage_table,
@@ -942,7 +903,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             let prepared_reader = prepared_actions
                 .read_rows()
                 .map_err(crate::physical::physical_exec_error)?;
-            let mut publication = MutationPublicationBatch::default();
+            let mut publication = statement_end::publication_batch(&ctes);
             for prepared in prepared_reader {
                 let prepared = prepared.map_err(crate::physical::physical_exec_error)?;
                 let action = decode_prepared_mutation_action_row(prepared)?;
@@ -954,7 +915,11 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 )?;
             }
             finish_mutation_publication(mutation.publication, &mut publication)?;
-            statement_events.fire_table_after(&triggers, &target_table, &events)?;
+            statement_end::note_written_rows(&ctes, &mut publication);
+            let table = target_table.clone();
+            statement_end::fire_after_events(&ctes, &triggers, move |context| {
+                statement_events.fire_table_after(context, &table, &events)
+            })?;
             if !stmt.returning.is_empty() {
                 let projections = expanded_merge_returning_projections(
                     preparation.returning.catalog,
@@ -987,8 +952,10 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             }
             Ok(SQLResult::from_affected(affected))
         };
-    match statement_snapshot.as_deref() {
+    let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
         None => execute_read(context),
-    }
+    }?;
+    statement_end::finish_statement(context, params, &stmt.ctes, Some(&mut ctes))?;
+    Ok(result)
 }

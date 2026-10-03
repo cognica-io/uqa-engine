@@ -10,9 +10,9 @@ use crate::mutation::{
     candidate::{MutationCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     command_scope::MutationOverlayScope,
     prepared::PreparedMutationAction,
-    publication::MutationPublicationBatch,
     returning::{DmlReturningShape, ReturningProjectionRow},
     row_images::{MutationRowImage, MutationRowImages},
+    statement_end,
 };
 use crate::query::CteScope;
 use std::collections::BTreeSet;
@@ -26,6 +26,7 @@ use uqa_sql::{
     SQLError, SQLParam, SQLResult,
 };
 mod qualification;
+mod triggers;
 use qualification::{
     count_delete_source_qualifications, qualified_delete_candidate, recheck_delete_candidate,
     DeleteCandidateQualification, DeleteCandidateRecheck,
@@ -146,33 +147,41 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
             &[],
         )?;
     }
-    let execute_read =
+    let mut statement_scope = None;
+    let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
             let mut affected = 0u64;
             let cancel = context.query.source.relational.runtime.cancellation_token();
             let mut qualified_targets: Vec<MutationCandidate<Option<crate::OwnedPhysicalRow>>> =
                 Vec::new();
             let mut returning_rows = Vec::new();
-            let mut ctes = read_context.mutation.scopes.command_scope(
+            let ctes = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
-            )?;
+            )?);
             if let Some(parent) = inherited_ctes {
                 ctes.inherit_cte_bindings(parent);
             }
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
-            crate::query::cte::materialize_plan_ctes(
+            crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
                 &stmt.ctes,
+                || {
+                    uqa_sql::semantics::primary_command_cte_references(
+                        &stmt.ctes,
+                        &stmt.query_inputs(),
+                        stmt.source_input(),
+                    )
+                },
                 params,
-                &mut ctes,
+                ctes,
             )?;
             ctes.scalar_subqueries.clone_from(&stmt.subqueries);
             if let Some(source) = stmt.source.as_deref() {
                 crate::query::privileges::ensure_select_privileges_for_source_expressions(
                     source,
                     &privilege_expressions,
-                    &ctes,
+                    ctes,
                 )?;
             }
             let mut action_qualification_count = if has_any_delete_rules && stmt.source.is_none() {
@@ -185,7 +194,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                         .expressions,
                     stmt.predicate.as_ref(),
                     params,
-                    &ctes,
+                    ctes,
                 )?
             } else {
                 None
@@ -203,7 +212,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                     &read_context.query.source,
                     source,
                     params,
-                    &mut ctes,
+                    ctes,
                 )?),
                 None => None,
             };
@@ -231,7 +240,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                                 .assignment
                                 .expressions,
                             stmt,
-                            &ctes,
+                            ctes,
                             using_rows,
                             params,
                         )?
@@ -275,7 +284,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                             &stmt.target_qualifier,
                             filter,
                             params,
-                            &ctes,
+                            ctes,
                         )?
                         .into_iter()
                         .map(|doc_id| (table.clone(), doc_id)),
@@ -353,6 +362,10 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                 let PhysicalMutationLockTarget::Present { identity, recheck } = target else {
                     continue;
                 };
+                // Another command of the statement already wrote the row, which `PostgreSQL`'s `ExecDelete` skips as `TM_SelfModified`.
+                if ctes.statement_wrote(&identity) {
+                    continue;
+                }
                 let storage_table = identity.table;
                 let doc_id = identity.doc_id;
                 let qualified = if recheck {
@@ -646,7 +659,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
             drop(overlay);
             if !prepared_deletes.is_empty() {
                 context.mutation.state.prepare_writer()?;
-                let mut publication = MutationPublicationBatch::default();
+                let mut publication = statement_end::publication_batch(ctes);
                 for action in prepared_deletes {
                     crate::mutation::publication::publish_prepared_mutation_action(
                         context.mutation.publication,
@@ -659,59 +672,27 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                     context.mutation.publication,
                     &mut publication,
                 )?;
+                statement_end::note_written_rows(ctes, &mut publication);
             }
-            let transition_tables = if delete_original_query {
-                crate::mutation::triggers::build_transition_tables(
-                    &context.mutation.preparation.referential.triggers,
-                    &stmt.table,
-                    uqa_sql::ast::TriggerEvent::Delete,
-                    &[],
-                    events.after_rows(),
-                )?
-            } else {
-                Vec::new()
-            };
-            let referential_transition = events.referential_transition_tables(
+            let table = stmt.table.clone();
+            statement_end::fire_after_events(
+                ctes,
                 &context.mutation.preparation.referential.triggers,
+                move |context| {
+                    triggers::fire_delete_after_triggers(
+                        context,
+                        &table,
+                        delete_original_query,
+                        &events,
+                    )
+                },
             )?;
-            let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
-            transition_refs.extend(referential_transition.iter());
-            let root_events = delete_original_query
-                .then_some(uqa_sql::ast::TriggerEvent::Delete)
-                .into_iter()
-                .collect::<Vec<_>>();
-            for generation in crate::mutation::triggers::after_trigger_generations(&transition_refs)
-            {
-                crate::mutation::triggers::fire_after_row_trigger_events_for_generation(
-                    &context.mutation.preparation.referential.triggers,
-                    events.after_rows(),
-                    &transition_refs,
-                    generation,
-                )?;
-                events.fire_referential_after_statement_triggers(
-                    &context.mutation.preparation.referential.triggers,
-                    &referential_transition,
-                    &stmt.table,
-                    &root_events,
-                    generation,
-                )?;
-                if delete_original_query {
-                    crate::mutation::triggers::fire_after_statement_trigger_generation_for_root(
-                        &context.mutation.preparation.referential.triggers,
-                        &stmt.table,
-                        uqa_sql::ast::TriggerEvent::Delete,
-                        &[],
-                        &transition_tables,
-                        generation,
-                    )?;
-                }
-            }
             if !stmt.returning.is_empty() {
                 if let Some(view_rule_returning) = view_rule_returning {
                     return view_rule_returning.project(
                         context.mutation.preparation.returning,
                         params,
-                        &ctes,
+                        ctes,
                         using_rows.as_ref().map(crate::SharedSpill::row_schema),
                     );
                 }
@@ -721,7 +702,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                     aliases: &stmt.returning_aliases,
                     returning: &stmt.returning,
                     params,
-                    ctes: &ctes,
+                    ctes,
                     supplemental_schema: using_rows.as_ref().map(crate::SharedSpill::row_schema),
                 };
                 if let Some(rule_returning) = rule_returning {
@@ -736,8 +717,10 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
             }
             Ok(SQLResult::from_affected(affected))
         };
-    match statement_snapshot.as_deref() {
+    let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
         None => execute_read(context),
-    }
+    }?;
+    statement_end::finish_statement(context, params, &stmt.ctes, statement_scope.as_mut())?;
+    Ok(result)
 }

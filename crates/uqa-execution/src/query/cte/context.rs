@@ -7,7 +7,7 @@
 //! Child-query execution, output rewrites, and expression services for CTEs.
 
 use crate::{
-    query::{output::QueryOutput, runtime::QueryRuntimeView, CteScope},
+    query::{output::QueryOutput, runtime::QueryRuntimeView, scope::AfterEventFiring, CteScope},
     OwnedPhysicalRow,
 };
 use uqa_sql::{
@@ -37,6 +37,8 @@ pub trait CteBodyExecutor<S: Clone>: Sync {
         params: &[SQLParam],
         ctes: &CteScope<S>,
     ) -> Result<SQLResult, SQLError>;
+    /// Fire the AFTER events the commands of a statement queued, in queue order, once the statement has finished.
+    fn fire_after_events(&self, events: Vec<AfterEventFiring>) -> Result<(), SQLError>;
 }
 
 pub trait QueryOutputRewriter: Sync {

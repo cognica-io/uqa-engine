@@ -338,6 +338,10 @@ impl InsertConflictLocks {
         else {
             return Ok(PreparedInsertConflict::Skip);
         };
+        // Another command of the statement inserted or rewrote the conflicting row, whose version `PostgreSQL`'s `ExecOnConflictUpdate` finds invisible to the statement's command id.
+        if scope.statement_wrote(&existing) {
+            return Err(on_conflict_cardinality_violation());
+        }
         match build_conflict_update(
             &context,
             &existing.table,
