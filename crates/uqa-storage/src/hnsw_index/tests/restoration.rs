@@ -140,7 +140,7 @@ fn restoration_charges_transferred_vector_and_adjacency_capacity() {
         &control,
     )
     .unwrap();
-    let compact_bytes = compact.reserved_bytes();
+    let compact_bytes = control.memory().used();
     drop(compact);
     let node = &mut snapshot.nodes[0];
     node.raw_vector.reserve_exact(4096);
@@ -150,7 +150,7 @@ fn restoration_charges_transferred_vector_and_adjacency_capacity() {
     }
     let raw_capacity = node.raw_vector.capacity();
     let node_id = node.node_id;
-    let limited = StorageReadControl::with_limit(compact_bytes);
+    let limited = StorageReadControl::with_limit(size_of::<HNSWIndex>() - 1);
     let rejected = HNSWIndex::from_persistence_controlled(
         4,
         source.params(),
@@ -183,8 +183,16 @@ fn restoration_charges_transferred_vector_and_adjacency_capacity() {
         &control,
     )
     .unwrap();
-    assert!(restored.reserved_bytes() > compact_bytes);
-    assert_eq!(restored.nodes[&node_id].raw_vector.capacity(), raw_capacity);
+    assert!(control.memory().used() > compact_bytes);
+    assert_eq!(
+        restored
+            .node(node_id)
+            .unwrap()
+            .unwrap()
+            .raw_vector
+            .capacity(),
+        raw_capacity
+    );
     assert_eq!(
         restored.persistence_snapshot(),
         source.persistence_snapshot()

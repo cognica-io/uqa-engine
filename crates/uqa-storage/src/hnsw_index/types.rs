@@ -6,9 +6,8 @@
 
 //! HNSW graph state and construction parameters.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use uqa_core::DocId;
+use super::store::Map;
+use uqa_core::{memory::MemoryBudget, DocId};
 
 use crate::vector_index::HNSWIndexParams;
 use crate::StorageBackendResult;
@@ -59,14 +58,15 @@ pub struct HNSWPersistenceDelta {
 pub struct HNSWIndex {
     pub(super) dimensions: u32,
     pub(super) params: HNSWIndexParams,
-    pub(super) nodes: BTreeMap<NodeId, HNSWNode>,
-    pub(super) active: BTreeMap<(DocId, u32), NodeId>,
+    pub(super) nodes: Map<HNSWNode>,
+    pub(super) active: Map<NodeId>,
     pub(super) entry_point: Option<NodeId>,
     pub(super) max_level: usize,
     pub(super) next_node_id: NodeId,
     pub(super) deleted_count: usize,
-    pub(super) dirty_nodes: BTreeSet<NodeId>,
+    pub(super) dirty_nodes: Map<u64>,
     pub(super) full_rewrite: bool,
+    pub(super) memory: MemoryBudget,
 }
 
 impl HNSWIndex {
@@ -76,18 +76,31 @@ impl HNSWIndex {
     }
 
     pub fn with_params(dimensions: u32, params: HNSWIndexParams) -> StorageBackendResult<Self> {
+        Self::with_memory(
+            dimensions,
+            params,
+            &MemoryBudget::new(crate::mvcc::VersionedSessionOptions::default().retained_bytes),
+        )
+    }
+
+    pub(super) fn with_memory(
+        dimensions: u32,
+        params: HNSWIndexParams,
+        memory: &MemoryBudget,
+    ) -> StorageBackendResult<Self> {
         let params = params.validate()?;
         Ok(Self {
             dimensions,
             params,
-            nodes: BTreeMap::new(),
-            active: BTreeMap::new(),
+            nodes: Map::new(memory, memory.limit() / 8),
+            active: Map::new(memory, memory.limit() / 32),
             entry_point: None,
             max_level: 0,
             next_node_id: 1,
             deleted_count: 0,
-            dirty_nodes: BTreeSet::new(),
+            dirty_nodes: Map::new(memory, memory.limit() / 32),
             full_rewrite: true,
+            memory: memory.clone(),
         })
     }
 
@@ -102,4 +115,8 @@ impl HNSWIndex {
             self.params.m
         }
     }
+}
+
+pub(super) fn active_key(document: DocId, ordinal: u32) -> u128 {
+    (u128::from(document) << 32) | u128::from(ordinal)
 }

@@ -6,16 +6,13 @@
 
 //! Physical HNSW queries retain invocation-owned workspace without changing graph traversal.
 
-use uqa_core::{DocId, PostingList};
+use uqa_core::{memory::BudgetedBinaryHeap, DocId, PostingList};
 
-use super::{prepare::Control, HNSWIndex};
+use super::{prepare::Control, search::Candidate, store::Map, HNSWIndex};
 use crate::{
     vector_index::{
-        cosine_similarity_with_norms, deduplicate_scored_values,
-        query::{
-            check, normalized_query, postings_from_scores, postings_from_unique_scores,
-            VectorQueryBuffer,
-        },
+        cosine_similarity_with_norms,
+        query::{check, normalized_query, postings_from_unique_scores, VectorQueryBuffer},
         validate_vector_values, vector_norm,
     },
     StorageBackendError, StorageBackendResult,
@@ -36,25 +33,53 @@ impl HNSWIndex {
         let (normalized, norm) = normalized_query(query, control)?;
         let mut ef = self.params.ef_search.max(k).min(self.nodes.len());
         let mut scored = VectorQueryBuffer::<(DocId, f32)>::new(control);
-        scored.reserve(ef)?;
         loop {
             scored.clear();
+            let memory = control.map_or(&self.memory, |control| control.memory());
+            let mut best = Map::<u64>::new(memory, memory.limit() / 32);
             let candidates = self.query_candidates(&normalized, ef, control)?;
             for candidate in candidates.iter() {
                 check(control)?;
-                let Some(node) = self.nodes.get(&candidate.node_id) else {
+                let candidate = candidate?;
+                let Some(node) = self.node(candidate.node_id)? else {
                     continue;
                 };
                 if !node.deleted {
                     let score =
                         cosine_similarity_with_norms(query, &node.raw_vector, norm, node.norm);
-                    scored.push((node.doc_id, score))?;
+                    let key = u128::from(node.doc_id);
+                    let score = best
+                        .get(key)?
+                        .map_or(score, |value| f32::from_bits(*value as u32).max(score));
+                    best.insert(key, u64::from(score.to_bits()), control)?;
                 }
             }
             drop(candidates);
-            let count = deduplicate_scored_values(&mut scored);
-            scored.truncate(count);
-            if scored.len() >= k || ef >= self.nodes.len() {
+            if best.len() >= k || ef >= self.nodes.len() {
+                // Reduce complete per-document maxima before selecting K: finite inputs can overflow to NaN, whose later finite tensor member changes its maximum.
+                let mut top = BudgetedBinaryHeap::<Candidate>::new(memory);
+                for value in best.iter() {
+                    check(control)?;
+                    let (document, score) = value?;
+                    // Negation reverses total float order, including signed zero and NaN payloads. The largest candidate is the worst score, with largest document identity breaking a tie.
+                    let candidate = Candidate {
+                        node_id: document as DocId,
+                        distance: -f32::from_bits(*score as u32),
+                    };
+                    if top.len() < k {
+                        top.push(candidate)?;
+                    } else if top.peek().is_some_and(|worst| candidate < *worst) {
+                        top.pop();
+                        top.push(candidate)?;
+                    }
+                }
+                drop(best);
+                let top = top.into_vec();
+                for candidate in top.iter() {
+                    check(control)?;
+                    scored.push((candidate.node_id, -candidate.distance))?;
+                }
+                drop(top);
                 return postings_from_unique_scores(scored, Some(k), control);
             }
             ef = ef
@@ -79,18 +104,31 @@ impl HNSWIndex {
         }
         let norm = vector_norm(query);
         let mut scored = VectorQueryBuffer::new(control);
-        for node_id in self.active.values() {
+        let mut current: Option<(DocId, f32)> = None;
+        for entry in self.active.iter() {
             check(control)?;
-            let node = self.nodes.get(node_id).ok_or_else(|| {
+            let (_, node_id) = entry?;
+            let node = self.node(*node_id)?.ok_or_else(|| {
                 StorageBackendError::Other(format!(
-                    "HNSW active map references missing node {node_id}"
+                    "HNSW active map references missing node {}",
+                    *node_id
                 ))
             })?;
             let score = cosine_similarity_with_norms(query, &node.raw_vector, norm, node.norm);
             if score >= threshold {
-                scored.push((node.doc_id, score))?;
+                match current.as_mut() {
+                    Some((document, best)) if *document == node.doc_id => *best = best.max(score),
+                    _ => {
+                        if let Some(previous) = current.replace((node.doc_id, score)) {
+                            scored.push(previous)?;
+                        }
+                    }
+                }
             }
         }
-        postings_from_scores(scored, None, control)
+        if let Some(last) = current {
+            scored.push(last)?;
+        }
+        postings_from_unique_scores(scored, None, control)
     }
 }

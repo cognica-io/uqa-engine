@@ -7,7 +7,7 @@
 //! Stage HNSW headers and incremental graph changes beside their canonical tensor mutation.
 
 use rusqlite::types::ValueRef;
-use uqa_storage::{hnsw_index::HNSWPersistenceDelta, KeyValueBatch};
+use uqa_storage::{hnsw_index::HNSWGraphDelta, KeyValueBatch};
 
 use super::super::{
     encoding::{checked_i64, checked_i64_u64, HNSW_FORMAT_VERSION},
@@ -39,7 +39,7 @@ pub(super) fn persist_delta(
     read: &NativeVectorRead<'_>,
     batch: &mut dyn KeyValueBatch,
     index: &SQLiteHNSWIndex,
-    delta: &HNSWPersistenceDelta,
+    delta: &HNSWGraphDelta,
     revision: u64,
     publication: VectorPublication,
 ) -> Result<()> {
@@ -89,7 +89,8 @@ pub(super) fn persist_delta(
         publication.delete_prefix(read, batch, Family::HNSWEdges, &[read.field()])?;
         publication.delete_prefix(read, batch, Family::HNSWNodes, &[read.field()])?;
     }
-    for node in &delta.nodes {
+    for node in delta.nodes() {
+        let node = node?;
         read.snapshot.control.check()?;
         let id = int(checked_i64_u64("node_id", node.node_id)?);
         let vector = vector_to_blob(&node.raw_vector)?;

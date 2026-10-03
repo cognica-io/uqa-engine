@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep memory HNSW graphs, mutation generations and search workspaces bounded by their retention allowance using encrypted temporary storage. Preserve graph topology, canonical scores and retained snapshots, and stream persistence deltas; see the [Rust API changes](docs/manual/reference/10-upgrading.md).
+
 ## [0.4.8] - 2026-10-03
 
 This release improves embedded reads and writes and corrects PostgreSQL 18 identity, input and diagnostic behavior. SQLite databases advance to record format 55, and cooperating processes use new row-lock and sequence sidecars. Stop all database owners, retain a closed pre-upgrade backup and update every owner together; see the [0.4.8 upgrade guide](docs/manual/reference/10-upgrading.md).

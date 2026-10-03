@@ -32,6 +32,11 @@ impl<T> BudgetedBinaryHeap<T> {
         self.values.first()
     }
 
+    /// Borrow the heap's values in heap order without transferring their allocation lease.
+    pub fn as_slice(&self) -> &[T] {
+        &self.values
+    }
+
     pub fn reserve(&mut self, additional: usize) -> Result<(), MemoryError> {
         self.values.reserve(additional)
     }
