@@ -187,10 +187,9 @@ impl Engine {
             transaction_block || (nested_statement && self.transaction_depth() != 0);
         if !transaction_active {
             self.push_sql_notice(
-                uqa_sql::SQLNotice::warning(
-                    "SET CONSTRAINTS can only be used in transaction blocks",
-                )
-                .with_sqlstate("25P01"),
+                uqa_sql::semantics::effects::transaction_blocks::no_transaction_block_warning(
+                    "SET CONSTRAINTS",
+                ),
             );
         }
 

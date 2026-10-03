@@ -364,11 +364,8 @@ impl Engine {
                 .parameter_scopes
                 .assigned(name.clone(), before, action, in_transaction)
         {
+            // A LOCAL assignment outside any transaction lasts only for its own statement; the statement executor reports the warning.
             restore_runtime_parameter(&mut state, &name, previous);
-            self.push_sql_notice(
-                uqa_sql::SQLNotice::warning("SET LOCAL can only be used in transaction blocks")
-                    .with_sqlstate("25P01"),
-            );
         }
         Ok(())
     }

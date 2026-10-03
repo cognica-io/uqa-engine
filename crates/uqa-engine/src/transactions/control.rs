@@ -186,6 +186,15 @@ impl Engine {
                 self.rollback_to_transaction_savepoint(guard, &name)
             }
             _ if failed => Err(failed_transaction_error()),
+            TransactionStmt::Begin | TransactionStmt::BeginWithCharacteristics(_)
+                if guard.iter().any(|frame| frame.explicit_transaction_block) =>
+            {
+                // PostgreSQL's BeginTransactionBlock warns about a BEGIN inside a transaction block, or inside one of its subtransactions, and changes nothing; the first COMMIT still commits the block.
+                self.push_sql_notice(
+                    uqa_sql::semantics::effects::transaction_blocks::transaction_in_progress_warning(),
+                );
+                Ok(())
+            }
             TransactionStmt::Begin => {
                 let characteristics = self.transaction_characteristics_for_begin(
                     guard,

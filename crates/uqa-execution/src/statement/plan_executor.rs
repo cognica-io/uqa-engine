@@ -65,6 +65,17 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         }
     }
 
+    /// Warn that `command`, whose effect lasts until its transaction ends, runs outside a transaction block, as `PostgreSQL`'s `WarnNoTransactionBlock` does. A statement nested in a function or in a multi-statement query has a transaction to last for and is not warned about.
+    fn warn_outside_transaction_block(&self, command: &str) {
+        if !self.nested_statement && !self.context.portals.state.in_transaction_block() {
+            self.context.runtime.notices.lock().push(
+                uqa_sql::semantics::effects::transaction_blocks::no_transaction_block_warning(
+                    command,
+                ),
+            );
+        }
+    }
+
     pub fn with_privilege_subject(mut self, subject: &RoleReference) -> Self {
         self.privilege_subject = Some(subject.clone());
         self
@@ -689,6 +700,9 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 local,
                 is_default,
             } => {
+                if *local {
+                    self.warn_outside_transaction_block("SET LOCAL");
+                }
                 self.context.settings.set_runtime_parameter(
                     name,
                     (!is_default).then_some(value.as_str()),
@@ -775,6 +789,12 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 *restart_identity,
             ),
             CommandPlan::Transaction(statement) => {
+                if matches!(
+                    statement,
+                    uqa_sql::ast::TransactionStmt::SetCharacteristics(_)
+                ) {
+                    self.warn_outside_transaction_block("SET TRANSACTION");
+                }
                 self.context
                     .controls
                     .run_transaction_statement(statement.clone())?;
