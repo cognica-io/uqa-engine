@@ -256,7 +256,7 @@ use cross_process::{
 };
 use parking_lot::{Condvar, Mutex, MutexGuard};
 pub use uqa_core::notifications::SQLNotification;
-use uqa_sql::SQLError;
+use uqa_sql::{SQLError, SQLNotice};
 pub(crate) use uqa_storage::notifications::PendingNotification;
 #[cfg(test)]
 use uqa_storage::notifications::NOTIFICATION_QUEUE_PAGE_BYTES;
@@ -311,7 +311,7 @@ struct NotificationSessionCommit<'a> {
     channels: Vec<String>,
     queue: &'a Arc<Mutex<VecDeque<SQLNotification>>>,
     wake: &'a Arc<Condvar>,
-    notices: &'a Arc<Mutex<Vec<(String, String)>>>,
+    notices: &'a Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
     pending: &'a [PendingNotification],
 }
 
@@ -331,7 +331,7 @@ pub(super) struct CrossNotificationCommit {
     publication: Option<uqa_storage::notifications::NotificationPublication>,
     previous_publication: Option<[u8; 32]>,
     wake_ports: uqa_storage::notifications::NotificationWakePorts,
-    warning: Option<String>,
+    warning: Option<SQLNotice>,
 }
 
 #[derive(Clone, Copy)]
@@ -554,6 +554,17 @@ fn projected_tail_position(
         })
         .min()
         .unwrap_or(state.head_position)
+}
+
+/// The warning `PostgreSQL`'s `asyncQueueFillWarning` reports once the queue is at least half full (`usage` is the filled fraction): the process `blocker` is a listener whose position holds back the oldest entries.
+fn queue_fill_warning(usage: f64, blocker: i32) -> SQLNotice {
+    SQLNotice::warning(format!("NOTIFY queue is {:.0}% full", usage * 100.0))
+        .with_detail(format!(
+            "The server process with PID {blocker} is among those with the oldest transactions."
+        ))
+        .with_hint(
+            "The NOTIFY queue cannot be emptied until that process ends its current transaction.",
+        )
 }
 
 fn queue_usage(state: &NotificationHubState, max_queue_pages: u64) -> f64 {
@@ -869,8 +880,16 @@ mod tests {
             after_publication: Mutex::new(None),
         };
         assert_eq!(
-            hub.queue_warning(&mut state).as_deref(),
-            Some("NOTIFY queue is 100% full\nDETAIL: The server process with PID 42 is among those with the oldest transactions.\nHINT: The NOTIFY queue cannot be emptied until that process ends its current transaction.")
+            hub.queue_warning(&mut state),
+            Some(
+                SQLNotice::warning("NOTIFY queue is 100% full")
+                    .with_detail(
+                        "The server process with PID 42 is among those with the oldest transactions."
+                    )
+                    .with_hint(
+                        "The NOTIFY queue cannot be emptied until that process ends its current transaction."
+                    )
+            )
         );
         assert!(hub.queue_warning(&mut state).is_none());
     }

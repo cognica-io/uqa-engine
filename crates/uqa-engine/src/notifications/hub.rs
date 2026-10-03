@@ -16,12 +16,13 @@ use uqa_storage::notifications::{
 };
 
 use super::{
-    append_notification, notifications_fit_queue, projected_tail_position, queue_page, queue_usage,
-    Arc, Condvar, CrossNotificationCommit, CrossNotificationRequest, CrossProcessCoordinator,
-    CrossProcessListenerRow, CrossProcessQueueState, CrossProcessRegistryTransaction, Instant,
-    ListenerLease, Mutex, MutexGuard, NotificationHub, NotificationHubState, NotificationListener,
-    NotificationSessionCommit, PendingNotification, PreparedCrossSubscription, PreparedDelivery,
-    SQLError, SQLNotification, VecDeque, NOTIFICATION_QUEUE_WARNING_INTERVAL,
+    append_notification, notifications_fit_queue, projected_tail_position, queue_fill_warning,
+    queue_page, queue_usage, Arc, Condvar, CrossNotificationCommit, CrossNotificationRequest,
+    CrossProcessCoordinator, CrossProcessListenerRow, CrossProcessQueueState,
+    CrossProcessRegistryTransaction, Instant, ListenerLease, Mutex, MutexGuard, NotificationHub,
+    NotificationHubState, NotificationListener, NotificationSessionCommit, PendingNotification,
+    PreparedCrossSubscription, PreparedDelivery, SQLError, SQLNotice, SQLNotification, VecDeque,
+    NOTIFICATION_QUEUE_WARNING_INTERVAL,
 };
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 use super::{CrossProcessState, MAX_NOTIFICATION_QUEUE_PAGES};
@@ -486,7 +487,7 @@ impl NotificationHub {
         state: &NotificationHubState,
         listeners: &NotificationListenerSummary,
         queue_state: CrossProcessQueueState,
-    ) -> Option<String> {
+    ) -> Option<SQLNotice> {
         let tail = listeners
             .oldest
             .map_or(queue_state.head_position, |listener| listener.position);
@@ -502,10 +503,7 @@ impl NotificationHub {
             return None;
         }
         let blocker = listeners.oldest?.process_id;
-        Some(format!(
-            "NOTIFY queue is {:.0}% full\nDETAIL: The server process with PID {blocker} is among those with the oldest transactions.\nHINT: The NOTIFY queue cannot be emptied until that process ends its current transaction.",
-            usage * 100.0
-        ))
+        Some(queue_fill_warning(usage, blocker))
     }
 
     pub(super) fn validate_commit(
@@ -590,8 +588,8 @@ impl NotificationHub {
         }
         Self::deliver_idle_listeners(&mut state);
         Self::remove_consumed_entries(&mut state);
-        if let Some(message) = self.queue_warning(&mut state) {
-            notices.lock().push(("WARNING".into(), message));
+        if let Some(warning) = self.queue_warning(&mut state) {
+            notices.lock().push(warning);
         }
     }
 
@@ -633,7 +631,7 @@ impl NotificationHub {
         channels: Vec<String>,
         queue: &Arc<Mutex<VecDeque<SQLNotification>>>,
         wake: &Arc<Condvar>,
-        notices: &Arc<Mutex<Vec<(String, String)>>>,
+        notices: &Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
     ) -> Result<(), SQLError> {
         if channels.is_empty() && !self.state.lock().listeners.contains_key(&session_id) {
             return Ok(());
@@ -683,7 +681,7 @@ impl NotificationHub {
         channels: Vec<String>,
         queue: &Arc<Mutex<VecDeque<SQLNotification>>>,
         wake: &Arc<Condvar>,
-        notices: &Arc<Mutex<Vec<(String, String)>>>,
+        notices: &Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
     ) -> Result<(), SQLError> {
         let cross_state = self.cross.as_ref().ok_or_else(|| {
             SQLError::Internal("cross-process notification coordinator is missing".into())
@@ -773,9 +771,9 @@ impl NotificationHub {
                 },
             );
         }
-        if let Some(message) = prepared.warning {
+        if let Some(warning) = prepared.warning {
             state.last_queue_warning = Some(Instant::now());
-            notices.lock().push(("WARNING".into(), message));
+            notices.lock().push(warning);
         }
         drop(state);
         drop(gate);
@@ -823,7 +821,7 @@ impl NotificationHub {
         }
     }
 
-    pub(super) fn queue_warning(&self, state: &mut NotificationHubState) -> Option<String> {
+    pub(super) fn queue_warning(&self, state: &mut NotificationHubState) -> Option<SQLNotice> {
         if queue_usage(state, self.max_queue_pages) < 0.5 {
             return None;
         }
@@ -839,9 +837,9 @@ impl NotificationHub {
             .min_by_key(|listener| listener.position)?
             .process_id;
         state.last_queue_warning = Some(now);
-        let percentage = queue_usage(state, self.max_queue_pages) * 100.0;
-        Some(format!(
-            "NOTIFY queue is {percentage:.0}% full\nDETAIL: The server process with PID {blocker} is among those with the oldest transactions.\nHINT: The NOTIFY queue cannot be emptied until that process ends its current transaction."
+        Some(queue_fill_warning(
+            queue_usage(state, self.max_queue_pages),
+            blocker,
         ))
     }
 

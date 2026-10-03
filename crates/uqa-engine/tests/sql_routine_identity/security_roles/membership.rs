@@ -58,10 +58,10 @@ fn assert_noinherit_member_cannot_manage_owned_routines(engine: &Engine) {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "WARNING".into(),
-            "no privileges were granted for \"owner_grant_probe\"".into(),
-        )]
+        [
+            uqa_engine::SQLNotice::warning("no privileges were granted for \"owner_grant_probe\"")
+                .with_sqlstate("01007")
+        ]
     );
     assert_eq!(
         sqlstate(engine, "DROP FUNCTION owner_drop_probe()"),
@@ -226,10 +226,10 @@ fn verify_routine_acl_alternate_paths_warnings_and_owner_transfer(engine: &Engin
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "WARNING".into(),
-            "no privileges were granted for \"acl_chain_probe\"".into(),
-        )]
+        [
+            uqa_engine::SQLNotice::warning("no privileges were granted for \"acl_chain_probe\"")
+                .with_sqlstate("01007")
+        ]
     );
     engine.sql("RESET ROLE", &[]).unwrap();
     assert_eq!(

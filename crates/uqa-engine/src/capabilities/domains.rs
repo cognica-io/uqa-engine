@@ -258,7 +258,7 @@ impl DomainRoutineRemoval for Engine {
     }
 }
 impl DomainDropNotices for Engine {
-    fn domain_drop_notice(&self, message: &str) {
-        self.push_sql_notice("NOTICE", message);
+    fn domain_drop_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }

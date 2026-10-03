@@ -35,17 +35,18 @@ pub fn drop_constraint(
                 "decode constraint-trigger relation `{table}`: {error}"
             ))
         })?;
-        return Err(constraint_error(
-            "2BP01",
-            format!(
-                "cannot drop constraint {name} on table {} because trigger {} on table {} requires it\nHINT: You can drop trigger {} on table {} instead.",
-                relation.name,
-                trigger,
-                relation.name,
-                trigger,
-                relation.name
+        return Err(SQLError::Diagnostic {
+            sqlstate: "2BP01".into(),
+            message: format!(
+                "cannot drop constraint {name} on table {} because trigger {trigger} on table {} requires it",
+                relation.name, relation.name
             ),
-        ));
+            detail: None,
+            hint: Some(format!(
+                "You can drop trigger {trigger} on table {} instead.",
+                relation.name
+            )),
+        });
     }
     if super::inheritance::drop_inherited_constraint(context, &table, name, recurse, cascade)? {
         return Ok(());

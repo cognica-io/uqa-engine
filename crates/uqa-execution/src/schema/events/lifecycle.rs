@@ -32,17 +32,15 @@ impl EventLifecycleContext<'_> {
             .resolve_visible_relation_kind(requested)?;
         match resolution {
             RelationResolution::MissingSchema(schema) if if_exists => {
-                self.notice(
-                    "NOTICE",
-                    &format!("schema \"{schema}\" does not exist, skipping"),
-                );
+                self.notice(uqa_sql::SQLNotice::notice(format!(
+                    "schema \"{schema}\" does not exist, skipping"
+                )));
                 Ok(None)
             }
             RelationResolution::MissingRelation if if_exists => {
-                self.notice(
-                    "NOTICE",
-                    &format!("relation \"{requested}\" does not exist, skipping"),
-                );
+                self.notice(uqa_sql::SQLNotice::notice(format!(
+                    "relation \"{requested}\" does not exist, skipping"
+                )));
                 Ok(None)
             }
             resolution => Ok(Some(resolution)),
@@ -165,12 +163,14 @@ impl EventLifecycleContext<'_> {
                 .view_definition(&table)?
                 .is_some()
         {
-            return Err(SQLError::Routine {
+            return Err(SQLError::Diagnostic {
                 sqlstate: "2BP01".into(),
                 message: format!(
-                    "cannot drop rule _RETURN on view {} because view {} requires it\nHINT: You can drop view {} instead.",
-                    relation.name, relation.name, relation.name
+                    "cannot drop rule _RETURN on view {} because view {} requires it",
+                    relation.name, relation.name
                 ),
+                detail: None,
+                hint: Some(format!("You can drop view {} instead.", relation.name)),
             });
         }
         self.writer.prepare_writer()?;
@@ -181,13 +181,10 @@ impl EventLifecycleContext<'_> {
             .and_then(|entries| entries.remove(&statement.name));
         if removed.is_none() {
             if statement.if_exists {
-                self.notice(
-                    "NOTICE",
-                    &format!(
-                        "rule \"{}\" for relation \"{}\" does not exist, skipping",
-                        statement.name, table
-                    ),
-                );
+                self.notice(uqa_sql::SQLNotice::notice(format!(
+                    "rule \"{}\" for relation \"{}\" does not exist, skipping",
+                    statement.name, table
+                )));
                 return Ok(());
             }
             return Err(undefined_rule(&statement.name, &table));
@@ -372,13 +369,10 @@ impl EventLifecycleContext<'_> {
             .and_then(|entries| entries.remove(&statement.name));
         let Some(removed) = removed else {
             if statement.if_exists {
-                self.notice(
-                    "NOTICE",
-                    &format!(
-                        "trigger \"{}\" for relation \"{}\" does not exist, skipping",
-                        statement.name, table
-                    ),
-                );
+                self.notice(uqa_sql::SQLNotice::notice(format!(
+                    "trigger \"{}\" for relation \"{}\" does not exist, skipping",
+                    statement.name, table
+                )));
                 return Ok(());
             }
             return Err(undefined_object("trigger", &statement.name, &relation.name));
@@ -514,9 +508,7 @@ fn new_trigger_object_id() -> Result<[u8; 16], SQLError> {
 }
 
 impl EventLifecycleContext<'_> {
-    pub(super) fn notice(&self, level: &str, message: &str) {
-        self.notices
-            .lock()
-            .push((level.to_string(), message.to_string()));
+    pub(super) fn notice(&self, notice: uqa_sql::SQLNotice) {
+        self.notices.lock().push(notice);
     }
 }

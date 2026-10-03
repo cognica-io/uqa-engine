@@ -26,11 +26,12 @@ use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles}
 use uqa_sql::{
     ast::{GrantSequenceStmt, GrantSequenceTarget},
     catalog::security::{
+        acl_warning::acl_warning,
         dependencies::added_acl_roles,
         sequence::requested_acl_privileges,
         sequence_grants::{
             apply_sequence_acl, bind_named_sequence_grants, bind_sequence_grant_schemas,
-            sequence_acl_warning, sequence_grants_in_schemas, validate_sequence_acl_roles,
+            sequence_grants_in_schemas, validate_sequence_acl_roles,
             validate_sequence_grant_target_kinds, ResolvedSequenceGrantTarget,
             SequenceGrantNamespace,
         },
@@ -48,7 +49,7 @@ pub trait SequencePrivilegePublication {
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
     fn security_write(&self) -> SequenceSecurityWrite<'_>;
     fn catalog_changed(&self);
-    fn notice(&self, level: &str, message: &str);
+    fn notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct SequencePrivilegeContext<'a> {
     pub inquiry: SequencePrivilegeInquiry<'a>,
@@ -63,7 +64,7 @@ pub struct SequencePrivilegeContext<'a> {
 struct SequencePrivilegeCandidate<'a> {
     registry: SequenceSecurityWrite<'a>,
     updates: Vec<(String, RelationIdentity, BoundSequenceSecurity)>,
-    notices: Vec<(&'static str, String)>,
+    notices: Vec<uqa_sql::SQLNotice>,
 }
 
 impl SequencePrivilegeContext<'_> {
@@ -105,8 +106,8 @@ impl SequencePrivilegeContext<'_> {
         drop(registry);
         drop(memberships);
         drop(roles);
-        for (level, message) in notices {
-            self.publication.notice(level, &message);
+        for notice in notices {
+            self.publication.notice(notice);
         }
         if changed {
             self.publication.catalog_changed();
@@ -165,7 +166,7 @@ impl SequencePrivilegeContext<'_> {
                 &current,
             )?;
             if grantable != privileges.len() {
-                notices.push(sequence_acl_warning(
+                notices.push(acl_warning(
                     statement.is_grant,
                     grantable != 0,
                     &target.relation.name,

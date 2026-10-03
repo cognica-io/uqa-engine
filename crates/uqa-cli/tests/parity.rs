@@ -230,6 +230,39 @@ fn command_string_routes_sql_notices_to_stderr() {
 }
 
 #[test]
+fn command_string_prints_error_detail_and_hint_lines() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(
+        &["-c", "SET session_replication_role = rep"],
+        "",
+        dir.path(),
+    );
+    assert!(!output.status.success(), "stdout: {}", stdout(&output));
+    assert!(
+        stdout(&output).contains(
+            "ERROR: 22023: invalid value for parameter \"session_replication_role\": \"rep\"\nHINT: Available values: origin, replica, local.\n"
+        ),
+        "{}",
+        stdout(&output)
+    );
+    let output = run_usql(
+        &[
+            "-c",
+            "CREATE TABLE pt (k int) PARTITION BY RANGE (k); CREATE TABLE p1 PARTITION OF pt FOR VALUES FROM (0) TO (10); ALTER TABLE pt DETACH PARTITION p1 FINALIZE",
+        ],
+        "",
+        dir.path(),
+    );
+    assert!(
+        stdout(&output).contains(
+            "ERROR: 55000: cannot complete detaching partition \"p1\"\nDETAIL: There's no pending concurrent detach.\n"
+        ),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
 fn command_string_preserves_sql_standard_function_body_for_engine_validation() {
     let dir = tempfile::tempdir().expect("tempdir");
     let sql = "CREATE FUNCTION cli_atomic(value anyelement) RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT 1; END;";

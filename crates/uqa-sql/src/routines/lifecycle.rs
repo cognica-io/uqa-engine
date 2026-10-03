@@ -33,14 +33,14 @@ pub struct SQLFunctionDropPlan {
     pub domains: BTreeSet<u32>,
     pub targets: Vec<RoutineDropTarget>,
     pub dependents: RoutineObjectDependents,
-    pub notices: Vec<(&'static str, String)>,
+    pub notices: Vec<crate::SQLNotice>,
 }
 
 #[derive(Default)]
 pub struct RoutineDropResolution {
     pub targets: Vec<RoutineDropTarget>,
     pub seen_targets: BTreeSet<RoutineDropTarget>,
-    pub notices: Vec<(&'static str, String)>,
+    pub notices: Vec<crate::SQLNotice>,
 }
 
 pub struct RoutineObjectDependents {

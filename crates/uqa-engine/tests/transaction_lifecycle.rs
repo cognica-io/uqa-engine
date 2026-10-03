@@ -171,14 +171,10 @@ fn sql_commit_and_rollback_without_begin_warn_instead_of_erroring() {
     assert_eq!(
         eng.take_sql_notices(),
         vec![
-            (
-                "WARNING".into(),
-                "there is no transaction in progress".into()
-            ),
-            (
-                "WARNING".into(),
-                "there is no transaction in progress".into()
-            ),
+            uqa_engine::SQLNotice::warning("there is no transaction in progress")
+                .with_sqlstate("25P01"),
+            uqa_engine::SQLNotice::warning("there is no transaction in progress")
+                .with_sqlstate("25P01"),
         ]
     );
 }

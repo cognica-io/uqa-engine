@@ -18,9 +18,10 @@ use uqa_sql::{
     catalog::{
         roles::{guards::RoleCatalogGuards, RoleReferenceNames},
         security::{
+            acl_warning::acl_warning,
             database::{
-                apply_database_acl, database_acl_warning, requested_acl_privileges,
-                resolve_database_grant_targets, validate_database_acl_roles, BoundDatabaseSecurity,
+                apply_database_acl, requested_acl_privileges, resolve_database_grant_targets,
+                validate_database_acl_roles, BoundDatabaseSecurity,
             },
             database_inquiry::DatabaseSecurityRead,
             dependencies::added_acl_roles,
@@ -44,7 +45,7 @@ pub trait DatabasePrivilegePublication {
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
     fn persist_security(&self, json: &str) -> Result<(), SQLError>;
     fn catalog_changed(&self);
-    fn notice(&self, level: &str, message: &str);
+    fn notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct DatabasePrivilegeContext<'a> {
     pub names: &'a dyn RoleReferenceNames,
@@ -91,8 +92,8 @@ pub fn grant_database_privileges(
     }
     drop(memberships);
     drop(roles);
-    if let Some((level, message)) = notice {
-        context.publication.notice(level, &message);
+    if let Some(notice) = notice {
+        context.publication.notice(notice);
     }
     Ok(())
 }
@@ -100,7 +101,7 @@ pub fn grant_database_privileges(
 struct DatabasePrivilegeCandidate {
     current: BoundDatabaseSecurity,
     next: BoundDatabaseSecurity,
-    notice: Option<(&'static str, String)>,
+    notice: Option<uqa_sql::SQLNotice>,
 }
 
 fn prepare_privileges<'a>(
@@ -143,7 +144,7 @@ fn prepare_privileges<'a>(
         &resolved,
     )?;
     let notice = (grantable != privileges.len())
-        .then(|| database_acl_warning(statement.is_grant, grantable != 0, DATABASE_NAME));
+        .then(|| acl_warning(statement.is_grant, grantable != 0, DATABASE_NAME));
     let mut dependencies = BTreeSet::new();
     added_acl_roles(
         resolved.acl.as_deref().unwrap_or_default(),

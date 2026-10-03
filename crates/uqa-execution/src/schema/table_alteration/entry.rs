@@ -52,7 +52,7 @@ pub struct TableAlterEntryContext<'a, S: Clone + 'static> {
     pub foreign_tables: &'a dyn ForeignTableAlterTransactions,
     pub sequences: &'a dyn SequenceAlterTransactions,
     pub indexes: &'a dyn crate::schema::indexes::renaming::IndexRenameTransactions,
-    pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
+    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
 }
 
 pub fn run_alter_table<S: Clone + 'static>(

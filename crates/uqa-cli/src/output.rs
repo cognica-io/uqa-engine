@@ -59,11 +59,7 @@ fn print_result_expanded_impl(
 
 pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
     if let Err(error) = print_result_impl(result, None, out) {
-        let _ = writeln!(
-            out,
-            "ERROR: {}: {error}",
-            error.sqlstate().unwrap_or("XX000")
-        );
+        let _ = writeln!(out, "ERROR: {}", super::diagnostics::sql_error_text(&error));
     }
 }
 

@@ -145,7 +145,9 @@ fn foreign_table_defaults_and_checks_keep_exact_routine_dependencies() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![("NOTICE".into(), "drop cascades to 3 other objects".into())]
+        vec![uqa_engine::SQLNotice::notice(
+            "drop cascades to 3 other objects"
+        )]
     );
     assert_eq!(
         scalar(
@@ -315,10 +317,8 @@ fn foreign_generated_columns_follow_routine_lifecycle() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![(
-            "NOTICE".into(),
+        vec![uqa_engine::SQLNotice::notice(
             "drop cascades to column derived of foreign table public.foreign_generated_items"
-                .into()
         )]
     );
     assert_eq!(
@@ -416,7 +416,9 @@ fn foreign_table_sequence_dependencies_follow_rename_drop_and_reopen() {
             .unwrap();
         assert_eq!(
             engine.take_sql_notices(),
-            vec![("NOTICE".into(), "drop cascades to 3 other objects".into())]
+            vec![uqa_engine::SQLNotice::notice(
+                "drop cascades to 3 other objects"
+            )]
         );
     }
 
@@ -593,10 +595,10 @@ fn invalid_foreign_table_schema_never_reaches_the_catalog() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![(
-            "NOTICE".into(),
-            "relation \"foreign_relation_collision\" already exists, skipping".into()
-        )]
+        vec![uqa_engine::SQLNotice::notice(
+            "relation \"foreign_relation_collision\" already exists, skipping"
+        )
+        .with_sqlstate("42P07")]
     );
 }
 

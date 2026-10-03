@@ -471,7 +471,7 @@ pub(super) struct QueryRuntime {
     pub(super) statement_gate: Arc<StatementGate>,
     pub(super) sql_execution_depth: AtomicUsize,
     pub(super) cancellation: uqa_core::CancellationToken,
-    pub(super) notices: Arc<Mutex<Vec<(String, String)>>>,
+    pub(super) notices: Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
     pub(super) notifications: Arc<Mutex<VecDeque<crate::SQLNotification>>>,
     pub(super) notification_wake: Arc<parking_lot::Condvar>,
     pub(super) function_depth_limit: AtomicUsize,

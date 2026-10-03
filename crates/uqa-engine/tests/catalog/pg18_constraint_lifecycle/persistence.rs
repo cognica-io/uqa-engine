@@ -221,9 +221,10 @@ fn set_constraints_uses_batch_callback_and_temporary_namespace_transaction_conte
         &engine,
         "SET CONSTRAINTS child_parent_fk DEFERRED; INSERT INTO child VALUES (1, 101); INSERT INTO parent VALUES (101); COMMIT",
     );
-    assert!(engine.take_sql_notices().iter().any(|(level, message)| {
-        level == "WARNING" && message == "there is no transaction in progress"
-    }));
+    assert!(engine.take_sql_notices().contains(
+        &uqa_engine::SQLNotice::warning("there is no transaction in progress")
+            .with_sqlstate("25P01")
+    ));
     error(
         &engine,
         "INSERT INTO parent VALUES (303); INSERT INTO parent VALUES (303); COMMIT",
@@ -293,9 +294,10 @@ fn set_constraints_uses_batch_callback_and_temporary_namespace_transaction_conte
         "42704",
         "does not exist",
     );
-    assert!(engine.take_sql_notices().iter().any(|(level, message)| {
-        level == "WARNING" && message == "SET CONSTRAINTS can only be used in transaction blocks"
-    }));
+    assert!(engine.take_sql_notices().contains(
+        &uqa_engine::SQLNotice::warning("SET CONSTRAINTS can only be used in transaction blocks")
+            .with_sqlstate("25P01")
+    ));
     exec(&engine, "CREATE TEMP TABLE temp_lifetime (id INTEGER)");
     exec(&engine, "DROP TABLE temp_lifetime");
     exec(&engine, "BEGIN");
@@ -443,9 +445,10 @@ fn set_constraints_resolves_names_like_postgresql_and_all_ignores_immediate_cons
     exec(&engine, "ROLLBACK");
 
     exec(&engine, "SET CONSTRAINTS ALL IMMEDIATE");
-    assert!(engine.take_sql_notices().iter().any(|(level, message)| {
-        level == "WARNING" && message == "SET CONSTRAINTS can only be used in transaction blocks"
-    }));
+    assert!(engine.take_sql_notices().contains(
+        &uqa_engine::SQLNotice::warning("SET CONSTRAINTS can only be used in transaction blocks")
+            .with_sqlstate("25P01")
+    ));
 }
 
 #[test]

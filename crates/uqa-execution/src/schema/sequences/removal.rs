@@ -251,12 +251,17 @@ impl SequenceRemovalContext<'_> {
                 [dependent] => {
                     self.routines
                         .notices
-                        .routine_drop_notice("NOTICE", &format!("drop cascades to {dependent}"));
+                        .routine_drop_notice(uqa_sql::SQLNotice::notice(format!(
+                            "drop cascades to {dependent}"
+                        )));
                 }
-                _ => self.routines.notices.routine_drop_notice(
-                    "NOTICE",
-                    &format!("drop cascades to {} other objects", dependents.len()),
-                ),
+                _ => self
+                    .routines
+                    .notices
+                    .routine_drop_notice(uqa_sql::SQLNotice::notice(format!(
+                        "drop cascades to {} other objects",
+                        dependents.len()
+                    ))),
             }
         }
         Ok(())

@@ -10,7 +10,7 @@ use super::{RoutineDropTarget, RoutineObjectDependents};
 use crate::SQLError;
 
 pub fn append_routine_cascade_notice(
-    notices: &mut Vec<(&'static str, String)>,
+    notices: &mut Vec<crate::SQLNotice>,
     cascaded_routines: &[RoutineDropTarget],
     dependents: &RoutineObjectDependents,
 ) {
@@ -58,11 +58,13 @@ pub fn append_routine_cascade_notice(
     cascaded.dedup();
     match cascaded.as_slice() {
         [] => {}
-        [object] => notices.push(("NOTICE", format!("drop cascades to {object}"))),
-        objects => notices.push((
-            "NOTICE",
-            format!("drop cascades to {} other objects", objects.len()),
-        )),
+        [object] => notices.push(crate::SQLNotice::notice(format!(
+            "drop cascades to {object}"
+        ))),
+        objects => notices.push(crate::SQLNotice::notice(format!(
+            "drop cascades to {} other objects",
+            objects.len()
+        ))),
     }
 }
 

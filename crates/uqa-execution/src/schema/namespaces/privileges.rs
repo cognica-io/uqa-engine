@@ -28,10 +28,11 @@ use uqa_sql::{
     catalog::{
         roles::RoleReferenceNames,
         security::{
+            acl_warning::acl_warning,
             dependencies::added_acl_roles,
             schema::{
                 apply_schema_acl, requested_acl_privileges, resolve_schema_grant_targets,
-                schema_acl_warning, validate_schema_acl_roles,
+                validate_schema_acl_roles,
             },
             BoundSchemaSecurity,
         },
@@ -46,7 +47,7 @@ pub trait SchemaPrivilegeRegistry {
     fn schemas_write(&self) -> SchemaRegistryWrite<'_>;
 }
 pub trait SchemaPrivilegeNotices {
-    fn schema_privilege_notice(&self, level: &str, message: &str);
+    fn schema_privilege_notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct SchemaPrivilegeContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
@@ -112,8 +113,8 @@ pub fn grant_schema_privileges(
             .schemas_write()
             .insert(name, value.security);
         context.changes.catalog_registry_changed();
-        if let Some((level, message)) = value.notice {
-            context.notices.schema_privilege_notice(level, &message);
+        if let Some(notice) = value.notice {
+            context.notices.schema_privilege_notice(notice);
         }
     }
     Ok(())
@@ -122,7 +123,7 @@ pub fn grant_schema_privileges(
 struct SchemaPrivilegeCandidate {
     before: uqa_core::catalog_schema::SchemaTupleIdentity,
     security: BoundSchemaSecurity,
-    notice: Option<(&'static str, String)>,
+    notice: Option<uqa_sql::SQLNotice>,
 }
 
 fn prepare_privileges<'a>(
@@ -158,7 +159,7 @@ fn prepare_privileges<'a>(
         &resolved,
     )?;
     let notice = (grantable != privileges.len())
-        .then(|| schema_acl_warning(statement.is_grant, grantable != 0, name));
+        .then(|| acl_warning(statement.is_grant, grantable != 0, name));
     let mut dependencies = BTreeSet::new();
     added_acl_roles(
         resolved.acl.as_deref().unwrap_or_default(),

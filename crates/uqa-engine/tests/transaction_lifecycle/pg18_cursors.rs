@@ -372,7 +372,7 @@ fn pg18_cursor_keeps_declare_time_relation_bindings_and_forwards_notices() {
     );
     assert_eq!(
         engine.take_sql_notices(),
-        vec![("NOTICE".into(), "from cursor".into())]
+        vec![uqa_engine::SQLNotice::notice("from cursor")]
     );
     engine.sql("ROLLBACK", &[]).unwrap();
 }

@@ -732,7 +732,13 @@ impl Engine {
             .inner()?
             .take_sql_notices()
             .into_iter()
-            .map(|(level, message)| SQLNotice { level, message })
+            .map(|notice| SQLNotice {
+                level: notice.level.as_str().to_string(),
+                sqlstate: notice.sqlstate,
+                message: notice.message,
+                detail: notice.detail,
+                hint: notice.hint,
+            })
             .collect())
     }
 

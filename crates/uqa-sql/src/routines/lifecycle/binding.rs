@@ -55,10 +55,9 @@ pub fn resolve_sql_function_drop_targets(
                 None => format!("{}()", item.name),
             };
             if stmt.if_exists {
-                resolution.notices.push((
-                    "NOTICE",
-                    format!("{kind} {spelled} does not exist, skipping"),
-                ));
+                resolution.notices.push(crate::SQLNotice::notice(format!(
+                    "{kind} {spelled} does not exist, skipping"
+                )));
                 continue;
             }
             let described = match &item.arg_types {

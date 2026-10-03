@@ -86,9 +86,8 @@ fn assert_sequence_persistence_errors(engine: &Engine) {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![(
-            "NOTICE".to_string(),
-            "relation \"missing_ids\" does not exist, skipping".to_string()
+        vec![uqa_engine::SQLNotice::notice(
+            "relation \"missing_ids\" does not exist, skipping"
         )]
     );
     engine
@@ -96,9 +95,8 @@ fn assert_sequence_persistence_errors(engine: &Engine) {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![(
-            "NOTICE".to_string(),
-            "relation \"missing_table_ids\" does not exist, skipping".to_string()
+        vec![uqa_engine::SQLNotice::notice(
+            "relation \"missing_table_ids\" does not exist, skipping"
         )]
     );
     for sql in [

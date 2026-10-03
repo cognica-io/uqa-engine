@@ -117,7 +117,7 @@ impl DatabasePrivilegePublication for DatabaseCatalog {
         self.epoch.set(self.epoch.get() + 1);
     }
 
-    fn notice(&self, _: &str, _: &str) {
+    fn notice(&self, _: uqa_sql::SQLNotice) {
         self.assert_guards_are_released();
         panic!("the database owner can grant CREATE without a warning");
     }

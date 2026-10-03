@@ -6,12 +6,27 @@
 
 //! Notices, limits, cancellation, close, and representation.
 
-use super::{pymethods, runtime_error, PyEngine, PyResult, PyRuntimeError};
+use super::{
+    pymethods, runtime_error, Py, PyAny, PyDict, PyDictMethods, PyEngine, PyResult, PyRuntimeError,
+    Python,
+};
 
 #[pymethods]
 impl PyEngine {
-    fn take_sql_notices(&self) -> PyResult<Vec<(String, String)>> {
-        Ok(self.inner()?.take_sql_notices())
+    fn take_sql_notices(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        self.inner()?
+            .take_sql_notices()
+            .into_iter()
+            .map(|notice| {
+                let dict = PyDict::new(py);
+                dict.set_item("level", notice.level.as_str())?;
+                dict.set_item("sqlstate", notice.sqlstate)?;
+                dict.set_item("message", notice.message)?;
+                dict.set_item("detail", notice.detail)?;
+                dict.set_item("hint", notice.hint)?;
+                Ok(dict.into_any().unbind())
+            })
+            .collect()
     }
 
     fn sql_function_depth_limit(&self) -> PyResult<usize> {

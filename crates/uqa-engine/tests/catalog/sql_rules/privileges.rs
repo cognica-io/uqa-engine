@@ -150,10 +150,7 @@ fn rule_ddl_authority_is_derived_from_the_target_relation() {
     );
     assert_eq!(
         engine.take_sql_notices(),
-        [(
-            "NOTICE".into(),
-            "rule \"missing_rule\" for relation \"rule_privilege.missing_items\" does not exist, skipping".into(),
-        )]
+        [uqa_engine::SQLNotice::notice("rule \"missing_rule\" for relation \"rule_privilege.missing_items\" does not exist, skipping")]
     );
     exec(&engine, "RESET ROLE");
 

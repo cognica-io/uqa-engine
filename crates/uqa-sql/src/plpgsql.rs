@@ -282,6 +282,18 @@ impl RaiseLevel {
             RaiseLevel::Error => "ERROR",
         }
     }
+
+    /// The level of the notice a `RAISE` at this level reports, or `None` for `EXCEPTION`, which raises an error.
+    pub const fn notice_level(self) -> Option<crate::NoticeLevel> {
+        match self {
+            RaiseLevel::Debug => Some(crate::NoticeLevel::Debug),
+            RaiseLevel::Log => Some(crate::NoticeLevel::Log),
+            RaiseLevel::Info => Some(crate::NoticeLevel::Info),
+            RaiseLevel::Notice => Some(crate::NoticeLevel::Notice),
+            RaiseLevel::Warning => Some(crate::NoticeLevel::Warning),
+            RaiseLevel::Error => None,
+        }
+    }
 }
 
 /// Assignment / `INTO` target.

@@ -23,8 +23,8 @@ impl RoutineExecutionAuthority for Engine {
     }
 }
 impl RoutinePrivilegeNotices for Engine {
-    fn routine_privilege_notice(&self, level: &str, message: &str) {
-        self.push_sql_notice(level, message);
+    fn routine_privilege_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }
 impl Engine {

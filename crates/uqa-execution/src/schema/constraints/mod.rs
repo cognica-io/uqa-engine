@@ -47,7 +47,7 @@ pub struct ConstraintAlterContext<'a> {
     pub foreign_keys: ForeignKeyDefinitionContext<'a>,
     pub publication: SchemaPublicationContext<'a>,
     pub writes: &'a dyn SchemaWriteTransaction,
-    pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
+    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
 }
 fn ddl_storage_error(action: &str, error: StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)

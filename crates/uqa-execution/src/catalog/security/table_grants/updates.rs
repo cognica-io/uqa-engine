@@ -23,7 +23,7 @@ pub(super) fn system_privilege_updates(
     context: &TableGrantContext<'_>,
     targets: &[ResolvedTableGrantTarget],
     application: &TableGrantApplication<'_>,
-    notices: &mut Vec<(&'static str, String)>,
+    notices: &mut Vec<uqa_sql::SQLNotice>,
     dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<SystemPrivilegeUpdate>, SQLError> {
     let mut updates = Vec::new();
@@ -76,7 +76,7 @@ pub(super) fn system_privilege_updates(
 pub(super) fn table_privilege_updates<'a>(
     targets: Vec<(&ResolvedTableGrantTarget, Box<dyn TableGrantState + 'a>)>,
     application: &TableGrantApplication<'_>,
-    notices: &mut Vec<(&'static str, String)>,
+    notices: &mut Vec<uqa_sql::SQLNotice>,
     dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<TablePrivilegeUpdate<'a>>, SQLError> {
     let mut updates = Vec::new();

@@ -39,7 +39,7 @@ fn scalar(engine: &Engine, sql: &str) -> Value {
 fn assert_single_warning(engine: &Engine, message: &str) {
     assert_eq!(
         engine.take_sql_notices(),
-        [("WARNING".into(), message.into())]
+        [uqa_engine::SQLNotice::warning(message)]
     );
 }
 
@@ -236,13 +236,9 @@ fn assert_owner_dependency_and_resolution_errors(engine: &Engine) {
     assert_eq!(
         engine.take_sql_notices(),
         [
-            (
-                "NOTICE".into(),
-                "relation \"missing_role_ids\" does not exist, skipping".into()
-            ),
-            (
-                "NOTICE".into(),
-                "relation \"missing_public_ids\" does not exist, skipping".into()
+            uqa_engine::SQLNotice::notice("relation \"missing_role_ids\" does not exist, skipping"),
+            uqa_engine::SQLNotice::notice(
+                "relation \"missing_public_ids\" does not exist, skipping"
             )
         ]
     );

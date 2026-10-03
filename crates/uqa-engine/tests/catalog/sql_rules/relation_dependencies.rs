@@ -515,9 +515,8 @@ fn assert_missing_relation_rename_semantics(engine: &Engine) {
         );
         assert_eq!(
             engine.take_sql_notices(),
-            [(
-                "NOTICE".into(),
-                "relation \"missing_relation\" does not exist, skipping".into()
+            [uqa_engine::SQLNotice::notice(
+                "relation \"missing_relation\" does not exist, skipping"
             )],
             "{kind}"
         );

@@ -72,7 +72,9 @@ fn sql_standard_routine_dependencies_restrict_and_cascade_transitively() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![("NOTICE".into(), "drop cascades to 3 other objects".into())]
+        vec![uqa_engine::SQLNotice::notice(
+            "drop cascades to 3 other objects"
+        )]
     );
     for sql in [
         "SELECT cascade_base(1)",
@@ -287,9 +289,8 @@ fn dependent_sql_procedure_and_durable_reopen_follow_the_same_graph() {
         .unwrap();
     assert_eq!(
         reopened.take_sql_notices(),
-        vec![(
-            "NOTICE".into(),
-            "drop cascades to procedure public.durable_proc(integer)".into(),
+        vec![uqa_engine::SQLNotice::notice(
+            "drop cascades to procedure public.durable_proc(integer)"
         )]
     );
     assert_eq!(sqlstate(&reopened, "CALL durable_proc(1)"), "42883");
@@ -472,7 +473,9 @@ fn command_body_dependency_survives_rename_recreation_and_reopen() {
         .unwrap();
     assert_eq!(
         reopened.take_sql_notices(),
-        vec![("NOTICE".into(), "drop cascades to 2 other objects".into())]
+        vec![uqa_engine::SQLNotice::notice(
+            "drop cascades to 2 other objects"
+        )]
     );
     assert_eq!(sqlstate(&reopened, "CALL command_writer(4)"), "42883");
     assert_eq!(sqlstate(&reopened, "CALL command_merge_writer()"), "42883");
@@ -733,7 +736,9 @@ fn parameter_default_dependencies_bind_every_body_form_and_creation_path() {
         .unwrap();
     assert_eq!(
         reopened.take_sql_notices(),
-        vec![("NOTICE".into(), "drop cascades to 3 other objects".into())]
+        vec![uqa_engine::SQLNotice::notice(
+            "drop cascades to 3 other objects"
+        )]
     );
     for sql in [
         "SELECT early.default_standard()",
@@ -805,7 +810,9 @@ fn table_defaults_and_checks_keep_exact_routine_dependencies() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![("NOTICE".into(), "drop cascades to 3 other objects".into())]
+        vec![uqa_engine::SQLNotice::notice(
+            "drop cascades to 3 other objects"
+        )]
     );
     assert!(engine
         .column_default_expr("schema_dependency_rows", "id")

@@ -277,13 +277,9 @@ fn sequence_schema_name_error_precedence_matches_postgresql() {
     assert_eq!(
         engine.take_sql_notices(),
         [
-            (
-                "NOTICE".into(),
-                "relation \"ids\" does not exist, skipping".into(),
-            ),
-            (
-                "NOTICE".into(),
-                "schema \"missing_sequence_schema\" does not exist, skipping".into(),
+            uqa_engine::SQLNotice::notice("relation \"ids\" does not exist, skipping"),
+            uqa_engine::SQLNotice::notice(
+                "schema \"missing_sequence_schema\" does not exist, skipping"
             ),
         ]
     );

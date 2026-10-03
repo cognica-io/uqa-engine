@@ -904,10 +904,12 @@ fn bind_orders(
 }
 
 pub fn invalid_rule_action_reference(qualifier: &str) -> SQLError {
-    SQLError::Routine {
+    SQLError::Diagnostic {
         sqlstate: "42P01".into(),
-        message: format!(
-            "invalid reference to FROM-clause entry for table \"{qualifier}\"\nDETAIL: There is an entry for table \"{qualifier}\", but it cannot be referenced from this part of the query."
-        ),
+        message: format!("invalid reference to FROM-clause entry for table \"{qualifier}\""),
+        detail: Some(format!(
+            "There is an entry for table \"{qualifier}\", but it cannot be referenced from this part of the query."
+        )),
+        hint: None,
     }
 }

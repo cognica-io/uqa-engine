@@ -475,8 +475,8 @@ test("sql notices, depth limit, and encryption rejection", async () => {
   await engine.sql("DO $$ BEGIN RAISE NOTICE 'v=% w=%% x=%', 1, 'two'; END $$");
   await engine.sql("DO $$ BEGIN RAISE WARNING 'careful'; END $$");
   assert.deepEqual(await engine.takeSQLNotices(), [
-    { level: "NOTICE", message: "v=1 w=% x=two" },
-    { level: "WARNING", message: "careful" },
+    { level: "NOTICE", sqlstate: "00000", message: "v=1 w=% x=two" },
+    { level: "WARNING", sqlstate: "01000", message: "careful" },
   ]);
   assert.deepEqual(await engine.takeSQLNotices(), []);
 

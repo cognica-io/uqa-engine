@@ -61,9 +61,8 @@ fn table_alter_if_exists_rechecks_a_source_removed_while_waiting() {
         result.unwrap();
         assert_eq!(
             second.take_sql_notices(),
-            [(
-                "NOTICE".into(),
-                "relation \"t\" does not exist, skipping".into()
+            [crate::SQLNotice::notice(
+                "relation \"t\" does not exist, skipping"
             )]
         );
         let columns = sql(&second, "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='renamed' ORDER BY ordinal_position");

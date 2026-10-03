@@ -453,3 +453,30 @@ fn highlighter_keeps_uppercase_keywords_case_insensitive() {
     assert!(highlighted.contains("\x1b[32m'rust'\x1b[0m"));
     assert!(highlighted.contains("\x1b[90m-- comment\x1b[0m"));
 }
+
+#[test]
+fn diagnostics_print_detail_and_hint_on_lines_of_their_own() {
+    let notice = uqa_sql::SQLNotice::warning("NOTIFY queue is 50% full")
+        .with_detail("The server process with PID 42 is among those with the oldest transactions.")
+        .with_hint(
+            "The NOTIFY queue cannot be emptied until that process ends its current transaction.",
+        );
+    assert_eq!(
+        super::diagnostics::sql_notice_text(&notice),
+        "WARNING: NOTIFY queue is 50% full\nDETAIL: The server process with PID 42 is among those with the oldest transactions.\nHINT: The NOTIFY queue cannot be emptied until that process ends its current transaction."
+    );
+    assert_eq!(
+        super::diagnostics::sql_notice_text(&uqa_sql::SQLNotice::notice("plain")),
+        "NOTICE: plain"
+    );
+    let error = uqa_sql::SQLError::Diagnostic {
+        sqlstate: "2BP01".into(),
+        message: "cannot drop rule _RETURN on view v because view v requires it".into(),
+        detail: None,
+        hint: Some("You can drop view v instead.".into()),
+    };
+    assert_eq!(
+        super::diagnostics::sql_error_text(&error),
+        "2BP01: cannot drop rule _RETURN on view v because view v requires it\nHINT: You can drop view v instead."
+    );
+}

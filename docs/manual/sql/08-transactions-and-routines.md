@@ -339,6 +339,12 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 SELECT manual_foreach_sum(ARRAY[1, 2, 3]);
 ```
 
+### Notices
+
+`RAISE DEBUG`, `LOG`, `INFO`, `NOTICE` and `WARNING` report a notice, and `RAISE EXCEPTION` raises an error with SQLSTATE `P0001`. A `RAISE` that names a condition, as in `RAISE NOTICE division_by_zero`, or a SQLSTATE, as in `RAISE NOTICE SQLSTATE '22012'`, reports that SQLSTATE; any other notice carries `00000`, or `01000` for a warning. `RAISE ... USING` options are not implemented.
+
+Statements report their own notices with the SQLSTATE PostgreSQL gives each, such as `42P07` for `relation "t" already exists, skipping` and `25P01` for `there is no transaction in progress`. `Engine::take_sql_notices` drains a session's notices in the order they were reported, as `SQLNotice` values with `level`, `sqlstate`, `message`, `detail` and `hint`. The Python binding returns them as dictionaries with those keys, and the Node.js and WASM bindings as objects whose `detail` and `hint` are present when set. The PostgreSQL server sends each notice as a NoticeResponse with these fields, and `usql` prints it on standard error with its detail and hint on lines of their own.
+
 ### Assertions
 
 The implemented syntax is `ASSERT condition [, message];`. The condition uses PL/pgSQL assignment-style Boolean coercion. A true condition is a no-op, while false or NULL raises `assert_failure` with SQLSTATE `P0004`. The optional message is evaluated only on failure and coerced to text; an omitted or NULL message becomes `assertion failed`.

@@ -294,7 +294,7 @@ impl RoutineEventRemoval for Engine {
     }
 }
 impl RoutineDropNotices for Engine {
-    fn routine_drop_notice(&self, level: &str, message: &str) {
-        self.push_sql_notice(level, message);
+    fn routine_drop_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }

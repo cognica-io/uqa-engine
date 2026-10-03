@@ -144,11 +144,13 @@ impl Engine {
                 "replica" => "replica",
                 "local" => "local",
                 _ => {
-                    return Err(SQLError::Routine {
+                    return Err(SQLError::Diagnostic {
                         sqlstate: "22023".into(),
                         message: format!(
-                            "invalid value for parameter \"session_replication_role\": \"{value}\"\nHINT: Available values: origin, replica, local."
+                            "invalid value for parameter \"session_replication_role\": \"{value}\""
                         ),
+                        detail: None,
+                        hint: Some("Available values: origin, replica, local.".into()),
                     })
                 }
             };
@@ -364,8 +366,8 @@ impl Engine {
         {
             restore_runtime_parameter(&mut state, &name, previous);
             self.push_sql_notice(
-                "WARNING",
-                "SET LOCAL can only be used in transaction blocks",
+                uqa_sql::SQLNotice::warning("SET LOCAL can only be used in transaction blocks")
+                    .with_sqlstate("25P01"),
             );
         }
         Ok(())

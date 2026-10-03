@@ -315,13 +315,15 @@ fn detach_partition(
             .first()
             .is_some_and(|edge| edge == parent);
     if finalize {
-        return Err(routine(
-            "55000",
-            format!(
-                "cannot complete detaching partition \"{}\"\nDETAIL: There's no pending concurrent detach.",
+        return Err(SQLError::Diagnostic {
+            sqlstate: "55000".into(),
+            message: format!(
+                "cannot complete detaching partition \"{}\"",
                 local_relation_name(&partition)
             ),
-        ));
+            detail: Some("There's no pending concurrent detach.".into()),
+            hint: None,
+        });
     }
     if !attached {
         return Err(routine(

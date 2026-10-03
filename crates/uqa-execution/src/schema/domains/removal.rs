@@ -22,7 +22,7 @@ pub trait DomainRoutineRemoval {
     ) -> Result<(), SQLError>;
 }
 pub trait DomainDropNotices {
-    fn domain_drop_notice(&self, message: &str);
+    fn domain_drop_notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct DomainRemovalContext<'a> {
     pub refresh: &'a dyn NamespaceCatalogRefresh,
@@ -45,7 +45,9 @@ pub fn drop_domains(
             BoundDomainDrop::Target(oid) => {
                 targets.insert(oid);
             }
-            BoundDomainDrop::Skipped(message) => context.notices.domain_drop_notice(&message),
+            BoundDomainDrop::Skipped(message) => context
+                .notices
+                .domain_drop_notice(uqa_sql::SQLNotice::notice(message)),
         }
     }
     context

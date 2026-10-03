@@ -55,7 +55,7 @@ pub struct ViewAlterContext<'a> {
     pub publication: &'a dyn ViewAlterPublication,
     pub changes: &'a dyn CatalogPublicationChanges,
     pub rewrite: ViewRewriteContext<'a>,
-    pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
+    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
 }
 pub type ViewAlterWrite<'a> = Box<dyn FnOnce(&ViewAlterContext<'_>) -> Result<(), SQLError> + 'a>;
 pub trait ViewAlterTransactions {
@@ -85,7 +85,7 @@ fn execute_alter_view(
                     context
                         .notices
                         .lock()
-                        .push(("NOTICE".into(), message.into()));
+                        .push(uqa_sql::SQLNotice::notice(message));
                 },
             )?
             else {

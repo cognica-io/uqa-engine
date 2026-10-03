@@ -75,8 +75,8 @@ impl TableGrantResolution for Engine {
     }
 }
 impl TableGrantNotices for Engine {
-    fn notice(&self, level: &str, message: &str) {
-        self.push_sql_notice(level, message);
+    fn notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }
 impl TableGrantPersistence for Engine {

@@ -85,6 +85,7 @@ impl<W: Write> Write for TrackedWriter<W> {
     }
 }
 mod completion;
+mod diagnostics;
 mod display;
 mod meta;
 mod migration_io;

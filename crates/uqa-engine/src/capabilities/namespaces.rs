@@ -153,8 +153,8 @@ impl SchemaPrivilegeRegistry for Engine {
     }
 }
 impl SchemaPrivilegeNotices for Engine {
-    fn schema_privilege_notice(&self, level: &str, message: &str) {
-        self.push_sql_notice(level, message);
+    fn schema_privilege_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }
 
@@ -289,8 +289,8 @@ impl SchemaRemovalPublication for Engine {
     }
 }
 impl SchemaDropNotices for Engine {
-    fn schema_drop_notice(&self, message: &str) {
-        self.push_sql_notice("NOTICE", message);
+    fn schema_drop_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }
 impl EmptySchemaRemovalState for Engine {

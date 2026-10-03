@@ -25,7 +25,7 @@ pub fn run_drop_index(
             context
                 .notices
                 .lock()
-                .push(("NOTICE".to_string(), message.to_string()));
+                .push(uqa_sql::SQLNotice::notice(message));
         },
     )?;
     for index in &indexes {

@@ -34,7 +34,7 @@ pub struct TableAlterBindingContext<'a> {
     pub authority: TablePrivilegeContext<'a>,
     pub creation: RelationCreationContext<'a>,
     pub locks: &'a dyn RelationDefinitionSession,
-    pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
+    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
 }
 
 pub fn bind_table_alteration(
@@ -67,7 +67,7 @@ pub(super) fn bind_alteration(
                     context
                         .notices
                         .lock()
-                        .push(("NOTICE".into(), message.into()));
+                        .push(uqa_sql::SQLNotice::notice(message));
                 },
             )?
             else {

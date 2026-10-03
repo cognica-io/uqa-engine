@@ -52,10 +52,9 @@ impl TableMaintenanceContext<'_> {
         drop(memberships);
         drop(roles);
         for name in denied {
-            self.notices.notice(
-                "WARNING",
-                &format!("permission denied to {operation} \"{name}\", skipping it"),
-            );
+            self.notices.notice(uqa_sql::SQLNotice::warning(format!(
+                "permission denied to {operation} \"{name}\", skipping it"
+            )));
         }
         Ok(permitted)
     }

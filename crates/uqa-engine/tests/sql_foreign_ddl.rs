@@ -108,10 +108,10 @@ fn create_foreign_table_if_not_exists_checks_the_relation_before_its_definition(
     let notices = engine.take_sql_notices();
     assert_eq!(notices.len(), 8);
     assert!(notices.iter().all(|notice| notice
-        == &(
-            "NOTICE".into(),
-            "relation \"existing_foreign_definition_target\" already exists, skipping".into()
-        )));
+        == &uqa_engine::SQLNotice::notice(
+            "relation \"existing_foreign_definition_target\" already exists, skipping"
+        )
+        .with_sqlstate("42P07")));
 
     engine
         .sql(
@@ -122,10 +122,10 @@ fn create_foreign_table_if_not_exists_checks_the_relation_before_its_definition(
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![(
-            "NOTICE".into(),
-            "relation \"existing_foreign_definition_sequence\" already exists, skipping".into()
-        )]
+        vec![uqa_engine::SQLNotice::notice(
+            "relation \"existing_foreign_definition_sequence\" already exists, skipping"
+        )
+        .with_sqlstate("42P07")]
     );
 
     for (sql, state) in [

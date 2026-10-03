@@ -425,14 +425,10 @@ fn indexes_and_other_relations_cannot_share_one_schema_identity() {
     assert_eq!(
         engine.take_sql_notices(),
         [
-            (
-                "NOTICE".into(),
-                "relation \"occupied_index\" already exists, skipping".into(),
-            ),
-            (
-                "NOTICE".into(),
-                "relation \"occupied_name\" already exists, skipping".into(),
-            ),
+            uqa_engine::SQLNotice::notice("relation \"occupied_index\" already exists, skipping")
+                .with_sqlstate("42P07"),
+            uqa_engine::SQLNotice::notice("relation \"occupied_name\" already exists, skipping")
+                .with_sqlstate("42P07"),
         ]
     );
     assert_eq!(index_identities(&engine), ["public.occupied_index"]);

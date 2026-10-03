@@ -91,7 +91,7 @@ fn drop_rebinds_a_renamed_missing_or_reused_view_name() {
                 assert_eq!(
                     notices
                         .iter()
-                        .filter(|(_, text)| text == "view \"v\" does not exist, skipping")
+                        .filter(|notice| notice.message == "view \"v\" does not exist, skipping")
                         .count(),
                     1
                 );
@@ -240,7 +240,7 @@ fn drop_handles_duplicate_targets_and_reports_missing_schema_notices() {
             .notices
             .lock()
             .iter()
-            .any(|(_, message)| message == "schema \"absent\" does not exist, skipping"));
+            .any(|notice| notice.message == "schema \"absent\" does not exist, skipping"));
     }
     error(&engine, "DROP FOREIGN TABLE missing", "42704");
 }

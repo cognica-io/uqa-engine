@@ -51,13 +51,13 @@ pub fn run_alter_table<S: Clone + 'static>(
                 .has_column(&table, &column.name)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
             {
-                context.constraints.notices.lock().push((
-                    "NOTICE".into(),
-                    format!(
+                context.constraints.notices.lock().push(
+                    uqa_sql::SQLNotice::notice(format!(
                         "column \"{}\" of relation \"{qualifier}\" already exists, skipping",
                         column.name
-                    ),
-                ));
+                    ))
+                    .with_sqlstate("42701"),
+                );
                 continue;
             }
         }

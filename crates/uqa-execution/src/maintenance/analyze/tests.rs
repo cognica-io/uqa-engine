@@ -19,7 +19,7 @@ struct Fixture {
     changes: RefCell<VecDeque<Option<Vec<AnalyzeTarget>>>>,
     children: Vec<String>,
     acquired: RefCell<Vec<(String, RelationLockMode)>>,
-    notices: RefCell<Vec<String>>,
+    notices: RefCell<Vec<uqa_sql::SQLNotice>>,
     authorized: RefCell<Vec<String>>,
     manager: RowLockManager,
     denied: Cell<bool>,
@@ -93,8 +93,8 @@ impl AnalyzeLocks for Fixture {
 }
 
 impl AnalyzeNotices for Fixture {
-    fn warning(&self, message: &str) {
-        self.notices.borrow_mut().push(message.into());
+    fn notice(&self, notice: uqa_sql::SQLNotice) {
+        self.notices.borrow_mut().push(notice);
     }
 }
 
@@ -167,7 +167,13 @@ fn replacement_after_binding_is_skipped_instead_of_analyzing_the_new_object() {
     let selected = prepare_targets(&fixture.context(), Some("t"), false).unwrap();
     assert!(selected.is_empty());
     run_locked_targets(&selected, |_| panic!("a replacement must not be analyzed")).unwrap();
-    assert_eq!(fixture.notices.borrow().len(), 1);
+    assert_eq!(
+        *fixture.notices.borrow(),
+        [
+            uqa_sql::SQLNotice::warning("skipping analyze of \"t\" --- relation no longer exists")
+                .with_sqlstate("42P01")
+        ]
+    );
     assert!(fixture.authorized.borrow().is_empty());
 }
 

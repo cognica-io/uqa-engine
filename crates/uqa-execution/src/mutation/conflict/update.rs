@@ -40,9 +40,14 @@ pub struct InsertConflictPreparation<'a, S: Clone + 'static> {
 }
 
 fn on_conflict_cardinality_violation() -> SQLError {
-    SQLError::Routine {
+    SQLError::Diagnostic {
         sqlstate: "21000".into(),
-        message: "ON CONFLICT DO UPDATE command cannot affect row a second time\nHINT: Ensure that no rows proposed for insertion within the same command have duplicate constrained values.".into(),
+        message: "ON CONFLICT DO UPDATE command cannot affect row a second time".into(),
+        detail: None,
+        hint: Some(
+            "Ensure that no rows proposed for insertion within the same command have duplicate constrained values."
+                .into(),
+        ),
     }
 }
 
