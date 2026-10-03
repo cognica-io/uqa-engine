@@ -246,7 +246,20 @@ impl Transaction {
         {
             return Ok(None);
         }
-        let kind = if kind == RecordWriteKind::GraphPreview {
+        Ok(Some((
+            expected,
+            self.record_kind(key, deleted, kind, control)?,
+        )))
+    }
+
+    fn record_kind(
+        &self,
+        key: &[u8],
+        deleted: bool,
+        kind: RecordWriteKind,
+        control: &StorageReadControl,
+    ) -> VersionResult<RecordWriteKind> {
+        Ok(if kind == RecordWriteKind::GraphPreview {
             // A later preview must retain an earlier explicit replacement or canonical write to the same private record.
             self.changes.write_kind(key, control)?.unwrap_or(kind)
         } else if matches!(
@@ -266,8 +279,7 @@ impl Transaction {
             RecordWriteKind::Canonical
         } else {
             kind
-        };
-        Ok(Some((expected, kind)))
+        })
     }
 
     pub(super) fn graph_mutation(&mut self, mutation: &OwnedGraphMutation) -> VersionResult<()> {
@@ -407,18 +419,20 @@ impl Transaction {
         control: &StorageReadControl,
     ) -> VersionResult<usize> {
         self.writable()?;
-        let mut keys = BudgetedVec::new(control.memory());
-        self.view()?
-            .visit_keys(prefix, None, usize::MAX, control, &mut |key, record| {
-                if record.live {
-                    keys.push(RecordKey::new(key, control.memory())?)?;
-                }
-                Ok(true)
-            })?;
-        for key in keys.iter() {
-            self.write_record(key.bytes(), None, kind, control)?;
-        }
-        Ok(keys.len())
+        let mut count = 0;
+        let view = self.view()?;
+        view.visit_keys(prefix, None, usize::MAX, control, &mut |key, record| {
+            if record.live {
+                // The cursor already supplies the original condition; do not reenter a provider read while its cursor is borrowed.
+                let kind = self.record_kind(key, true, kind, control)?;
+                let write = PreparedRecordWrite::copy_bytes(key, record.revision, None, control)?
+                    .with_kind(kind);
+                self.changes.apply_owned(&[write], control)?;
+                count += 1;
+            }
+            Ok(true)
+        })?;
+        Ok(count)
     }
 
     pub(super) fn atomic<T>(
