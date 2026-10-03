@@ -9,7 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Spill private transaction changes and prepared publication records to encrypted temporary files under the existing session allowance. Preserve savepoints and conflict preconditions, stream SQLite/redb publication and release decoded run caches when reading ends.
-- Keep memory HNSW graphs, mutation generations and search workspaces bounded by their retention allowance using encrypted temporary storage. Preserve graph topology, canonical scores and retained snapshots, and stream persistence deltas; see the [Rust API changes](docs/manual/reference/10-upgrading.md).
+- Keep HNSW graph construction, restoration, mutation generations, publication and search workspaces bounded by their retention allowance using encrypted temporary storage across memory, native SQLite, standalone SQLite, SQLite Key/Value and redb. Preserve graph topology, canonical scores, retained snapshots and transaction rollback while streaming provider inputs and persistence deltas; see the [Rust API changes](docs/manual/reference/10-upgrading.md).
 
 ## [0.4.8] - 2026-10-03
 
