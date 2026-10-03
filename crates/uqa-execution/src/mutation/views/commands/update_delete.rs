@@ -223,7 +223,8 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 &assigned_columns,
             )?
             .is_empty();
-    let statement_commands = crate::mutation::statement_end::statement_commands(inherited_ctes);
+    let (statement_commands, _running_statement) =
+        crate::mutation::statement_end::statement_commands(inherited_ctes);
     let view_statement = crate::mutation::triggers::queue::StatementEvent::new(
         &target.canonical_name,
         uqa_sql::ast::TriggerEvent::Update,

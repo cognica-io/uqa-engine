@@ -80,7 +80,8 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let constraints = referential.constraints;
     let triggers = referential.triggers;
     super::analysis::ensure_merge_privileges(mutation, stmt, inherited_ctes)?;
-    let statement_commands = statement_end::statement_commands(inherited_ctes);
+    let (statement_commands, _running_statement) =
+        statement_end::statement_commands(inherited_ctes);
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     let target_table = stmt.target.clone();
     // The columns the statement supplies, which its constraint violations show to a role that may not read the table.
@@ -489,7 +490,13 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         let storage_table = pair.storage_table.as_deref().ok_or_else(|| {
                             SQLError::Internal("MERGE update lost its physical target table".into())
                         })?;
-                        ensure_merge_target_is_unwritten(&snapshot_ctes, storage_table, doc_id)?;
+                        ensure_merge_target_is_unwritten(
+                            &snapshot_ctes,
+                            &triggers,
+                            storage_table,
+                            doc_id,
+                            uqa_sql::ast::TriggerEvent::Update,
+                        )?;
                         let Some(triggered_document) =
                             crate::mutation::triggers::fire_before_row_triggers(
                                 &triggers,
@@ -614,7 +621,13 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         let old_document = pair.target_document.as_ref().ok_or_else(|| {
                             SQLError::Internal("MERGE delete lost its target row".into())
                         })?;
-                        ensure_merge_target_is_unwritten(&snapshot_ctes, storage_table, doc_id)?;
+                        ensure_merge_target_is_unwritten(
+                            &snapshot_ctes,
+                            &triggers,
+                            storage_table,
+                            doc_id,
+                            uqa_sql::ast::TriggerEvent::Delete,
+                        )?;
                         if crate::mutation::triggers::fire_before_row_triggers(
                             &triggers,
                             storage_table,

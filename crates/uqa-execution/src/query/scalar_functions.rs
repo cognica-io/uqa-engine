@@ -154,6 +154,7 @@ fn is_catalog_scalar(name: &str) -> bool {
         "pg_get_expr"
             | "pg_get_partkeydef"
             | "pg_backend_pid"
+            | "pg_trigger_depth"
             | "pg_notify"
             | "pg_notification_queue_usage"
             | "pg_get_serial_sequence"
@@ -191,6 +192,8 @@ pub fn catalog_scalar_value(
     Some(match lower.as_str() {
         "pg_backend_pid" => no_scalar_arguments(&lower, arguments)
             .map(|()| Value::Int(i64::from(context.session.backend_process_id()))),
+        "pg_trigger_depth" => no_scalar_arguments(&lower, arguments)
+            .map(|()| Value::Int(crate::mutation::triggers::trigger_depth())),
         "pg_notify" => (|| {
             let (channel, payload) = notification_arguments(arguments)?;
             context.session.notify(channel, payload)?;

@@ -21,6 +21,8 @@ pub struct StatementCommands {
     postponed: parking_lot::Mutex<Vec<CtePlan>>,
     /// The rows the statement's commands inserted, updated or deleted, which a statement whose WITH modifies data keeps.
     written: parking_lot::Mutex<BTreeSet<PhysicalDocumentIdentity>>,
+    /// The rows that statements the statement started wrote: statements of its triggers and of the functions it calls, and their referential actions, which run under later command ids.
+    triggered: parking_lot::Mutex<BTreeSet<PhysicalDocumentIdentity>>,
     after_triggers: AfterTriggerQueue,
 }
 
@@ -51,5 +53,14 @@ impl StatementCommands {
     /// Whether one of the statement's commands wrote `row`, which the statement's later commands find in their snapshot as a row the statement already modified.
     pub fn wrote(&self, row: &PhysicalDocumentIdentity) -> bool {
         self.written.lock().contains(row)
+    }
+
+    pub fn note_triggered(&self, rows: impl IntoIterator<Item = PhysicalDocumentIdentity>) {
+        self.triggered.lock().extend(rows);
+    }
+
+    /// Whether a statement that this statement started wrote `row`, which `PostgreSQL` finds modified by a later command than the statement's own (`TM_SelfModified` with another `cmax`).
+    pub fn triggered_write(&self, row: &PhysicalDocumentIdentity) -> bool {
+        self.triggered.lock().contains(row)
     }
 }

@@ -105,6 +105,7 @@ pub fn function_volatility_with_binding(
                 | "current_schemas"
                 | "current_setting"
                 | "pg_backend_pid"
+                | "pg_trigger_depth"
                 | "version"
                 | "pg_listening_channels"
                 | "to_regclass"

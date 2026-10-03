@@ -44,17 +44,34 @@ pub(super) fn ensure_merge_target_is_modified_once(
     Err(merge_cardinality_violation())
 }
 
-/// Reject an action on a target row that another command of the statement already wrote. `PostgreSQL`'s `ExecMergeMatched` reports the row as `TM_SelfModified` before any BEFORE ROW trigger fires for it, and a MERGE may not affect a row twice.
+/// Reject an action on a target row that the statement already modified, which `PostgreSQL`'s `ExecMergeMatched` finds as `TM_SelfModified` before any BEFORE ROW trigger fires for it: a row another command of the statement wrote, which a MERGE may not affect a second time, or a row that a statement the command's triggers or functions started wrote under a later command id. `event` is the action's operation, whose BEFORE ROW triggers fetch the row through `GetTupleForTrigger`.
 pub(super) fn ensure_merge_target_is_unwritten<S: Clone>(
     scope: &crate::query::CteScope<S>,
+    triggers: &crate::mutation::triggers::context::TriggerContext<'_>,
     storage_table: &str,
     doc_id: uqa_core::DocId,
+    event: uqa_sql::ast::TriggerEvent,
 ) -> Result<(), SQLError> {
-    if scope.statement_wrote(&crate::mutation::candidate::PhysicalDocumentIdentity {
+    let row = crate::mutation::candidate::PhysicalDocumentIdentity {
         table: storage_table.to_string(),
         doc_id,
-    }) {
+    };
+    if scope.statement_wrote(&row) {
         return Err(merge_cardinality_violation());
+    }
+    if scope.statement_triggered_write(&row) {
+        let operation = if crate::mutation::triggers::has_before_row_triggers(
+            triggers,
+            storage_table,
+            event,
+        )? {
+            "updated"
+        } else {
+            "updated or deleted"
+        };
+        return Err(crate::mutation::errors::triggered_modification_error(
+            operation,
+        ));
     }
     Ok(())
 }

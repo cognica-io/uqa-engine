@@ -207,6 +207,12 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         if ctes.statement_wrote(&identity) {
             continue;
         }
+        // A statement that the command's triggers or functions started wrote the row under a later command id.
+        if ctes.statement_triggered_write(&identity) {
+            return Err(crate::mutation::errors::triggered_modification_error(
+                "updated",
+            ));
+        }
         let storage_table = identity.table;
         let doc_id = identity.doc_id;
         if !locked_ids.insert((storage_table.clone(), doc_id)) {

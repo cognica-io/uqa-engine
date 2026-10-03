@@ -45,6 +45,16 @@ impl<S: Clone> CteScope<S> {
             .is_some_and(|commands| commands.wrote(row))
     }
 
+    /// Whether a statement that the statement this scope belongs to started wrote `row`, which `PostgreSQL` finds modified under a later command id.
+    pub fn statement_triggered_write(
+        &self,
+        row: &crate::mutation::candidate::PhysicalDocumentIdentity,
+    ) -> bool {
+        self.statement_commands
+            .as_ref()
+            .is_some_and(|commands| commands.triggered_write(row))
+    }
+
     pub fn inherit_cte_bindings(&mut self, parent: &Self) {
         self.rows.clone_from(&parent.rows);
         self.deferred_ctes.clone_from(&parent.deferred_ctes);

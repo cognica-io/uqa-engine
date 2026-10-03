@@ -54,10 +54,16 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
         .diagnostics
         .bind_current()
         .map_err(|error| crate::storage_errors::storage_error("bind query diagnostics", &error))?;
+    let mut running_statement = None;
     if plan.ctes.iter().any(|cte| cte.body.modifies_data()) {
         analyze_query_plan_schema(context.source.ctes.routines, plan, params, ctes, None)?;
         if ctes.command_cte_snapshot().is_none() {
             ctes.set_command_cte_snapshot(Some(std::sync::Arc::new(context.snapshots.capture()?)));
+        }
+        if ctes.statement_commands().is_none() {
+            let statement = std::sync::Arc::<crate::query::scope::StatementCommands>::default();
+            ctes.set_statement_commands(std::sync::Arc::clone(&statement));
+            running_statement = Some(crate::mutation::statement_end::enter_statement(statement));
         }
     }
     let mut relation_lookup = ctes.enter_relation_lookup_mode(plan.relations_bound)?;
@@ -100,6 +106,7 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
                 .fire_after_triggers(commands.after_triggers())?;
         }
     }
+    drop(running_statement);
     Ok(output)
 }
 #[expect(

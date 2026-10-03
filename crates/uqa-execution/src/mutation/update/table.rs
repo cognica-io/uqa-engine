@@ -35,7 +35,8 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<SQLResult, SQLError> {
-    let statement_commands = statement_end::statement_commands(inherited_ctes);
+    let (statement_commands, _running_statement) =
+        statement_end::statement_commands(inherited_ctes);
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     context.query.source.locking.session.lock_relation(
         &stmt.table,
@@ -415,6 +416,12 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 // Another command of the statement already wrote the row, which `PostgreSQL`'s `ExecUpdate` skips as `TM_SelfModified`.
                 if ctes.statement_wrote(&identity) {
                     continue;
+                }
+                // A statement that the command's triggers or functions started wrote the row under a later command id.
+                if ctes.statement_triggered_write(&identity) {
+                    return Err(crate::mutation::errors::triggered_modification_error(
+                        "updated",
+                    ));
                 }
                 let storage_table = identity.table;
                 let doc_id = identity.doc_id;

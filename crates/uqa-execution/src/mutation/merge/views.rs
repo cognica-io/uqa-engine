@@ -605,9 +605,8 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
         params,
         inherited_ctes,
     )?;
-    let statement_commands = statement_end::statement_commands(inherited_ctes);
-    let before = events.before_statements(&target.canonical_name);
-    statement_end::fire_before_statements(&statement_commands, triggers, &before)?;
+    let (statement_commands, _running_statement) =
+        begin_view_merge_statement(inherited_ctes, triggers, &events, &target)?;
     let mut statement_scope = None;
     let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
@@ -688,6 +687,28 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
     }?;
     statement_end::finish_statement(context, params, &plan.ctes, statement_scope.as_mut())?;
     Ok(result)
+}
+
+/// The statement a view MERGE belongs to, with the BEFORE STATEMENT triggers of the view fired for the MERGE's actions.
+fn begin_view_merge_statement<S: Clone>(
+    inherited_ctes: Option<&CteScope<S>>,
+    triggers: &TriggerContext<'_>,
+    events: &super::statement_events::MergeStatementEvents,
+    target: &ViewDmlTarget,
+) -> Result<
+    (
+        std::sync::Arc<StatementCommands>,
+        Option<statement_end::RunningStatement>,
+    ),
+    SQLError,
+> {
+    let (statement_commands, running_statement) = statement_end::statement_commands(inherited_ctes);
+    statement_end::fire_before_statements(
+        &statement_commands,
+        triggers,
+        &events.before_statements(&target.canonical_name),
+    )?;
+    Ok((statement_commands, running_statement))
 }
 
 /// The scope of a view MERGE's command, with the WITH items that run before the MERGE materialized.

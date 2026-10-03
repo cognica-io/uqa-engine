@@ -26,6 +26,8 @@ mod row_images;
 mod statement_scope;
 #[path = "sql_triggers/transition.rs"]
 mod transition;
+#[path = "sql_triggers/triggered_modifications.rs"]
+mod triggered_modifications;
 
 fn exec(engine: &Engine, sql: &str) -> uqa_engine::SQLResult {
     engine

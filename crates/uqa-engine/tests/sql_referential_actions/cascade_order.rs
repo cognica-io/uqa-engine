@@ -273,7 +273,10 @@ fn the_last_action_on_a_table_selects_its_after_statement_triggers() {
     );
     exec(&engine, "UPDATE mp SET a = a + 100, b = b + 1000");
     let fired = engine
-        .sql("SELECT string_agg(msg, ' | ' ORDER BY seq) AS fired FROM mlg", &[])
+        .sql(
+            "SELECT string_agg(msg, ' | ' ORDER BY seq) AS fired FROM mlg",
+            &[],
+        )
         .unwrap();
     assert_eq!(
         fired.rows[0]["fired"],

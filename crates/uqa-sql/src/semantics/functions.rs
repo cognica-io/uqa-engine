@@ -80,6 +80,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "current_schemas"
                         | "current_setting"
                         | "pg_backend_pid"
+                        | "pg_trigger_depth"
                         | "pg_listening_channels"
                         | "pg_notify"
                         | "pg_notification_queue_usage"

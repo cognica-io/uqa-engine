@@ -18,7 +18,6 @@ use crate::mutation::{
     prepared::PreparedMutationAction,
     publication::{
         finish_mutation_publication, publish_prepared_mutation_action, InsertedIdentity,
-        MutationPublicationBatch,
     },
     staging::{stage_prepared_document_delete, stage_referential_rewrite},
     statement::MutationExecutionContext,
@@ -152,7 +151,7 @@ pub(super) fn run_referential_action<S: Clone + 'static>(
     drop(overlay);
     if !prepared.is_empty() {
         context.state.prepare_writer()?;
-        let mut publication = MutationPublicationBatch::default();
+        let mut publication = crate::mutation::statement_end::action_publication_batch();
         for action in prepared {
             publish_prepared_mutation_action(
                 context.publication,
@@ -162,6 +161,7 @@ pub(super) fn run_referential_action<S: Clone + 'static>(
             )?;
         }
         finish_mutation_publication(context.publication, &mut publication)?;
+        crate::mutation::statement_end::note_action_rows(&mut publication);
     }
     queue.queue_command(&referential.triggers, &[statement], events)
 }

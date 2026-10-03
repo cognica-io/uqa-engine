@@ -121,14 +121,26 @@ pub fn try_run_point_update<S: Clone + 'static>(
     {
         return Ok(Some(SQLResult::from_affected(0)));
     }
-    crate::serializable::observe_row_write(context.observations, &stmt.table, doc_id)?;
-    let affected = context.storage.patch_document_fields_with_vector_values(
-        &stmt.table,
-        doc_id,
-        &updates,
-        &vectors,
-    )?;
+    let affected = patch_point_row(&context, &stmt.table, doc_id, &updates, &vectors)?;
     Ok(Some(SQLResult::from_affected(u64::from(affected))))
+}
+
+/// Write the patched fields of the row that `table` holds at `doc_id`, and note the row for the statements that started the running one.
+fn patch_point_row<S: Clone + 'static>(
+    context: &PointMutationContext<'_, S>,
+    table: &str,
+    doc_id: uqa_core::DocId,
+    updates: &BTreeMap<String, Value>,
+    vectors: &RowUpdateVectors,
+) -> Result<bool, SQLError> {
+    crate::serializable::observe_row_write(context.observations, table, doc_id)?;
+    let affected = context
+        .storage
+        .patch_document_fields_with_vector_values(table, doc_id, updates, vectors)?;
+    if affected {
+        crate::mutation::statement_end::note_written_row(table, doc_id);
+    }
+    Ok(affected)
 }
 
 pub fn point_lookup_filter<S: Clone + 'static>(

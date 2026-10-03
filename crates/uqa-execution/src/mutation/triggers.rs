@@ -28,6 +28,29 @@ type TransitionCaptureStack = Vec<BTreeMap<TransitionCaptureKey, bool>>;
 thread_local! {
     static ACTIVE_TRANSITION_RELATIONS: RefCell<Vec<BTreeMap<String, crate::SharedSpill>>> = const { RefCell::new(Vec::new()) };
     static TRANSITION_CAPTURE_CACHE: RefCell<TransitionCaptureStack> = const { RefCell::new(Vec::new()) };
+    /// How many trigger functions this thread is inside.
+    static TRIGGER_DEPTH: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many trigger functions the running code is inside, as `pg_trigger_depth()` reports it: 0 outside any trigger.
+pub fn trigger_depth() -> i64 {
+    TRIGGER_DEPTH.with(std::cell::Cell::get)
+}
+
+/// One trigger function running until the guard drops.
+struct TriggerDepthScope;
+
+impl TriggerDepthScope {
+    fn enter() -> Self {
+        TRIGGER_DEPTH.with(|depth| depth.set(depth.get() + 1));
+        Self
+    }
+}
+
+impl Drop for TriggerDepthScope {
+    fn drop(&mut self) {
+        TRIGGER_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
 }
 
 pub struct TransitionRelationScope;
@@ -181,6 +204,7 @@ fn invoke_trigger(
             )))
         }
     };
+    let _depth = TriggerDepthScope::enter();
     context.routines.execute_trigger_routine(
         &function,
         &TriggerRoutineContext {
@@ -368,6 +392,15 @@ fn fire_statement_triggers_with_transition(
         )?;
     }
     Ok(())
+}
+
+/// Whether `table` has BEFORE ROW triggers for `event`, whatever replication role fires them, which make `PostgreSQL` fetch a row through `GetTupleForTrigger` before it updates or deletes it.
+pub fn has_before_row_triggers(
+    context: &TriggerContext<'_>,
+    table: &str,
+    event: TriggerEvent,
+) -> Result<bool> {
+    Ok(!row_triggers::resolve(context, table, TriggerTiming::Before, event, &[])?.is_empty())
 }
 
 pub fn fire_before_row_triggers(
