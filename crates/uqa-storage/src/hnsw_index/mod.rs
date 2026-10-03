@@ -17,6 +17,7 @@ mod prepare;
 mod query;
 mod restore;
 mod search;
+mod store;
 mod types;
 mod validation;
 mod visited;
