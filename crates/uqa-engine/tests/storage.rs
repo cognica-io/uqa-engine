@@ -12,6 +12,8 @@ mod catalog_atomicity;
 mod concurrency;
 #[path = "direct_rmw_concurrency.rs"]
 mod direct_rmw_concurrency;
+#[path = "storage/hnsw_spill.rs"]
+mod hnsw_spill;
 #[path = "python_db_migration.rs"]
 mod python_db_migration;
 #[path = "redb_backend.rs"]
