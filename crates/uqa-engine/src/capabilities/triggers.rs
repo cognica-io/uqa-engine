@@ -130,7 +130,4 @@ impl ReferentialCatalog for Engine {
     fn try_referrers_to(&self, table: &str) -> Result<Vec<(String, ForeignKey)>, String> {
         Engine::referrers_in_execution(self, table).map_err(|error| error.to_string())
     }
-    fn partition_hierarchy_root(&self, table: &str) -> Result<Option<String>, SQLError> {
-        Engine::partition_hierarchy_root(self, table)
-    }
 }

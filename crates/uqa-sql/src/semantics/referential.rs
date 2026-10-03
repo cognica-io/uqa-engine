@@ -12,7 +12,6 @@ pub trait ReferentialCatalog {
     /// The relation followed by each partitioned table it is a partition of, nearest first, as [`crate::semantics::partition::partition_ancestor_tables`] returns them.
     fn partition_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError>;
     fn try_referrers_to(&self, table: &str) -> Result<Vec<(String, ForeignKey)>, String>;
-    fn partition_hierarchy_root(&self, table: &str) -> Result<Option<String>, SQLError>;
 }
 use crate::catalog::errors::dml_storage_error;
 
@@ -29,30 +28,36 @@ pub fn referrers_to_for_actions(
         let referrers = catalog
             .try_referrers_to(&target)
             .map_err(|err| dml_storage_error("foreign-key lookup", err))?;
-        for (declaring_table, foreign_key) in referrers {
-            let referencing_table = catalog
-                .partition_hierarchy_root(&declaring_table)?
-                .unwrap_or(declaring_table);
-            if output.iter().any(|(existing_table, existing_key)| {
-                existing_table == &referencing_table
-                    && foreign_keys_equivalent(existing_key, &foreign_key)
-            }) {
-                continue;
+        for (declaring_table, foreign_key) in &referrers {
+            if declares_foreign_key(catalog, &referrers, declaring_table, foreign_key)? {
+                output.push((declaring_table.clone(), foreign_key.clone()));
             }
-            output.push((referencing_table, foreign_key));
         }
     }
     Ok(output)
 }
 
-fn foreign_keys_equivalent(left: &ForeignKey, right: &ForeignKey) -> bool {
-    left.name == right.name
-        && left.local_columns == right.local_columns
-        && left.ref_table == right.ref_table
-        && left.ref_columns == right.ref_columns
-        && left.on_update == right.on_update
-        && left.on_delete == right.on_delete
-        && left.on_delete_set_columns == right.on_delete_set_columns
-        && left.match_type == right.match_type
-        && left.enforced == right.enforced
+/// A foreign key declared on a partitioned table recurs on each of its partitions under the object identity of the declaration, and only the declaration acts on the rows of the whole subtree, as `PostgreSQL` creates action triggers for the constraint without a parent alone. A partition's own foreign key acts on that partition's rows only.
+fn declares_foreign_key(
+    catalog: &dyn ReferentialCatalog,
+    referrers: &[(String, ForeignKey)],
+    declaring_table: &str,
+    foreign_key: &ForeignKey,
+) -> Result<bool, SQLError> {
+    let Some(object_id) = foreign_key.object_id else {
+        return Ok(true);
+    };
+    for ancestor in catalog
+        .partition_ancestor_tables(declaring_table)?
+        .iter()
+        .skip(1)
+    {
+        if referrers
+            .iter()
+            .any(|(table, key)| table == ancestor && key.object_id == Some(object_id))
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }

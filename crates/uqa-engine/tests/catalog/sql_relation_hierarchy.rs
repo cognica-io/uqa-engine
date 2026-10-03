@@ -37,6 +37,8 @@ mod not_null_origin;
 mod ownership;
 #[path = "sql_relation_hierarchy/referenced_partitions.rs"]
 mod referenced_partitions;
+#[path = "sql_relation_hierarchy/referencing_partitions.rs"]
+mod referencing_partitions;
 #[path = "sql_relation_hierarchy/regressions.rs"]
 mod regressions;
 #[path = "sql_relation_hierarchy/retrieval.rs"]
