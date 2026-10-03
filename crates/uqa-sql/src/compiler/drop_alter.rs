@@ -614,6 +614,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                             deferrable: constraint.deferrable,
                             initially_deferred: constraint.initdeferred,
                             period: constraint.fk_with_period,
+                            referenced_partitions: Vec::new(),
                         };
                         if foreign_key.period
                             && (!matches!(

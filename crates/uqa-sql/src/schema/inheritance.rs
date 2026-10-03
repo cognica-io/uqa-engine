@@ -101,6 +101,7 @@ pub fn prepare_create_table_hierarchy(
             column.not_null_identity = None;
             if let Some(reference) = &mut column.references {
                 reference.catalog_identity = None;
+                reference.referenced_partitions.clear();
             }
             if column.not_null_no_inherit {
                 column.not_null = false;
@@ -155,6 +156,7 @@ pub fn prepare_create_table_hierarchy(
         if is_partition {
             inherited_foreign_keys.extend(constraints.foreign_keys.into_iter().map(|mut key| {
                 key.catalog_identity = None;
+                key.referenced_partitions.clear();
                 key
             }));
             inherited_keys.extend(constraints.key_constraints.into_iter().map(|mut key| {

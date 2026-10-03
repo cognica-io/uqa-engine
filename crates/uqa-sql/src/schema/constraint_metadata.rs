@@ -276,6 +276,20 @@ fn constraint_names_for_assignment(
     for constraint in &constraints.foreign_keys {
         record_constraint_name(relation, &mut used, constraint.name.as_deref())?;
     }
+    // The constraints a foreign key derives on referenced partitions share the relation's names.
+    for derived in columns
+        .iter()
+        .filter_map(|column| column.references.as_ref())
+        .flat_map(|reference| &reference.referenced_partitions)
+        .chain(
+            constraints
+                .foreign_keys
+                .iter()
+                .flat_map(|foreign_key| &foreign_key.referenced_partitions),
+        )
+    {
+        record_constraint_name(relation, &mut used, Some(&derived.name))?;
+    }
     for name in &names.events {
         if !used.insert(name.clone()) {
             return Err(duplicate_constraint(relation, name));

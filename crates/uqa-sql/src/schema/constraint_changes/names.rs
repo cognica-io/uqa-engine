@@ -6,8 +6,11 @@
 
 //! Names and independent catalog identities from a borrowed relation declaration.
 
-use super::ConstraintLocation;
-use crate::ast::{ColumnDef, ForeignKey, TableCheck, TableConstraintSet, TableKeyConstraint};
+use super::{ConstraintLocation, ForeignKeyLocation};
+use crate::ast::{
+    ColumnDef, ForeignKey, ReferencedPartitionConstraint, TableCheck, TableConstraintSet,
+    TableKeyConstraint,
+};
 
 #[derive(Clone, Copy)]
 pub struct NamedConstraint<'a> {
@@ -103,11 +106,49 @@ impl<'a> ConstraintNames<'a> {
                 location: ConstraintLocation::Key(position),
             })
         });
+        let column_derived = self
+            .columns
+            .iter()
+            .enumerate()
+            .filter_map(|(position, column)| Some((position, column.references.as_ref()?)))
+            .flat_map(|(position, reference)| {
+                derived_entries(
+                    ForeignKeyLocation::Column(position),
+                    &reference.referenced_partitions,
+                )
+            });
+        let table_derived =
+            self.foreign_keys
+                .iter()
+                .enumerate()
+                .flat_map(|(position, foreign_key)| {
+                    derived_entries(
+                        ForeignKeyLocation::Table(position),
+                        &foreign_key.referenced_partitions,
+                    )
+                });
         not_null
             .chain(column_checks)
             .chain(column_foreign_keys)
             .chain(checks)
             .chain(foreign_keys)
             .chain(keys)
+            .chain(column_derived)
+            .chain(table_derived)
     }
+}
+
+/// The derived constraints of one foreign key, which share the relation's constraint names.
+fn derived_entries(
+    foreign_key: ForeignKeyLocation,
+    constraints: &[ReferencedPartitionConstraint],
+) -> impl Iterator<Item = NamedConstraint<'_>> {
+    constraints
+        .iter()
+        .enumerate()
+        .map(move |(index, constraint)| NamedConstraint {
+            name: &constraint.name,
+            object_id: Some(constraint.catalog_identity.object_id),
+            location: ConstraintLocation::ReferencedPartition(foreign_key, index),
+        })
 }

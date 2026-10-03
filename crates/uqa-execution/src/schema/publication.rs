@@ -63,6 +63,9 @@ pub struct SchemaPublicationContext<'a> {
     pub bindings: SchemaDependencyBindingContext<'a>,
     pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub indexes: super::indexes::registry::IndexRegistryContext<'a>,
+    /// The partition trees that the constraints a foreign key derives on referenced partitions follow.
+    pub partitions: uqa_sql::semantics::partition::PartitionContext<'a>,
+    pub referencing: &'a dyn referenced_partitions::ReferencingTableAccess,
 }
 
 impl<'a> SchemaPublicationContext<'a> {
@@ -122,14 +125,22 @@ fn materialize_metadata(
 ) -> StorageBackendResult<bool> {
     let relation = RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
     let mut allocate = context.identity_allocator();
-    materialize_constraint_metadata_with_names(
+    let names = context.constraint_names().name_scope(&relation);
+    let changed = materialize_constraint_metadata_with_names(
         &relation,
         columns,
         constraints,
         &mut allocate,
-        &context.constraint_names().name_scope(&relation),
+        &names,
     )
-    .map_err(|error| StorageBackendError::backend("constraint identity", error))
+    .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
+    Ok(referenced_partitions::reconcile_derived_constraints(
+        context,
+        columns,
+        constraints,
+        &names.schema,
+        &mut allocate,
+    )? || changed)
 }
 
 pub fn register_column(
@@ -299,5 +310,7 @@ pub mod keys;
 pub mod columns;
 
 pub mod dependencies;
+
+pub mod referenced_partitions;
 
 pub mod removal;

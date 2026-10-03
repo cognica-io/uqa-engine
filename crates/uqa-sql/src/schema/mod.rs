@@ -194,6 +194,8 @@ pub mod inheritance;
 
 pub mod foreign_keys;
 
+pub mod referenced_partitions;
+
 pub mod sequences;
 
 pub mod constraint_metadata;

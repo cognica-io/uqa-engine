@@ -241,6 +241,7 @@ pub fn column_foreign_key(
         deferrable: reference.deferrable,
         initially_deferred: reference.initially_deferred,
         period: reference.period,
+        referenced_partitions: reference.referenced_partitions.clone(),
     }
 }
 

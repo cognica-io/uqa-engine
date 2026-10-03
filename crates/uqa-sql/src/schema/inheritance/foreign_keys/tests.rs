@@ -26,6 +26,7 @@ fn foreign_key(name: &str) -> ForeignKey {
         deferrable: false,
         initially_deferred: false,
         period: false,
+        referenced_partitions: Vec::new(),
     }
 }
 

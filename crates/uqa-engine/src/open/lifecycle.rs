@@ -437,6 +437,13 @@ impl Engine {
         }
     }
 
+    /// Repair what earlier releases left inconsistent once a writer has restored the catalog: physical value indexes, partitions without the copies of their parent's foreign keys, and foreign keys without the constraints they derive on referenced partitions.
+    fn repair_catalog_on_open(&self) -> StorageBackendResult<()> {
+        self.repair_persistent_value_indexes_on_open()?;
+        self.repair_partition_foreign_keys_on_open()?;
+        self.repair_derived_constraints_on_open()
+    }
+
     fn build_persistent_session(
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
@@ -510,8 +517,7 @@ impl Engine {
             )?;
         }
         if initialize_catalog {
-            engine.repair_persistent_value_indexes_on_open()?;
-            engine.repair_partition_foreign_keys_on_open()?;
+            engine.repair_catalog_on_open()?;
         }
         // Eagerly and fallibly populate read caches. Once open succeeds,
         // cache misses mean absence rather than a swallowed catalog error.

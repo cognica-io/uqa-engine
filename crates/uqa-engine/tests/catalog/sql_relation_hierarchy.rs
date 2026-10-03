@@ -17,6 +17,8 @@ mod catalog;
 mod checks;
 #[path = "sql_relation_hierarchy/copy_io.rs"]
 mod copy_io;
+#[path = "sql_relation_hierarchy/derived_constraints.rs"]
+mod derived_constraints;
 #[path = "sql_relation_hierarchy/fk_conflict.rs"]
 mod fk_conflict;
 #[path = "sql_relation_hierarchy/hash.rs"]

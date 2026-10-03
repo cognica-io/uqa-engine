@@ -240,6 +240,19 @@ pub fn validate_and_mark_constraint(
         )
     })?;
     match location {
+        ConstraintLocation::ReferencedPartition(foreign_key, index) => {
+            if !validate_referenced_partition(
+                context,
+                table,
+                name,
+                &mut columns,
+                &mut constraints,
+                foreign_key,
+                index,
+            )? {
+                return Ok(());
+            }
+        }
         ConstraintLocation::NotNull(index) => {
             if columns[index].not_null_validated {
                 return Ok(());
@@ -314,6 +327,65 @@ pub fn validate_and_mark_constraint(
         }
     }
     publish_constraint_state(context, table, columns, constraints)
+}
+
+/// Validate a constraint a foreign key derives on a referenced partition, and the constraints deriving from it, which `PostgreSQL` marks valid without validating the foreign key. A referencing table that is not partitioned has its rows validated against that partition alone, as `QueueFKConstraintValidation` validates them against the derived constraint's referenced relation. Reports whether the constraint was not yet valid.
+fn validate_referenced_partition(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+    name: &str,
+    columns: &mut [uqa_sql::ast::ColumnDef],
+    constraints: &mut uqa_sql::ast::TableConstraintSet,
+    foreign_key: uqa_sql::schema::constraint_changes::ForeignKeyLocation,
+    index: usize,
+) -> Result<bool, SQLError> {
+    let holder = match foreign_key {
+        uqa_sql::schema::constraint_changes::ForeignKeyLocation::Column(position) => {
+            uqa_sql::schema::inheritance::foreign_keys::DeclaredForeignKey::Column(position)
+        }
+        uqa_sql::schema::constraint_changes::ForeignKeyLocation::Table(position) => {
+            uqa_sql::schema::inheritance::foreign_keys::DeclaredForeignKey::Table(position)
+        }
+    };
+    let mut scoped = holder
+        .foreign_key(columns, constraints)
+        .ok_or_else(|| SQLError::Internal("FOREIGN KEY disappeared".into()))?;
+    let derived = scoped
+        .referenced_partitions
+        .get(index)
+        .cloned()
+        .ok_or_else(|| SQLError::Internal("derived constraint disappeared".into()))?;
+    if derived.validated {
+        return Ok(false);
+    }
+    if !scoped.enforced {
+        return Err(constraint_error(
+            "55000",
+            "cannot validate NOT ENFORCED constraint",
+        ));
+    }
+    if !is_partitioned(context, table)? {
+        scoped.ref_table = context
+            .lock_catalog
+            .table_name(derived.partition)
+            .ok_or_else(|| SQLError::Internal("referenced partition disappeared".into()))?;
+        crate::schema::validation::validate_foreign_key_rows(context.rows, table, name, &scoped)?;
+    }
+    let entries = foreign_key
+        .derived_mut(columns, constraints)
+        .ok_or_else(|| SQLError::Internal("FOREIGN KEY disappeared".into()))?;
+    let mut validated = std::collections::BTreeSet::from([derived.partition]);
+    for entry in entries.iter_mut() {
+        if entry.partition == derived.partition
+            || entry
+                .parent
+                .is_some_and(|parent| validated.contains(&parent))
+        {
+            entry.validated = true;
+            validated.insert(entry.partition);
+        }
+    }
+    Ok(true)
 }
 
 /// Validate the rows of an enforced foreign key: the table's own rows, and on a partitioned table the rows of each leaf partition through its copy.

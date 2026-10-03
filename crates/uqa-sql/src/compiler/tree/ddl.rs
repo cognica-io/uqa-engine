@@ -164,6 +164,7 @@ pub(in crate::compiler) fn compile_create_table(
                             deferrable: cstr.deferrable,
                             initially_deferred: cstr.initdeferred,
                             period: cstr.fk_with_period,
+                            referenced_partitions: Vec::new(),
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrPrimary
@@ -581,6 +582,7 @@ pub(in crate::compiler) fn compile_column_def(
                         deferrable: cstr.deferrable,
                         initially_deferred: cstr.initdeferred,
                         period: false,
+                        referenced_partitions: Vec::new(),
                     });
                     last_enforceable = Some(EnforceableConstraint::ForeignKey);
                     saw_deferrability = false;

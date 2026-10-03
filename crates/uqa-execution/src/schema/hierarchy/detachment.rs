@@ -147,5 +147,10 @@ pub(super) fn publish(
     context
         .constraint_modes
         .preserve_split_modes(&split.retained, &mode_changes)?;
-    Ok(())
+    // The constraints the foreign keys referencing the parent or its ancestors derived on the detached subtree go with it.
+    crate::schema::publication::referenced_partitions::republish_referencing_tables(
+        &context.publication,
+        parent,
+        crate::row_locks::RelationLockMode::AccessExclusive,
+    )
 }

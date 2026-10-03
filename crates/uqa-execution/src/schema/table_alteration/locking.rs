@@ -176,6 +176,27 @@ fn lock_validation_reference<S: Clone + 'static>(
     let (columns, constraints) =
         crate::schema::constraints::table_constraint_state(&tables.constraints, primary)?;
     let target = constraint_validation(primary, name, &columns, &constraints)?;
+    // A derived constraint validates the referencing rows against its referenced partition.
+    let partition = match (target.validated, target.kind) {
+        (false, ConstraintValidationKind::ReferencedPartition { partition }) => Some(
+            binding
+                .catalog
+                .table_name(partition)
+                .ok_or_else(|| SQLError::Internal("referenced partition disappeared".into()))?,
+        ),
+        _ => None,
+    };
+    let target = match (&partition, target.kind) {
+        (Some(partition), _) => {
+            uqa_sql::schema::constraint_changes::validation::ConstraintValidation {
+                kind: ConstraintValidationKind::ForeignKey {
+                    referenced_table: partition,
+                },
+                validated: false,
+            }
+        }
+        _ => target,
+    };
     if let (false, ConstraintValidationKind::ForeignKey { referenced_table }) =
         (target.validated, target.kind)
     {

@@ -204,9 +204,14 @@ impl ConstraintNameContext<'_> {
     pub fn ensure_available(&self, table: &str, name: Option<&str>) -> Result<(), SQLError> {
         if let Some(name) = name {
             if self.in_use(self.bind(table)?, name)? {
+                let relation =
+                    RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
                 return Err(super::constraint_error(
                     "42710",
-                    format!("constraint \"{name}\" for relation \"{table}\" already exists"),
+                    format!(
+                        "constraint \"{name}\" for relation \"{}\" already exists",
+                        relation.name
+                    ),
                 ));
             }
         }

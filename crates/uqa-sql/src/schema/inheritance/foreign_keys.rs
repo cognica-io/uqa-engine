@@ -69,6 +69,8 @@ pub fn partition_foreign_key_copy(
 ) -> Result<ForeignKey, SQLError> {
     let mut copy = parent_key.clone();
     copy.catalog_identity = None;
+    // Only the foreign key without a parent derives constraints on referenced partitions.
+    copy.referenced_partitions.clear();
     if let Some(name) = copy.name.as_ref().filter(|name| used.contains(*name)) {
         copy.name = Some(
             crate::schema::constraint_metadata::choose_suffixed_constraint_name(name, schema)

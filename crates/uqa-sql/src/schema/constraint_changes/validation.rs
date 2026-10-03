@@ -14,9 +14,20 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConstraintValidationKind<'a> {
-    Check { no_inherit: bool },
-    NotNull { column: &'a str, no_inherit: bool },
-    ForeignKey { referenced_table: &'a str },
+    Check {
+        no_inherit: bool,
+    },
+    NotNull {
+        column: &'a str,
+        no_inherit: bool,
+    },
+    ForeignKey {
+        referenced_table: &'a str,
+    },
+    /// A constraint a foreign key derives on a referenced partition, by the partition's object identity.
+    ReferencedPartition {
+        partition: [u8; 16],
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +99,20 @@ pub fn constraint_validation<'a>(
             (ConstraintValidationKind::ForeignKey { referenced_table: &reference.ref_table }, reference.validated, reference.enforced)
         }
         ConstraintLocation::Key(_) => return Err(constraint_error("42809", format!("constraint \"{name}\" of relation \"{table}\" is not a foreign key, check, or not-null constraint"))),
+        ConstraintLocation::ReferencedPartition(foreign_key, index) => {
+            let derived = foreign_key
+                .derived(columns, constraints)
+                .and_then(|(_, derived)| derived.get(index))
+                .ok_or_else(|| SQLError::Internal("derived constraint disappeared".into()))?;
+            let enforced = match foreign_key {
+                super::ForeignKeyLocation::Column(position) => columns[position]
+                    .references
+                    .as_ref()
+                    .is_some_and(|reference| reference.enforced),
+                super::ForeignKeyLocation::Table(position) => constraints.foreign_keys[position].enforced,
+            };
+            (ConstraintValidationKind::ReferencedPartition { partition: derived.partition }, derived.validated, enforced)
+        }
     };
     if !enforced {
         return Err(constraint_error(

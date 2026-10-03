@@ -123,6 +123,10 @@ pub fn drop_constraint_one(
             format!("constraint \"{name}\" of relation \"{table}\" does not exist"),
         ));
     };
+    // A constraint derived on a referenced partition belongs to its foreign key, as an inherited constraint belongs to its parent's.
+    if matches!(location, ConstraintLocation::ReferencedPartition(..)) {
+        return uqa_sql::schema::constraint_changes::inheritance::ensure_inherited_constraint_removable(table, name, 1);
+    }
     if let Some(target) = ForeignKeyTarget::by_name(&columns, &constraints, name)? {
         return foreign_keys::drop_one(context, table, target.object_id);
     }
@@ -140,6 +144,9 @@ pub fn drop_constraint_one(
         SQLError::Internal("locked constraint disappeared during dependent removal".into())
     })?;
     match location {
+        ConstraintLocation::ReferencedPartition(..) => {
+            return uqa_sql::schema::constraint_changes::inheritance::ensure_inherited_constraint_removable(table, name, 1);
+        }
         ConstraintLocation::NotNull(index) => {
             uqa_sql::schema::constraint_changes::not_null_removal::validate_constraint_removal(
                 table,

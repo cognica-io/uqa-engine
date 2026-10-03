@@ -229,7 +229,12 @@ fn attach_partition(
         validate_existing_constraints(context, &target)?;
     }
     let _ = parent_spec;
-    Ok(())
+    // The foreign keys referencing the parent or its ancestors derive constraints on the attached subtree.
+    super::publication::referenced_partitions::republish_referencing_tables(
+        &context.publication,
+        parent,
+        crate::row_locks::RelationLockMode::ShareRowExclusive,
+    )
 }
 
 fn inherit_partition_schema(
