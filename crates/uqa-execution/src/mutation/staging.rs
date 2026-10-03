@@ -91,6 +91,7 @@ pub fn stage_prepared_document_rewrite_with_parent(
                             new_document: None,
                             updated_columns,
                             cascade_parent,
+                            foreign_key_checks: Vec::new(),
                         },
                     )?
                 {
@@ -161,6 +162,8 @@ pub fn stage_prepared_document_rewrite_with_parent(
                 new_document: None,
                 updated_columns: &[],
                 cascade_parent: movement_parent,
+                // The table the UPDATE names checks the referenced keys the moved row held.
+                foreign_key_checks: Vec::new(),
             },
         )? {
             last_movement_event = Some(crate::mutation::triggers::AfterRowTriggerEvent::push(
@@ -179,6 +182,13 @@ pub fn stage_prepared_document_rewrite_with_parent(
                 new_document: Some(&prepared.new_document),
                 updated_columns: &[],
                 cascade_parent: movement_parent,
+                foreign_key_checks: crate::mutation::referential::checks::referencing_checks(
+                    context.constraints,
+                    destination_table,
+                    rewritten_doc_id,
+                    &prepared.new_document,
+                    None,
+                )?,
             },
         )? {
             last_movement_event = Some(crate::mutation::triggers::AfterRowTriggerEvent::push(
@@ -200,6 +210,7 @@ pub fn stage_prepared_document_rewrite_with_parent(
                             new_document: Some(&prepared.new_document),
                             updated_columns,
                             cascade_parent: movement_parent,
+                            foreign_key_checks: Vec::new(),
                         },
                     )?
                 {
@@ -211,23 +222,62 @@ pub fn stage_prepared_document_rewrite_with_parent(
                 }
             }
         }
+        // `PostgreSQL` fires the update triggers of the UPDATE's root for the referenced keys of a row it moved, after the row's insert into its new partition.
+        if let Some(event) = crate::mutation::triggers::AfterRowTriggerEvent::foreign_key_checks(
+            prepared.moved_through.as_deref().unwrap_or(&prepared.table),
+            uqa_sql::ast::TriggerEvent::Update,
+            crate::mutation::referential::checks::referenced_checks(
+                context.constraints,
+                &prepared.table,
+                &prepared.old_document,
+                Some(&prepared.new_document),
+                prepared.moved_through.as_deref(),
+            )?,
+            movement_parent,
+        ) {
+            crate::mutation::triggers::AfterRowTriggerEvent::push(after_row_events, event);
+        }
         if let Some(event) = last_movement_event {
             cascade_parent = Some(event);
         }
-    } else if let Some(updated_columns) = trigger_updated_columns.as_deref() {
-        if let Some(event) = crate::mutation::triggers::AfterRowTriggerEvent::prepare(
-            &context.triggers,
-            crate::mutation::triggers::AfterRowTriggerInput {
-                table: &prepared.table,
-                event: uqa_sql::ast::TriggerEvent::Update,
-                old_doc_id: prepared.doc_id,
-                new_doc_id: rewritten_doc_id,
-                old_document: Some(&prepared.old_document),
-                new_document: Some(&prepared.new_document),
-                updated_columns,
+    } else {
+        let mut foreign_key_checks = crate::mutation::referential::checks::referenced_checks(
+            context.constraints,
+            &prepared.table,
+            &prepared.old_document,
+            Some(&prepared.new_document),
+            None,
+        )?;
+        foreign_key_checks.extend(crate::mutation::referential::checks::referencing_checks(
+            context.constraints,
+            &prepared.table,
+            rewritten_doc_id,
+            &prepared.new_document,
+            Some(&prepared.old_document),
+        )?);
+        let event = match trigger_updated_columns.as_deref() {
+            Some(updated_columns) => crate::mutation::triggers::AfterRowTriggerEvent::prepare(
+                &context.triggers,
+                crate::mutation::triggers::AfterRowTriggerInput {
+                    table: &prepared.table,
+                    event: uqa_sql::ast::TriggerEvent::Update,
+                    old_doc_id: prepared.doc_id,
+                    new_doc_id: rewritten_doc_id,
+                    old_document: Some(&prepared.old_document),
+                    new_document: Some(&prepared.new_document),
+                    updated_columns,
+                    cascade_parent,
+                    foreign_key_checks,
+                },
+            )?,
+            None => crate::mutation::triggers::AfterRowTriggerEvent::foreign_key_checks(
+                &prepared.table,
+                uqa_sql::ast::TriggerEvent::Update,
+                foreign_key_checks,
                 cascade_parent,
-            },
-        )? {
+            ),
+        };
+        if let Some(event) = event {
             cascade_parent = Some(crate::mutation::triggers::AfterRowTriggerEvent::push(
                 after_row_events,
                 event,
@@ -292,6 +342,13 @@ pub fn stage_prepared_document_delete_with_parent(
             new_document: None,
             updated_columns: &[],
             cascade_parent,
+            foreign_key_checks: crate::mutation::referential::checks::referenced_checks(
+                context.constraints,
+                &prepared.table,
+                &prepared.document,
+                None,
+                None,
+            )?,
         },
     )? {
         cascade_parent = Some(crate::mutation::triggers::AfterRowTriggerEvent::push(

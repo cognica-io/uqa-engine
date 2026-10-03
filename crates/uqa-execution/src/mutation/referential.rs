@@ -9,8 +9,7 @@ use super::{
     assignment::refresh_stored_generated_columns,
     candidate::{MutationLockTarget, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     constraints::{
-        lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-        lock_existing_document_rewrite_foreign_key_dependencies, partition_insert_target,
+        lock_document_key_dependencies, partition_insert_target,
         period::period_foreign_key_coverage, validate_partition_constraint, ConstraintStatement,
     },
     errors::{dml_storage_error, missing_document_error},
@@ -28,8 +27,7 @@ use uqa_sql::{
     ast::{ForeignKey, ForeignKeyAction},
     semantics::{
         foreign_keys::{
-            foreign_key_comparison_types, foreign_key_lookup_values, foreign_key_relation_name,
-            ForeignKeyComparison,
+            foreign_key_comparison_types, foreign_key_lookup_values, ForeignKeyComparison,
         },
         referential::referrers_to_for_actions,
     },
@@ -41,6 +39,7 @@ pub use context::{
     ReferentialContext, ReferentialDeferrals, ReferentialReadSnapshot, ReferentialSnapshots,
 };
 mod actions;
+pub mod checks;
 mod delete;
 mod references;
 mod rewrite;

@@ -68,6 +68,12 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                 &fk,
                 firing.derived,
             )?;
+        } else if matches!(
+            fk.on_update,
+            ForeignKeyAction::NoAction | ForeignKeyAction::Restrict
+        ) {
+            // The statement checks the removed key once it has written its rows (`super::checks`).
+            continue;
         }
         if fk.period {
             let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
@@ -107,26 +113,14 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                     if covered {
                         continue;
                     }
-                    if defer_no_action {
-                        context.deferrals.defer_foreign_key_check(
-                            &ref_table,
-                            firing.relation,
-                            &physical_table,
-                            child_id,
-                            &fk,
-                            firing.derived,
-                        )?;
-                        continue;
-                    }
-                    let ref_display = super::foreign_key_relation_name(&ref_table);
-                    return Err(SQLError::Routine {
-                        sqlstate: "23503".into(),
-                        message: format!(
-                            "update on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
-                            super::foreign_key_relation_name(firing.relation),
-                            firing.name(&fk)
-                        ),
-                    });
+                    context.deferrals.defer_foreign_key_check(
+                        &ref_table,
+                        firing.relation,
+                        &physical_table,
+                        child_id,
+                        &fk,
+                        firing.derived,
+                    )?;
                 }
             }
             continue;
@@ -160,7 +154,8 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
         )?;
         for (child, _child_doc) in referencing {
             match fk.on_update {
-                ForeignKeyAction::NoAction if defer_no_action => {
+                // Only a deferred NO ACTION key reaches its referencing rows here.
+                ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
                     context.deferrals.defer_foreign_key_check(
                         &ref_table,
                         firing.relation,
@@ -169,17 +164,6 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                         &fk,
                         firing.derived,
                     )?;
-                }
-                ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    let ref_display = super::foreign_key_relation_name(&ref_table);
-                    return Err(SQLError::Routine {
-                        sqlstate: "23503".into(),
-                        message: format!(
-                            "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
-                            super::foreign_key_relation_name(firing.relation),
-                            firing.name(&fk)
-                        ),
-                    });
                 }
                 ForeignKeyAction::Cascade => {
                     let Some((child, child_doc)) = lock_referencing_child(
@@ -322,6 +306,12 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                 &fk,
                 firing.derived,
             )?;
+        } else if matches!(
+            fk.on_delete,
+            ForeignKeyAction::NoAction | ForeignKeyAction::Restrict
+        ) {
+            // The statement checks the removed key once it has written its rows (`super::checks`).
+            continue;
         }
         if fk.period {
             let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
@@ -375,26 +365,14 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                     {
                         continue;
                     }
-                    if defer_no_action {
-                        context.deferrals.defer_foreign_key_check(
-                            &ref_table,
-                            parent_table,
-                            &physical_table,
-                            child_id,
-                            &fk,
-                            firing.derived,
-                        )?;
-                        continue;
-                    }
-                    let ref_display = super::foreign_key_relation_name(&ref_table);
-                    return Err(SQLError::Routine {
-                        sqlstate: "23503".into(),
-                        message: format!(
-                            "delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
-                            super::foreign_key_relation_name(parent_table),
-                            firing.name(&fk)
-                        ),
-                    });
+                    context.deferrals.defer_foreign_key_check(
+                        &ref_table,
+                        parent_table,
+                        &physical_table,
+                        child_id,
+                        &fk,
+                        firing.derived,
+                    )?;
                 }
             }
             continue;
@@ -439,7 +417,8 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                 continue;
             }
             match fk.on_delete {
-                ForeignKeyAction::NoAction if defer_no_action => {
+                // Only a deferred NO ACTION key reaches its referencing rows here.
+                ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
                     context.deferrals.defer_foreign_key_check(
                         &ref_table,
                         parent_table,
@@ -448,17 +427,6 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                         &fk,
                         firing.derived,
                     )?;
-                }
-                ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    let ref_display = super::foreign_key_relation_name(&ref_table);
-                    return Err(SQLError::Routine {
-                        sqlstate: "23503".into(),
-                        message: format!(
-                            "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
-                            super::foreign_key_relation_name(parent_table),
-                            firing.name(&fk)
-                        ),
-                    });
                 }
                 ForeignKeyAction::Cascade => {
                     if let Some(prepared) = prepare_document_delete(

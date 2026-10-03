@@ -23,8 +23,8 @@ use crate::{
         candidate::PhysicalMutationLockTarget,
         command_scope::MutationOverlayScope,
         constraints::{
-            lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-            partition_insert_target, validate_document_constraints, ConstraintStatement,
+            lock_document_key_dependencies, partition_insert_target, validate_document_constraints,
+            ConstraintStatement,
         },
         errors::{dml_storage_error, missing_document_error},
         expressions::eval_mutation_expr,
@@ -823,11 +823,6 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
                     });
                         }
-                        lock_existing_document_foreign_key_dependencies(
-                            constraints,
-                            &storage_table,
-                            &document,
-                        )?;
                         let _key_locks = lock_document_key_dependencies(
                             constraints,
                             &storage_table,
@@ -870,6 +865,14 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                     new_document: Some(&document),
                                     updated_columns: &[],
                                     cascade_parent: None,
+                                    foreign_key_checks:
+                                        crate::mutation::referential::checks::referencing_checks(
+                                            constraints,
+                                            &storage_table,
+                                            doc_id,
+                                            &document,
+                                            None,
+                                        )?,
                                 },
                             )?
                         {

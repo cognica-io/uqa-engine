@@ -23,7 +23,7 @@ pub struct TransitionTables {
 
 impl TransitionTables {
     pub fn covers(&self, event: &AfterRowTriggerEvent) -> bool {
-        self.event == event.event && self.source_tables.contains(&event.table)
+        event.captured && self.event == event.event && self.source_tables.contains(&event.table)
     }
 
     pub fn applies_to(&self, event: &AfterRowTriggerEvent) -> bool {
@@ -281,7 +281,11 @@ fn transition_event_schedule(
 ) -> Result<TransitionEventSchedule> {
     let matching = events
         .iter()
-        .filter(|candidate| candidate.event == event && source_tables.contains(&candidate.table))
+        .filter(|candidate| {
+            candidate.captured
+                && candidate.event == event
+                && source_tables.contains(&candidate.table)
+        })
         .map(|candidate| candidate.sequence)
         .collect::<BTreeSet<_>>();
     let mut roots = Vec::new();
@@ -374,7 +378,11 @@ pub fn build_transition_tables(
         transition_event_schedule(context, event, &source_tables, events, split_cascades)?;
     let mut matching = events
         .iter()
-        .filter(|candidate| candidate.event == event && source_tables.contains(&candidate.table))
+        .filter(|candidate| {
+            candidate.captured
+                && candidate.event == event
+                && source_tables.contains(&candidate.table)
+        })
         .collect::<Vec<_>>();
     matching.sort_by_key(|candidate| {
         schedule

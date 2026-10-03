@@ -12,13 +12,15 @@ use uqa_core::{DocId, Value};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
-const PREPARED_MUTATION_CODEC_VERSION: i64 = 2;
+const PREPARED_MUTATION_CODEC_VERSION: i64 = 3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedDocumentRewrite {
     pub table: String,
     pub doc_id: DocId,
     pub destination: Option<(String, DocId)>,
+    /// The table the `UPDATE` named for a row it moves to another partition, whose triggers fire for the referenced keys the row held.
+    pub moved_through: Option<String>,
     /// The identity within its own table the row moves to because its integer primary key changed, decided once when the rewrite is prepared so that every later stage moves it to the same one.
     pub relocation: Option<DocId>,
     pub partition_move_delete: Option<Box<PreparedDocumentDelete>>,
@@ -144,6 +146,10 @@ pub fn encode_prepared_document_rewrite(prepared: PreparedDocumentRewrite) -> Va
             }),
         ),
         (
+            "moved_through".into(),
+            prepared.moved_through.map_or(Value::Null, Value::Str),
+        ),
+        (
             "relocation".into(),
             prepared
                 .relocation
@@ -236,6 +242,15 @@ pub fn decode_prepared_document_rewrite(value: Value) -> Result<PreparedDocument
             ))
         }
     };
+    let moved_through = match fields.remove("moved_through") {
+        Some(Value::Null) => None,
+        Some(Value::Str(table)) => Some(table),
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared rewrite spill payload has no moved-through relation".into(),
+            ))
+        }
+    };
     let relocation = match fields.remove("relocation") {
         Some(Value::Null) => None,
         Some(doc_id) => Some(decode_prepared_doc_id(
@@ -303,6 +318,7 @@ pub fn decode_prepared_document_rewrite(value: Value) -> Result<PreparedDocument
         table,
         doc_id,
         destination,
+        moved_through,
         relocation,
         partition_move_delete,
         old_document,
@@ -634,6 +650,7 @@ mod tests {
             table: "public.source".into(),
             doc_id: 7,
             destination: Some(("public.destination".into(), 9)),
+            moved_through: Some("public.root".into()),
             relocation: None,
             partition_move_delete: Some(Box::new(PreparedDocumentDelete {
                 table: "public.source".into(),
@@ -647,6 +664,7 @@ mod tests {
                 table: "public.child".into(),
                 doc_id: 11,
                 destination: None,
+                moved_through: None,
                 relocation: Some(1 << 62),
                 partition_move_delete: None,
                 old_document: document("parent", 7),

@@ -34,7 +34,19 @@ impl Engine {
             expressions: self,
             projection: self.catalog_execution(),
             runtime: self.query_runtime_view(),
+            foreign_keys: self,
         }
+    }
+}
+impl uqa_execution::mutation::triggers::context::ForeignKeyCheckRunner for Engine {
+    fn run_foreign_key_check(
+        &self,
+        check: &uqa_execution::mutation::referential::checks::ForeignKeyCheck,
+    ) -> Result<(), SQLError> {
+        uqa_execution::mutation::referential::checks::run_foreign_key_check(
+            &self.referential_execution_context(),
+            check,
+        )
     }
 }
 impl TriggerCatalog for Engine {

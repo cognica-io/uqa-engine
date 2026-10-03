@@ -75,6 +75,13 @@ pub trait ConstraintTriggerQueue {
         event: DeferredConstraintTriggerEvent,
     ) -> Result<(), SQLError>;
 }
+/// Runs the foreign key checks that row events carry when a statement's AFTER ROW triggers fire.
+pub trait ForeignKeyCheckRunner {
+    fn run_foreign_key_check(
+        &self,
+        check: &crate::mutation::referential::checks::ForeignKeyCheck,
+    ) -> Result<(), SQLError>;
+}
 #[derive(Clone, Copy)]
 pub struct TriggerContext<'a> {
     pub catalog: &'a dyn TriggerCatalog,
@@ -85,4 +92,5 @@ pub struct TriggerContext<'a> {
     pub expressions: &'a dyn RoutineExpressions,
     pub projection: CatalogContext<'a>,
     pub runtime: QueryRuntimeView<'a>,
+    pub foreign_keys: &'a dyn ForeignKeyCheckRunner,
 }

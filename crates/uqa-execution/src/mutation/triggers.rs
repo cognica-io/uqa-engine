@@ -612,7 +612,14 @@ fn fire_after_row_trigger(
         .iter()
         .find(|tables| tables.applies_to(event))
         .copied();
+    // The foreign key checks are internal triggers, which fire among the user triggers in the order of their names.
+    let mut checks = event.foreign_keys.iter().peekable();
     for trigger in &event.triggers {
+        while let Some(check) =
+            checks.next_if(|check| check.precedes_trigger(&trigger.definition.name))
+        {
+            context.foreign_keys.run_foreign_key_check(check)?;
+        }
         if trigger.definition.constraint
             && context.deferrals.constraint_trigger_is_deferred(trigger)?
         {
@@ -649,6 +656,9 @@ fn fire_after_row_trigger(
             },
             transition_tables,
         )?;
+    }
+    for check in checks {
+        context.foreign_keys.run_foreign_key_check(check)?;
     }
     Ok(())
 }
@@ -689,7 +699,11 @@ pub struct AfterRowTriggerEvent {
     event: TriggerEvent,
     old: Value,
     new: Value,
+    /// Whether `old` and `new` hold the row's images, which a row with no user trigger to fire and no transition to capture leaves out.
+    captured: bool,
     triggers: Vec<uqa_sql::catalog::events::StoredTrigger>,
+    /// The foreign key checks the row queued, in the order of their internal triggers' names.
+    foreign_keys: Vec<crate::mutation::referential::checks::ForeignKeyCheck>,
     sequence: usize,
     cascade_parent: Option<usize>,
 }
@@ -703,6 +717,8 @@ pub struct AfterRowTriggerInput<'a> {
     pub new_document: Option<&'a Document>,
     pub updated_columns: &'a [String],
     pub cascade_parent: Option<usize>,
+    /// The foreign key checks the row's change queues (`referential::checks`).
+    pub foreign_key_checks: Vec<crate::mutation::referential::checks::ForeignKeyCheck>,
 }
 
 impl AfterRowTriggerEvent {
@@ -719,7 +735,9 @@ impl AfterRowTriggerEvent {
             new_document,
             updated_columns,
             cascade_parent,
+            mut foreign_key_checks,
         } = input;
+        crate::mutation::referential::checks::ForeignKeyCheck::sort(&mut foreign_key_checks);
         let candidates =
             row_triggers::resolve(context, table, TriggerTiming::After, event, updated_columns)?;
         let capture_transition =
@@ -730,7 +748,12 @@ impl AfterRowTriggerEvent {
                 .iter()
                 .any(|trigger| row_triggers::fires(context, trigger))
         {
-            return Ok(None);
+            return Ok(Self::foreign_key_checks(
+                table,
+                event,
+                foreign_key_checks,
+                cascade_parent,
+            ));
         }
         let types = trigger_column_types(context, table)?;
         let old = trigger_record(context, table, old_doc_id, old_document, false)?;
@@ -750,17 +773,48 @@ impl AfterRowTriggerEvent {
             }
         }
         if matching.is_empty() && !capture_transition {
-            return Ok(None);
+            return Ok(Self::foreign_key_checks(
+                table,
+                event,
+                foreign_key_checks,
+                cascade_parent,
+            ));
         }
         Ok(Some(Self {
             table: table.to_string(),
             event,
             old,
             new,
+            captured: true,
             triggers: matching,
+            foreign_keys: foreign_key_checks,
             sequence: usize::MAX,
             cascade_parent,
         }))
+    }
+
+    /// An event that only checks foreign keys, for a row with no user trigger to fire and no transition to capture; `None` when the row queued no check.
+    pub fn foreign_key_checks(
+        table: &str,
+        event: TriggerEvent,
+        mut foreign_key_checks: Vec<crate::mutation::referential::checks::ForeignKeyCheck>,
+        cascade_parent: Option<usize>,
+    ) -> Option<Self> {
+        if foreign_key_checks.is_empty() {
+            return None;
+        }
+        crate::mutation::referential::checks::ForeignKeyCheck::sort(&mut foreign_key_checks);
+        Some(Self {
+            table: table.to_string(),
+            event,
+            old: Value::Null,
+            new: Value::Null,
+            captured: false,
+            triggers: Vec::new(),
+            foreign_keys: foreign_key_checks,
+            sequence: usize::MAX,
+            cascade_parent,
+        })
     }
 
     pub fn prepare_transition_capture(
@@ -776,9 +830,15 @@ impl AfterRowTriggerEvent {
             new_document,
             updated_columns,
             cascade_parent,
+            foreign_key_checks,
         } = input;
         if !transition_capture_required(context, table, event, updated_columns)? {
-            return Ok(None);
+            return Ok(Self::foreign_key_checks(
+                table,
+                event,
+                foreign_key_checks,
+                cascade_parent,
+            ));
         }
         let old = match old_document {
             Some(document) => trigger_record(context, table, old_doc_id, Some(document), false)?,
@@ -788,12 +848,16 @@ impl AfterRowTriggerEvent {
             Some(document) => trigger_record(context, table, new_doc_id, Some(document), false)?,
             None => Value::Null,
         };
+        let mut foreign_key_checks = foreign_key_checks;
+        crate::mutation::referential::checks::ForeignKeyCheck::sort(&mut foreign_key_checks);
         Ok(Some(Self {
             table: table.to_string(),
             event,
             old,
             new,
+            captured: true,
             triggers: Vec::new(),
+            foreign_keys: foreign_key_checks,
             sequence: usize::MAX,
             cascade_parent,
         }))

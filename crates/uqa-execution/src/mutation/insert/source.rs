@@ -14,10 +14,7 @@ use super::{
 use crate::mutation::{
     assignment::apply_missing_column_defaults,
     conflict::update::{InsertConflictLocks, InsertConflictPreparation},
-    constraints::{
-        lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-        partition_insert_target, ConstraintStatement,
-    },
+    constraints::{lock_document_key_dependencies, partition_insert_target, ConstraintStatement},
     errors::dml_storage_error,
     identity::{
         prepare_auto_increment_identity, prepare_insert_identity,
@@ -417,11 +414,6 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
             });
         }
-        lock_existing_document_foreign_key_dependencies(
-            services.rows.referential.constraints,
-            &target_table,
-            &document,
-        )?;
         let prepared_conflict = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
             conflict_locks
                 .as_mut()

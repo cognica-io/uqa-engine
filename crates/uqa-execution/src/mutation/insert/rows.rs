@@ -11,9 +11,9 @@ use crate::{
         assignment::{validate_view_checks, ViewCheckContext},
         conflict::update::{InsertConflictLocks, InsertConflictPreparation},
         constraints::{
-            lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-            partition_insert_target, validate_document_non_key_constraints,
-            validate_key_constraints, validate_key_constraints_with_previous, ConstraintStatement,
+            lock_document_key_dependencies, partition_insert_target,
+            validate_document_non_key_constraints, validate_key_constraints,
+            validate_key_constraints_with_previous, ConstraintStatement,
         },
         events::ReferentialActionContext,
         identity::refresh_insert_identity_after_trigger,
@@ -99,11 +99,6 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
             message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
         });
     }
-    lock_existing_document_foreign_key_dependencies(
-        services.referential.constraints,
-        &target_table,
-        &document,
-    )?;
     let prepared = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
         conflict_locks.prepare_document(
             InsertConflictPreparation {
@@ -236,6 +231,13 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
                     new_document: Some(document),
                     updated_columns: &[],
                     cascade_parent: None,
+                    foreign_key_checks: crate::mutation::referential::checks::referencing_checks(
+                        services.referential.constraints,
+                        storage_table,
+                        *doc_id,
+                        document,
+                        None,
+                    )?,
                 },
             )? {
                 crate::mutation::triggers::AfterRowTriggerEvent::push(&mut after_row_events, event);

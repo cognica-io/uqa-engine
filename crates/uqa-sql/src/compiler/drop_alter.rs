@@ -617,20 +617,9 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                             period: constraint.fk_with_period,
                             referenced_partitions: Vec::new(),
                         };
-                        if foreign_key.period
-                            && (!matches!(
-                                foreign_key.on_update,
-                                crate::ast::ForeignKeyAction::NoAction
-                            ) || !matches!(
-                                foreign_key.on_delete,
-                                crate::ast::ForeignKeyAction::NoAction
-                            ))
-                        {
-                            return Err(SQLError::Unsupported(
-                                "unsupported referential action for foreign key constraint using PERIOD"
-                                    .into(),
-                            ));
-                        }
+                        crate::schema::foreign_keys::validate_period_foreign_key_actions(
+                            &foreign_key,
+                        )?;
                         AlterTableAction::AddForeignKeyConstraint {
                             constraint: foreign_key,
                         }

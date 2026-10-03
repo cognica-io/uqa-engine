@@ -247,17 +247,7 @@ pub(in crate::compiler) fn compile_create_table(
                 "FOREIGN KEY using PERIOD needs at least two columns".into(),
             ));
         }
-        if !matches!(
-            (foreign_key.on_update, foreign_key.on_delete),
-            (
-                crate::ast::ForeignKeyAction::NoAction,
-                crate::ast::ForeignKeyAction::NoAction
-            )
-        ) {
-            return Err(SQLError::Unsupported(
-                "unsupported referential action for foreign key constraint using PERIOD".into(),
-            ));
-        }
+        crate::schema::foreign_keys::validate_period_foreign_key_actions(foreign_key)?;
         let period_column = foreign_key
             .local_columns
             .last()

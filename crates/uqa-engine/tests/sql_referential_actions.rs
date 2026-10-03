@@ -445,3 +445,6 @@ fn merge_insert_rejects_missing_foreign_key_and_rolls_back() {
 
     assert!(query(&engine, "SELECT id FROM child").rows.is_empty());
 }
+
+#[path = "sql_referential_actions/statement_checks.rs"]
+mod statement_checks;

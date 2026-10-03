@@ -5,9 +5,7 @@
 //
 
 use super::{
-    arriving_key_identity, key_relocation, lock_document_key_dependencies,
-    lock_existing_document_foreign_key_dependencies,
-    lock_existing_document_rewrite_foreign_key_dependencies, lock_mutation_row,
+    arriving_key_identity, key_relocation, lock_document_key_dependencies, lock_mutation_row,
     partition_insert_target, prepare_referenced_key_update_actions,
     refresh_stored_generated_columns, update_lock_strength, validate_partition_constraint,
     ConstraintStatement, DocId, Document, PartitionUpdateRoute, PhysicalDocumentIdentity,
@@ -60,12 +58,6 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
         &new_document,
         Some(&old_document),
     )?;
-    lock_existing_document_rewrite_foreign_key_dependencies(
-        context.constraints,
-        table,
-        &old_document,
-        &new_document,
-    )?;
     referential_actions.rewrite_stack.push(key);
     let actions = prepare_referenced_key_update_actions(
         context,
@@ -90,6 +82,7 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
         table: table.to_string(),
         doc_id,
         destination: None,
+        moved_through: None,
         relocation,
         partition_move_delete: None,
         old_document,
@@ -197,11 +190,6 @@ fn retarget_prepared_document_rewrite<S: Clone + 'static>(
         destination_table,
         &prepared.new_document,
         None,
-    )?;
-    lock_existing_document_foreign_key_dependencies(
-        context.constraints,
-        destination_table,
-        &prepared.new_document,
     )?;
     let destination_doc_id = match arriving_key_identity(
         context.constraints.catalog,
@@ -346,6 +334,7 @@ pub fn prepare_routed_document_rewrite<S: Clone + 'static>(
             };
             if let Some(destination) = destination {
                 retarget_prepared_document_rewrite(context, &mut prepared, &destination)?;
+                prepared.moved_through = moved_through;
             }
             Ok(Some(prepared))
         }
@@ -367,6 +356,7 @@ pub fn prepare_routed_document_rewrite<S: Clone + 'static>(
                 table: table.to_string(),
                 doc_id,
                 destination: None,
+                moved_through: None,
                 relocation: None,
                 partition_move_delete: Some(Box::new(delete)),
                 old_document,
