@@ -72,7 +72,6 @@ pub fn add_foreign_key_constraint(
         context.publication.bindings.schema,
         qualifier,
         &mut columns,
-        &constraints.key_constraints,
         &constraints.foreign_keys,
     )?;
     materialize_constraint_candidate(context, table, &mut columns, &mut constraints)?;
@@ -510,55 +509,127 @@ fn foreign_key_family(
     }
 }
 
+/// Add a key as ALTER TABLE does: the declaration's checks, the index's name, the rows of a plain table, and then, through the index that `DefineIndex` builds or adopts on each partition, the partition keys and the rows of each partition, before the NOT NULL constraints of a primary key are verified.
 pub fn add_key_constraint(
     context: &ConstraintAlterContext<'_>,
     table: &str,
-    qualifier: &str,
     mut constraint: uqa_sql::ast::TableKeyConstraint,
 ) -> Result<(), SQLError> {
-    let mut columns = context
+    let columns = context
         .catalog
         .try_describe_table(table)
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    context
-        .publication
-        .constraint_names()
-        .ensure_available(table, constraint.name.as_deref())?;
+    let keys = context
+        .catalog
+        .try_key_constraints(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+    let partition = context
+        .rows
+        .partitions
+        .catalog
+        .try_table_hierarchy(table)
+        .map_err(SQLError::Internal)?
+        .partition_spec;
+    uqa_sql::schema::keys::validate_added_key(
+        &uqa_sql::schema::keys::AddedKeyRelation {
+            table,
+            columns: &columns,
+            keys: &keys,
+            partition: partition.as_ref(),
+        },
+        &constraint,
+    )?;
     uqa_sql::schema::indexes::names::name_constraint_indexes(
         context.names,
         table,
         std::slice::from_mut(&mut constraint),
     )?;
-    let mut key_constraints = context
-        .catalog
-        .try_key_constraints(table)
-        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-    key_constraints.push(constraint.clone());
-    let foreign_keys = context
-        .catalog
-        .try_foreign_keys(table)
-        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-    uqa_sql::schema::generated::prepare_generated_columns(
-        context.publication.bindings.schema,
-        qualifier,
-        &mut columns,
-        &key_constraints,
-        &foreign_keys,
-    )?;
-    crate::schema::keys::validate_added_key_constraint(
-        &crate::schema::keys::KeyValidationContext {
-            catalog: context.catalog,
-            constraints: context.rows,
-        },
-        table,
-        &constraint,
-    )?;
+    context
+        .publication
+        .constraint_names()
+        .ensure_available(table, constraint.name.as_deref())?;
+    let validation = crate::schema::keys::KeyValidationContext {
+        catalog: context.catalog,
+        constraints: context.rows,
+    };
+    let partitions = partition_keys(context, table)?;
+    if partition.is_none() {
+        crate::schema::keys::validate_key_index_rows(&validation, table, &constraint)?;
+    }
     context
         .writes
         .with_schema_write(Box::new(|publication| {
             crate::schema::publication::keys::append_key_constraint(publication, table, &constraint)
         }))
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+    let mut built = Vec::new();
+    for state in &partitions {
+        let index = uqa_sql::schema::keys::definition::define_partition_key(
+            &uqa_sql::schema::keys::definition::KeyPartition {
+                table: &state.table,
+                partition: state.partition.as_ref(),
+                keys: &state.keys,
+            },
+            &constraint,
+        )?;
+        if index == uqa_sql::schema::keys::definition::PartitionKeyIndex::Created
+            && state.partition.is_none()
+        {
+            let copy = context
+                .catalog
+                .try_key_constraints(&state.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+                .into_iter()
+                .find(|key| uqa_sql::schema::inheritance::alter::key_equivalent(key, &constraint))
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "partition `{}` did not receive its key",
+                        state.table
+                    ))
+                })?;
+            crate::schema::keys::validate_key_index_rows(&validation, &state.table, &copy)?;
+            built.push((state.table.as_str(), copy));
+        }
+    }
+    if partition.is_none() {
+        crate::schema::keys::validate_primary_key_rows(&validation, table, &constraint)?;
+    }
+    for (leaf, copy) in &built {
+        crate::schema::keys::validate_primary_key_rows(&validation, leaf, copy)?;
+    }
     Ok(())
+}
+
+/// A partition below a relation that receives a key, with its keys before the key reaches it.
+struct PartitionKeys {
+    table: String,
+    partition: Option<uqa_sql::ast::PartitionSpec>,
+    keys: Vec<uqa_sql::ast::TableKeyConstraint>,
+}
+
+/// The partitions below `table` in the order `DefineIndex` recurses into them.
+fn partition_keys(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+) -> Result<Vec<PartitionKeys>, SQLError> {
+    uqa_sql::semantics::partition::partition_tree(&context.rows.partitions, table, false)?
+        .into_iter()
+        .map(|node| {
+            Ok(PartitionKeys {
+                partition: context
+                    .rows
+                    .partitions
+                    .catalog
+                    .try_table_hierarchy(&node.table)
+                    .map_err(SQLError::Internal)?
+                    .partition_spec,
+                keys: context
+                    .catalog
+                    .try_key_constraints(&node.table)
+                    .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?,
+                table: node.table,
+            })
+        })
+        .collect()
 }

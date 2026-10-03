@@ -45,14 +45,7 @@ pub fn validate_key_constraint_rows(
                     .zip(&values)
                     .find_map(|(column, value)| matches!(value, Value::Null).then_some(column))
                 {
-                    let relation = uqa_core::RelationIdentity::from_legacy_name(table)
-                        .map_or_else(|_| table.to_string(), |identity| identity.name);
-                    return Err(SQLError::Routine {
-                        sqlstate: "23502".into(),
-                        message: format!(
-                            "column \"{column}\" of relation \"{relation}\" contains null values"
-                        ),
-                    });
+                    return Err(null_key_column(table, column));
                 }
             }
             if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::Unique
@@ -81,7 +74,7 @@ pub fn validate_temporal_key_rows(
         .map_err(|error| ddl_storage_error("table rewrite", error))?
     {
         if constraint.without_overlaps {
-            validate_key_constraint_data(context, table, &constraint)?;
+            validate_key_index_rows(context, table, &constraint)?;
         }
     }
     Ok(())
@@ -110,17 +103,8 @@ fn duplicated_key(
     })
 }
 
-pub fn validate_added_key_constraint(
-    context: &KeyValidationContext<'_>,
-    table: &str,
-    constraint: &uqa_sql::ast::TableKeyConstraint,
-) -> Result<(), SQLError> {
-    validate_added_key_declaration(context, table, constraint)?;
-    validate_key_constraint_data(context, table, constraint)
-}
-
-/// Validate physical values independently of whether the declaration has already been published in the current transaction.
-pub(super) fn validate_key_constraint_data(
+/// Check the rows of `table` as building a key's index does: a repeated key fails as `could not create unique index` with the index's name, and a `WITHOUT OVERLAPS` key fails on overlapping periods. A key value with a NULL never repeats unless the key treats NULLs as not distinct.
+pub fn validate_key_index_rows(
     context: &KeyValidationContext<'_>,
     table: &str,
     constraint: &uqa_sql::ast::TableKeyConstraint,
@@ -130,23 +114,6 @@ pub(super) fn validate_key_constraint_data(
         let Some(document) = context.constraints.reads.get_document(table, doc_id)? else {
             continue;
         };
-        let values: Vec<Value> = constraint
-            .columns
-            .iter()
-            .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
-            .collect();
-        let contains_null = values.iter().any(|value| matches!(value, Value::Null));
-        if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey && contains_null {
-            return Err(SQLError::TypeMismatch(format!(
-                "PRIMARY KEY constraint contains NULL values on table `{table}`"
-            )));
-        }
-        if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::Unique
-            && contains_null
-            && !constraint.nulls_not_distinct
-        {
-            continue;
-        }
         if constraint.without_overlaps {
             if crate::mutation::constraints::without_overlaps_conflict(
                 context.constraints,
@@ -164,6 +131,15 @@ pub(super) fn validate_key_constraint_data(
             }
             continue;
         }
+        let values: Vec<Value> = constraint
+            .columns
+            .iter()
+            .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+            .collect();
+        if values.iter().any(|value| matches!(value, Value::Null)) && !constraint.nulls_not_distinct
+        {
+            continue;
+        }
         if seen.contains(&values) {
             return Err(duplicated_key(context, table, constraint, &values)?);
         }
@@ -172,42 +148,46 @@ pub(super) fn validate_key_constraint_data(
     Ok(())
 }
 
-fn validate_added_key_declaration(
+/// Check the NOT NULL constraints that a primary key gives its columns, after its index is built, as `PostgreSQL` verifies new NOT NULL constraints once the table's other changes are done: the first row holding a NULL in a key column fails on the first such column of the table.
+pub fn validate_primary_key_rows(
     context: &KeyValidationContext<'_>,
     table: &str,
     constraint: &uqa_sql::ast::TableKeyConstraint,
 ) -> Result<(), SQLError> {
+    if constraint.kind != uqa_sql::ast::TableKeyConstraintKind::PrimaryKey {
+        return Ok(());
+    }
     let columns = context
         .catalog
         .try_describe_table(table)
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    uqa_sql::schema::keys::validate_added_key_columns(table, constraint, &columns)?;
-
-    let existing_keys = context
-        .catalog
-        .try_key_constraints(table)
-        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-    let (checks, foreign_keys) = if constraint.name.is_some() {
-        let checks = context
-            .catalog
-            .try_check_constraint_definitions(table)
-            .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-        let foreign_keys = context
-            .catalog
-            .try_foreign_keys(table)
-            .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-        (checks, foreign_keys)
-    } else {
-        (Vec::new(), Vec::new())
-    };
-    uqa_sql::schema::keys::validate_added_key_identity(
-        table,
-        constraint,
-        &existing_keys,
-        &checks,
-        &foreign_keys,
-    )?;
-
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?
+        .into_iter()
+        .map(|column| column.name)
+        .filter(|column| constraint.columns.contains(column))
+        .collect::<Vec<_>>();
+    for doc_id in context.constraints.reads.live_table_doc_ids(table)? {
+        let Some(document) = context.constraints.reads.get_document(table, doc_id)? else {
+            continue;
+        };
+        if let Some(column) = columns.iter().find(|column| {
+            matches!(
+                document.get(column.as_str()).unwrap_or(&Value::Null),
+                Value::Null
+            )
+        }) {
+            return Err(null_key_column(table, column));
+        }
+    }
     Ok(())
+}
+
+/// `column "a" of relation "t" contains null values`, for a NOT NULL constraint that a row violates.
+fn null_key_column(table: &str, column: &str) -> SQLError {
+    let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+        .map_or_else(|_| table.to_string(), |identity| identity.name);
+    SQLError::Routine {
+        sqlstate: "23502".into(),
+        message: format!("column \"{column}\" of relation \"{relation}\" contains null values"),
+    }
 }

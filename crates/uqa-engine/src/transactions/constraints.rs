@@ -16,11 +16,46 @@ pub(crate) use uqa_sql::catalog::constraints::constraint_identities_match;
 use uqa_sql::catalog::constraints::find_live_constraint_identity;
 
 /// A referenced key check: the foreign key of `constraint_table` whose check a change to a referenced row of `firing_table` fires, and the constraint it derives on that partition when it derives one.
+#[derive(Clone, Copy)]
 pub(crate) struct DeferredReferencedKey<'a> {
     pub(crate) constraint_table: &'a str,
     pub(crate) firing_table: &'a str,
     pub(crate) foreign_key: &'a ForeignKey,
     pub(crate) derived: Option<&'a uqa_sql::ast::ReferencedPartitionConstraint>,
+}
+
+/// The named constraints followed by every constraint deriving from them, as `SET CONSTRAINTS` adds the descendants of the constraints it names.
+fn with_derived_constraints<'a>(
+    constraints: &'a [uqa_execution::catalog::projection::RuntimeConstraint],
+    named: Vec<&'a uqa_execution::catalog::projection::RuntimeConstraint>,
+) -> Vec<&'a uqa_execution::catalog::projection::RuntimeConstraint> {
+    let mut oids = named
+        .iter()
+        .filter_map(|constraint| constraint.catalog_oid)
+        .collect::<BTreeSet<_>>();
+    let mut selected = named;
+    loop {
+        let descendants = constraints
+            .iter()
+            .filter(|constraint| {
+                constraint
+                    .parent_oid
+                    .is_some_and(|parent| oids.contains(&parent))
+                    && constraint
+                        .catalog_oid
+                        .is_some_and(|oid| !oids.contains(&oid))
+            })
+            .collect::<Vec<_>>();
+        if descendants.is_empty() {
+            return selected;
+        }
+        oids.extend(
+            descendants
+                .iter()
+                .filter_map(|constraint| constraint.catalog_oid),
+        );
+        selected.extend(descendants);
+    }
 }
 
 fn constraint_is_deferred(
@@ -174,36 +209,8 @@ impl Engine {
                     message: format!("constraint \"{}\" is not deferrable", requested_name.name),
                 });
             }
-            // The constraints deriving from a named one follow it, as `SET CONSTRAINTS` adds the descendants of the constraints it names.
-            let mut named = matches
-                .iter()
-                .filter_map(|constraint| constraint.catalog_oid)
-                .collect::<BTreeSet<_>>();
-            let mut selected = matches;
-            loop {
-                let descendants = constraints
-                    .iter()
-                    .filter(|constraint| {
-                        constraint
-                            .parent_oid
-                            .is_some_and(|parent| named.contains(&parent))
-                            && constraint
-                                .catalog_oid
-                                .is_some_and(|oid| !named.contains(&oid))
-                    })
-                    .collect::<Vec<_>>();
-                if descendants.is_empty() {
-                    break;
-                }
-                named.extend(
-                    descendants
-                        .iter()
-                        .filter_map(|constraint| constraint.catalog_oid),
-                );
-                selected.extend(descendants);
-            }
             targets.extend(
-                selected
+                with_derived_constraints(&constraints, matches)
                     .into_iter()
                     .filter(|constraint| constraint.deferrable)
                     .map(|constraint| constraint.identity.clone()),

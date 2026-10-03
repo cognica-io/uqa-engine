@@ -149,13 +149,7 @@ impl ForeignSchemaContext<'_> {
                 None,
             )?;
         }
-        crate::schema::generated::prepare_generated_columns(
-            self.schema,
-            &qualifier,
-            columns,
-            &[],
-            &[],
-        )?;
+        crate::schema::generated::prepare_generated_columns(self.schema, &qualifier, columns, &[])?;
         let mut constraints = crate::ast::TableConstraintSet {
             checks: std::mem::take(checks),
             ..crate::ast::TableConstraintSet::default()

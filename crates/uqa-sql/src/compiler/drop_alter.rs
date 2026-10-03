@@ -529,13 +529,14 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                                     .into(),
                             ));
                         }
-                        let mut seen = std::collections::BTreeSet::new();
-                        for column in &columns {
-                            if !seen.insert(column.as_str()) {
-                                return Err(SQLError::TypeMismatch(format!(
-                                "PRIMARY KEY / UNIQUE constraint names column `{column}` more than once"
-                            )));
-                            }
+                        if let Some(column) =
+                            columns.iter().enumerate().find_map(|(position, column)| {
+                                columns[..position].contains(column).then_some(column)
+                            })
+                        {
+                            return Err(crate::schema::keys::definition::repeated_key_column(
+                                kind, column,
+                            ));
                         }
                         AlterTableAction::AddKeyConstraint {
                             constraint: TableKeyConstraint {

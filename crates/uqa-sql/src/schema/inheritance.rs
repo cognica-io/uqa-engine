@@ -298,6 +298,13 @@ fn validate_partition_keys(
     let Some(spec) = table.hierarchy.partition_spec.as_ref() else {
         return Ok(());
     };
+    // `transformPartitionSpec` counts the key columns before it resolves any of them.
+    if spec.strategy == crate::ast::PartitionStrategy::List && spec.keys.len() != 1 {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "cannot use \"list\" partition strategy with more than one column".into(),
+        });
+    }
     let column_names = table
         .columns
         .iter()

@@ -66,12 +66,14 @@ pub fn run_create_table(
     context: &CreateTableContext<'_>,
     mut table: CreateTable,
 ) -> Result<SQLResult, SQLError> {
-    validate_create_table_columns(&table)?;
     let owner = context.creation.bind_owner()?;
-    let Some(name) = preflight(context, &table.name, table.persistence, table.if_not_exists)?
-    else {
+    // PostgreSQL resolves the creation namespace, analyzes the declaration, validates the row type and only then finds an existing relation.
+    let name = creation_name(context, &table.name, table.persistence)?;
+    declaration::transform_create_table(&context.analysis, &mut table)?;
+    validate_create_table_columns(&table)?;
+    if !ensure_new_relation(context, &name, table.if_not_exists)? {
         return Ok(SQLResult::empty());
-    };
+    }
     table.name = name;
     create_after_preflight(context, table, &owner)
 }
@@ -84,9 +86,47 @@ pub fn run_create_table_if_not_exists(
         return Ok(SQLResult::empty());
     };
     let mut table = uqa_sql::resolve_deferred_create_table(&deferred)?;
+    declaration::transform_create_table(&context.analysis, &mut table)?;
     validate_create_table_columns(&table)?;
     table.name = name;
     create_after_preflight(context, table, &owner)
+}
+/// Resolve the new relation's name in its creation namespace, with the authority to create there.
+fn creation_name(
+    context: &CreateTableContext<'_>,
+    name: &str,
+    persistence: RelationPersistence,
+) -> Result<String, SQLError> {
+    if persistence == RelationPersistence::Temporary {
+        context.creation.temporary_name(name)
+    } else {
+        context.namespace.prepare_writer()?;
+        context.creation.persistent_relation_name(name)
+    }
+}
+/// Whether the resolved name is free. An existing relation fails, or is skipped with a notice under `IF NOT EXISTS`.
+fn ensure_new_relation(
+    context: &CreateTableContext<'_>,
+    name: &str,
+    if_not_exists: bool,
+) -> Result<bool, SQLError> {
+    if !context.namespace.relation_exists(name)? {
+        return Ok(true);
+    }
+    let local = uqa_core::RelationIdentity::from_legacy_name(name)
+        .map_err(SQLError::Internal)?
+        .name;
+    if if_not_exists {
+        context.notices.lock().push(
+            uqa_sql::SQLNotice::notice(format!("relation \"{local}\" already exists, skipping"))
+                .with_sqlstate("42P07"),
+        );
+        return Ok(false);
+    }
+    Err(SQLError::Routine {
+        sqlstate: "42P07".into(),
+        message: format!("relation \"{local}\" already exists"),
+    })
 }
 fn preflight(
     context: &CreateTableContext<'_>,
@@ -94,40 +134,16 @@ fn preflight(
     persistence: RelationPersistence,
     if_not_exists: bool,
 ) -> Result<Option<String>, SQLError> {
-    if persistence != RelationPersistence::Temporary {
-        context.namespace.prepare_writer()?;
-    }
-    let name = if persistence == RelationPersistence::Temporary {
-        context.creation.temporary_name(name)?
-    } else {
-        context.creation.persistent_relation_name(name)?
-    };
-    if context.namespace.relation_exists(&name)? {
-        let local = uqa_core::RelationIdentity::from_legacy_name(&name)
-            .map_err(SQLError::Internal)?
-            .name;
-        if if_not_exists {
-            context.notices.lock().push(
-                uqa_sql::SQLNotice::notice(format!(
-                    "relation \"{local}\" already exists, skipping"
-                ))
-                .with_sqlstate("42P07"),
-            );
-            return Ok(None);
-        }
-        return Err(SQLError::Routine {
-            sqlstate: "42P07".into(),
-            message: format!("relation \"{local}\" already exists"),
-        });
-    }
-    Ok(Some(name))
+    let name = creation_name(context, name, persistence)?;
+    Ok(ensure_new_relation(context, &name, if_not_exists)?.then_some(name))
 }
 fn create_after_preflight(
     context: &CreateTableContext<'_>,
     mut table: CreateTable,
     owner: &crate::catalog::security::roles::locking::RoleBinding,
 ) -> Result<SQLResult, SQLError> {
-    declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
+    let inherited_keys =
+        declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
     context.creation.retain_owner(owner)?;
     if preflight(context, &table.name, table.persistence, table.if_not_exists)?.is_none() {
         return Ok(SQLResult::empty());
@@ -140,6 +156,7 @@ fn create_after_preflight(
         table.persistence,
     )?;
     declaration::validate_create_table_expressions(&context.analysis, &mut table)?;
+    declaration::define_create_table_constraints(&context.analysis, &mut table, inherited_keys)?;
     let mut vector_fields = Vec::new();
     for column in &table.columns {
         match &column.ty {

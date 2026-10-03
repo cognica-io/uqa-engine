@@ -64,7 +64,7 @@ fn nested_leaf_mutations_validate_every_ancestor_partition_bound() {
     let engine = Engine::new();
     exec(
         &engine,
-        "CREATE TABLE nested_root (id INTEGER PRIMARY KEY, region INTEGER, bucket INTEGER) PARTITION BY RANGE (region)",
+        "CREATE TABLE nested_root (id INTEGER, region INTEGER, bucket INTEGER, PRIMARY KEY (id, region, bucket)) PARTITION BY RANGE (region)",
     );
     exec(
         &engine,

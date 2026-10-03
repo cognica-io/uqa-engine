@@ -1,0 +1,213 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! The PRIMARY KEY and UNIQUE constraints of a new table. `transformIndexConstraints` validates the declared keys before the relation exists, and `DefineIndex` checks and names each key's index after `DefineRelation` has cloned the keys of a partition's parent.
+
+use crate::ast::{ColumnDef, ColumnType, CreateTable, TableKeyConstraint, TableKeyConstraintKind};
+use crate::schema::columns::POSTGRES_SYSTEM_COLUMNS;
+use crate::schema::indexes::names::{ConstraintIndexNamer, IndexNameCatalog};
+use crate::schema::inheritance::InheritanceContext;
+use crate::schema::keys::definition::{
+    index_order, missing_key_column, multiple_primary_keys, repeated_key_column,
+    validate_key_definition, validate_overlaps_column, validate_overlaps_key_length, KeyRelation,
+};
+use crate::SQLError;
+
+#[cfg(test)]
+mod tests;
+
+/// The keys a partition clones from its parent, which precede the keys its statement declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InheritedKeys(pub usize);
+
+/// Validate the keys a CREATE TABLE declares, in declaration order, then order them as `transformIndexConstraints` does: the primary key first, and a key whose index would repeat an earlier key's index dropped, giving its name to that key when the earlier key has none.
+pub fn transform_declared_keys(
+    context: &InheritanceContext<'_>,
+    table: &mut CreateTable,
+) -> Result<(), SQLError> {
+    let mut columns = KeyColumns {
+        context,
+        declared: &table.columns,
+        parents: &table.hierarchy.parents,
+        inherited: Vec::new(),
+    };
+    let mut primary_key = false;
+    for key in &table.key_constraints {
+        if key.kind == TableKeyConstraintKind::PrimaryKey {
+            if primary_key {
+                return Err(multiple_primary_keys(&table.qualifier));
+            }
+            primary_key = true;
+        }
+        validate_declared_key(&mut columns, key)?;
+    }
+    table.key_constraints = index_order(std::mem::take(&mut table.key_constraints));
+    // The column flags follow the keys that survive; `define_created_keys` sets them again.
+    for column in &mut table.columns {
+        column.primary_key = false;
+        column.unique = false;
+    }
+    Ok(())
+}
+
+/// The columns a declared key may name: the statement's columns, the system columns, and then each parent's columns, a parent being read only when a key names a column that no earlier source has.
+struct KeyColumns<'s, 'c> {
+    context: &'s InheritanceContext<'c>,
+    declared: &'s [ColumnDef],
+    parents: &'s [String],
+    inherited: Vec<Vec<ColumnDef>>,
+}
+
+enum KeyColumn {
+    Column(ColumnType),
+    System,
+}
+
+impl KeyColumns<'_, '_> {
+    fn find(&mut self, name: &str) -> Result<Option<KeyColumn>, SQLError> {
+        if let Some(column) = self.declared.iter().find(|column| column.name == name) {
+            return Ok(Some(KeyColumn::Column(column.ty.clone())));
+        }
+        if POSTGRES_SYSTEM_COLUMNS.contains(&name) {
+            return Ok(Some(KeyColumn::System));
+        }
+        for (position, requested) in self.parents.iter().enumerate() {
+            if position == self.inherited.len() {
+                let parent = self.context.catalog.resolve_parent(requested)?;
+                let columns = self
+                    .context
+                    .partitions
+                    .catalog
+                    .try_describe_table(&parent)
+                    .map_err(|error| {
+                        SQLError::Internal(format!("read inherited row type: {error}"))
+                    })?
+                    .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
+                self.inherited.push(columns);
+            }
+            if let Some(column) = self.inherited[position]
+                .iter()
+                .find(|column| column.name == name)
+            {
+                return Ok(Some(KeyColumn::Column(column.ty.clone())));
+            }
+        }
+        Ok(None)
+    }
+}
+
+fn validate_declared_key(
+    columns: &mut KeyColumns<'_, '_>,
+    key: &TableKeyConstraint,
+) -> Result<(), SQLError> {
+    for (position, name) in key.columns.iter().enumerate() {
+        let Some(column) = columns.find(name)? else {
+            return Err(missing_key_column(name));
+        };
+        if key.columns[..position].contains(name) {
+            return Err(repeated_key_column(key.kind, name));
+        }
+        if key.without_overlaps && position + 1 == key.columns.len() {
+            let ty = match &column {
+                KeyColumn::Column(ty) => Some(ty),
+                KeyColumn::System => None,
+            };
+            validate_overlaps_column(name, ty)?;
+        }
+    }
+    validate_overlaps_key_length(key)?;
+    for name in &key.included_columns {
+        if columns.find(name)?.is_none() {
+            return Err(missing_key_column(name));
+        }
+    }
+    Ok(())
+}
+
+/// A declared primary key makes each of its columns NOT NULL through a constraint of the new table: an inherited NOT NULL becomes local and takes the name generated for the new table, as `AddRelationNotNullConstraints` merges the declaration with the inherited constraint.
+pub fn declare_primary_key_not_null(columns: &mut [ColumnDef], keys: &[TableKeyConstraint]) {
+    for key in keys
+        .iter()
+        .filter(|key| key.kind == TableKeyConstraintKind::PrimaryKey)
+    {
+        for name in &key.columns {
+            let Some(column) = columns.iter_mut().find(|column| column.name == *name) else {
+                continue;
+            };
+            if column.not_null && column.not_null_is_local {
+                continue;
+            }
+            if column.not_null {
+                column.not_null_name = None;
+                column.not_null_identity = None;
+            }
+            column.not_null = true;
+            column.not_null_is_local = true;
+            column.not_null_validated = true;
+        }
+    }
+}
+
+/// Define the new table's keys as `DefineRelation` and then `DefineIndex` do: each inherited key against the table's own partition key, then each declared key, primary key first, against an inherited primary key, the partition key and its index attributes. Each key's index is named after its checks, so a later key's errors follow an earlier key's name conflict.
+pub fn define_created_keys(
+    catalog: &dyn IndexNameCatalog,
+    table: &mut CreateTable,
+    inherited: InheritedKeys,
+) -> Result<(), SQLError> {
+    let mut indexes = ConstraintIndexNamer::new(catalog, &table.name)?;
+    indexes.occupy(
+        table
+            .columns
+            .iter()
+            .flat_map(|column| [column.not_null_name.clone(), column.check_name.clone()])
+            .chain(table.checks.iter().map(|check| check.name.clone()))
+            .flatten(),
+    );
+    let inherited_primary_key = table.key_constraints[..inherited.0]
+        .iter()
+        .any(|key| key.kind == TableKeyConstraintKind::PrimaryKey);
+    let partition = table.hierarchy.partition_spec.as_ref();
+    for (position, key) in table.key_constraints.iter_mut().enumerate() {
+        if position < inherited.0 {
+            if let Some(partition) = partition {
+                crate::schema::indexes::unique::validate_partitioned_key_constraint(
+                    &table.name,
+                    key,
+                    partition,
+                )?;
+            }
+        } else {
+            validate_key_definition(
+                &KeyRelation {
+                    table: &table.name,
+                    columns: &table.columns,
+                    partition,
+                    has_primary_key: inherited_primary_key,
+                },
+                key,
+            )?;
+        }
+        indexes.name(key)?;
+    }
+    mark_single_column_keys(&mut table.columns, &table.key_constraints[inherited.0..]);
+    Ok(())
+}
+
+/// Single-column keys also flag their columns for the scalar key paths that read the flags.
+fn mark_single_column_keys(columns: &mut [ColumnDef], keys: &[TableKeyConstraint]) {
+    for key in keys {
+        let [name] = key.columns.as_slice() else {
+            continue;
+        };
+        let Some(column) = columns.iter_mut().find(|column| column.name == *name) else {
+            continue;
+        };
+        match key.kind {
+            TableKeyConstraintKind::PrimaryKey => column.primary_key = true,
+            TableKeyConstraintKind::Unique => column.unique = true,
+        }
+    }
+}

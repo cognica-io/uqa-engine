@@ -34,13 +34,43 @@ pub fn name_constraint_indexes(
     table: &str,
     keys: &mut [TableKeyConstraint],
 ) -> Result<(), SQLError> {
-    let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-    let existing = catalog.existing_constraint_keys(table)?;
-    let occupied = catalog.existing_constraint_names(table)?;
-    let automatic = catalog.automatic_constraint_names(table)?;
-    let mut used = std::collections::BTreeSet::new();
+    let mut namer = ConstraintIndexNamer::new(catalog, table)?;
     for key in keys {
-        if let Some(old) = existing.iter().find(|old| {
+        namer.name(key)?;
+    }
+    Ok(())
+}
+
+/// Names the indexes of a relation's keys one at a time, each after the keys named before it, as `index_create` names each new index.
+pub struct ConstraintIndexNamer<'a> {
+    catalog: &'a dyn IndexNameCatalog,
+    relation: RelationIdentity,
+    existing: Vec<TableKeyConstraint>,
+    occupied: std::collections::BTreeSet<String>,
+    automatic: std::collections::BTreeSet<String>,
+    used: std::collections::BTreeSet<String>,
+}
+
+impl<'a> ConstraintIndexNamer<'a> {
+    pub fn new(catalog: &'a dyn IndexNameCatalog, table: &str) -> Result<Self, SQLError> {
+        Ok(Self {
+            catalog,
+            relation: RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?,
+            existing: catalog.existing_constraint_keys(table)?,
+            occupied: catalog.existing_constraint_names(table)?,
+            automatic: catalog.automatic_constraint_names(table)?,
+            used: std::collections::BTreeSet::new(),
+        })
+    }
+
+    /// Constraints the statement creates on the relation before its keys, such as a new table's CHECK and NOT NULL constraints.
+    pub fn occupy(&mut self, names: impl IntoIterator<Item = String>) {
+        self.occupied.extend(names);
+    }
+
+    /// Name a key's index. A retained key keeps its name; an explicit name must not belong to a relation, then to another constraint of the relation; any other key takes the first free generated name.
+    pub fn name(&mut self, key: &mut TableKeyConstraint) -> Result<(), SQLError> {
+        if let Some(old) = self.existing.iter().find(|old| {
             *old == key
                 || key.catalog_identity.is_some_and(|identity| {
                     old.catalog_identity
@@ -48,26 +78,27 @@ pub fn name_constraint_indexes(
                 })
         }) {
             key.name.clone_from(&old.name);
-            used.extend(key.name.iter().cloned());
-            continue;
+            self.used.extend(key.name.iter().cloned());
+            return Ok(());
         }
         if let Some(name) = &key.name {
-            if occupied.contains(name) {
-                return Err(crate::schema::constraint_changes::constraint_error(
-                    "42710",
-                    format!(
-                        "constraint \"{name}\" for relation \"{}\" already exists",
-                        relation.name
-                    ),
-                ));
-            }
-            if !used.insert(name.clone()) || !available(catalog, &relation, name)? {
+            if self.used.contains(name) || !available(self.catalog, &self.relation, name)? {
                 return Err(SQLError::Routine {
                     sqlstate: "42P07".into(),
                     message: format!("relation \"{name}\" already exists"),
                 });
             }
-            continue;
+            if self.occupied.contains(name) {
+                return Err(crate::schema::constraint_changes::constraint_error(
+                    "42710",
+                    format!(
+                        "constraint \"{name}\" for relation \"{}\" already exists",
+                        self.relation.name
+                    ),
+                ));
+            }
+            self.used.insert(name.clone());
+            return Ok(());
         }
         let suffix = if key.kind == TableKeyConstraintKind::PrimaryKey {
             "pkey"
@@ -85,19 +116,19 @@ pub fn name_constraint_indexes(
             } else {
                 format!("{suffix}{number}")
             };
-            let candidate = object_name(&relation.name, &component, &label);
-            if !used.contains(&candidate)
-                && !occupied.contains(&candidate)
-                && !automatic.contains(&candidate)
-                && available(catalog, &relation, &candidate)?
+            let candidate = object_name(&self.relation.name, &component, &label);
+            if !self.used.contains(&candidate)
+                && !self.occupied.contains(&candidate)
+                && !self.automatic.contains(&candidate)
+                && available(self.catalog, &self.relation, &candidate)?
             {
-                used.insert(candidate.clone());
+                self.used.insert(candidate.clone());
                 key.name = Some(candidate);
                 break;
             }
         }
+        Ok(())
     }
-    Ok(())
 }
 
 /// The attributes of a constraint's supporting index: its key columns followed by the columns it includes.

@@ -8,7 +8,7 @@
 
 use super::SchemaExpressionCatalog;
 use crate::ast::ForeignKey;
-use crate::ast::{ColumnDef, Expr, GeneratedColumnKind, TableKeyConstraint};
+use crate::ast::{ColumnDef, Expr, GeneratedColumnKind};
 use crate::{
     assignment::conversion::convert_value_to_column_type, semantics::aggregates, ColumnType,
     SQLError,
@@ -21,7 +21,6 @@ pub fn prepare_generated_columns(
     engine: &dyn SchemaExpressionCatalog,
     qualifier: &str,
     columns: &mut [ColumnDef],
-    key_constraints: &[TableKeyConstraint],
     foreign_keys: &[ForeignKey],
 ) -> Result<(), SQLError> {
     let snapshot = columns.to_vec();
@@ -42,7 +41,7 @@ pub fn prepare_generated_columns(
             )));
         }
         if generated.kind == GeneratedColumnKind::Virtual {
-            validate_virtual_column_envelope(column, key_constraints, foreign_keys)?;
+            validate_virtual_column_envelope(column, foreign_keys)?;
         }
         let plan = crate::plan::ExpressionPlan::lower((*generated.expression).clone());
         if !plan.subqueries.is_empty() {
@@ -89,9 +88,9 @@ pub fn prepare_generated_columns(
     Ok(())
 }
 
+/// A virtual generated column cannot take a user-defined type or a foreign key; `DefineIndex` rejects it as a key column, after the key's other checks.
 fn validate_virtual_column_envelope(
     column: &ColumnDef,
-    key_constraints: &[TableKeyConstraint],
     foreign_keys: &[ForeignKey],
 ) -> Result<(), SQLError> {
     if contains_engine_defined_type(&column.ty) {
@@ -99,34 +98,6 @@ fn validate_virtual_column_envelope(
             "virtual generated column `{}` cannot use a user-defined type",
             column.name
         )));
-    }
-    if column.primary_key
-        || key_constraints.iter().any(|constraint| {
-            constraint.kind == crate::ast::TableKeyConstraintKind::PrimaryKey
-                && constraint
-                    .columns
-                    .iter()
-                    .chain(&constraint.included_columns)
-                    .any(|name| name == &column.name)
-        })
-    {
-        return Err(SQLError::Unsupported(
-            "primary keys on virtual generated columns are not supported".into(),
-        ));
-    }
-    if column.unique
-        || key_constraints.iter().any(|constraint| {
-            constraint.kind == crate::ast::TableKeyConstraintKind::Unique
-                && constraint
-                    .columns
-                    .iter()
-                    .chain(&constraint.included_columns)
-                    .any(|name| name == &column.name)
-        })
-    {
-        return Err(SQLError::Unsupported(
-            "unique constraints on virtual generated columns are not supported".into(),
-        ));
     }
     if column.references.is_some()
         || foreign_keys.iter().any(|foreign_key| {
