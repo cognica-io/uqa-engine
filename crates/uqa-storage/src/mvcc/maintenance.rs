@@ -9,8 +9,9 @@
 use uqa_core::memory::BudgetedVec;
 
 use super::{
-    commit::RecordWriteKind, resolution::ResolutionMode, CommittedRecordSnapshot,
-    PreparedRecordCommit, VersionError, VersionResult,
+    commit::{PreparedWritesBuilder, RecordWriteKind},
+    resolution::ResolutionMode,
+    CommittedRecordSnapshot, PreparedRecordCommit, VersionError, VersionResult,
 };
 use crate::{read_control::StorageReadControl, statistics_maintenance::StatisticsMaintenance};
 
@@ -38,12 +39,11 @@ pub(super) fn resolve(
     mode: ResolutionMode,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
-    let mut writes = BudgetedVec::new(control.memory());
-    writes.reserve(original.records().len())?;
-    for write in original.records() {
-        control.cancellation().check()?;
+    let mut writes = PreparedWritesBuilder::like(original, control)?;
+    let mut originals = original.writes();
+    while let Some(write) = originals.next(control)? {
         if write.kind() != RecordWriteKind::StatisticsMaintenance {
-            writes.push(write.clone())?;
+            writes.push(write, control)?;
             continue;
         }
         let value = write.value().ok_or(VersionError::InvalidEncoding(
@@ -73,17 +73,19 @@ pub(super) fn resolve(
         };
         let Some(merged) = merged else {
             // Preserve the original conditional replacement for object replacement or competing resets. The normal validator then reports a conflict rather than resurrecting an old relation's state.
-            writes.push(write.clone().with_kind(RecordWriteKind::Canonical))?;
+            writes.push(write.clone().with_kind(RecordWriteKind::Canonical), control)?;
             continue;
         };
+        let encoded = layout.encode(write.key(), value, &merged, control)?;
         writes.push(
             write
-                .clone()
-                .with_value(layout.encode(write.key(), value, &merged, control)?)
+                .with_value(encoded)
                 .rebase(latest.as_ref().map(super::RecordVersion::sequence))
                 .with_kind(mode.kind(RecordWriteKind::StatisticsMaintenance)),
+            control,
         )?;
     }
-    Ok(PreparedRecordCommit::from_unique_owned(writes, control)?
+    Ok(writes
+        .finish(control)?
         .resolved(original, current.sequence()))
 }

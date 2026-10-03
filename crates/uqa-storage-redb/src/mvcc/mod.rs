@@ -171,25 +171,24 @@ impl RedbRecordStore {
             prepared,
             control,
         )?;
-        prepared.validate(control.cancellation(), |key| {
+        prepared.validate(control, |key| {
             Ok(heads
                 .get(key)
                 .map_err(redb_error)?
                 .map(|version| CommitSequence::from_u64(version.value())))
         })?;
-        let sequence = if prepared.records().is_empty() {
+        let sequence = if prepared.is_empty() {
             current
         } else {
             current.successor()?
         };
         let mut maximum = 0;
-        for write in prepared.records() {
-            control.cancellation().check()?;
+        let mut writes = prepared.writes();
+        while let Some(write) = writes.next_metadata(control)? {
+            let len = usize::try_from(write.value_len().unwrap_or(0))
+                .map_err(|_| VersionError::InvalidEncoding("record size overflow"))?;
             maximum = maximum.max(
-                write
-                    .value()
-                    .map_or(0, <[u8]>::len)
-                    .checked_add(1)
+                len.checked_add(1)
                     .ok_or(VersionError::InvalidEncoding("record size overflow"))?,
             );
         }
@@ -200,8 +199,8 @@ impl RedbRecordStore {
             .map_err(|error| uqa_storage::StorageBackendError::Memory(error.into()))?;
         workspace.grow(encoded.capacity() - maximum)?;
         let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-        for write in prepared.records() {
-            control.cancellation().check()?;
+        let mut writes = prepared.writes();
+        while let Some(write) = writes.next(control)? {
             let value = write.value();
             // redb's insert_reserve allocates a temporary value for every row. Reuse one charged encoding buffer for this bounded physical commit instead.
             encoded.clear();

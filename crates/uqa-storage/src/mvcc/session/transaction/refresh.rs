@@ -45,9 +45,10 @@ impl Transaction {
             ResolutionMode::Command,
             control,
         )?;
-        let records = resolved.as_ref().unwrap_or(&prepared).records();
-        for (mutation, write) in records.iter().enumerate() {
-            control.cancellation().check()?;
+        let records = resolved.as_ref().unwrap_or(&prepared);
+        let mut writes = records.writes();
+        let mut mutation = 0;
+        while let Some(write) = writes.next_metadata(control)? {
             let actual = current
                 .metadata(write.key(), control)?
                 .and_then(|row| row.revision);
@@ -58,9 +59,10 @@ impl Transaction {
                     actual,
                 });
             }
+            mutation += 1;
         }
         let changes = PrivateRecordChanges::new(control.memory());
-        changes.apply_owned(records, control)?;
+        changes.apply_prepared(records, control)?;
         changes.inherit_retained_sources(&self.changes, control)?;
         control.check()?;
         self.changes = changes;

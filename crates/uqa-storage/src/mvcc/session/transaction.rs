@@ -568,7 +568,7 @@ impl Transaction {
             self.prepared = Some(self.prepare(control)?);
         }
         let prepared = self.prepared.as_ref().expect("prepared once");
-        if prepared.records().is_empty()
+        if prepared.is_empty()
             && prepared.graph.is_none()
             && prepared.vector.is_none()
             && prepared.populations.is_none()

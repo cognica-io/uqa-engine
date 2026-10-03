@@ -4,10 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    reconcile::{Reconciliation, StructuralRecords},
-    OwnedPopulationMutation,
-};
+use super::{reconcile::Reconciliation, structural::StructuralRecords, OwnedPopulationMutation};
 use crate::mvcc::{
     commit::RecordWriteKind, resolution::ResolutionMode, CommittedRecordSnapshot,
     MergedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges,
@@ -47,12 +44,8 @@ pub(in crate::mvcc) fn resolve(
     control: &StorageReadControl,
 ) -> VersionResult<Option<PreparedRecordCommit>> {
     if prepared.populations.is_none()
-        && !prepared.records().iter().any(|write| {
-            matches!(
-                write.kind(),
-                RecordWriteKind::DiskANNOrigin | RecordWriteKind::DiskANNPopulationPreview
-            )
-        })
+        && !prepared.has_kind(RecordWriteKind::DiskANNOrigin)
+        && !prepared.has_kind(RecordWriteKind::DiskANNPopulationPreview)
     {
         return Ok(resolved);
     }
@@ -86,15 +79,14 @@ fn reconcile(
             ))?;
     let changes = PrivateRecordChanges::new(control.memory());
     let mut origins = BudgetedVec::new(control.memory());
-    let mut structural = StructuralRecords::new(control.memory());
-    for write in original.records() {
+    let structural = StructuralRecords::new(original, control)?;
+    let mut originals = original.writes();
+    let mut position = 0;
+    while let Some(write) = originals.next(control)? {
         control.check()?;
-        if write.kind() == RecordWriteKind::Canonical {
-            structural.insert(write.key(), write)?;
-        }
-    }
-    for (position, write) in original.records().iter().enumerate() {
-        control.check()?;
+        let write = &write;
+        position += 1;
+        let position = position - 1;
         let kind = match write.kind() {
             RecordWriteKind::DiskANNOrigin => {
                 validate(current.as_ref(), position, write, control)?;
@@ -104,7 +96,7 @@ fn reconcile(
             RecordWriteKind::DiskANNPopulationPreview => {
                 let header = layout.preview_header(write.key(), control)?;
                 if structural
-                    .get(&*header)
+                    .get(&header, control)?
                     .is_none_or(|owner| owner.value().is_none())
                 {
                     continue;
@@ -133,12 +125,10 @@ fn reconcile(
         structural: Some(&structural),
     }
     .run(&origins, lifecycle)?;
-    for write in generated.records() {
-        control.check()?;
+    let mut generated_writes = generated.writes();
+    while let Some(write) = generated_writes.next(control)? {
         changes.apply_owned(
-            &[write
-                .clone()
-                .with_kind(mode.kind(RecordWriteKind::DiskANNPopulationPreview))],
+            &[write.with_kind(mode.kind(RecordWriteKind::DiskANNPopulationPreview))],
             control,
         )?;
     }

@@ -54,7 +54,7 @@ pub(super) fn validate(
             prefix,
             codec::decode_u64(value.value())?,
             current,
-            control.cancellation(),
+            control,
         )?;
     }
     Ok(())

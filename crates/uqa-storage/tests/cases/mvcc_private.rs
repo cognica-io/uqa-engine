@@ -188,7 +188,12 @@ fn command_views_keep_values_across_later_changes_and_rollback() {
     assert_eq!(value(&changes.snapshot().unwrap(), b"a").unwrap(), b"third");
     changes.rollback().unwrap();
     assert!(!changes.has_written());
-    assert!(changes.prepare(&control).unwrap().records().is_empty());
+    assert!(changes
+        .prepare(&control)
+        .unwrap()
+        .resident()
+        .unwrap()
+        .is_empty());
     drop(changes);
     assert_eq!(value(&second, b"b").unwrap(), b"inserted");
 }
@@ -300,7 +305,7 @@ fn final_replacements_preserve_original_revisions_and_tombstones() {
         .apply(&[write(b"z", b"last"), write(b"b", b"middle")], &control)
         .unwrap();
     let final_changes = changes.prepare(&control).unwrap();
-    let records = final_changes.records();
+    let records = final_changes.resident().unwrap();
     assert_eq!(
         records
             .iter()

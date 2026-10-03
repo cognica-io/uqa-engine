@@ -34,10 +34,7 @@ pub(super) fn has_effects(prepared: &PreparedRecordCommit) -> bool {
         || prepared.notification.is_some()
         || prepared.vector.is_some()
         || prepared.populations.is_some()
-        || prepared
-            .records()
-            .iter()
-            .any(|write| write.kind() != RecordWriteKind::Canonical)
+        || prepared.typed()
 }
 
 pub(super) fn resolve(
@@ -67,12 +64,9 @@ pub(super) fn resolve(
     };
     resolved =
         super::populations::resolve(prepared, resolved, current, persistence, mode, control)?;
-    if prepared.records().iter().any(|write| {
-        matches!(
-            write.kind(),
-            RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache
-        )
-    }) {
+    if prepared.has_kind(RecordWriteKind::Occurrence)
+        || prepared.has_kind(RecordWriteKind::OccurrenceCache)
+    {
         resolved = Some(super::occurrence::resolve(
             resolved.as_ref().unwrap_or(prepared),
             base,
@@ -98,11 +92,7 @@ pub(super) fn resolve(
             control,
         )?);
     }
-    if prepared
-        .records()
-        .iter()
-        .any(|write| write.kind() == RecordWriteKind::IdempotentDelete)
-    {
+    if prepared.has_kind(RecordWriteKind::IdempotentDelete) {
         resolved = Some(super::deletions::resolve(
             resolved.as_ref().unwrap_or(prepared),
             current.as_ref(),
@@ -110,11 +100,7 @@ pub(super) fn resolve(
             control,
         )?);
     }
-    if prepared
-        .records()
-        .iter()
-        .any(|write| write.kind() == RecordWriteKind::StatisticsMaintenance)
-    {
+    if prepared.has_kind(RecordWriteKind::StatisticsMaintenance) {
         resolved = Some(super::maintenance::resolve(
             resolved.as_ref().unwrap_or(prepared),
             base,
@@ -124,11 +110,7 @@ pub(super) fn resolve(
             control,
         )?);
     }
-    if prepared
-        .records()
-        .iter()
-        .any(|write| write.kind() == RecordWriteKind::Marker)
-    {
+    if prepared.has_kind(RecordWriteKind::Marker) {
         resolved = Some(super::markers::resolve(
             resolved.as_ref().unwrap_or(prepared),
             current.as_ref(),
