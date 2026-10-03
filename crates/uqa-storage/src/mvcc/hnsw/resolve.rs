@@ -67,10 +67,11 @@ pub(in crate::mvcc) fn merge(
         control,
     )?;
     replace(changes, current, key, &value, control)?;
-    for node in &delta.nodes {
+    for node in delta.nodes() {
+        let node = node?;
         control.cancellation().check()?;
         let address = layout.key(key, Key::Node(node.node_id), control)?;
-        let value = layout.encode(&address, template, Value::Node(node), control)?;
+        let value = layout.encode(&address, template, Value::Node(&node), control)?;
         replace(changes, current, &address, &value, control)?;
         if let Some(edges) = layout.edges_prefix(key, Some(node.node_id), control)? {
             if !delta.full_rewrite {

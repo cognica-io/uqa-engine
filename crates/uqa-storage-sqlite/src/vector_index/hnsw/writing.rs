@@ -14,13 +14,13 @@ use super::encoding::{
 use super::SQLiteHNSWIndex;
 use crate::vector_index::vector_to_blob;
 use crate::{ManagedConnection, Result as SQLiteResult, SQLiteError};
-use uqa_storage::hnsw_index::{HNSWGraphMeta, HNSWNodeSnapshot, HNSWPersistenceDelta};
+use uqa_storage::hnsw_index::{HNSWGraphDelta, HNSWGraphMeta, HNSWNodeSnapshot};
 
 impl SQLiteHNSWIndex {
     pub(super) fn persist_delta(
         &self,
         conn: &rusqlite::Connection,
-        delta: &HNSWPersistenceDelta,
+        delta: &HNSWGraphDelta,
         expected_revision: Option<u64>,
         revision: u64,
     ) -> SQLiteResult<()> {
@@ -36,8 +36,9 @@ impl SQLiteHNSWIndex {
                 params![self.persistent.table, self.persistent.field],
             )?;
         }
-        for node in &delta.nodes {
-            write_node(conn, self, node)?;
+        for node in delta.nodes() {
+            let node = node?;
+            write_node(conn, self, &node)?;
         }
         Ok(())
     }

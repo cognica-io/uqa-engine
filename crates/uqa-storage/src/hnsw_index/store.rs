@@ -7,11 +7,12 @@
 //! Ordered immutable roots move from charged memory to encrypted temporary pages.
 
 mod disk;
+mod node;
 #[cfg(test)]
 mod tests;
 
 use std::{ops::Deref, sync::Arc};
-use uqa_core::memory::{Budgeted, BudgetedSharedMap, MemoryBudget, MemoryError};
+use uqa_core::memory::{Budgeted, BudgetedSharedMap, MemoryBudget, MemoryError, MemoryReservation};
 
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
@@ -56,6 +57,7 @@ pub(super) struct Map<V> {
     root: Root<V>,
     len: usize,
     memory: MemoryBudget,
+    resident_bytes: usize,
 }
 
 impl<V> Clone for Map<V> {
@@ -64,6 +66,7 @@ impl<V> Clone for Map<V> {
             root: self.root.clone(),
             len: self.len,
             memory: self.memory.clone(),
+            resident_bytes: self.resident_bytes,
         }
     }
 }
@@ -73,7 +76,7 @@ impl<V> std::fmt::Debug for Map<V> {
         out.debug_struct("HNSWMap")
             .field("len", &self.len)
             .field("spilled", &matches!(self.root, Root::Disk(_)))
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -83,6 +86,7 @@ impl<V: Record> Map<V> {
             root: Root::Memory(BudgetedSharedMap::new(&memory.child(resident_bytes))),
             len: 0,
             memory: memory.clone(),
+            resident_bytes,
         }
     }
 
@@ -92,6 +96,18 @@ impl<V: Record> Map<V> {
 
     pub(super) fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    pub(super) fn clear(&mut self) {
+        *self = Self::new(&self.memory, self.resident_bytes);
+    }
+
+    pub(super) fn iter(&self) -> Iter<'_, V> {
+        Iter {
+            map: self,
+            after: None,
+            done: false,
+        }
     }
 
     pub(super) fn get(&self, key: u128) -> StorageBackendResult<Option<Read<'_, V>>> {
@@ -139,10 +155,13 @@ impl<V: Record> Map<V> {
         let mut value = Some(value);
         let mut retained = None;
         if let Root::Memory(map) = &mut self.root {
-            match map
-                .budget()
-                .reserve(value.as_ref().expect("unmoved value").memory_bytes()?)
-            {
+            let bytes = value
+                .as_ref()
+                .expect("unmoved value")
+                .memory_bytes()?
+                .checked_add(size_of::<MemoryReservation>())
+                .ok_or(MemoryError::SizeOverflow)?;
+            match map.budget().reserve(bytes) {
                 Ok(memory) => {
                     let value =
                         Arc::new(Budgeted::new(value.take().expect("unmoved value"), memory));
@@ -191,6 +210,7 @@ impl<V: Record> Map<V> {
             let mut candidate = map.clone();
             candidate.insert(key, value, &self.memory)?;
             candidate.compact::<V>(&self.memory, control)?;
+            super::prepare::check(control)?;
             *map = candidate;
             self.len += usize::from(!present);
             Ok(())
@@ -219,10 +239,36 @@ impl<V: Record> Map<V> {
             }
         }
         if let Root::Disk(map) = &mut self.root {
-            map.remove(key)?;
+            let mut candidate = map.clone();
+            candidate.remove(key, &self.memory)?;
+            candidate.compact::<V>(&self.memory, control)?;
+            super::prepare::check(control)?;
+            *map = candidate;
             self.len -= 1;
         }
         Ok(())
+    }
+
+    pub(super) fn last(&self) -> StorageBackendResult<Option<(u128, Read<'_, V>)>> {
+        match &self.root {
+            Root::Memory(map) => {
+                let mut before = None;
+                while let Some((key, value)) = map.last_before(
+                    before
+                        .as_ref()
+                        .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
+                ) {
+                    if let Some(value) = value {
+                        return Ok(Some((*key, Read::Borrowed(&***value))));
+                    }
+                    before = Some(*key);
+                }
+                Ok(None)
+            }
+            Root::Disk(map) => map
+                .last(&self.memory)
+                .map(|entry| entry.map(|(key, value)| (key, Read::Owned(value)))),
+        }
     }
 
     pub(super) fn spill(
@@ -239,13 +285,44 @@ impl<V: Record> Map<V> {
                 disk.push(*key, &***value, &self.memory)?;
             }
         }
-        self.root = Root::Disk(disk.finish()?);
+        let root = disk.finish()?;
+        super::prepare::check(control)?;
+        self.root = Root::Disk(root);
         Ok(())
     }
 
     #[cfg(test)]
     pub(super) fn is_spilled(&self) -> bool {
         matches!(self.root, Root::Disk(_))
+    }
+}
+
+pub(super) struct Iter<'a, V> {
+    map: &'a Map<V>,
+    after: Option<u128>,
+    done: bool,
+}
+
+impl<'a, V: Record> Iterator for Iter<'a, V> {
+    type Item = StorageBackendResult<(u128, Read<'a, V>)>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        match self.map.next(self.after) {
+            Ok(Some((key, value))) => {
+                self.after = Some(key);
+                Some(Ok((key, value)))
+            }
+            Ok(None) => {
+                self.done = true;
+                None
+            }
+            Err(error) => {
+                self.done = true;
+                Some(Err(error))
+            }
+        }
     }
 }
 

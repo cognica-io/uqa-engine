@@ -37,7 +37,7 @@ struct Cache {
     header: Header,
 }
 
-struct File {
+struct Pages {
     file: BlockTemporaryFile<BLOCK_BYTES>,
     cache: Vec<Cache>,
     _memory: MemoryReservation,
@@ -45,7 +45,7 @@ struct File {
 
 #[derive(Clone)]
 pub(super) struct Map {
-    file: Arc<Mutex<File>>,
+    file: Arc<Mutex<Pages>>,
     root: u64,
     logical_bytes: u64,
 }
@@ -78,12 +78,13 @@ impl Builder {
         memory: &MemoryBudget,
     ) -> StorageBackendResult<()> {
         let encoded = value.encoded_bytes()?;
-        let _encoded_memory = memory.reserve(encoded)?;
+        let mut encoded_memory = memory.reserve(encoded)?;
         let mut bytes = Vec::with_capacity(encoded);
         value.encode(&mut bytes);
-        if bytes.len() != encoded || bytes.capacity() != encoded {
+        if bytes.len() != encoded {
             return Err(invalid("encoded size"));
         }
+        encoded_memory.grow(bytes.capacity() - encoded)?;
         let mut file = self.map.file.lock();
         if let Some(previous) = self.previous {
             if key <= previous {
@@ -147,11 +148,11 @@ impl Map {
     pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
         let slots = (memory.limit() / 64 / size_of::<Cache>()).min(256);
         let slots = if slots == 0 { 0 } else { 1 << slots.ilog2() };
-        let reservation = memory.reserve(size_of::<File>() + slots * size_of::<Cache>())?;
+        let reservation = memory.reserve(size_of::<Pages>() + slots * size_of::<Cache>())?;
         let mut file = BlockTemporaryFile::new().map_err(io)?;
         file.write_all(&[0; HEADER_BYTES]).map_err(io)?;
         Ok(Self {
-            file: Arc::new(Mutex::new(File {
+            file: Arc::new(Mutex::new(Pages {
                 file,
                 cache: vec![Cache::default(); slots],
                 _memory: reservation,
@@ -177,6 +178,25 @@ impl Map {
         file.value(leaf, memory).map(Some)
     }
 
+    pub(super) fn last<V: Record>(
+        &self,
+        memory: &MemoryBudget,
+    ) -> StorageBackendResult<Option<(u128, Budgeted<V>)>> {
+        if self.root == 0 {
+            return Ok(None);
+        }
+        let mut file = self.file.lock();
+        let mut offset = self.root;
+        for _ in 0..=128 {
+            let header = file.header(offset)?;
+            if header.bit == LEAF {
+                return Ok(Some((header.key, file.value(header, memory)?)));
+            }
+            offset = header.right;
+        }
+        Err(invalid("Patricia depth"))
+    }
+
     pub(super) fn next<V: Record>(
         &self,
         after: Option<u128>,
@@ -185,6 +205,7 @@ impl Map {
         if self.root == 0 {
             return Ok(None);
         }
+        let _workspace = memory.reserve(size_of::<[u64; 128]>())?;
         let mut file = self.file.lock();
         let mut offset = self.root;
         let mut pending = [0_u64; 128];
@@ -222,13 +243,15 @@ impl Map {
         value: &V,
         memory: &MemoryBudget,
     ) -> StorageBackendResult<()> {
+        let _workspace = memory.reserve(size_of::<[u64; 128]>())?;
         let encoded = value.encoded_bytes()?;
-        let _encoded_memory = memory.reserve(encoded)?;
+        let mut encoded_memory = memory.reserve(encoded)?;
         let mut bytes = Vec::with_capacity(encoded);
         value.encode(&mut bytes);
-        if bytes.len() != encoded || bytes.capacity() != encoded {
+        if bytes.len() != encoded {
             return Err(invalid("encoded size"));
         }
+        encoded_memory.grow(bytes.capacity() - encoded)?;
         let retained = value.memory_bytes()?;
         let mut file = self.file.lock();
         let original = file.file.metadata().map_err(io)?.len();
@@ -239,7 +262,7 @@ impl Map {
                 Some(file.leaf(self.root, key)?)
             };
             let differing = existing.map_or(0, |(_, leaf)| (key ^ leaf.key).leading_zeros() as u8);
-            let mut path = [(Header::default(), false); 128];
+            let mut path = [0_u64; 128];
             let mut depth = 0;
             let mut previous = self.root;
             while previous != 0 {
@@ -248,7 +271,7 @@ impl Map {
                     break;
                 }
                 let right = bit(key, header.bit);
-                path[depth] = (header, right);
+                path[depth] = previous;
                 depth += 1;
                 previous = if right { header.right } else { header.left };
             }
@@ -264,7 +287,9 @@ impl Map {
                     ..Header::default()
                 })?;
             }
-            for (mut header, right) in path[..depth].iter().rev().copied() {
+            for offset in path[..depth].iter().rev().copied() {
+                let mut header = file.header(offset)?;
+                let right = bit(key, header.bit);
                 if right {
                     header.right = root;
                 } else {
@@ -297,14 +322,15 @@ impl Map {
         }
     }
 
-    pub(super) fn remove(&mut self, key: u128) -> StorageBackendResult<()> {
+    pub(super) fn remove(&mut self, key: u128, memory: &MemoryBudget) -> StorageBackendResult<()> {
         if self.root == 0 {
             return Ok(());
         }
+        let _workspace = memory.reserve(size_of::<[u64; 128]>())?;
         let mut file = self.file.lock();
         let original = file.file.metadata().map_err(io)?.len();
         let result = (|| {
-            let mut path = [(Header::default(), false); 128];
+            let mut path = [0_u64; 128];
             let mut depth = 0;
             let mut offset = self.root;
             let leaf = loop {
@@ -313,7 +339,7 @@ impl Map {
                     break header;
                 }
                 let right = bit(key, header.bit);
-                path[depth] = (header, right);
+                path[depth] = offset;
                 depth += 1;
                 offset = if right { header.right } else { header.left };
             };
@@ -324,10 +350,13 @@ impl Map {
             let mut removed = HEADER_BYTES as u64 + leaf.length;
             if depth > 0 {
                 depth -= 1;
-                let (parent, right) = path[depth];
+                let parent = file.header(path[depth])?;
+                let right = bit(key, parent.bit);
                 root = if right { parent.left } else { parent.right };
                 removed += HEADER_BYTES as u64;
-                for (mut header, right) in path[..depth].iter().rev().copied() {
+                for offset in path[..depth].iter().rev().copied() {
+                    let mut header = file.header(offset)?;
+                    let right = bit(key, header.bit);
                     if right {
                         header.right = root;
                     } else {
@@ -381,7 +410,7 @@ fn bit(key: u128, position: u8) -> bool {
     key & (1_u128 << (127 - position)) != 0
 }
 
-impl File {
+impl Pages {
     fn cache_position(&self, offset: u64) -> Option<usize> {
         if self.cache.is_empty() {
             return None;

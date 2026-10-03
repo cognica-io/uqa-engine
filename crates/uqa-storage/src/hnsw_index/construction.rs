@@ -11,7 +11,7 @@ use uqa_core::DocId;
 use super::metric::{deterministic_level, normalize_with_norm};
 use super::prepare::{check, Control};
 use super::search::Candidate;
-use super::types::{HNSWIndex, HNSWNode};
+use super::types::{active_key, HNSWIndex, HNSWNode};
 use crate::{StorageBackendError, StorageBackendResult};
 
 impl HNSWIndex {
@@ -32,8 +32,7 @@ impl HNSWIndex {
         let (normalized_vector, norm) = normalize_with_norm(&raw_vector);
         let previous_entry = self.entry_point;
         let previous_max_level = self.max_level;
-        self.nodes.insert(
-            node_id,
+        self.put_node(
             HNSWNode {
                 id: node_id,
                 doc_id,
@@ -45,9 +44,10 @@ impl HNSWIndex {
                 deleted: false,
                 neighbors: vec![Vec::new(); level + 1],
             },
-        );
-        self.active.insert((doc_id, vector_ordinal), node_id);
-        self.dirty_nodes.insert(node_id);
+            control,
+        )?;
+        self.active
+            .insert(active_key(doc_id, vector_ordinal), node_id, control)?;
 
         let Some(mut entry) = previous_entry else {
             self.entry_point = Some(node_id);
@@ -61,41 +61,38 @@ impl HNSWIndex {
         }
         for layer in (0..=level.min(previous_max_level)).rev() {
             check(control)?;
-            // Controlled construction already retains the candidate workspace allowance, including these traversal buffers.
             let candidates = self.search_layer(
                 &normalized_vector,
                 &[entry],
                 self.params.ef_construction,
                 layer,
                 control,
-                None,
+                control,
             )?;
-            let mut selected = self.select_neighbors(
-                &normalized_vector,
-                candidates.iter().map(|candidate| candidate.node_id),
+            let mut selected = self.select_candidates(
+                candidates.iter(),
                 self.max_connections(layer),
                 Some(node_id),
                 control,
             )?;
             if layer == 0 {
-                self.ensure_layer_zero_backbone(node_id, &mut selected);
+                self.ensure_layer_zero_backbone(node_id, &mut selected)?;
             }
-            if let Some(node) = self.nodes.get_mut(&node_id) {
+            self.modify_node(node_id, control, |node| {
                 node.neighbors[layer].clone_from(&selected);
-            }
+            })?;
             for neighbor_id in selected {
                 check(control)?;
-                if let Some(neighbor) = self.nodes.get_mut(&neighbor_id) {
+                self.modify_node(neighbor_id, control, |neighbor| {
                     if !neighbor.neighbors[layer].contains(&node_id) {
                         neighbor.neighbors[layer].push(node_id);
                     }
-                    self.dirty_nodes.insert(neighbor_id);
-                }
+                })?;
                 self.prune_node(neighbor_id, layer, control)?;
             }
             self.prune_node(node_id, layer, control)?;
-            if let Some(Candidate { node_id, .. }) = candidates.first() {
-                entry = *node_id;
+            if let Some(Candidate { node_id, .. }) = candidates.iter().next().transpose()? {
+                entry = node_id;
             }
         }
         if level > previous_max_level {

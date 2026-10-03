@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Evaluated HNSW candidates retain their allocation allowance without changing the source graph.
+//! Candidate roots share immutable graph pages and publish only successful evaluations.
 
-mod workspace;
+pub(super) mod workspace;
 
-use super::{HNSWIndex, HNSWNodeSnapshot, HNSWPersistenceDelta};
+use super::{store::Record, HNSWGraphDelta, HNSWIndex};
 use crate::{read_control::StorageReadControl, HNSWIndexParams, StorageBackendResult, VectorIndex};
 use uqa_core::{memory::Budgeted, DocId};
 
@@ -31,16 +31,41 @@ impl HNSWIndex {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<Self>> {
         control.check()?;
-        let memory = workspace::candidate(self, 0, control)?;
-        Ok(Budgeted::new(self.clone_controlled(control)?, memory))
+        let memory = control.memory().reserve(size_of::<Self>())?;
+        if self.memory.shares_allowance(control.memory()) {
+            return Ok(Budgeted::new(self.clone(), memory));
+        }
+        let mut candidate = Self::with_memory(self.dimensions, self.params, control.memory())?;
+        candidate.entry_point = self.entry_point;
+        candidate.max_level = self.max_level;
+        candidate.next_node_id = self.next_node_id;
+        candidate.deleted_count = self.deleted_count;
+        candidate.full_rewrite = self.full_rewrite;
+        for entry in self.nodes.iter() {
+            control.check()?;
+            let (id, node) = entry?;
+            let _copy = control.memory().reserve(node.memory_bytes()?)?;
+            candidate.nodes.insert(id, (*node).clone(), Some(control))?;
+        }
+        for entry in self.active.iter() {
+            control.check()?;
+            let (key, node) = entry?;
+            candidate.active.insert(key, *node, Some(control))?;
+        }
+        for entry in self.dirty_nodes.iter() {
+            control.check()?;
+            let (id, value) = entry?;
+            candidate.dirty_nodes.insert(id, *value, Some(control))?;
+        }
+        Ok(Budgeted::new(candidate, memory))
     }
 
-    /// Prepare an immutable graph delta. Failure or cancellation leaves the source and its dirty-node state intact.
+    /// Prepare a streaming immutable delta. Failure leaves source graph and pending persistence unchanged.
     pub fn prepare_delta(
         &self,
         mutation: HNSWMutation<'_>,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<Budgeted<HNSWPersistenceDelta>> {
+    ) -> StorageBackendResult<Budgeted<HNSWGraphDelta>> {
         self.prepare_delta_changes(std::slice::from_ref(&mutation), control)
     }
 
@@ -48,24 +73,22 @@ impl HNSWIndex {
         &self,
         mutations: &[HNSWMutation<'_>],
         control: &StorageReadControl,
-    ) -> StorageBackendResult<Budgeted<HNSWPersistenceDelta>> {
+    ) -> StorageBackendResult<Budgeted<HNSWGraphDelta>> {
         control.check()?;
         if matches!(mutations, [HNSWMutation::Clear]) {
-            return Self::with_params(self.dimensions, self.params)?.delta_controlled(control);
+            return Ok(Budgeted::new(
+                Self::with_memory(self.dimensions, self.params, control.memory())?.delta(control),
+                control.memory().empty_reservation(),
+            ));
         }
-        let additions = workspace::validate_mutations(self.dimensions, mutations, control)?;
-        let _workspace = workspace::candidate(self, additions, control)?;
-        let mut candidate = self.clone_controlled(control)?;
+        workspace::validate_mutations(self.dimensions, mutations, control)?;
+        let _workspace = workspace::operation(self, control)?;
+        let (mut candidate, memory) = self.snapshot_controlled(control)?.into_parts();
         for mutation in mutations {
             control.check()?;
             match *mutation {
                 HNSWMutation::Replace { document, vectors } => {
-                    let mut owned = Vec::with_capacity(vectors.len());
-                    for vector in vectors {
-                        control.check()?;
-                        owned.push(vector.clone());
-                    }
-                    candidate.replace_document_vectors(document, owned, Some(control))?;
+                    candidate.replace_document_vectors(document, vectors, Some(control))?;
                 }
                 HNSWMutation::Delete(document) => {
                     candidate.mark_document_deleted(document, Some(control))?;
@@ -74,102 +97,118 @@ impl HNSWIndex {
                 HNSWMutation::Clear => candidate.clear()?,
             }
         }
-        candidate.delta_controlled(control)
+        Ok(Budgeted::new(candidate.delta(control), memory))
     }
 
-    /// Rebuild from complete canonical tensors ordered by document and ordinal. Reconstruction reserves its graph and algorithm workspace before copying any vector.
+    /// Rebuild from ordered canonical tensors without an additional corpus or graph copy. Streaming providers use `HNSWCanonicalBuilder` directly.
     pub fn prepare_canonical(
         dimensions: u32,
         params: HNSWIndexParams,
         vectors: &[(DocId, u32, Vec<f32>)],
         control: &StorageReadControl,
-    ) -> StorageBackendResult<Budgeted<HNSWPersistenceDelta>> {
-        Self::from_canonical_controlled(dimensions, params, vectors, control)?
-            .delta_controlled(control)
+    ) -> StorageBackendResult<Budgeted<HNSWGraphDelta>> {
+        let (index, memory) =
+            Self::from_canonical_controlled(dimensions, params, vectors, control)?.into_parts();
+        Ok(Budgeted::new(index.delta(control), memory))
     }
 
-    /// Build an immutable graph from ordered canonical tensors, retaining the construction allowance with the graph.
     pub(crate) fn from_canonical_controlled(
         dimensions: u32,
         params: HNSWIndexParams,
         vectors: &[(DocId, u32, Vec<f32>)],
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<Self>> {
-        control.check()?;
-        let source = Self::with_params(dimensions, params)?;
-        let memory = workspace::candidate(&source, vectors.len(), control)?;
-        let mut candidate = source;
-        let mut previous: Option<(DocId, u32)> = None;
+        let mut builder = HNSWCanonicalBuilder::new(dimensions, params, control)?;
         for (document, ordinal, vector) in vectors {
-            control.check()?;
-            let valid = match previous {
-                Some((old_document, old_ordinal)) if old_document == *document => {
-                    old_ordinal.checked_add(1) == Some(*ordinal)
-                }
-                Some((old_document, _)) => old_document < *document && *ordinal == 0,
-                None => *ordinal == 0,
-            };
-            if !valid {
-                return Err(crate::StorageBackendError::Other(
-                    "HNSW canonical tensors require ordered complete ordinals".into(),
-                ));
-            }
-            crate::vector_index::validate_vector_values(dimensions, vector)?;
-            candidate.insert_vector(*document, *ordinal, vector.clone(), Some(control))?;
-            previous = Some((*document, *ordinal));
+            builder.push(*document, *ordinal, vector)?;
         }
-        Ok(Budgeted::new(candidate, memory))
+        builder.finish()
     }
+}
 
-    fn clone_controlled(&self, control: &StorageReadControl) -> StorageBackendResult<Self> {
-        let mut candidate = Self::with_params(self.dimensions, self.params)?;
-        candidate.entry_point = self.entry_point;
-        candidate.max_level = self.max_level;
-        candidate.next_node_id = self.next_node_id;
-        candidate.deleted_count = self.deleted_count;
-        candidate.full_rewrite = self.full_rewrite;
-        for (id, node) in &self.nodes {
-            control.check()?;
-            candidate.nodes.insert(*id, node.clone());
-        }
-        for (key, node) in &self.active {
-            control.check()?;
-            candidate.active.insert(*key, *node);
-        }
-        for id in &self.dirty_nodes {
-            control.check()?;
-            candidate.dirty_nodes.insert(*id);
-        }
-        Ok(candidate)
-    }
+/// One ordered canonical vector at a time under the original storage allowance.
+pub struct HNSWCanonicalBuilder {
+    index: HNSWIndex,
+    control: StorageReadControl,
+    memory: uqa_core::memory::MemoryReservation,
+    previous: Option<(DocId, u32)>,
+    failed: bool,
+}
 
-    fn delta_controlled(
-        &self,
+impl HNSWCanonicalBuilder {
+    pub fn new(
+        dimensions: u32,
+        params: HNSWIndexParams,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<Budgeted<HNSWPersistenceDelta>> {
+    ) -> StorageBackendResult<Self> {
         control.check()?;
-        let include = |id: &u64| self.full_rewrite || self.dirty_nodes.contains(id);
-        let mut bytes = 0;
-        let mut count = 0;
-        for node in self.nodes.values().filter(|node| include(&node.id)) {
-            control.check()?;
-            workspace::add(&mut bytes, workspace::snapshot(node)?)?;
-            count += 1;
-        }
-        let memory = control.memory().reserve(bytes)?;
-        let mut nodes = Vec::with_capacity(count);
-        for node in self.nodes.values().filter(|node| include(&node.id)) {
-            control.check()?;
-            nodes.push(HNSWNodeSnapshot::from(node));
-        }
-        Ok(Budgeted::new(
-            HNSWPersistenceDelta {
-                meta: self.graph_meta(),
-                nodes,
-                full_rewrite: self.full_rewrite,
-            },
+        let memory = control.memory().reserve(size_of::<HNSWIndex>())?;
+        Ok(Self {
+            index: HNSWIndex::with_memory(dimensions, params, control.memory())?,
+            control: control.clone(),
             memory,
-        ))
+            previous: None,
+            failed: false,
+        })
+    }
+
+    pub fn push(
+        &mut self,
+        document: DocId,
+        ordinal: u32,
+        vector: &[f32],
+    ) -> StorageBackendResult<()> {
+        self.check_usable()?;
+        let result = self.push_inner(document, ordinal, vector);
+        self.failed = result.is_err();
+        result
+    }
+
+    fn push_inner(
+        &mut self,
+        document: DocId,
+        ordinal: u32,
+        vector: &[f32],
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        let valid = match self.previous {
+            Some((old_document, old_ordinal)) if old_document == document => {
+                old_ordinal.checked_add(1) == Some(ordinal)
+            }
+            Some((old_document, _)) => old_document < document && ordinal == 0,
+            None => ordinal == 0,
+        };
+        if !valid {
+            return Err(crate::StorageBackendError::Other(
+                "HNSW canonical tensors require ordered complete ordinals".into(),
+            ));
+        }
+        crate::vector_index::validate_vector_values(self.index.dimensions, vector)?;
+        let _workspace = workspace::operation(&self.index, &self.control)?;
+        self.index
+            .insert_vector(document, ordinal, vector.to_vec(), Some(&self.control))?;
+        self.previous = Some((document, ordinal));
+        Ok(())
+    }
+
+    fn check_usable(&self) -> StorageBackendResult<()> {
+        self.control.check()?;
+        if self.failed {
+            return Err(crate::StorageBackendError::Other(
+                "HNSW construction cannot continue after an error".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn finish(self) -> StorageBackendResult<Budgeted<HNSWIndex>> {
+        self.check_usable()?;
+        Ok(Budgeted::new(self.index, self.memory))
+    }
+
+    pub fn finish_delta(self) -> StorageBackendResult<Budgeted<HNSWGraphDelta>> {
+        self.check_usable()?;
+        Ok(Budgeted::new(self.index.delta(&self.control), self.memory))
     }
 }
 

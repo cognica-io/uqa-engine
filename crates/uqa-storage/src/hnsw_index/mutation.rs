@@ -4,23 +4,22 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Validated replacement, deletion, and tombstone compaction.
-
-use uqa_core::DocId;
+//! Validated replacement, deletion, and streaming tombstone compaction.
 
 use super::prepare::{check, Control};
-use super::types::HNSWIndex;
+use super::types::{active_key, HNSWIndex};
 use crate::vector_index::validate_vector_values;
-use crate::{StorageBackendError, StorageBackendResult};
+use crate::{StorageBackendError, StorageBackendResult, VectorIndex};
+use uqa_core::DocId;
 
 impl HNSWIndex {
     pub(super) fn replace_document_vectors(
         &mut self,
         doc_id: DocId,
-        vectors: Vec<Vec<f32>>,
+        vectors: &[Vec<f32>],
         control: Control<'_>,
     ) -> StorageBackendResult<()> {
-        for vector in &vectors {
+        for vector in vectors {
             check(control)?;
             validate_vector_values(self.dimensions, vector)?;
         }
@@ -36,9 +35,9 @@ impl HNSWIndex {
             .checked_add(inserted)
             .ok_or_else(|| StorageBackendError::Other("HNSW node id space exhausted".into()))?;
         self.mark_document_deleted(doc_id, control)?;
-        for (ordinal, vector) in vectors.into_iter().enumerate() {
+        for (ordinal, vector) in vectors.iter().enumerate() {
             check(control)?;
-            self.insert_vector(doc_id, ordinal as u32, vector, control)?;
+            self.insert_vector(doc_id, ordinal as u32, vector.clone(), control)?;
         }
         self.maybe_rebuild(control)
     }
@@ -49,39 +48,25 @@ impl HNSWIndex {
         control: Control<'_>,
     ) -> StorageBackendResult<()> {
         check(control)?;
-        let node_ids = self
-            .active
-            .range((doc_id, 0)..=(doc_id, u32::MAX))
-            .map(|(_, node_id)| {
-                check(control)?;
-                Ok(*node_id)
-            })
-            .collect::<StorageBackendResult<Vec<_>>>()?;
-        let next_deleted_count =
-            self.deleted_count
-                .checked_add(node_ids.len())
-                .ok_or_else(|| {
-                    StorageBackendError::Other("HNSW deleted-node counter overflow".into())
-                })?;
-        if let Some(node_id) = node_ids
-            .iter()
-            .find(|node_id| !self.nodes.contains_key(node_id))
-        {
-            return Err(StorageBackendError::Other(format!(
-                "HNSW active map references missing node {node_id}"
-            )));
+        let mut after = active_key(doc_id, 0).checked_sub(1);
+        while let Some((key, node_id)) = self.active.next(after)? {
+            if key >> 32 != u128::from(doc_id) {
+                break;
+            }
+            let node_id = *node_id;
+            if self.node(node_id)?.is_none() {
+                return Err(StorageBackendError::Other(format!(
+                    "HNSW active map references missing node {node_id}"
+                )));
+            }
+            let deleted = self.deleted_count.checked_add(1).ok_or_else(|| {
+                StorageBackendError::Other("HNSW deleted-node counter overflow".into())
+            })?;
+            self.modify_node(node_id, control, |node| node.deleted = true)?;
+            self.active.remove(key, control)?;
+            self.deleted_count = deleted;
+            after = Some(key);
         }
-        for node_id in node_ids {
-            check(control)?;
-            let node = self
-                .nodes
-                .get_mut(&node_id)
-                .expect("node ids were validated before mutation");
-            node.deleted = true;
-            self.active.remove(&(node.doc_id, node.vector_ordinal));
-            self.dirty_nodes.insert(node_id);
-        }
-        self.deleted_count = next_deleted_count;
         Ok(())
     }
 
@@ -94,32 +79,21 @@ impl HNSWIndex {
     }
 
     fn rebuild(&mut self, control: Control<'_>) -> StorageBackendResult<()> {
-        let live = self
-            .active
-            .iter()
-            .map(|(&(doc_id, ordinal), node_id)| {
-                check(control)?;
-                self.nodes
-                    .get(node_id)
-                    .map(|node| (doc_id, ordinal, node.raw_vector.clone()))
-                    .ok_or_else(|| {
-                        StorageBackendError::Other(format!(
-                            "HNSW active map references missing node {node_id}"
-                        ))
-                    })
-            })
-            .collect::<StorageBackendResult<Vec<_>>>()?;
-        self.nodes.clear();
-        self.active.clear();
-        self.entry_point = None;
-        self.max_level = 0;
-        self.next_node_id = 1;
-        self.deleted_count = 0;
-        self.dirty_nodes.clear();
-        self.full_rewrite = true;
-        for (doc_id, ordinal, vector) in live {
+        // The retained root supplies canonical order while the successor is built one vector at a time.
+        let source = self.clone();
+        self.clear()?;
+        for entry in source.active.iter() {
             check(control)?;
-            self.insert_vector(doc_id, ordinal, vector, control)?;
+            let (key, node_id) = entry?;
+            let node = source.node(*node_id)?.ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "HNSW active map references missing node {}",
+                    *node_id
+                ))
+            })?;
+            let vector = node.raw_vector.clone();
+            drop(node);
+            self.insert_vector((key >> 32) as u64, key as u32, vector, control)?;
         }
         Ok(())
     }

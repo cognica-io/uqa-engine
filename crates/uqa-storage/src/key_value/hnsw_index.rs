@@ -14,7 +14,7 @@ use super::codec::{other_error, vector_field_prefix};
 use super::hnsw_persistence::{self, metadata_from_graph, PersistedHNSWNode};
 use super::index_keys::{hnsw_metadata_key, hnsw_node_key, hnsw_node_prefix};
 use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
-use crate::hnsw_index::{HNSWIndex, HNSWMutation, HNSWPersistenceDelta};
+use crate::hnsw_index::{HNSWGraphDelta, HNSWIndex, HNSWMutation};
 use crate::vector_index::{HNSWIndexParams, VectorIndex};
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -159,7 +159,7 @@ impl KeyValueHNSWIndex {
     fn stage_delta(
         &self,
         batch: &mut dyn KeyValueBatch,
-        delta: &HNSWPersistenceDelta,
+        delta: &HNSWGraphDelta,
         revision: u64,
         preview: bool,
     ) -> StorageBackendResult<()> {
@@ -184,9 +184,10 @@ impl KeyValueHNSWIndex {
                 batch.delete_prefix(&prefix)?;
             }
         }
-        for node in &delta.nodes {
+        for node in delta.nodes() {
+            let node = node?;
             let key = hnsw_node_key(&self.table, &self.field, node.node_id)?;
-            let value = encode_value(&PersistedHNSWNode::try_from(node)?)?;
+            let value = encode_value(&PersistedHNSWNode::try_from(&*node)?)?;
             if preview {
                 batch.preview_hnsw_record(&key, Some(&value))?;
             } else {
