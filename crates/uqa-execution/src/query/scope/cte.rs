@@ -25,14 +25,12 @@ impl<S: Clone> CteScope<S> {
         self.command_cte_snapshot = snapshot;
     }
 
-    /// Begin a statement whose WITH modifies data, keeping `postponed`, the items that run once its primary query has finished. The scopes of the statement's commands share what this begins.
-    pub fn begin_statement_commands(&mut self, postponed: Vec<CtePlan>) {
-        self.statement_commands = Some(std::sync::Arc::new(super::StatementCommands::new(
-            postponed,
-        )));
+    /// Make this scope part of the statement whose commands `commands` holds.
+    pub fn set_statement_commands(&mut self, commands: std::sync::Arc<super::StatementCommands>) {
+        self.statement_commands = Some(commands);
     }
 
-    /// The data-modifying WITH items of the statement this scope belongs to, when its WITH modifies data.
+    /// The commands of the statement this scope belongs to.
     pub fn statement_commands(&self) -> Option<&std::sync::Arc<super::StatementCommands>> {
         self.statement_commands.as_ref()
     }

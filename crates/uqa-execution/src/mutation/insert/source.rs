@@ -420,18 +420,15 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 .ok_or_else(|| {
                     SQLError::Internal("INSERT SELECT conflict locks are unavailable".into())
                 })?
-                .prepare_document(
-                    InsertConflictPreparation {
-                        context: services.rows.referential,
-                        table: &target_table,
-                        target_qualifier: &stmt.target_qualifier,
-                        on_conflict,
-                        document: &document,
-                        params,
-                        scope: snapshot_scope,
-                    },
-                    events.referential_actions_mut(),
-                )?
+                .prepare_document(InsertConflictPreparation {
+                    context: services.rows.referential,
+                    table: &target_table,
+                    target_qualifier: &stmt.target_qualifier,
+                    on_conflict,
+                    document: &document,
+                    params,
+                    scope: snapshot_scope,
+                })?
         } else {
             let _key_locks = lock_document_key_dependencies(
                 services.rows.referential.constraints,

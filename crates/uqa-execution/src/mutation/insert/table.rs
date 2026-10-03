@@ -14,7 +14,7 @@ use super::{
         PreparedInsertSelect,
     },
     supplied_identities::SuppliedIdentities,
-    triggers::fire_insert_after_triggers,
+    triggers::insert_statement_events,
 };
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::{
@@ -33,6 +33,7 @@ use crate::{
         publication::{apply_validated_prepared_insert, finish_mutation_publication},
         returning::{dml_returning_result, DmlReturningShape},
         statement_end,
+        triggers::queue::StatementEvent,
     },
     query::{statement::consumer::QueryOutputMode, CteScope},
 };
@@ -70,6 +71,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
     let preparation = mutation.preparation;
     let assignment = preparation.referential.assignment;
     let triggers = preparation.referential.triggers;
+    let statement_commands = statement_end::statement_commands(inherited_ctes);
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     preparation.referential.locking.session.lock_relation(
         &stmt.table,
@@ -237,21 +239,15 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         None => None,
     };
     if insert_original_query {
-        crate::mutation::triggers::fire_statement_triggers(
+        statement_commands.after_triggers().fire_before_statement(
             &triggers,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Insert,
-            &[],
+            &StatementEvent::new(&stmt.table, uqa_sql::ast::TriggerEvent::Insert, &[]),
         )?;
     }
     if let Some(columns) = conflict_update_columns.as_deref() {
-        crate::mutation::triggers::fire_statement_triggers(
+        statement_commands.after_triggers().fire_before_statement(
             &triggers,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Update,
-            columns,
+            &StatementEvent::new(&stmt.table, uqa_sql::ast::TriggerEvent::Update, columns),
         )?;
     }
     let mut statement_scope = None;
@@ -265,6 +261,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             if let Some(parent) = inherited_ctes {
                 scope.inherit_cte_bindings(parent);
             }
+            scope.set_statement_commands(Arc::clone(&statement_commands));
             scope.set_command_cte_snapshot(statement_snapshot.clone());
             crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
@@ -349,7 +346,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     let apply_reader = prepared_rows
                         .read_rows()
                         .map_err(crate::physical::physical_exec_error)?;
-                    let mut publication = statement_end::publication_batch(scope);
+                    let mut publication = statement_end::publication_batch(&statement_commands);
                     let mut known_new = KnownNewInserts::new(
                         preparation.referential.constraints.catalog,
                         &id_column,
@@ -380,18 +377,17 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         )?;
                     }
                     finish_mutation_publication(mutation.publication, &mut publication)?;
-                    statement_end::note_written_rows(scope, &mut publication);
-                    let table = stmt.table.clone();
-                    let conflict_columns = conflict_update_columns.clone();
-                    statement_end::fire_after_events(scope, &triggers, move |triggers| {
-                        fire_insert_after_triggers(
-                            triggers,
-                            &table,
+                    statement_end::note_written_rows(&statement_commands, &mut publication);
+                    statement_end::end_command(
+                        &statement_commands,
+                        &triggers,
+                        &insert_statement_events(
+                            &stmt.table,
                             insert_original_query,
-                            conflict_columns.as_deref(),
-                            &events,
-                        )
-                    })?;
+                            conflict_update_columns.as_deref(),
+                        ),
+                        events.into_after_rows(),
+                    )?;
                     if !stmt.returning.is_empty() {
                         return dml_returning_result(
                             preparation.returning,
@@ -611,7 +607,6 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     document,
                     insert_identity,
                     &mut conflict_locks,
-                    events.referential_actions_mut(),
                 )? {
                     if let Some(returning) = staged.returning {
                         returning_rows.push(returning);
@@ -758,7 +753,6 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         document,
                         insert_identity,
                         &mut conflict_locks,
-                        events.referential_actions_mut(),
                     )?
                     else {
                         continue;
@@ -792,7 +786,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 supplied_identities.note(target_table, prepared);
             }
             let observed = supplied_identities.observe(mutation.publication.storage)?;
-            let mut publication = statement_end::publication_batch(scope);
+            let mut publication = statement_end::publication_batch(&statement_commands);
             let mut known_new = KnownNewInserts::new(
                 preparation.referential.constraints.catalog,
                 &id_column,
@@ -823,18 +817,17 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 )?;
             }
             finish_mutation_publication(mutation.publication, &mut publication)?;
-            statement_end::note_written_rows(scope, &mut publication);
-            let table = stmt.table.clone();
-            let conflict_columns = conflict_update_columns.clone();
-            statement_end::fire_after_events(scope, &triggers, move |triggers| {
-                fire_insert_after_triggers(
-                    triggers,
-                    &table,
+            statement_end::note_written_rows(&statement_commands, &mut publication);
+            statement_end::end_command(
+                &statement_commands,
+                &triggers,
+                &insert_statement_events(
+                    &stmt.table,
                     insert_original_query,
-                    conflict_columns.as_deref(),
-                    &events,
-                )
-            })?;
+                    conflict_update_columns.as_deref(),
+                ),
+                events.into_after_rows(),
+            )?;
             let (rule_returning, rule_affected, rule_sets_command_tag) =
                 if let Some(rule_batch) = rule_batch.as_ref() {
                     let outcome = rule_batch.execute_actions_with_affected(

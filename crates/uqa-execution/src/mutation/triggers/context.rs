@@ -75,11 +75,12 @@ pub trait ConstraintTriggerQueue {
         event: DeferredConstraintTriggerEvent,
     ) -> Result<(), SQLError>;
 }
-/// Runs the foreign key checks that row events carry when a statement's AFTER ROW triggers fire.
+/// Runs the foreign key checks and referential actions that row events carry when a statement's AFTER ROW triggers fire. A referential action queues the events of the rows it writes in `queue`, the queue of the statement whose event fired it.
 pub trait ForeignKeyCheckRunner {
     fn run_foreign_key_check(
         &self,
         check: &crate::mutation::referential::checks::ForeignKeyCheck,
+        queue: &super::queue::AfterTriggerQueue,
     ) -> Result<(), SQLError>;
 }
 #[derive(Clone, Copy)]

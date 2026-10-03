@@ -42,10 +42,12 @@ impl uqa_execution::mutation::triggers::context::ForeignKeyCheckRunner for Engin
     fn run_foreign_key_check(
         &self,
         check: &uqa_execution::mutation::referential::checks::ForeignKeyCheck,
+        queue: &uqa_execution::mutation::triggers::queue::AfterTriggerQueue,
     ) -> Result<(), SQLError> {
         uqa_execution::mutation::referential::checks::run_foreign_key_check(
-            &self.referential_execution_context(),
+            &self.mutation_statement_context().mutation,
             check,
+            queue,
         )
     }
 }

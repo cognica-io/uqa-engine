@@ -14,8 +14,7 @@ use uqa_core::DocId;
 use uqa_sql::SQLError;
 
 use super::prepared::{
-    PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentInsert, PreparedDocumentRewrite,
-    PreparedMutationAction,
+    PreparedDocumentDelete, PreparedDocumentInsert, PreparedDocumentRewrite, PreparedMutationAction,
 };
 use super::vectors::document_vectors;
 mod context;
@@ -138,16 +137,11 @@ pub fn publish_prepared_mutation_action(
                 }
             }
         }
-        PreparedMutationAction::Rewrite(mut rewrite) => {
-            apply_document_rewrite(context, &mut rewrite, Some(batch))?;
+        PreparedMutationAction::Rewrite(rewrite) => {
+            apply_document_rewrite(context, &rewrite, Some(batch))?;
         }
-        PreparedMutationAction::Delete(mut delete) => {
-            if !delete.actions.is_empty()
-                || !context.storage.can_defer_document_text(&delete.table)?
-            {
-                batch.flush_fts(context.text)?;
-                apply_validated_prepared_document_delete(context, &mut delete)?;
-            } else {
+        PreparedMutationAction::Delete(delete) => {
+            if context.storage.can_defer_document_text(&delete.table)? {
                 batch.before_document(context.text, &delete.table, delete.doc_id)?;
                 observe_row_write(context.observations, &delete.table, delete.doc_id)?;
                 context
@@ -157,6 +151,9 @@ pub fn publish_prepared_mutation_action(
                 if batch.fts_is_full() {
                     batch.flush_fts(context.text)?;
                 }
+            } else {
+                batch.flush_fts(context.text)?;
+                apply_validated_prepared_document_delete(context, &delete)?;
             }
         }
     }
@@ -174,26 +171,25 @@ pub use crate::row_locks::publication::TransactionRowChange;
 
 pub fn apply_validated_prepared_document_rewrite(
     context: PublicationContext<'_>,
-    prepared: &mut PreparedDocumentRewrite,
+    prepared: &PreparedDocumentRewrite,
 ) -> Result<DocId, SQLError> {
     apply_document_rewrite(context, prepared, None)
 }
 
 fn apply_document_rewrite(
     context: PublicationContext<'_>,
-    prepared: &mut PreparedDocumentRewrite,
+    prepared: &PreparedDocumentRewrite,
     mut batch: Option<&mut MutationPublicationBatch>,
 ) -> Result<DocId, SQLError> {
     if prepared.partition_move_delete.is_some()
         || prepared.destination.is_some()
-        || !prepared.actions.is_empty()
         || (batch.is_some() && !context.storage.can_defer_document_text(&prepared.table)?)
     {
         if let Some(batch) = batch.take() {
             batch.flush_fts(context.text)?;
         }
     }
-    if let Some(delete) = prepared.partition_move_delete.as_mut() {
+    if let Some(delete) = prepared.partition_move_delete.as_deref() {
         apply_validated_prepared_document_delete(context, delete)?;
         return Ok(prepared.doc_id);
     }
@@ -228,9 +224,6 @@ fn apply_document_rewrite(
             None,
             &prepared.new_document,
         )?;
-        for action in &mut prepared.actions {
-            apply_validated_prepared_document_rewrite(context, action)?;
-        }
         return Ok(*destination_doc_id);
     }
     let rewritten_doc_id = match prepared.relocation {
@@ -276,9 +269,6 @@ fn apply_document_rewrite(
             prepared.doc_id
         }
     };
-    for action in &mut prepared.actions {
-        apply_validated_prepared_document_rewrite(context, action)?;
-    }
     Ok(rewritten_doc_id)
 }
 
@@ -322,18 +312,8 @@ mod tests;
 
 pub fn apply_validated_prepared_document_delete(
     context: PublicationContext<'_>,
-    prepared: &mut PreparedDocumentDelete,
+    prepared: &PreparedDocumentDelete,
 ) -> Result<(), SQLError> {
-    for action in &mut prepared.actions {
-        match action {
-            PreparedDeleteAction::Delete(delete) => {
-                apply_validated_prepared_document_delete(context, delete)?;
-            }
-            PreparedDeleteAction::Rewrite(rewrite) => {
-                apply_validated_prepared_document_rewrite(context, rewrite)?;
-            }
-        }
-    }
     observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
     context
         .storage

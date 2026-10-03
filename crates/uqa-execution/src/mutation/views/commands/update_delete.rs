@@ -223,6 +223,12 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 &assigned_columns,
             )?
             .is_empty();
+    let statement_commands = crate::mutation::statement_end::statement_commands(inherited_ctes);
+    let view_statement = crate::mutation::triggers::queue::StatementEvent::new(
+        &target.canonical_name,
+        uqa_sql::ast::TriggerEvent::Update,
+        &assigned_columns,
+    );
     let statement_snapshot = match inherited_ctes.and_then(CteScope::command_cte_snapshot) {
         Some(snapshot) => Some(snapshot),
         None if has_before_statement_trigger
@@ -233,12 +239,9 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
         None => None,
     };
     if original_query_survives {
-        crate::mutation::triggers::fire_statement_triggers(
+        statement_commands.after_triggers().fire_before_statement(
             &context.mutation.preparation.referential.triggers,
-            &target.canonical_name,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Update,
-            &assigned_columns,
+            &view_statement,
         )?;
     }
     let mut statement_scope = None;
@@ -251,6 +254,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
             if let Some(parent) = inherited_ctes {
                 ctes.inherit_cte_bindings(parent);
             }
+            ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
             crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
@@ -665,20 +669,11 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                     )?);
                 }
             }
-            let view = target.canonical_name.clone();
-            let columns = assigned_columns.clone();
-            crate::mutation::statement_end::fire_after_events(
-                ctes,
+            crate::mutation::statement_end::end_command(
+                &statement_commands,
                 &context.mutation.preparation.referential.triggers,
-                move |context| {
-                    crate::mutation::triggers::fire_statement_triggers(
-                        context,
-                        &view,
-                        uqa_sql::ast::TriggerTiming::After,
-                        uqa_sql::ast::TriggerEvent::Update,
-                        &columns,
-                    )
-                },
+                std::slice::from_ref(&view_statement),
+                Vec::new(),
             )?;
             let result = finish_view_dml(
                 &context.mutation.preparation.returning,

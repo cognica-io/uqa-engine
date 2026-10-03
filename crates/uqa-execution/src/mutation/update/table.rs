@@ -13,6 +13,7 @@ use crate::mutation::{
     prepared::PreparedMutationAction,
     returning::DmlReturningShape,
     statement_end,
+    triggers::queue::StatementEvent,
 };
 use crate::query::CteScope;
 use std::collections::BTreeSet;
@@ -34,6 +35,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<SQLResult, SQLError> {
+    let statement_commands = statement_end::statement_commands(inherited_ctes);
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     context.query.source.locking.session.lock_relation(
         &stmt.table,
@@ -150,13 +152,15 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
         }
         None => None,
     };
+    let update_statement = StatementEvent::new(
+        &stmt.table,
+        uqa_sql::ast::TriggerEvent::Update,
+        &assigned_columns,
+    );
     if update_original_query && !has_any_update_rules {
-        crate::mutation::triggers::fire_statement_triggers(
+        statement_commands.after_triggers().fire_before_statement(
             &context.mutation.preparation.referential.triggers,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Update,
-            &assigned_columns,
+            &update_statement,
         )?;
     }
     let mut statement_scope = None;
@@ -169,6 +173,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             if let Some(parent) = inherited_ctes {
                 ctes.inherit_cte_bindings(parent);
             }
+            ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
             crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
@@ -216,6 +221,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     source,
                     params,
                     ctes,
+                    &statement_commands,
                 );
             }
             let row_independent_update_qualification = if has_any_update_rules {
@@ -283,15 +289,12 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     stmt,
                     params,
                 )? {
-                    if update_original_query {
-                        crate::mutation::triggers::fire_statement_triggers(
-                            &context.mutation.preparation.referential.triggers,
-                            &stmt.table,
-                            uqa_sql::ast::TriggerTiming::After,
-                            uqa_sql::ast::TriggerEvent::Update,
-                            &assigned_columns,
-                        )?;
-                    }
+                    statement_end::end_command(
+                        &statement_commands,
+                        &context.mutation.preparation.referential.triggers,
+                        &update_statement_events(update_original_query, &update_statement),
+                        Vec::new(),
+                    )?;
                     return Ok(result);
                 }
             }
@@ -524,7 +527,6 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     doc_id,
                     original_doc,
                     doc,
-                    events.referential_actions_mut(),
                 )? {
                     if let Some(returning) = prepared.returning {
                         returning_rows.push(returning);
@@ -629,12 +631,9 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     });
                 }
                 if update_original_query {
-                    crate::mutation::triggers::fire_statement_triggers(
+                    statement_commands.after_triggers().fire_before_statement(
                         &context.mutation.preparation.referential.triggers,
-                        &stmt.table,
-                        uqa_sql::ast::TriggerTiming::Before,
-                        uqa_sql::ast::TriggerEvent::Update,
-                        &assigned_columns,
+                        &update_statement,
                     )?;
                 }
                 let overlay = MutationOverlayScope::new(context.mutation.state);
@@ -652,7 +651,6 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         candidate.identity.doc_id,
                         candidate.old_document,
                         candidate.proposed_document,
-                        events.referential_actions_mut(),
                     )? {
                         if let Some(returning) = prepared.returning {
                             returning_rows.push(returning);
@@ -672,7 +670,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             };
             if !prepared_updates.is_empty() {
                 context.mutation.state.prepare_writer()?;
-                let mut publication = statement_end::publication_batch(ctes);
+                let mut publication = statement_end::publication_batch(&statement_commands);
                 for (action, after_rows) in prepared_updates {
                     crate::mutation::publication::publish_prepared_mutation_action(
                         context.mutation.publication,
@@ -686,22 +684,13 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     context.mutation.publication,
                     &mut publication,
                 )?;
-                statement_end::note_written_rows(ctes, &mut publication);
+                statement_end::note_written_rows(&statement_commands, &mut publication);
             }
-            let table = stmt.table.clone();
-            let columns = assigned_columns.clone();
-            statement_end::fire_after_events(
-                ctes,
+            statement_end::end_command(
+                &statement_commands,
                 &context.mutation.preparation.referential.triggers,
-                move |triggers| {
-                    super::triggers::fire_update_after_triggers(
-                        triggers,
-                        &table,
-                        update_original_query,
-                        &columns,
-                        &events,
-                    )
-                },
+                &update_statement_events(update_original_query, &update_statement),
+                events.into_after_rows(),
             )?;
             if !stmt.returning.is_empty() {
                 if let Some(view_rule_returning) = view_rule_returning {
@@ -739,4 +728,15 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     }?;
     statement_end::finish_statement(context, params, &stmt.ctes, statement_scope.as_mut())?;
     Ok(result)
+}
+
+/// The relations and operations an UPDATE writes: its own statement, unless the statement's rules replaced it.
+pub(super) fn update_statement_events(
+    update_original_query: bool,
+    statement: &StatementEvent,
+) -> Vec<StatementEvent> {
+    update_original_query
+        .then(|| statement.clone())
+        .into_iter()
+        .collect()
 }

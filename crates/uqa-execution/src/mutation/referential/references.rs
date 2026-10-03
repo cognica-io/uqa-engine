@@ -7,8 +7,7 @@
 use super::{
     dml_storage_error, lock_physical_mutation_target, missing_document_error, update_lock_strength,
     Document, ForeignKey, ForeignKeyAction, ForeignKeyComparison, PhysicalDocumentIdentity,
-    PhysicalMutationLockTarget, ReferentialActionContext, ReferentialContext, SQLError, SQLParam,
-    Value,
+    PhysicalMutationLockTarget, ReferentialContext, SQLError, Value,
 };
 
 /// Lock one referencing child row for a referential action and refetch it after the wait. Returns `None` when the child vanished or its foreign-key columns no longer reference the parent key that triggered the action, so the action skips it exactly like `PostgreSQL` after an `EvalPlanQual` recheck of the referencing row.
@@ -24,7 +23,6 @@ pub struct ReferencingChildLock<'a> {
 pub fn lock_referencing_child<S: Clone + 'static>(
     context: &ReferentialContext<'_, S>,
     request: ReferencingChildLock<'_>,
-    referential_actions: &ReferentialActionContext,
 ) -> Result<Option<(PhysicalDocumentIdentity, Document)>, SQLError> {
     let ReferencingChildLock {
         ref_table,
@@ -50,19 +48,12 @@ pub fn lock_referencing_child<S: Clone + 'static>(
             .transactions
             .refresh_explicit_statement_snapshot()?;
     }
-    let child_doc = match referential_actions.pending_document(&identity) {
-        Some(Some(document)) => document.clone(),
-        Some(None) => return Ok(None),
-        None => {
-            let Some(document) = context
-                .locking
-                .rows
-                .get_document_for_mutation(&identity.table, identity.doc_id)?
-            else {
-                return Ok(None);
-            };
-            document
-        }
+    let Some(child_doc) = context
+        .locking
+        .rows
+        .get_document_for_mutation(&identity.table, identity.doc_id)?
+    else {
+        return Ok(None);
     };
     let actual = foreign_key
         .local_columns
@@ -79,7 +70,6 @@ pub fn referencing_rows<S: Clone + 'static>(
     fk: &ForeignKey,
     comparison: &ForeignKeyComparison,
     expected: &[Value],
-    referential_actions: &ReferentialActionContext,
     action: ForeignKeyAction,
 ) -> Result<Vec<(PhysicalDocumentIdentity, Document)>, SQLError> {
     let mut out = Vec::new();
@@ -94,19 +84,12 @@ pub fn referencing_rows<S: Clone + 'static>(
                 table: physical_table.clone(),
                 doc_id,
             };
-            let doc = match referential_actions.pending_document(&identity) {
-                Some(Some(document)) => document.clone(),
-                Some(None) => continue,
-                None => {
-                    let Some(document) = rows.document(doc_id)? else {
-                        return Err(missing_document_error(
-                            "foreign-key reference scan",
-                            &physical_table,
-                            doc_id,
-                        ));
-                    };
-                    document
-                }
+            let Some(doc) = rows.document(doc_id)? else {
+                return Err(missing_document_error(
+                    "foreign-key reference scan",
+                    &physical_table,
+                    doc_id,
+                ));
             };
             let values = fk
                 .local_columns
@@ -119,8 +102,7 @@ pub fn referencing_rows<S: Clone + 'static>(
                     ForeignKeyAction::Cascade
                         | ForeignKeyAction::SetNull
                         | ForeignKeyAction::SetDefault
-                ) && referential_actions.pending_document(&identity).is_none()
-                {
+                ) {
                     rows.check_visible(doc_id)?;
                 }
                 out.push((identity, doc));
@@ -137,7 +119,6 @@ pub fn apply_set_action_to_child<S: Clone + 'static>(
     new_doc: &mut Document,
     columns: &[String],
     action: ForeignKeyAction,
-    params: &[SQLParam],
 ) -> Result<(), SQLError> {
     for column in columns {
         let value = match action {
@@ -154,7 +135,7 @@ pub fn apply_set_action_to_child<S: Clone + 'static>(
                         context.assignment.scopes.current_routine_scope(),
                         &expr,
                         Some(old_doc),
-                        params,
+                        &[],
                     )?
                 } else {
                     Value::Null

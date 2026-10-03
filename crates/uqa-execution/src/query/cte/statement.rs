@@ -7,7 +7,6 @@
 //! When the WITH items of a statement whose WITH modifies data run, as `PostgreSQL`'s executor runs them.
 
 use super::{materialize_plan_ctes, materialize_plan_ctes_with_filters, CteExecutionContext};
-use crate::query::scope::AfterEventFiring;
 use crate::query::CteScope;
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_sql::{
@@ -36,7 +35,15 @@ pub fn materialize_statement_ctes<'a, S: Clone>(
         );
     }
     let order = order_statement_ctes(ctes, order_cte_plans(scheduled)?, &primary_references());
-    scope.begin_statement_commands(order.postponed.into_iter().cloned().collect());
+    let commands = match scope.statement_commands() {
+        Some(commands) => std::sync::Arc::clone(commands),
+        None => {
+            let commands = std::sync::Arc::default();
+            scope.set_statement_commands(std::sync::Arc::clone(&commands));
+            commands
+        }
+    };
+    commands.begin_data_modifying_with(order.postponed.into_iter().cloned().collect());
     materialize_plan_ctes_with_filters(context, order.primary, params, scope, output_filters)
 }
 
@@ -59,16 +66,15 @@ pub fn materialize_command_ctes<S: Clone>(
     )
 }
 
-/// Run the items a statement kept for after its primary query, in the order [`materialize_statement_ctes`] kept them, and hand back every AFTER event the statement's commands queued, in the order they fire.
+/// Run the items a statement kept for after its primary query, in the order [`materialize_statement_ctes`] kept them.
 pub fn finish_statement_ctes<S: Clone>(
     context: CteExecutionContext<'_, S>,
     params: &[SQLParam],
     scope: &mut CteScope<S>,
-) -> Result<Vec<AfterEventFiring>, SQLError> {
+) -> Result<(), SQLError> {
     let Some(commands) = scope.statement_commands().cloned() else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     let postponed = commands.take_postponed();
-    materialize_plan_ctes(context, &postponed, params, scope)?;
-    Ok(commands.take_after_events())
+    materialize_plan_ctes(context, &postponed, params, scope)
 }

@@ -10,7 +10,7 @@ use super::{
         context::ConstraintContext, validate_document_non_key_constraints,
         validate_document_rewrite_constraints, validate_key_constraints, ConstraintStatement,
     },
-    prepared::{PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentRewrite},
+    prepared::{PreparedDocumentDelete, PreparedDocumentRewrite},
     triggers::context::TriggerContext,
 };
 use uqa_core::DocId;
@@ -36,7 +36,8 @@ pub struct MutationStagingContext<'a> {
     pub constraints: ConstraintContext<'a>,
     pub triggers: TriggerContext<'a>,
 }
-/// Stage the row that `statement` writes in place of a row, with the rewrites of its referential actions.
+/// Stage the row that `statement` writes in place of a row, and queue the events of the change.
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub fn stage_prepared_document_rewrite(
     context: MutationStagingContext<'_>,
     prepared: &mut PreparedDocumentRewrite,
@@ -45,37 +46,19 @@ pub fn stage_prepared_document_rewrite(
     root_updated_columns: Option<&[String]>,
     after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
 ) -> Result<DocId, SQLError> {
-    stage_prepared_document_rewrite_with_parent(
-        context,
-        prepared,
-        params,
-        statement,
-        root_updated_columns,
-        after_row_events,
-        None,
-    )
-}
-
-#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
-pub fn stage_prepared_document_rewrite_with_parent(
-    context: MutationStagingContext<'_>,
-    prepared: &mut PreparedDocumentRewrite,
-    params: &[SQLParam],
-    statement: ConstraintStatement<'_>,
-    root_updated_columns: Option<&[String]>,
-    after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
-    mut cascade_parent: Option<usize>,
-) -> Result<DocId, SQLError> {
     let trigger_updated_columns = root_updated_columns
         .or_else(|| prepared.referential_columns())
         .map(<[String]>::to_vec);
-    if let Some(delete) = prepared.partition_move_delete.as_mut() {
-        stage_prepared_document_delete_with_parent(
-            context,
+    if let Some(delete) = prepared.partition_move_delete.as_deref() {
+        stage_document_delete(
+            &context,
             delete,
-            params,
+            crate::mutation::referential::checks::moved_row_delete_checks(
+                context.constraints,
+                &delete.table,
+                &delete.document,
+            )?,
             after_row_events,
-            cascade_parent,
         )?;
         if prepared.capture_partition_move_update_transition {
             if let Some(updated_columns) = trigger_updated_columns.as_deref() {
@@ -90,12 +73,11 @@ pub fn stage_prepared_document_rewrite_with_parent(
                             old_document: Some(&prepared.old_document),
                             new_document: None,
                             updated_columns,
-                            cascade_parent,
                             foreign_key_checks: Vec::new(),
                         },
                     )?
                 {
-                    crate::mutation::triggers::AfterRowTriggerEvent::push(after_row_events, event);
+                    after_row_events.push(event);
                 }
             }
         }
@@ -149,8 +131,6 @@ pub fn stage_prepared_document_rewrite_with_parent(
             rewritten_doc_id
         };
     if let Some((destination_table, _)) = prepared.destination.as_ref() {
-        let movement_parent = cascade_parent;
-        let mut last_movement_event = None;
         if let Some(event) = crate::mutation::triggers::AfterRowTriggerEvent::prepare(
             &context.triggers,
             crate::mutation::triggers::AfterRowTriggerInput {
@@ -161,15 +141,15 @@ pub fn stage_prepared_document_rewrite_with_parent(
                 old_document: Some(&prepared.old_document),
                 new_document: None,
                 updated_columns: &[],
-                cascade_parent: movement_parent,
-                // The table the UPDATE names checks the referenced keys the moved row held.
-                foreign_key_checks: Vec::new(),
+                // The table the UPDATE names checks the keys of its foreign keys that the moved row held.
+                foreign_key_checks: crate::mutation::referential::checks::moved_row_delete_checks(
+                    context.constraints,
+                    &prepared.table,
+                    &prepared.old_document,
+                )?,
             },
         )? {
-            last_movement_event = Some(crate::mutation::triggers::AfterRowTriggerEvent::push(
-                after_row_events,
-                event,
-            ));
+            after_row_events.push(event);
         }
         if let Some(event) = crate::mutation::triggers::AfterRowTriggerEvent::prepare(
             &context.triggers,
@@ -181,7 +161,6 @@ pub fn stage_prepared_document_rewrite_with_parent(
                 old_document: None,
                 new_document: Some(&prepared.new_document),
                 updated_columns: &[],
-                cascade_parent: movement_parent,
                 foreign_key_checks: crate::mutation::referential::checks::referencing_checks(
                     context.constraints,
                     destination_table,
@@ -191,10 +170,7 @@ pub fn stage_prepared_document_rewrite_with_parent(
                 )?,
             },
         )? {
-            last_movement_event = Some(crate::mutation::triggers::AfterRowTriggerEvent::push(
-                after_row_events,
-                event,
-            ));
+            after_row_events.push(event);
         }
         if prepared.capture_partition_move_update_transition {
             if let Some(updated_columns) = trigger_updated_columns.as_deref() {
@@ -209,16 +185,11 @@ pub fn stage_prepared_document_rewrite_with_parent(
                             old_document: Some(&prepared.old_document),
                             new_document: Some(&prepared.new_document),
                             updated_columns,
-                            cascade_parent: movement_parent,
                             foreign_key_checks: Vec::new(),
                         },
                     )?
                 {
-                    last_movement_event =
-                        Some(crate::mutation::triggers::AfterRowTriggerEvent::push(
-                            after_row_events,
-                            event,
-                        ));
+                    after_row_events.push(event);
                 }
             }
         }
@@ -233,12 +204,8 @@ pub fn stage_prepared_document_rewrite_with_parent(
                 Some(&prepared.new_document),
                 prepared.moved_through.as_deref(),
             )?,
-            movement_parent,
         ) {
-            crate::mutation::triggers::AfterRowTriggerEvent::push(after_row_events, event);
-        }
-        if let Some(event) = last_movement_event {
-            cascade_parent = Some(event);
+            after_row_events.push(event);
         }
     } else {
         let mut foreign_key_checks = crate::mutation::referential::checks::referenced_checks(
@@ -266,7 +233,6 @@ pub fn stage_prepared_document_rewrite_with_parent(
                     old_document: Some(&prepared.old_document),
                     new_document: Some(&prepared.new_document),
                     updated_columns,
-                    cascade_parent,
                     foreign_key_checks,
                 },
             )?,
@@ -274,59 +240,56 @@ pub fn stage_prepared_document_rewrite_with_parent(
                 &prepared.table,
                 uqa_sql::ast::TriggerEvent::Update,
                 foreign_key_checks,
-                cascade_parent,
             ),
         };
         if let Some(event) = event {
-            cascade_parent = Some(crate::mutation::triggers::AfterRowTriggerEvent::push(
-                after_row_events,
-                event,
-            ));
+            after_row_events.push(event);
         }
-    }
-    for action in &mut prepared.actions {
-        stage_referential_rewrite(&context, action, params, after_row_events, cascade_parent)?;
     }
     Ok(rewritten_doc_id)
 }
 
 /// Stage a rewrite that a referential action prepared, which writes as a statement of its own that names the foreign key's table and sets its columns.
-fn stage_referential_rewrite(
-    context: &MutationStagingContext<'_>,
+pub fn stage_referential_rewrite(
+    context: MutationStagingContext<'_>,
     action: &mut PreparedDocumentRewrite,
     params: &[SQLParam],
     after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
-    cascade_parent: Option<usize>,
 ) -> Result<DocId, SQLError> {
     let referential = action.referential_action.clone().ok_or_else(|| {
         SQLError::Internal("a referential action rewrite does not name its foreign key".into())
     })?;
-    stage_prepared_document_rewrite_with_parent(
-        *context,
+    stage_prepared_document_rewrite(
+        context,
         action,
         params,
         ConstraintStatement::referential_action(&referential.relation, &referential.columns),
         None,
         after_row_events,
-        cascade_parent,
     )
 }
 
+/// Stage the delete of a row, and queue the events of the change.
 pub fn stage_prepared_document_delete(
     context: MutationStagingContext<'_>,
-    prepared: &mut PreparedDocumentDelete,
-    params: &[SQLParam],
+    prepared: &PreparedDocumentDelete,
     after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
 ) -> Result<(), SQLError> {
-    stage_prepared_document_delete_with_parent(context, prepared, params, after_row_events, None)
+    let foreign_key_checks = crate::mutation::referential::checks::referenced_checks(
+        context.constraints,
+        &prepared.table,
+        &prepared.document,
+        None,
+        None,
+    )?;
+    stage_document_delete(&context, prepared, foreign_key_checks, after_row_events)
 }
 
-pub fn stage_prepared_document_delete_with_parent(
-    context: MutationStagingContext<'_>,
-    prepared: &mut PreparedDocumentDelete,
-    params: &[SQLParam],
+fn stage_document_delete(
+    context: &MutationStagingContext<'_>,
+    prepared: &PreparedDocumentDelete,
+    foreign_key_checks: Vec<crate::mutation::referential::checks::ForeignKeyCheck>,
     after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
-    mut cascade_parent: Option<usize>,
 ) -> Result<(), SQLError> {
     context
         .commands
@@ -341,42 +304,10 @@ pub fn stage_prepared_document_delete_with_parent(
             old_document: Some(&prepared.document),
             new_document: None,
             updated_columns: &[],
-            cascade_parent,
-            foreign_key_checks: crate::mutation::referential::checks::referenced_checks(
-                context.constraints,
-                &prepared.table,
-                &prepared.document,
-                None,
-                None,
-            )?,
+            foreign_key_checks,
         },
     )? {
-        cascade_parent = Some(crate::mutation::triggers::AfterRowTriggerEvent::push(
-            after_row_events,
-            event,
-        ));
-    }
-    for action in &mut prepared.actions {
-        match action {
-            PreparedDeleteAction::Delete(delete) => {
-                stage_prepared_document_delete_with_parent(
-                    context,
-                    delete,
-                    params,
-                    after_row_events,
-                    cascade_parent,
-                )?;
-            }
-            PreparedDeleteAction::Rewrite(rewrite) => {
-                stage_referential_rewrite(
-                    &context,
-                    rewrite,
-                    params,
-                    after_row_events,
-                    cascade_parent,
-                )?;
-            }
-        }
+        after_row_events.push(event);
     }
     Ok(())
 }

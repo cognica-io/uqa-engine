@@ -8,7 +8,6 @@
 use super::{
     assignment::{validate_view_checks, ViewCheckContext},
     constraints::{validate_key_constraints_with_previous, ConstraintStatement},
-    events::ReferentialActionContext,
     preparation::MutationPreparationContext,
     prepared::PreparedDocumentRewrite,
     referential::{prepare_partition_update_route, prepare_routed_document_rewrite},
@@ -44,7 +43,6 @@ pub fn prepare_update_row<S: Clone + 'static>(
     doc_id: uqa_core::DocId,
     original_document: Document,
     document: Document,
-    referential_actions: &mut ReferentialActionContext,
 ) -> Result<Option<PreparedUpdateRow>, SQLError> {
     let Some(triggered_document) = fire_before_row_triggers(
         &context.referential.triggers,
@@ -72,18 +70,13 @@ pub fn prepare_update_row<S: Clone + 'static>(
     else {
         return Ok(None);
     };
-    let Some(mut rewrite) = prepare_routed_document_rewrite(
+    let mut rewrite = prepare_routed_document_rewrite(
         &context.referential,
         storage_table,
         doc_id,
         original_document,
         route,
-        params,
-        referential_actions,
-    )?
-    else {
-        return Ok(None);
-    };
+    )?;
     let primary_key_doc_id = rewrite.relocation;
     let rewritten_doc_id = rewrite
         .destination
@@ -170,5 +163,3 @@ pub fn prepare_update_row<S: Clone + 'static>(
 pub mod from;
 
 pub mod table;
-
-pub mod triggers;

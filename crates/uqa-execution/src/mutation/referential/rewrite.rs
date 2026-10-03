@@ -5,19 +5,15 @@
 //
 
 use super::{
-    arriving_key_identity, key_relocation, lock_document_key_dependencies, lock_mutation_row,
-    partition_insert_target, prepare_referenced_key_update_actions,
+    arriving_key_identity, defer_updated_key_checks, key_relocation,
+    lock_document_key_dependencies, lock_mutation_row, partition_insert_target,
     refresh_stored_generated_columns, update_lock_strength, validate_partition_constraint,
-    ConstraintStatement, DocId, Document, PartitionUpdateRoute, PhysicalDocumentIdentity,
-    PreparedDocumentDelete, PreparedDocumentRewrite, ReferentialActionContext, ReferentialContext,
-    ReferentialRewrite, ReferentialRewritePreparation, SQLError, SQLParam,
+    ConstraintStatement, DocId, Document, PartitionUpdateRoute, PreparedDocumentDelete,
+    PreparedDocumentRewrite, ReferentialContext, ReferentialRewrite, ReferentialRewritePreparation,
+    SQLError, SQLParam,
 };
 
-/// Build the complete tuple-lock dependency tree for one rewrite while the backend transaction is still deferred. The prepared documents retain volatile SET DEFAULT results so the apply phase never re-evaluates them. `referenced_relation` is the relation whose constraints a change to the row's referenced key fires: the row's table, or the relation an `UPDATE` names when the row moves to another partition.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "keeps DML row-image inputs aligned"
-)]
+/// Lock one row for its rewrite while the backend transaction is still deferred, and leave for the transaction the checks of the deferred `NO ACTION` keys the rewrite removes. `referenced_relation` is the relation whose constraints a change to the row's referenced key fires: the row's table, or the relation an `UPDATE` names when the row moves to another partition.
 pub fn prepare_document_rewrite<S: Clone + 'static>(
     context: &ReferentialContext<'_, S>,
     table: &str,
@@ -25,13 +21,7 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
     doc_id: DocId,
     old_document: Document,
     mut new_document: Document,
-    params: &[SQLParam],
-    referential_actions: &mut ReferentialActionContext,
-) -> Result<Option<PreparedDocumentRewrite>, SQLError> {
-    let key = (table.to_string(), doc_id);
-    if referential_actions.rewrite_stack.contains(&key) {
-        return Ok(None);
-    }
+) -> Result<PreparedDocumentRewrite, SQLError> {
     context
         .locking
         .session
@@ -58,19 +48,14 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
         &new_document,
         Some(&old_document),
     )?;
-    referential_actions.rewrite_stack.push(key);
-    let actions = prepare_referenced_key_update_actions(
+    defer_updated_key_checks(
         context,
         table,
         referenced_relation,
         doc_id,
         &old_document,
         &new_document,
-        params,
-        referential_actions,
-    );
-    referential_actions.rewrite_stack.pop();
-    let actions = actions?;
+    )?;
     let relocation = key_relocation(
         context.constraints.catalog,
         context.identifiers,
@@ -78,7 +63,7 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
         doc_id,
         &new_document,
     )?;
-    Ok(Some(PreparedDocumentRewrite {
+    Ok(PreparedDocumentRewrite {
         table: table.to_string(),
         doc_id,
         destination: None,
@@ -87,17 +72,16 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
         partition_move_delete: None,
         old_document,
         new_document,
-        actions,
         capture_partition_move_update_transition: true,
         referential_action: None,
-    }))
+    })
 }
 
+/// Prepare the rewrite that a referential action makes of a referencing row: its BEFORE ROW triggers fire, and a partitioned table routes the new row.
 pub fn prepare_referential_document_rewrite<S: Clone + 'static>(
     context: &ReferentialContext<'_, S>,
     preparation: ReferentialRewritePreparation<'_>,
     params: &[SQLParam],
-    referential_actions: &mut ReferentialActionContext,
 ) -> Result<Option<PreparedDocumentRewrite>, SQLError> {
     let ReferentialRewritePreparation {
         constraint_table,
@@ -145,31 +129,12 @@ pub fn prepare_referential_document_rewrite<S: Clone + 'static>(
             moved_through: None,
         }
     };
-    let Some(mut prepared) = prepare_routed_document_rewrite(
-        context,
-        table,
-        doc_id,
-        old_document,
-        route,
-        params,
-        referential_actions,
-    )?
-    else {
-        return Ok(None);
-    };
+    let mut prepared =
+        prepare_routed_document_rewrite(context, table, doc_id, old_document, route)?;
     prepared.referential_action = Some(Box::new(ReferentialRewrite {
         relation: constraint_table.to_string(),
         columns: updated_columns,
     }));
-    if !prepared.is_partition_move_delete() {
-        referential_actions.record_pending_document(
-            PhysicalDocumentIdentity {
-                table: prepared.table.clone(),
-                doc_id: prepared.doc_id,
-            },
-            Some(prepared.new_document.clone()),
-        );
-    }
     Ok(Some(prepared))
 }
 
@@ -310,49 +275,34 @@ pub fn prepare_routed_document_rewrite<S: Clone + 'static>(
     doc_id: DocId,
     old_document: Document,
     route: PartitionUpdateRoute,
-    params: &[SQLParam],
-    referential_actions: &mut ReferentialActionContext,
-) -> Result<Option<PreparedDocumentRewrite>, SQLError> {
+) -> Result<PreparedDocumentRewrite, SQLError> {
     match route {
         PartitionUpdateRoute::Rewrite {
             document,
             destination,
             moved_through,
         } => {
-            let Some(mut prepared) = prepare_document_rewrite(
+            let mut prepared = prepare_document_rewrite(
                 context,
                 table,
                 moved_through.as_deref().unwrap_or(table),
                 doc_id,
                 old_document,
                 document,
-                params,
-                referential_actions,
-            )?
-            else {
-                return Ok(None);
-            };
+            )?;
             if let Some(destination) = destination {
                 retarget_prepared_document_rewrite(context, &mut prepared, &destination)?;
                 prepared.moved_through = moved_through;
             }
-            Ok(Some(prepared))
+            Ok(prepared)
         }
         PartitionUpdateRoute::Delete { attempted_document } => {
             let delete = PreparedDocumentDelete {
                 table: table.to_string(),
                 doc_id,
                 document: old_document.clone(),
-                actions: Vec::new(),
             };
-            referential_actions.record_pending_document(
-                PhysicalDocumentIdentity {
-                    table: table.to_string(),
-                    doc_id,
-                },
-                None,
-            );
-            Ok(Some(PreparedDocumentRewrite {
+            Ok(PreparedDocumentRewrite {
                 table: table.to_string(),
                 doc_id,
                 destination: None,
@@ -361,10 +311,9 @@ pub fn prepare_routed_document_rewrite<S: Clone + 'static>(
                 partition_move_delete: Some(Box::new(delete)),
                 old_document,
                 new_document: attempted_document,
-                actions: Vec::new(),
                 capture_partition_move_update_transition: true,
                 referential_action: None,
-            }))
+            })
         }
     }
 }

@@ -15,7 +15,6 @@ use crate::{
             validate_document_non_key_constraints, validate_key_constraints,
             validate_key_constraints_with_previous, ConstraintStatement,
         },
-        events::ReferentialActionContext,
         identity::refresh_insert_identity_after_trigger,
         prepared::PreparedInsertConflict,
         returning::{build_returning_row, ReturningProjectionRow},
@@ -54,7 +53,6 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
     mut document: Document,
     mut insert_identity: (DocId, bool),
     conflict_locks: &mut InsertConflictLocks,
-    referential_actions: &mut ReferentialActionContext,
 ) -> Result<Option<StagedValuesInsertRow>, SQLError> {
     let Some(triggered_document) = crate::mutation::triggers::fire_before_row_triggers(
         &services.referential.triggers,
@@ -100,18 +98,15 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
         });
     }
     let prepared = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
-        conflict_locks.prepare_document(
-            InsertConflictPreparation {
-                context: services.referential,
-                table: &target_table,
-                target_qualifier: &stmt.target_qualifier,
-                on_conflict,
-                document: &document,
-                params,
-                scope: snapshot_scope,
-            },
-            referential_actions,
-        )?
+        conflict_locks.prepare_document(InsertConflictPreparation {
+            context: services.referential,
+            table: &target_table,
+            target_qualifier: &stmt.target_qualifier,
+            on_conflict,
+            document: &document,
+            params,
+            scope: snapshot_scope,
+        })?
     } else {
         let _key_locks = lock_document_key_dependencies(
             services.referential.constraints,
@@ -230,7 +225,6 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
                     old_document: None,
                     new_document: Some(document),
                     updated_columns: &[],
-                    cascade_parent: None,
                     foreign_key_checks: crate::mutation::referential::checks::referencing_checks(
                         services.referential.constraints,
                         storage_table,
@@ -240,7 +234,7 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
                     )?,
                 },
             )? {
-                crate::mutation::triggers::AfterRowTriggerEvent::push(&mut after_row_events, event);
+                after_row_events.push(event);
             }
             (
                 MutationRowImages {

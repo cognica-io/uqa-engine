@@ -4,32 +4,27 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+//! The deferred `NO ACTION` checks that a delete or an update of a referenced row leaves for its transaction. A foreign key that is not deferred is checked, and its referential action taken, by the internal triggers that the row's change queues (`super::checks`).
+
 use super::{
-    apply_set_action_to_child, foreign_key_comparison_types, foreign_key_lookup_values,
-    lock_referencing_child, period_foreign_key_coverage, prepare_document_delete,
-    prepare_referential_document_rewrite, referencing_rows, referrers_to_for_actions, BTreeSet,
-    DocId, Document, ForeignKey, ForeignKeyAction, PhysicalDocumentIdentity, PreparedDeleteAction,
-    PreparedDocumentRewrite, ReferencingChildLock, ReferentialActionContext, ReferentialContext,
-    ReferentialRewritePreparation, SQLError, SQLParam, Value,
+    foreign_key_comparison_types, foreign_key_lookup_values, period_foreign_key_coverage,
+    referencing_rows, referrers_to_for_actions, BTreeSet, DocId, Document, ForeignKey,
+    ForeignKeyAction, PhysicalDocumentIdentity, ReferentialContext, SQLError, Value,
 };
 
-#[expect(
-    clippy::too_many_lines,
-    clippy::too_many_arguments,
-    reason = "preserves cascade lock and recheck order and keeps DML row-image inputs aligned"
-)]
-pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
+/// Leave for the transaction the checks of the referenced keys that an update of the row `old_doc` of `table` to `new_doc` removes, under a deferred `NO ACTION` foreign key: the key's event, and each row that references the key, which the transaction checks again when the constraint becomes immediate. `referenced_relation` is the relation whose constraints the change fires: the row's table, or the relation an `UPDATE` names when the row moves to another partition.
+pub fn defer_updated_key_checks<S: Clone + 'static>(
     context: &ReferentialContext<'_, S>,
     table: &str,
     referenced_relation: &str,
     parent_doc_id: DocId,
     old_doc: &Document,
     new_doc: &Document,
-    params: &[SQLParam],
-    referential_actions: &mut ReferentialActionContext,
-) -> Result<Vec<PreparedDocumentRewrite>, SQLError> {
-    let mut actions = Vec::new();
+) -> Result<(), SQLError> {
     for (ref_table, fk) in referrers_to_for_actions(context.constraints.referrers, table)? {
+        if fk.on_update != ForeignKeyAction::NoAction {
+            continue;
+        }
         let old_values: Vec<Value> = fk
             .ref_columns
             .iter()
@@ -43,236 +38,81 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
         if old_values == new_values || old_values.iter().any(|v| matches!(v, Value::Null)) {
             continue;
         }
-        context
-            .locking
-            .session
-            .lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
-        let comparison =
-            foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
-        let expected = comparison.normalize(old_values.clone())?;
         let firing = uqa_sql::schema::referenced_partitions::firing_constraint(
             context.constraints.partitions.catalog,
             table,
             (referenced_relation != table).then_some(referenced_relation),
             &fk,
         )?;
-        let defer_no_action = matches!(fk.on_update, ForeignKeyAction::NoAction)
-            && context
-                .constraints
-                .transactions
-                .referenced_key_is_deferred(&ref_table, &fk, firing.derived)?;
-        if defer_no_action {
-            context.deferrals.defer_foreign_key_parent_event(
-                &ref_table,
-                firing.relation,
-                &fk,
-                firing.derived,
-            )?;
-        } else if matches!(
-            fk.on_update,
-            ForeignKeyAction::NoAction | ForeignKeyAction::Restrict
-        ) {
-            // The statement checks the removed key once it has written its rows (`super::checks`).
+        if !context
+            .constraints
+            .transactions
+            .referenced_key_is_deferred(&ref_table, &fk, firing.derived)?
+        {
             continue;
         }
+        let comparison =
+            foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
+        let expected = comparison.normalize(old_values)?;
+        context.deferrals.defer_foreign_key_parent_event(
+            &ref_table,
+            firing.relation,
+            &fk,
+            firing.derived,
+        )?;
         if fk.period {
-            let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
-            let ordinary_len = expected.len().saturating_sub(1);
             let parent = PhysicalDocumentIdentity {
                 table: table.to_string(),
                 doc_id: parent_doc_id,
             };
-            for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
-                context.constraints.partitions.catalog,
-                &ref_table,
-            )? {
-                let rows = snapshot.table(&physical_table)?;
-                for child_id in rows.doc_ids()? {
-                    let Some(child_doc) = rows.document(child_id)? else {
-                        continue;
-                    };
-                    let Some(child_lookup) = foreign_key_lookup_values(
-                        context.constraints.partitions.catalog,
-                        &physical_table,
-                        &fk,
-                        &child_doc,
-                    )?
-                    else {
-                        continue;
-                    };
-                    if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
-                        continue;
-                    }
-                    let (covered, _) = period_foreign_key_coverage(
-                        context.constraints,
-                        &fk,
-                        &child_lookup.values,
-                        std::slice::from_ref(&parent),
-                        Some((&parent, new_doc)),
-                    )?;
-                    if covered {
-                        continue;
-                    }
-                    context.deferrals.defer_foreign_key_check(
-                        &ref_table,
-                        firing.relation,
-                        &physical_table,
-                        child_id,
-                        &fk,
-                        firing.derived,
-                    )?;
-                }
-            }
+            defer_period_key_checks(
+                context,
+                PeriodKeyChecks {
+                    constraint_table: &ref_table,
+                    firing_relation: firing.relation,
+                    foreign_key: &fk,
+                    derived: firing.derived,
+                    expected: &expected,
+                    root_deletes: &BTreeSet::new(),
+                },
+                std::slice::from_ref(&parent),
+                Some((&parent, new_doc)),
+            )?;
             continue;
         }
-        if matches!(
-            fk.on_update,
-            ForeignKeyAction::Cascade | ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault
-        ) {
-            let identity = format!(
-                "{}:{}:{}:on_update_update",
-                ref_table,
-                fk.name.as_deref().unwrap_or("<unnamed>"),
-                fk.local_columns.join(",")
-            );
-            referential_actions.trigger_statements.begin(
-                &context.triggers,
-                identity,
-                &ref_table,
-                uqa_sql::ast::TriggerEvent::Update,
-                &fk.local_columns,
-            )?;
-        }
-        let referencing = referencing_rows(
+        for (child, _child_doc) in referencing_rows(
             context,
             &ref_table,
             &fk,
             &comparison,
             &expected,
-            referential_actions,
-            fk.on_update,
-        )?;
-        for (child, _child_doc) in referencing {
-            match fk.on_update {
-                // Only a deferred NO ACTION key reaches its referencing rows here.
-                ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    context.deferrals.defer_foreign_key_check(
-                        &ref_table,
-                        firing.relation,
-                        &child.table,
-                        child.doc_id,
-                        &fk,
-                        firing.derived,
-                    )?;
-                }
-                ForeignKeyAction::Cascade => {
-                    let Some((child, child_doc)) = lock_referencing_child(
-                        context,
-                        ReferencingChildLock {
-                            ref_table: &ref_table,
-                            child: &child,
-                            lock_columns: &fk.local_columns,
-                            foreign_key: &fk,
-                            comparison: &comparison,
-                            expected: &expected,
-                        },
-                        referential_actions,
-                    )?
-                    else {
-                        continue;
-                    };
-                    let mut updated = child_doc.clone();
-                    for (col, value) in fk.local_columns.iter().zip(new_values.iter()) {
-                        updated.insert(
-                            col.clone(),
-                            uqa_sql::assignment::columns::coerce_to_column_type(
-                                context.assignment.assignment,
-                                context.assignment.columns,
-                                &child.table,
-                                col,
-                                value.clone(),
-                            )?,
-                        );
-                    }
-                    if let Some(prepared) = prepare_referential_document_rewrite(
-                        context,
-                        ReferentialRewritePreparation {
-                            constraint_table: &ref_table,
-                            table: &child.table,
-                            doc_id: child.doc_id,
-                            old_document: child_doc,
-                            proposed_document: updated,
-                            updated_columns: fk.local_columns.clone(),
-                        },
-                        params,
-                        referential_actions,
-                    )? {
-                        actions.push(prepared);
-                    }
-                }
-                ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
-                    let Some((child, child_doc)) = lock_referencing_child(
-                        context,
-                        ReferencingChildLock {
-                            ref_table: &ref_table,
-                            child: &child,
-                            lock_columns: &fk.local_columns,
-                            foreign_key: &fk,
-                            comparison: &comparison,
-                            expected: &expected,
-                        },
-                        referential_actions,
-                    )?
-                    else {
-                        continue;
-                    };
-                    let mut updated = child_doc.clone();
-                    apply_set_action_to_child(
-                        context,
-                        &child.table,
-                        &child_doc,
-                        &mut updated,
-                        &fk.local_columns,
-                        fk.on_update,
-                        params,
-                    )?;
-                    if let Some(prepared) = prepare_referential_document_rewrite(
-                        context,
-                        ReferentialRewritePreparation {
-                            constraint_table: &ref_table,
-                            table: &child.table,
-                            doc_id: child.doc_id,
-                            old_document: child_doc,
-                            proposed_document: updated,
-                            updated_columns: fk.local_columns.clone(),
-                        },
-                        params,
-                        referential_actions,
-                    )? {
-                        actions.push(prepared);
-                    }
-                }
-            }
+            ForeignKeyAction::NoAction,
+        )? {
+            context.deferrals.defer_foreign_key_check(
+                &ref_table,
+                firing.relation,
+                &child.table,
+                child.doc_id,
+                &fk,
+                firing.derived,
+            )?;
         }
     }
-    Ok(actions)
+    Ok(())
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves cascade lock and recheck order"
-)]
-pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
+/// Leave for the transaction the checks of the referenced keys that a delete of the row `parent_document` of `parent_table` removes, under a deferred `NO ACTION` foreign key: the key's event, and each row that references the key, which the transaction checks again when the constraint becomes immediate. A row in `root_deletes`, which the same statement deletes, needs no check.
+pub fn defer_deleted_key_checks<S: Clone + 'static>(
     context: &ReferentialContext<'_, S>,
     parent_table: &str,
     parent_doc_id: DocId,
     parent_document: &Document,
-    params: &[SQLParam],
     root_deletes: &BTreeSet<(String, DocId)>,
-    referential_actions: &mut ReferentialActionContext,
-) -> Result<Vec<PreparedDeleteAction>, SQLError> {
-    let mut actions = Vec::new();
+) -> Result<(), SQLError> {
     for (ref_table, fk) in referrers_to_for_actions(context.constraints.referrers, parent_table)? {
+        if fk.on_delete != ForeignKeyAction::NoAction {
+            continue;
+        }
         let key_values: Vec<Value> = fk
             .ref_columns
             .iter()
@@ -281,41 +121,29 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
         if key_values.iter().any(|value| matches!(value, Value::Null)) {
             continue;
         }
-        context
-            .locking
-            .session
-            .lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
-        let comparison =
-            foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
-        let expected = comparison.normalize(key_values)?;
         let firing = uqa_sql::schema::referenced_partitions::firing_constraint(
             context.constraints.partitions.catalog,
             parent_table,
             None,
             &fk,
         )?;
-        let defer_no_action = matches!(fk.on_delete, ForeignKeyAction::NoAction)
-            && context
-                .constraints
-                .transactions
-                .referenced_key_is_deferred(&ref_table, &fk, firing.derived)?;
-        if defer_no_action {
-            context.deferrals.defer_foreign_key_parent_event(
-                &ref_table,
-                parent_table,
-                &fk,
-                firing.derived,
-            )?;
-        } else if matches!(
-            fk.on_delete,
-            ForeignKeyAction::NoAction | ForeignKeyAction::Restrict
-        ) {
-            // The statement checks the removed key once it has written its rows (`super::checks`).
+        if !context
+            .constraints
+            .transactions
+            .referenced_key_is_deferred(&ref_table, &fk, firing.derived)?
+        {
             continue;
         }
+        let comparison =
+            foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
+        let expected = comparison.normalize(key_values)?;
+        context.deferrals.defer_foreign_key_parent_event(
+            &ref_table,
+            parent_table,
+            &fk,
+            firing.derived,
+        )?;
         if fk.period {
-            let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
-            let ordinary_len = expected.len().saturating_sub(1);
             let mut excluded_parents = root_deletes
                 .iter()
                 .map(|(table, doc_id)| PhysicalDocumentIdentity {
@@ -330,170 +158,112 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
             if !excluded_parents.contains(&parent_identity) {
                 excluded_parents.push(parent_identity);
             }
-            for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
-                context.constraints.partitions.catalog,
-                &ref_table,
-            )? {
-                let rows = snapshot.table(&physical_table)?;
-                for child_id in rows.doc_ids()? {
-                    if root_deletes.contains(&(physical_table.clone(), child_id)) {
-                        continue;
-                    }
-                    let Some(child_document) = rows.document(child_id)? else {
-                        continue;
-                    };
-                    let Some(child_lookup) = foreign_key_lookup_values(
-                        context.constraints.partitions.catalog,
-                        &physical_table,
-                        &fk,
-                        &child_document,
-                    )?
-                    else {
-                        continue;
-                    };
-                    if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
-                        continue;
-                    }
-                    if period_foreign_key_coverage(
-                        context.constraints,
-                        &fk,
-                        &child_lookup.values,
-                        &excluded_parents,
-                        None,
-                    )?
-                    .0
-                    {
-                        continue;
-                    }
-                    context.deferrals.defer_foreign_key_check(
-                        &ref_table,
-                        parent_table,
-                        &physical_table,
-                        child_id,
-                        &fk,
-                        firing.derived,
-                    )?;
-                }
-            }
+            defer_period_key_checks(
+                context,
+                PeriodKeyChecks {
+                    constraint_table: &ref_table,
+                    firing_relation: parent_table,
+                    foreign_key: &fk,
+                    derived: firing.derived,
+                    expected: &expected,
+                    root_deletes,
+                },
+                &excluded_parents,
+                None,
+            )?;
             continue;
         }
-        let statement_identity = format!(
-            "{}:{}:{}",
-            ref_table,
-            fk.name.as_deref().unwrap_or("<unnamed>"),
-            fk.local_columns.join(",")
-        );
-        match fk.on_delete {
-            ForeignKeyAction::Cascade => referential_actions.trigger_statements.begin(
-                &context.triggers,
-                format!("{statement_identity}:on_delete_delete"),
-                &ref_table,
-                uqa_sql::ast::TriggerEvent::Delete,
-                &[],
-            )?,
-            ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
-                let columns = delete_set_columns(&fk);
-                referential_actions.trigger_statements.begin(
-                    &context.triggers,
-                    format!("{statement_identity}:on_delete_update"),
-                    &ref_table,
-                    uqa_sql::ast::TriggerEvent::Update,
-                    &columns,
-                )?;
-            }
-            ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {}
-        }
-        let referencing = referencing_rows(
+        for (child, _child_document) in referencing_rows(
             context,
             &ref_table,
             &fk,
             &comparison,
             &expected,
-            referential_actions,
-            fk.on_delete,
-        )?;
-        for (child, _child_document) in referencing {
+            ForeignKeyAction::NoAction,
+        )? {
             if root_deletes.contains(&(child.table.clone(), child.doc_id)) {
                 continue;
             }
-            match fk.on_delete {
-                // Only a deferred NO ACTION key reaches its referencing rows here.
-                ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    context.deferrals.defer_foreign_key_check(
-                        &ref_table,
-                        parent_table,
-                        &child.table,
-                        child.doc_id,
-                        &fk,
-                        firing.derived,
-                    )?;
-                }
-                ForeignKeyAction::Cascade => {
-                    if let Some(prepared) = prepare_document_delete(
-                        context,
-                        &child.table,
-                        child.doc_id,
-                        params,
-                        root_deletes,
-                        referential_actions,
-                        true,
-                    )? {
-                        actions.push(PreparedDeleteAction::Delete(Box::new(prepared)));
-                    }
-                }
-                ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
-                    let columns = delete_set_columns(&fk);
-                    let Some((child, child_document)) = lock_referencing_child(
-                        context,
-                        ReferencingChildLock {
-                            ref_table: &ref_table,
-                            child: &child,
-                            lock_columns: &columns,
-                            foreign_key: &fk,
-                            comparison: &comparison,
-                            expected: &expected,
-                        },
-                        referential_actions,
-                    )?
-                    else {
-                        continue;
-                    };
-                    let mut updated = child_document.clone();
-                    apply_set_action_to_child(
-                        context,
-                        &child.table,
-                        &child_document,
-                        &mut updated,
-                        &columns,
-                        fk.on_delete,
-                        params,
-                    )?;
-                    if let Some(prepared) = prepare_referential_document_rewrite(
-                        context,
-                        ReferentialRewritePreparation {
-                            constraint_table: &ref_table,
-                            table: &child.table,
-                            doc_id: child.doc_id,
-                            old_document: child_document,
-                            proposed_document: updated,
-                            updated_columns: columns,
-                        },
-                        params,
-                        referential_actions,
-                    )? {
-                        actions.push(PreparedDeleteAction::Rewrite(Box::new(prepared)));
-                    }
-                }
-            }
+            context.deferrals.defer_foreign_key_check(
+                &ref_table,
+                parent_table,
+                &child.table,
+                child.doc_id,
+                &fk,
+                firing.derived,
+            )?;
         }
     }
-    Ok(actions)
+    Ok(())
 }
 
-fn delete_set_columns(foreign_key: &ForeignKey) -> Vec<String> {
-    if foreign_key.on_delete_set_columns.is_empty() {
-        foreign_key.local_columns.clone()
-    } else {
-        foreign_key.on_delete_set_columns.clone()
+/// The removed period key whose referencing rows a deferred `NO ACTION` foreign key checks again when it becomes immediate.
+struct PeriodKeyChecks<'a> {
+    constraint_table: &'a str,
+    firing_relation: &'a str,
+    foreign_key: &'a ForeignKey,
+    derived: Option<&'a uqa_sql::ast::ReferencedPartitionConstraint>,
+    expected: &'a [Value],
+    /// The rows the same statement deletes, which need no check.
+    root_deletes: &'a BTreeSet<(String, DocId)>,
+}
+
+/// Leave for the transaction a check of each row that references the leading values of a removed period key over a period the remaining referenced rows no longer cover. `excluded_parents` holds the referenced rows the statement removes, and `replacement` the row an update writes in place of one.
+fn defer_period_key_checks<S: Clone + 'static>(
+    context: &ReferentialContext<'_, S>,
+    key: PeriodKeyChecks<'_>,
+    excluded_parents: &[PhysicalDocumentIdentity],
+    replacement: Option<(&PhysicalDocumentIdentity, &Document)>,
+) -> Result<(), SQLError> {
+    let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
+    let ordinary_len = key.expected.len().saturating_sub(1);
+    for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+        context.constraints.partitions.catalog,
+        key.constraint_table,
+    )? {
+        let rows = snapshot.table(&physical_table)?;
+        for child_id in rows.doc_ids()? {
+            if key
+                .root_deletes
+                .contains(&(physical_table.clone(), child_id))
+            {
+                continue;
+            }
+            let Some(child_document) = rows.document(child_id)? else {
+                continue;
+            };
+            let Some(child_lookup) = foreign_key_lookup_values(
+                context.constraints.partitions.catalog,
+                &physical_table,
+                key.foreign_key,
+                &child_document,
+            )?
+            else {
+                continue;
+            };
+            if child_lookup.values[..ordinary_len] != key.expected[..ordinary_len] {
+                continue;
+            }
+            if period_foreign_key_coverage(
+                context.constraints,
+                key.foreign_key,
+                &child_lookup.values,
+                excluded_parents,
+                replacement,
+            )?
+            .0
+            {
+                continue;
+            }
+            context.deferrals.defer_foreign_key_check(
+                key.constraint_table,
+                key.firing_relation,
+                &physical_table,
+                child_id,
+                key.foreign_key,
+                key.derived,
+            )?;
+        }
     }
+    Ok(())
 }

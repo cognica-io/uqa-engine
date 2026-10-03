@@ -91,8 +91,14 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
         None => execute_query_root(context, plan, params, ctes, output_mode)?,
     };
     if plan.ctes.iter().any(|cte| cte.body.modifies_data()) {
-        let events = finish_statement_ctes(context.source.ctes, params, ctes)?;
-        context.source.ctes.queries.fire_after_events(events)?;
+        finish_statement_ctes(context.source.ctes, params, ctes)?;
+        if let Some(commands) = ctes.statement_commands().cloned() {
+            context
+                .source
+                .ctes
+                .queries
+                .fire_after_triggers(commands.after_triggers())?;
+        }
     }
     Ok(output)
 }

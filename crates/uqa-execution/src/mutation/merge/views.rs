@@ -16,7 +16,7 @@ use crate::mutation::{
     triggers::context::TriggerContext,
     views::commands::{materialize_view_rows, target_row, SourceOutputPruning},
 };
-use crate::query::{sources::build_join_spill_with_ctes, CteScope};
+use crate::query::{scope::StatementCommands, sources::build_join_spill_with_ctes, CteScope};
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_core::Value;
 use uqa_sql::{
@@ -605,9 +605,11 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
         params,
         inherited_ctes,
     )?;
-    events.fire_before(triggers, &target.canonical_name)?;
+    let statement_commands = statement_end::statement_commands(inherited_ctes);
+    let before = events.before_statements(&target.canonical_name);
+    statement_end::fire_before_statements(&statement_commands, triggers, &before)?;
     let mut statement_scope = None;
-    let execute_read =
+    let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
             let read_mutation = &read_context.mutation;
             let ctes = statement_scope.insert(view_merge_scope(
@@ -616,6 +618,7 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
                 plan,
                 params,
                 inherited_ctes,
+                &statement_commands,
                 statement_snapshot.clone(),
             )?);
             let source_privilege_expressions =
@@ -660,10 +663,12 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
                 ctes: &snapshot,
             };
             let (affected, returning_rows) = execute_view_merge_pairs(&action_context, &pairings)?;
-            let view = target.canonical_name.clone();
-            statement_end::fire_after_events(ctes, triggers, move |context| {
-                events.fire_after(context, &view)
-            })?;
+            statement_end::end_command(
+                &statement_commands,
+                triggers,
+                &events.after_statements(&target.canonical_name),
+                Vec::new(),
+            )?;
             super::returning::finish_view_merge_returning(
                 returning,
                 super::returning::ViewMergeReturningResult {
@@ -692,6 +697,7 @@ fn view_merge_scope<S: Clone + Send + Sync + 'static>(
     plan: &MergePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
+    statement_commands: &std::sync::Arc<StatementCommands>,
     statement_snapshot: Option<std::sync::Arc<S>>,
 ) -> Result<CteScope<S>, SQLError> {
     let mut ctes = read_context
@@ -701,6 +707,7 @@ fn view_merge_scope<S: Clone + Send + Sync + 'static>(
     if let Some(parent) = inherited_ctes {
         ctes.inherit_cte_bindings(parent);
     }
+    ctes.set_statement_commands(std::sync::Arc::clone(statement_commands));
     ctes.set_command_cte_snapshot(statement_snapshot);
     crate::query::cte::materialize_command_ctes(
         context.query.source.ctes,

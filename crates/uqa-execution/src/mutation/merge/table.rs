@@ -80,6 +80,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let constraints = referential.constraints;
     let triggers = referential.triggers;
     super::analysis::ensure_merge_privileges(mutation, stmt, inherited_ctes)?;
+    let statement_commands = statement_end::statement_commands(inherited_ctes);
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     let target_table = stmt.target.clone();
     // The columns the statement supplies, which its constraint violations show to a role that may not read the table.
@@ -131,6 +132,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     if let Some(parent) = inherited_ctes {
         ctes.inherit_cte_bindings(parent);
     }
+    ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
     if ctes.command_cte_snapshot().is_none()
         && (stmt.ctes.iter().any(|cte| cte.body.modifies_data())
             || statement_events.has_before_statement_trigger(&triggers, &target_table)?)
@@ -140,7 +142,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     uqa_sql::semantics::merge::validate_merge_target_columns(assignment.columns, stmt)?;
     let statement_snapshot = ctes.command_cte_snapshot();
-    let execute_read =
+    let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
             let read_referential = &read_context.mutation.preparation.referential;
             let read_assignment = read_referential.assignment;
@@ -177,7 +179,11 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 &source_schema,
                 &crate::query::binding::binding_context(&analysis_scope)?,
             )?;
-            statement_events.fire_before(&triggers, &target_table)?;
+            statement_end::fire_before_statements(
+                &statement_commands,
+                &triggers,
+                &statement_events.before_statements(&target_table),
+            )?;
             crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
                 &stmt.ctes,
@@ -522,14 +528,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             doc_id,
                             old_document,
                             route,
-                            params,
-                            events.referential_actions_mut(),
-                        )?
-                        .ok_or_else(|| {
-                            SQLError::Internal(
-                                "MERGE rewrite dependency tree was cyclic at its root".into(),
-                            )
-                        })?;
+                        )?;
                         prepared.capture_partition_move_update_transition = false;
                         let row_affected = !prepared.is_partition_move_delete();
                         let old_storage_table = prepared.table.clone();
@@ -635,20 +634,13 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             doc_id,
                         )?;
                         root_deletes.insert((storage_table.to_string(), doc_id));
-                        let mut prepared = prepare_document_delete(
-                            referential,
-                            storage_table,
-                            doc_id,
-                            params,
-                            &root_deletes,
-                            events.referential_actions_mut(),
-                            false,
-                        )?
-                        .ok_or_else(|| {
-                            SQLError::Internal(
-                                "MERGE delete dependency tree was cyclic at its root".into(),
-                            )
-                        })?;
+                        let prepared =
+                            prepare_document_delete(referential, storage_table, doc_id, &root_deletes, false)?
+                                .ok_or_else(|| {
+                                    SQLError::Internal(format!(
+                                        "MERGE delete target `{storage_table}` row {doc_id} is no longer present"
+                                    ))
+                                })?;
                         let old_metadata = existing_tuple_metadata(
                             assignment.rows,
                             &prepared.table,
@@ -656,8 +648,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         )?;
                         stage_prepared_document_delete(
                             preparation.staging,
-                            &mut prepared,
-                            params,
+                            &prepared,
                             events.after_rows_mut(),
                         )?;
                         if !stmt.returning.is_empty() {
@@ -825,7 +816,6 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                     old_document: None,
                                     new_document: Some(&document),
                                     updated_columns: &[],
-                                    cascade_parent: None,
                                     foreign_key_checks:
                                         crate::mutation::referential::checks::referencing_checks(
                                             constraints,
@@ -837,10 +827,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 },
                             )?
                         {
-                            crate::mutation::triggers::AfterRowTriggerEvent::push(
-                                events.after_rows_mut(),
-                                event,
-                            );
+                            events.after_rows_mut().push(event);
                         }
                         if !stmt.returning.is_empty() {
                             returning_rows.push(build_merge_returning_row(
@@ -903,7 +890,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             let prepared_reader = prepared_actions
                 .read_rows()
                 .map_err(crate::physical::physical_exec_error)?;
-            let mut publication = statement_end::publication_batch(&ctes);
+            let mut publication = statement_end::publication_batch(&statement_commands);
             for prepared in prepared_reader {
                 let prepared = prepared.map_err(crate::physical::physical_exec_error)?;
                 let action = decode_prepared_mutation_action_row(prepared)?;
@@ -915,11 +902,13 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 )?;
             }
             finish_mutation_publication(mutation.publication, &mut publication)?;
-            statement_end::note_written_rows(&ctes, &mut publication);
-            let table = target_table.clone();
-            statement_end::fire_after_events(&ctes, &triggers, move |context| {
-                statement_events.fire_table_after(context, &table, &events)
-            })?;
+            statement_end::note_written_rows(&statement_commands, &mut publication);
+            statement_end::end_command(
+                &statement_commands,
+                &triggers,
+                &statement_events.after_statements(&target_table),
+                events.into_after_rows(),
+            )?;
             if !stmt.returning.is_empty() {
                 let projections = expanded_merge_returning_projections(
                     preparation.returning.catalog,

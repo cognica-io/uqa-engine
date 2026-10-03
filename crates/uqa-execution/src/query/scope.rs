@@ -23,7 +23,7 @@ mod statement_commands;
 pub mod subqueries;
 use row_locks::RowLockScopeState;
 pub use row_locks::{LockIdentityOptions, ResolvedRowLock};
-pub use statement_commands::{AfterEventFiring, StatementCommands};
+pub use statement_commands::StatementCommands;
 use subqueries::ScalarSubqueryCacheEntry;
 
 #[derive(Clone)]
@@ -47,7 +47,7 @@ pub struct CteScope<S: Clone = ()> {
     catalog_resolution: Option<RelationNameResolution>,
     privilege_subject: Option<RoleReference>,
     command_cte_snapshot: Option<Arc<S>>,
-    /// The data-modifying WITH items of the statement this scope belongs to, shared by every scope of the statement.
+    /// The commands of the statement this scope belongs to, shared by every scope of the statement.
     statement_commands: Option<Arc<StatementCommands>>,
 }
 

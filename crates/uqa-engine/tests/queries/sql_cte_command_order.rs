@@ -356,3 +356,33 @@ fn merge_and_on_conflict_do_update_reject_a_row_the_statement_already_wrote() {
         ]
     );
 }
+
+#[test]
+fn commands_of_one_statement_fire_its_statement_triggers_once() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE lg (seq serial, msg text);
+         CREATE FUNCTION mlog_row() RETURNS trigger LANGUAGE plpgsql AS $$
+         DECLARE detail text := '';
+         BEGIN
+           IF TG_LEVEL = 'ROW' THEN detail := ' ' || OLD.id; END IF;
+           INSERT INTO lg (msg) VALUES (TG_TABLE_NAME || ' ' || TG_NAME || ' ' || TG_WHEN || ' ' || TG_LEVEL || detail);
+           IF TG_WHEN = 'BEFORE' AND TG_LEVEL = 'ROW' THEN RETURN OLD; END IF;
+           RETURN NULL;
+         END $$;
+         CREATE TABLE mt (id int PRIMARY KEY);
+         CREATE TRIGGER bs BEFORE DELETE ON mt FOR EACH STATEMENT EXECUTE FUNCTION mlog_row();
+         CREATE TRIGGER s AFTER DELETE ON mt FOR EACH STATEMENT EXECUTE FUNCTION mlog_row();
+         CREATE TRIGGER r AFTER DELETE ON mt FOR EACH ROW EXECUTE FUNCTION mlog_row();
+         INSERT INTO mt VALUES (1), (2), (3)",
+    );
+    exec(
+        &engine,
+        "WITH d AS (DELETE FROM mt WHERE id = 1) DELETE FROM mt WHERE id = 2",
+    );
+    assert_eq!(
+        fired(&engine),
+        "mt bs BEFORE STATEMENT, mt r AFTER ROW 2, mt r AFTER ROW 1, mt s AFTER STATEMENT"
+    );
+}
