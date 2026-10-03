@@ -1,10 +1,10 @@
-# Upgrading to UQA Engine 0.4.8
+# Upgrading to UQA Engine 0.4.9
 
-Version 0.4.8 improves embedded SQL, vector and graph reads and reduces repeated work during writes. It adds index-only reads and corrects PostgreSQL 18 identity columns, integer and BYTEA input, row-trigger definitions and constraint diagnostics. It includes the legacy catalog migration fixes from 0.4.7. See the [release history](../../../HISTORY.md#048---2026-10-03).
+Version 0.4.9 bounds HNSW and private transaction retention with encrypted temporary storage and corrects PostgreSQL 18 sequence allocation, partition and inheritance foreign keys, table rewrite validation, transaction commands and diagnostic fields. Custom Rust persistence/HNSW adapters and Rust/Python notice consumers require the API updates below. See the [release history](../../../HISTORY.md#049---2026-10-03).
 
-Stop every process sharing a persistent database and take a closed-file backup before the first upgraded open, then update all owners together. SQLite main records upgrade atomically from format 54 to 55; native SQLite mapping 13, redb main records 53 and SQL catalog 49 remain unchanged. Earlier SQLite binaries reject format 55. Restore the pre-upgrade backup to return to an earlier release. Applications upgrading from before 0.4.0 must also apply the earlier MVCC, Rust API and catalog changes below.
+Stop every process sharing a persistent database and take a closed-file backup before the first upgraded open, then update all owners together. Native SQLite mapping upgrades atomically from 13 to 14 for separate sequence value records; SQLite main records 55, redb main records 53 and SQL catalog 49 remain unchanged from 0.4.8. SQLite Key/Value and redb also migrate their sequence representation on open. Earlier native SQLite binaries reject mapping 14, and earlier Key/Value binaries cannot read the upgraded sequence definitions. Restore the pre-upgrade backup to return to an earlier release. Applications upgrading from before 0.4.0 must also apply the earlier MVCC, Rust API and catalog changes below.
 
-The new row-claim and sequence sidecars also require coordinated process upgrades, including providers whose main record format is unchanged. Review the row-lock and sequence sections below, the first-open repair of integer-key identities and B-tree postings, and the corrected identity/BYTEA input behavior before upgrading an application that relied on earlier behavior.
+Upgrades from before 0.4.8 also introduce SQLite main record format 55 and the row-claim and sequence sidecars. Review the row-lock and sequence sections below, the first-open repair of integer-key identities and B-tree postings, and the corrected identity/BYTEA input behavior before upgrading an application that relied on earlier behavior.
 
 Application-owned raw SQLite tables remain outside the native UQA record model. Initial open still rejects unmapped physical tables; application-specific migration must preserve their data before native conversion. This release does not infer ownership or silently discard those tables.
 
@@ -405,7 +405,7 @@ IVF mutation wrappers must forward `KeyValueBatch::ivf_mutation`, `preview_ivf_r
 
 HNSW mutation wrappers must likewise forward `KeyValueBatch::hnsw_mutation`, `preview_hnsw_record`, `preview_hnsw_prefix` and `fence_hnsw_prefix`. `VersionedPersistence::hnsw_record_layout` defaults to common Key/Value addressing; native providers must supply their own codec before routing typed HNSW changes. SQLite Key/Value and redb now merge ordered document changes within one HNSW graph, using the same journal, fingerprint and canonical validation as IVF. Their field/document guards share canonical vector identities; savepoint undo and failed operations discard their inputs atomically. HNSW JSON row format 1 is unchanged. The common record-format upgrade to 4 preserves existing histories and receipts while excluding writers that omit these guards.
 
-Current-source HNSW callers use `HNSWIndex::prepare_delta(HNSWMutation, control)` for an immutable evaluated graph change and `prepare_canonical(dimensions, params, vectors, control)` for explicit reconstruction from ordered complete tensors. These methods now return `Budgeted<HNSWGraphDelta>`; `take_persistence_delta()` returns `HNSWGraphDelta` directly. Replace access to the old `delta.nodes` vector with iteration over `delta.nodes()`, handling each `Result<Budgeted<HNSWNodeSnapshot>>` while retaining its reservation through encoding or staging. A consumer that explicitly needs the complete vector can call `delta.collect()`, which retains the complete materialization allowance and can fail when it does not fit. Streaming construction/restoration uses `HNSWCanonicalBuilder` and `HNSWRestoreBuilder`. Existing durable graph encodings and record-format markers remain unchanged. These unreleased Rust API changes do not by themselves complete provider input streaming; see the [implementation plan](../../plans/0016-hnsw-bounded-storage.md).
+In 0.4.9, HNSW callers use `HNSWIndex::prepare_delta(HNSWMutation, control)` for an immutable evaluated graph change and `prepare_canonical(dimensions, params, vectors, control)` for explicit reconstruction from ordered complete tensors. These methods now return `Budgeted<HNSWGraphDelta>`; `take_persistence_delta()` returns `HNSWGraphDelta` directly. Replace access to the old `delta.nodes` vector with iteration over `delta.nodes()`, handling each `Result<Budgeted<HNSWNodeSnapshot>>` while retaining its reservation through encoding or staging. A consumer that explicitly needs the complete vector can call `delta.collect()`, which retains the complete materialization allowance and can fail when it does not fit. Streaming construction/restoration uses `HNSWCanonicalBuilder` and `HNSWRestoreBuilder`; provider input, restoration and publication paths use these bounded interfaces. Existing durable graph encodings and record-format markers remain unchanged. See the [completed implementation plan](../../plans/0016-hnsw-bounded-storage.md).
 
 Key/Value document and table-lifecycle consumers now require compound read/mutation support. Read adapters must forward `visit_keys_after`; durable batches must forward `inherit_identifiers` along with definition requirements, marker touches and identifier observations. Identifier inheritance is ordered with observations, completes before record publication, and survives private undo after successful evaluation. Adoption by a different object preserves reservations; a new generation of the same object seeds visible rows. TRUNCATE retires old rows before generation rotation so CONTINUE IDENTITY and RESTART IDENTITY can select distinct floors. Native projected adapters may forward identifier namespaces, but cannot forward arbitrary record keys unchanged between different key layouts. Document snapshots are fixed read-only views; code requiring subsequent live changes must retain the live document handle. The storage-owned identity generator is re-exported from the existing execution path without reversing crate dependencies.
 
@@ -486,20 +486,20 @@ SQLite catalogs advance to version 46 for durable cache revisions, graph access 
 
 ## Package versions
 
-Update the UQA packages used by one application together. Rust's `0.1`, `0.2` and `0.3` dependency requirements do not select `0.4.5`; change the requirement explicitly and regenerate the application's lockfile.
+Update the UQA packages used by one application together. Rust's `0.1`, `0.2` and `0.3` dependency requirements do not select `0.4.9`; change the requirement explicitly and regenerate the application's lockfile.
 
 | Environment | Versioned installation |
 | --- | --- |
-| Embedded Rust | `cargo add uqa@0.4.5` |
-| Rust HTTP client | `cargo add uqa-client@0.4.5` |
-| Python and `usql` | `python -m pip install --upgrade uqa==0.4.5` |
-| Embedded Node.js | `npm install @cognica-io/uqa@0.4.5` |
-| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.4.5` |
-| Browser WASM | `npm install @cognica-io/uqa-wasm@0.4.5` |
+| Embedded Rust | `cargo add uqa@0.4.9` |
+| Rust HTTP client | `cargo add uqa-client@0.4.9` |
+| Python and `usql` | `python -m pip install --upgrade uqa==0.4.9` |
+| Embedded Node.js | `npm install @cognica-io/uqa@0.4.9` |
+| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.4.9` |
+| Browser WASM | `npm install @cognica-io/uqa-wasm@0.4.9` |
 
 The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
-The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.4.5) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.4.5"` consistently for every UQA dependency.
+The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.4.9) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.4.9"` consistently for every UQA dependency.
 
 ## Automatic statistics and session caches
 
@@ -568,10 +568,10 @@ Default document-API FTS registrations preserve their field list and analyzer re
 Existing native catalogs may retain the Python-era `_graph_catalog(graph_name)` alias alongside `_named_graphs` and native graph membership. Migration validates this exact representation and merges its names into `_named_graphs` before restoring graph metadata, then retires the alias in the same transaction. Catalog vertices, edges and memberships remain in their original namespace; Rust standalone graph catalogs use a different schema and keep their independent conversion. Historical FTS accelerator tables may declare their term column as `TEXT`: empty tables retire normally and canonical BLOB keys preserve their bytes; populated text-valued keys are rejected rather than coerced into another token representation.
 
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
-2. Open a copy with the exact 0.4.5 application and its selected provider, encryption key, and compression configuration.
+2. Open a copy with the exact 0.4.9 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
 4. Update every process sharing the database before reopening the original file. Register process-local runtime callbacks again when the application starts.
-5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.4.5.
+5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.4.9.
 
 Keep migration failures visible and resolve them before admitting writes. Retain encryption keys and any external rollback anchor according to the [storage and security contract](04-storage-and-security.md).
 

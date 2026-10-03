@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "package": "uqa-engine",
+  "features": [],
+  "criterion_args": [
+    "--bench",
+    "--noplot",
+    "--warm-up-time",
+    "1",
+    "--measurement-time",
+    "3",
+    "--sample-size",
+    "30",
+    "--nresamples",
+    "10000"
+  ],
+  "suites": [
+    {
+      "target": "query_matrix",
+      "env": {},
+      "cases": [
+        "unified_read/query_block_constant",
+        "unified_read/query_block_row",
+        "unified_read/query_block_aggregate",
+        "unified_read/query_block_window",
+        "unified_read/set_union",
+        "unified_read/set_union_all",
+        "unified_read/set_intersect",
+        "unified_read/set_except",
+        "unified_read/standalone_values",
+        "unified_read/source_values",
+        "unified_read/source_function",
+        "unified_read/source_subquery",
+        "unified_read/source_join",
+        "unified_read/source_lateral",
+        "unified_read/cte_non_recursive",
+        "unified_read/cte_recursive",
+        "unified_read/grouping_sets",
+        "unified_read/scalar_subquery",
+        "unified_read/correlated_exists",
+        "unified_retrieval/operator_tree_text",
+        "unified_retrieval/operator_tree_bayesian",
+        "unified_retrieval/operator_tree_vector",
+        "unified_retrieval/hybrid_residual",
+        "unified_retrieval/hybrid_fusion",
+        "unified_mutation/insert_values",
+        "unified_mutation/insert_select",
+        "unified_mutation/insert_on_conflict",
+        "unified_mutation/update_returning",
+        "unified_mutation/update_from",
+        "unified_mutation/delete_using",
+        "unified_mutation/merge_matched"
+      ],
+      "name": "query_matrix"
+    },
+    {
+      "target": "sql_sqlite_e2e",
+      "env": {
+        "UQA_STORAGE_BENCH_PROVIDER": "sqlite"
+      },
+      "cases": [
+        "sqlite_e2e/count_star_10k",
+        "sqlite_e2e/pk_point_select_10k",
+        "sqlite_e2e/indexed_eq_filter_10k",
+        "sqlite_e2e/indexed_filter_order_limit_10k",
+        "sqlite_e2e/order_limit_unindexed_10k",
+        "sqlite_e2e/group_by_10k",
+        "sqlite_e2e/filtered_join_10k_x_50",
+        "sqlite_e2e_write/insert_batch_500",
+        "sqlite_e2e_write/point_update_indexed",
+        "sqlite_e2e_session/new_session_select_one_10k",
+        "sqlite_e2e_session/new_encrypted_session_select_one"
+      ],
+      "name": "sql_sqlite"
+    },
+    {
+      "name": "sql_sqlite_kv",
+      "target": "sql_sqlite_e2e",
+      "env": {
+        "UQA_STORAGE_BENCH_PROVIDER": "sqlite_kv"
+      },
+      "cases": [
+        "sqlite_kv_e2e/count_star_10k",
+        "sqlite_kv_e2e/pk_point_select_10k",
+        "sqlite_kv_e2e/indexed_eq_filter_10k",
+        "sqlite_kv_e2e/indexed_filter_order_limit_10k",
+        "sqlite_kv_e2e/order_limit_unindexed_10k",
+        "sqlite_kv_e2e/group_by_10k",
+        "sqlite_kv_e2e/filtered_join_10k_x_50",
+        "sqlite_kv_e2e_write/insert_batch_500",
+        "sqlite_kv_e2e_write/point_update_indexed",
+        "sqlite_kv_e2e_session/new_session_select_one_10k"
+      ]
+    },
+    {
+      "name": "sql_redb",
+      "target": "sql_sqlite_e2e",
+      "env": {
+        "UQA_STORAGE_BENCH_PROVIDER": "redb"
+      },
+      "cases": [
+        "redb_e2e/count_star_10k",
+        "redb_e2e/pk_point_select_10k",
+        "redb_e2e/indexed_eq_filter_10k",
+        "redb_e2e/indexed_filter_order_limit_10k",
+        "redb_e2e/order_limit_unindexed_10k",
+        "redb_e2e/group_by_10k",
+        "redb_e2e/filtered_join_10k_x_50",
+        "redb_e2e_write/insert_batch_500",
+        "redb_e2e_write/point_update_indexed",
+        "redb_e2e_session/new_session_select_one_10k"
+      ]
+    },
+    {
+      "target": "retrieval_workloads",
+      "env": {
+        "UQA_RETRIEVAL_BENCH_SUITE": "core"
+      },
+      "cases": [
+        "retrieval_index_build/text_gin_2k",
+        "retrieval_index_build/vector_ivf_2k",
+        "retrieval_index_build/hybrid_gin_ivf_2k",
+        "retrieval_index_build/graph_path_depth3_1k",
+        "retrieval_search/text_bayesian_4k",
+        "retrieval_search/vector_ivf_top100_4k",
+        "retrieval_search/graph_vertex_match_1k",
+        "retrieval_search/hybrid_text_vector_4k"
+      ],
+      "name": "retrieval_workloads"
+    }
+  ]
+}
