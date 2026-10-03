@@ -156,7 +156,7 @@ fn create_after_preflight(
         table.persistence,
     )?;
     declaration::validate_create_table_expressions(&context.analysis, &mut table)?;
-    declaration::define_create_table_constraints(&context.analysis, &mut table, inherited_keys)?;
+    declaration::define_create_table_constraints(&context.analysis, &mut table, &inherited_keys)?;
     let mut vector_fields = Vec::new();
     for column in &table.columns {
         match &column.ty {

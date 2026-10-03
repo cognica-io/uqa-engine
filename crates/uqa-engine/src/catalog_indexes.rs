@@ -11,6 +11,26 @@ use super::{
 mod definition;
 pub(crate) use definition::{index_definition, IndexDefinition};
 
+/// The catalog row of an index with its keys, options and definition serialized as the registry stores them.
+fn catalog_index_row(
+    relation: &RelationIdentity,
+    index_type: &str,
+    table: &str,
+    columns: &[uqa_sql::ast::IndexKey],
+    options: &[(String, String)],
+    definition: &IndexDefinition,
+) -> StorageBackendResult<CatalogIndexRow> {
+    let options: std::collections::BTreeMap<String, String> = options.iter().cloned().collect();
+    Ok(CatalogIndexRow {
+        relation: relation.clone(),
+        index_type: index_type.to_string(),
+        table_name: table.to_string(),
+        columns_json: serde_json::to_string(columns).map_err(StorageBackendError::from)?,
+        parameters_json: serde_json::to_string(&options).map_err(StorageBackendError::from)?,
+        definition_json: Some(serde_json::to_string(definition)?),
+    })
+}
+
 impl Engine {
     pub fn register_catalog_index(
         &self,
@@ -96,22 +116,28 @@ impl Engine {
             definition,
         )
         .map_err(|error| StorageBackendError::backend("index catalog identity", error))?;
-        let columns_json = serde_json::to_string(columns).map_err(StorageBackendError::from)?;
-        let options_map: std::collections::BTreeMap<String, String> =
-            options.iter().cloned().collect();
-        let parameters_json =
-            serde_json::to_string(&options_map).map_err(StorageBackendError::from)?;
-        let row = CatalogIndexRow {
-            relation: relation.clone(),
-            index_type: index_type.to_string(),
-            table_name: table.clone(),
-            columns_json: columns_json.clone(),
-            parameters_json: parameters_json.clone(),
-            definition_json: Some(serde_json::to_string(&definition)?),
-        };
         uqa_execution::schema::indexes::registry::lifecycle::register(
             &self.index_registry_context(),
-            row,
+            catalog_index_row(&relation, index_type, &table, columns, options, &definition)?,
+        )
+    }
+
+    /// The indexes that registering this index would create on the partitions below `table`, as partition and index name.
+    pub(crate) fn planned_catalog_partition_indexes(
+        &self,
+        name: &str,
+        index_type: &str,
+        table: &str,
+        columns: &[uqa_sql::ast::IndexKey],
+        options: &[(String, String)],
+        definition: &IndexDefinition,
+    ) -> StorageBackendResult<std::collections::BTreeMap<String, String>> {
+        self.synchronize_catalog_registries()?;
+        let relation =
+            RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
+        uqa_execution::schema::indexes::registry::lifecycle::planned_partition_indexes(
+            &self.index_registry_context(),
+            catalog_index_row(&relation, index_type, table, columns, options, definition)?,
         )
     }
 

@@ -72,18 +72,62 @@ pub enum IndexOwner {
     Index,
 }
 
-/// `DefineIndex` builds no index on a system column or on a virtual generated column. `columns` are the relation's columns, and a name outside them is a system column, which binding has already admitted.
+/// Whether `name` is a system column, which every table has beside its own columns.
+pub fn is_system_column(name: &str) -> bool {
+    POSTGRES_SYSTEM_COLUMNS.contains(&name)
+}
+
+/// `data type xid has no default operator class for access method "btree"`, which `ComputeIndexAttrs` reports for a key attribute whose type the access method cannot order.
+fn missing_operator_class(type_name: &str, access_method: &str) -> SQLError {
+    SQLError::Diagnostic {
+        sqlstate: "42704".into(),
+        message: format!(
+            "data type {type_name} has no default operator class for access method \"{access_method}\""
+        ),
+        detail: None,
+        hint: Some(
+            "You must specify an operator class for the index or define a default operator class for the data type."
+                .into(),
+        ),
+    }
+}
+
+/// A system column that is a key attribute needs an operator class of the index's access method for its type. The transaction and command identifiers of `xmin`, `xmax`, `cmin` and `cmax` have one only for a hash index, and the tuple identifier of `ctid` has one for a btree and a hash index; the object identifier of `tableoid` is ordered wherever integers are.
+pub fn resolve_system_key_attribute(name: &str, access_method: &str) -> Result<(), SQLError> {
+    let type_name = match name {
+        "xmin" | "xmax" => "xid",
+        "cmin" | "cmax" => "cid",
+        "ctid" => "tid",
+        _ => return Ok(()),
+    };
+    let ordered = match access_method {
+        "hash" => true,
+        "" | "btree" => type_name == "tid",
+        _ => false,
+    };
+    if ordered {
+        Ok(())
+    } else {
+        Err(missing_operator_class(
+            type_name,
+            if access_method.is_empty() {
+                "btree"
+            } else {
+                access_method
+            },
+        ))
+    }
+}
+
+/// `DefineIndex` builds no index on a system column or on a virtual generated column. `columns` are the relation's columns, and a name outside them is a system column, which the index's attributes have already been resolved to.
 pub fn validate_index_attribute(
     columns: &[ColumnDef],
     name: &str,
     owner: IndexOwner,
 ) -> Result<(), SQLError> {
     let Some(column) = columns.iter().find(|column| column.name == name) else {
-        if POSTGRES_SYSTEM_COLUMNS.contains(&name) {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "index creation on system columns is not supported".into(),
-            });
+        if is_system_column(name) {
+            return Err(system_column_index());
         }
         return Err(SQLError::Internal(format!(
             "index attribute `{name}` is not a column"
@@ -111,6 +155,14 @@ pub fn validate_index_attribute(
     Ok(())
 }
 
+/// `index creation on system columns is not supported`.
+pub fn system_column_index() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "0A000".into(),
+        message: "index creation on system columns is not supported".into(),
+    }
+}
+
 /// The relation a key's index is built on.
 pub struct KeyRelation<'a> {
     /// The relation's catalog name.
@@ -122,11 +174,33 @@ pub struct KeyRelation<'a> {
     pub has_primary_key: bool,
 }
 
-/// Validate a key as `DefineIndex` does before it builds the key's index on `relation`: a second primary key first, then the partition key, then each key column and each included column as an index attribute.
+/// Validate a key as `DefineIndex` does before it builds the key's index on `relation`: the index's attributes are resolved in order, key columns before included columns; then a second primary key, the partition key, and each attribute as one an index can hold.
 pub fn validate_key_definition(
     relation: &KeyRelation<'_>,
     key: &TableKeyConstraint,
 ) -> Result<(), SQLError> {
+    let declared = |name: &str| relation.columns.iter().any(|column| column.name == name);
+    let access_method = if key.without_overlaps {
+        "gist"
+    } else {
+        "btree"
+    };
+    for name in &key.columns {
+        if declared(name) {
+            continue;
+        }
+        if !is_system_column(name) {
+            return Err(missing_key_column(name));
+        }
+        resolve_system_key_attribute(name, access_method)?;
+    }
+    if let Some(name) = key
+        .included_columns
+        .iter()
+        .find(|name| !declared(name) && !is_system_column(name))
+    {
+        return Err(missing_key_column(name));
+    }
     if key.kind == TableKeyConstraintKind::PrimaryKey && relation.has_primary_key {
         let local = uqa_core::RelationIdentity::from_legacy_name(relation.table)
             .map_err(SQLError::Internal)?;

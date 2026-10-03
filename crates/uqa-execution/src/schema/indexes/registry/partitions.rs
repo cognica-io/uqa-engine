@@ -108,6 +108,37 @@ pub(in crate::schema::indexes) fn materialize(
     Ok(())
 }
 
+/// The indexes that registering `row` creates on the partitions below its table, as partition and index name, named as registration names them. A partition that adopts an index it already has is absent.
+pub(super) fn planned(
+    catalog: &CatalogReadView,
+    mut row: CatalogIndexRow,
+) -> StorageBackendResult<BTreeMap<String, String>> {
+    let previous = &catalog.snapshot().definitions.catalog_indexes;
+    let table = RelationIdentity::from_legacy_name(&row.table_name).map_err(invalid)?;
+    let table_object_id = catalog
+        .snapshot()
+        .tables
+        .get(&table)
+        .ok_or_else(|| invalid("planned index has no table"))?
+        .object_id;
+    // The plan needs identities only to link each index to its parent; none of them is reserved or published.
+    let mut allocator = crate::catalog::identity::allocate_catalog_object_id;
+    let mut definition = index_definition(&row)?;
+    definition.catalog = Some(
+        IndexCatalogIdentity::allocate(table_object_id, &mut allocator).map_err(metadata_error)?,
+    );
+    row.definition_json = Some(serde_json::to_string(&definition)?);
+    let root = row.relation.clone();
+    let mut rows = previous.as_ref().clone();
+    rows.insert(root.clone(), row);
+    materialize(catalog, &mut rows, &mut allocator)?;
+    Ok(rows
+        .into_iter()
+        .filter(|(name, _)| *name != root && !previous.contains_key(name))
+        .map(|(name, row)| (row.table_name, name.name))
+        .collect())
+}
+
 pub(in crate::schema::indexes) fn constraint_kind(
     catalog: &CatalogReadView,
     row: &CatalogIndexRow,

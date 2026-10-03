@@ -44,16 +44,29 @@ pub fn prepare_create_table_declaration(
 ) -> Result<InheritedKeys, SQLError> {
     let declared = c.key_constraints.len();
     super::super::inheritance::prepare_create_table_hierarchy(&context.inheritance, c)?;
-    let inherited = InheritedKeys(c.key_constraints.len() - declared);
-    super::keys::declare_primary_key_not_null(&mut c.columns, &c.key_constraints[inherited.0..]);
-    Ok(inherited)
+    let keys = c.key_constraints.len() - declared;
+    super::keys::declare_primary_key_not_null(&mut c.columns, &c.key_constraints[keys..]);
+    let unique_indexes = match c.hierarchy.parents.first() {
+        Some(parent) if c.hierarchy.is_partition() && c.hierarchy.partition_spec.is_some() => {
+            context
+                .inheritance
+                .catalog
+                .unique_index_keys(parent)
+                .map_err(|error| SQLError::Internal(format!("read parent indexes: {error}")))?
+        }
+        _ => Vec::new(),
+    };
+    Ok(InheritedKeys {
+        keys,
+        unique_indexes,
+    })
 }
 
 /// Define the keys and then bind the foreign keys, which `PostgreSQL` creates after the keys so that a foreign key can reference a key of its own table.
 pub fn define_create_table_constraints(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
-    inherited: InheritedKeys,
+    inherited: &InheritedKeys,
 ) -> Result<(), SQLError> {
     super::keys::define_created_keys(context.index_names, c, inherited)?;
     bind_create_table_relation_references(context.foreign_keys.catalog, c)?;

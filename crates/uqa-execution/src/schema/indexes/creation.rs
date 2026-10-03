@@ -53,6 +53,16 @@ pub trait IndexCreationPublication {
         options: &[(String, String)],
         definition: &IndexDefinition,
     ) -> Result<(), SQLError>;
+    /// The indexes that registering this index would create on the partitions below `table`, as partition and index name.
+    fn planned_partition_indexes(
+        &self,
+        name: &str,
+        method: &str,
+        table: &str,
+        keys: &[IndexKey],
+        options: &[(String, String)],
+        definition: &IndexDefinition,
+    ) -> Result<std::collections::BTreeMap<String, String>, SQLError>;
 }
 pub struct IndexCreationContext<'a> {
     pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
@@ -84,6 +94,19 @@ pub fn run_create_index(
         allocate_default_index_name(context.names, &table_relation, &c.columns)?
     };
     let relation = uqa_core::RelationIdentity::new(&table_relation.schema, &name);
+    uqa_sql::schema::indexes::system_columns::reject_system_column_index(
+        &context
+            .schema
+            .schema_expression_columns(&c.table)?
+            .unwrap_or_default(),
+        &c,
+        context
+            .unique
+            .catalog
+            .table_hierarchy(&c.table)?
+            .partition_spec
+            .as_ref(),
+    )?;
     let definition = uqa_sql::schema::indexes::keys::prepare_index_definition(
         context.schema,
         context.bindings,
@@ -121,7 +144,27 @@ pub fn run_create_index(
         });
     }
 
-    super::validate_index_rows(&context.unique, &c, &name, &definition.key_types)?;
+    // Publish the original option values and bound key metadata so reopening restores the same physical index.
+    let catalog_index_type = if am.is_empty() { "btree" } else { &am };
+    let partitioned = context
+        .unique
+        .catalog
+        .table_hierarchy(&c.table)?
+        .partition_spec
+        .is_some();
+    if c.unique && partitioned && catalog_index_type == "btree" {
+        let planned = context.publication.planned_partition_indexes(
+            &relation.qualified_name(),
+            catalog_index_type,
+            &c.table,
+            &c.columns,
+            &c.options,
+            &definition,
+        )?;
+        super::validate_partition_index_rows(&context.unique, &c, &definition.key_types, &planned)?;
+    } else {
+        super::validate_index_rows(&context.unique, &c, &name, &definition.key_types)?;
+    }
     if am == "diskann" {
         resolve_vector_index_target(context.vectors, &c, &am)?;
     }
@@ -130,8 +173,6 @@ pub fn run_create_index(
     if am != "diskann" {
         build_physical_index(context.vectors, context.publication, &c, &am)?;
     }
-    // Publish the original option values and bound key metadata so reopening restores the same physical index.
-    let catalog_index_type = if am.is_empty() { "btree" } else { &am };
     context.publication.register_index(
         &relation.qualified_name(),
         catalog_index_type,

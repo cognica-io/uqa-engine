@@ -18,13 +18,13 @@ pub struct AddedKeyRelation<'a> {
     pub partition: Option<&'a crate::ast::PartitionSpec>,
 }
 
-/// Validate a key that ALTER TABLE adds, before its index is named: the `WITHOUT OVERLAPS` period as `transformIndexConstraint` checks it, a primary key's columns as the NOT NULL constraints that `ATPrepAddPrimaryKey` adds before the index, and then the key's columns and the checks of `DefineIndex`. A column repeated in the key was rejected while the statement was compiled.
+/// Validate a key that ALTER TABLE adds, before its index is named: the `WITHOUT OVERLAPS` period as `transformIndexConstraint` checks it, a primary key's columns as the NOT NULL constraints that `ATPrepAddPrimaryKey` adds before the index, and then the checks of `DefineIndex`, which resolves the key's columns. A column repeated in the key was rejected while the statement was compiled.
 pub fn validate_added_key(
     relation: &AddedKeyRelation<'_>,
     key: &TableKeyConstraint,
 ) -> Result<(), SQLError> {
     let column = |name: &str| relation.columns.iter().find(|column| column.name == name);
-    let system = |name: &str| super::columns::POSTGRES_SYSTEM_COLUMNS.contains(&name);
+    let system = definition::is_system_column;
     if key.without_overlaps {
         if let Some(period) = key.columns.last() {
             if let Some(found) = column(period) {
@@ -56,14 +56,6 @@ pub fn validate_added_key(
                 ),
             });
         }
-    }
-    if let Some(name) = key
-        .columns
-        .iter()
-        .chain(&key.included_columns)
-        .find(|name| column(name).is_none() && !system(name))
-    {
-        return Err(definition::missing_key_column(name));
     }
     definition::validate_key_definition(
         &definition::KeyRelation {

@@ -18,6 +18,8 @@ pub trait InheritanceCatalog {
     fn resolve_parent(&self, name: &str) -> Result<String, SQLError>;
     fn declared_constraints(&self, table: &str) -> Result<TableConstraintSet, String>;
     fn check_definitions(&self, table: &str) -> Result<Vec<TableCheck>, String>;
+    /// The key attributes of each unique index of `table` that no key constraint owns; a partition builds an index for each.
+    fn unique_index_keys(&self, table: &str) -> Result<Vec<Vec<crate::ast::IndexKey>>, String>;
 }
 pub struct InheritanceContext<'a> {
     pub catalog: &'a dyn InheritanceCatalog,

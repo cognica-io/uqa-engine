@@ -25,9 +25,17 @@ pub fn validate_unique_partition_columns(
     statement: &CreateIndex,
     hierarchy: &TableHierarchy,
 ) -> Result<(), SQLError> {
-    let Some(partition) = &hierarchy.partition_spec else {
-        return Ok(());
-    };
+    match &hierarchy.partition_spec {
+        Some(partition) => validate_unique_index_partition_key(statement, partition),
+        None => Ok(()),
+    }
+}
+
+/// A unique index of a partitioned table holds every partition key column among its key columns.
+pub fn validate_unique_index_partition_key(
+    statement: &CreateIndex,
+    partition: &PartitionSpec,
+) -> Result<(), SQLError> {
     let columns = statement
         .columns
         .iter()

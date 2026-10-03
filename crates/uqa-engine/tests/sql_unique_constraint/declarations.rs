@@ -505,3 +505,96 @@ fn alter_table_add_column_keys_fail_after_the_column() {
     assert_eq!(constraints(&engine, "ic"), pairs(&[("ip_d_not_null", "n")]));
     exec(&engine, "INSERT INTO ic VALUES (1, 1, 1), (1, 1, 1)");
 }
+
+#[test]
+fn keys_and_indexes_over_system_columns_fail_as_postgresql_resolves_them() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE sy (a int, b int)");
+    let unordered = |ty: &str, method: &str| {
+        format!("data type {ty} has no default operator class for access method \"{method}\"")
+    };
+    let system = "index creation on system columns is not supported".to_string();
+    for (sql, state, message) in [
+        ("CREATE INDEX ON sy (tableoid)", "0A000", system.clone()),
+        ("CREATE INDEX ON sy (ctid)", "0A000", system.clone()),
+        (
+            "CREATE INDEX ON sy (xmin)",
+            "42704",
+            unordered("xid", "btree"),
+        ),
+        (
+            "CREATE INDEX ON sy (cmax)",
+            "42704",
+            unordered("cid", "btree"),
+        ),
+        (
+            "CREATE INDEX ON sy USING gin (ctid)",
+            "42704",
+            unordered("tid", "gin"),
+        ),
+        (
+            "CREATE INDEX ON sy (a) INCLUDE (xmin)",
+            "0A000",
+            system.clone(),
+        ),
+        (
+            "CREATE INDEX ON sy (a) WHERE ctid IS NOT NULL",
+            "0A000",
+            system.clone(),
+        ),
+        (
+            "CREATE INDEX ON sy (a, (ctid::text))",
+            "0A000",
+            system.clone(),
+        ),
+        (
+            "CREATE UNIQUE INDEX ON sy (a) INCLUDE (b, ctid)",
+            "0A000",
+            system.clone(),
+        ),
+        (
+            "CREATE INDEX ON sy (zz, ctid)",
+            "42703",
+            "column \"zz\" does not exist".into(),
+        ),
+        (
+            "CREATE TABLE s2 (a int, UNIQUE (xmin))",
+            "42704",
+            unordered("xid", "btree"),
+        ),
+        (
+            "CREATE TABLE s3 (a int, UNIQUE (a) INCLUDE (xmin))",
+            "0A000",
+            system.clone(),
+        ),
+        (
+            "ALTER TABLE sy ADD UNIQUE (cmin)",
+            "42704",
+            unordered("cid", "btree"),
+        ),
+        (
+            "ALTER TABLE sy ADD UNIQUE (xmin, zz)",
+            "42704",
+            unordered("xid", "btree"),
+        ),
+        (
+            "ALTER TABLE sy ADD UNIQUE (zz, xmin)",
+            "42703",
+            "column \"zz\" named in key does not exist".into(),
+        ),
+        (
+            "ALTER TABLE sy ADD PRIMARY KEY (xmin)",
+            "0A000",
+            "cannot add not-null constraint on system column \"xmin\"".into(),
+        ),
+    ] {
+        error(&engine, sql, state, &message);
+    }
+    match engine.sql("CREATE INDEX ON sy (xmin)", &[]).unwrap_err() {
+        uqa_sql::SQLError::Diagnostic { hint, .. } => assert_eq!(
+            hint.as_deref(),
+            Some("You must specify an operator class for the index or define a default operator class for the data type.")
+        ),
+        other => panic!("{other} carries no hint"),
+    }
+}

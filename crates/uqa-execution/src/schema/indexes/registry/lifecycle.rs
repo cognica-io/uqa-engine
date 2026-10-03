@@ -57,6 +57,29 @@ pub fn register(
     difference(previous, &rows)?.publish(context)
 }
 
+/// The indexes that registering `row` would create on the partitions below its table, as partition and index name; nothing is reserved or published.
+pub fn planned_partition_indexes(
+    context: &IndexRegistryContext<'_>,
+    row: CatalogIndexRow,
+) -> StorageBackendResult<BTreeMap<String, String>> {
+    partitions::planned(&context.identities.catalog.current_catalog_snapshot(), row)
+}
+
+/// The key attributes of each unique index of `table` that no key constraint owns.
+pub fn standalone_unique_index_keys(
+    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    table: &str,
+) -> StorageBackendResult<Vec<Vec<uqa_sql::ast::IndexKey>>> {
+    let mut keys = Vec::new();
+    for row in rows.values().filter(|row| row.table_name == table) {
+        let definition = index_definition(row)?;
+        if definition.unique && definition.relationships.owning_constraint.is_none() {
+            keys.push(serde_json::from_str(&row.columns_json)?);
+        }
+    }
+    Ok(keys)
+}
+
 pub fn descendants(
     rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
     root: &RelationIdentity,

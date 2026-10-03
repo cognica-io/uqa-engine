@@ -80,27 +80,29 @@ pub fn validate_temporal_key_rows(
     Ok(())
 }
 
-/// `could not create unique index "x"` with `Key (a)=(1) is duplicated.`, for a key constraint whose index finds a repeated key.
+/// The error of a key constraint whose index finds a repeated key.
 fn duplicated_key(
     context: &KeyValidationContext<'_>,
     table: &str,
     constraint: &uqa_sql::ast::TableKeyConstraint,
     values: &[Value],
 ) -> Result<SQLError, SQLError> {
-    let name = constraint.name.as_deref().ok_or_else(|| {
-        SQLError::Internal("key validation requires its reserved index name".into())
-    })?;
-    Ok(SQLError::Diagnostic {
-        sqlstate: "23505".into(),
-        message: format!("could not create unique index \"{name}\""),
-        detail: crate::mutation::constraints::duplicate_index_key_detail(
+    Ok(super::indexes::unique_build::duplicated_index_key(
+        index_name(constraint)?,
+        crate::mutation::constraints::enforced_key_description(
             context.constraints,
             table,
             &constraint.clone().into(),
             values,
         )?,
-        hint: None,
-    })
+    ))
+}
+
+fn index_name(constraint: &uqa_sql::ast::TableKeyConstraint) -> Result<&str, SQLError> {
+    constraint
+        .name
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("key validation requires its reserved index name".into()))
 }
 
 /// Check the rows of `table` as building a key's index does: a repeated key fails as `could not create unique index` with the index's name, and a `WITHOUT OVERLAPS` key fails on overlapping periods. A key value with a NULL never repeats unless the key treats NULLs as not distinct.
@@ -109,12 +111,11 @@ pub fn validate_key_index_rows(
     table: &str,
     constraint: &uqa_sql::ast::TableKeyConstraint,
 ) -> Result<(), SQLError> {
-    let mut seen = std::collections::BTreeSet::<Vec<Value>>::new();
-    for doc_id in context.constraints.reads.live_table_doc_ids(table)? {
-        let Some(document) = context.constraints.reads.get_document(table, doc_id)? else {
-            continue;
-        };
-        if constraint.without_overlaps {
+    if constraint.without_overlaps {
+        for doc_id in context.constraints.reads.live_table_doc_ids(table)? {
+            let Some(document) = context.constraints.reads.get_document(table, doc_id)? else {
+                continue;
+            };
             if crate::mutation::constraints::without_overlaps_conflict(
                 context.constraints,
                 table,
@@ -129,23 +130,42 @@ pub fn validate_key_index_rows(
                     ),
                 });
             }
-            continue;
         }
-        let values: Vec<Value> = constraint
-            .columns
-            .iter()
-            .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
-            .collect();
-        if values.iter().any(|value| matches!(value, Value::Null)) && !constraint.nulls_not_distinct
-        {
-            continue;
-        }
-        if seen.contains(&values) {
-            return Err(duplicated_key(context, table, constraint, &values)?);
-        }
-        seen.insert(values);
+        return Ok(());
     }
-    Ok(())
+    let columns = context
+        .catalog
+        .try_describe_table(table)
+        .map_err(|error| ddl_storage_error("unique index build", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let key_types = constraint
+        .columns
+        .iter()
+        .map(|name| {
+            columns
+                .iter()
+                .find(|column| column.name == *name)
+                .map(|column| column.ty.clone())
+                .ok_or_else(|| SQLError::UnknownColumn(name.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let keys = constraint
+        .columns
+        .iter()
+        .cloned()
+        .map(uqa_sql::ast::IndexKey::Column)
+        .collect::<Vec<_>>();
+    super::indexes::unique_build::validate_unique_index_build(
+        super::indexes::unique_build::UniqueBuildContext::of(&context.constraints),
+        &super::indexes::unique_build::UniqueIndexBuild {
+            table,
+            name: index_name(constraint)?,
+            keys: &keys,
+            key_types: &key_types,
+            predicate: None,
+            nulls_not_distinct: constraint.nulls_not_distinct,
+        },
+    )
 }
 
 /// Check the NOT NULL constraints that a primary key gives its columns, after its index is built, as `PostgreSQL` verifies new NOT NULL constraints once the table's other changes are done: the first row holding a NULL in a key column fails on the first such column of the table.

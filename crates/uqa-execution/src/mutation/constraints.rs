@@ -22,7 +22,7 @@ use crate::mutation::{
 };
 pub use context::ConstraintContext;
 pub use deferred::validate_deferred_foreign_key_checks;
-pub(crate) use diagnostics::duplicate_index_key_detail;
+pub(crate) use diagnostics::enforced_key_description;
 use index_keys::EnforcedKeyExecution;
 pub use keys::{
     lock_document_key_dependencies, validate_key_constraints,
