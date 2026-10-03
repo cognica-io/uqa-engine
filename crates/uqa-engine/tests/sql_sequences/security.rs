@@ -36,10 +36,11 @@ fn scalar(engine: &Engine, sql: &str) -> Value {
         .clone()
 }
 
-fn assert_single_warning(engine: &Engine, message: &str) {
+/// The only notice is the `GRANT` warning `message`, which `PostgreSQL` reports with SQLSTATE `01007` (`warning_privilege_not_granted`).
+fn assert_single_grant_warning(engine: &Engine, message: &str) {
     assert_eq!(
         engine.take_sql_notices(),
-        [uqa_engine::SQLNotice::warning(message)]
+        [uqa_engine::SQLNotice::warning(message).with_sqlstate("01007")]
     );
 }
 
@@ -779,7 +780,7 @@ fn sequence_acl_grant_chains_follow_restrict_cascade_and_alternate_paths() {
             &[],
         )
         .unwrap();
-    assert_single_warning(
+    assert_single_grant_warning(
         &engine,
         "not all privileges were granted for \"acl_chain_ids\"",
     );
@@ -791,7 +792,7 @@ fn sequence_acl_grant_chains_follow_restrict_cascade_and_alternate_paths() {
             &[],
         )
         .unwrap();
-    assert_single_warning(&engine, "no privileges were granted for \"acl_chain_ids\"");
+    assert_single_grant_warning(&engine, "no privileges were granted for \"acl_chain_ids\"");
     engine.sql("RESET ROLE", &[]).unwrap();
     assert_eq!(sqlstate(&engine, "DROP ROLE acl_chain_leaf"), "2BP01");
     for sql in [
