@@ -7,9 +7,8 @@
 //! PL/pgSQL activation records, control flow, cursor loops, and diagnostics.
 
 use diagnostics::{
-    arm_matches, catchable, format_raise_message, looks_like_sqlstate, result_row_count,
-    result_row_values, return_query_context_error, routine_message, strict_into_check,
-    to_i64_value,
+    arm_matches, format_raise_message, looks_like_sqlstate, result_row_count, result_row_values,
+    return_query_context_error, routine_message, strict_into_check, to_i64_value,
 };
 use std::collections::{BTreeSet, HashMap};
 use transaction::DirectRoutineCommandGuard;

@@ -240,9 +240,12 @@ impl RowLockManager {
         let coordinator = self.coordinator()?;
         let relation = self.relation_bytes(table);
         let cross_wait = CrossWaitGuard::new(self, coordinator, session_id);
+        let mut wait_started = None;
         loop {
             let mut state = self.state.lock();
-            if let Err(error) = cancel.check() {
+            let checked = wait_started
+                .map_or_else(|| cancel.check(), |started| cancel.check_lock_wait(started));
+            if let Err(error) = checked {
                 state.waiting_relations.remove(&session_id);
                 drop(state);
                 self.wake.notify_all();
@@ -321,7 +324,9 @@ impl RowLockManager {
                 .entry(session_id)
                 .or_default()
                 .insert(table, mode);
-            self.wake.wait_for(&mut state, WAIT_SLICE);
+            let started = *wait_started.get_or_insert_with(std::time::Instant::now);
+            self.wake
+                .wait_for(&mut state, cancel.lock_wait_slice(started, WAIT_SLICE));
         }
     }
 }

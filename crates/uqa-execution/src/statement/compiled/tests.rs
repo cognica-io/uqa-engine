@@ -49,6 +49,10 @@ impl StatementExecutionInputs<()> for Inputs {
     fn statement_execution_context(&self) -> StatementExecutionContext<'_, ()> {
         panic!("failed analysis must not capture execution state or start execution")
     }
+
+    fn statement_timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 fn statement(sql: &str) -> Statement {

@@ -189,7 +189,10 @@ fn vacuum_validates_before_reclaiming_and_preserves_resource_failures() {
     }
     for full in [false, true] {
         for (failure, state) in [
-            (StorageBackendError::from(uqa_core::QueryCancelled), "57014"),
+            (
+                StorageBackendError::from(uqa_core::QueryCancelled::USER_REQUEST),
+                "57014",
+            ),
             (
                 StorageBackendError::from(uqa_core::memory::MemoryError::Limit {
                     required: 2,

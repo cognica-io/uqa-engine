@@ -26,7 +26,10 @@ mod relation_identity;
 pub mod types;
 pub mod vector_execution;
 
-pub use cancel::{CancellationToken, QueryCancelled, SQLSTATE_QUERY_CANCELED};
+pub use cancel::{
+    CancellationDeadline, CancellationReason, CancellationToken, QueryCancelled,
+    SQLSTATE_QUERY_CANCELED,
+};
 pub use doc_set::DocSet;
 pub use float_text::{format_float_pg, format_float_pg_with_control};
 pub use posting_list::{GeneralizedPostingList, PostingList};

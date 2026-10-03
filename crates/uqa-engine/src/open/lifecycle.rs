@@ -54,13 +54,15 @@ impl Engine {
         let session_id = row_locks.allocate_session();
         let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
         let client_level = session.state.client_level();
+        let runtime = super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT, client_level);
+        session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::memory(),
             durable: Arc::new(super::DurableCatalogState::new()),
             session,
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
-            runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT, client_level),
+            runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
             notification_hub,
@@ -417,17 +419,19 @@ impl Engine {
         let session_id = row_locks.allocate_session();
         let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
         let client_level = session.state.client_level();
+        let runtime = super::QueryRuntime::with_cancellation(
+            super::SQL_FUNCTION_DEPTH_LIMIT,
+            cancellation,
+            client_level,
+        );
+        session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
             durable: Arc::new(super::DurableCatalogState::new()),
             session,
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
-            runtime: super::QueryRuntime::with_cancellation(
-                super::SQL_FUNCTION_DEPTH_LIMIT,
-                cancellation,
-                client_level,
-            ),
+            runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
             notification_hub,

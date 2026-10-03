@@ -103,6 +103,15 @@ impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
         Engine::notification_subscriptions_required(self)
     }
 
+    fn statement_timeout(&self) -> Option<std::time::Duration> {
+        let milliseconds = self
+            .session
+            .setting("statement_timeout")
+            .parse::<u64>()
+            .ok()?;
+        (milliseconds != 0).then(|| std::time::Duration::from_millis(milliseconds))
+    }
+
     fn statement_execution_context(&self) -> StatementExecutionContext<'_, StatementReadSnapshot> {
         Engine::statement_execution_context(self)
     }

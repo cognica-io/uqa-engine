@@ -258,6 +258,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         Ok(self.engine.session_execution_view().runtime_parameter(name))
     }
 
+    fn sleep(&self, duration: std::time::Duration) -> std::result::Result<(), SQLError> {
+        Ok(self.engine.runtime.cancellation.sleep(duration)?)
+    }
+
     fn set_runtime_parameter(
         &self,
         name: &str,

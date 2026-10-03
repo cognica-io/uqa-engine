@@ -23,6 +23,7 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
     sql: &str,
     params: &[SQLParam],
 ) -> Result<SQLCursor, SQLError> {
+    let _statement_deadline = crate::statement::batch::context::statement_deadline(context);
     if let Err(error) = context.runtime.cancellation.check() {
         return Err(abort_explicit_statement_error(
             context.transactions,

@@ -41,7 +41,6 @@ fn graph_larger_than_its_allowance_keeps_topology_scores_and_retained_readers() 
         assert_eq!(*node.unwrap(), *nodes.next().unwrap().unwrap());
     }
     assert!(nodes.next().is_none());
-    drop(nodes);
     for query in [3, 15, 90] {
         assert_eq!(
             spilled.search_knn(&vector(query, dimensions), 7).unwrap(),
@@ -59,7 +58,12 @@ fn graph_larger_than_its_allowance_keeps_topology_scores_and_retained_readers() 
     assert_eq!(spilled.count().unwrap(), count - 1);
     let changed = spilled.take_persistence_delta();
     assert!(!changed.full_rewrite);
-    assert!(changed.nodes().map(|node| node.unwrap()).count() > 0);
+    let mut changed_nodes = 0;
+    for node in changed.nodes() {
+        node.unwrap();
+        changed_nodes += 1;
+    }
+    assert!(changed_nodes > 0);
     spilled.delete(9).unwrap();
     resident.add(17, vector(250, dimensions)).unwrap();
     resident.delete(8).unwrap();
@@ -73,7 +77,6 @@ fn graph_larger_than_its_allowance_keeps_topology_scores_and_retained_readers() 
         assert_eq!(*nodes.next().unwrap().unwrap(), *expected.unwrap());
     }
     assert!(nodes.next().is_none());
-    drop(nodes);
     assert_eq!(retained.search_knn(&query, 7).unwrap(), old_results);
     assert_eq!(
         spilled.search_knn(&query, 7).unwrap(),
@@ -116,7 +119,6 @@ fn restoration_streams_nodes_and_preserves_bits_with_more_vectors_than_memory() 
         assert_eq!(*nodes.next().unwrap().unwrap(), *expected.unwrap());
     }
     assert!(nodes.next().is_none());
-    drop(nodes);
     drop((actual, restored));
     assert_eq!(control.memory().used(), 0);
 }

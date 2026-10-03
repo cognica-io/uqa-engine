@@ -64,6 +64,8 @@ pub struct StatementValidationContext<'a> {
 /// Capture live subsystem inputs only when a statement is ready to execute.
 pub trait StatementExecutionInputs<S: Clone + 'static> {
     fn statement_execution_context(&self) -> StatementExecutionContext<'_, S>;
+    /// The session's `statement_timeout`, which a statement starts with; `None` lets a statement run without a limit. Reading it captures none of the statement's execution inputs.
+    fn statement_timeout(&self) -> Option<std::time::Duration>;
     /// Read the live host policy without capturing the statement's catalog/execution inputs.
     fn notification_subscriptions_required(&self) -> bool {
         false

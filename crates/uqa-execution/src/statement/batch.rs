@@ -114,6 +114,9 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
     }
     if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
         if let Some(plan) = context.cache.cached_optimized_sql_plan(sql) {
+            let _statement_deadline = (!nested_statement)
+                .then(|| context::statement_deadline(context))
+                .flatten();
             let can_execute_without_transaction = match plan.as_ref() {
                 uqa_sql::plan::UnifiedPlan::Query(query) => !query_requires_statement_transaction(
                     &context.effects.query_effect_context(),
@@ -189,6 +192,9 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     let execution = (|| -> Result<SQLResult, SQLError> {
         let mut last = SQLResult::empty();
         for (statement_index, statement) in statements.into_iter().enumerate() {
+            let _statement_deadline = (!nested_statement)
+                .then(|| context::statement_deadline(context))
+                .flatten();
             if let Err(error) = context.runtime.cancellation.check() {
                 return Err(abort_explicit_statement_error(
                     context.transactions,

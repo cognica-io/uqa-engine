@@ -199,7 +199,7 @@ fn cancellation_after_resource_lookup_reaches_the_analysis_callback() {
         .unwrap_err();
         assert!(matches!(
             error,
-            SQLError::Cancelled(uqa_core::QueryCancelled)
+            SQLError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST)
         ));
         assert_eq!(error.sqlstate(), Some("57014"));
     });

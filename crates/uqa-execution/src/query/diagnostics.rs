@@ -44,7 +44,7 @@ enum Failure {
 impl Failure {
     fn error(self) -> SQLError {
         match self {
-            Self::Cancelled => uqa_core::QueryCancelled.into(),
+            Self::Cancelled => uqa_core::QueryCancelled::USER_REQUEST.into(),
             Self::Memory => SQLError::Routine {
                 sqlstate: "53200".into(),
                 message: "EXPLAIN could not retain complete vector execution diagnostics".into(),

@@ -139,7 +139,7 @@ mod tests {
                 (
                     StorageBackendError::backend(
                         "decimal",
-                        ValueRetentionError::Cancelled(QueryCancelled),
+                        ValueRetentionError::Cancelled(QueryCancelled::USER_REQUEST),
                     ),
                     "57014",
                 ),
@@ -151,7 +151,10 @@ mod tests {
                     "53200",
                 ),
                 (
-                    StorageBackendError::backend("jsonb", JsonbKeyError::Cancelled(QueryCancelled)),
+                    StorageBackendError::backend(
+                        "jsonb",
+                        JsonbKeyError::Cancelled(QueryCancelled::USER_REQUEST),
+                    ),
                     "57014",
                 ),
                 (
@@ -184,7 +187,10 @@ mod tests {
                 "decimal",
                 ValueRetentionError::Memory(MemoryError::SizeOverflow),
             ),
-            StorageBackendError::backend("jsonb", JsonbKeyError::Cancelled(QueryCancelled)),
+            StorageBackendError::backend(
+                "jsonb",
+                JsonbKeyError::Cancelled(QueryCancelled::USER_REQUEST),
+            ),
         ] {
             let error = StorageBackendError::backend(
                 "receipt",
@@ -239,9 +245,12 @@ mod tests {
     fn graph_and_cypher_keep_transaction_and_resource_diagnostics() {
         for cypher in [false, true] {
             for (error, state) in [
-                (StorageBackendError::from(uqa_core::QueryCancelled), "57014"),
                 (
-                    StorageBackendError::backend("fixture", uqa_core::QueryCancelled),
+                    StorageBackendError::from(uqa_core::QueryCancelled::USER_REQUEST),
+                    "57014",
+                ),
+                (
+                    StorageBackendError::backend("fixture", uqa_core::QueryCancelled::USER_REQUEST),
                     "57014",
                 ),
                 (
@@ -304,7 +313,10 @@ mod tests {
     fn transaction_diagnostics_survive_provider_error_wrappers() {
         for wrapped in [false, true] {
             let errors = [
-                (StorageBackendError::from(uqa_core::QueryCancelled), "57014"),
+                (
+                    StorageBackendError::from(uqa_core::QueryCancelled::USER_REQUEST),
+                    "57014",
+                ),
                 (
                     StorageBackendError::from(uqa_core::memory::MemoryError::SizeOverflow),
                     "53200",

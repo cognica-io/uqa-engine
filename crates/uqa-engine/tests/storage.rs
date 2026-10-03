@@ -26,6 +26,8 @@ mod sessions;
 mod sql_callback_transactions;
 #[path = "sql_cancellation.rs"]
 mod sql_cancellation;
+#[path = "sql_statement_timeouts.rs"]
+mod sql_statement_timeouts;
 #[path = "sqlite_backend_parity.rs"]
 mod sqlite_backend_parity;
 #[path = "sqlite_compression.rs"]

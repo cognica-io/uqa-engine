@@ -286,7 +286,9 @@ fn catalog_admission_errors_preserve_memory_cancellation_and_invariant_sqlstates
             "53200",
         ),
         (
-            CatalogRetentionError::from(ValueRetentionError::Cancelled(QueryCancelled)),
+            CatalogRetentionError::from(ValueRetentionError::Cancelled(
+                QueryCancelled::USER_REQUEST,
+            )),
             "57014",
         ),
         (CatalogRetentionError::UnexpectedSubquery, "XX000"),

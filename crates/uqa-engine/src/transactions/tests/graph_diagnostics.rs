@@ -23,7 +23,9 @@ fn assert_state(error: &StorageBackendError, state: &str) {
 
 fn graph_error(state: &str) -> GraphStoreError {
     match state {
-        "57014" => GraphStoreError::from(StorageBackendError::from(uqa_core::QueryCancelled)),
+        "57014" => GraphStoreError::from(StorageBackendError::from(
+            uqa_core::QueryCancelled::USER_REQUEST,
+        )),
         "53200" => GraphStoreError::from(StorageBackendError::from(
             uqa_core::memory::MemoryError::SizeOverflow,
         )),

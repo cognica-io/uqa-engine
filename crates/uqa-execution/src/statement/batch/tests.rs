@@ -72,6 +72,10 @@ impl StatementExecutionInputs<()> for Inputs {
     fn statement_execution_context(&self) -> StatementExecutionContext<'_, ()> {
         panic!("a rejected batch must not capture execution inputs")
     }
+
+    fn statement_timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 #[test]
@@ -200,7 +204,7 @@ impl BatchTransactions for Inputs {
     fn prepare_explicit_statement_snapshot(&self, sets_snapshot: bool) -> Result<(), SQLError> {
         self.record(format!("snapshot.{sets_snapshot}"));
         if self.reject_snapshot {
-            return Err(SQLError::Cancelled(uqa_core::QueryCancelled));
+            return Err(SQLError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST));
         }
         self.snapshot.set(true);
         Ok(())

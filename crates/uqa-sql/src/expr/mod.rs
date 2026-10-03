@@ -59,6 +59,7 @@ mod scalar_postgres;
 mod scalar_range;
 mod scalar_temporal;
 mod session_settings;
+mod session_sleep;
 
 #[cfg(test)]
 use binary::eval_comparison_op;

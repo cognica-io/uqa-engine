@@ -156,6 +156,13 @@ pub trait EngineHook {
         ))
     }
 
+    /// Sleep in the session for `duration`, ending at once when the statement is canceled or times out (`pg_sleep`).
+    fn sleep(&self, _duration: std::time::Duration) -> Result<()> {
+        Err(SQLError::Unsupported(
+            "engine hook does not provide session sleeps".into(),
+        ))
+    }
+
     /// Assign a session setting as `set_config(name, value, is_local)` does, restoring the reset setting for `None`, and return the new value as `SHOW` reports it.
     fn set_runtime_parameter(
         &self,

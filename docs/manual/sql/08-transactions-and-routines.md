@@ -27,7 +27,7 @@ LOCK [TABLE] [ONLY] name [*] [, ...] [IN lockmode MODE] [NOWAIT]
 
 `name` is a relation identifier. Modes are `ACCESS SHARE`, `ROW SHARE`, `ROW EXCLUSIVE`, `SHARE UPDATE EXCLUSIVE`, `SHARE`, `SHARE ROW EXCLUSIVE`, `EXCLUSIVE` and `ACCESS EXCLUSIVE`; omitting the mode selects `ACCESS EXCLUSIVE`. Targets are acquired in their written order. `ONLY` excludes descendants; otherwise inheritance and partition descendants are included. Locking a view also locks its referenced tables and views recursively, preserving each stored source's `ONLY` scope.
 
-The command returns no rows and the completion tag `LOCK TABLE`. Acquired locks remain until transaction end; rolling back a savepoint releases acquisitions made after that savepoint while preserving earlier modes. A transaction's own modes do not conflict with each other. `NOWAIT` reports `55P03` when another transaction holds a conflicting mode, and ordinary SQL statement-error rollback applies. Blocking requests participate in cancellation (`57014`) and deadlock detection (`40P01`).
+The command returns no rows and the completion tag `LOCK TABLE`. Acquired locks remain until transaction end; rolling back a savepoint releases acquisitions made after that savepoint while preserving earlier modes. A transaction's own modes do not conflict with each other. `NOWAIT` reports `55P03` when another transaction holds a conflicting mode, and ordinary SQL statement-error rollback applies. Blocking requests participate in cancellation (`57014`) and deadlock detection (`40P01`), and a wait for a relation or row lock that outlasts the session's `lock_timeout` reports `55P03`, `canceling statement due to lock timeout`; each wait is timed separately from the moment it begins, as PostgreSQL times each lock acquisition attempt.
 
 `LOCK TABLE` alone outside a transaction reports `25P01`. An explicit transaction, a multi-statement Simple Query transaction or a routine's transaction can retain the lock. All modes are permitted in read-only transactions. Locking alone does not fix the first data snapshot of a `REPEATABLE READ` transaction.
 
@@ -185,6 +185,8 @@ A name of two or more identifiers separated by dots that no parameter defines be
 
 `search_path` keeps the text it was set to, as PostgreSQL does: `SET search_path = a, 'My S'` shows `a, "My S"`, `set_config` keeps its text as given, and the default is `"$user", public`. The list is split as an identifier list, downcasing unquoted names; invalid syntax reports `22023` with the detail `List syntax is invalid.`. Name resolution reads `$user` as the current role's name, skips schemas that do not exist or that the role may not use, and finds no schema to create in when none remains: with an empty path, unqualified `CREATE TABLE` reports `3F000`, `no schema has been selected to create in`, unqualified relations are not found, and `current_schema()` returns NULL.
 
+`statement_timeout` cancels a statement that runs longer than its limit with `57014`, `canceling statement due to statement timeout`: the limit applies to each top-level statement separately, including each statement of a multi-statement query, from the moment it starts and through its lock waits, and not to the statements a routine runs. `lock_timeout` limits each wait for a relation or row lock and reports `55P03`, `canceling statement due to lock timeout`. Both take milliseconds or a time unit and `0` disables them. A cancellation, whether a client's cancel request, `Engine::cancel` or a statement timeout, is reported once: a PL/pgSQL handler that names `query_canceled` catches it and the statement continues, while `WHEN OTHERS` does not catch it; a lock timeout is an ordinary `lock_not_available` error that `WHEN OTHERS` catches. `pg_sleep(double precision)`, `pg_sleep_for(interval)` and `pg_sleep_until(timestamp with time zone)` sleep for the requested time and end at once when the statement is canceled or times out; a zero, negative or NaN duration returns at once.
+
 `client_min_messages` withholds a notice below its level as the notice is raised, as PostgreSQL decides when it reports one: the default `notice` withholds `RAISE DEBUG` and `RAISE LOG`, `INFO` always reaches the client, and a routine with `SET client_min_messages = warning` silences only the notices raised while it runs. `default_tablespace` accepts the empty string, `pg_default` and `pg_global`; `default_table_access_method` accepts `heap`, reports `55000` for an index access method and `22023` for an unknown one; `default_with_oids` accepts only `false`. `xmloption`, `row_security` and `escape_string_warning` take their PostgreSQL values; `standard_conforming_strings` accepts `on`, and `off` is rejected with `0A000` until the parser honors it.
 
 | Setting | Default or behavior |
@@ -194,6 +196,7 @@ A name of two or more identifiers separated by dots that no parameter defines be
 | `server_encoding`, `client_encoding` | `UTF8` |
 | `DateStyle`, `TimeZone` | `ISO, MDY` and `UTC` |
 | `work_mem` | `64MB` |
+| `statement_timeout`, `lock_timeout` | `0`, no limit |
 | `client_min_messages` | `notice` |
 | `plan_cache_mode` | `auto`, `force_generic_plan`, or `force_custom_plan` |
 | `enable_indexonlyscan` | `on`; `off` makes every query read its rows instead of [index entries](02-ddl.md#relational-b-tree-indexes) |
@@ -660,4 +663,4 @@ Durable SQL and PL/pgSQL routine definitions are restored with the catalog. Rest
 
 ## Cancellation and failure
 
-Cancellation is session-local and cooperative. Routine errors propagate through SQL. An exception handler can catch implemented SQL-state categories inside PL/pgSQL; unhandled errors abort the current statement and should lead the caller to roll back an explicit transaction when its invariant is no longer satisfiable.
+Cancellation is session-local and cooperative, and a statement timeout cancels through the same path. Routine errors propagate through SQL. An exception handler can catch implemented SQL-state categories inside PL/pgSQL; unhandled errors abort the current statement and should lead the caller to roll back an explicit transaction when its invariant is no longer satisfiable.

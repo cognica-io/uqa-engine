@@ -15,6 +15,7 @@ const STATEMENT_BEHAVIOR: &str = "Client Connection Defaults / Statement Behavio
 const LOCALE_AND_FORMATTING: &str = "Client Connection Defaults / Locale and Formatting";
 const PREVIOUS_VERSIONS: &str = "Version and Platform Compatibility / Previous PostgreSQL Versions";
 const PRESET_OPTIONS: &str = "Preset Options";
+const TIMEOUT_DISABLED: Option<&str> = Some("0 disables the timeout.");
 
 /// The message levels of `PostgreSQL`'s `elog.h`, which order `client_min_messages`.
 pub mod message_levels {
@@ -90,6 +91,23 @@ const fn define(
         flags,
         library: None,
     }
+}
+
+const fn timeout(name: &'static str, short_desc: &'static str) -> ParameterDefinition {
+    define(
+        name,
+        ParameterKind::Integer {
+            boot: 0,
+            min: 0,
+            max: i32::MAX,
+            unit: Some(ParameterUnit::Milliseconds),
+        },
+        ParameterContext::User,
+        STATEMENT_BEHAVIOR,
+        short_desc,
+        TIMEOUT_DISABLED,
+        ParameterFlags::NONE,
+    )
 }
 
 const fn boolean(boot: bool) -> ParameterKind {
@@ -247,6 +265,10 @@ static PARAMETERS: &[ParameterDefinition] = &[
             .union(ParameterFlags::NO_SHOW_ALL)
             .union(ParameterFlags::NO_RESET_ALL),
     ),
+    timeout(
+        "lock_timeout",
+        "Sets the maximum allowed duration of any wait for a lock.",
+    ),
     define(
         "plan_cache_mode",
         enumerated(0, PLAN_CACHE_MODES),
@@ -356,6 +378,10 @@ static PARAMETERS: &[ParameterDefinition] = &[
         "Causes '...' strings to treat backslashes literally.",
         None,
         ParameterFlags::REPORT,
+    ),
+    timeout(
+        "statement_timeout",
+        "Sets the maximum allowed duration of any statement.",
     ),
     define(
         "TimeZone",

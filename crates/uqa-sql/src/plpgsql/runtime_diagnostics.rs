@@ -71,10 +71,6 @@ pub fn to_i64_value(value: &Value) -> Result<i64, SQLError> {
     }
 }
 
-pub fn catchable(error: &SQLError) -> bool {
-    !matches!(error, SQLError::Cancelled(_))
-}
-
 /// Message text exposed through SQLERRM: user-routine errors keep
 /// their raw message, engine errors keep their display form.
 pub fn routine_message(error: &SQLError) -> String {

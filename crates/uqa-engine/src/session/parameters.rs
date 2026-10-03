@@ -270,6 +270,11 @@ impl Engine {
                         self.session.state.set_reset_client_level(level);
                     }
                 }
+                if definition.name == "lock_timeout" {
+                    if let Ok(milliseconds) = setting.parse::<u64>() {
+                        self.session.state.set_reset_lock_timeout(milliseconds);
+                    }
+                }
                 self.session
                     .parameters
                     .lock()

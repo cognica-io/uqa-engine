@@ -106,7 +106,6 @@ fn bind(connection: &ManagedConnection, native: bool) -> StorageReadControl {
         connection
             .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions {
                 retained_bytes: 256 * 1024,
-                ..Default::default()
             })
             .unwrap();
         connection.retention_control().unwrap()

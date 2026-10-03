@@ -131,7 +131,9 @@ impl OccurrenceRead<'_> {
                     )) => crate::StorageBackendError::Memory(memory),
                     crate::StorageBackendError::Analysis(
                         uqa_analysis::AnalysisError::Cancelled,
-                    ) => crate::StorageBackendError::Cancelled(uqa_core::QueryCancelled),
+                    ) => crate::StorageBackendError::Cancelled(
+                        uqa_core::QueryCancelled::USER_REQUEST,
+                    ),
                     other => other,
                 })?;
                 let metadata = IndexedFieldMetadata::new(revision, &analyzed);

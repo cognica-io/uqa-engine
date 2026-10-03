@@ -68,6 +68,9 @@ fn eval_function_call_inner(
     if lower == "set_config" {
         return super::session_settings::set_config(&evaluated, ctx);
     }
+    if let Some(result) = super::session_sleep::eval_session_sleep(lower, &evaluated, ctx) {
+        return result;
+    }
 
     if let Some(result) = random::eval_random_function(lower, &call_args, ctx) {
         return result;
