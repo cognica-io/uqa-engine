@@ -13,25 +13,32 @@ use crate::{
 use uqa_core::Value;
 use uqa_sql::SQLError;
 
-pub(super) struct IndexBuildKeys {
+pub(crate) struct IndexBuildKeys {
     rows: SpillBuffer,
     schema: RowSchema,
     relation: uqa_sql::ast::InternalRelationId,
     budget: usize,
+    width: usize,
+    pushed: i64,
 }
 
 impl IndexBuildKeys {
-    pub(super) fn new(width: usize, budget: usize) -> Self {
+    /// Keys of `width` values; each is stored with the position it was pushed at.
+    pub(crate) fn new(width: usize, budget: usize) -> Self {
         let relation = uqa_sql::ast::InternalRelationId::allocate();
         Self {
             rows: SpillBuffer::new(budget),
-            schema: RowSchema::with_internal_relation_types(relation, vec![None; width]),
+            schema: RowSchema::with_internal_relation_types(relation, vec![None; width + 1]),
             relation,
             budget,
+            width,
+            pushed: 0,
         }
     }
 
-    pub(super) fn push(&mut self, values: Vec<Value>) -> Result<(), SQLError> {
+    pub(crate) fn push(&mut self, mut values: Vec<Value>) -> Result<(), SQLError> {
+        values.push(Value::Int(self.pushed));
+        self.pushed += 1;
         self.rows
             .push(Batch::from_physical_rows(
                 self.schema.clone(),
@@ -41,27 +48,31 @@ impl IndexBuildKeys {
         Ok(())
     }
 
-    pub(super) fn validate(
+    /// Sort the keys, which fails on a comparison that fails, and find the key a unique build reports as duplicated: the key of the first row, in the order the rows were pushed, that repeats the key of an earlier row. A key holding a NULL repeats nothing unless NULLs are not distinct.
+    pub(crate) fn first_duplicate(
         self,
-        name: &str,
         unique: bool,
         nulls_not_distinct: bool,
-    ) -> Result<(), SQLError> {
-        let keys = (0..self.schema.physical_width())
-            .map(|index| SortKey {
-                expr: ScalarExpr::InternalColumn(self.relation.column(index)),
-                descending: false,
-                nulls_first: Some(false),
-            })
-            .collect::<Vec<_>>();
+    ) -> Result<Option<Vec<Value>>, SQLError> {
+        let width = self.width;
+        let column = |index| SortKey {
+            expr: ScalarExpr::InternalColumn(self.relation.column(index)),
+            descending: false,
+            nulls_first: Some(false),
+        };
+        let keys = (0..width).map(column).collect::<Vec<_>>();
+        // Rows with equal keys follow one another in the order they were pushed.
+        let order = (0..=width).map(column).collect::<Vec<_>>();
         let mut sorted = Sort::with_work_mem(
             Box::new(SpillScan::new(self.schema, self.rows)),
-            keys.clone(),
+            order,
             vec![],
             self.budget,
         );
         sorted.open().map_err(physical_exec_error)?;
         let mut previous: Option<PhysicalRow> = None;
+        let mut repeated = false;
+        let mut first: Option<(i64, Vec<Value>)> = None;
         while let Some(batch) = sorted.next().map_err(physical_exec_error)? {
             for row in batch.rows {
                 if let Some(previous) = &previous {
@@ -72,24 +83,39 @@ impl IndexBuildKeys {
                         )
                     })
                     .map_err(physical_exec_error)?;
-                    if unique
-                        && ordering.is_eq()
+                    if !ordering.is_eq() {
+                        repeated = false;
+                    } else if unique
+                        && !repeated
                         && (nulls_not_distinct
-                            || !(0..keys.len())
+                            || !(0..width)
                                 .any(|index| matches!(row.value(index), Some(Value::Null))))
                     {
-                        return Err(SQLError::Routine {
-                            sqlstate: "23505".into(),
-                            message: format!(
-                                r#"could not create unique index "{name}": key is duplicated"#
-                            ),
-                        });
+                        // The second row of a run of equal keys is the first to repeat that key.
+                        repeated = true;
+                        let Some(Value::Int(position)) = row.value(width) else {
+                            return Err(SQLError::Internal(
+                                "index build key lost its position".into(),
+                            ));
+                        };
+                        if first
+                            .as_ref()
+                            .is_none_or(|(earliest, _)| position < earliest)
+                        {
+                            first = Some((
+                                *position,
+                                (0..width)
+                                    .map(|index| row.value(index).cloned().unwrap_or(Value::Null))
+                                    .collect(),
+                            ));
+                        }
                     }
                 }
                 previous = Some(row);
             }
         }
-        sorted.close().map_err(physical_exec_error)
+        sorted.close().map_err(physical_exec_error)?;
+        Ok(first.map(|(_, key)| key))
     }
 }
 
@@ -102,26 +128,21 @@ mod tests {
     fn index_builds_check_duplicates_and_null_policy_in_internal_slots() {
         for budget in [1, 1 << 20] {
             for (values, unique, nulls_not_distinct, expected) in [
-                (vec![Value::Int(2), Value::Int(1)], true, false, None),
-                (
-                    vec![Value::Int(1), Value::Int(1)],
-                    true,
-                    false,
-                    Some("23505"),
-                ),
-                (vec![Value::Int(1), Value::Int(1)], false, false, None),
-                (vec![Value::Null, Value::Null], true, false, None),
-                (vec![Value::Null, Value::Null], true, true, Some("23505")),
+                (vec![Value::Int(2), Value::Int(1)], true, false, false),
+                (vec![Value::Int(1), Value::Int(1)], true, false, true),
+                (vec![Value::Int(1), Value::Int(1)], false, false, false),
+                (vec![Value::Null, Value::Null], true, false, false),
+                (vec![Value::Null, Value::Null], true, true, true),
             ] {
                 let mut keys = IndexBuildKeys::new(1, budget);
-                for value in values {
+                for value in values.iter().cloned() {
                     keys.push(vec![value]).unwrap();
                 }
-                match (keys.validate("keys", unique, nulls_not_distinct), expected) {
-                    (Ok(()), None) => (),
-                    (Err(error), Some(expected)) => assert_eq!(error.sqlstate(), Some(expected)),
-                    (result, expected) => panic!("{result:?}, expected {expected:?}"),
-                }
+                let first = values.first().cloned();
+                assert_eq!(
+                    keys.first_duplicate(unique, nulls_not_distinct).unwrap(),
+                    expected.then(|| vec![first.expect("duplicated key")])
+                );
             }
         }
     }
@@ -138,7 +159,7 @@ mod tests {
         for budget in [1, 1 << 20] {
             let mut single = IndexBuildKeys::new(1, budget);
             single.push(vec![invalid.clone()]).unwrap();
-            single.validate("one_key", true, false).unwrap();
+            assert_eq!(single.first_duplicate(true, false).unwrap(), None);
             for unique in [false, true] {
                 for null_prefix in [false, true] {
                     let key = if null_prefix {
@@ -149,7 +170,7 @@ mod tests {
                     let mut duplicate = IndexBuildKeys::new(key.len(), budget);
                     duplicate.push(key.clone()).unwrap();
                     duplicate.push(key).unwrap();
-                    let error = duplicate.validate("two_keys", unique, false).unwrap_err();
+                    let error = duplicate.first_duplicate(unique, false).unwrap_err();
                     assert_eq!(error.sqlstate(), Some("42804"));
                     assert_eq!(error.to_string(), "array is not a valid oidvector");
                 }
@@ -160,9 +181,42 @@ mod tests {
                     .push(vec![Value::Int(prefix), invalid.clone()])
                     .unwrap();
             }
-            distinct_prefix
-                .validate("prefix_first", true, false)
-                .unwrap();
+            assert_eq!(distinct_prefix.first_duplicate(true, false).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn a_unique_build_reports_the_first_row_that_repeats_an_earlier_key() {
+        for budget in [1, 1 << 20] {
+            for (values, nulls_not_distinct, expected) in [
+                (vec![Some(2), Some(2), Some(1), Some(1)], false, Some(2)),
+                (vec![Some(2), Some(1), Some(1), Some(2)], false, Some(1)),
+                (
+                    vec![Some(3), Some(1), Some(2), Some(3), Some(1)],
+                    false,
+                    Some(3),
+                ),
+                (vec![None, None, Some(1), Some(1)], false, Some(1)),
+                (vec![Some(1), Some(1), Some(1)], false, Some(1)),
+            ] {
+                let mut keys = IndexBuildKeys::new(1, budget);
+                for value in values {
+                    keys.push(vec![value.map_or(Value::Null, Value::Int)])
+                        .unwrap();
+                }
+                assert_eq!(
+                    keys.first_duplicate(true, nulls_not_distinct).unwrap(),
+                    expected.map(|value| vec![Value::Int(value)])
+                );
+            }
+            let mut keys = IndexBuildKeys::new(1, budget);
+            for value in [Value::Int(1), Value::Null, Value::Null, Value::Int(1)] {
+                keys.push(vec![value]).unwrap();
+            }
+            assert_eq!(
+                keys.first_duplicate(true, true).unwrap(),
+                Some(vec![Value::Null])
+            );
         }
     }
 }

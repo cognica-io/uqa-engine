@@ -54,6 +54,12 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 &[],
             )?
             .is_empty();
+    let statement_commands = crate::mutation::statement_end::statement_commands(inherited_ctes);
+    let view_statement = crate::mutation::triggers::queue::StatementEvent::new(
+        &target.canonical_name,
+        uqa_sql::ast::TriggerEvent::Delete,
+        &[],
+    );
     let statement_snapshot = match inherited_ctes.and_then(CteScope::command_cte_snapshot) {
         Some(snapshot) => Some(snapshot),
         None if has_before_statement_trigger
@@ -64,29 +70,35 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
         None => None,
     };
     if original_query_survives {
-        crate::mutation::triggers::fire_statement_triggers(
+        statement_commands.after_triggers().fire_before_statement(
             &context.mutation.preparation.referential.triggers,
-            &target.canonical_name,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Delete,
-            &[],
+            &view_statement,
         )?;
     }
-    let execute_read =
+    let mut statement_scope = None;
+    let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
-            let mut ctes = read_context.mutation.scopes.command_scope(
+            let ctes = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
-            )?;
+            )?);
             if let Some(parent) = inherited_ctes {
                 ctes.inherit_cte_bindings(parent);
             }
+            ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
-            crate::query::cte::materialize_plan_ctes(
+            crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
                 &stmt.ctes,
+                || {
+                    uqa_sql::semantics::primary_command_cte_references(
+                        &stmt.ctes,
+                        &stmt.query_inputs(),
+                        stmt.source_input(),
+                    )
+                },
                 params,
-                &mut ctes,
+                ctes,
             )?;
             ctes.scalar_subqueries.clone_from(&stmt.subqueries);
             let row_independent_delete_qualification = if stmt.source.is_none()
@@ -108,7 +120,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                         .expressions,
                     stmt.predicate.as_ref(),
                     params,
-                    &ctes,
+                    ctes,
                 )?
             } else {
                 None
@@ -149,7 +161,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                             aliases: &stmt.returning_aliases,
                             returning: &stmt.returning,
                             params,
-                            ctes: &ctes,
+                            ctes,
                             supplemental_schema: None,
                         },
                     );
@@ -162,7 +174,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                         aliases: &stmt.returning_aliases,
                         returning: &stmt.returning,
                         params,
-                        ctes: &ctes,
+                        ctes,
                         supplemental_schema: None,
                     },
                     Vec::new(),
@@ -350,17 +362,16 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                         },
                         &stmt.returning,
                         params,
-                        &ctes,
+                        ctes,
                     )?);
                 }
             }
             if original_query_survives {
-                crate::mutation::triggers::fire_statement_triggers(
+                crate::mutation::statement_end::end_command(
+                    &statement_commands,
                     &context.mutation.preparation.referential.triggers,
-                    &target.canonical_name,
-                    uqa_sql::ast::TriggerTiming::After,
-                    uqa_sql::ast::TriggerEvent::Delete,
-                    &[],
+                    std::slice::from_ref(&view_statement),
+                    Vec::new(),
                 )?;
             }
             let mut result = finish_view_dml(
@@ -371,7 +382,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                     aliases: &stmt.returning_aliases,
                     returning: &stmt.returning,
                     params,
-                    ctes: &ctes,
+                    ctes,
                     supplemental_schema: source_rows.as_ref().map(crate::SharedSpill::row_schema),
                 },
                 returning_rows,
@@ -386,7 +397,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                         aliases: &stmt.returning_aliases,
                         returning: &stmt.returning,
                         params,
-                        ctes: &ctes,
+                        ctes,
                         supplemental_schema: source_rows
                             .as_ref()
                             .map(crate::SharedSpill::row_schema),
@@ -397,7 +408,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 return rule_returning.project(
                     context.mutation.preparation.returning,
                     params,
-                    &ctes,
+                    ctes,
                     source_rows.as_ref().map(crate::SharedSpill::row_schema),
                 );
             }
@@ -410,8 +421,15 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
             }
             Ok(result)
         };
-    match statement_snapshot.as_deref() {
+    let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
         None => execute_read(context),
-    }
+    }?;
+    crate::mutation::statement_end::finish_statement(
+        context,
+        params,
+        &stmt.ctes,
+        statement_scope.as_mut(),
+    )?;
+    Ok(result)
 }

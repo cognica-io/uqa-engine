@@ -30,6 +30,8 @@ mod sql_blocking_spill;
 mod sql_correlated_subqueries;
 #[path = "sql_cte.rs"]
 mod sql_cte;
+#[path = "queries/sql_cte_command_order.rs"]
+mod sql_cte_command_order;
 #[path = "queries/sql_cte_commands.rs"]
 mod sql_cte_commands;
 #[path = "queries/sql_cte_pg18_controls.rs"]

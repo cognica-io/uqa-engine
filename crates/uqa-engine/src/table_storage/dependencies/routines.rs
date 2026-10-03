@@ -72,7 +72,6 @@ impl Engine {
                     self,
                     &table_name,
                     &mut columns,
-                    &key_constraints,
                     &foreign_keys,
                 )
                 .map_err(|error| {

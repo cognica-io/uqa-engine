@@ -13,7 +13,7 @@ use super::{
 use crate::query::{
     binding::{analyze_query_plan_schema, bind_query_plan_schema},
     block::execute_query_block_output,
-    cte::{materialize_plan_ctes_with_filters, strategy::schedule_plan_ctes},
+    cte::{finish_statement_ctes, materialize_statement_ctes, strategy::schedule_plan_ctes},
     ordering::identity_order_columns,
     output::{QueryOutput, QueryRows},
     projection::{physical_exec_error, physical_work_mem_bytes},
@@ -27,7 +27,7 @@ use std::rc::Rc;
 use uqa_sql::{
     ast::SetOpKind,
     plan::{AccessPathPlan, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan},
-    semantics::sets::validation::validate_values_set_contexts,
+    semantics::{primary_query_cte_references, sets::validation::validate_values_set_contexts},
     SQLError, SQLParam, SQLResult,
 };
 
@@ -70,23 +70,37 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
             ctes.insert_deferred(cte.plan.clone());
         }
         let filters = context.cte_filters.output_filters(plan, ctes)?;
-        materialize_plan_ctes_with_filters(
+        materialize_statement_ctes(
             context.source.ctes,
+            &plan.ctes,
             scheduled
                 .into_iter()
                 .filter(|cte| !cte.deferred)
-                .map(|cte| cte.plan),
+                .map(|cte| cte.plan)
+                .collect(),
+            || primary_query_cte_references(plan),
             params,
             ctes,
             &filters,
         )?;
     }
-    if let Some(snapshot) = ctes.command_cte_snapshot() {
-        return with_query_snapshot(context.snapshots, &snapshot, |selected| {
+    let output = match ctes.command_cte_snapshot() {
+        Some(snapshot) => with_query_snapshot(context.snapshots, &snapshot, |selected| {
             execute_query_root(selected, plan, params, ctes, output_mode)
-        });
+        })?,
+        None => execute_query_root(context, plan, params, ctes, output_mode)?,
+    };
+    if plan.ctes.iter().any(|cte| cte.body.modifies_data()) {
+        finish_statement_ctes(context.source.ctes, params, ctes)?;
+        if let Some(commands) = ctes.statement_commands().cloned() {
+            context
+                .source
+                .ctes
+                .queries
+                .fire_after_triggers(commands.after_triggers())?;
+        }
     }
-    execute_query_root(context, plan, params, ctes, output_mode)
+    Ok(output)
 }
 #[expect(
     clippy::too_many_lines,

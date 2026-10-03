@@ -5,24 +5,18 @@
 //
 
 use super::{
-    lock_mutation_target, prepare_referenced_key_delete_actions, BTreeSet, DocId,
-    MutationLockTarget, PhysicalDocumentIdentity, PreparedDocumentDelete, ReferentialActionContext,
-    ReferentialContext, SQLError, SQLParam,
+    defer_deleted_key_checks, lock_mutation_target, BTreeSet, DocId, MutationLockTarget,
+    PreparedDocumentDelete, ReferentialContext, SQLError,
 };
 
+/// Lock the row that `table` holds at `doc_id` and prepare its delete, firing its BEFORE ROW triggers when `fire_row_triggers` holds, and leave for the transaction the checks of the deferred `NO ACTION` keys it removes. `root_deletes` holds the rows the same statement deletes. `None` when the row is gone or a BEFORE ROW trigger skipped it.
 pub fn prepare_document_delete<S: Clone + 'static>(
     context: &ReferentialContext<'_, S>,
     table: &str,
     doc_id: DocId,
-    params: &[SQLParam],
     root_deletes: &BTreeSet<(String, DocId)>,
-    referential_actions: &mut ReferentialActionContext,
     fire_row_triggers: bool,
 ) -> Result<Option<PreparedDocumentDelete>, SQLError> {
-    let key = (table.to_string(), doc_id);
-    if referential_actions.delete_stack.contains(&key) {
-        return Ok(None);
-    }
     context
         .locking
         .session
@@ -43,19 +37,8 @@ pub fn prepare_document_delete<S: Clone + 'static>(
             .transactions
             .refresh_explicit_statement_snapshot()?;
     }
-    let identity = PhysicalDocumentIdentity {
-        table: table.to_string(),
-        doc_id,
-    };
-    let target = match referential_actions.pending_document(&identity) {
-        Some(Some(document)) => document.clone(),
-        Some(None) => return Ok(None),
-        None => {
-            let Some(document) = context.constraints.reads.get_document(table, doc_id)? else {
-                return Ok(None);
-            };
-            document
-        }
+    let Some(document) = context.constraints.reads.get_document(table, doc_id)? else {
+        return Ok(None);
     };
     if fire_row_triggers
         && crate::mutation::triggers::fire_before_row_triggers(
@@ -63,7 +46,7 @@ pub fn prepare_document_delete<S: Clone + 'static>(
             table,
             uqa_sql::ast::TriggerEvent::Delete,
             doc_id,
-            Some(&target),
+            Some(&document),
             None,
             &[],
         )?
@@ -71,25 +54,10 @@ pub fn prepare_document_delete<S: Clone + 'static>(
     {
         return Ok(None);
     }
-    referential_actions
-        .delete_stack
-        .push((table.to_string(), doc_id));
-    let actions = prepare_referenced_key_delete_actions(
-        context,
-        table,
-        doc_id,
-        &target,
-        params,
-        root_deletes,
-        referential_actions,
-    );
-    referential_actions.delete_stack.pop();
-    let prepared = PreparedDocumentDelete {
+    defer_deleted_key_checks(context, table, doc_id, &document, root_deletes)?;
+    Ok(Some(PreparedDocumentDelete {
         table: table.to_string(),
         doc_id,
-        document: target,
-        actions: actions?,
-    };
-    referential_actions.record_pending_document(identity, None);
-    Ok(Some(prepared))
+        document,
+    }))
 }

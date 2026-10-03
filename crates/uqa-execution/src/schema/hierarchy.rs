@@ -53,6 +53,7 @@ pub struct HierarchyContext<'a> {
     pub constraint_modes: &'a dyn detachment::DetachedConstraintModes,
 }
 
+mod attached_indexes;
 pub mod detachment;
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
@@ -221,10 +222,13 @@ fn attach_partition(
         parent,
         &bound,
     )?;
+    // PostgreSQL builds the partition's indexes while it attaches the partition, and scans the rows against the partition constraint and the foreign keys afterwards.
+    let prior_indexes = attached_indexes::prior_indexes(context, parent, &partition)?;
+    let (subtree, foreign_keys) = inherit_partition_schema(context, parent, &partition, &bound)?;
+    attached_indexes::validate_attached_indexes(context, parent, &prior_indexes)?;
     validate_attached_rows(context, parent, &partition, &bound)?;
     validate_default_partition_exclusion(context, parent, &bound)?;
-
-    let subtree = inherit_partition_schema(context, parent, &partition, &bound)?;
+    foreign_keys.validate(context)?;
     for target in subtree {
         validate_existing_constraints(context, &target)?;
     }
@@ -237,12 +241,13 @@ fn attach_partition(
     )
 }
 
+/// Publish the attached subtree as partitions: the parent's keys and foreign keys reach each table that lacks them. The inherited foreign keys are returned for validation once the rows are known to belong to the partition.
 fn inherit_partition_schema(
     context: &HierarchyContext<'_>,
     parent: &str,
     partition: &str,
     bound: &PartitionBound,
-) -> Result<Vec<String>, SQLError> {
+) -> Result<(Vec<String>, PartitionForeignKeyInheritance), SQLError> {
     let parent_columns = table_columns(context, parent, "ATTACH PARTITION")?;
     let inherited_identity = parent_columns
         .iter()
@@ -308,8 +313,10 @@ fn inherit_partition_schema(
         )
         .map_err(|error| ddl_storage_error("ATTACH PARTITION", error))?;
     }
-    foreign_keys.validate(context)?;
-    Ok(subtree.into_iter().map(|(table, _)| table).collect())
+    Ok((
+        subtree.into_iter().map(|(table, _)| table).collect(),
+        foreign_keys,
+    ))
 }
 
 impl PartitionForeignKeyTables for HierarchyContext<'_> {

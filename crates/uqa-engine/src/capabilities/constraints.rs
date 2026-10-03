@@ -36,6 +36,7 @@ impl Engine {
             referrers: self,
             partitions: self.partition_context(),
             diagnostics: self,
+            memory: self.session.as_ref(),
         }
     }
 }

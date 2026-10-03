@@ -43,11 +43,13 @@ pub fn foreign_key_lookup_values(
     document: &Document,
 ) -> Result<Option<ForeignKeyLookup>, SQLError> {
     let comparison = foreign_key_comparison_types(catalog, table, fk)?;
-    Ok(foreign_key_values(fk, document, &comparison)?
+    Ok(foreign_key_values(table, fk, document, &comparison)?
         .map(|values| ForeignKeyLookup { values, comparison }))
 }
 
+/// The normalized values of the foreign key that the row of `table` holds, or `None` when NULLs exempt the row: any NULL under `MATCH SIMPLE`, all of them under `MATCH FULL`, which rejects a key that mixes NULLs with values as `RI_FKey_check` does.
 pub fn foreign_key_values(
+    table: &str,
     fk: &ForeignKey,
     document: &Document,
     comparison: &ForeignKeyComparison,
@@ -72,15 +74,16 @@ pub fn foreign_key_values(
     match fk.match_type {
         ForeignKeyMatch::Simple => Ok(None),
         ForeignKeyMatch::Full if null_count == local_values.len() => Ok(None),
-        ForeignKeyMatch::Full => {
-            Err(SQLError::Routine {
-                sqlstate: "23503".into(),
-                message: format!(
-                    "insert or update on table violates foreign key constraint \"{}\": MATCH FULL does not allow mixing of null and nonnull key values",
-                    fk.name.as_deref().unwrap_or("<unnamed>")
-                ),
-            })
-        }
+        ForeignKeyMatch::Full => Err(SQLError::Diagnostic {
+            sqlstate: "23503".into(),
+            message: format!(
+                "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
+                foreign_key_relation_name(table),
+                fk.name.as_deref().unwrap_or("<unnamed>")
+            ),
+            detail: Some("MATCH FULL does not allow mixing of null and nonnull key values.".into()),
+            hint: None,
+        }),
     }
 }
 

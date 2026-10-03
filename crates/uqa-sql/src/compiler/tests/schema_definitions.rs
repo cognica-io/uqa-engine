@@ -699,8 +699,8 @@ fn create_table_preserves_typed_composite_keys_and_null_policy() {
     assert_eq!(table.key_constraints[1].columns, vec!["tenant", "email"]);
     assert!(table.key_constraints[1].nulls_not_distinct);
 
-    assert!(table.columns[0].not_null);
-    assert!(table.columns[1].not_null);
+    // A table-level key marks no column while compiling; the analysis of the declaration does.
+    assert!(!table.columns[0].not_null);
     assert!(!table.columns[0].primary_key);
     assert!(!table.columns[1].primary_key);
 }
@@ -725,15 +725,47 @@ fn create_table_preserves_named_column_keys() {
 }
 
 #[test]
-fn create_table_rejects_invalid_key_declarations() {
-    for sql in [
-        "CREATE TABLE t (a INTEGER, CONSTRAINT same UNIQUE (a), CONSTRAINT same CHECK (a > 0))",
-        "CREATE TABLE t (a INTEGER, UNIQUE (missing))",
-        "CREATE TABLE t (a INTEGER, UNIQUE (a, a))",
-        "CREATE TABLE t (a INTEGER PRIMARY KEY, b INTEGER, PRIMARY KEY (b))",
+fn create_table_keeps_key_declarations_for_analysis() {
+    // A key may name an inherited column and has the name of its index, so the declaration's analysis validates keys, not the compiler.
+    for (sql, kinds) in [
+        (
+            "CREATE TABLE t (a INTEGER, CONSTRAINT same UNIQUE (a), CONSTRAINT same CHECK (a > 0))",
+            &[TableKeyConstraintKind::Unique][..],
+        ),
+        (
+            "CREATE TABLE t (a INTEGER, UNIQUE (missing))",
+            &[TableKeyConstraintKind::Unique],
+        ),
+        (
+            "CREATE TABLE t (a INTEGER, UNIQUE (a, a))",
+            &[TableKeyConstraintKind::Unique],
+        ),
+        (
+            "CREATE TABLE t (a INTEGER UNIQUE PRIMARY KEY, b INTEGER, PRIMARY KEY (b))",
+            &[
+                TableKeyConstraintKind::Unique,
+                TableKeyConstraintKind::PrimaryKey,
+                TableKeyConstraintKind::PrimaryKey,
+            ],
+        ),
     ] {
-        assert!(compile(sql).is_err(), "expected invalid DDL to fail: {sql}");
+        let Statement::CreateTable(table) = first(sql) else {
+            panic!("not CREATE TABLE: {sql}");
+        };
+        assert_eq!(
+            table
+                .key_constraints
+                .iter()
+                .map(|key| key.kind)
+                .collect::<Vec<_>>(),
+            kinds,
+            "{sql}"
+        );
     }
+    assert!(compile(
+        "CREATE TABLE t (a INTEGER, CONSTRAINT same CHECK (a > 0), CONSTRAINT same CHECK (a > 1))"
+    )
+    .is_err());
 }
 
 #[test]

@@ -21,9 +21,11 @@ use uqa_sql::{
 };
 pub mod context;
 pub mod recursive;
+mod statement;
 pub(crate) mod strategy;
 pub use context::CteExecutionContext;
 use recursive::materialize_recursive_cte;
+pub use statement::{finish_statement_ctes, materialize_command_ctes, materialize_statement_ctes};
 
 pub fn materialize_plan_ctes<S: Clone>(
     context: CteExecutionContext<'_, S>,

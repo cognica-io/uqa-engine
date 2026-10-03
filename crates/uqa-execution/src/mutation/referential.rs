@@ -9,17 +9,14 @@ use super::{
     assignment::refresh_stored_generated_columns,
     candidate::{MutationLockTarget, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     constraints::{
-        lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-        lock_existing_document_rewrite_foreign_key_dependencies, partition_insert_target,
+        lock_document_key_dependencies, partition_insert_target,
         period::period_foreign_key_coverage, validate_partition_constraint, ConstraintStatement,
     },
     errors::{dml_storage_error, missing_document_error},
-    events::{ReferentialActionContext, ReferentialRewritePreparation},
+    events::ReferentialRewritePreparation,
     identity::{arriving_key_identity, key_relocation},
     locking::{lock_mutation_row, lock_mutation_target, lock_physical_mutation_target},
-    prepared::{
-        PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentRewrite, ReferentialRewrite,
-    },
+    prepared::{PreparedDocumentDelete, PreparedDocumentRewrite, ReferentialRewrite},
 };
 use crate::query::locking::context::update_lock_strength;
 use std::collections::BTreeSet;
@@ -28,8 +25,7 @@ use uqa_sql::{
     ast::{ForeignKey, ForeignKeyAction},
     semantics::{
         foreign_keys::{
-            foreign_key_comparison_types, foreign_key_lookup_values, foreign_key_relation_name,
-            ForeignKeyComparison,
+            foreign_key_comparison_types, foreign_key_lookup_values, ForeignKeyComparison,
         },
         referential::referrers_to_for_actions,
     },
@@ -41,11 +37,13 @@ pub use context::{
     ReferentialContext, ReferentialDeferrals, ReferentialReadSnapshot, ReferentialSnapshots,
 };
 mod actions;
+mod cascades;
+pub mod checks;
 mod delete;
 mod references;
 mod rewrite;
 mod snapshots;
-pub use actions::{prepare_referenced_key_delete_actions, prepare_referenced_key_update_actions};
+pub use actions::{defer_deleted_key_checks, defer_updated_key_checks};
 pub use delete::prepare_document_delete;
 pub use references::{
     apply_set_action_to_child, lock_referencing_child, referencing_rows, ReferencingChildLock,

@@ -66,6 +66,73 @@ pub fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
     reachable
 }
 
+/// The WITH items of `ctes` that the definition of the item at `index` names: the items defined before it, or any item of a recursive list.
+pub fn cte_definition_references(ctes: &[CtePlan], index: usize) -> BTreeSet<String> {
+    let cte = &ctes[index];
+    let visible = if cte.recursive {
+        ctes.iter()
+    } else {
+        ctes[..index].iter()
+    }
+    .map(|cte| cte.name.clone())
+    .collect::<BTreeSet<_>>();
+    let mut references = BTreeSet::new();
+    collect_target_cte_references_from_body(&cte.body, &visible, &BTreeSet::new(), &mut references);
+    references
+}
+
+/// The WITH items of `plan` that its primary query names outside the items' own definitions.
+pub fn primary_query_cte_references(plan: &QueryPlan) -> BTreeSet<String> {
+    let targets = plan
+        .ctes
+        .iter()
+        .map(|cte| cte.name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut references = BTreeSet::new();
+    if !targets.is_empty() {
+        collect_target_cte_references_from_root(
+            &plan.root,
+            &targets,
+            &BTreeSet::new(),
+            &mut references,
+        );
+    }
+    references
+}
+
+/// The WITH items of a data-modifying statement that its own clauses name: the queries and the source relation it evaluates in the scope of `ctes`.
+pub fn primary_command_cte_references(
+    ctes: &[CtePlan],
+    queries: &[&QueryPlan],
+    source: Option<&SourcePlan>,
+) -> BTreeSet<String> {
+    let targets = ctes
+        .iter()
+        .map(|cte| cte.name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut references = BTreeSet::new();
+    if targets.is_empty() {
+        return references;
+    }
+    for query in queries {
+        collect_target_cte_references_from_nested_query(
+            query,
+            &targets,
+            &BTreeSet::new(),
+            &mut references,
+        );
+    }
+    if let Some(source) = source {
+        collect_target_cte_references_from_source(
+            source,
+            &targets,
+            &BTreeSet::new(),
+            &mut references,
+        );
+    }
+    references
+}
+
 pub fn cte_references_own_name(cte: &CtePlan) -> bool {
     let targets = BTreeSet::from([cte.name.clone()]);
     let mut references = BTreeSet::new();

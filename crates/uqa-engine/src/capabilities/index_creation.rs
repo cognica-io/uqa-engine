@@ -48,6 +48,7 @@ impl Engine {
                 reads: self,
                 expressions: self.constraint_execution_context().index_expressions(),
                 memory: runtime.settings,
+                description: self,
             },
             vectors: self,
             publication: self,
@@ -204,5 +205,17 @@ impl IndexCreationPublication for Engine {
         self.register_catalog_index_definition(name, method, table, keys, options, definition)
             .map_err(|error| storage_error("CREATE INDEX", &error))?;
         Ok(())
+    }
+    fn planned_partition_indexes(
+        &self,
+        name: &str,
+        method: &str,
+        table: &str,
+        keys: &[IndexKey],
+        options: &[(String, String)],
+        definition: &IndexDefinition,
+    ) -> Result<std::collections::BTreeMap<String, String>, SQLError> {
+        self.planned_catalog_partition_indexes(name, method, table, keys, options, definition)
+            .map_err(|error| storage_error("CREATE INDEX", &error))
     }
 }

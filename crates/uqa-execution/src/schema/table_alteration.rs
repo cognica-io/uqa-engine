@@ -242,7 +242,6 @@ fn run_alter_table_action<S: Clone + 'static>(
             crate::schema::constraints::add_key_constraint(
                 &context.constraints,
                 &stmt.table,
-                &stmt.qualifier,
                 constraint,
             )?;
         }

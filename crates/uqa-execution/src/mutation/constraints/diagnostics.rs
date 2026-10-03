@@ -17,21 +17,12 @@ pub(super) fn unique_key_detail(
     key: &EnforcedKey,
     values: &[Value],
 ) -> Result<Option<String>, SQLError> {
-    Ok(index_key_detail(context, table, key, values)?
-        .map(|detail| format!("{detail} already exists.")))
+    Ok(enforced_key_description(context, table, key, values)?
+        .map(|key| format!("Key {key} already exists.")))
 }
 
-pub(crate) fn duplicate_index_key_detail(
-    context: ConstraintContext<'_>,
-    table: &str,
-    key: &EnforcedKey,
-    values: &[Value],
-) -> Result<Option<String>, SQLError> {
-    Ok(index_key_detail(context, table, key, values)?
-        .map(|detail| format!("{detail} is duplicated.")))
-}
-
-fn index_key_detail(
+/// `(names)=(values)` for the values of an enforced key, printed with the output types of its index or of its columns; `None` when the current role may not read every key column.
+pub(crate) fn enforced_key_description(
     context: ConstraintContext<'_>,
     table: &str,
     key: &EnforcedKey,
@@ -44,11 +35,7 @@ fn index_key_detail(
     {
         return Ok(None);
     }
-    let catalog_context = diagnostics.catalog;
-    let catalog = catalog_context.catalog_read_view();
-    let resolution = catalog_context
-        .session_execution_view()
-        .relation_name_resolution();
+    let catalog = diagnostics.catalog.catalog_read_view();
     let definition = key
         .index
         .as_ref()
@@ -58,41 +45,82 @@ fn index_key_detail(
         })
         .transpose()
         .map_err(|error| SQLError::Internal(format!("index output types: {error}")))?;
-    let names = key
+    let types = key
         .keys
         .iter()
-        .map(|key| projection::index_key_definition(&catalog, &resolution, key, false))
-        .collect::<Result<Vec<_>, _>>()?
-        .join(", ");
-    let output = OutputNames(catalog_context);
-    let values = values
-        .iter()
         .enumerate()
-        .map(|(position, value)| {
-            if *value == Value::Null {
-                return Ok("null".into());
-            }
-            let ty = match definition
+        .map(|(position, index_key)| {
+            match definition
                 .as_ref()
                 .and_then(|definition| definition.key_types.get(position))
             {
-                Some(ty) => ty.clone(),
+                Some(ty) => Ok(ty.clone()),
                 None => {
-                    let column = key.keys[position].column().ok_or_else(|| {
+                    let column = index_key.column().ok_or_else(|| {
                         SQLError::Internal("stored expression index has no output type".into())
                     })?;
                     context
                         .catalog
                         .column_type(table, column)
                         .map_err(SQLError::Internal)?
-                        .ok_or_else(|| SQLError::UnknownColumn(column.into()))?
+                        .ok_or_else(|| SQLError::UnknownColumn(column.into()))
                 }
-            };
-            uqa_sql::catalog::index::format_key_value(value, &ty, Some(&output))
+            }
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    render_index_key(diagnostics.catalog, &key.keys, &types, values).map(Some)
+}
+
+/// `(names)=(values)` for the values of an index's keys, printed with the keys' output types.
+fn render_index_key(
+    catalog_context: CatalogContext<'_>,
+    keys: &[uqa_sql::ast::IndexKey],
+    key_types: &[ColumnType],
+    values: &[Value],
+) -> Result<String, SQLError> {
+    let catalog = catalog_context.catalog_read_view();
+    let resolution = catalog_context
+        .session_execution_view()
+        .relation_name_resolution();
+    let names = keys
+        .iter()
+        .map(|key| projection::index_key_definition(&catalog, &resolution, key, false))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", ");
+    if values.len() != key_types.len() {
+        return Err(SQLError::Internal(
+            "index key values do not match the key's output types".into(),
+        ));
+    }
+    let output = OutputNames(catalog_context);
+    let values = values
+        .iter()
+        .zip(key_types)
+        .map(|(value, ty)| {
+            if *value == Value::Null {
+                return Ok("null".into());
+            }
+            uqa_sql::catalog::index::format_key_value(value, ty, Some(&output))
         })
         .collect::<Result<Vec<_>, SQLError>>()?
         .join(", ");
-    Ok(Some(format!("Key ({names})=({values})")))
+    Ok(format!("({names})=({values})"))
+}
+
+impl crate::schema::indexes::unique_build::IndexKeyDescription for ConstraintContext<'_> {
+    fn describe_index_key(
+        &self,
+        table: &str,
+        keys: &[uqa_sql::ast::IndexKey],
+        key_types: &[ColumnType],
+        values: &[Value],
+    ) -> Result<Option<String>, SQLError> {
+        let diagnostics = self.diagnostics.diagnostic_context();
+        if !diagnostics.authorization.can_view_index_key(table, keys)? {
+            return Ok(None);
+        }
+        render_index_key(diagnostics.catalog, keys, key_types, values).map(Some)
+    }
 }
 
 /// `Key (columns)=(values)` for values of the columns of a foreign key, named as `table`'s columns and printed with the types of `value_table`'s `value_columns`, as `PostgreSQL`'s `ri_ReportViolation` prints a foreign key's key; `None` when the current role may not read every one of `table`'s columns.

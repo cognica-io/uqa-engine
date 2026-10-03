@@ -7,10 +7,10 @@
 //! `BEFORE`/`AFTER`, row-level, and statement-level trigger execution.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DocId, Value};
-use uqa_sql::ast::{ForeignKeyAction, TriggerEvent, TriggerTiming};
+use uqa_sql::ast::{TriggerEvent, TriggerTiming};
 use uqa_sql::error::Result;
 use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
@@ -98,8 +98,9 @@ impl Drop for TriggerStatementScope {
     }
 }
 
+pub mod queue;
 mod transitions;
-pub use transitions::{build_transition_tables, transition_capture_required, TransitionTables};
+pub use transitions::{transition_capture_required, TransitionTables};
 
 mod row_triggers;
 mod rows;
@@ -369,169 +370,6 @@ fn fire_statement_triggers_with_transition(
     Ok(())
 }
 
-pub fn fire_after_statement_triggers(
-    context: &TriggerContext<'_>,
-    table: &str,
-    event: TriggerEvent,
-    updated_columns: &[String],
-    transition_tables: Option<&TransitionTables>,
-) -> Result<()> {
-    fire_statement_triggers_with_transition(
-        context,
-        table,
-        TriggerTiming::After,
-        event,
-        updated_columns,
-        transition_tables,
-    )
-}
-
-fn fire_after_statement_trigger_generation(
-    context: &TriggerContext<'_>,
-    table: &str,
-    event: TriggerEvent,
-    updated_columns: &[String],
-    transition_tables: &[TransitionTables],
-    generation: usize,
-) -> Result<()> {
-    let matching = transition_tables
-        .iter()
-        .filter(|transition| {
-            transition.matches_statement(table, event) && transition.generation == generation
-        })
-        .collect::<Vec<_>>();
-    if matching.is_empty() {
-        let has_transition_sets = transition_tables
-            .iter()
-            .any(|transition| transition.matches_statement(table, event));
-        if generation == 0 && !has_transition_sets {
-            return fire_after_statement_triggers(context, table, event, updated_columns, None);
-        }
-        return Ok(());
-    }
-    for transition in matching {
-        fire_after_statement_triggers(context, table, event, updated_columns, Some(transition))?;
-    }
-    Ok(())
-}
-
-pub fn after_trigger_generations(transition_tables: &[&TransitionTables]) -> Vec<usize> {
-    let mut generations = transition_tables
-        .iter()
-        .map(|transition| transition.generation)
-        .collect::<BTreeSet<_>>();
-    if generations.is_empty() {
-        generations.insert(0);
-    }
-    generations.into_iter().collect()
-}
-
-#[derive(Default)]
-pub struct ReferentialTriggerStatements {
-    seen: BTreeSet<String>,
-    after: Vec<ReferentialStatementTrigger>,
-}
-
-struct ReferentialStatementTrigger {
-    table: String,
-    event: TriggerEvent,
-    updated_columns: Vec<String>,
-}
-
-impl ReferentialTriggerStatements {
-    pub fn begin(
-        &mut self,
-        context: &TriggerContext<'_>,
-        identity: String,
-        table: &str,
-        event: TriggerEvent,
-        updated_columns: &[String],
-    ) -> Result<()> {
-        if !self.seen.insert(identity) {
-            return Ok(());
-        }
-        if let Some(statement) = self
-            .after
-            .iter_mut()
-            .find(|statement| statement.table == table && statement.event == event)
-        {
-            for column in updated_columns {
-                if !statement.updated_columns.contains(column) {
-                    statement.updated_columns.push(column.clone());
-                }
-            }
-            return Ok(());
-        }
-        fire_statement_triggers(
-            context,
-            table,
-            TriggerTiming::Before,
-            event,
-            updated_columns,
-        )?;
-        self.after.push(ReferentialStatementTrigger {
-            table: table.to_string(),
-            event,
-            updated_columns: updated_columns.to_vec(),
-        });
-        Ok(())
-    }
-
-    pub fn build_transition_tables(
-        &self,
-        context: &TriggerContext<'_>,
-        events: &[AfterRowTriggerEvent],
-    ) -> Result<Vec<TransitionTables>> {
-        let mut tables = Vec::new();
-        for statement in &self.after {
-            tables.extend(build_transition_tables(
-                context,
-                &statement.table,
-                statement.event,
-                &statement.updated_columns,
-                events,
-            )?);
-        }
-        Ok(tables)
-    }
-
-    pub fn fire_after(
-        &self,
-        context: &TriggerContext<'_>,
-        transitions: &[TransitionTables],
-        root_table: &str,
-        root_events: &[TriggerEvent],
-        generation: usize,
-    ) -> Result<()> {
-        let canonical_root = context
-            .relations
-            .try_resolve_table_name(root_table)
-            .map_err(|error| SQLError::Internal(format!("resolve trigger root: {error}")))?
-            .unwrap_or_else(|| root_table.to_string());
-        for statement in &self.after {
-            let canonical_statement = context
-                .relations
-                .try_resolve_table_name(&statement.table)
-                .map_err(|error| {
-                    SQLError::Internal(format!("resolve referential trigger table: {error}"))
-                })?
-                .unwrap_or_else(|| statement.table.clone());
-            if canonical_statement == canonical_root && root_events.contains(&statement.event) {
-                continue;
-            }
-            fire_after_statement_trigger_generation(
-                context,
-                &statement.table,
-                statement.event,
-                &statement.updated_columns,
-                transitions,
-                generation,
-            )?;
-        }
-        Ok(())
-    }
-}
-
 pub fn fire_before_row_triggers(
     context: &TriggerContext<'_>,
     table: &str,
@@ -603,16 +441,20 @@ pub fn fire_before_row_triggers(
     trigger_document(context, table, new)
 }
 
+/// Fire the AFTER ROW triggers of one queued row, and run its foreign key checks and referential actions, which are internal triggers that fire among the user triggers in the order of their names. A referential action queues the events of the rows it writes in `queue`. `transition_table` is the state whose transition tables collected the row, which the first trigger that reads them closes, after the internal triggers that precede it have run.
 fn fire_after_row_trigger(
     context: &TriggerContext<'_>,
     event: &AfterRowTriggerEvent,
-    transition_tables: &[&TransitionTables],
+    transition_table: Option<usize>,
+    queue: &queue::AfterTriggerQueue,
 ) -> Result<()> {
-    let transition_tables = transition_tables
-        .iter()
-        .find(|tables| tables.applies_to(event))
-        .copied();
+    let mut checks = event.foreign_keys.iter().peekable();
     for trigger in &event.triggers {
+        while let Some(check) =
+            checks.next_if(|check| check.precedes_trigger(&trigger.definition.name))
+        {
+            context.foreign_keys.run_foreign_key_check(check, queue)?;
+        }
         if trigger.definition.constraint
             && context.deferrals.constraint_trigger_is_deferred(trigger)?
         {
@@ -636,6 +478,12 @@ fn fire_after_row_trigger(
                 })?;
             continue;
         }
+        let transition_tables = match transition_table {
+            Some(table) if !trigger.definition.transition_relations.is_empty() => {
+                Some(queue.transitions(context, table)?)
+            }
+            _ => None,
+        };
         let _ = invoke_trigger(
             context,
             TriggerInvocation {
@@ -647,8 +495,11 @@ fn fire_after_row_trigger(
                 old: event.old.clone(),
                 new: event.new.clone(),
             },
-            transition_tables,
+            transition_tables.as_deref(),
         )?;
+    }
+    for check in checks {
+        context.foreign_keys.run_foreign_key_check(check, queue)?;
     }
     Ok(())
 }
@@ -689,9 +540,11 @@ pub struct AfterRowTriggerEvent {
     event: TriggerEvent,
     old: Value,
     new: Value,
+    /// Whether `old` and `new` hold the row's images, which a row with no user trigger to fire and no transition to capture leaves out.
+    captured: bool,
     triggers: Vec<uqa_sql::catalog::events::StoredTrigger>,
-    sequence: usize,
-    cascade_parent: Option<usize>,
+    /// The foreign key checks and referential actions the row queued, in the order of their internal triggers' names.
+    foreign_keys: Vec<crate::mutation::referential::checks::ForeignKeyCheck>,
 }
 
 pub struct AfterRowTriggerInput<'a> {
@@ -702,7 +555,8 @@ pub struct AfterRowTriggerInput<'a> {
     pub old_document: Option<&'a Document>,
     pub new_document: Option<&'a Document>,
     pub updated_columns: &'a [String],
-    pub cascade_parent: Option<usize>,
+    /// The foreign key checks and referential actions the row's change queues (`referential::checks`).
+    pub foreign_key_checks: Vec<crate::mutation::referential::checks::ForeignKeyCheck>,
 }
 
 impl AfterRowTriggerEvent {
@@ -718,8 +572,9 @@ impl AfterRowTriggerEvent {
             old_document,
             new_document,
             updated_columns,
-            cascade_parent,
+            mut foreign_key_checks,
         } = input;
+        crate::mutation::referential::checks::ForeignKeyCheck::sort(&mut foreign_key_checks);
         let candidates =
             row_triggers::resolve(context, table, TriggerTiming::After, event, updated_columns)?;
         let capture_transition =
@@ -730,7 +585,7 @@ impl AfterRowTriggerEvent {
                 .iter()
                 .any(|trigger| row_triggers::fires(context, trigger))
         {
-            return Ok(None);
+            return Ok(Self::foreign_key_checks(table, event, foreign_key_checks));
         }
         let types = trigger_column_types(context, table)?;
         let old = trigger_record(context, table, old_doc_id, old_document, false)?;
@@ -750,17 +605,38 @@ impl AfterRowTriggerEvent {
             }
         }
         if matching.is_empty() && !capture_transition {
-            return Ok(None);
+            return Ok(Self::foreign_key_checks(table, event, foreign_key_checks));
         }
         Ok(Some(Self {
             table: table.to_string(),
             event,
             old,
             new,
+            captured: true,
             triggers: matching,
-            sequence: usize::MAX,
-            cascade_parent,
+            foreign_keys: foreign_key_checks,
         }))
+    }
+
+    /// An event that only checks foreign keys and takes referential actions, for a row with no user trigger to fire and no transition to capture; `None` when the row queued neither.
+    pub fn foreign_key_checks(
+        table: &str,
+        event: TriggerEvent,
+        mut foreign_key_checks: Vec<crate::mutation::referential::checks::ForeignKeyCheck>,
+    ) -> Option<Self> {
+        if foreign_key_checks.is_empty() {
+            return None;
+        }
+        crate::mutation::referential::checks::ForeignKeyCheck::sort(&mut foreign_key_checks);
+        Some(Self {
+            table: table.to_string(),
+            event,
+            old: Value::Null,
+            new: Value::Null,
+            captured: false,
+            triggers: Vec::new(),
+            foreign_keys: foreign_key_checks,
+        })
     }
 
     pub fn prepare_transition_capture(
@@ -775,10 +651,10 @@ impl AfterRowTriggerEvent {
             old_document,
             new_document,
             updated_columns,
-            cascade_parent,
+            foreign_key_checks,
         } = input;
         if !transition_capture_required(context, table, event, updated_columns)? {
-            return Ok(None);
+            return Ok(Self::foreign_key_checks(table, event, foreign_key_checks));
         }
         let old = match old_document {
             Some(document) => trigger_record(context, table, old_doc_id, Some(document), false)?,
@@ -788,80 +664,16 @@ impl AfterRowTriggerEvent {
             Some(document) => trigger_record(context, table, new_doc_id, Some(document), false)?,
             None => Value::Null,
         };
+        let mut foreign_key_checks = foreign_key_checks;
+        crate::mutation::referential::checks::ForeignKeyCheck::sort(&mut foreign_key_checks);
         Ok(Some(Self {
             table: table.to_string(),
             event,
             old,
             new,
+            captured: true,
             triggers: Vec::new(),
-            sequence: usize::MAX,
-            cascade_parent,
+            foreign_keys: foreign_key_checks,
         }))
     }
-
-    pub fn push(events: &mut Vec<Self>, mut event: Self) -> usize {
-        let sequence = events.len();
-        event.sequence = sequence;
-        events.push(event);
-        sequence
-    }
-
-    pub fn append(events: &mut Vec<Self>, appended: Vec<Self>) {
-        let sequence_offset = events.len();
-        debug_assert!(appended
-            .iter()
-            .enumerate()
-            .all(|(sequence, event)| event.sequence == sequence));
-        events.reserve(appended.len());
-        for mut event in appended {
-            event.cascade_parent = event.cascade_parent.map(|parent| sequence_offset + parent);
-            Self::push(events, event);
-        }
-    }
-}
-
-pub fn fire_after_row_trigger_events_for_generation(
-    context: &TriggerContext<'_>,
-    events: &[AfterRowTriggerEvent],
-    transition_tables: &[&TransitionTables],
-    generation: usize,
-) -> Result<()> {
-    let mut matching = events
-        .iter()
-        .filter(|event| {
-            transition_tables
-                .iter()
-                .find_map(|tables| tables.generation_for(event))
-                .unwrap_or(0)
-                == generation
-        })
-        .collect::<Vec<_>>();
-    matching.sort_by_key(|event| {
-        transition_tables
-            .iter()
-            .find_map(|tables| tables.order_for(event))
-            .unwrap_or(event.sequence)
-    });
-    for event in matching {
-        fire_after_row_trigger(context, event, transition_tables)?;
-    }
-    Ok(())
-}
-
-pub fn fire_after_statement_trigger_generation_for_root(
-    context: &TriggerContext<'_>,
-    table: &str,
-    event: TriggerEvent,
-    updated_columns: &[String],
-    transition_tables: &[TransitionTables],
-    generation: usize,
-) -> Result<()> {
-    fire_after_statement_trigger_generation(
-        context,
-        table,
-        event,
-        updated_columns,
-        transition_tables,
-        generation,
-    )
 }
