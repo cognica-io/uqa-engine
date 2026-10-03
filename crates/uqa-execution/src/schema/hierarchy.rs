@@ -390,7 +390,8 @@ fn detach_partition(
         return Err(routine(
             "42P01",
             format!(
-                "relation \"{requested_partition}\" is not a partition of relation \"{}\"",
+                "relation \"{}\" is not a partition of relation \"{}\"",
+                local_relation_name(requested_partition),
                 local_relation_name(parent)
             ),
         ));
@@ -406,6 +407,7 @@ fn detach_partition(
         .as_ref()
         .ok_or_else(|| SQLError::Internal("attached partition lost its bound".into()))?
         .clone();
+    detachment::ensure_no_referencing_rows(context, &partition)?;
     detachment::publish(
         context,
         parent,

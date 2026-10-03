@@ -8,6 +8,7 @@
 pub mod context;
 mod deferred;
 mod diagnostics;
+pub(crate) use diagnostics::foreign_key_key;
 pub mod index_keys;
 mod keys;
 pub mod period;

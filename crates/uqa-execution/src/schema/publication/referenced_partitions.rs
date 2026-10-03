@@ -35,7 +35,7 @@ fn storage(error: StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error("derived constraint publication", &error)
 }
 
-fn declared_state(
+pub(crate) fn declared_state(
     context: &SchemaPublicationContext<'_>,
     table: &str,
 ) -> Result<(Vec<ColumnDef>, TableConstraintSet), SQLError> {
@@ -98,7 +98,7 @@ pub(super) fn reconcile_derived_constraints(
 }
 
 /// The foreign keys without a parent that a declaration holds: the copies of a partitioned parent's foreign keys are left out.
-fn declared_foreign_keys(
+pub(crate) fn declared_foreign_keys(
     context: &SchemaPublicationContext<'_>,
     columns: &[ColumnDef],
     constraints: &TableConstraintSet,
