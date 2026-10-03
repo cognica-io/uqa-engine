@@ -1,10 +1,10 @@
-# Upgrading to UQA Engine 0.4.7
+# Upgrading to UQA Engine 0.4.8
 
-Version 0.4.7 corrects supported legacy catalog migration and reopen for default document-API full-text fields, Python graph-name aliases and historical FTS accelerator declarations. Stored values and binary token keys remain unchanged, and incompatible stored representations still fail atomically. It includes the PostgreSQL overload and Nori corrections from 0.4.6. See the [release history](../../../HISTORY.md#047---2026-09-29).
+Version 0.4.8 improves embedded SQL, vector and graph reads and reduces repeated work during writes. It adds index-only reads and corrects PostgreSQL 18 identity columns, integer and BYTEA input, row-trigger definitions and constraint diagnostics. It includes the legacy catalog migration fixes from 0.4.7. See the [release history](../../../HISTORY.md#048---2026-10-03).
 
-When upgrading from before 0.4.5, persistent formats upgrade in one direction. Stop all owners and take a closed-file backup before the first upgraded open; update every process sharing the database together. Earlier incompatible binaries cannot reopen or continue writing upgraded state. Restore the pre-upgrade backup to return to an earlier release. Applications upgrading from before 0.4.0 must also apply the earlier MVCC, Rust API and catalog changes below.
+Stop every process sharing a persistent database and take a closed-file backup before the first upgraded open, then update all owners together. SQLite main records upgrade atomically from format 54 to 55; native SQLite mapping 13, redb main records 53 and SQL catalog 49 remain unchanged. Earlier SQLite binaries reject format 55. Restore the pre-upgrade backup to return to an earlier release. Applications upgrading from before 0.4.0 must also apply the earlier MVCC, Rust API and catalog changes below.
 
-Databases already opened with 0.4.5 or 0.4.6 use the same persistent formats in 0.4.7: SQLite main records 54, native SQLite mapping 13, redb main records 53 and SQL catalog 49.
+The new row-claim and sequence sidecars also require coordinated process upgrades, including providers whose main record format is unchanged. Review the row-lock and sequence sections below, the first-open repair of integer-key identities and B-tree postings, and the corrected identity/BYTEA input behavior before upgrading an application that relied on earlier behavior.
 
 Application-owned raw SQLite tables remain outside the native UQA record model. Initial open still rejects unmapped physical tables; application-specific migration must preserve their data before native conversion. This release does not infer ownership or silently discard those tables.
 
