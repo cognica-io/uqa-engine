@@ -155,6 +155,13 @@ fn bind_secondary_relations<S: Clone + 'static>(
         AlterTableAction::ValidateConstraint { name } => {
             lock_validation_reference(binding, tables, primary, name)?;
         }
+        AlterTableAction::AlterConstraint {
+            name,
+            enforceability: Some(enforced),
+            ..
+        } => {
+            lock_enforceability_reference(binding, tables, primary, name, *enforced)?;
+        }
         _ => {}
     }
     Ok(())
@@ -185,6 +192,63 @@ fn lock_validation_reference<S: Clone + 'static>(
             false,
         )?
         .ok_or_else(|| SQLError::UnknownTable(referenced_table.to_string()))?;
+    }
+    Ok(())
+}
+
+/// A foreign key whose enforceability changes creates or drops the triggers of the table it references and of that table's partitions, which `PostgreSQL` locks `ShareRowExclusive` to create them and `AccessExclusive` to drop them.
+fn lock_enforceability_reference<S: Clone + 'static>(
+    binding: &TableAlterBindingContext<'_>,
+    tables: &TableAlterContext<'_, S>,
+    primary: &str,
+    name: &str,
+    enforced: bool,
+) -> Result<(), SQLError> {
+    let (columns, constraints) =
+        crate::schema::constraints::table_constraint_state(&tables.constraints, primary)?;
+    let Some(location) =
+        uqa_sql::schema::constraint_changes::find_constraint(&columns, &constraints, name)
+    else {
+        return Ok(());
+    };
+    let (referenced_table, current) = match location {
+        uqa_sql::schema::constraint_changes::ConstraintLocation::ColumnForeignKey(index) => {
+            let Some(reference) = columns[index].references.as_ref() else {
+                return Ok(());
+            };
+            (reference.table.clone(), reference.enforced)
+        }
+        uqa_sql::schema::constraint_changes::ConstraintLocation::TableForeignKey(index) => (
+            constraints.foreign_keys[index].ref_table.clone(),
+            constraints.foreign_keys[index].enforced,
+        ),
+        _ => return Ok(()),
+    };
+    if current == enforced {
+        return Ok(());
+    }
+    let mode = if enforced {
+        RelationLockMode::ShareRowExclusive
+    } else {
+        RelationLockMode::AccessExclusive
+    };
+    let referenced = bind_secondary_table(binding, &referenced_table, mode, false)?;
+    let partitioned = tables
+        .hierarchy
+        .partitions
+        .catalog
+        .try_table_hierarchy(&referenced)
+        .map_err(SQLError::Internal)?
+        .partition_spec
+        .is_some();
+    if partitioned {
+        lock_alter_children(binding, &referenced, mode, |parent| {
+            tables
+                .hierarchy
+                .partitions
+                .catalog
+                .direct_hierarchy_children(parent)
+        })?;
     }
     Ok(())
 }
@@ -349,6 +413,18 @@ fn locks_all_descendants<S: Clone + 'static>(
         .is_some()
     {
         return Ok(true);
+    }
+    // ALTER CONSTRAINT of a partitioned table alters the copies on every partition; ONLY fails before reaching them.
+    if matches!(action, AlterTableAction::AlterConstraint { .. }) {
+        return Ok(recurse
+            && context
+                .hierarchy
+                .partitions
+                .catalog
+                .try_table_hierarchy(parent)
+                .map_err(|error| SQLError::Internal(error.to_string()))?
+                .partition_spec
+                .is_some());
     }
     // PostgreSQL prepares ADD CONSTRAINT by locking every inheritor before execution can merge a constraint or stop its propagation with NO INHERIT.
     if matches!(

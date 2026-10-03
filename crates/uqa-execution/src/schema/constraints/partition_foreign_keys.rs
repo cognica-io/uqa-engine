@@ -433,3 +433,71 @@ fn invalidate_above_invalid(
     }
     Ok(())
 }
+
+/// The foreign key without a parent that the copy of family `key_family` on `table` derives from: the one the farthest partitioned ancestor holding the family declares, or `None` when `table`'s foreign key is not a copy.
+pub fn foreign_key_ancestor(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+    key_family: [u8; 16],
+) -> Result<Option<uqa_sql::schema::constraint_changes::ConstraintAncestor>, SQLError> {
+    let mut ancestor = None;
+    let mut current = table.to_string();
+    loop {
+        let hierarchy = context
+            .rows
+            .partitions
+            .catalog
+            .try_table_hierarchy(&current)
+            .map_err(SQLError::Internal)?;
+        let Some(parent) = hierarchy
+            .parents
+            .first()
+            .filter(|_| hierarchy.is_partition())
+            .cloned()
+        else {
+            break;
+        };
+        let (columns, constraints) = table_constraint_state(context, &parent)?;
+        let Some(key) = DeclaredForeignKey::by_family(&columns, &constraints, key_family)
+            .and_then(|location| location.foreign_key(&columns, &constraints))
+        else {
+            break;
+        };
+        ancestor = Some(uqa_sql::schema::constraint_changes::ConstraintAncestor {
+            name: key.name.unwrap_or_default(),
+            table: parent.clone(),
+        });
+        current = parent;
+    }
+    Ok(ancestor)
+}
+
+/// Apply an `ALTER CONSTRAINT` enforceability and deferrability change of a partitioned table's foreign key to its copies on the partitions below it, as `PostgreSQL` alters every constraint deriving from it. A copy that becomes enforced is validated with the foreign key.
+pub fn alter_partition_foreign_keys(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+    key_family: [u8; 16],
+    enforceability: Option<bool>,
+    deferrability: Option<(bool, bool)>,
+) -> Result<(), SQLError> {
+    for node in
+        uqa_sql::semantics::partition::partition_tree(&context.rows.partitions, table, false)?
+    {
+        let (mut columns, mut constraints) = table_constraint_state(context, &node.table)?;
+        let location = DeclaredForeignKey::by_family(&columns, &constraints, key_family)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "partition `{}` holds no copy of its parent's foreign key",
+                    node.table
+                ))
+            })?;
+        location.alter(
+            &mut columns,
+            &mut constraints,
+            enforceability,
+            deferrability,
+        );
+        publish_constraint_state(context, &node.table, columns, constraints)?;
+    }
+    Ok(())
+}

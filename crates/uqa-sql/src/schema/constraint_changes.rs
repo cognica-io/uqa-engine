@@ -218,15 +218,45 @@ pub struct ConstraintAlterOptions {
     pub enforceability: Option<bool>,
     pub deferrability: Option<(bool, bool)>,
     pub no_inherit: Option<bool>,
+    /// The constraint without a parent that the altered constraint derives from, when it is a partition's copy of a foreign key.
+    pub ancestor: Option<ConstraintAncestor>,
+}
+
+/// A constraint without a parent, which the constraints derived from it name in diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstraintAncestor {
+    pub name: String,
+    pub table: String,
+}
+
+/// `ALTER CONSTRAINT` of a constraint derived from another, which `PostgreSQL` refuses so that the derived constraints keep following the one they derive from.
+pub fn derived_constraint_alteration(
+    table: &str,
+    name: &str,
+    ancestor: &ConstraintAncestor,
+) -> SQLError {
+    let local = |table: &str| match uqa_core::RelationIdentity::from_legacy_name(table) {
+        Ok(relation) => Ok(relation.name),
+        Err(error) => Err(SQLError::Internal(error)),
+    };
+    let (relation, ancestor_relation) = match (local(table), local(&ancestor.table)) {
+        (Ok(relation), Ok(ancestor_relation)) => (relation, ancestor_relation),
+        (Err(error), _) | (_, Err(error)) => return error,
+    };
+    SQLError::Diagnostic {
+        sqlstate: "55000".into(),
+        message: format!("cannot alter constraint \"{name}\" on relation \"{relation}\""),
+        detail: Some(format!(
+            "Constraint \"{name}\" is derived from constraint \"{}\" of relation \"{ancestor_relation}\".",
+            ancestor.name
+        )),
+        hint: Some("You may alter the constraint it derives from instead.".into()),
+    }
 }
 pub struct ConstraintAlterEffects {
     pub recreated_foreign_key: Option<ForeignKey>,
     pub validate_after_publish: bool,
 }
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves ordered constraint alteration rules"
-)]
 pub fn apply_constraint_alteration(
     table: &str,
     name: &str,
@@ -238,11 +268,16 @@ pub fn apply_constraint_alteration(
         enforceability,
         deferrability,
         no_inherit,
+        ancestor,
     } = options;
+    // Diagnostics name the relation without its schema, as `RelationGetRelationName` does.
+    let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+        .map_err(SQLError::Internal)?
+        .name;
     let location = find_constraint(columns, constraints, name).ok_or_else(|| {
         constraint_error(
             "42704",
-            format!("constraint \"{name}\" of relation \"{table}\" does not exist"),
+            format!("constraint \"{name}\" of relation \"{relation}\" does not exist"),
         )
     })?;
     let is_foreign_key = matches!(
@@ -253,22 +288,29 @@ pub fn apply_constraint_alteration(
     if enforceability.is_some() && !is_foreign_key {
         return Err(constraint_error(
             "42809",
-            format!("cannot alter enforceability of constraint \"{name}\" of relation \"{table}\""),
+            format!(
+                "cannot alter enforceability of constraint \"{name}\" of relation \"{relation}\""
+            ),
         ));
     }
     if deferrability.is_some() && !is_foreign_key {
         return Err(constraint_error(
             "42809",
             format!(
-                "constraint \"{name}\" of relation \"{table}\" is not a foreign key constraint"
+                "constraint \"{name}\" of relation \"{relation}\" is not a foreign key constraint"
             ),
         ));
     }
     if no_inherit.is_some() && !is_not_null {
         return Err(constraint_error(
             "42809",
-            format!("constraint \"{name}\" of relation \"{table}\" is not a not-null constraint"),
+            format!(
+                "constraint \"{name}\" of relation \"{relation}\" is not a not-null constraint"
+            ),
         ));
+    }
+    if let Some(ancestor) = &ancestor {
+        return Err(derived_constraint_alteration(table, name, ancestor));
     }
     let recreated_foreign_key = if enforceability == Some(true) {
         match location {
@@ -298,41 +340,22 @@ pub fn apply_constraint_alteration(
             }
         }
         ConstraintLocation::ColumnForeignKey(index) => {
-            let foreign_key = columns[index]
-                .references
-                .as_mut()
-                .ok_or_else(|| SQLError::Internal("column FOREIGN KEY disappeared".into()))?;
-            if let Some(enforced) = enforceability {
-                if !enforced {
-                    foreign_key.enforced = false;
-                    foreign_key.validated = false;
-                } else if !foreign_key.enforced {
-                    foreign_key.enforced = true;
-                    foreign_key.validated = false;
-                    validate_after_publish = true;
-                }
-            }
-            if let Some((deferrable, initially_deferred)) = deferrability {
-                foreign_key.deferrable = deferrable;
-                foreign_key.initially_deferred = initially_deferred;
-            }
+            validate_after_publish =
+                crate::schema::inheritance::foreign_keys::DeclaredForeignKey::Column(index).alter(
+                    columns,
+                    constraints,
+                    enforceability,
+                    deferrability,
+                );
         }
         ConstraintLocation::TableForeignKey(index) => {
-            let foreign_key = &mut constraints.foreign_keys[index];
-            if let Some(enforced) = enforceability {
-                if !enforced {
-                    foreign_key.enforced = false;
-                    foreign_key.validated = false;
-                } else if !foreign_key.enforced {
-                    foreign_key.enforced = true;
-                    foreign_key.validated = false;
-                    validate_after_publish = true;
-                }
-            }
-            if let Some((deferrable, initially_deferred)) = deferrability {
-                foreign_key.deferrable = deferrable;
-                foreign_key.initially_deferred = initially_deferred;
-            }
+            validate_after_publish =
+                crate::schema::inheritance::foreign_keys::DeclaredForeignKey::Table(index).alter(
+                    columns,
+                    constraints,
+                    enforceability,
+                    deferrability,
+                );
         }
         ConstraintLocation::ColumnCheck(_)
         | ConstraintLocation::TableCheck(_)

@@ -368,25 +368,36 @@ fn validate_check_rows(
     )
 }
 
+/// `ALTER CONSTRAINT`, which a partitioned table's foreign key applies to the copies on its partitions as well, and which a partition's copy refuses, as `PostgreSQL` does. `ONLY` cannot alter a constraint of a partitioned table.
 pub fn alter_constraint(
     context: &ConstraintAlterContext<'_>,
     table: &str,
     name: &str,
-    enforceability: Option<bool>,
-    deferrability: Option<(bool, bool)>,
-    no_inherit: Option<bool>,
+    mut options: uqa_sql::schema::constraint_changes::ConstraintAlterOptions,
+    recurse: bool,
 ) -> Result<(), SQLError> {
+    let partitioned = is_partitioned(context, table)?;
+    if !recurse && partitioned {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42P16".into(),
+            message: "constraint must be altered in child tables too".into(),
+            detail: None,
+            hint: Some("Do not specify the ONLY keyword.".into()),
+        });
+    }
     let (mut columns, mut constraints) = table_constraint_state(context, table)?;
+    let family = foreign_key_family(&columns, &constraints, name);
+    if let Some(family) = family {
+        options.ancestor =
+            super::partition_foreign_keys::foreign_key_ancestor(context, table, family)?;
+    }
+    let (enforceability, deferrability) = (options.enforceability, options.deferrability);
     let effects = uqa_sql::schema::constraint_changes::apply_constraint_alteration(
         table,
         name,
         &mut columns,
         &mut constraints,
-        uqa_sql::schema::constraint_changes::ConstraintAlterOptions {
-            enforceability,
-            deferrability,
-            no_inherit,
-        },
+        options,
     )?;
     let recreated_foreign_key = effects
         .recreated_foreign_key
@@ -394,6 +405,15 @@ pub fn alter_constraint(
         .map(|foreign_key| foreign_key_constraint_identity(context, table, foreign_key))
         .transpose()?;
     publish_constraint_state(context, table, columns, constraints)?;
+    if let Some(family) = family.filter(|_| partitioned) {
+        super::partition_foreign_keys::alter_partition_foreign_keys(
+            context,
+            table,
+            family,
+            enforceability,
+            deferrability,
+        )?;
+    }
     if effects.validate_after_publish {
         validate_and_mark_constraint(context, table, name)?;
     }
@@ -401,6 +421,21 @@ pub fn alter_constraint(
         context.modes.forget(identity);
     }
     Ok(())
+}
+
+/// The object identity of the foreign key named `name`, which its partition copies share.
+fn foreign_key_family(
+    columns: &[uqa_sql::ast::ColumnDef],
+    constraints: &uqa_sql::ast::TableConstraintSet,
+    name: &str,
+) -> Option<[u8; 16]> {
+    match find_constraint(columns, constraints, name)? {
+        ConstraintLocation::ColumnForeignKey(index) => {
+            columns[index].references.as_ref()?.object_id
+        }
+        ConstraintLocation::TableForeignKey(index) => constraints.foreign_keys[index].object_id,
+        _ => None,
+    }
 }
 
 pub fn add_key_constraint(

@@ -377,3 +377,127 @@ fn reopening_gives_partitions_the_foreign_key_copies_they_lack() {
     exec(&reopened, "ALTER TABLE fk VALIDATE CONSTRAINT fk_a_fkey");
     assert!(validated(&reopened).iter().all(|(_, validated)| *validated));
 }
+
+fn diagnostic(error: uqa_sql::SQLError) -> (String, String, Option<String>, Option<String>) {
+    match error {
+        uqa_sql::SQLError::Diagnostic {
+            sqlstate,
+            message,
+            detail,
+            hint,
+        } => (sqlstate, message, detail, hint),
+        other => panic!("expected diagnostic fields: {other:?}"),
+    }
+}
+
+fn flags(engine: &Engine, column: &str) -> Vec<(String, bool)> {
+    let mut rows = engine
+        .sql(
+            &format!(
+                "SELECT conrelid::regclass::text AS conrelid, {column} AS flag FROM pg_constraint WHERE contype = 'f'"
+            ),
+            &[],
+        )
+        .unwrap()
+        .rows
+        .into_iter()
+        .map(|row| {
+            let Value::Str(table) = &row["conrelid"] else {
+                panic!("unexpected conrelid");
+            };
+            let Value::Bool(flag) = row["flag"] else {
+                panic!("unexpected {column}");
+            };
+            (table.clone(), flag)
+        })
+        .collect::<Vec<_>>();
+    rows.sort();
+    rows
+}
+
+#[test]
+fn altering_a_partitioned_foreign_key_alters_its_copies() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE TABLE pk (a integer PRIMARY KEY)",
+        "CREATE TABLE fk (a integer REFERENCES pk, b integer) PARTITION BY RANGE (b)",
+        "CREATE TABLE fk1 PARTITION OF fk FOR VALUES FROM (0) TO (10) PARTITION BY RANGE (b)",
+        "CREATE TABLE fk11 PARTITION OF fk1 FOR VALUES FROM (0) TO (5)",
+    ] {
+        exec(&engine, sql);
+    }
+    assert_eq!(
+        diagnostic(
+            engine
+                .sql(
+                    "ALTER TABLE ONLY fk ALTER CONSTRAINT fk_a_fkey DEFERRABLE",
+                    &[]
+                )
+                .unwrap_err()
+        ),
+        (
+            "42P16".into(),
+            "constraint must be altered in child tables too".into(),
+            None,
+            Some("Do not specify the ONLY keyword.".into())
+        )
+    );
+    exec(
+        &engine,
+        "ALTER TABLE fk ALTER CONSTRAINT fk_a_fkey DEFERRABLE INITIALLY DEFERRED",
+    );
+    let all = |flag| {
+        ["fk", "fk1", "fk11"]
+            .into_iter()
+            .map(|table| (table.to_string(), flag))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(flags(&engine, "condeferred"), all(true));
+    // A row routed to a leaf partition follows the copy's deferral.
+    exec(&engine, "BEGIN");
+    exec(&engine, "INSERT INTO fk VALUES (9, 1)");
+    exec(&engine, "ROLLBACK");
+    exec(
+        &engine,
+        "ALTER TABLE fk ALTER CONSTRAINT fk_a_fkey NOT ENFORCED",
+    );
+    assert_eq!(flags(&engine, "conenforced"), all(false));
+    exec(&engine, "INSERT INTO fk VALUES (9, 1)");
+    assert_violation(
+        &engine,
+        "ALTER TABLE fk ALTER CONSTRAINT fk_a_fkey ENFORCED",
+        "insert or update on table \"fk11\" violates foreign key constraint \"fk_a_fkey\"",
+    );
+    exec(&engine, "DELETE FROM fk");
+    exec(
+        &engine,
+        "ALTER TABLE fk ALTER CONSTRAINT fk_a_fkey ENFORCED",
+    );
+    assert_eq!(flags(&engine, "conenforced"), all(true));
+    assert_eq!(flags(&engine, "convalidated"), all(true));
+    assert_eq!(
+        diagnostic(
+            engine
+                .sql(
+                    "ALTER TABLE fk11 ALTER CONSTRAINT fk_a_fkey NOT DEFERRABLE",
+                    &[]
+                )
+                .unwrap_err()
+        ),
+        (
+            "55000".into(),
+            "cannot alter constraint \"fk_a_fkey\" on relation \"fk11\"".into(),
+            Some(
+                "Constraint \"fk_a_fkey\" is derived from constraint \"fk_a_fkey\" of relation \"fk\"."
+                    .into()
+            ),
+            Some("You may alter the constraint it derives from instead.".into())
+        )
+    );
+    assert_error(
+        &engine,
+        "ALTER TABLE fk11 ALTER CONSTRAINT fk_a_fkey NO INHERIT",
+        "42809",
+        "constraint \"fk_a_fkey\" of relation \"fk11\" is not a not-null constraint",
+    );
+}

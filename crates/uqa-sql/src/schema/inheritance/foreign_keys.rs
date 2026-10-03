@@ -14,8 +14,10 @@ use crate::SQLError;
 #[cfg(test)]
 mod tests;
 
-fn local_name(table: &str) -> &str {
-    table.rsplit_once('.').map_or(table, |(_, name)| name)
+fn local_name(table: &str) -> Result<String, SQLError> {
+    uqa_core::RelationIdentity::from_legacy_name(table)
+        .map(|relation| relation.name)
+        .map_err(SQLError::Internal)
 }
 
 /// The foreign key of `partition` that `parent_key` attaches among `candidates`, the partition's foreign keys that copy none of its parent's, in name order: the first that references the same key through the same columns with the same deferrability, actions and match type. A candidate that differs from `parent_key` in enforceability alone is an error, as `PostgreSQL` refuses to attach it or to add a second constraint beside it.
@@ -41,7 +43,7 @@ pub fn attachable_foreign_key<'a>(
                     "constraint \"{}\" enforceability conflicts with constraint \"{}\" on relation \"{}\"",
                     parent_key.name.as_deref().unwrap_or_default(),
                     candidate.name.as_deref().unwrap_or_default(),
-                    local_name(partition)
+                    local_name(partition)?
                 ),
                 detail: None,
                 hint: None,
@@ -190,6 +192,56 @@ impl DeclaredForeignKey {
             }
             Self::Table(index) => constraints.foreign_keys[index].validated = validated,
         }
+    }
+
+    /// Apply an `ALTER CONSTRAINT` enforceability and deferrability change. A foreign key that stops being enforced is no longer valid, and one that becomes enforced is not valid until its rows are validated; reports whether it became enforced.
+    pub fn alter(
+        self,
+        columns: &mut [ColumnDef],
+        constraints: &mut TableConstraintSet,
+        enforceability: Option<bool>,
+        deferrability: Option<(bool, bool)>,
+    ) -> bool {
+        let (enforced, validated, deferrable, initially_deferred) = match self {
+            Self::Column(index) => {
+                let Some(reference) = columns[index].references.as_mut() else {
+                    return false;
+                };
+                (
+                    &mut reference.enforced,
+                    &mut reference.validated,
+                    &mut reference.deferrable,
+                    &mut reference.initially_deferred,
+                )
+            }
+            Self::Table(index) => {
+                let foreign_key = &mut constraints.foreign_keys[index];
+                (
+                    &mut foreign_key.enforced,
+                    &mut foreign_key.validated,
+                    &mut foreign_key.deferrable,
+                    &mut foreign_key.initially_deferred,
+                )
+            }
+        };
+        let mut became_enforced = false;
+        match enforceability {
+            Some(false) => {
+                *enforced = false;
+                *validated = false;
+            }
+            Some(true) if !*enforced => {
+                *enforced = true;
+                *validated = false;
+                became_enforced = true;
+            }
+            Some(true) | None => {}
+        }
+        if let Some((deferrable_value, initially_deferred_value)) = deferrability {
+            *deferrable = deferrable_value;
+            *initially_deferred = initially_deferred_value;
+        }
+        became_enforced
     }
 
     pub fn set_family(
