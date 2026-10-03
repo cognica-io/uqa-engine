@@ -18,7 +18,7 @@ use uqa_execution::catalog::sequence::values::context::{
 use uqa_sql::{catalog::sequence_functions::value_error::SequenceValueError, SQLError};
 use uqa_storage::{PersistentStorageSession, StorageBackendResult};
 struct SessionRead<'a>(parking_lot::RwLockReadGuard<'a, SessionStateSnapshot>);
-struct SessionWrite<'a>(parking_lot::RwLockWriteGuard<'a, SessionStateSnapshot>);
+struct SessionWrite<'a>(crate::state::SessionStateWriteGuard<'a>);
 impl SequenceSessionRead for SessionRead<'_> {
     fn currvals(&self) -> &BTreeMap<RelationIdentity, SessionSequenceValue> {
         &self.0.sequence_currvals

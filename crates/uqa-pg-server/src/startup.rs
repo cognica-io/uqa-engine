@@ -8,16 +8,16 @@ use uqa_engine::Engine;
 use uqa_pg_wire::StartupMessage;
 use uqa_sql::SQLError;
 
-pub(crate) const REPORTED_PARAMETERS: &[&str] = &[
-    "server_version",
-    "server_encoding",
-    "client_encoding",
-    "application_name",
-    "DateStyle",
-    "TimeZone",
-    "integer_datetimes",
-    "standard_conforming_strings",
-];
+/// The parameters whose changes the server reports to the client in `ParameterStatus` messages (`GUC_REPORT`).
+pub(crate) fn reported_parameters() -> impl Iterator<Item = &'static str> {
+    use uqa_sql::semantics::parameters::{
+        catalog::parameter_definitions, definition::ParameterFlags,
+    };
+    parameter_definitions()
+        .iter()
+        .filter(|definition| definition.has_flag(ParameterFlags::REPORT))
+        .map(|definition| definition.name)
+}
 
 pub(crate) fn configure(engine: &Engine, startup: &StartupMessage) -> Result<(), SQLError> {
     for (name, value) in &startup.parameter_pairs {
@@ -26,10 +26,10 @@ pub(crate) fn configure(engine: &Engine, startup: &StartupMessage) -> Result<(),
             name if name.starts_with("_pq_.") => {}
             "options" => {
                 for (name, value) in parse_options(value)? {
-                    engine.set_variable(&name, &value)?;
+                    engine.set_client_parameter(&name, &value)?;
                 }
             }
-            _ => engine.set_variable(name, value)?,
+            _ => engine.set_client_parameter(name, value)?,
         }
     }
     Ok(())

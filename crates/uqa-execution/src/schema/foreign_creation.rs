@@ -47,7 +47,7 @@ pub struct ForeignCreationContext<'a> {
     pub changes: &'a dyn CatalogPublicationChanges,
     pub sequences: ImplicitSequenceContext<'a>,
     pub ownership: ImplicitOwnershipContext<'a>,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
     pub allocate_identity: fn() -> StorageBackendResult<[u8; 16]>,
 }
 struct ForeignTableCreationTarget {
@@ -121,7 +121,7 @@ impl ForeignCreationContext<'_> {
             .is_some()
         {
             if if_not_exists {
-                self.notices.lock().push(
+                self.notices.push(
                     uqa_sql::SQLNotice::notice(format!(
                         "relation \"{}\" already exists, skipping",
                         relation.name

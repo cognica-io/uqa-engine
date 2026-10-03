@@ -170,10 +170,10 @@ impl CatalogSession for Session {
             lookup_mode: crate::catalog::RelationLookupMode::Dynamic,
         }
     }
-    fn show_variable(&self, _: &str) -> Result<String, SQLError> {
+    fn show_parameter(&self, _: &str) -> Result<(String, String), SQLError> {
         unreachable!()
     }
-    fn runtime_parameter_source(&self, _: &str) -> &'static str {
+    fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
         unreachable!()
     }
     fn prepared_statements(&self) -> Vec<uqa_sql::catalog::session::PreparedStatementMetadata> {

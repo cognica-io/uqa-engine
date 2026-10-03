@@ -284,7 +284,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         )
                     })
                 {
-                    context.runtime.notices.lock().push(
+                    context.runtime.notices.push(
                         uqa_sql::semantics::effects::transaction_blocks::no_transaction_in_progress_warning(),
                     );
                     last = SQLResult::empty();
@@ -310,7 +310,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         )
                     })
                 {
-                    context.runtime.notices.lock().push(
+                    context.runtime.notices.push(
                         uqa_sql::semantics::effects::transaction_blocks::no_transaction_in_progress_warning(),
                     );
                 }

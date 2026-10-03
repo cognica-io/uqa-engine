@@ -136,11 +136,9 @@ pub trait EngineHook {
         Ok(None)
     }
 
-    /// Resolve the first existing schema on the logical session's search
-    /// path. `None` lets standalone expression evaluation use its `public`
-    /// compatibility default.
+    /// The first schema of the session's search path that exists and that the role may use, or `None` when there is none, which `current_schema()` reports as NULL. A hook without a session reports `public`, the first schema of the default search path.
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
-        Ok(None)
+        Ok(Some("public".into()))
     }
 
     fn current_user(&self) -> std::result::Result<Option<String>, crate::SQLError> {
@@ -153,6 +151,18 @@ pub trait EngineHook {
 
     /// Read a session setting. `None` means the parameter is unknown; errors must remain visible even for `current_setting(..., true)`.
     fn runtime_parameter(&self, _name: &str) -> Result<Option<String>> {
+        Err(SQLError::Unsupported(
+            "engine hook does not provide session settings".into(),
+        ))
+    }
+
+    /// Assign a session setting as `set_config(name, value, is_local)` does, restoring the reset setting for `None`, and return the new value as `SHOW` reports it.
+    fn set_runtime_parameter(
+        &self,
+        _name: &str,
+        _value: Option<&str>,
+        _local: bool,
+    ) -> Result<String> {
         Err(SQLError::Unsupported(
             "engine hook does not provide session settings".into(),
         ))

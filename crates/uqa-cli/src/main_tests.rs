@@ -401,7 +401,9 @@ fn terminator_detection_waits_for_atomic_body_end() {
 fn meta_ds_lists_sequences_using_search_path() {
     let engine = Engine::new();
     engine.sql("CREATE SCHEMA app", &[]).unwrap();
-    engine.set_search_path(vec!["app".into(), "public".into()]);
+    engine
+        .set_search_path(&["app".into(), "public".into()])
+        .unwrap();
     assert!(engine.create_sequence("acct_seq", 10, 2, false).unwrap());
     assert_eq!(engine.nextval("acct_seq").unwrap(), 10);
     let mut session = Session {

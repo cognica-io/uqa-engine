@@ -589,6 +589,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "to_char"
         | "timeofday"
         | "current_setting"
+        | "set_config"
         | "merge_action"
         | "string_to_table"
         | "regexp_split_to_table"

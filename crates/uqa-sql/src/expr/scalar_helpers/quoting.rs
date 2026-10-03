@@ -11,7 +11,7 @@ use uqa_core::{
     ValueRetentionError,
 };
 
-/// Double-quote unless the identifier is a safe lowercase name that is not a keyword.
+/// Double-quote unless the identifier starts with a lowercase letter or an underscore, holds only lowercase letters, digits and underscores, and is not a keyword other than an unreserved one (`quote_identifier`).
 pub fn quote_ident(ident: &str) -> String {
     quote_ident_with_control(ident, &ProductionControl::uncontrolled())
         .expect("ordinary identifier quoting")
@@ -29,7 +29,7 @@ pub(in crate::expr) fn quote_ident_with_control(
         control.check()?;
         safe &= character.is_ascii_lowercase()
             || character == '_'
-            || (index > 0 && (character.is_ascii_digit() || character == '$'));
+            || (index > 0 && character.is_ascii_digit());
     }
     if safe && !super::is_quoted_keyword(ident) {
         return control.copy_text(ident);

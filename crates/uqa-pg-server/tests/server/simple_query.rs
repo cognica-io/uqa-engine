@@ -339,3 +339,58 @@ fn cancellation_uses_the_session_key_and_recovers() {
         json!([["42"]])
     );
 }
+
+fn parameter_statuses(
+    messages: &[super::client::Message],
+) -> std::collections::BTreeMap<String, String> {
+    messages
+        .iter()
+        .filter(|(tag, _)| *tag == b'S')
+        .map(|(_, body)| {
+            let mut body = body.as_slice();
+            let name = super::client::read_string(&mut body);
+            let value = super::client::read_string(&mut body);
+            (name, value)
+        })
+        .collect()
+}
+
+#[test]
+fn startup_reports_every_reported_parameter_and_reset_restores_client_settings() {
+    let fixture = Fixture::new();
+    let (mut client, startup) = Client::connect(fixture.server.local_addr(), "uqa", "uqa", 196_610);
+    let reported = parameter_statuses(&startup);
+    assert_eq!(
+        reported.keys().map(String::as_str).collect::<Vec<_>>(),
+        [
+            "DateStyle",
+            "TimeZone",
+            "application_name",
+            "client_encoding",
+            "default_transaction_read_only",
+            "in_hot_standby",
+            "integer_datetimes",
+            "is_superuser",
+            "search_path",
+            "server_encoding",
+            "server_version",
+            "session_authorization",
+            "standard_conforming_strings",
+        ]
+    );
+    assert_eq!(reported["application_name"], "wire-test");
+    assert_eq!(reported["is_superuser"], "on");
+    assert_eq!(reported["search_path"], "\"$user\", public");
+    assert_eq!(reported["session_authorization"], "uqa");
+    let changed =
+        parameter_statuses(&client.query("SET search_path = app; SET application_name = 'other'"));
+    assert_eq!(changed["search_path"], "app");
+    assert_eq!(changed["application_name"], "other");
+    let reset = parameter_statuses(&client.query("RESET application_name"));
+    assert_eq!(reset["application_name"], "wire-test");
+    let response = client.query("SELECT source FROM pg_settings WHERE name = 'application_name'");
+    assert_eq!(
+        evidence(&response)["results"][0]["rows"],
+        json!([["client"]])
+    );
+}

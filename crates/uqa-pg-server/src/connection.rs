@@ -19,7 +19,7 @@ use uqa_sql::SQLError;
 
 use crate::results::{send_notices, send_result, sql_error};
 use crate::server::{Client, ServerConfig, Shared};
-use crate::startup::{self, REPORTED_PARAMETERS};
+use crate::startup::{self, reported_parameters};
 use crate::transport::Transport;
 use crate::ServerError;
 
@@ -268,14 +268,14 @@ fn send_parameters(
     transport: &mut Transport,
     session: &mut Session<'_>,
 ) -> Result<(), ServerError> {
-    for name in REPORTED_PARAMETERS {
+    for name in reported_parameters() {
         let value = session.engine.show_variable(name)?;
-        if session.reported.get(*name) != Some(&value) {
+        if session.reported.get(name) != Some(&value) {
             transport.send(&BackendMessage::ParameterStatus {
-                name: (*name).into(),
+                name: name.into(),
                 value: value.clone(),
             })?;
-            session.reported.insert((*name).into(), value);
+            session.reported.insert(name.into(), value);
         }
     }
     Ok(())

@@ -12,6 +12,7 @@ use crate::{Engine, SQLCursor, SQLCursorSummary};
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 
 struct SQLExecutionScope<'a> {
+    engine: &'a Engine,
     depth: &'a std::sync::atomic::AtomicUsize,
     statement_clock: &'a std::sync::atomic::AtomicI64,
     previous_clock: Option<i64>,
@@ -30,6 +31,7 @@ impl<'a> SQLExecutionScope<'a> {
         });
         (
             Self {
+                engine,
                 depth,
                 statement_clock,
                 previous_clock,
@@ -49,6 +51,10 @@ impl Drop for SQLExecutionScope<'_> {
             .depth
             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         debug_assert!(previous != 0, "SQL execution depth underflow");
+        // A statement outside a transaction block runs in a transaction of its own, so the LOCAL assignments it made (`set_config(..., true)`) end with it.
+        if previous == 1 && self.engine.transaction_depth() == 0 {
+            self.engine.restore_local_runtime_parameters();
+        }
     }
 }
 

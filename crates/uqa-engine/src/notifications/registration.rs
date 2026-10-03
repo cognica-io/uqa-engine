@@ -6,7 +6,7 @@
 
 //! Bounded retained registration permits and cancellable Engine state gates.
 
-use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
+use parking_lot::{Mutex, MutexGuard, RwLockReadGuard};
 use std::{
     sync::{Arc, Weak},
     time::Duration,
@@ -103,13 +103,14 @@ pub(super) fn lock<'a, T>(
     }
 }
 
-pub(super) fn read<'a, T>(
-    mutex: &'a RwLock<T>,
+/// Read the session's values once no writer holds them, unless `cancellation` fires first.
+pub(super) fn read<'a>(
+    lock: &'a crate::state::SessionStateLock,
     cancellation: &CancellationToken,
-) -> Result<RwLockReadGuard<'a, T>, SQLError> {
+) -> Result<RwLockReadGuard<'a, crate::SessionStateSnapshot>, SQLError> {
     loop {
         cancellation.check()?;
-        if let Some(guard) = mutex.try_read_for(WAIT_SLICE) {
+        if let Some(guard) = lock.try_read_for(WAIT_SLICE) {
             cancellation.check()?;
             return Ok(guard);
         }

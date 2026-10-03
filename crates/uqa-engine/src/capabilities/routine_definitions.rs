@@ -170,7 +170,7 @@ impl Engine {
 }
 impl RoutineCompilationSession for Engine {
     fn routine_search_path(&self) -> Vec<String> {
-        self.session.state.read().search_path.clone()
+        crate::session::effective_search_path(&self.session.state.read())
     }
     fn replace_routine_search_path(&self, path: Vec<String>) -> Vec<String> {
         std::mem::replace(&mut self.session.state.write().search_path, path)
@@ -202,6 +202,14 @@ impl RoutineConfigurationSession for Engine {
     }
     fn show_routine_variable(&self, name: &str) -> Result<String, SQLError> {
         self.show_variable(name)
+    }
+    fn routine_variable_name(&self, name: &str) -> Result<String, SQLError> {
+        self.session_execution_view()
+            .show_parameter(name)
+            .map(|(name, _)| name)
+    }
+    fn load_language_library(&self, language: &str) {
+        self.load_language(language);
     }
 }
 impl Engine {

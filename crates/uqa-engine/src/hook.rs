@@ -164,6 +164,15 @@ impl uqa_sql::expr::EngineHook for Engine {
         Ok(self.session_execution_view().runtime_parameter(name))
     }
 
+    fn set_runtime_parameter(
+        &self,
+        name: &str,
+        value: Option<&str>,
+        local: bool,
+    ) -> std::result::Result<String, SQLError> {
+        self.set_config(name, value, local)
+    }
+
     fn current_schemas(
         &self,
         include_implicit: bool,

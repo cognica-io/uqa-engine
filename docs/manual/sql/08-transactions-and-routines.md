@@ -175,31 +175,40 @@ The [compatibility ledger](09-compatibility.md) tracks the remaining preparation
 
 `SET [SESSION] name TO value` changes a session value; transaction rollback undoes it. `SET LOCAL name TO value` applies through the current transaction and restores the preceding session value at its end. Outside a transaction block, `SET LOCAL` and `SET TRANSACTION` warn with `25P01`, `SET LOCAL can only be used in transaction blocks`, and last only for their own statement; a multi-statement query runs in an implicit block and a function in its caller's transaction, so neither warns there. Savepoint rollback restores both the active value and any pending local restoration. A later session SET supersedes a preceding local assignment. `SET name TO DEFAULT` restores the default while reporting a SET completion tag; RESET reports RESET. The current-transaction settings `transaction_isolation`, `transaction_read_only`, and `transaction_deferrable` cannot be reset and report `0A000`. `plan_cache_mode` accepts case-insensitive complete enum values, rejects other values with `22023`, and exposes its current value, source, allowed values, and default through `pg_settings`.
 
-Known settings include:
+Parameters follow PostgreSQL 18's definitions: each has a type, a context that decides who may change it, and the category, descriptions, bounds and boot value that `pg_settings` reports. Names are case-insensitive, `SHOW` names its column after the canonical spelling (`SHOW timezone` returns a `TimeZone` column), and a former name such as `sort_mem` refers to `work_mem`. A Boolean accepts `parse_bool`'s spellings (a prefix of `true`, `false`, `yes` or `no`, two or more letters of `on` or `off`, `1` or `0`) and shows `on` or `off`. An enumerated value is matched case-insensitively, including hidden aliases such as `debug` for `debug2`, and shows its canonical name. An integer reads C `strtol` and `strtod` syntax, including octal and hexadecimal forms and fractions, with an optional unit (`us`, `ms`, `s`, `min`, `h`, `d` for times and `B`, `kB`, `MB`, `GB`, `TB` for memory) that rounds a fraction to the next smaller unit; it is kept in its base unit and shown in the greatest unit that divides it, so `SET work_mem = 65536` shows `64MB` and `pg_settings.setting` reports `65536` with unit `kB`. Invalid values report `22023` with PostgreSQL's messages and hints: `parameter "name" requires a Boolean value`, `invalid value for parameter "name": "value"` with the valid units, the available values or `Value exceeds integer range.`, and `63 kB is outside the valid range for parameter "work_mem" (64 kB .. 2147483647 kB)`. Only a list parameter (`search_path`, `DateStyle`) takes several `SET` arguments, joined with `, `; any other reports `SET name takes only one argument`. A preset parameter reports `55P02`, `parameter "name" cannot be changed`, and a superuser parameter such as `session_replication_role` reports `42501` for other roles. A name parameter (`application_name`, `client_encoding`, `default_tablespace`, `default_table_access_method`) longer than an identifier is truncated after a `42622` notice, and `application_name` writes bytes outside printable ASCII as `\xNN`.
+
+A name of two or more identifiers separated by dots that no parameter defines becomes a custom placeholder holding text, as PostgreSQL's custom parameters do: `SET myapp.tenant = 'a'` and `set_config('myapp.tenant', 'a', false)` create it, `current_setting('myapp.tenant')` reads it, and it keeps the spelling it was created with. A placeholder outlives the transaction that created it, so after a rolled-back `SET` it reads as an empty string, and `RESET` of a custom name creates an empty one. An invalid custom name reports `42602` with PostgreSQL's detail, and a single-part name that nothing defines reports `42704`. The parameters a library defines appear when the session loads it: `plpgsql.check_asserts` is a placeholder until the session first uses PL/pgSQL (a `DO` block, a PL/pgSQL routine's creation or call, or `LOAD 'plpgsql'`); loading converts a placeholder of a defined parameter into its setting and removes any other placeholder under the `plpgsql` prefix with a `42602` warning, after which the prefix is reserved.
+
+`set_config(setting_name text, new_value text, is_local boolean)` assigns a setting as `SET` or, when `is_local` is true, as `SET LOCAL` does, and returns the new value as `SHOW` reports it. A NULL name reports `22004`, `SET requires parameter name`; a NULL value restores the reset value; a NULL `is_local` assigns for the session. A local assignment outside a transaction block lasts until its statement ends, without a warning. The function is VOLATILE and parallel unsafe.
+
+`SHOW ALL` returns the name, setting and description of every parameter that `pg_settings` lists, in case-insensitive name order; the authorization parameters, `is_superuser`, `default_with_oids` and placeholders are hidden from both. `pg_settings.source` reports `default`, `client` for a setting the client gave at startup, `session` after a `SET`, and `override` for a transaction characteristic the transaction did not assign; `reset_val` reports the value `RESET` restores, which is the client's startup value where it gave one, and `boot_val` PostgreSQL's boot value. The engine starts `client_encoding` and `server_encoding` at `UTF8`, `TimeZone` at `UTC` and `work_mem` at `64MB`.
+
+`search_path` keeps the text it was set to, as PostgreSQL does: `SET search_path = a, 'My S'` shows `a, "My S"`, `set_config` keeps its text as given, and the default is `"$user", public`. The list is split as an identifier list, downcasing unquoted names; invalid syntax reports `22023` with the detail `List syntax is invalid.`. Name resolution reads `$user` as the current role's name, skips schemas that do not exist or that the role may not use, and finds no schema to create in when none remains: with an empty path, unqualified `CREATE TABLE` reports `3F000`, `no schema has been selected to create in`, unqualified relations are not found, and `current_schema()` returns NULL.
+
+`client_min_messages` withholds a notice below its level as the notice is raised, as PostgreSQL decides when it reports one: the default `notice` withholds `RAISE DEBUG` and `RAISE LOG`, `INFO` always reaches the client, and a routine with `SET client_min_messages = warning` silences only the notices raised while it runs. `default_tablespace` accepts the empty string, `pg_default` and `pg_global`; `default_table_access_method` accepts `heap`, reports `55000` for an index access method and `22023` for an unknown one; `default_with_oids` accepts only `false`. `xmloption`, `row_security` and `escape_string_warning` take their PostgreSQL values; `standard_conforming_strings` accepts `on`, and `off` is rejected with `0A000` until the parser honors it.
 
 | Setting | Default or behavior |
 | --- | --- |
-| `search_path` | Schema resolution path |
-| `server_version` | Read-only compatibility value `18.0-uqa` |
-| `server_encoding` | Read-only `UTF8` |
-| `client_encoding` | Mutable, default `UTF8` |
-| `datestyle` | Mutable, default `ISO, MDY` |
-| `timezone` | Mutable, default `UTC` |
-| `work_mem` | Mutable, default `64MB` |
-| `plan_cache_mode` | `auto`, `force_generic_plan`, or `force_custom_plan`; default `auto` |
-| `enable_indexonlyscan` | Mutable Boolean, default `on`; `off` makes every query read its rows instead of [index entries](02-ddl.md#relational-b-tree-indexes) |
-| `default_transaction_isolation` | Mutable transaction default, `read committed` |
-| `default_transaction_read_only` | Mutable transaction default, `off` |
-| `default_transaction_deferrable` | Mutable transaction default, `off` |
-| `transaction_isolation` | Current transaction value |
-| `transaction_read_only` | Current transaction value |
-| `transaction_deferrable` | Current transaction value |
+| `search_path` | `"$user", public` |
+| `server_version`, `server_version_num` | Preset `18.0-uqa` and `180000` |
+| `server_encoding`, `client_encoding` | `UTF8` |
+| `DateStyle`, `TimeZone` | `ISO, MDY` and `UTC` |
+| `work_mem` | `64MB` |
+| `client_min_messages` | `notice` |
+| `plan_cache_mode` | `auto`, `force_generic_plan`, or `force_custom_plan` |
+| `enable_indexonlyscan` | `on`; `off` makes every query read its rows instead of [index entries](02-ddl.md#relational-b-tree-indexes) |
+| `default_transaction_isolation`, `default_transaction_read_only`, `default_transaction_deferrable` | Transaction defaults `read committed`, `off`, `off` |
+| `transaction_isolation`, `transaction_read_only`, `transaction_deferrable` | The current transaction's values |
+| `session_replication_role` | Superuser setting, `origin` |
+| `application_name`, `default_tablespace`, `default_table_access_method` | Empty, empty and `heap` |
+| `standard_conforming_strings`, `escape_string_warning`, `row_security`, `xmloption`, `default_with_oids` | `on`, `on`, `on`, `content`, `off` |
+| `integer_datetimes`, `in_hot_standby`, `is_superuser` | Preset values; `is_superuser` follows the session or `SET ROLE` role |
 
 ```sql
 SET search_path TO application, public;
 SHOW search_path;
-SET timezone TO 'UTC';
-SHOW timezone;
+SELECT set_config('application_name', 'reporting', false);
+SHOW ALL;
 ```
 
 `current_setting(setting_name text [, missing_ok boolean])` reads a setting by its case-insensitive text name and returns the current `text` value, as `SHOW` does. The call reads the active session and transaction without changing them; prepared calls read the current value each time they execute. Both overloads are strict and STABLE and are also available through `pg_catalog.current_setting`.
@@ -351,7 +360,7 @@ The implemented syntax is `ASSERT condition [, message];`. The condition uses PL
 
 A successful assertion does not change `FOUND` or `ROW_COUNT`. An exception handler can catch `assert_failure` by name, while `WHEN OTHERS` excludes it as in PostgreSQL 18. Sequence calls and other nontransactional sequence effects evaluated by a failing assertion remain visible after the handler's subtransaction rollback.
 
-`plpgsql.check_asserts` is a user-settable Boolean setting that defaults to `on` and is exposed through `pg_settings`. When it is `off`, the assertion skips both its condition and message without evaluating either expression. A routine-local `SET plpgsql.check_asserts = off` applies only while that routine executes.
+`plpgsql.check_asserts` is a user-settable Boolean setting that defaults to `on`; PL/pgSQL defines it, with its `pg_settings` row, once the session has loaded the language. When it is `off`, the assertion skips both its condition and message without evaluating either expression. A routine-local `SET plpgsql.check_asserts = off` applies only while that routine executes.
 
 ```sql execute
 CREATE FUNCTION manual_assert_positive(value INTEGER)

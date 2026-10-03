@@ -61,6 +61,22 @@ fn allocate_routine_object_id(
     }
 }
 
+/// Resolve the routine's type references, validate its support function and configuration, and load its language's library, as `CreateFunction` does before it calls the language's validator.
+fn validate_routine_definition(
+    context: &RoutineRegistrationContext<'_>,
+    def: &mut CreateFunction,
+) -> Result<(), SQLError> {
+    resolve_routine_type_references(context.definition.compilation.analysis.types, def)?;
+    if let Some(support) = def.support.as_deref() {
+        analysis::validate_routine_support(context.support, support)?;
+    }
+    configuration::apply_routine_config_actions(context.configuration, def)?;
+    if def.language == "plpgsql" {
+        context.configuration.load_language_library(&def.language);
+    }
+    Ok(())
+}
+
 pub fn register_sql_function(
     context: &RoutineRegistrationContext<'_>,
     mut def: CreateFunction,
@@ -81,11 +97,7 @@ pub fn register_sql_function(
     def.owner = Some(owner.identity());
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
-    resolve_routine_type_references(context.definition.compilation.analysis.types, &mut def)?;
-    if let Some(support) = def.support.as_deref() {
-        analysis::validate_routine_support(context.support, support)?;
-    }
-    configuration::apply_routine_config_actions(context.configuration, &mut def)?;
+    validate_routine_definition(context, &mut def)?;
     let (compiled, _) = compile_catalog_bound_routine(
         &context.definition,
         &mut def,

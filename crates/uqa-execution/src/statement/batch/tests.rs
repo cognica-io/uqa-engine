@@ -17,7 +17,6 @@ use crate::{
 use context::{
     BatchRowLocks, BatchTransactions, CachedStatement, RowLockStatementGuard, StatementCache,
 };
-use parking_lot::Mutex;
 use std::cell::{Cell, RefCell};
 use uqa_core::CancellationToken;
 use uqa_sql::{
@@ -29,7 +28,7 @@ use uqa_sql::{
 #[derive(Default)]
 struct Inputs {
     cancellation: CancellationToken,
-    notices: Mutex<Vec<uqa_sql::SQLNotice>>,
+    notices: crate::query::NoticeQueue,
     events: RefCell<Vec<String>>,
     depth: Cell<usize>,
     guarded: Cell<bool>,
@@ -279,7 +278,7 @@ fn whole_batch_syntax_failure_precedes_all_commands_and_callbacks() {
     .is_err());
     inputs.assert_events(&["cache.lookup"]);
     assert_eq!(delivered, 0);
-    assert!(inputs.notices.lock().is_empty());
+    assert!(inputs.notices.is_empty());
     assert_eq!(inputs.depth.get(), 0);
 }
 
@@ -303,14 +302,14 @@ fn out_of_block_completions_and_notices_keep_statement_order() {
         false,
         &mut |result| {
             tags.push(result.command_tag.clone().unwrap());
-            assert_eq!(inputs.notices.lock().len(), tags.len());
+            assert_eq!(inputs.notices.len(), tags.len());
             Ok(())
         },
     )
     .unwrap();
     assert_eq!(tags, ["COMMIT", "ROLLBACK"]);
     assert_eq!(
-        &*inputs.notices.lock(),
+        &inputs.notices.snapshot(),
         &vec![
             uqa_sql::SQLNotice::warning("there is no transaction in progress")
                 .with_sqlstate("25P01");
@@ -337,7 +336,7 @@ fn consumer_failure_stops_later_transaction_completions() {
     .unwrap_err();
     assert!(error.to_string().contains("consumer disconnected"));
     assert_eq!(tags, ["COMMIT"]);
-    assert_eq!(inputs.notices.lock().len(), 1);
+    assert_eq!(inputs.notices.len(), 1);
     inputs.assert_events(&["cache.lookup"]);
 }
 

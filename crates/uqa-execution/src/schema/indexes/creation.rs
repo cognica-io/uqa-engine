@@ -73,7 +73,7 @@ pub struct IndexCreationContext<'a> {
     pub unique: super::IndexBuildContext<'a>,
     pub vectors: &'a dyn VectorIndexCatalog,
     pub publication: &'a dyn IndexCreationPublication,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }
 pub fn run_create_index(
     context: &IndexCreationContext<'_>,
@@ -132,7 +132,7 @@ pub fn run_create_index(
         .relation_exists(&relation.qualified_name())?
     {
         if c.if_not_exists {
-            context.notices.lock().push(
+            context.notices.push(
                 uqa_sql::SQLNotice::notice(format!("relation \"{name}\" already exists, skipping"))
                     .with_sqlstate("42P07"),
             );

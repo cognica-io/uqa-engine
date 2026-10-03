@@ -22,14 +22,17 @@ mod analyze_helpers;
 mod clocks;
 mod portals;
 pub(crate) use portals::StatementReadSnapshot;
+mod parameter_registry;
 mod schemas;
+pub(crate) use parameter_registry::SessionParameterRegistry;
+mod parameters;
+mod search_path;
+pub(crate) use search_path::{default_search_path, effective_search_path, LockedSearchPath};
 mod settings;
 pub(crate) use settings::restore_runtime_parameter;
-mod settings_parse;
 mod views;
 
 use analyze_helpers::{build_histogram, build_mcv, collect_analyze_values, distinct_count};
-use settings_parse::parse_search_path_list;
 
 #[cfg(test)]
 use uqa_sql::binding::view_dependencies::sequence_function_reference_mut;

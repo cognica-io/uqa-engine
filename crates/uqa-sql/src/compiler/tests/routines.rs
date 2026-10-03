@@ -205,7 +205,7 @@ fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
         function.config_actions,
         [RoutineConfigAction::Set {
             name: "search_path".into(),
-            value: "app,public".into(),
+            value: "app, public".into(),
         }]
     );
 

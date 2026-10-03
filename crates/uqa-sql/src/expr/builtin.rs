@@ -54,6 +54,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "pg_has_role" if matches!(argument_count, 2 | 3) => Some(true),
         "pg_get_userbyid" if argument_count == 1 => Some(true),
         "current_setting" if matches!(argument_count, 1 | 2) => Some(true),
+        "set_config" if argument_count == 3 => Some(false),
         "has_table_privilege" if matches!(argument_count, 2 | 3) => Some(true),
         "has_column_privilege" if matches!(argument_count, 3 | 4) => Some(true),
         "has_database_privilege" if matches!(argument_count, 2 | 3) => Some(true),

@@ -50,7 +50,7 @@ pub trait StatementEffects {
 #[derive(Clone, Copy)]
 pub struct StatementRuntime<'a> {
     pub cancellation: &'a uqa_core::CancellationToken,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }
 
 #[derive(Clone, Copy)]

@@ -178,6 +178,10 @@ declarations! { fn lookup_local(local);
         "pg_get_userbyid" => &[Signature::new(&[ColumnType::Oid], ColumnType::Name)],
         "pg_backend_pid" => &[Signature::new(&[], ColumnType::Integer)],
         "pg_trigger_depth" => &[Signature::new(&[], ColumnType::Integer)],
+        "set_config" => &[Signature::new(
+            &[ColumnType::Text, ColumnType::Text, ColumnType::Boolean],
+            ColumnType::Text,
+        )],
         "current_setting" => &[
             Signature::new(&[ColumnType::Text], ColumnType::Text),
             Signature::new(&[ColumnType::Text, ColumnType::Boolean],

@@ -68,6 +68,7 @@ pub(crate) fn fixed_builtin_is_non_immutable(name: &str) -> bool {
             | "pg_backend_pid"
             | "pg_trigger_depth"
             | "current_setting"
+            | "set_config"
             | "version"
             | "pg_listening_channels"
             | "pg_notify"

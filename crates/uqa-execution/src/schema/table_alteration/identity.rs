@@ -438,7 +438,6 @@ pub(super) fn drop_identity<S: Clone + 'static>(
             context
                 .constraints
                 .notices
-                .lock()
                 .push(uqa_sql::SQLNotice::notice(format!(
                     "column \"{name}\" of relation \"{}\" is not an identity column, skipping",
                     local_name(table)?

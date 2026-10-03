@@ -311,7 +311,7 @@ struct NotificationSessionCommit<'a> {
     channels: Vec<String>,
     queue: &'a Arc<Mutex<VecDeque<SQLNotification>>>,
     wake: &'a Arc<Condvar>,
-    notices: &'a Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
+    notices: &'a Arc<uqa_execution::query::NoticeQueue>,
     pending: &'a [PendingNotification],
 }
 

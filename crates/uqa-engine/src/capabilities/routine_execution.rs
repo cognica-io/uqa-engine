@@ -108,6 +108,9 @@ impl RoutineStatements for Engine {
     fn assertions_enabled(&self) -> bool {
         self.plpgsql_asserts_enabled()
     }
+    fn load_language_library(&self, language: &str) {
+        self.load_language(language);
+    }
 }
 impl RoutineTransactions for Engine {
     fn depth(&self) -> usize {

@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::query::runtime::QueryMemorySettings;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -43,7 +43,7 @@ fn diagnostic_execution_reads_live_limits_and_preserves_cancellation() {
     let scalar_functions = RwLock::default();
     let table_functions = RwLock::default();
     let aggregate_functions = RwLock::default();
-    let notices = Mutex::default();
+    let notices = crate::query::NoticeQueue::default();
     let runtime = QueryRuntimeView {
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         settings: &settings,

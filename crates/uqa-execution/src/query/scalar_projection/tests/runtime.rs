@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::query::runtime::{QueryMemorySettings, QueryRuntimeView};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use uqa_core::CancellationToken;
 
@@ -41,7 +41,7 @@ fn with_runtime(
     let scalar_functions = RwLock::default();
     let table_functions = RwLock::default();
     let aggregate_functions = RwLock::default();
-    let notices = Mutex::default();
+    let notices = crate::query::NoticeQueue::default();
     run(QueryRuntimeView {
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         settings,

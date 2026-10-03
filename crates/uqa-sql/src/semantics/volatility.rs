@@ -150,6 +150,7 @@ fn builtin_is_volatile(name: &str) -> bool {
         name,
         "random"
             | "setseed"
+            | "set_config"
             | "pg_notify"
             | "pg_notification_queue_usage"
             | "array_sample"

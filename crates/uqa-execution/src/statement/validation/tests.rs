@@ -66,11 +66,11 @@ impl CatalogSession for Inputs {
             lookup_mode: RelationLookupMode::Dynamic,
         }
     }
-    fn show_variable(&self, _: &str) -> Result<String, SQLError> {
+    fn show_parameter(&self, _: &str) -> Result<(String, String), SQLError> {
         panic!("validation must not execute SHOW")
     }
-    fn runtime_parameter_source(&self, _: &str) -> &'static str {
-        panic!("validation must not enumerate settings")
+    fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
+        panic!("validation must not read settings")
     }
     fn cursors(&self) -> Vec<uqa_sql::catalog::session::CursorMetadata> {
         panic!("unexpected cursor catalog read")

@@ -35,6 +35,8 @@ pub trait RoutineStatements {
     fn execute_text(&self, text: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError>;
     fn optimize_plan(&self, plan: UnifiedPlan) -> Result<UnifiedPlan, SQLError>;
     fn assertions_enabled(&self) -> bool;
+    /// Load the library of a procedural language into the session, as its call handler does on first use.
+    fn load_language_library(&self, language: &str);
 }
 pub trait RoutineTransactions {
     fn depth(&self) -> usize;
