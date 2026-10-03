@@ -56,6 +56,17 @@ impl SequenceState {
         }
     }
 
+    /// The state with the value state of the durable record its generation's latest commit holds, when there is one.
+    #[must_use]
+    pub fn with_record(mut self, record: Option<&uqa_storage::SequenceValuePosition>) -> Self {
+        if let Some(record) = record {
+            self.current = record.current;
+            self.called = record.called;
+            self.log_count = record.log_count;
+        }
+        self
+    }
+
     /// The state at the exact position recorded for it. The value state held here is the durable record's, which runs ahead of the values handed out while a position is recorded.
     #[must_use]
     pub fn at_position(
@@ -106,6 +117,7 @@ pub fn sequence_row(
     })
 }
 
+pub mod latest_values;
 pub mod restoration;
 
 pub mod session;

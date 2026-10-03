@@ -34,6 +34,30 @@ fn sequence_generation(
     .unwrap()
 }
 
+/// The value record of a sequence definition generation.
+fn sequence_value(
+    identity: [u8; 16],
+    generation: [u8; 16],
+    control: &StorageReadControl,
+) -> NativeRecord {
+    NativeRecord::encode(
+        NativeRecordFamily::SequenceValues,
+        NativeRecordOwner::Object {
+            identity,
+            generation,
+        },
+        &[
+            ValueRef::Blob(&identity),
+            ValueRef::Blob(&generation),
+            ValueRef::Integer(0),
+            ValueRef::Integer(0),
+            ValueRef::Integer(0),
+        ],
+        control,
+    )
+    .unwrap()
+}
+
 #[test]
 fn native_sequence_preparation_rejects_multiple_final_generations_of_one_incarnation() {
     let connection = ManagedConnection::open_in_memory().unwrap();
@@ -45,10 +69,27 @@ fn native_sequence_preparation_rejects_multiple_final_generations_of_one_incarna
     let control = StorageReadControl::with_limit(1 << 24);
     let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
     let original = records(&connection, &store, NativeRecordFamily::Sequences, &control);
+    let values = records(
+        &connection,
+        &store,
+        NativeRecordFamily::SequenceValues,
+        &control,
+    );
     let (identity, _) = decode_record(original[0].key(), original[0].row(), &control).unwrap();
-    let NativeRecordOwner::Object { identity, .. } = identity.owner() else {
+    let original_owner = identity.owner();
+    let NativeRecordOwner::Object { identity, .. } = original_owner else {
         panic!("sequence owner")
     };
+    let original_value = values
+        .iter()
+        .find(|value| {
+            decode_record(value.key(), value.row(), &control)
+                .unwrap()
+                .0
+                .owner()
+                == original_owner
+        })
+        .expect("the value record of the definition");
     let first = sequence_generation(&original[0], identity, [90; 16], &control);
     let second = sequence_generation(&original[1], identity, [91; 16], &control);
     let conflicting = PreparedRecordCommit::new(
@@ -81,8 +122,25 @@ fn native_sequence_preparation_rejects_multiple_final_generations_of_one_incarna
             record.row()
         );
     }
-    let replacement =
+    // A definition generation without its value record is refused as well.
+    let unpaired =
         PreparedRecordCommit::new(&[delete(&original[0]), first.write(None)], &control).unwrap();
+    assert!(matches!(
+        store.commit(id, &unpaired, &control),
+        Err(CommitFailure::Rejected(VersionError::InvalidEncoding(
+            "a native sequence definition generation and its value record must change together"
+        )))
+    ));
+    let replacement = PreparedRecordCommit::new(
+        &[
+            delete(&original[0]),
+            first.write(None),
+            delete(original_value),
+            sequence_value(identity, [90; 16], &control).write(None),
+        ],
+        &control,
+    )
+    .unwrap();
     store.commit(id, &replacement, &control).unwrap();
     let after = store.snapshot(&control).unwrap();
     assert_eq!(

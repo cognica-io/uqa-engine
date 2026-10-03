@@ -318,6 +318,39 @@ impl CatalogReadView {
             .collect()
     }
 
+    /// Sequence definitions with their persistence and security, for readers that show no value state.
+    pub fn sequence_definitions(
+        &self,
+    ) -> Result<
+        Vec<(
+            uqa_core::RelationIdentity,
+            crate::catalog::sequence::SequenceState,
+            uqa_sql::ast::RelationPersistence,
+            crate::catalog::security::SequenceSecurity,
+        )>,
+        SQLError,
+    > {
+        self.snapshot
+            .definitions
+            .sequences
+            .iter()
+            .map(|(identity, state)| {
+                Ok((
+                    identity.clone(),
+                    *state,
+                    self.snapshot
+                        .definitions
+                        .sequence_persistence
+                        .get(identity)
+                        .copied()
+                        .unwrap_or_default(),
+                    self.sequence_security(identity)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// Sequence definitions with their persistence and security, each with the value state its latest committed value record holds, at the exact position a shared position records.
     pub fn sequence_states(
         &self,
     ) -> Result<
@@ -333,43 +366,58 @@ impl CatalogReadView {
             Some(positions) => positions.sequence_positions()?,
             None => std::collections::HashMap::new(),
         };
+        let records = self.latest_sequence_records()?;
         let object_ids = &self.snapshot.definitions.sequence_object_ids;
-        self.snapshot
-            .definitions
-            .sequences
-            .iter()
-            .map(|(identity, state)| {
-                let position = object_ids
-                    .get(identity)
-                    .and_then(|object_id| positions.get(&state.position_key(*object_id)));
-                Ok((
-                    identity.clone(),
-                    state.at_position(position.copied()),
-                    self.snapshot
-                        .definitions
-                        .sequence_persistence
-                        .get(identity)
-                        .copied()
-                        .unwrap_or_default(),
-                    self.sequence_security(identity)?,
-                ))
+        Ok(self
+            .sequence_definitions()?
+            .into_iter()
+            .map(|(identity, state, persistence, security)| {
+                let key = object_ids
+                    .get(&identity)
+                    .map(|object_id| state.position_key(*object_id));
+                let state = state
+                    .with_record(key.and_then(|key| records.get(&key)))
+                    .at_position(key.and_then(|key| positions.get(&key)).copied());
+                (identity, state, persistence, security)
             })
-            .collect()
+            .collect())
     }
 
-    /// The state of one sequence at its exact position.
+    /// The state of one sequence with the value state of its latest committed value record, at the exact position a shared position records.
     fn sequence_state_at_position(
         &self,
         relation: &uqa_core::RelationIdentity,
         state: crate::catalog::sequence::SequenceState,
     ) -> Result<crate::catalog::sequence::SequenceState, SQLError> {
-        let (Some(positions), Some(object_id)) = (
-            self.sequence_positions.as_ref(),
-            self.snapshot.definitions.sequence_object_ids.get(relation),
-        ) else {
+        let Some(object_id) = self.snapshot.definitions.sequence_object_ids.get(relation) else {
             return Ok(state);
         };
-        Ok(state.at_position(positions.sequence_position(state.position_key(*object_id))?))
+        let key = state.position_key(*object_id);
+        let state = state.with_record(self.latest_sequence_records()?.get(&key));
+        let Some(positions) = self.sequence_positions.as_ref() else {
+            return Ok(state);
+        };
+        Ok(state.at_position(positions.sequence_position(key)?))
+    }
+
+    /// The committed value records of sequences, which a session's catalog cache does not follow. A sequence this transaction created, and a temporary one, has none, and keeps the state the cache holds.
+    fn latest_sequence_records(
+        &self,
+    ) -> Result<
+        std::collections::HashMap<
+            crate::row_locks::SequencePositionKey,
+            uqa_storage::SequenceValuePosition,
+        >,
+        SQLError,
+    > {
+        self.latest_sequence_values.as_ref().map_or_else(
+            || Ok(std::collections::HashMap::new()),
+            |values| {
+                values.latest_sequence_values().map_err(|error| {
+                    uqa_sql::catalog::errors::storage_error("read sequence values", &error)
+                })
+            },
+        )
     }
 
     fn sequence_security(

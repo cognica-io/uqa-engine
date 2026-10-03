@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 
 mod diskann;
 mod relation_acls;
+mod sequence_values;
 
 fn legacy_security(
     role_owner: &str,
@@ -380,6 +381,14 @@ fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
     let sequence = &catalog.load_sequence_rows().unwrap()[0];
     assert_eq!(sequence.relation, RelationIdentity::new("public", "seq"));
     assert_eq!(sequence.object_id, [0; 16]);
+    // An initial open moves the value state of such a definition into its value record before anything allocates from it.
+    assert_eq!(
+        catalog
+            .next_sequence_value("public.seq", sequence.object_id)
+            .unwrap(),
+        None
+    );
+    catalog.migrate_sequence_values().unwrap();
     assert_eq!(
         catalog
             .next_sequence_value("public.seq", sequence.object_id)
@@ -886,9 +895,10 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
                         definition_generation: [0; 16],
                         start: 1,
                         increment: 1,
-                        current: 0,
-                        called: true,
-                        log_count: 0,
+                        // A definition of the flat namespace keeps its value state, as every definition of its era did.
+                        current: Some(0),
+                        called: Some(true),
+                        log_count: Some(0),
                         persistence: "p".into(),
                         options: SequenceOptions::default(),
                         owner: None,

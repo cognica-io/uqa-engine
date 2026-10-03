@@ -71,10 +71,11 @@ fn sequence_values_follow_commits_without_losing_private_name_and_definition_cha
             .iter()
             .map(|row| (row.relation.name.as_str(), row.current))
             .collect::<Vec<_>>(),
+        // A private rename keeps its committed generation, whose committed value record value operations move outside the transaction.
         [
             ("created", 50),
             ("created_by_peer", 70),
-            ("renamed", 40),
+            ("renamed", 10),
             ("values", 300)
         ]
     );

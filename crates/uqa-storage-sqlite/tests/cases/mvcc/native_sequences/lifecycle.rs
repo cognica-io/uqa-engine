@@ -173,16 +173,10 @@ fn sequence_catalog_rejects_name_and_constraint_errors_without_partial_changes()
             catalog.load_sequence_rows().unwrap(),
             std::slice::from_ref(&original)
         );
+        // Value operations find a sequence by its object identity, not by the name the caller knows.
         assert_eq!(
             catalog
-                .set_sequence_value(
-                    "missing",
-                    original.object_id,
-                    original.definition_generation,
-                    10,
-                    true,
-                    -1
-                )
+                .set_sequence_value("s", [77; 16], original.definition_generation, 10, true, 0)
                 .unwrap(),
             uqa_storage::SequenceSetValueResult::Missing
         );
@@ -249,12 +243,14 @@ fn native_sequence_identity_changes_preserve_retained_generations_and_reject_ali
         reader.load_sequence_rows().unwrap(),
         catalog.load_sequence_rows().unwrap()
     );
-    assert_eq!(
-        catalog
-            .reserve_sequence_values("s", next.object_id, next.definition_generation)
-            .unwrap(),
-        SequenceReservationResult::Missing
-    );
+    // Value operations find a generation by identity, whatever sequence now has the name the caller knows.
+    let SequenceReservationResult::Reserved(continued) = catalog
+        .reserve_sequence_values("s", next.object_id, next.definition_generation)
+        .unwrap()
+    else {
+        panic!("expected a reservation of the renamed sequence")
+    };
+    assert_eq!(continued.first_value, 103);
     assert!(catalog.drop_sequence_row("renamed").unwrap());
     assert!(catalog.drop_sequence_row("s").unwrap());
     let mut fresh = sequence("s", 4);

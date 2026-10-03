@@ -370,6 +370,16 @@ impl CatalogFacade for Catalog {
         into_storage_result(self.native_sequence_has_private_changes(object_id))
     }
 
+    fn sequence_value_has_private_changes(
+        &self,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(
+            self.native_sequence_value_has_private_changes(object_id, definition_generation),
+        )
+    }
+
     fn reserve_sequence_values(
         &self,
         name: &str,

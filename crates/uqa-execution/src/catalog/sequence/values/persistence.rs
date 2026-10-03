@@ -12,19 +12,21 @@ use uqa_storage::{
 };
 
 impl SequenceValueContext<'_> {
-    /// Whether the caller's transaction holds changes of this sequence that an independent session would not see.
-    pub(super) fn sequence_is_private(
+    /// Whether the caller's transaction created this definition generation, whose value record no other session can see, so that its values are allocated in the transaction. The values of a committed generation are allocated outside any transaction, even when the transaction changed the sequence's privileges, owner, name or ownership, as `PostgreSQL` moves a sequence's state outside the transaction that changes its catalog rows.
+    pub(super) fn sequence_value_is_private(
         &self,
         temporary: bool,
-        relation: &uqa_core::RelationIdentity,
         object_id: [u8; 16],
+        definition_generation: [u8; 16],
     ) -> Result<bool, SequenceValueError> {
         if temporary {
             return Ok(false);
         }
         Ok(self
             .storage
-            .map(|catalog| catalog.sequence_has_private_changes(relation, object_id))
+            .map(|catalog| {
+                catalog.sequence_value_has_private_changes(object_id, definition_generation)
+            })
             .transpose()
             .map_err(|error| sequence_storage_error("inspect sequence transaction scope", error))?
             .unwrap_or(false))

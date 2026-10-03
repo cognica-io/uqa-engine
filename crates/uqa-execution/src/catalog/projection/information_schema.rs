@@ -300,7 +300,7 @@ pub fn build_info_columns(
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
     let sequences = catalog
-        .sequence_states()?
+        .sequence_definitions()?
         .into_iter()
         .map(|(relation, state, _, _)| (relation.qualified_name(), state))
         .collect::<std::collections::BTreeMap<_, _>>();
@@ -829,7 +829,7 @@ pub fn build_info_sequences(
     let current_user = session.current_role();
     let temporary_schema = session.temporary_schema_name();
     Ok(catalog
-        .sequence_states()?
+        .sequence_definitions()?
         .into_iter()
         .filter(|(relation, state, persistence, security)| {
             (*persistence != uqa_sql::ast::RelationPersistence::Temporary

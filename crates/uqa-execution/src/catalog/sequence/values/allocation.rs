@@ -66,13 +66,13 @@ impl SequenceValueContext<'_> {
         &self,
         target: &NextvalTarget,
     ) -> Result<Reserved, SequenceValueError> {
-        let private =
-            self.sequence_is_private(target.temporary, &target.relation, target.object_id)?;
+        let private = self.sequence_value_is_private(
+            target.temporary,
+            target.object_id,
+            target.state.definition_generation,
+        )?;
         if let Some(positions) = self.shared_positions(target, private) {
             return self.reserve_at_position(positions, target);
-        }
-        if private {
-            self.move_position_into_transaction(target)?;
         }
         if let Some((result, autonomous)) = self.mutate_persistent_value(
             target.temporary,

@@ -20,7 +20,7 @@ use super::{
 use crate::mvcc::{read, write, Error, PhysicalResult};
 
 // Parents precede their children; native document guards and graph invalidation triggers also run before evaluated index materializations are installed.
-const ORDER: [Family; 61] = [
+const ORDER: [Family; 62] = [
     Family::StandaloneGraphScopes,
     Family::StandaloneGraphMetadata,
     Family::StandaloneGraphCatalog,
@@ -33,6 +33,7 @@ const ORDER: [Family; 61] = [
     Family::Relations,
     Family::Tables,
     Family::Sequences,
+    Family::SequenceValues,
     Family::Views,
     Family::ForeignServers,
     Family::ForeignTables,
@@ -105,6 +106,7 @@ fn apply(
     seed_originals(connection, database, prepared, control)?;
     seed_targets(connection, prepared, control)?;
     super::sequences::validate_prepared(connection, prepared, control)?;
+    super::sequence_values::validate_prepared(connection, prepared, control)?;
     queue::visit(
         connection,
         "_uqa_mvcc_native_expected",

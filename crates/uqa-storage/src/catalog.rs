@@ -390,15 +390,18 @@ pub trait CatalogFacade: Send + Sync {
     fn load_all_scoring_params(&self) -> StorageBackendResult<Vec<(String, String)>>;
     fn drop_scoring_params(&self, name: &str) -> StorageBackendResult<()>;
 
+    /// Create a sequence's definition and the value record of its definition generation, which starts at the value state of `sequence`.
     fn create_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool>;
-    /// Replace a sequence's definition, ownership and security. A row that keeps its object identity and definition generation keeps its stored value state, which only value operations move; the value state of `sequence` is stored with a new generation.
+    /// Replace a sequence's definition, ownership and security. A row that keeps its object identity and definition generation leaves the generation's value record, which only value operations move; a row with a new generation replaces the old generation's value record with one that starts at the value state of `sequence`.
     fn replace_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool>;
-    /// Atomically move one sequence catalog row and its shared relation claim while preserving object identity and physical value state.
+    /// Atomically move one sequence catalog row and its shared relation claim while preserving object identity and the generation's value record.
     fn rename_sequence_row(&self, from: &str, to: &str) -> StorageBackendResult<bool>;
+    /// Remove a sequence's definition together with the value record of its generation.
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool>;
+    /// Sequence definitions, each with the value state of its generation's value record.
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>>;
 
-    /// Whether this sequence has transaction-private state that an autonomous value allocation must not bypass. Versioned catalogs must inspect their retained private records, including creation, rename and definition replacement.
+    /// Whether this sequence's definition has transaction-private changes, including creation, rename, deletion and definition replacement, which the transaction's own catalog reads must select.
     fn sequence_has_private_changes(
         &self,
         _relation: &RelationIdentity,
@@ -411,6 +414,26 @@ pub trait CatalogFacade: Send + Sync {
         }
         Ok(false)
     }
+
+    /// Whether the value record of this definition generation has transaction-private changes, which holds exactly when the current transaction created the generation. Values of such a generation are allocated in the transaction, since no other session can see it; the value record of a committed generation is moved only outside any transaction, as `PostgreSQL` moves a sequence's state whatever happens to the transaction that drew from it.
+    fn sequence_value_has_private_changes(
+        &self,
+        _object_id: [u8; 16],
+        _definition_generation: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private sequence value provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
+
+    /// Move the value state that earlier releases kept in sequence definitions into value records. Only an initial open runs this, inside its catalog preparation.
+    fn migrate_sequence_values(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+    /// Reserve the next block of values from the value record of this generation of `object_id`, whatever name the sequence currently has. `DefinitionChanged` reports that another generation of the sequence has replaced this one, and `Missing` that the sequence no longer exists.
     fn reserve_sequence_values(
         &self,
         name: &str,
@@ -447,6 +470,7 @@ pub trait CatalogFacade: Send + Sync {
             }
         }
     }
+    /// Replace the value state in the value record of this generation of `object_id`, with the results `reserve_sequence_values` reports.
     fn set_sequence_value(
         &self,
         name: &str,
@@ -456,7 +480,7 @@ pub trait CatalogFacade: Send + Sync {
         called: bool,
         log_count: i64,
     ) -> StorageBackendResult<SequenceSetValueResult>;
-    /// Move the durable position of a sequence to `logged` when its value and called flag still are `expected`. Nothing is written otherwise, and `Changed` reports the position the record holds. A caller that hands out values at or below a logged value records that value here before it hands any of them out.
+    /// Move the durable position in the value record of this generation of `object_id` to `logged` when its value and called flag still are `expected`. Nothing is written otherwise, and `Changed` reports the position the record holds. A caller that hands out values at or below a logged value records that value here before it hands any of them out.
     fn log_sequence_values(
         &self,
         name: &str,

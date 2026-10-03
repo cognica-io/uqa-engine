@@ -79,6 +79,8 @@ const TAG_PATH_INDEX_DATA: u8 = b'Q';
 const TAG_COLUMN_STATS: u8 = b'c';
 const TAG_SCHEMA: u8 = b's';
 const TAG_SEQUENCE: u8 = b'q';
+/// Value records of sequence definition generations, keyed by object identity and generation.
+const TAG_SEQUENCE_VALUE: u8 = b'L';
 const TAG_RELATION: u8 = b'R';
 const TAG_VIEW: u8 = b'w';
 const TAG_DOCUMENT: u8 = b'd';

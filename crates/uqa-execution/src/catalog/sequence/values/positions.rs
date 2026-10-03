@@ -230,39 +230,6 @@ impl SequenceValueContext<'_> {
         Ok(())
     }
 
-    /// A sequence this transaction changed allocates in the transaction, where its values continue the shared position. The position moves into the transaction's record, and other sessions find none until the record is committed or the values are restored after a rollback.
-    pub(super) fn move_position_into_transaction(
-        &self,
-        target: &NextvalTarget,
-    ) -> Result<(), SequenceValueError> {
-        let (Some(positions), Some(catalog)) = (self.runtime.sequence_positions(), self.storage)
-        else {
-            return Ok(());
-        };
-        if target.temporary {
-            return Ok(());
-        }
-        let mut guard = positions.lock_sequence_position(target.position_key())?;
-        let Some(recorded) = guard.recorded() else {
-            return Ok(());
-        };
-        if let Some(position) = recorded.continuing((target.state.current, target.state.called)) {
-            self.prepare_transaction_writer()?;
-            catalog
-                .set_sequence_value(
-                    &target.name,
-                    target.object_id,
-                    target.state.definition_generation,
-                    position.current,
-                    position.called,
-                    position.log_count,
-                )
-                .map_err(|error| sequence_storage_error("continue sequence position", error))?;
-        }
-        guard.discard()?;
-        Ok(())
-    }
-
     /// Forget the position of a sequence whose record a value assignment replaces.
     pub(super) fn discard_position(
         &self,

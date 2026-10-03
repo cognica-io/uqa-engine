@@ -134,7 +134,8 @@ fn verify_sequence_conflicts(
     first: &KeyValueCatalog,
     second: &KeyValueCatalog,
 ) -> StorageBackendResult<()> {
-    for change in ["reserve", "set", "replace", "rename", "drop"] {
+    // A reservation conflicts with every other change of the generation's value record: a value change, its replacement by a new generation, or its removal.
+    for change in ["reserve", "set", "replace", "drop"] {
         for change_wins in [false, true] {
             let row = sequence("sequence_conflict", 3);
             assert!(first.create_sequence_row(&row)?);
@@ -159,9 +160,6 @@ fn verify_sequence_conflicts(
                     changed.definition_generation = [99; 16];
                     changed.current = 100;
                     assert!(second.replace_sequence_row(&changed)?);
-                }
-                "rename" => {
-                    assert!(second.rename_sequence_row("sequence_conflict", "sequence_moved")?);
                 }
                 _ => assert!(second.drop_sequence_row("sequence_conflict")?),
             }
@@ -189,9 +187,10 @@ fn verify_sequence_conflicts(
             assert_eq!(first.load_sequence_rows()?, expected);
             assert_eq!(second.load_sequence_rows()?, expected);
             first.drop_sequence_row("sequence_conflict")?;
-            first.drop_sequence_row("sequence_moved")?;
         }
     }
+
+    verify_definition_changes_leave_value_records(a, b, first, second)?;
 
     for other_wins in [false, true] {
         let first_row = sequence("sequence_claim", 4);
@@ -210,6 +209,47 @@ fn verify_sequence_conflicts(
         loser.rollback_transaction()?;
         assert_eq!(first.load_sequence_rows()?, std::slice::from_ref(expected));
         first.drop_sequence_row("sequence_claim")?;
+    }
+
+    Ok(())
+}
+
+/// A change of the definition alone leaves the value record, as `PostgreSQL`'s catalog rows hold a sequence's name and privileges apart from its state, so a reservation and such a change both commit.
+fn verify_definition_changes_leave_value_records(
+    a: &Arc<dyn KeyValueStore>,
+    b: &Arc<dyn KeyValueStore>,
+    first: &KeyValueCatalog,
+    second: &KeyValueCatalog,
+) -> StorageBackendResult<()> {
+    for change in ["rename", "owner"] {
+        let row = sequence("sequence_definition", 3);
+        assert!(first.create_sequence_row(&row)?);
+        a.begin_transaction()?;
+        b.begin_transaction()?;
+        assert_eq!(reserve(first, &row)?.first_value, 1);
+        let mut expected = row.clone();
+        if change == "rename" {
+            assert!(second.rename_sequence_row("sequence_definition", "sequence_renamed")?);
+            expected.relation = RelationIdentity::new("public", "sequence_renamed");
+        } else {
+            expected.security = crate::SequenceSecurityRow::Bound(
+                uqa_core::catalog_sequence::BoundSequenceSecurity::owner(
+                    uqa_core::catalog_role::RoleIdentity {
+                        oid: 20_002,
+                        object_id: [8; 16],
+                    },
+                ),
+            );
+            assert!(second.replace_sequence_row(&expected)?);
+        }
+        a.commit_transaction()?;
+        b.commit_transaction()?;
+        expected.current = 3;
+        expected.called = true;
+        expected.log_count = 32;
+        assert_eq!(first.load_sequence_rows()?, [expected.clone()], "{change}");
+        assert_eq!(second.load_sequence_rows()?, [expected.clone()], "{change}");
+        assert!(first.drop_sequence_row(&expected.relation.qualified_name())?);
     }
 
     Ok(())
@@ -253,21 +293,27 @@ fn verify_sequence_records(catalog: &KeyValueCatalog) -> StorageBackendResult<()
         catalog.log_sequence_values(&name, row.object_id, [200; 16], (66, true), logged(99))?,
         SequenceLogResult::DefinitionChanged
     );
-    for (name, object_id) in [
-        (name.as_str(), [201; 16]),
-        ("public.sequence_absent", row.object_id),
-    ] {
-        assert_eq!(
-            catalog.log_sequence_values(
-                name,
-                object_id,
-                row.definition_generation,
-                (66, true),
-                logged(99)
-            )?,
-            SequenceLogResult::Missing
-        );
-    }
+    assert_eq!(
+        catalog.log_sequence_values(
+            &name,
+            [201; 16],
+            row.definition_generation,
+            (66, true),
+            logged(99)
+        )?,
+        SequenceLogResult::Missing
+    );
+    // The value record is found by object identity and generation, whatever name the caller knows the sequence by, so that an operation outside a transaction that renames the sequence finds it.
+    assert_eq!(
+        catalog.log_sequence_values(
+            "public.sequence_absent",
+            row.object_id,
+            row.definition_generation,
+            (66, true),
+            logged(66)
+        )?,
+        SequenceLogResult::Logged
+    );
     assert!(catalog
         .log_sequence_values(
             &name,

@@ -94,6 +94,8 @@ impl Engine {
             catalog,
             crate::new_sequence_object_id,
         )?;
+        // Value records are keyed by the identities assigned above.
+        catalog.migrate_sequence_values()?;
         Ok(())
     }
 
