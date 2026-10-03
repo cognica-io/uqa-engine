@@ -14,6 +14,7 @@ mod filter;
 mod tests;
 mod writer;
 
+pub(in crate::mvcc) use cache::RunCacheReader;
 pub(in crate::mvcc) use cursor::RunCursor;
 pub(in crate::mvcc) use entry::RunEntry;
 pub(in crate::mvcc) use writer::SpilledRunWriter;
@@ -55,10 +56,15 @@ pub(in crate::mvcc) struct SpilledRun {
     bytes: u64,
     /// One bit for each write kind code the run holds.
     kinds: u16,
-    cache: RunCache,
+    cache: Arc<RunCache>,
 }
 
 impl SpilledRun {
+    /// Share decoded blocks while a lookup operation is active, without tying their lifetime to this run.
+    pub(in crate::mvcc) fn cache_reader(&self) -> RunCacheReader {
+        self.cache.reader()
+    }
+
     /// Whether the run holds a write of `kind`.
     pub(in crate::mvcc) fn has_kind(&self, kind: crate::mvcc::commit::RecordWriteKind) -> bool {
         self.kinds & (1 << kind.code()) != 0

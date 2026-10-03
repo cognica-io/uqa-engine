@@ -11,6 +11,22 @@ use uqa_storage::KeyValueStore;
 use uqa_storage_redb::RedbStorage;
 
 #[test]
+fn hnsw_spill_publishes_and_reopens_beyond_the_session_allowance() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bounded-hnsw.redb");
+    let options = uqa_storage::mvcc::VersionedSessionOptions {
+        retained_bytes: 256 * 1024,
+        ..Default::default()
+    };
+    {
+        let storage = RedbStorage::open_with_options(&path, options).unwrap();
+        verify_hnsw_spill_lifecycle(Arc::new(storage.store())).unwrap();
+    }
+    let storage = RedbStorage::open_with_options(&path, options).unwrap();
+    verify_hnsw_spill_reopen(Arc::new(storage.store())).unwrap();
+}
+
+#[test]
 fn command_refresh_preserves_index_generations_and_reopens() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("commands.redb");

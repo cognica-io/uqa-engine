@@ -64,7 +64,9 @@ pub use origins::{verify_diskann_maintenance_reopen, verify_diskann_maintenance_
 pub use origins::{verify_diskann_pruning, verify_diskann_pruning_reopen};
 pub use origins::{verify_diskann_query_reopen, verify_diskann_query_views};
 pub use origins::{verify_diskann_resource_reopen, verify_diskann_resource_source};
+mod hnsw_spill;
 mod physical_vectors;
+pub use hnsw_spill::{verify_hnsw_spill_lifecycle, verify_hnsw_spill_reopen};
 pub use physical_vectors::{
     verify_hnsw_concurrency, verify_hnsw_reopen, verify_hnsw_undo, verify_ivf_concurrency,
     verify_ivf_reopen, verify_ivf_undo,

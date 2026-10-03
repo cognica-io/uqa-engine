@@ -19,6 +19,8 @@ use crate::{KeyValueBatch, StorageBackendResult};
 use super::transaction::Transaction;
 use super::VersionedKeyValueStore;
 
+mod records;
+
 enum Operation {
     Requirement(BudgetedVec<u8>),
     ObservedRequirement(RecordKey, crate::mvcc::CommitSequence),
@@ -30,7 +32,7 @@ enum Operation {
     ),
     IdentifierObservation(BudgetedVec<u8>, u64),
     IdentifierInheritance(BudgetedVec<u8>, BudgetedVec<u8>),
-    DeletePrefix(BudgetedVec<u8>, RecordWriteKind),
+    Records(records::Records),
     OccurrenceReset(BudgetedVec<u8>),
     Fence(BudgetedVec<u8>),
     Graph(OwnedGraphMutation),
@@ -86,6 +88,9 @@ impl<'a> Batch<'a> {
         value: Option<&[u8]>,
         kind: RecordWriteKind,
     ) -> StorageBackendResult<()> {
+        if kind != RecordWriteKind::DiskANNOrigin {
+            return self.record_edit(key, value, kind, false);
+        }
         self.operations.push(Operation::TypedRecord {
             key: RecordKey::new(key, self.store.control.memory())
                 .map_err(VersionError::into_storage_error)?,
@@ -95,6 +100,27 @@ impl<'a> Batch<'a> {
             kind,
         })?;
         Ok(())
+    }
+
+    fn record_edit(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+        kind: RecordWriteKind,
+        prefix: bool,
+    ) -> StorageBackendResult<()> {
+        if !matches!(self.operations.last(), Some(Operation::Records(_))) {
+            self.operations
+                .push(Operation::Records(records::Records::new(
+                    &self.store.control,
+                )))?;
+        }
+        let Some(Operation::Records(records)) = self.operations.last_mut() else {
+            unreachable!()
+        };
+        records
+            .push(key, value, kind, prefix, &self.store.control)
+            .map_err(VersionError::into_storage_error)
     }
 
     pub(super) fn apply(&self, transaction: &mut Transaction) -> Result<(), VersionError> {
@@ -140,9 +166,19 @@ impl<'a> Batch<'a> {
                 }
                 Operation::IdentifierObservation(_, _) | Operation::IdentifierInheritance(_, _) => {
                 }
-                Operation::DeletePrefix(prefix, kind) => {
-                    transaction.delete_prefix_kind(prefix, *kind, control)?;
-                }
+                Operation::Records(records) => records.visit(control, |edit| {
+                    if edit.prefix {
+                        transaction.delete_prefix_kind(edit.key.bytes(), edit.kind, control)?;
+                    } else {
+                        transaction.write_shared_record(
+                            &edit.key,
+                            edit.value.as_ref(),
+                            edit.kind,
+                            control,
+                        )?;
+                    }
+                    Ok(())
+                })?,
                 Operation::OccurrenceReset(table) => {
                     let table = std::str::from_utf8(table)
                         .map_err(|_| VersionError::InvalidEncoding("invalid occurrence table"))?;
@@ -446,11 +482,7 @@ impl KeyValueBatch for Batch<'_> {
         self.typed_record(key, value, RecordWriteKind::IVFPreview)
     }
     fn preview_ivf_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::IVFPreview,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::IVFPreview, true)
     }
     fn fence_ivf_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
         self.operations.push(Operation::VectorFence(
@@ -485,11 +517,7 @@ impl KeyValueBatch for Batch<'_> {
         self.typed_record(key, value, RecordWriteKind::HNSWPreview)
     }
     fn preview_hnsw_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::HNSWPreview,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::HNSWPreview, true)
     }
     fn fence_hnsw_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
         self.operations.push(Operation::VectorFence(
@@ -597,18 +625,10 @@ impl KeyValueBatch for Batch<'_> {
         self.typed_record(key, None, RecordWriteKind::Canonical)
     }
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::Canonical,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::Canonical, true)
     }
     fn delete_prefix_allow_absent(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::IdempotentDelete,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::IdempotentDelete, true)
     }
     fn replace_occurrence_record(
         &mut self,
@@ -618,11 +638,7 @@ impl KeyValueBatch for Batch<'_> {
         self.typed_record(key, value, RecordWriteKind::Occurrence)
     }
     fn invalidate_occurrence_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::OccurrenceCache,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::OccurrenceCache, true)
     }
     fn occurrence_document(&mut self, table: &str, document: u64) -> StorageBackendResult<()> {
         let key =

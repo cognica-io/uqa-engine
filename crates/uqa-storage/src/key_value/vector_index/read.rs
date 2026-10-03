@@ -21,6 +21,29 @@ use crate::StorageBackendResult;
 pub(super) use crate::vector_index::retained::VectorEntries as Entries;
 
 impl KeyValueVectorIndex {
+    pub(in crate::key_value) fn visit_canonical_from(
+        &self,
+        read: &dyn KeyValueRead,
+        mut visit: impl FnMut(DocId, u32, &[f32]) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        read.control().check()?;
+        let mut decoder = CanonicalDecoder::new(self);
+        read.visit_prefix(
+            &vector_field_prefix(&self.table, &self.field)?,
+            &mut |key, value| {
+                read.control().check()?;
+                let mut payload = read.control().memory().reserve(value.len())?;
+                let (document, ordinal, vector) = decoder.decode(key, value)?;
+                let capacity = vector
+                    .capacity()
+                    .checked_mul(size_of::<f32>())
+                    .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+                payload.grow(capacity.saturating_sub(value.len()))?;
+                visit(document, ordinal, &vector)
+            },
+        )
+    }
+
     pub(in crate::key_value) fn load_all_from(
         &self,
         read: &dyn KeyValueRead,

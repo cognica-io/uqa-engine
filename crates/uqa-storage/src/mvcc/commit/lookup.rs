@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use uqa_core::memory::{MemoryError, MemoryReservation};
 
-use crate::mvcc::overlay::run::SpilledRun;
+use crate::mvcc::overlay::run::{RunCacheReader, SpilledRun};
 use crate::mvcc::VersionResult;
 use crate::read_control::StorageReadControl;
 
@@ -23,7 +23,10 @@ enum Source<'a> {
         writes: BTreeMap<&'a [u8], &'a PreparedRecordWrite>,
         _memory: MemoryReservation,
     },
-    Spilled(&'a Arc<SpilledRun>),
+    Spilled {
+        run: &'a Arc<SpilledRun>,
+        _reader: RunCacheReader,
+    },
 }
 
 /// Finds the write of a key in a prepared commit: through an ordered index of a batch in memory, or through the key filter and block index of a spilled batch.
@@ -54,7 +57,10 @@ impl<'a> PreparedLookup<'a> {
                     _memory: memory,
                 }
             }
-            PreparedWrites::Spilled(run) => Source::Spilled(run),
+            PreparedWrites::Spilled(run) => Source::Spilled {
+                run,
+                _reader: run.cache_reader(),
+            },
         };
         Ok(Self { source })
     }
@@ -67,7 +73,7 @@ impl<'a> PreparedLookup<'a> {
     ) -> VersionResult<Option<PreparedRecordWrite>> {
         match &self.source {
             Source::Resident { writes, .. } => Ok(writes.get(key).map(|write| (*write).clone())),
-            Source::Spilled(run) => run
+            Source::Spilled { run, .. } => run
                 .get(key, control)?
                 .map(|entry| {
                     let value = entry
@@ -102,7 +108,7 @@ impl<'a> PreparedLookup<'a> {
                     }
                 }
             }
-            Source::Spilled(run) => {
+            Source::Spilled { run, .. } => {
                 let mut cursor = run.cursor(std::ops::Bound::Included(prefix));
                 while let Some(entry) = cursor.next(control)? {
                     if !entry.key.bytes().starts_with(prefix) {
@@ -130,7 +136,7 @@ impl<'a> PreparedLookup<'a> {
     ) -> VersionResult<bool> {
         match &self.source {
             Source::Resident { writes, .. } => Ok(writes.contains_key(key)),
-            Source::Spilled(run) => Ok(run.get(key, control)?.is_some()),
+            Source::Spilled { run, .. } => Ok(run.get(key, control)?.is_some()),
         }
     }
 }

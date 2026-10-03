@@ -227,7 +227,7 @@ impl SpilledRunWriter {
             last,
             len: self.len,
             kinds: self.kinds,
-            cache: super::cache::RunCache::new(&self.memory),
+            cache: std::sync::Arc::new(super::cache::RunCache::new(&self.memory)),
         }))
     }
 }

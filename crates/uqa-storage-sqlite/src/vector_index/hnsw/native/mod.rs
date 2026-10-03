@@ -7,7 +7,7 @@
 //! Native record adapters keep canonical vectors and HNSW generations on one logical boundary.
 
 use uqa_storage::{
-    hnsw_index::{HNSWIndex, HNSWMutation},
+    hnsw_index::{HNSWCanonicalBuilder, HNSWMutation},
     KeyValueBatch,
 };
 
@@ -50,13 +50,15 @@ impl SQLiteHNSWIndex {
             return Err(missing_metadata(self).into());
         }
         let read = read.owned(batch)?;
-        let entries = read.vectors()?;
-        let delta = HNSWIndex::prepare_canonical(
+        let mut builder = HNSWCanonicalBuilder::new(
             self.persistent.dimensions,
             self.params,
-            &entries,
             &read.snapshot.control,
         )?;
+        read.visit_ordered_vectors(|document, ordinal, vector| {
+            Ok(builder.push(document, ordinal, vector)?)
+        })?;
+        let delta = builder.finish_delta()?;
         writing::persist_delta(
             &read,
             batch,

@@ -13,11 +13,12 @@ use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 #[derive(Default)]
 struct Cached {
+    readers: usize,
     block: Option<(usize, Arc<BudgetedVec<u8>>)>,
     chunk: Option<(u64, Arc<BudgetedVec<u8>>)>,
 }
 
-/// Keeps the entry block and the value chunk a run last decrypted, so that reads of neighbouring keys, which ordered readers make one after another, decrypt each block once. The cached bytes are charged to the allowance of the transaction that owns the run.
+/// Shares the last decrypted block and value chunk among active readers. The last reader releases both; retaining an immutable run or savepoint alone does not retain decoded bytes. Cached bytes remain charged to the transaction that owns the run.
 pub(super) struct RunCache {
     memory: MemoryBudget,
     cached: Mutex<Cached>,
@@ -29,6 +30,11 @@ impl RunCache {
             memory: memory.clone(),
             cached: Mutex::new(Cached::default()),
         }
+    }
+
+    pub(super) fn reader(self: &Arc<Self>) -> RunCacheReader {
+        self.cached.lock().readers += 1;
+        RunCacheReader(Arc::clone(self))
     }
 
     /// The allowance cached bytes are charged to.
@@ -46,7 +52,10 @@ impl RunCache {
     }
 
     pub(super) fn keep_block(&self, index: usize, bytes: &Arc<BudgetedVec<u8>>) {
-        self.cached.lock().block = Some((index, Arc::clone(bytes)));
+        let mut cached = self.cached.lock();
+        if cached.readers != 0 {
+            cached.block = Some((index, Arc::clone(bytes)));
+        }
     }
 
     pub(super) fn chunk(&self, start: u64) -> Option<Arc<BudgetedVec<u8>>> {
@@ -59,6 +68,23 @@ impl RunCache {
     }
 
     pub(super) fn keep_chunk(&self, start: u64, bytes: &Arc<BudgetedVec<u8>>) {
-        self.cached.lock().chunk = Some((start, Arc::clone(bytes)));
+        let mut cached = self.cached.lock();
+        if cached.readers != 0 {
+            cached.chunk = Some((start, Arc::clone(bytes)));
+        }
+    }
+}
+
+/// Keeps shared decoded bytes only for the duration of a scan or lookup operation.
+pub(in crate::mvcc) struct RunCacheReader(Arc<RunCache>);
+
+impl Drop for RunCacheReader {
+    fn drop(&mut self) {
+        let mut cached = self.0.cached.lock();
+        cached.readers -= 1;
+        if cached.readers == 0 {
+            cached.block = None;
+            cached.chunk = None;
+        }
     }
 }

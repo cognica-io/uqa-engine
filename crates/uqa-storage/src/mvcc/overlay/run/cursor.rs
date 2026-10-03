@@ -15,7 +15,7 @@ use crate::mvcc::VersionResult;
 use crate::read_control::StorageReadControl;
 
 use super::entry::{self, RunEntry};
-use super::SpilledRun;
+use super::{RunCacheReader, SpilledRun};
 
 /// Visits a run's changes in key order from a starting bound, holding one block of entries at a time.
 pub(in crate::mvcc) struct RunCursor {
@@ -24,6 +24,7 @@ pub(in crate::mvcc) struct RunCursor {
     block: Option<Arc<BudgetedVec<u8>>>,
     position: usize,
     start: Option<(Vec<u8>, bool)>,
+    reader: Option<RunCacheReader>,
 }
 
 impl RunCursor {
@@ -35,6 +36,7 @@ impl RunCursor {
             Bound::Excluded(key) => Some((key.to_vec(), false)),
         };
         Self {
+            reader: Some(run.cache_reader()),
             run,
             next_block,
             block: None,
@@ -60,7 +62,9 @@ impl RunCursor {
                 .as_ref()
                 .is_none_or(|block| self.position >= block.len())
             {
+                self.block = None;
                 if self.next_block >= self.run.blocks.len() {
+                    self.reader = None;
                     return Ok(None);
                 }
                 self.block = Some(self.run.read_block(self.next_block, control)?);

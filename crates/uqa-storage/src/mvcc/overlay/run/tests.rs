@@ -164,3 +164,56 @@ fn keys_must_increase() {
         )
         .is_err());
 }
+
+#[test]
+fn decoded_run_cache_ends_with_active_readers_not_retained_roots() {
+    let control = StorageReadControl::with_limit(256 * 1024);
+    let (run, _) = run(400, &control);
+    let run = Arc::new(run);
+    let retained = Arc::clone(&run);
+    let baseline = control.memory().used();
+    let read = || {
+        let entry = run.get(&key(2), &control).unwrap().unwrap();
+        let loaded = run.load_value(entry.value.unwrap(), &control).unwrap();
+        assert_eq!(&loaded[..], value(2).unwrap());
+    };
+
+    read();
+    assert_eq!(
+        control.memory().used(),
+        baseline,
+        "a point read retains no cache"
+    );
+    let reader = run.cache_reader();
+    read();
+    assert!(control.memory().used() > baseline);
+    let mut cursor = run.cursor(Bound::Unbounded);
+    assert!(cursor.next(&control).unwrap().is_some());
+    drop(reader);
+    assert!(
+        control.memory().used() > baseline,
+        "the cursor still uses the cache"
+    );
+    while cursor.next(&control).unwrap().is_some() {}
+    assert_eq!(
+        control.memory().used(),
+        baseline,
+        "exhaustion releases decoded blocks"
+    );
+    assert!(cursor.next(&control).unwrap().is_none());
+
+    let mut partial = run.cursor(Bound::Unbounded);
+    assert!(partial.next(&control).unwrap().is_some());
+    read();
+    drop(partial);
+    assert_eq!(
+        control.memory().used(),
+        baseline,
+        "early stop releases decoded blocks"
+    );
+    drop((run, retained));
+    // The exhausted cursor retains only the immutable run until it is dropped.
+    assert_eq!(control.memory().used(), baseline);
+    drop(cursor);
+    assert_eq!(control.memory().used(), 0);
+}

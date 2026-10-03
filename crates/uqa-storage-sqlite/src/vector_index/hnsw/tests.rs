@@ -13,6 +13,8 @@ use crate::vector_index::codec::vector_to_blob;
 use crate::ManagedConnection;
 use uqa_storage::vector_index::{HNSWIndexParams, VectorIndex};
 
+mod spill;
+
 fn params() -> HNSWIndexParams {
     HNSWIndexParams {
         m: 4,

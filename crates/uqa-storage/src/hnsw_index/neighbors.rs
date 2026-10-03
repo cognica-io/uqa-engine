@@ -6,8 +6,6 @@
 
 //! Diversity-aware neighbor selection and reciprocal degree pruning.
 
-use std::collections::BTreeSet;
-
 use super::metric::distance;
 use super::prepare::{check, Control};
 use super::search::Candidate;
@@ -15,14 +13,19 @@ use super::types::{HNSWIndex, NodeId};
 use crate::StorageBackendResult;
 
 impl HNSWIndex {
-    pub(super) fn ensure_layer_zero_backbone(&self, node_id: NodeId, neighbors: &mut Vec<NodeId>) {
+    pub(super) fn ensure_layer_zero_backbone(
+        &self,
+        node_id: NodeId,
+        neighbors: &mut Vec<NodeId>,
+    ) -> StorageBackendResult<()> {
         let Some(previous_id) = node_id.checked_sub(1) else {
-            return;
+            return Ok(());
         };
-        if self.nodes.contains_key(&previous_id) && !neighbors.contains(&previous_id) {
+        if self.node(previous_id)?.is_some() && !neighbors.contains(&previous_id) {
             neighbors.push(previous_id);
             neighbors.sort_unstable();
         }
+        Ok(())
     }
 
     pub(super) fn prune_node(
@@ -32,7 +35,7 @@ impl HNSWIndex {
         control: Control<'_>,
     ) -> StorageBackendResult<()> {
         check(control)?;
-        let Some(node) = self.nodes.get(&node_id) else {
+        let Some(node) = self.node(node_id)? else {
             return Ok(());
         };
         let Some(current) = node.neighbors.get(layer).cloned() else {
@@ -42,9 +45,9 @@ impl HNSWIndex {
             .iter()
             .copied()
             .filter(|neighbor_id| layer == 0 && node_id.abs_diff(*neighbor_id) == 1)
-            .collect::<BTreeSet<_>>();
+            .collect::<Vec<_>>();
         let limit = self.max_connections(layer);
-        let mut selected = protected.iter().copied().collect::<Vec<_>>();
+        let mut selected = protected.clone();
         selected.extend(
             self.select_neighbors(
                 &node.normalized_vector,
@@ -58,23 +61,21 @@ impl HNSWIndex {
             )?,
         );
         selected.sort_unstable();
-        let selected_set = selected.iter().copied().collect::<BTreeSet<_>>();
         let removed = current
             .into_iter()
-            .filter(|neighbor| !selected_set.contains(neighbor))
+            .filter(|neighbor| selected.binary_search(neighbor).is_err())
             .collect::<Vec<_>>();
-        if let Some(node) = self.nodes.get_mut(&node_id) {
+        drop(node);
+        self.modify_node(node_id, control, |node| {
             node.neighbors[layer] = selected;
-            self.dirty_nodes.insert(node_id);
-        }
+        })?;
         for removed_id in removed {
             check(control)?;
-            if let Some(neighbor) = self.nodes.get_mut(&removed_id) {
+            self.modify_node(removed_id, control, |neighbor| {
                 if let Some(reverse) = neighbor.neighbors.get_mut(layer) {
                     reverse.retain(|candidate| *candidate != node_id);
-                    self.dirty_nodes.insert(removed_id);
                 }
-            }
+            })?;
         }
         Ok(())
     }
@@ -92,7 +93,7 @@ impl HNSWIndex {
         for node_id in candidates {
             check(control)?;
             if Some(node_id) != exclude {
-                if let Some(node) = self.nodes.get(&node_id) {
+                if let Some(node) = self.node(node_id)? {
                     scored.push(Candidate {
                         distance: distance(query, &node.normalized_vector),
                         node_id,
@@ -103,17 +104,34 @@ impl HNSWIndex {
         let mut candidates = scored;
         candidates.sort();
         candidates.dedup_by_key(|candidate| candidate.node_id);
-        let mut selected = Vec::with_capacity(limit.min(candidates.len()));
+        self.select_candidates(candidates.into_iter().map(Ok), limit, exclude, control)
+    }
+
+    pub(super) fn select_candidates(
+        &self,
+        candidates: impl IntoIterator<Item = StorageBackendResult<Candidate>>,
+        limit: usize,
+        exclude: Option<NodeId>,
+        control: Control<'_>,
+    ) -> StorageBackendResult<Vec<NodeId>> {
+        let mut selected = Vec::new();
         let mut rejected = Vec::new();
         for candidate in candidates {
             check(control)?;
-            let Some(candidate_node) = self.nodes.get(&candidate.node_id) else {
+            if selected.len() == limit {
+                break;
+            }
+            let candidate = candidate?;
+            if Some(candidate.node_id) == exclude {
+                continue;
+            }
+            let Some(candidate_node) = self.node(candidate.node_id)? else {
                 continue;
             };
             let mut diverse = true;
             for selected_id in &selected {
                 check(control)?;
-                if let Some(selected_node) = self.nodes.get(selected_id) {
+                if let Some(selected_node) = self.node(*selected_id)? {
                     let separated = distance(
                         &candidate_node.normalized_vector,
                         &selected_node.normalized_vector,
@@ -126,7 +144,7 @@ impl HNSWIndex {
             }
             if diverse && selected.len() < limit {
                 selected.push(candidate.node_id);
-            } else {
+            } else if rejected.len() < limit {
                 rejected.push(candidate.node_id);
             }
         }

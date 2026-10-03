@@ -37,8 +37,32 @@ fn dense_workspace_retains_its_original_budget_and_checks_cancellation() {
         assert!(!set.insert(512).unwrap());
     }
     assert_eq!(control.memory().used(), 0);
-    assert!(Visited::new(Some(1), Some(4096), 64, Some(&control)).is_err());
+    let mut sparse = Visited::new(Some(1), Some(4096), 64, Some(&control)).unwrap();
+    assert!(matches!(sparse, Visited::Sparse(_)));
+    assert!(sparse.insert(1).is_err());
+    drop(sparse);
     assert_eq!(control.memory().used(), 0);
     control.cancellation().cancel();
     assert!(Visited::new(Some(1), Some(512), 64, Some(&control)).is_err());
+}
+
+#[test]
+fn sparse_words_spill_and_keep_membership_across_distant_identities() {
+    let control = StorageReadControl::with_limit(32 * 1024);
+    let mut visited = Visited::new(Some(0), Some(u64::MAX), 2, Some(&control)).unwrap();
+    let mut expected = std::collections::BTreeSet::new();
+    for id in (0..80_u64)
+        .map(|id| id << 56)
+        .chain([0, 1, 63, 64, u64::MAX, u64::MAX])
+    {
+        assert_eq!(visited.insert(id).unwrap(), expected.insert(id));
+    }
+    let Visited::Sparse(words) = &visited else {
+        panic!("expected sparse membership");
+    };
+    assert!(words.words.is_spilled());
+    control.cancellation().cancel();
+    assert!(visited.insert(3).is_err());
+    drop(visited);
+    assert_eq!(control.memory().used(), 0);
 }
