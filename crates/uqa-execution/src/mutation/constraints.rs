@@ -103,6 +103,41 @@ fn validate_document_non_key_constraints_with_old(
     params: &[SQLParam],
     old_document: Option<&Document>,
 ) -> Result<(), SQLError> {
+    validate_row_checks(
+        context,
+        statement,
+        table,
+        document,
+        params,
+        old_document.is_none(),
+    )?;
+    lock_document_foreign_key_dependencies(
+        context,
+        table,
+        document,
+        ForeignKeyCheck::new_row(statement.is_none()),
+        old_document,
+    )
+}
+
+/// Check a row that a table rewrite produced against the table's validated NOT NULL and CHECK constraints before it replaces the existing row, as `ATRewriteTable` does; the rewrite validates foreign keys once every row is written.
+pub fn validate_rewritten_row(
+    context: ConstraintContext<'_>,
+    table: &str,
+    document: &Document,
+) -> Result<(), SQLError> {
+    validate_row_checks(context, None, table, document, &[], false)
+}
+
+/// The NOT NULL, CHECK and, for a row an INSERT writes into a partition it names, partition constraints of a row.
+fn validate_row_checks(
+    context: ConstraintContext<'_>,
+    statement: Option<ConstraintStatement<'_>>,
+    table: &str,
+    document: &Document,
+    params: &[SQLParam],
+    inserted: bool,
+) -> Result<(), SQLError> {
     let definitions = context
         .catalog
         .try_describe_table(table)
@@ -163,7 +198,8 @@ fn validate_document_non_key_constraints_with_old(
     let mut check_constraints = check_constraints;
     check_constraints.sort_by(|left, right| left.name.cmp(&right.name));
     for constraint in check_constraints {
-        if !constraint.enforced {
+        // An existing row was never checked against a NOT VALID constraint, which a table alteration therefore leaves unchecked as well.
+        if !constraint.enforced || (statement.is_none() && !constraint.validated) {
             continue;
         }
         let accepted = if let Some(partition) = constraint.partition_constraint.as_ref() {
@@ -193,12 +229,11 @@ fn validate_document_non_key_constraints_with_old(
 
     // A partition that an INSERT names checks its partition constraint after its other constraints; a row routed to it from a partitioned table it belongs to was checked by routing (`ExecInsert`).
     if let Some(statement) = statement {
-        if old_document.is_none() && statement.relation == table {
+        if inserted && statement.relation == table {
             validate_partition_constraint(context, statement, table, document, params)?;
         }
     }
-
-    lock_document_foreign_key_dependencies(context, table, document, false, old_document)
+    Ok(())
 }
 
 pub fn lock_existing_document_foreign_key_dependencies(
@@ -206,7 +241,7 @@ pub fn lock_existing_document_foreign_key_dependencies(
     table: &str,
     document: &Document,
 ) -> Result<(), SQLError> {
-    lock_document_foreign_key_dependencies(context, table, document, true, None)
+    lock_document_foreign_key_dependencies(context, table, document, ForeignKeyCheck::Lock, None)
 }
 
 pub fn lock_existing_document_rewrite_foreign_key_dependencies(
@@ -215,17 +250,46 @@ pub fn lock_existing_document_rewrite_foreign_key_dependencies(
     old_document: &Document,
     new_document: &Document,
 ) -> Result<(), SQLError> {
-    lock_document_foreign_key_dependencies(context, table, new_document, true, Some(old_document))
+    lock_document_foreign_key_dependencies(
+        context,
+        table,
+        new_document,
+        ForeignKeyCheck::Lock,
+        Some(old_document),
+    )
+}
+
+/// How a row's foreign keys are checked.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ForeignKeyCheck {
+    /// Lock the referenced rows that exist, before the row's other checks.
+    Lock,
+    /// Require the referenced rows of a row a statement writes, unless the key is deferred or the session replays replicated changes.
+    Statement,
+    /// Require the referenced rows of an existing row that a table alteration validates, for every validated key, as `PostgreSQL` validates a foreign key whatever the replication role.
+    Existing,
+}
+
+impl ForeignKeyCheck {
+    const fn new_row(existing: bool) -> Self {
+        if existing {
+            Self::Existing
+        } else {
+            Self::Statement
+        }
+    }
 }
 
 fn lock_document_foreign_key_dependencies(
     context: ConstraintContext<'_>,
     table: &str,
     document: &Document,
-    allow_missing: bool,
+    check: ForeignKeyCheck,
     old_document: Option<&Document>,
 ) -> Result<(), SQLError> {
-    if context.referrers.session_replication_role_is_replica() {
+    let allow_missing = check == ForeignKeyCheck::Lock;
+    if check != ForeignKeyCheck::Existing && context.referrers.session_replication_role_is_replica()
+    {
         return Ok(());
     }
     for fk in context
@@ -233,10 +297,12 @@ fn lock_document_foreign_key_dependencies(
         .try_foreign_keys(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?
     {
-        if !fk.enforced {
+        if !fk.enforced || (check == ForeignKeyCheck::Existing && !fk.validated) {
             continue;
         }
-        if !allow_missing && context.transactions.foreign_key_is_deferred(table, &fk)? {
+        if check == ForeignKeyCheck::Statement
+            && context.transactions.foreign_key_is_deferred(table, &fk)?
+        {
             continue;
         }
         if old_document.is_some_and(|old_document| {
@@ -383,6 +449,7 @@ fn validate_not_null_columns(
     let virtual_columns = definitions.iter().filter(|column| is_virtual(column));
     for col_def in stored.chain(virtual_columns) {
         if !col_def.not_null
+            || (statement.is_none() && !col_def.not_null_validated)
             || col_def.auto_increment.as_ref().is_some_and(|provenance| {
                 provenance.kind == uqa_sql::ast::AutoIncrementKind::Legacy
             })

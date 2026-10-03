@@ -9,7 +9,6 @@ use crate::mutation::constraints::context::MutationRead;
 use crate::mutation::publication::DocumentVectors;
 use std::collections::BTreeMap;
 use uqa_core::{DocId, Value};
-use uqa_sql::assignment::vectors::index_vectors_for_type;
 use uqa_sql::assignment::{
     columns::{AssignmentColumnCatalog, ColumnCatalogError},
     conversion::{
@@ -22,6 +21,7 @@ use uqa_sql::{
     ast::{ColumnType, Expr},
     SQLError,
 };
+use uqa_storage::document_store::Document;
 /// Publish converted fields through the caller's storage and index update path.
 pub trait ColumnRewritePublication {
     fn update_fields(
@@ -42,15 +42,15 @@ pub struct ColumnRewriteContext<'a> {
 fn ddl_storage_error(action: &str, error: ColumnCatalogError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, error.as_ref())
 }
-type RowUpdateVectors = DocumentVectors;
-pub fn rewrite_column_values_to_type(
+/// The rows of `table` with `column` converted from `source_ty` to `target_ty`, by its `USING` expression when the type change has one. A type change rewrites the table with them; their constraints are checked before they replace the stored rows.
+pub fn converted_column_rows(
     context: &ColumnRewriteContext<'_>,
     table: &str,
     column: &str,
     source_ty: &ColumnType,
     target_ty: &ColumnType,
     using: Option<&Expr>,
-) -> Result<(), SQLError> {
+) -> Result<Vec<(DocId, Document)>, SQLError> {
     let definitions = context
         .columns
         .try_describe_table(table)
@@ -72,35 +72,40 @@ pub fn rewrite_column_values_to_type(
             })
             .collect(),
     );
-    for doc_id in context.reads.live_table_doc_ids(table)? {
-        let Some(doc) = context.reads.get_document(table, doc_id)? else {
+    let doc_ids = context.reads.live_table_doc_ids(table)?;
+    let mut rows = Vec::with_capacity(doc_ids.len());
+    for doc_id in doc_ids {
+        let Some(mut doc) = context.reads.get_document(table, doc_id)? else {
             continue;
         };
         let converted = if let Some(expression) = using {
             let value = context
                 .expressions
                 .evaluate_row(expression, &doc, &schema, &[])?;
-            convert_value_to_column_type_with_context(context.types, value, target_ty)?
+            Some(convert_value_to_column_type_with_context(
+                context.types,
+                value,
+                target_ty,
+            )?)
         } else {
-            let Some(value) = doc.get(column).cloned() else {
-                continue;
-            };
-            convert_declared_value_to_column_type(context.types, value, source_ty, target_ty)?
+            doc.get(column)
+                .cloned()
+                .map(|value| {
+                    convert_declared_value_to_column_type(
+                        context.types,
+                        value,
+                        source_ty,
+                        target_ty,
+                    )
+                })
+                .transpose()?
         };
-        let mut updates: BTreeMap<String, Value> = BTreeMap::new();
-        updates.insert(column.to_string(), converted.clone());
-        let mut vectors: RowUpdateVectors = BTreeMap::new();
-        if matches!(target_ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
-            vectors.insert(
-                column.to_string(),
-                index_vectors_for_type(&converted, target_ty)?,
-            );
+        if let Some(converted) = converted {
+            doc.insert(column.to_string(), converted);
         }
-        context
-            .writes
-            .update_fields(table, doc_id, updates, vectors)?;
+        rows.push((doc_id, doc));
     }
-    Ok(())
+    Ok(rows)
 }
 
 pub mod backfill;

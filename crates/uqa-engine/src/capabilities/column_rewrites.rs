@@ -64,9 +64,6 @@ impl ColumnBackfillState for Engine {
     }
 }
 impl GeneratedRewriteState for Engine {
-    fn table_names(&self) -> StorageBackendResult<Vec<String>> {
-        Engine::table_names_in_execution(self)
-    }
     fn advance_next_id(&self, table: &str, id: DocId) -> StorageBackendResult<()> {
         Engine::advance_next_id(self, table, id)
     }
