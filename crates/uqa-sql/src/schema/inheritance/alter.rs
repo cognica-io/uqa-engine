@@ -6,9 +6,9 @@
 
 //! ALTER inheritance and partition declaration rules over immutable column and constraint definitions.
 use crate::ast::{
-    AutoIncrement, BinaryOp, ColumnDef, DetachedPartitionConstraint, Expr, ForeignKey,
-    PartitionBound, PartitionIdentityOverride, PartitionRangeDatum, PartitionSpec,
-    RelationPersistence, TableCheck, TableHierarchy, TableKeyConstraint,
+    AutoIncrement, BinaryOp, ColumnDef, DetachedPartitionConstraint, Expr, PartitionBound,
+    PartitionIdentityOverride, PartitionRangeDatum, PartitionSpec, RelationPersistence, TableCheck,
+    TableHierarchy, TableKeyConstraint,
 };
 use crate::SQLError;
 use uqa_core::Value;
@@ -281,25 +281,6 @@ pub fn key_equivalent(left: &TableKeyConstraint, right: &TableKeyConstraint) -> 
         && left.without_overlaps == right.without_overlaps
 }
 
-pub fn append_inherited_foreign_keys(
-    target: &mut Vec<ForeignKey>,
-    inherited: &[ForeignKey],
-) -> Vec<ForeignKey> {
-    let mut appended = Vec::new();
-    for constraint in inherited {
-        if !target
-            .iter()
-            .any(|candidate| foreign_key_equivalent(candidate, constraint))
-        {
-            let mut clone = constraint.clone();
-            clone.catalog_identity = None;
-            target.push(clone.clone());
-            appended.push(clone);
-        }
-    }
-    appended
-}
-
 pub fn clear_partition_constraint_provenance(constraints: &mut crate::ast::TableConstraintSet) {
     constraints
         .hierarchy
@@ -309,17 +290,6 @@ pub fn clear_partition_constraint_provenance(constraints: &mut crate::ast::Table
         .hierarchy
         .partition_inherited_foreign_keys
         .clear();
-}
-
-fn foreign_key_equivalent(left: &ForeignKey, right: &ForeignKey) -> bool {
-    left.local_columns == right.local_columns
-        && left.ref_table == right.ref_table
-        && left.ref_columns == right.ref_columns
-        && left.on_update == right.on_update
-        && left.on_delete == right.on_delete
-        && left.on_delete_set_columns == right.on_delete_set_columns
-        && left.match_type == right.match_type
-        && left.enforced == right.enforced
 }
 
 pub fn detached_bound_check(

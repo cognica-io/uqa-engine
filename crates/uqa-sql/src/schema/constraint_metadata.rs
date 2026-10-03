@@ -256,9 +256,10 @@ fn constraint_names_for_assignment(
 ) -> ConstraintMetadataResult<BTreeSet<String>> {
     let mut used = BTreeSet::new();
     for column in columns {
-        record_constraint_name(&mut used, column.not_null_name.as_deref())?;
-        record_constraint_name(&mut used, column.check_name.as_deref())?;
+        record_constraint_name(relation, &mut used, column.not_null_name.as_deref())?;
+        record_constraint_name(relation, &mut used, column.check_name.as_deref())?;
         record_constraint_name(
+            relation,
             &mut used,
             column
                 .references
@@ -267,29 +268,37 @@ fn constraint_names_for_assignment(
         )?;
     }
     for constraint in &constraints.key_constraints {
-        record_constraint_name(&mut used, constraint.name.as_deref())?;
+        record_constraint_name(relation, &mut used, constraint.name.as_deref())?;
     }
     for constraint in &constraints.checks {
-        record_constraint_name(&mut used, constraint.name.as_deref())?;
+        record_constraint_name(relation, &mut used, constraint.name.as_deref())?;
     }
     for constraint in &constraints.foreign_keys {
-        record_constraint_name(&mut used, constraint.name.as_deref())?;
+        record_constraint_name(relation, &mut used, constraint.name.as_deref())?;
     }
     for name in &names.events {
         if !used.insert(name.clone()) {
-            return Err(ConstraintMetadataError::Execution(Box::new(
-                crate::schema::constraint_changes::constraint_error(
-                    "42710",
-                    format!(
-                        "constraint \"{name}\" for relation \"{}\" already exists",
-                        relation.name
-                    ),
-                ),
-            )));
+            return Err(duplicate_constraint(relation, name));
         }
     }
     used.extend(names.schema.iter().cloned());
     Ok(used)
+}
+
+/// The first of `base_1`, `base_2`, ... that no constraint in `used` holds, which then holds it, as `PostgreSQL`'s `ChooseConstraintName` chooses a name with an empty label for a base that a constraint of the schema already holds.
+pub fn choose_suffixed_constraint_name(
+    base: &str,
+    used: &mut BTreeSet<String>,
+) -> ConstraintMetadataResult<String> {
+    for suffix in 1_u64.. {
+        let candidate = super::indexes::names::object_name(base, "", &suffix.to_string());
+        if used.insert(candidate.clone()) {
+            return Ok(candidate);
+        }
+    }
+    Err(ConstraintMetadataError::Invalid(format!(
+        "constraint name suffix space exhausted for `{base}`"
+    )))
 }
 
 pub fn materialize_column_key_constraints(
@@ -416,6 +425,7 @@ fn assign_catalog_object_id(
 }
 
 fn record_constraint_name(
+    relation: &RelationIdentity,
     used: &mut BTreeSet<String>,
     name: Option<&str>,
 ) -> ConstraintMetadataResult<()> {
@@ -428,11 +438,21 @@ fn record_constraint_name(
         ));
     }
     if !used.insert(name.to_string()) {
-        return Err(ConstraintMetadataError::Invalid(format!(
-            "constraint `{name}` is declared more than once"
-        )));
+        return Err(duplicate_constraint(relation, name));
     }
     Ok(())
+}
+
+fn duplicate_constraint(relation: &RelationIdentity, name: &str) -> ConstraintMetadataError {
+    ConstraintMetadataError::Execution(Box::new(
+        crate::schema::constraint_changes::constraint_error(
+            "42710",
+            format!(
+                "constraint \"{name}\" for relation \"{}\" already exists",
+                relation.name
+            ),
+        ),
+    ))
 }
 
 pub(super) fn assign_constraint_name(

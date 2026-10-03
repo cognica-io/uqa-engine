@@ -511,6 +511,7 @@ impl Engine {
         }
         if initialize_catalog {
             engine.repair_persistent_value_indexes_on_open()?;
+            engine.repair_partition_foreign_keys_on_open()?;
         }
         // Eagerly and fallibly populate read caches. Once open succeeds,
         // cache misses mean absence rather than a swallowed catalog error.

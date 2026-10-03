@@ -82,10 +82,30 @@ pub fn add_foreign_key_constraint(
         .and_then(|constraint| constraint.name.clone())
         .ok_or_else(|| SQLError::Internal("new FOREIGN KEY constraint has no name".into()))?;
     publish_constraint_state(context, table, columns, constraints)?;
+    if is_partitioned(context, table)? {
+        let (_, constraints) = table_constraint_state(context, table)?;
+        let key = constraints
+            .foreign_keys
+            .iter()
+            .find(|constraint| constraint.name.as_deref() == Some(name.as_str()))
+            .ok_or_else(|| SQLError::Internal("new FOREIGN KEY constraint disappeared".into()))?;
+        super::partition_foreign_keys::inherit_partition_foreign_key(context, table, key)?;
+    }
     if should_validate {
         validate_and_mark_constraint(context, table, &name)?;
     }
     Ok(())
+}
+
+fn is_partitioned(context: &ConstraintAlterContext<'_>, table: &str) -> Result<bool, SQLError> {
+    Ok(context
+        .rows
+        .partitions
+        .catalog
+        .try_table_hierarchy(table)
+        .map_err(SQLError::Internal)?
+        .partition_spec
+        .is_some())
 }
 
 pub fn set_not_null_constraint(
@@ -265,18 +285,11 @@ pub fn validate_and_mark_constraint(
             if reference.validated {
                 return Ok(());
             }
-            if !reference.enforced {
-                return Err(constraint_error(
-                    "55000",
-                    "cannot validate NOT ENFORCED constraint",
-                ));
-            }
-            let foreign_key = column_foreign_key(&columns[index], reference);
-            crate::schema::validation::validate_foreign_key_rows(
-                context.rows,
+            validate_foreign_key(
+                context,
                 table,
                 name,
-                &foreign_key,
+                &column_foreign_key(&columns[index], reference),
             )?;
             columns[index]
                 .references
@@ -288,18 +301,7 @@ pub fn validate_and_mark_constraint(
             if constraints.foreign_keys[index].validated {
                 return Ok(());
             }
-            if !constraints.foreign_keys[index].enforced {
-                return Err(constraint_error(
-                    "55000",
-                    "cannot validate NOT ENFORCED constraint",
-                ));
-            }
-            crate::schema::validation::validate_foreign_key_rows(
-                context.rows,
-                table,
-                name,
-                &constraints.foreign_keys[index],
-            )?;
+            validate_foreign_key(context, table, name, &constraints.foreign_keys[index])?;
             constraints.foreign_keys[index].validated = true;
         }
         ConstraintLocation::Key(_) => {
@@ -312,6 +314,32 @@ pub fn validate_and_mark_constraint(
         }
     }
     publish_constraint_state(context, table, columns, constraints)
+}
+
+/// Validate the rows of an enforced foreign key: the table's own rows, and on a partitioned table the rows of each leaf partition through its copy.
+fn validate_foreign_key(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+    name: &str,
+    foreign_key: &uqa_sql::ast::ForeignKey,
+) -> Result<(), SQLError> {
+    if !foreign_key.enforced {
+        return Err(constraint_error(
+            "55000",
+            "cannot validate NOT ENFORCED constraint",
+        ));
+    }
+    crate::schema::validation::validate_foreign_key_rows(context.rows, table, name, foreign_key)?;
+    if is_partitioned(context, table)? {
+        super::partition_foreign_keys::validate_partition_foreign_keys(
+            context,
+            table,
+            foreign_key.object_id.ok_or_else(|| {
+                SQLError::Internal("materialized foreign key has no object identity".into())
+            })?,
+        )?;
+    }
+    Ok(())
 }
 
 pub fn validate_not_null_rows(

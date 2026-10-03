@@ -35,6 +35,8 @@ mod not_null;
 mod not_null_origin;
 #[path = "sql_relation_hierarchy/ownership.rs"]
 mod ownership;
+#[path = "sql_relation_hierarchy/partition_foreign_keys.rs"]
+mod partition_foreign_keys;
 #[path = "sql_relation_hierarchy/referenced_partitions.rs"]
 mod referenced_partitions;
 #[path = "sql_relation_hierarchy/referencing_partitions.rs"]

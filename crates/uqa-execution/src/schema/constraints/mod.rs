@@ -57,6 +57,7 @@ pub mod drop;
 mod inheritance;
 mod lifecycle;
 pub mod names;
+pub mod partition_foreign_keys;
 pub mod renaming;
 pub mod restoration;
 mod validation;

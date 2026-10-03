@@ -328,5 +328,6 @@ fn validate_partition_keys(
 pub mod alter;
 
 pub mod detachment;
+pub mod foreign_keys;
 pub mod origins;
 pub mod restoration;

@@ -362,9 +362,19 @@ fn locks_all_descendants<S: Clone + 'static>(
     if let AlterTableAction::ValidateConstraint { name } = action {
         let (columns, constraints) =
             crate::schema::constraints::table_constraint_state(&context.constraints, parent)?;
-        return Ok(
-            constraint_validation(parent, name, &columns, &constraints)?.requires_descendants()
-        );
+        let validation = constraint_validation(parent, name, &columns, &constraints)?;
+        // An unvalidated foreign key of a partitioned table validates the copies on its partitions, as `QueueFKConstraintValidation` opens each of them.
+        let partition_foreign_key = !validation.validated
+            && matches!(validation.kind, ConstraintValidationKind::ForeignKey { .. })
+            && context
+                .hierarchy
+                .partitions
+                .catalog
+                .try_table_hierarchy(parent)
+                .map_err(|error| SQLError::Internal(error.to_string()))?
+                .partition_spec
+                .is_some();
+        return Ok(validation.requires_descendants() || partition_foreign_key);
     }
     if let AlterTableAction::RenameConstraint { from: name, .. } = action {
         let (columns, constraints) =

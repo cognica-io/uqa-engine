@@ -20,6 +20,8 @@ pub trait PartitionCatalog {
     fn direct_hierarchy_children(&self, parent: &str) -> Result<Vec<String>, SQLError>;
     fn try_resolve_table_name(&self, name: &str) -> Result<Option<String>, String>;
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
+    /// The object identity of a table, which survives renames.
+    fn try_table_object_id(&self, table: &str) -> Result<Option<[u8; 16]>, String>;
 }
 
 /// Evaluate declared partition keys and bounds with the caller's expression scope.
@@ -592,7 +594,11 @@ fn compare_key_to_bound(
 }
 
 mod identity;
+mod order;
+pub use order::partition_bound_order;
+mod tree;
 pub use identity::{
     foreign_key_scan_tables, partition_ancestor_tables, partition_hierarchy_root,
     partition_identity_owner,
 };
+pub use tree::{partition_tree, PartitionTreeNode};

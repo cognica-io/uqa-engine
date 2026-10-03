@@ -70,6 +70,13 @@ impl PartitionCatalog for Catalog {
     fn try_describe_table(&self, _table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Ok(None)
     }
+
+    fn try_table_object_id(&self, table: &str) -> Result<Option<[u8; 16]>, String> {
+        Ok(self
+            .0
+            .contains_key(table)
+            .then_some([table.len() as u8; 16]))
+    }
 }
 
 #[test]
