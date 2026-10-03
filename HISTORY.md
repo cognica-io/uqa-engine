@@ -6,10 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-10-03
+
+This release bounds HNSW and transaction retention with encrypted temporary storage and corrects PostgreSQL 18 sequence, foreign-key, transaction and diagnostic behavior. Native SQLite mapping advances from 13 to 14, and persistent sequence definitions and values are stored separately. Stop every database owner, retain a closed pre-upgrade backup and update all owners together. Rust persistence and HNSW adapters and consumers of Rust/Python notices need API updates; see the [0.4.9 upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/reference/10-upgrading.md).
+
+### Changed
+
+- Store sequence values independently of catalog definitions, avoiding catalog refreshes when reserved values are published. Native SQLite migrates retained sequence revisions to mapping format 14; SQLite Key/Value and redb migrate sequence definitions and value records on open. Earlier binaries cannot consume the upgraded sequence representation.
+- Preserve PostgreSQL notice levels, SQLSTATEs, messages, details and hints through Rust, Python, Node.js, WASM, the PostgreSQL server and `usql`. Rust returns `SQLNotice` values and Python returns dictionaries instead of pairs; Node.js and WASM notice objects gain the diagnostic fields.
+
 ### Fixed
 
 - Spill private transaction changes and prepared publication records to encrypted temporary files under the existing session allowance. Preserve savepoints and conflict preconditions, stream SQLite/redb publication and release decoded run caches when reading ends.
-- Keep HNSW graph construction, restoration, mutation generations, publication and search workspaces bounded by their retention allowance using encrypted temporary storage across memory, native SQLite, standalone SQLite, SQLite Key/Value and redb. Preserve graph topology, canonical scores, retained snapshots and transaction rollback while streaming provider inputs and persistence deltas; see the [Rust API changes](docs/manual/reference/10-upgrading.md).
+- Keep HNSW graph construction, restoration, mutation generations, publication and search workspaces bounded by their retention allowance using encrypted temporary storage across memory, native SQLite, standalone SQLite, SQLite Key/Value and redb. Preserve graph topology, canonical scores, retained snapshots and transaction rollback while streaming provider inputs and persistence deltas; see the [Rust API changes](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/reference/10-upgrading.md).
+- Keep committed sequence allocation outside transactions that change sequence names, ownership or privileges, preventing duplicate values, allocation conflicts and rollback to values already issued by another session. Preserve transactional allocation for newly created or restarted sequence generations.
+- Match PostgreSQL foreign-key behavior across ordinary inheritance and partitioned tables: restrict referential actions to the declaring relation, propagate and validate partition constraints, preserve derived constraint identities and deferrability, and reject dropping, truncating or detaching referenced partitions when required.
+- Validate table rewrites against the affected rows and validated constraints, including referencing foreign keys. Check unique keys across the complete rewritten result so values moved by `USING` do not conflict with rows being replaced, and preserve PostgreSQL index-build diagnostics.
+- Treat a repeated SQL `BEGIN` as a warning without opening another transaction frame; the first `COMMIT` commits the block. Report PostgreSQL warnings for `SET LOCAL` and `SET TRANSACTION` outside transaction blocks while preserving explicit Rust nested frames.
+- Keep error details and hints separate from primary messages, preserve referenced-side diagnostics for deferred foreign-key failures, and follow PostgreSQL partition-attachment validation order.
 
 ## [0.4.8] - 2026-10-03
 
