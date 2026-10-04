@@ -24,6 +24,79 @@ enum CommandScanCandidate {
 }
 
 impl LocalTableRowSource {
+    /// Emit the rows at the identities the scan's filter admits: each read from the changes above storage when they hold the identity, otherwise from storage, and only when it exists. Each identity is observed, also when it holds no row, since the filter's result depends on it.
+    pub(super) fn next_candidate_physical_rows_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> crate::ExecResult<Vec<crate::PhysicalRow>> {
+        let Some(candidates) = self.candidates.clone() else {
+            return Err(SQLError::Internal("candidate scan has no identities".into()).into());
+        };
+        let changes = self.command_changes.clone();
+        let mut rows = Vec::new();
+        while rows.len() < max_rows && self.candidate_cursor < candidates.len() {
+            let end = candidates
+                .len()
+                .min(self.candidate_cursor + (max_rows - rows.len()));
+            let page = &candidates[self.candidate_cursor..end];
+            self.candidate_cursor = end;
+            let mut persisted_ids = Vec::new();
+            let mut private_ids = Vec::new();
+            {
+                let store = self.table.read_documents();
+                for &id in page {
+                    self.cancellation.check().map_err(SQLError::from)?;
+                    self.serializable.observe_row(id)?;
+                    let changed = changes
+                        .as_ref()
+                        .map(|changes| changes.change_presence(id))
+                        .transpose()
+                        .map_err(|error| {
+                            storage_error("probe a changed document identity", &error)
+                        })?
+                        .flatten();
+                    match changed {
+                        Some(true) => private_ids.push(id),
+                        Some(false) => {}
+                        None => {
+                            if store.contains_doc_id(id).map_err(|error| {
+                                storage_error("probe a named document identity", &error)
+                            })? {
+                                persisted_ids.push(id);
+                            }
+                        }
+                    }
+                }
+            }
+            let mut persisted =
+                self.command_projected_rows(&**self.table.read_documents(), &persisted_ids)?;
+            let mut private = match changes.as_ref() {
+                Some(changes) => self.command_projected_rows(changes, &private_ids)?,
+                None => BTreeMap::new(),
+            };
+            let mut persisted_ids = persisted_ids.into_iter().peekable();
+            let mut private_ids = private_ids.into_iter().peekable();
+            for &id in page {
+                // A present row whose projection names no field has no projected values.
+                let physical = if persisted_ids.next_if_eq(&id).is_some() {
+                    persisted.remove(&id)
+                } else if private_ids.next_if_eq(&id).is_some() {
+                    private.remove(&id)
+                } else {
+                    continue;
+                }
+                .unwrap_or_else(|| crate::PhysicalRow::nulls(self.columns.len()));
+                if let Some(predicate) = self.predicate.as_ref() {
+                    if !predicate.keep_row(&self.physical_schema.view(&physical))? {
+                        continue;
+                    }
+                }
+                rows.push(self.with_lock_identity(physical, id)?);
+            }
+        }
+        Ok(rows)
+    }
+
     pub(super) fn next_command_physical_rows_batch(
         &mut self,
         max_rows: usize,
@@ -129,7 +202,7 @@ impl LocalTableRowSource {
         Ok(candidates)
     }
 
-    fn command_projected_rows(
+    pub(super) fn command_projected_rows(
         &self,
         source: &dyn DocumentStore,
         ids: &[DocId],

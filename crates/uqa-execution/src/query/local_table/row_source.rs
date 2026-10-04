@@ -45,6 +45,9 @@ impl LocalTableRowSource {
         if self.recheck_pins.is_some() {
             return self.next_pinned_physical_rows_batch(max_rows);
         }
+        if self.candidates.is_some() {
+            return self.next_candidate_physical_rows_batch(max_rows);
+        }
         self.serializable.observe_relation()?;
         if self.command_changes.is_some() {
             return self.next_command_physical_rows_batch(max_rows);

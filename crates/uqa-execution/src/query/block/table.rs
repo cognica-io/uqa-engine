@@ -213,11 +213,20 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     }
 
     let table_state = context.scans.tables.table(table)?;
-    // A filter that names its rows by `_doc_id` reads only those of them that exist and evaluates the whole filter on them.
+    // A filter that names its rows by `_doc_id` or by an integer primary key whose values are the rows' identities reads only those of them that exist and evaluates the whole filter on them.
     if matches!(scored, ScoredInput::All) {
         if let Some(identities) = physical_filter.as_ref().and_then(|filter| {
-            super::document_ids::document_id_candidates(filter, params, &table_snapshot.columns)
+            crate::query::key_candidates::key_candidates(
+                filter,
+                params,
+                crate::query::key_candidates::IdentityColumns::new(
+                    &table_snapshot.columns,
+                    table_state.maps_integer_keys(),
+                    |name| name,
+                ),
+            )
         }) {
+            let serializable = context.scans.tables.serializable_read(table)?;
             let documents = table_state.read_documents();
             let mut entries = Vec::with_capacity(identities.len());
             for doc_id in identities {
@@ -225,6 +234,9 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                     crate::storage_errors::storage_error("probe a named document identity", &error)
                 })? {
                     entries.push(uqa_core::ScoredEntry { doc_id, score: 0.0 });
+                } else if let Some(serializable) = serializable.as_ref() {
+                    // The read of a named identity that holds no row still depends on that identity; the source observes the rows it returns.
+                    serializable.observe_row(doc_id)?;
                 }
             }
             drop(documents);

@@ -18,12 +18,8 @@ use uqa_storage_sqlite::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorage
 const ALLOWANCE: usize = 4 << 20;
 
 fn engines(directory: &Path) -> Vec<(&'static str, Engine)> {
-    engines_with(directory, ALLOWANCE)
-}
-
-fn engines_with(directory: &Path, allowance: usize) -> Vec<(&'static str, Engine)> {
     let options = VersionedSessionOptions {
-        retained_bytes: allowance,
+        retained_bytes: ALLOWANCE,
     };
     let native = {
         let connection = ManagedConnection::open(&directory.join("native.db")).unwrap();
@@ -245,15 +241,11 @@ fn keys_stay_unique_across_the_rows_of_a_statement_larger_than_the_session_allow
     }
 }
 
-/// The rows of the statement below and an allowance they exceed. Each call of its function reads the table, so the statement's work grows with the square of its rows.
-const READ_BACK_ROWS: i64 = 2_000;
-const READ_BACK_ALLOWANCE: usize = 512 << 10;
-
 #[test]
 fn a_volatile_function_reads_the_rows_that_a_statement_larger_than_the_session_allowance_wrote_before(
 ) {
     let directory = tempfile::tempdir().unwrap();
-    for (backend, engine) in engines_with(directory.path(), READ_BACK_ALLOWANCE) {
+    for (backend, engine) in engines(directory.path()) {
         exec(
             &engine,
             "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
@@ -265,12 +257,12 @@ fn a_volatile_function_reads_the_rows_that_a_statement_larger_than_the_session_a
         exec(
             &engine,
             &format!(
-                "INSERT INTO docs SELECT g, earlier(g) || repeat(' payload', 12) FROM generate_series(1, {READ_BACK_ROWS}) AS g"
+                "INSERT INTO docs SELECT g, earlier(g) || repeat(' payload', 12) FROM generate_series(1, {STATEMENT_ROWS}) AS g"
             ),
         );
         assert_eq!(
             scalar(&engine, "SELECT count(*) FROM docs WHERE body LIKE '1 %'"),
-            Value::Int(READ_BACK_ROWS - 1),
+            Value::Int(STATEMENT_ROWS - 1),
             "{backend}"
         );
         assert_eq!(

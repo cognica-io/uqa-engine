@@ -106,8 +106,8 @@ impl QueryTableAccess for Engine {
     ) -> Result<Option<uqa_execution::query::document_changes::DocumentChanges>, SQLError> {
         self.command_overlay_changes(name)
     }
-    fn table_doc_count(&self, name: &str) -> Result<u64, SQLError> {
-        self.table_doc_count(name)
+    fn table_row_estimate(&self, name: &str) -> Result<u64, SQLError> {
+        self.table_row_estimate(name)
     }
 }
 impl RetrievalAccess for Engine {

@@ -188,6 +188,18 @@ impl Engine {
         Ok(visible.into_iter().collect())
     }
 
+    /// An estimate of the rows a read of `table` sees: the rows of the table the read selects, and each row the running commands staged for it as if it added one. Unlike [`Self::table_doc_count`] it reads no changed row, so its cost does not grow with the changes a read merges.
+    pub(crate) fn table_row_estimate(&self, table: &str) -> Result<u64, SQLError> {
+        let Some(t) = self
+            .try_query_table(table)
+            .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        let stored = t.stored_document_count()?;
+        Ok(stored.saturating_add(self.command_overlay_row_bound(table)?))
+    }
+
     pub(crate) fn table_doc_count(&self, table: &str) -> Result<u64, SQLError> {
         let Some(t) = self
             .try_query_table(table)

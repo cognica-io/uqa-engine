@@ -200,6 +200,7 @@ fn borrowed_local_scan_preserves_lock_identity_and_cancellation() {
             estimated_cardinality: 5,
             lock_origin: Some(("t".into(), "public.t".into())),
             recheck_pins: None,
+            candidates: None,
             command_changes: None,
         });
         assert!(source.next_physical_batch(0).unwrap().is_empty());

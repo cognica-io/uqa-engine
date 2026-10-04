@@ -162,6 +162,18 @@ impl Engine {
         Ok(matches)
     }
 
+    /// At least the number of rows the running commands staged for `table`, without reading them.
+    pub(crate) fn command_overlay_row_bound(&self, table: &str) -> Result<u64, SQLError> {
+        if self.session.command_mutation_overlays.lock().is_empty() {
+            return Ok(0);
+        }
+        let table = self.command_overlay_table_name(table)?;
+        Ok(CommandMutationOverlay::staged_row_bound(
+            &self.session.command_mutation_overlays.lock(),
+            &table,
+        ))
+    }
+
     pub(crate) fn command_overlay_changes(
         &self,
         table: &str,

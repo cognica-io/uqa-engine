@@ -32,6 +32,8 @@ pub(super) struct StagedRows {
     /// The estimated bytes the memory tier holds, which decide when it spills.
     resident: usize,
     pub(super) spilled: Option<SpilledRows>,
+    /// The rows moved into the spilled tier, counting a row once for each move.
+    spilled_rows: u64,
 }
 
 impl StagedRows {
@@ -40,7 +42,14 @@ impl StagedRows {
             memory: MemoryRows::new(control.memory()),
             resident: 0,
             spilled: None,
+            spilled_rows: 0,
         }
+    }
+
+    /// At least the number of rows staged, without reading them: a row staged again after it spilled counts twice.
+    pub(super) fn count_bound(&self) -> u64 {
+        self.spilled_rows
+            .saturating_add(u64::try_from(self.memory.len()).unwrap_or(u64::MAX))
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -57,6 +66,9 @@ impl StagedRows {
 
     /// Release the memory tier once every row of it is in the spilled tier.
     pub(super) fn clear_memory(&mut self) {
+        self.spilled_rows = self
+            .spilled_rows
+            .saturating_add(u64::try_from(self.memory.len()).unwrap_or(u64::MAX));
         self.memory = MemoryRows::new(self.memory.budget());
         self.resident = 0;
     }

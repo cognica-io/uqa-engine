@@ -74,6 +74,16 @@ impl CommandMutationOverlay {
             .is_some_and(|table| !table.rows.is_empty())
     }
 
+    /// At least the number of rows `overlays` staged for `table`, without reading them; a row staged by several commands or staged again after it spilled counts more than once.
+    pub fn staged_row_bound(overlays: &[Self], table: &str) -> u64 {
+        overlays
+            .iter()
+            .filter_map(|overlay| overlay.table(table))
+            .fold(0, |count, rows| {
+                count.saturating_add(rows.rows.count_bound())
+            })
+    }
+
     /// The row the newest of `overlays` staged for `id` in `table`: its fields, or `None` for a row the command deleted. `None` when no command staged the row.
     pub fn row(
         overlays: &[Self],
