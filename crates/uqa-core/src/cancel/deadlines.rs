@@ -15,7 +15,7 @@ use super::{CancellationReason, TokenState};
 /// What happens when a deadline passes.
 enum Pending {
     /// Cancel a token that still exists.
-    Cancel(Weak<TokenState>, CancellationReason),
+    Cancel(Arc<PendingCancellation>),
     /// Run an action.
     Run(Box<dyn FnOnce() + Send>),
 }
@@ -23,13 +23,50 @@ enum Pending {
 impl Pending {
     fn fire(self) {
         match self {
-            Self::Cancel(token, reason) => {
-                if let Some(token) = token.upgrade() {
-                    token.cancel(reason);
-                }
-            }
+            Self::Cancel(cancellation) => cancellation.fire(),
             Self::Run(action) => action(),
         }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CancellationPhase {
+    Armed,
+    Fired,
+    Disarmed,
+}
+
+struct PendingCancellation {
+    token: Weak<TokenState>,
+    reason: CancellationReason,
+    phase: Mutex<CancellationPhase>,
+}
+
+impl PendingCancellation {
+    fn lock(&self) -> MutexGuard<'_, CancellationPhase> {
+        self.phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn fire(&self) {
+        let mut phase = self.lock();
+        if *phase == CancellationPhase::Armed {
+            if let Some(token) = self.token.upgrade() {
+                token.cancel(self.reason);
+            }
+            *phase = CancellationPhase::Fired;
+        }
+    }
+
+    fn disarm(&self, token: &TokenState) {
+        // Hold the same lock through cancellation and clearing: a dequeued timer must
+        // either finish before this clear or observe Disarmed without touching the token.
+        let mut phase = self.lock();
+        if *phase == CancellationPhase::Fired {
+            token.clear(self.reason);
+        }
+        *phase = CancellationPhase::Disarmed;
     }
 }
 
@@ -106,7 +143,7 @@ impl DeadlineService {
         (at, id)
     }
 
-    /// Disarm a deadline; `false` when it has already fired.
+    /// Remove a queued deadline; `false` when the timer has already dequeued it.
     fn remove(&self, key: (Instant, u64)) -> bool {
         self.lock().pending.remove(&key).is_some()
     }
@@ -117,7 +154,7 @@ impl DeadlineService {
 pub struct CancellationDeadline {
     key: (Instant, u64),
     token: Arc<TokenState>,
-    reason: CancellationReason,
+    cancellation: Arc<PendingCancellation>,
 }
 
 impl CancellationDeadline {
@@ -126,19 +163,23 @@ impl CancellationDeadline {
         after: Duration,
         reason: CancellationReason,
     ) -> Self {
-        Self {
-            key: service().insert(after, Pending::Cancel(Arc::downgrade(token), reason)),
-            token: Arc::clone(token),
+        let cancellation = Arc::new(PendingCancellation {
+            token: Arc::downgrade(token),
             reason,
+            phase: Mutex::new(CancellationPhase::Armed),
+        });
+        Self {
+            key: service().insert(after, Pending::Cancel(Arc::clone(&cancellation))),
+            token: Arc::clone(token),
+            cancellation,
         }
     }
 }
 
 impl Drop for CancellationDeadline {
     fn drop(&mut self) {
-        if !service().remove(self.key) {
-            self.token.clear(self.reason);
-        }
+        self.cancellation.disarm(&self.token);
+        service().remove(self.key);
     }
 }
 
@@ -158,5 +199,92 @@ impl Drop for ScheduledAction {
 pub fn schedule(after: Duration, action: impl FnOnce() + Send + 'static) -> ScheduledAction {
     ScheduledAction {
         key: service().insert(after, Pending::Run(Box::new(action))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cancel::{CancellationToken, QueryCancelled};
+
+    fn dequeue(deadline: &CancellationDeadline) -> Pending {
+        service()
+            .lock()
+            .pending
+            .remove(&deadline.key)
+            .expect("armed deadline")
+    }
+
+    #[test]
+    fn dropped_dequeued_deadline_cannot_cancel_the_next_statement() {
+        let token = CancellationToken::new();
+        let deadline = token.deadline(
+            Duration::from_secs(3_600),
+            CancellationReason::StatementTimeout,
+        );
+        let pending = dequeue(&deadline);
+        drop(deadline);
+
+        let next = token.deadline(
+            Duration::from_secs(3_600),
+            CancellationReason::StatementTimeout,
+        );
+        pending.fire();
+        assert_eq!(token.check(), Ok(()));
+
+        dequeue(&next).fire();
+        assert_eq!(
+            token.check(),
+            Err(QueryCancelled::new(CancellationReason::StatementTimeout))
+        );
+        drop(next);
+        assert_eq!(token.check(), Ok(()));
+    }
+
+    #[test]
+    fn fired_deadline_drop_preserves_an_unrelated_cancellation() {
+        let token = CancellationToken::new();
+        let deadline = token.deadline(
+            Duration::from_secs(3_600),
+            CancellationReason::StatementTimeout,
+        );
+        token.cancel();
+        dequeue(&deadline).fire();
+        drop(deadline);
+        assert_eq!(token.check(), Err(QueryCancelled::USER_REQUEST));
+    }
+
+    #[test]
+    fn disarmed_dequeued_session_deadline_cannot_terminate_the_session() {
+        let token = CancellationToken::new();
+        let deadline = token.deadline(
+            Duration::from_secs(3_600),
+            CancellationReason::IdleSessionTimeout,
+        );
+        let pending = dequeue(&deadline);
+        drop(deadline);
+        pending.fire();
+        assert_eq!(token.termination(), None);
+        assert_eq!(token.check(), Ok(()));
+    }
+
+    #[test]
+    fn fired_session_deadline_remains_terminal_after_drop_and_reset() {
+        let token = CancellationToken::new();
+        let deadline = token.deadline(
+            Duration::from_secs(3_600),
+            CancellationReason::IdleSessionTimeout,
+        );
+        dequeue(&deadline).fire();
+        drop(deadline);
+        token.reset();
+        assert_eq!(
+            token.termination(),
+            Some(CancellationReason::IdleSessionTimeout)
+        );
+        assert_eq!(
+            token.check(),
+            Err(QueryCancelled::new(CancellationReason::IdleSessionTimeout))
+        );
     }
 }
