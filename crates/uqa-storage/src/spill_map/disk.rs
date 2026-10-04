@@ -397,7 +397,7 @@ impl Map {
         let mut replacement = Builder::new(memory)?;
         let mut after = None;
         while let Some((key, value)) = self.next::<V>(after, memory)? {
-            super::super::prepare::check(control)?;
+            super::check(control)?;
             replacement.push(key, &*value, memory)?;
             after = Some(key);
         }
