@@ -6,14 +6,17 @@
 
 //! The encoding of one spilled change: its key and metadata in the entry file, and the place of its value in the value file.
 
-use uqa_core::memory::MemoryBudget;
+use std::io::Read;
+use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::key::RecordKey;
 use crate::mvcc::{CommitSequence, PrivateRecordRevision, VersionError, VersionResult};
+use crate::read_control::StorageReadControl;
 
 const EXPECTED: u8 = 1;
 const VALUE: u8 = 2;
+const ZEROES: [u8; 1024] = [0; 1024];
 
 /// The bytes of a value in a run's value file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,32 +101,101 @@ pub(super) fn decode<'a>(bytes: &'a [u8], position: &mut usize) -> VersionResult
     };
     let key_len = u32::from_le_bytes(take(4)?.try_into().expect("four bytes")) as usize;
     let key = take(key_len)?;
-    let flags = take(1)?[0];
+    let metadata = metadata(|output| {
+        output.copy_from_slice(take(output.len())?);
+        Ok(())
+    })?;
+    Ok(RawEntry {
+        key,
+        expected: metadata.expected,
+        kind: metadata.kind,
+        identity: metadata.identity,
+        value: metadata.value,
+    })
+}
+
+/// Decode one complete entry without retaining its block or copying its key twice.
+pub(super) fn read(
+    reader: &mut impl Read,
+    remaining: &mut u64,
+    control: &StorageReadControl,
+) -> VersionResult<RunEntry> {
+    let mut length = [0; 4];
+    read_part(reader, &mut length, remaining, control)?;
+    let length = u32::from_le_bytes(length) as usize;
+    if length as u64 > *remaining {
+        return Err(VersionError::InvalidEncoding("truncated spilled record"));
+    }
+    let mut key = BudgetedVec::new(control.memory());
+    key.reserve(length)?;
+    while key.len() < length {
+        let begin = key.len();
+        let count = (length - begin).min(ZEROES.len());
+        key.extend_from_slice(&ZEROES[..count])?;
+        read_part(reader, &mut key[begin..], remaining, control)?;
+    }
+    let metadata = metadata(|output| read_part(reader, output, remaining, control))?;
+    Ok(RunEntry {
+        key: RecordKey::from_budgeted(key),
+        expected: metadata.expected,
+        kind: metadata.kind,
+        identity: metadata.identity,
+        value: metadata.value,
+    })
+}
+
+fn read_part(
+    reader: &mut impl Read,
+    output: &mut [u8],
+    remaining: &mut u64,
+    control: &StorageReadControl,
+) -> VersionResult<()> {
+    control.check()?;
+    *remaining = remaining
+        .checked_sub(output.len() as u64)
+        .ok_or(VersionError::InvalidEncoding("truncated spilled record"))?;
+    reader.read_exact(output).map_err(super::spill_error)
+}
+
+struct Metadata {
+    expected: Option<CommitSequence>,
+    kind: RecordWriteKind,
+    identity: PrivateRecordRevision,
+    value: Option<ValueLocation>,
+}
+
+/// Cached and streamed entry decoding share every metadata validation.
+fn metadata(mut take: impl FnMut(&mut [u8]) -> VersionResult<()>) -> VersionResult<Metadata> {
+    let mut byte = [0; 1];
+    take(&mut byte)?;
+    let flags = byte[0];
     if flags & !(EXPECTED | VALUE) != 0 {
         return Err(VersionError::InvalidEncoding(
             "invalid spilled record flags",
         ));
     }
     let expected = if flags & EXPECTED != 0 {
-        Some(CommitSequence::from_u64(u64::from_le_bytes(
-            take(8)?.try_into().expect("eight bytes"),
-        )))
+        let mut bytes = [0; 8];
+        take(&mut bytes)?;
+        Some(CommitSequence::from_u64(u64::from_le_bytes(bytes)))
     } else {
         None
     };
-    let kind = RecordWriteKind::from_code(take(1)?[0])?;
-    let identity = PrivateRecordRevision::from_u64(u64::from_le_bytes(
-        take(8)?.try_into().expect("eight bytes"),
-    ))?;
+    take(&mut byte)?;
+    let kind = RecordWriteKind::from_code(byte[0])?;
+    let mut bytes = [0; 8];
+    take(&mut bytes)?;
+    let identity = PrivateRecordRevision::from_u64(u64::from_le_bytes(bytes))?;
     let value = if flags & VALUE != 0 {
-        let offset = u64::from_le_bytes(take(8)?.try_into().expect("eight bytes"));
-        let len = u64::from_le_bytes(take(8)?.try_into().expect("eight bytes"));
+        take(&mut bytes)?;
+        let offset = u64::from_le_bytes(bytes);
+        take(&mut bytes)?;
+        let len = u64::from_le_bytes(bytes);
         Some(ValueLocation { offset, len })
     } else {
         None
     };
-    Ok(RawEntry {
-        key,
+    Ok(Metadata {
         expected,
         kind,
         identity,

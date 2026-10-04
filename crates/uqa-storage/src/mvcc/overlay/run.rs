@@ -10,6 +10,7 @@ mod cache;
 mod cursor;
 mod entry;
 mod filter;
+mod reader;
 #[cfg(test)]
 mod tests;
 mod writer;
@@ -108,17 +109,12 @@ impl SpilledRun {
         let Some(index) = self.block_at_or_before(key) else {
             return Ok(None);
         };
-        let block = self.read_block(index, control)?;
-        let mut position = 0;
-        while position < block.len() {
-            let raw = entry::decode(&block, &mut position)?;
-            match raw.key.cmp(key) {
-                std::cmp::Ordering::Less => {}
-                std::cmp::Ordering::Equal => return raw.owned(control.memory()).map(Some),
-                std::cmp::Ordering::Greater => break,
-            }
-        }
-        Ok(None)
+        let mut block = reader::EntryReader::new(self, index, control)?;
+        block.select(control, |candidate| match candidate.cmp(key) {
+            std::cmp::Ordering::Less => reader::Selection::Skip,
+            std::cmp::Ordering::Equal => reader::Selection::Take,
+            std::cmp::Ordering::Greater => reader::Selection::End,
+        })
     }
 
     /// The change with the greatest key before `end`, if the run has one.
@@ -138,15 +134,16 @@ impl SpilledRun {
             .partition_point(|block| before(block.first.bytes()));
         while index > 0 {
             index -= 1;
-            let block = self.read_block(index, control)?;
-            let mut position = 0;
+            let mut block = reader::EntryReader::new(self, index, control)?;
             let mut found = None;
-            while position < block.len() {
-                let raw = entry::decode(&block, &mut position)?;
-                if !before(raw.key) {
-                    break;
+            while let Some(entry) = block.select(control, |key| {
+                if before(key) {
+                    reader::Selection::Take
+                } else {
+                    reader::Selection::End
                 }
-                found = Some(raw.owned(control.memory())?);
+            })? {
+                found = Some(entry);
             }
             if found.is_some() {
                 return Ok(found);
