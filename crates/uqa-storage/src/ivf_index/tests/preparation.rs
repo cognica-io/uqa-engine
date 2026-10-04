@@ -6,7 +6,8 @@
 
 //! Evaluated IVF candidates preserve canonical mutation semantics and caller resource limits.
 
-use super::{IVFIndex, IVFMutation, IVFState};
+use super::state::{StoredVector, VectorKey};
+use super::{IVFIndex, IVFMetadataSnapshot, IVFMutation, IVFState};
 use crate::{read_control::StorageReadControl, StorageBackendError, VectorIndex};
 use uqa_core::memory::MemoryError;
 
@@ -308,5 +309,169 @@ fn stale_query_training_uses_its_own_workspace_and_preserves_the_source_on_rejec
     assert_eq!(source.metadata_snapshot(), before);
     assert_eq!(control.memory().used(), retained);
     drop(snapshot);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn restored_generation_releases_reconstruction_scratch_before_preparing_a_write() {
+    const DIMENSIONS: usize = 1024;
+    const DOCUMENTS: usize = 2338;
+    let vectors = (1..=DOCUMENTS)
+        .map(|document| {
+            let mut vector = vec![0.0; DIMENSIONS];
+            vector[document % 100] = 1.0;
+            (document as u64, 0, vector)
+        })
+        .collect();
+    let metadata = IVFMetadataSnapshot {
+        state: IVFState::Trained,
+        centroids: (0..100)
+            .map(|coordinate| {
+                let mut centroid = vec![0.0; DIMENSIONS];
+                centroid[coordinate] = 1.0;
+                centroid
+            })
+            .collect(),
+        assignments: (1..=DOCUMENTS)
+            .map(|document| (document as u64, 0, document % 100))
+            .collect(),
+        trained_size: DOCUMENTS,
+        deletes_since_train: 0,
+        vector_count: DOCUMENTS,
+    };
+    let control = StorageReadControl::with_limit(64 * 1024 * 1024);
+    let restored = IVFIndex::restore_controlled(
+        DIMENSIONS as u32,
+        crate::vector_index::IVFIndexParams::default(),
+        vectors,
+        metadata,
+        &control,
+    )
+    .unwrap();
+    let retained = control.memory().used();
+    assert_eq!(retained, restored.reserved_bytes());
+    assert!(retained < control.memory().peak());
+    assert!(retained >= DOCUMENTS * DIMENSIONS * size_of::<f32>() * 2);
+    let replacement = [vec![1.0; DIMENSIONS]];
+    let prepared = restored
+        .prepare_metadata(
+            IVFMutation::Replace {
+                document: DOCUMENTS as u64 + 1,
+                vectors: &replacement,
+            },
+            &control,
+        )
+        .unwrap();
+    assert_eq!(prepared.vector_count, DOCUMENTS + 1);
+    assert_eq!(prepared.trained_size, DOCUMENTS);
+    assert_eq!(restored.metadata_snapshot().vector_count, DOCUMENTS);
+    assert_eq!(
+        control.memory().used(),
+        retained + prepared.reserved_bytes()
+    );
+    assert!(control.memory().peak() <= control.memory().limit());
+    drop(prepared);
+    assert_eq!(control.memory().used(), retained);
+    drop(restored);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn restored_generation_keeps_spare_vector_and_centroid_capacity_reserved() {
+    let mut vector = Vec::with_capacity(4096);
+    vector.extend([1.0, 0.0]);
+    let mut centroid = Vec::with_capacity(4096);
+    centroid.extend([1.0, 0.0]);
+    let retained_payload = (vector.capacity() + centroid.capacity()) * size_of::<f32>();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let restored = IVFIndex::restore_controlled(
+        2,
+        crate::vector_index::IVFIndexParams::default(),
+        vec![(1, 0, vector)],
+        IVFMetadataSnapshot {
+            state: IVFState::Trained,
+            centroids: vec![centroid],
+            assignments: vec![(1, 0, 0)],
+            trained_size: 1,
+            deletes_since_train: 0,
+            vector_count: 1,
+        },
+        &control,
+    )
+    .unwrap();
+    assert!(restored.reserved_bytes() > retained_payload);
+    assert_eq!(control.memory().used(), restored.reserved_bytes());
+    let result = restored.search_knn(&[1.0, 0.0], 1).unwrap();
+    assert_eq!(result.len(), 1);
+    drop(restored);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn restored_stale_generation_reserves_resident_capacity_after_query_training() {
+    let mut source = trained();
+    for document in 1..=3 {
+        source.delete(document).unwrap();
+    }
+    let mut metadata = source.metadata_snapshot();
+    metadata.centroids.truncate(1);
+    for (_, _, cluster) in &mut metadata.assignments {
+        *cluster = 0;
+    }
+    let vectors = source
+        .vectors
+        .lock()
+        .values()
+        .map(|vector| {
+            (
+                vector.doc_id,
+                vector.vector_ordinal,
+                vector.raw_vector.clone(),
+            )
+        })
+        .collect();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let restored = IVFIndex::restore_controlled(
+        3,
+        crate::vector_index::IVFIndexParams {
+            nlist: 7,
+            nprobe: 7,
+            train_threshold: 2,
+        },
+        vectors,
+        metadata,
+        &control,
+    )
+    .unwrap();
+    let retained = restored.reserved_bytes();
+    restored
+        .search_knn_with_control(&[1.0, 0.0, 0.0], 2, &control)
+        .unwrap();
+    assert_eq!(restored.state(), IVFState::Trained);
+    assert_eq!(restored.centroids.lock().len(), 7);
+    assert_eq!(control.memory().used(), retained);
+    let vectors = restored.vectors.lock();
+    let centroids = restored.centroids.lock();
+    let lists = restored.inverted_lists.lock();
+    let payload = vectors.len() * size_of::<(VectorKey, StoredVector)>()
+        + vectors
+            .values()
+            .map(|vector| {
+                (vector.raw_vector.capacity() + vector.vector.capacity()) * size_of::<f32>()
+            })
+            .sum::<usize>()
+        + centroids.capacity() * size_of::<Vec<f32>>()
+        + centroids
+            .iter()
+            .map(|centroid| centroid.capacity() * size_of::<f32>())
+            .sum::<usize>()
+        + lists.capacity() * size_of::<Vec<(u64, u32)>>()
+        + lists
+            .iter()
+            .map(|list| list.capacity() * size_of::<(u64, u32)>())
+            .sum::<usize>();
+    assert!(payload <= retained);
+    drop((vectors, centroids, lists));
+    drop(restored);
     assert_eq!(control.memory().used(), 0);
 }

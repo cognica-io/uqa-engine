@@ -34,7 +34,8 @@ pub(in crate::mvcc) fn merge(
     for operation in operations {
         inputs.push(operation.ivf())?;
     }
-    let snapshot = index.prepare_metadata_changes(&inputs, control)?;
+    let prepared = index.prepare(&inputs)?;
+    let snapshot = prepared.header();
     let next = header
         .revision
         .map(|revision| {
@@ -63,7 +64,7 @@ pub(in crate::mvcc) fn merge(
         key,
         template,
         Value::Header {
-            snapshot: &snapshot,
+            snapshot,
             revision: next,
         },
         control,
@@ -74,9 +75,10 @@ pub(in crate::mvcc) fn merge(
         let value = layout.encode(&address, template, Value::Centroid(vector), control)?;
         replace(changes, current, &address, &value, control)?;
     }
-    for (document, ordinal, centroid) in &snapshot.assignments {
-        let address = layout.key(key, Key::Assignment(*document, *ordinal), control)?;
-        let value = layout.encode(&address, template, Value::Assignment(*centroid), control)?;
+    for entry in prepared.assignments() {
+        let (document, ordinal, centroid) = entry?;
+        let address = layout.key(key, Key::Assignment(document, ordinal), control)?;
+        let value = layout.encode(&address, template, Value::Assignment(centroid), control)?;
         replace(changes, current, &address, &value, control)?;
     }
     Ok(())
