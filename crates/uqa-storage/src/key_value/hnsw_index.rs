@@ -115,14 +115,15 @@ impl KeyValueHNSWIndex {
     ) -> StorageBackendResult<()> {
         self.view.evaluate(self.store.as_ref(), |read, batch| {
             let cached = self.graph_at(read)?;
-            let delta = cached.value.prepare_delta(mutation, read.control())?;
-            canonical(batch)?;
             let preview = !cached.definition_candidate
                 && cached.revision.is_some()
                 && !matches!(mutation, HNSWMutation::Clear);
             if preview {
+                // Admit the retained input before constructing its derived graph.
                 batch.hnsw_mutation(&hnsw_metadata_key(&self.table, &self.field)?, mutation)?;
             }
+            let delta = cached.value.prepare_delta(mutation, read.control())?;
+            canonical(batch)?;
             // Only a later reader publishes the graph with its actual committed/private identity.
             self.stage_delta(batch, &delta, next_revision(cached.revision)?, preview)
         })

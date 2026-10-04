@@ -1,6 +1,6 @@
 # Rust Engine API
 
-The `uqa` facade is the primary application dependency and re-exports the `uqa-engine` crate documented here. `uqa-engine` owns durable storage, session-local SQL state, runtime extensions, epochs, and query execution and remains available as a direct dependency.
+The `uqa` facade is the primary application dependency and re-exports the `uqa-engine` crate documented here. `uqa-engine` is the composition facade for persistent providers, session-local SQL state, runtime extensions and retained resources, and remains available as a direct dependency. SQL analysis, planning, storage and execution algorithms belong to their [owning crates](../internals/01-architecture.md).
 
 ## Construct an engine
 
@@ -132,7 +132,7 @@ The engine exposes explicit transaction primitives:
 
 `Engine::transaction` executes a Rust closure as one transaction. An error or panic from the closure rolls the transaction back; a successful closure attempts to commit it.
 
-Development versioned provider sessions retain uncertain completion. A commit or rollback whose durable result cannot be confirmed returns SQLSTATE `08007` and leaves `Engine::pending_transaction_completion()` set to `TransactionOutcomeId::Records` for a physical publication or `TransactionOutcomeId::Serializable` for logical SSI completion without a write receipt. `pending_commit()` continues to expose only a physical write identity; its absence does not establish that logical completion finished. Ordinary SQL, nested BEGIN and savepoint commands are blocked until the caller resolves the attempt with `commit`/`COMMIT` or requests whole-transaction rollback. `transaction_failed()` is false for an unresolved commit attempt and true for retained failed-transaction rollback; check `pending_transaction_completion()` before resuming work. SQL statements, SQL cursors and the direct document, retrieval and graph queries described below admit their SERIALIZABLE participant at the first data snapshot through the common storage session. The [implementation plan](../../plans/0008-concurrent-storage-transactions.md) tracks remaining transaction and provider acceptance.
+Versioned provider sessions retain uncertain completion. A commit or rollback whose durable result cannot be confirmed returns SQLSTATE `08007` and leaves `Engine::pending_transaction_completion()` set to `TransactionOutcomeId::Records` for a physical publication or `TransactionOutcomeId::Serializable` for logical SSI completion without a write receipt. `pending_commit()` continues to expose only a physical write identity; its absence does not establish that logical completion finished. Ordinary SQL, nested BEGIN and savepoint commands are blocked until the caller resolves the attempt with `commit`/`COMMIT` or requests whole-transaction rollback. `transaction_failed()` is false for an unresolved commit attempt and true for retained failed-transaction rollback; check `pending_transaction_completion()` before resuming work. SQL statements, SQL cursors and the direct document, retrieval and graph queries described below admit their SERIALIZABLE participant at the first data snapshot through the common storage session. The [completed implementation plan](../../plans/0008-concurrent-storage-transactions.md) records the transaction, provider and recovery acceptance released in 0.4.0.
 
 Repeating COMMIT after an unresolved commit resolves the same evaluated storage batch and does not rerun the Rust callback, deferred triggers, held-cursor materialization or temporary-table COMMIT actions. If rollback discovers a matching committed receipt, Engine finishes that commit's session publication and returns `25000` explaining that rollback could not undo it. If a later COMMIT confirms a recorded abort, Engine restores the rolled-back session state and returns `25000` instead of a successful COMMIT.
 
@@ -140,9 +140,9 @@ If statement-error cleanup cannot finish storage rollback, Engine retains the tr
 
 The same uncertain-outcome contract applies when a transaction callback returns an error or panics, deferred commit validation fails, or an implicit document/graph operation cannot finish rollback. Cleanup context preserves `08007`, including through storage error wrappers and `close()`. A scoped callback that reports an uncertain rollback leaves the original attempt for explicit completion resolution; dropping the scope does not silently retry it, even if the provider has become available again.
 
-An unresolved result must not be treated as proof of rollback or a reason to replay application operations. Session receipt resolution does not provide crash-safe publication recovery or exactly-once acknowledgement after process loss.
+An unresolved result must not be treated as proof of rollback or a reason to replay application operations. Providers recover durable publication through their receipt and process-recovery protocol; session receipt resolution alone does not provide exactly-once application acknowledgement after process loss.
 
-The development transaction adapter preserves typed storage diagnostics: a rejected MVCC row or definition conflict reports `40001`, cancellation reports `57014` as `SQLError::Cancelled`, and memory exhaustion reports `53200`. Embedded SQL diagnostics, including constraint errors, retain their SQLSTATE; an unrelated provider error is not classified as a serialization failure. An indeterminate outer commit remains `08007` even when its underlying diagnostic describes a conflict. A rejected commit restores the session after storage rollback, preserves independently committed data, and does not replay application callbacks. These diagnostics do not enable the unfinished concurrent SQL transaction model.
+The transaction adapter preserves typed storage diagnostics: a rejected MVCC row or definition conflict reports `40001`, user or statement-timeout cancellation reports `57014`, lock timeout reports `55P03`, and memory exhaustion reports `53200`. Embedded SQL diagnostics, including constraint errors, retain their SQLSTATE; an unrelated provider error is not classified as a serialization failure. An indeterminate outer commit remains `08007` even when its underlying diagnostic describes a conflict. A rejected commit restores the session after storage rollback, preserves independently committed data, and does not replay application callbacks. Native SQLite, SQLite Key/Value and redb use the shared concurrent SQL transaction model; serialized custom providers retain their declared transaction model.
 
 An error or panic while applying a direct mutation or document read inside an explicit transaction uses the same abort boundary as SQL: private data, index changes and logical write intents roll back to the active user savepoint or transaction frame. `transaction_failed()` remains true until recovery. `ROLLBACK TO SAVEPOINT` restores the usable savepoint while preserving earlier writes; COMMIT of an unrecovered failed frame performs rollback. The original error or panic is preserved when cleanup succeeds, and a cleanup failure reports both causes. Existing read dependencies remain retained according to the isolation contract.
 
@@ -351,11 +351,38 @@ Default options are conservative: a function is `VOLATILE` and may mutate. Use `
 
 Runtime callbacks are not serialized to persistent storage. Register them each time the process constructs an engine. New sessions share the runtime registry of their parent engine.
 
+## Session settings and resource limits
+
+Session settings use the same validation, canonical parameter names and transaction rules as [SQL SET and SHOW](../sql/08-transactions-and-routines.md#set-and-show). Invalid names or values return `SQLError` before replacing the setting.
+
+| API | Contract |
+| --- | --- |
+| `set_variable(name, value) -> Result<(), SQLError>` | Apply a session `SET` using the parameter's accepted input text |
+| `reset_variable(name) -> Result<(), SQLError>` | Restore that parameter's reset value |
+| `set_client_parameter(name, value) -> Result<(), SQLError>` | Set a client startup value; ordinary parameters also use it as their subsequent `RESET` value |
+| `search_path() -> Vec<String>` | Return the configured path elements, including the literal `$user` placeholder |
+| `set_search_path(&[String]) -> Result<(), SQLError>` | Quote schema identifiers and assign the path; an empty slice keeps an empty path |
+| `set_query_memory_limit(Option<usize>)` | Override this session's per-workspace query allowance in bytes; `Some(0)` is clamped to one byte and `None` returns to SQL `work_mem` |
+
+The default `search_path` is `"$user", public`; resolution substitutes the effective role for `$user`. An empty path retains implicit system-schema lookup but provides no user schema for unqualified creation. Startup settings and session settings differ in their reset values; use `set_variable` for ordinary application changes and `set_client_parameter` when configuring a newly authenticated client session.
+
+SQL `work_mem` has PostgreSQL's 64 kB minimum. The host memory override can force spill with smaller fixtures, such as `engine.set_query_memory_limit(Some(1))`, without changing `SHOW work_mem`. It is a query-workspace allowance, not a cap on the entire engine or the separate persistent-session retention budget. Operators use their existing spill or typed memory-error contract.
+
 ## Cancellation
 
-Each session has its own cancellation token. `cancel()` requests cancellation, `is_cancelled()` observes it, and the reset API clears the request before later work. Long-running execution paths poll the token at safe boundaries.
+Each session has its own cancellation token. `cancel()` requests cancellation, `is_cancelled()` observes it, and `cancellation_token()` returns the token for host coordination. Long-running execution paths poll the token at safe boundaries. `uqa_core::QueryCancelled` carries a `CancellationReason`; `QueryCancelled::USER_REQUEST` represents an explicit client request.
 
-Cancellation is cooperative. Handle the returned error, inspect `transaction_failed()` and recover an aborted explicit transaction through rollback or an available savepoint before continuing. Reset the session cancellation token before issuing subsequent work.
+User cancellation is cooperative. Clear an explicit request with `reset_cancellation()`, inspect `transaction_failed()` and recover an aborted explicit transaction through rollback or an available savepoint before continuing. Statement and lock timeouts are consumed at their statement or exception-handler boundary; resetting cancellation does not undo a failed transaction.
+
+| Cause | SQLSTATE | Session behavior |
+| --- | --- | --- |
+| User request or `statement_timeout` | `57014` | Cancels the statement; transaction recovery may be required |
+| `lock_timeout` | `55P03` | Ends the lock wait; transaction recovery may be required |
+| `idle_in_transaction_session_timeout` | `25P03` | Terminates the session and rolls back its transaction |
+| `idle_session_timeout` | `57P05` | Terminates the idle session |
+| `transaction_timeout` | `25P04` | Terminates the session and rolls back its transaction |
+
+`Engine::session_termination() -> Option<SQLError>` exposes a permanent session-timeout error. Every later statement returns that error, and `reset_cancellation()` cannot revive the session; create a new session instead. The PostgreSQL server sends the error at FATAL severity and closes the connection. The [SQL timeout contract](../sql/08-transactions-and-routines.md#set-and-show) describes configuration and execution boundaries.
 
 ## QueryBuilder
 

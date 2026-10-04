@@ -12,6 +12,34 @@ use uqa_storage::{
 };
 
 #[test]
+fn oversized_hnsw_input_preserves_private_and_committed_vectors() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(64 << 10));
+    let mut index =
+        KeyValueHNSWIndex::create(store.clone(), "vectors", "v", 2, HNSWIndexParams::default())
+            .unwrap();
+    index.add(1, vec![1.0, 0.0]).unwrap();
+    index.initialize().unwrap();
+    for explicit in [false, true] {
+        if explicit {
+            store.begin_transaction().unwrap();
+            index.add(2, vec![0.0, 1.0]).unwrap();
+        }
+        let before = store.scan_prefix(b"").unwrap();
+        let error = index.add_many(1, vec![vec![0.5, 0.5]; 4096]).unwrap_err();
+        assert!(matches!(error, StorageBackendError::Memory(_)), "{error}");
+        assert_eq!(store.in_transaction(), explicit);
+        assert_eq!(store.scan_prefix(b"").unwrap(), before);
+        assert_eq!(index.count().unwrap(), if explicit { 2 } else { 1 });
+        if explicit {
+            store.commit_transaction().unwrap();
+        }
+    }
+    index.add(3, vec![0.5, 0.5]).unwrap();
+    assert_eq!(index.count().unwrap(), 3);
+}
+
+#[test]
 fn independent_hnsw_writers_merge_shared_node_ids_and_preserve_serial_topology() {
     for seed in [0, 16] {
         let persistence = Persistence::new();

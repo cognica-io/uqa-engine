@@ -1,6 +1,6 @@
 # DiskANN canonical document scoring
 
-Status: Merged in PR #173 on top of the [retained canonical sources](diskann-canonical-origins.md). The [document search owner](diskann-document-search.md) now connects graph, side and current-change candidates to this scorer, using the published generation and retained canonical view. Public index dispatch and SQL remain incomplete in the [implementation plan](../plans/0014-diskann-vector-index.md).
+Status: Merged in PR #173 on top of the [retained canonical sources](diskann-canonical-origins.md). The [document search owner](diskann-document-search.md) now connects graph, side and current-change candidates to this scorer, using the published generation and retained canonical view. Public index dispatch and SQL are included in 0.4.5, with their closing evidence in the [completed implementation plan](../plans/0014-diskann-vector-index.md).
 
 ## Ownership and observations
 
