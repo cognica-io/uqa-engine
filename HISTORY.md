@@ -20,6 +20,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse resident record prefixes when evaluated MVCC batches spill, share their memory allowance across record groups, and avoid unnecessary cursor allocations and spilled-run handle overhead.
 - Admit retained HNSW mutation inputs before constructing a derived graph, so an oversized input fails without first building a graph that cannot be published.
+- Release completed IVF reconstruction scratch before later resident preparation; stream native SQLite and shared commit-time IVF vectors/assignments through encrypted temporary roots, and spill native tensor-score reduction under the unchanged session allowance. Preserve centroids, cosine payloads, retained readers and transaction undo; see the [preservation argument](docs/plans/0017-native-ivf-bounded-storage.md).
 - Synchronize deadline cancellation with handle cleanup so a dequeued timer cannot cancel the next statement after its original handle is dropped; retain explicit cancellation and permanent session termination.
 - Validate PRIMARY KEY, UNIQUE and partitioned unique-index declarations with PostgreSQL's column requirements, duplicate-declaration handling, creation order and index-build diagnostics.
 - Check immediate foreign keys after the statement writes its rows, and order referential actions with AFTER triggers in one statement queue. Preserve statement-trigger sharing and reject rows already modified by triggered commands with SQLSTATE `27000`; expose `pg_trigger_depth()`.

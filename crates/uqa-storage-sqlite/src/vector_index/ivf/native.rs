@@ -6,10 +6,13 @@
 
 //! IVF canonical values and persisted metadata share one native read and mutation boundary.
 
-use uqa_core::{memory::Budgeted, DocId, PostingList};
+use uqa_core::{memory::Budgeted, PostingList};
 use uqa_storage::{
     ivf_index::{IVFMutation, IVFState},
-    vector_index::query::{nearest_centroids, scored_posting_list},
+    vector_index::{
+        cosine_similarity,
+        query::{nearest_centroids, SpillingVectorScores},
+    },
     KeyValueBatch,
 };
 
@@ -18,9 +21,9 @@ mod records;
 mod state;
 #[cfg(test)]
 mod tests;
-pub(super) use publication::{drop_metadata, write_metadata};
+pub(super) use publication::{drop_metadata, write_prepared};
 pub(crate) use records::NativeIVFRecords;
-pub(super) use state::{encode_controlled, load_state};
+pub(super) use state::load_state;
 
 use super::{
     metadata::{decode_metadata, SQLiteIVFMeta},
@@ -32,8 +35,6 @@ use crate::vector_index::{
     native::{blob, integer, text, NativeVectorRead, VectorBuffer},
 };
 use crate::{Result, SQLiteError};
-
-type Candidates = Vec<(DocId, Vec<f32>)>;
 
 pub(super) fn load_metadata(read: &NativeVectorRead<'_>) -> Result<Option<SQLiteIVFMeta>> {
     let Some(owner) = read.owner else {
@@ -65,15 +66,10 @@ impl SQLiteIVFIndex {
     ) -> Result<()> {
         let read = read.owned(batch)?;
         let doc_id = decode_doc_id(doc)?;
-        let index = load_state(&read, self.params, false)?;
-        let snapshot = index.prepare_metadata(
-            IVFMutation::Replace {
-                document: doc_id,
-                vectors,
-            },
-            &read.snapshot.control,
-        )?;
-        let metadata = encode_controlled(self.params, &snapshot, &read.snapshot.control)?;
+        let metadata = load_state(&read, self.params, false)?.prepare(&[IVFMutation::Replace {
+            document: doc_id,
+            vectors,
+        }])?;
         read.replace(batch, doc, encoded)?;
         publication::write_input(
             &read,
@@ -93,13 +89,11 @@ impl SQLiteIVFIndex {
         doc: i64,
     ) -> Result<()> {
         let doc_id = decode_doc_id(doc)?;
-        let index = load_state(read, self.params, false)?;
-        let snapshot =
-            index.prepare_metadata(IVFMutation::Delete(doc_id), &read.snapshot.control)?;
+        let metadata =
+            load_state(read, self.params, false)?.prepare(&[IVFMutation::Delete(doc_id)])?;
         if read.owner.is_none() {
             return Ok(());
         }
-        let metadata = encode_controlled(self.params, &snapshot, &read.snapshot.control)?;
         read.delete(batch, doc)?;
         publication::write_input(read, batch, &metadata, IVFMutation::Delete(doc_id))
     }
@@ -143,28 +137,26 @@ impl SQLiteIVFIndex {
             self.params.nprobe,
             Some(&read.snapshot.control),
         )?;
-        let candidates = load_candidates(read, &probes, centroids.len(), meta.vector_count)?;
-        Ok(scored_posting_list(
+        let mut scores = SpillingVectorScores::new(&read.snapshot.control);
+        load_candidates(
+            read,
+            &probes,
+            centroids.len(),
+            meta.vector_count,
             query,
-            candidates
-                .iter()
-                .map(|(doc, vector)| (*doc, vector.as_slice())),
-            k,
-            Some(&read.snapshot.control),
-        )?)
+            &mut scores,
+        )?;
+        Ok(scores.finish(k)?)
     }
 }
 
 fn exact(read: &NativeVectorRead<'_>, query: &[f32], k: usize) -> Result<PostingList> {
-    let entries = read.vectors()?;
-    Ok(scored_posting_list(
-        query,
-        entries
-            .iter()
-            .map(|(doc, _, vector)| (*doc, vector.as_slice())),
-        k,
-        Some(&read.snapshot.control),
-    )?)
+    let mut scores = SpillingVectorScores::new(&read.snapshot.control);
+    read.visit_ordered_vectors(|document, _, vector| {
+        scores.add(document, cosine_similarity(query, vector))?;
+        Ok(())
+    })?;
+    Ok(scores.finish(k)?)
 }
 
 fn load_centroids(read: &NativeVectorRead<'_>) -> Result<Budgeted<Vec<Vec<f32>>>> {
@@ -195,9 +187,9 @@ fn load_candidates(
     centroids: &[usize],
     centroid_count: usize,
     expected_count: usize,
-) -> Result<Budgeted<Candidates>> {
-    let mut output = VectorBuffer::new(read)?;
-    let (candidates, payload) = (&mut output.rows, &mut output.payload);
+    query: &[f32],
+    scores: &mut SpillingVectorScores,
+) -> Result<()> {
     let mut assignment_count = 0_usize;
     if let Some(owner) = read.owner {
         // Release the assignment page's physical read before probing selected vector records.
@@ -228,11 +220,10 @@ fn load_candidates(
                         &[read.field(), row[2], row[3]],
                         |vector_row| {
                             let bytes = blob(vector_row[4])?;
-                            payload.grow(bytes.len())?;
-                            candidates.reserve(1)?;
+                            let _memory = read.snapshot.control.memory().reserve(bytes.len())?;
                             let vector = blob_to_vector(bytes)?;
                             read.index.validate_dimensions_sqlite(&vector)?;
-                            candidates.push((doc, vector))?;
+                            scores.add(doc, cosine_similarity(query, &vector))?;
                             Ok(())
                         },
                     )?
@@ -250,5 +241,5 @@ fn load_candidates(
             "native IVF assignments do not cover the canonical generation".into(),
         ));
     }
-    Ok(output.finish())
+    Ok(())
 }
