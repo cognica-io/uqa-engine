@@ -12,6 +12,7 @@ pub mod cursor;
 pub mod notifications;
 pub mod portal;
 pub mod prepared;
+pub mod show;
 pub mod table_locks;
 pub mod transactions;
 

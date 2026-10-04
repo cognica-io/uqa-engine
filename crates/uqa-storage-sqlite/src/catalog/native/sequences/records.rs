@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Resolve sequence names for catalog changes and object identities for value allocation.
+//! Resolve sequence names and object identities for catalog changes.
 
 use super::{
     text, Family, NativeRecordOwner, NativeSnapshot, RelationIdentity, Result, SQLiteError,
@@ -63,26 +63,5 @@ impl NativeSnapshot {
             }
             Ok(())
         })
-    }
-
-    pub(super) fn sequence_incarnation(
-        &self,
-        relation: &RelationIdentity,
-        identity: [u8; 16],
-    ) -> Result<Option<NativeRecordOwner>> {
-        if identity == [0; 16] {
-            return Ok(None);
-        }
-        let mut found = None;
-        // Allocation never scans definitions belonging to other sequences, including their ACL payloads.
-        self.visit_object_rows(Family::Sequences, identity, |row| {
-            if named(row, relation) && found.replace(owner(row)?).is_some() {
-                return Err(SQLiteError::StorageBackend(
-                    "multiple native sequence generations are active".into(),
-                ));
-            }
-            Ok(())
-        })?;
-        Ok(found)
     }
 }

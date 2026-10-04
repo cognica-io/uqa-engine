@@ -6,6 +6,7 @@
 
 //! Compile stored routine bodies inside their recorded creation namespace.
 
+use super::configuration::RoutineConfigurationGuard;
 use std::sync::Arc;
 use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
@@ -16,10 +17,36 @@ use uqa_sql::{
     SQLError,
 };
 
+/// Complete a `PL/pgSQL` compilation with the session's settings for what the body does not declare, as a backend compiles a function under the settings in effect.
+pub fn apply_session_compile_options(
+    session: &dyn super::invocation::context::RoutineInvocationSession,
+    parsed: &mut uqa_sql::plpgsql::PLpgSQLFunction,
+) {
+    parsed.variable_conflict = parsed
+        .options
+        .variable_conflict
+        .unwrap_or_else(|| session.plpgsql_variable_conflict());
+}
+
+/// Examine a body given as a string under the routine's own settings, as `PostgreSQL` validates it under them at creation and compiles it under them when the routine is called.
+pub fn with_routine_settings<T>(
+    context: &StoredRoutineCompilationContext<'_>,
+    def: &CreateFunction,
+    examine: impl FnOnce() -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
+    let _settings = context.session.routine_settings_scope(&def.config)?;
+    examine()
+}
+
 pub trait RoutineCompilationSession {
     fn routine_search_path(&self) -> Vec<String>;
     fn replace_routine_search_path(&self, path: Vec<String>) -> Vec<String>;
     fn restore_routine_search_path(&self, path: Vec<String>);
+    /// Apply a routine's own settings, as a call of the routine applies them, until the returned scope is dropped.
+    fn routine_settings_scope(
+        &self,
+        settings: &[(String, String)],
+    ) -> Result<Box<dyn RoutineConfigurationGuard + '_>, SQLError>;
 }
 #[derive(Clone, Copy)]
 pub struct StoredRoutineCompilationContext<'a> {

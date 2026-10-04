@@ -133,7 +133,7 @@ fn query_builds_missing_durable_index_in_memory_only() {
         .contains_key(&"id".into()));
 
     // Recovery leaves a missing durable index cold, so it cannot execute SQL callbacks while the transaction state is locked. Its next read builds only the in-memory accelerator.
-    engine.reload_persistent_value_indexes().unwrap();
+    engine.drop_persistent_value_indexes();
     assert!(backend
         .load_btree_index("public.items", &"id".into())
         .unwrap()
@@ -268,4 +268,120 @@ fn clean_open_repair_does_not_contend_for_sqlite_writer_lock() {
     repair_result.unwrap();
     new_session_result.unwrap();
     reopen_result.unwrap();
+}
+
+#[test]
+fn memory_value_indexes_survive_their_own_data_generations() {
+    let engine = crate::Engine::new();
+    engine
+        .sql("CREATE TABLE kept (id INTEGER PRIMARY KEY, v INTEGER)", &[])
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO kept SELECT g, g FROM generate_series(1, 50) AS g",
+            &[],
+        )
+        .unwrap();
+    let key = ValueIndexKey::from("id");
+    let count = |engine: &crate::Engine| {
+        engine
+            .sql("SELECT count(*) FROM kept WHERE id BETWEEN 10 AND 19", &[])
+            .unwrap()
+            .value_at(0, 0)
+            .cloned()
+    };
+    assert_eq!(count(&engine), Some(Value::Int(10)));
+    let has_index = |engine: &crate::Engine| {
+        engine
+            .try_table("kept")
+            .unwrap()
+            .unwrap()
+            .value_indexes
+            .read()
+            .contains_key(&key)
+    };
+    assert!(has_index(&engine));
+    // Only this engine writes its tables, and each write maintained the index, so a new data generation keeps it.
+    engine.sql("DELETE FROM kept WHERE id = 12", &[]).unwrap();
+    engine.synchronize_table_data().unwrap();
+    assert!(has_index(&engine));
+    assert_eq!(count(&engine), Some(Value::Int(9)));
+    // A rolled-back write restores the index of the snapshot instead of keeping the undone posting.
+    engine
+        .sql("BEGIN; INSERT INTO kept VALUES (12, 12)", &[])
+        .unwrap();
+    assert_eq!(count(&engine), Some(Value::Int(10)));
+    engine.sql("ROLLBACK", &[]).unwrap();
+    engine.synchronize_table_data().unwrap();
+    assert_eq!(count(&engine), Some(Value::Int(9)));
+}
+
+fn ids(engine: &crate::Engine, sql: &str) -> Vec<Value> {
+    engine
+        .sql(sql, &[])
+        .unwrap()
+        .rows
+        .iter()
+        .map(|row| row["id"].clone())
+        .collect()
+}
+
+fn assert_lookups(engine: &crate::Engine, expected: &[(i64, &[i64])]) {
+    for (category, documents) in expected {
+        assert_eq!(
+            ids(
+                engine,
+                &format!("SELECT id FROM items WHERE category = {category}")
+            ),
+            documents
+                .iter()
+                .map(|id| Value::Int(*id))
+                .collect::<Vec<_>>(),
+            "category {category}"
+        );
+    }
+}
+
+#[test]
+fn rollbacks_leave_the_rows_they_undo_out_of_every_lookup() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = crate::Engine::open(&directory.path().join("rolled-back-lookups.db")).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, category INTEGER); CREATE INDEX items_category ON items (category); INSERT INTO items VALUES (1, 10), (2, 20), (3, 30)",
+            &[],
+        )
+        .unwrap();
+    // The lookups build the in-memory indexes before the transactions change their rows.
+    assert_lookups(&engine, &[(10, &[1]), (20, &[2]), (30, &[3])]);
+    engine
+        .sql(
+            "BEGIN; UPDATE items SET category = 21 WHERE id = 2; SAVEPOINT before_rows; DELETE FROM items WHERE id = 3; INSERT INTO items VALUES (4, 40)",
+            &[],
+        )
+        .unwrap();
+    assert_lookups(&engine, &[(21, &[2]), (30, &[]), (40, &[4])]);
+    engine.sql("ROLLBACK TO before_rows", &[]).unwrap();
+    assert_lookups(&engine, &[(20, &[]), (21, &[2]), (30, &[3]), (40, &[])]);
+    // A failed statement leaves out the rows it wrote before it failed.
+    assert_eq!(
+        engine
+            .sql("INSERT INTO items VALUES (5, 50), (1, 11)", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("23505")
+    );
+    engine.sql("ROLLBACK TO before_rows", &[]).unwrap();
+    assert_lookups(&engine, &[(50, &[]), (11, &[]), (10, &[1])]);
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert_lookups(&engine, &[(20, &[2]), (21, &[]), (30, &[3]), (40, &[])]);
+    // So does a statement that fails outside a transaction.
+    assert_eq!(
+        engine
+            .sql("INSERT INTO items VALUES (6, 60), (1, 11)", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("23505")
+    );
+    assert_lookups(&engine, &[(60, &[]), (11, &[]), (10, &[1])]);
 }

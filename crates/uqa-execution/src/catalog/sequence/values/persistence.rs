@@ -12,23 +12,36 @@ use uqa_storage::{
 };
 
 impl SequenceValueContext<'_> {
+    /// Whether the caller's transaction created this definition generation, whose value record no other session can see, so that its values are allocated in the transaction. The values of a committed generation are allocated outside any transaction, even when the transaction changed the sequence's privileges, owner, name or ownership, as `PostgreSQL` moves a sequence's state outside the transaction that changes its catalog rows.
+    pub(super) fn sequence_value_is_private(
+        &self,
+        temporary: bool,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+    ) -> Result<bool, SequenceValueError> {
+        if temporary {
+            return Ok(false);
+        }
+        Ok(self
+            .storage
+            .map(|catalog| {
+                catalog.sequence_value_has_private_changes(object_id, definition_generation)
+            })
+            .transpose()
+            .map_err(|error| sequence_storage_error("inspect sequence transaction scope", error))?
+            .unwrap_or(false))
+    }
+
     pub(super) fn mutate_persistent_value<T>(
         &self,
         temporary: bool,
-        relation: &uqa_core::RelationIdentity,
-        object_id: [u8; 16],
+        private: bool,
         action: &str,
         operation: impl Fn(&dyn CatalogFacade) -> StorageBackendResult<T>,
     ) -> Result<Option<(T, bool)>, SequenceValueError> {
         if temporary {
             return Ok(None);
         }
-        let private = self
-            .storage
-            .map(|catalog| catalog.sequence_has_private_changes(relation, object_id))
-            .transpose()
-            .map_err(|error| sequence_storage_error("inspect sequence transaction scope", error))?
-            .unwrap_or(false);
         let session = if private {
             None
         } else {
@@ -41,6 +54,15 @@ impl SequenceValueContext<'_> {
                 .map(|value| Some((value, true)))
                 .map_err(|error| sequence_storage_error(action, error));
         }
+        self.prepare_transaction_writer()?;
+        self.storage
+            .map(|catalog| operation(catalog).map(|value| (value, false)))
+            .transpose()
+            .map_err(|error| sequence_storage_error(action, error))
+    }
+
+    /// Make the caller's transaction a writer before a sequence value is changed in it.
+    pub(super) fn prepare_transaction_writer(&self) -> Result<(), SequenceValueError> {
         self.runtime
             .prepare_explicit_transaction_writer()
             .map_err(|error| match error {
@@ -48,15 +70,11 @@ impl SequenceValueContext<'_> {
                     SequenceValueError::Internal(format!("prepare sequence writer: {error}"))
                 }
                 error => error.into(),
-            })?;
-        self.storage
-            .map(|catalog| operation(catalog).map(|value| (value, false)))
-            .transpose()
-            .map_err(|error| sequence_storage_error(action, error))
+            })
     }
 }
 
-fn autonomous_value<T>(
+pub(super) fn autonomous_value<T>(
     session: &PersistentStorageSession,
     cancel: &uqa_core::CancellationToken,
     operation: &impl Fn(&dyn CatalogFacade) -> StorageBackendResult<T>,

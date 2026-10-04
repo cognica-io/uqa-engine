@@ -26,6 +26,83 @@ fn changed_names(
 }
 
 impl Engine {
+    /// After this session's own data commit, keep its table caches when that commit is the only one since the view they reflect. Its writes already maintained them, so the next statement need not rebuild them as it must after another writer. Any other commit, or a catalog, registry, graph or schema revision change, leaves the observed state behind for the ordinary refresh. A catalog that reports no cache revisions, before as after, relies on the caller, which adopts only a commit whose dirty state shows data changes alone. A failure to observe the committed view has the same effect as another commit: the next statement's refresh reads it again and reports any persistent error.
+    pub(crate) fn adopt_own_commit_revisions(&self) {
+        let Some(backend) = self.storage.backend.as_ref() else {
+            return;
+        };
+        let Some(catalog) = self.storage.catalog.as_ref() else {
+            return;
+        };
+        let previous_view = self.epochs.seen_storage_read_view.lock().clone();
+        let previous = self.epochs.storage_cache_revisions.lock().clone();
+        let Some(previous_view) = previous_view else {
+            return;
+        };
+        if backend.in_transaction() {
+            return;
+        }
+        // Observed before the view: a sibling that publishes later remains unobserved.
+        let data_epoch = self.epochs.table_data.published.load(Ordering::Acquire);
+        // A versioned session's pinned view reports its own change version, which costs no further read of the latest commit. Any other session asks the monitor first: inside its read transaction the monitor could wait behind a writer that waits for this reader.
+        let pinned_version = backend.transaction_model().is_versioned();
+        let before = if pinned_version {
+            None
+        } else {
+            match backend.change_version() {
+                Ok(version) => Some(version),
+                Err(_) => return,
+            }
+        };
+        if backend.begin_read_transaction().is_err() {
+            return;
+        }
+        let observed = before
+            .map_or_else(|| backend.change_version(), Ok)
+            .and_then(|version| {
+                Ok((
+                    version,
+                    backend.read_view_revision()?,
+                    catalog.cache_revisions()?,
+                ))
+            });
+        if backend.rollback_transaction().is_err() {
+            return;
+        }
+        let Ok((version, Some(view), current)) = observed else {
+            return;
+        };
+        if !view.follows_by_one_commit(&previous_view) {
+            return;
+        }
+        match (&previous, &current) {
+            (Some(previous), Some(current)) => {
+                if current.table_catalog != previous.table_catalog
+                    || current.registries != previous.registries
+                    || current.graphs != previous.graphs
+                    || current.storage_schema != previous.storage_schema
+                {
+                    return;
+                }
+            }
+            (None, None) => {}
+            _ => return,
+        }
+        *self.epochs.storage_cache_revisions.lock() = current;
+        *self.epochs.seen_storage_read_view.lock() = Some(view);
+        if let Some(version) = version {
+            self.epochs
+                .seen_storage_change_version
+                .store(version, Ordering::Release);
+        }
+        self.epochs
+            .table_data
+            .seen
+            .store(data_epoch, Ordering::Release);
+        self.clear_bayesian_params_cache();
+        self.invalidate_prepared_plans();
+    }
+
     /// An epoch may be published after the physical commit was already seen.
     /// Reconcile against the durable generations rather than decoding again.
     pub(super) fn refresh_tracked_storage_snapshot(&self) -> StorageBackendResult<bool> {
@@ -35,7 +112,7 @@ impl Engine {
         let Some(backend) = self.storage.backend.as_ref() else {
             return Ok(false);
         };
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let _refresh = self.epochs.external_commit_refresh.lock();
         if backend.in_transaction() {
             return Ok(false);
@@ -57,6 +134,7 @@ impl Engine {
         catalog_epoch: u64,
         data_epoch: u64,
         registry_epoch: u64,
+        committed_unchanged: bool,
     ) -> StorageBackendResult<bool> {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(false);
@@ -98,7 +176,7 @@ impl Engine {
         // Physical indexes and analyzer bindings belong to the same committed revision. Restore changed registries before reopening data stores, so an old cached binding never meets newly committed occurrence metadata.
         if !catalog_changed {
             if let Some(previous) = previous.as_ref() {
-                self.refresh_changed_table_caches(previous, &current)?;
+                self.refresh_changed_table_caches(previous, &current, committed_unchanged)?;
             }
         }
         // Generations become observed only after every dependent cache was
@@ -124,13 +202,26 @@ impl Engine {
         Ok(true)
     }
 
+    /// `committed_unchanged` reports that the committed state is the one the caches were last refreshed from, so a private generation is this transaction's own change, which its writes already applied to the caches. A rollback restores the committed generation, which differs from the private one and refreshes the table.
     fn refresh_changed_table_caches(
         &self,
         previous: &CatalogCacheRevisions,
         current: &CatalogCacheRevisions,
+        committed_unchanged: bool,
     ) -> StorageBackendResult<()> {
-        let data = changed_names(&previous.table_data, &current.table_data);
-        let statistics = changed_names(&previous.column_statistics, &current.column_statistics);
+        let foreign = |previous: &BTreeMap<String, u64>, current: &BTreeMap<String, u64>| {
+            let mut names = changed_names(previous, current);
+            if committed_unchanged {
+                names.retain(|name| {
+                    !current.get(name).is_some_and(|generation| {
+                        CatalogCacheRevisions::is_private_generation(*generation)
+                    })
+                });
+            }
+            names
+        };
+        let data = foreign(&previous.table_data, &current.table_data);
+        let statistics = foreign(&previous.column_statistics, &current.column_statistics);
         let maintenance = changed_names(
             &previous.statistics_maintenance,
             &current.statistics_maintenance,

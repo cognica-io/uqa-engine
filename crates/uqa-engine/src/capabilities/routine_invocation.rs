@@ -51,6 +51,13 @@ impl RoutineInvocationSession for Engine {
     fn set_configured_parameter(&self, name: &str, value: &str) -> Result<(), SQLError> {
         Engine::set_configured_parameter(self, name, value)
     }
+    fn plpgsql_variable_conflict(&self) -> uqa_sql::plpgsql::VariableConflict {
+        self.load_language("plpgsql");
+        uqa_sql::plpgsql::VariableConflict::from_name(
+            &self.session.setting("plpgsql.variable_conflict"),
+        )
+        .unwrap_or_default()
+    }
 }
 impl Engine {
     pub(crate) fn routine_invocation_context(&self) -> RoutineInvocationContext<'_> {

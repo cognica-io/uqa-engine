@@ -101,7 +101,8 @@ fn names() -> Vec<(ColumnType, &'static str, &'static str)> {
                 base: Box::new(ColumnType::Integer),
             },
             "bare.a1_$",
-            "bare.a1_$",
+            // PostgreSQL 18's `quote_identifier` quotes a `$` that SQL text accepts unquoted: `'bare.a1_$'::regtype` prints `bare."a1_$"`.
+            "bare.\"a1_$\"",
         ),
         (ColumnType::Vector(5), "vector(5)", "vector"),
         (ColumnType::Tensor(9), "tensor(9)", "tensor"),

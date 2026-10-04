@@ -624,6 +624,7 @@ fn syntax_expressions(command: &CommandPlan) -> Vec<&ScalarExpr> {
                         condition,
                         columns,
                         values,
+                        ..
                     } => {
                         expressions.extend(condition.as_ref());
                         expressions.extend(

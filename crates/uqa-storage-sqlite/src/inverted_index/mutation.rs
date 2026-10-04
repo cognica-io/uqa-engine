@@ -6,6 +6,7 @@
 
 //! Atomic source replacement with coalesced graph clusters and revision statistics.
 
+use super::clustered::write_encoded_cluster;
 use super::data::FieldStats;
 use super::{
     clustered_result, encode_index_counter, encode_index_u64, invalidate_posting_accelerators,
@@ -14,7 +15,8 @@ use super::{
 };
 use uqa_storage::clustered_postings::{cluster_id, encode_term_keys};
 use uqa_storage::inverted_index::{
-    visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor,
+    visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor, SourceRebuild,
+    StagedFieldRecord, TextIndexSource,
 };
 use uqa_storage::read_control::StorageReadControl;
 
@@ -291,81 +293,72 @@ impl SQLiteInvertedIndex {
 
     pub(super) fn rebuild_documents_inner(
         &self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn TextIndexSource,
     ) -> SQLiteResult<()> {
-        self.rebuild_documents_with_cancellation(documents, None)
+        self.rebuild_documents_with_cancellation(source, None)
     }
 
+    /// Replace the index with the documents `source` reads. They are analyzed and staged before the replacement begins, in a record set that spills beyond the default session allowance, so neither the source nor its postings are held in memory while the rows are written.
     pub(super) fn rebuild_documents_with_cancellation(
         &self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn TextIndexSource,
         cancellation: Option<&uqa_core::CancellationToken>,
     ) -> SQLiteResult<()> {
-        if let Some(cancellation) = cancellation {
-            cancellation.check()?;
+        let check = || cancellation.map_or(Ok(()), uqa_core::CancellationToken::check);
+        check()?;
+        let control = StorageReadControl::new(
+            &uqa_core::memory::MemoryBudget::new(
+                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+            ),
+            &cancellation.cloned().unwrap_or_default(),
+        );
+        let mut staged = SourceRebuild::new(&control);
+        while let Some((doc_id, fields)) = source.next_document()? {
+            check()?;
+            encode_index_u64("document", doc_id)?;
+            let analyzed = self.analyze_fields(fields, cancellation)?;
+            staged.stage(
+                doc_id,
+                analyzed.iter().map(|(field, snapshot)| {
+                    (field.as_str(), &snapshot.metadata, &snapshot.postings)
+                }),
+            )?;
         }
-        let staged = self.stage_documents_inner(documents, cancellation)?;
-        let mut totals = BTreeMap::new();
-        let mut clusters =
-            BTreeMap::<(FieldName, TokenTermKey, u64), Vec<OccurrencePosting>>::new();
-        for (doc_id, fields) in &staged {
-            add_statistics(&mut totals, fields)?;
-            for (field, snapshot) in fields {
-                for (term, occurrences) in &snapshot.postings {
-                    if let Some(cancellation) = cancellation {
-                        cancellation.check()?;
-                    }
-                    clusters
-                        .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
-                        .or_default()
-                        .push(OccurrencePosting {
-                            doc_id: *doc_id,
-                            doc_length: snapshot.metadata.length,
-                            occurrences: occurrences.clone(),
-                        });
-                }
-            }
-        }
+        let totals = staged
+            .totals()
+            .iter()
+            .map(|(field, totals)| {
+                (
+                    field.clone(),
+                    FieldStats {
+                        revision: totals.revision,
+                        doc_count: totals.doc_count,
+                        total_length: totals.total_length,
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
-            if let Some(cancellation) = cancellation {
-                cancellation.check()?;
-            }
+            check()?;
             self.clear_index_on(&tx)?;
-            let encoding = cancellation.map_or_else(
-                || StorageReadControl::with_limit(usize::MAX),
-                |cancellation| {
-                    StorageReadControl::new(
-                        &uqa_core::memory::MemoryBudget::new(usize::MAX),
-                        cancellation,
-                    )
-                },
-            );
-            for ((field, term, cluster), entries) in clusters {
-                if let Some(cancellation) = cancellation {
-                    cancellation.check()?;
-                }
-                write_cluster(
-                    &tx,
-                    &self.table,
-                    &field,
-                    &term,
-                    cluster,
-                    &entries,
-                    &encoding,
-                )?;
-            }
-            for (doc_id, fields) in &staged {
-                if let Some(cancellation) = cancellation {
-                    cancellation.check()?;
-                }
-                self.write_document_on(&tx, *doc_id, fields)?;
-            }
+            staged
+                .visit_clusters(&mut |cluster| {
+                    check()?;
+                    write_encoded_cluster(&tx, &self.table, &cluster)
+                        .map_err(uqa_storage::StorageBackendError::from)
+                })
+                .map_err(SQLiteError::from)?;
+            staged
+                .visit_documents(&mut |record| {
+                    check()?;
+                    self.write_staged_field_on(&tx, &record)
+                        .map_err(uqa_storage::StorageBackendError::from)
+                })
+                .map_err(SQLiteError::from)?;
             self.write_statistics_on(&tx, &totals)?;
             for field in totals.keys() {
-                if let Some(cancellation) = cancellation {
-                    cancellation.check()?;
-                }
+                check()?;
                 Self::ensure_aux_tables_on(
                     &tx,
                     &self.skip_table_name(field),
@@ -373,11 +366,22 @@ impl SQLiteInvertedIndex {
                 )?;
             }
             invalidate_posting_accelerators(&tx, &self.table)?;
-            if let Some(cancellation) = cancellation {
-                cancellation.check()?;
-            }
+            check()?;
             tx.commit()?;
             Ok(())
         })
+    }
+
+    /// Write one staged field of a document into a replacement, whose rows the replacement cleared.
+    fn write_staged_field_on(
+        &self,
+        conn: &rusqlite::Connection,
+        record: &StagedFieldRecord<'_>,
+    ) -> SQLiteResult<()> {
+        let doc_id = encode_index_u64("document", record.doc_id)?;
+        let metadata = clustered_result(record.metadata.to_bytes())?;
+        conn.execute("INSERT INTO _occurrence_documents(table_name, doc_id, field, terms_blob, metadata_blob) VALUES (?1, ?2, ?3, ?4, ?5)", params![self.table, doc_id, record.field, record.terms, metadata.as_slice()])?;
+        conn.execute("INSERT INTO _occurrence_lengths(table_name, doc_id, field, length) VALUES (?1, ?2, ?3, ?4)", params![self.table, doc_id, record.field, encode_index_counter("document length", record.metadata.length)?])?;
+        Ok(())
     }
 }

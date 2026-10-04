@@ -159,6 +159,21 @@ impl ManagedConnection {
         }
     }
 
+    /// Run a record read on a pooled connection, with the connection's memory of the committed state a store last validated. A record connection pins no transaction, so the connection serves this call alone.
+    pub(crate) fn with_record_read<R>(
+        &self,
+        operation: impl FnOnce(&Connection, &std::cell::Cell<Option<super::ValidatedRead>>) -> Result<R>,
+    ) -> Result<R> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        if !self.record_access || self.session.transaction.lock().is_some() {
+            return Err(SQLiteError::SessionMappingMismatch);
+        }
+        let connection = self.pool.checkout()?;
+        let physical = connection.physical()?;
+        operation(&physical.connection, &physical.validated_read)
+    }
+
     pub(crate) fn with_record_connection<R>(
         &self,
         control: &StorageReadControl,

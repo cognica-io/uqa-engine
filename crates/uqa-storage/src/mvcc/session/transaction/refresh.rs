@@ -19,8 +19,21 @@ impl Transaction {
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         self.unsealed()?;
+        if let Some(captured_at) = self.committed.commit_monitor() {
+            // Nothing was committed since this snapshot was captured, so a new one would be the same.
+            if persistence.commit_monitor_version()? == Some(captured_at) {
+                control.cancellation().check()?;
+                return Ok(());
+            }
+        }
         let current = persistence.snapshot(control)?;
         if current.sequence() == self.committed.sequence() {
+            if let Some(monitor) = current.commit_monitor() {
+                // The same records under the monitor's current value, which spares the next refresh this capture.
+                if !self.committed.adopt_commit_monitor(monitor) {
+                    self.committed = current;
+                }
+            }
             return Ok(());
         }
         let prepared = self.prepare(control)?;
@@ -32,9 +45,10 @@ impl Transaction {
             ResolutionMode::Command,
             control,
         )?;
-        let records = resolved.as_ref().unwrap_or(&prepared).records();
-        for (mutation, write) in records.iter().enumerate() {
-            control.cancellation().check()?;
+        let records = resolved.as_ref().unwrap_or(&prepared);
+        let mut writes = records.writes();
+        let mut mutation = 0;
+        while let Some(write) = writes.next_metadata(control)? {
             let actual = current
                 .metadata(write.key(), control)?
                 .and_then(|row| row.revision);
@@ -45,9 +59,10 @@ impl Transaction {
                     actual,
                 });
             }
+            mutation += 1;
         }
         let changes = PrivateRecordChanges::new(control.memory());
-        changes.apply_owned(records, control)?;
+        changes.apply_prepared(records, control)?;
         changes.inherit_retained_sources(&self.changes, control)?;
         control.check()?;
         self.changes = changes;

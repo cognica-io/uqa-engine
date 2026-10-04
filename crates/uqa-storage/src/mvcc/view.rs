@@ -7,6 +7,7 @@
 //! Provider-independent reads combine one pinned committed boundary with a fixed private command view.
 
 mod fingerprint;
+mod last;
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -48,6 +49,11 @@ impl VisibleRecordRevision {
             .flatten()
     }
 
+    /// The committed sequence this view includes, whether or not private changes accompany it.
+    pub(crate) fn committed_sequence(self) -> Option<CommitSequence> {
+        self.committed
+    }
+
     pub(crate) fn database(self) -> super::DatabaseId {
         self.database
     }
@@ -67,6 +73,9 @@ impl From<BorrowedRecord<'_>> for RecordMetadata {
 }
 
 pub type RecordValueVisitor<'a> = dyn FnMut(Option<BorrowedRecord<'_>>) -> VersionResult<()> + 'a;
+pub type RecordPointVisitor<'a> =
+    dyn FnMut(&[u8], Option<BorrowedRecord<'_>>) -> VersionResult<bool> + 'a;
+pub type RecordKeyIterator<'a> = dyn Iterator<Item = VersionResult<BudgetedVec<u8>>> + 'a;
 pub type RecordScanVisitor<'a> = dyn FnMut(&[u8], BorrowedRecord<'_>) -> VersionResult<bool> + 'a;
 pub type RecordKeyVisitor<'a> = dyn FnMut(&[u8], RecordMetadata) -> VersionResult<bool> + 'a;
 
@@ -77,6 +86,21 @@ pub trait CommittedRecordSnapshot: Send + Sync {
     /// The provider's tombstone-reclamation epoch captured under the same admission as this snapshot. `None` means this provider does not supply reclamation-aware observations. Wrappers must forward the original value, never refresh it from current storage.
     fn reclamation_epoch(&self) -> Option<u64> {
         None
+    }
+
+    /// The provider's own snapshot type, which its native read paths may serve from physical projections at the same boundary. Wrappers must forward the original provider snapshot.
+    fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+
+    /// The value [`VersionedPersistence::commit_monitor_version`](super::VersionedPersistence::commit_monitor_version) returned before this snapshot was captured. While the monitor still returns it, nothing was committed after the capture began, so this snapshot is the latest one. `None` when the provider has no monitor. Wrappers must forward the original value.
+    fn commit_monitor(&self) -> Option<u64> {
+        None
+    }
+
+    /// Take the monitor value another snapshot of this same sequence was captured at. Nothing was committed between the two captures, so this snapshot is the latest one for as long as the monitor returns that value. Returns false when the snapshot cannot change its value, and its holder then keeps the other snapshot instead. Keeping this one keeps what it has already read of its records.
+    fn adopt_commit_monitor(&self, _monitor: u64) -> bool {
+        false
     }
 
     /// Read a revision and tombstone marker without materializing its value when the provider supports key-only access.
@@ -105,6 +129,17 @@ pub trait CommittedRecordSnapshot: Send + Sync {
         self.visit_prefix(prefix, after, limit, control, &mut |key, record| {
             visit(key, record.into())
         })
+    }
+
+    /// Visit the greatest visible identity with this prefix strictly before `before`, including a tombstone. Invoke the visitor at most once; providers may seek directly without reading preceding keys or values. The default preserves semantics for providers that only implement forward scans.
+    fn visit_last_key(
+        &self,
+        prefix: &[u8],
+        before: Option<&[u8]>,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        last::by_scan(self, prefix, before, control, visit)
     }
 
     /// Return the newest revision at or before this snapshot, including tombstones. Missing identities return `None`.
@@ -152,6 +187,31 @@ pub trait CommittedRecordSnapshot: Send + Sync {
             "size-bounded committed record reads are not supported".into(),
         )
         .into())
+    }
+
+    /// Borrow requested values in input order under one optional provider read window. Key production and visitors are internal and must not reenter storage or invoke user code. Produce one key at a time; a false visitor or an error stops before requesting the next key, including duplicate and missing identities.
+    fn visit_values(
+        &self,
+        keys: &mut RecordKeyIterator<'_>,
+        control: &StorageReadControl,
+        visit: &mut RecordPointVisitor<'_>,
+    ) -> VersionResult<()> {
+        loop {
+            control.check()?;
+            let Some(key) = keys.next() else {
+                return Ok(());
+            };
+            let key = key?;
+            let mut more = true;
+            self.visit_value(&key, control, &mut |record| {
+                more = visit(&key, record)?;
+                Ok(())
+            })?;
+            control.check()?;
+            if !more {
+                return Ok(());
+            }
+        }
     }
 
     /// Visit ordered versions until the limit, exhaustion or a visitor returning `false`. Implementations with borrowed pages avoid charging their encoded payloads to the caller's decode allowance.
@@ -224,6 +284,24 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
     fn reclamation_epoch(&self) -> Option<u64> {
         self.snapshot.reclamation_epoch()
     }
+    fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
+        self.snapshot.provider_snapshot()
+    }
+    fn commit_monitor(&self) -> Option<u64> {
+        self.snapshot.commit_monitor()
+    }
+    fn adopt_commit_monitor(&self, monitor: u64) -> bool {
+        self.snapshot.adopt_commit_monitor(monitor)
+    }
+    fn visit_last_key(
+        &self,
+        prefix: &[u8],
+        before: Option<&[u8]>,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.snapshot.visit_last_key(prefix, before, control, visit)
+    }
     fn metadata(
         &self,
         key: &[u8],
@@ -265,6 +343,14 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
         visit: &mut RecordValueVisitor<'_>,
     ) -> VersionResult<()> {
         self.snapshot.visit_value(key, control, visit)
+    }
+    fn visit_values(
+        &self,
+        keys: &mut RecordKeyIterator<'_>,
+        control: &StorageReadControl,
+        visit: &mut RecordPointVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.snapshot.visit_values(keys, control, visit)
     }
     fn visit_value_bounded(
         &self,
@@ -410,6 +496,11 @@ impl MergedRecordSnapshot {
         self.committed.sequence()
     }
 
+    /// Whole private command-root identity, restored together with its records on undo.
+    pub fn private_revision(&self) -> Option<super::PrivateRecordRevision> {
+        self.private.revision()
+    }
+
     /// The pinned committed boundary underlying this command view, without private replacements.
     pub fn committed(&self) -> &dyn CommittedRecordSnapshot {
         self.committed.as_ref()
@@ -445,6 +536,34 @@ impl MergedRecordSnapshot {
             return Ok(());
         }
         self.committed.visit_value(key, control, visit)
+    }
+
+    /// Keep private replacements ahead of committed values while allowing an unchanged command view to reuse the provider's point-read window.
+    pub fn visit_values(
+        &self,
+        keys: &mut RecordKeyIterator<'_>,
+        control: &StorageReadControl,
+        visit: &mut RecordPointVisitor<'_>,
+    ) -> VersionResult<()> {
+        if self.private_revision().is_none() {
+            return self.committed.visit_values(keys, control, visit);
+        }
+        loop {
+            control.check()?;
+            let Some(key) = keys.next() else {
+                return Ok(());
+            };
+            let key = key?;
+            let mut more = true;
+            self.visit_value(&key, control, &mut |record| {
+                more = visit(&key, record)?;
+                Ok(())
+            })?;
+            control.check()?;
+            if !more {
+                return Ok(());
+            }
+        }
     }
 
     /// Preserve private replacement/tombstone precedence while enforcing the physical source's encoded-value cap.
@@ -519,6 +638,15 @@ impl MergedRecordSnapshot {
             control,
             visit,
         )
+    }
+
+    /// Whether this view holds a private change of `key`, whose committed record is then not what a read of the key returns.
+    pub fn has_private_change(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<bool> {
+        Ok(self.private.get(key, control)?.is_some())
     }
 
     pub fn get(

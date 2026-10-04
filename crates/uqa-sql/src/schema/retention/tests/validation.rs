@@ -70,7 +70,6 @@ fn virtual_generated_calls_preserve_postgresql_error_fields() {
                 "t",
                 &mut source,
                 &[],
-                &[],
             )
             .unwrap_err();
             assert_eq!(error.sqlstate(), Some("0A000"));
@@ -111,7 +110,6 @@ fn generated_column_owner_rejects_the_query_shapes_excluded_from_retention() {
             },
             "t",
             &mut source,
-            &[],
             &[],
         )
         .unwrap_err();

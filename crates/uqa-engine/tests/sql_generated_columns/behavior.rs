@@ -39,7 +39,10 @@ fn generated_columns_follow_pg18_insert_update_and_read_semantics() {
         .sql("INSERT INTO generated_rows VALUES (3, 6, 99, DEFAULT)", &[])
         .unwrap_err()
         .to_string();
-    assert!(error.contains("only DEFAULT may be assigned"), "{error}");
+    assert_eq!(
+        error,
+        "cannot insert a non-DEFAULT value into column \"virtual_value\""
+    );
 
     let updated = engine
         .sql(
@@ -56,7 +59,10 @@ fn generated_columns_follow_pg18_insert_update_and_read_semantics() {
         )
         .unwrap_err()
         .to_string();
-    assert!(error.contains("only DEFAULT may be assigned"), "{error}");
+    assert_eq!(
+        error,
+        "column \"stored_value\" can only be updated to DEFAULT"
+    );
 
     let selected = engine
         .sql(
@@ -98,14 +104,17 @@ fn implicit_insert_slots_keep_generated_columns_in_declared_order() {
         .sql("INSERT INTO generated_slots VALUES (4, 5)", &[])
         .unwrap_err()
         .to_string();
-    assert!(error.contains("only DEFAULT may be assigned"), "{error}");
+    assert_eq!(
+        error,
+        "cannot insert a non-DEFAULT value into column \"derived\""
+    );
     let select_error = engine
         .sql("INSERT INTO generated_slots SELECT 6, 7", &[])
         .unwrap_err()
         .to_string();
-    assert!(
-        select_error.contains("only DEFAULT may be assigned"),
-        "{select_error}"
+    assert_eq!(
+        select_error,
+        "cannot insert a non-DEFAULT value into column \"derived\""
     );
     engine
         .sql(
@@ -198,4 +207,84 @@ fn alter_generated_expression_rewrites_stored_rows_and_preserves_drop_value() {
         )
         .unwrap();
     assert_eq!(int(&retained.rows[0], "stored_value"), 9);
+}
+
+/// The SQLSTATE, message and detail of the diagnostic `statement` fails with.
+fn diagnostic(engine: &Engine, statement: &str) -> (String, String, Option<String>) {
+    match engine.sql(statement, &[]) {
+        Err(uqa_sql::SQLError::Diagnostic {
+            sqlstate,
+            message,
+            detail,
+            ..
+        }) => (sqlstate, message, detail),
+        other => panic!("{statement}: expected a diagnostic, got {other:?}"),
+    }
+}
+
+#[test]
+fn writes_to_generated_columns_fail_before_any_row_as_postgresql_reports() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE g (x int, y int GENERATED ALWAYS AS (x * 2) STORED);
+             INSERT INTO g (x) VALUES (1);
+             CREATE TABLE mix (a int GENERATED ALWAYS AS IDENTITY, b int GENERATED ALWAYS AS (1) STORED, c int)",
+            &[],
+        )
+        .unwrap();
+    let generated = |column: &str| Some(format!("Column \"{column}\" is a generated column."));
+    let identity = |column: &str| {
+        Some(format!(
+            "Column \"{column}\" is an identity column defined as GENERATED ALWAYS."
+        ))
+    };
+    let insert =
+        |column: &str| format!("cannot insert a non-DEFAULT value into column \"{column}\"");
+    let update = |column: &str| format!("column \"{column}\" can only be updated to DEFAULT");
+    for (statement, message, detail) in [
+        // A statement whose source yields no row is rejected as well.
+        ("INSERT INTO g (x, y) SELECT 1, 5 WHERE false", insert("y"), generated("y")),
+        ("UPDATE g SET y = 5 WHERE false", update("y"), generated("y")),
+        (
+            "MERGE INTO g USING (SELECT 1 AS a) s ON false WHEN NOT MATCHED THEN INSERT (x, y) VALUES (1, 5)",
+            insert("y"),
+            generated("y"),
+        ),
+        (
+            "MERGE INTO g USING (SELECT 1 AS a) s ON true WHEN MATCHED THEN UPDATE SET y = 5",
+            update("y"),
+            generated("y"),
+        ),
+        // Columns are checked in table order, and OVERRIDING admits only an identity column's value.
+        ("INSERT INTO mix (b, a) VALUES (1, 2)", insert("a"), identity("a")),
+        (
+            "INSERT INTO mix (b, a) OVERRIDING SYSTEM VALUE VALUES (1, 2)",
+            insert("b"),
+            generated("b"),
+        ),
+        ("UPDATE mix SET b = 1, a = 2", update("a"), identity("a")),
+    ] {
+        assert_eq!(
+            diagnostic(&engine, statement),
+            ("428C9".to_owned(), message, detail),
+            "{statement}"
+        );
+    }
+    match engine.copy_from("COPY g (x, y) FROM STDIN", b"1\t2\n".as_slice()) {
+        Err(uqa_sql::SQLError::Diagnostic {
+            sqlstate,
+            message,
+            detail,
+            ..
+        }) => assert_eq!(
+            (sqlstate.as_str(), message.as_str(), detail.as_deref()),
+            (
+                "42P10",
+                "column \"y\" is a generated column",
+                Some("Generated columns cannot be used in COPY.")
+            )
+        ),
+        other => panic!("COPY into a generated column: expected a diagnostic, got {other:?}"),
+    }
 }

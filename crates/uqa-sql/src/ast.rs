@@ -23,18 +23,22 @@ mod events;
 mod expressions;
 mod from;
 mod function_binding;
+mod identity_sequence;
 mod indexes;
 mod interval;
 mod locking;
 mod namespaces;
 mod object_acl;
+mod overriding;
 mod ranges;
+mod referenced_partition;
 mod relation_hierarchy;
 mod relation_lifecycle;
 mod role_specification;
 mod routine_security;
 mod routines;
 mod sequence;
+mod sequence_declaration;
 mod type_lifecycle;
 mod type_privileges;
 mod types;
@@ -51,18 +55,22 @@ pub use events::*;
 pub use expressions::*;
 pub use from::*;
 pub use function_binding::*;
+pub use identity_sequence::{DeferredSQLError, IdentitySequenceDeclaration, IdentitySequenceName};
 pub use indexes::*;
 pub use interval::*;
 pub use locking::*;
 pub use namespaces::*;
 pub use object_acl::ObjectAclEntry;
+pub use overriding::OverridingKind;
 pub use ranges::*;
+pub use referenced_partition::ReferencedPartitionConstraint;
 pub use relation_hierarchy::*;
 pub use relation_lifecycle::*;
 pub use role_specification::RoleSpecification;
 pub use routine_security::*;
 pub use routines::*;
 pub use sequence::*;
+pub use sequence_declaration::{SequenceDeclaration, SequenceOptionValue};
 pub use type_lifecycle::*;
 pub use type_privileges::*;
 pub use types::*;
@@ -284,6 +292,32 @@ pub enum AlterTableAction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         using: Option<Expr>,
     },
+    /// `ALTER COLUMN name ADD GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY [ ( options ) ]`.
+    AddIdentity {
+        name: String,
+        kind: AutoIncrementKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declaration: Option<Box<IdentitySequenceDeclaration>>,
+    },
+    /// `ALTER COLUMN name` followed by `SET GENERATED { ALWAYS | BY DEFAULT }`, `RESTART [ [ WITH ] value ]` and `SET sequence_option` in any combination.
+    SetIdentity {
+        name: String,
+        /// The generation `SET GENERATED` gives the column.
+        kind: Option<AutoIncrementKind>,
+        /// Whether `SET GENERATED` is repeated, which `PostgreSQL` reports after it has changed the sequence.
+        repeated_kind: bool,
+        /// The sequence options, kept as written: `PostgreSQL` reads them as `ALTER SEQUENCE` reads its options, and only for an identity column.
+        #[serde(default)]
+        sequence: SequenceDeclaration,
+        /// The first error collecting the sequence options raised, which waits until they are read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<DeferredSQLError>,
+    },
+    /// `ALTER COLUMN name DROP IDENTITY [ IF EXISTS ]`.
+    DropIdentity {
+        name: String,
+        if_exists: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -300,6 +334,9 @@ pub struct InsertStmt {
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,
     pub columns: Vec<AssignmentTarget>,
+    /// `OVERRIDING SYSTEM VALUE` or `OVERRIDING USER VALUE`; `None` without the clause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overriding: Option<OverridingKind>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
     /// Inline `VALUES (...) (...)` rows. `DEFAULT VALUES` is represented by one empty row; the vector itself is empty only for `INSERT ... SELECT`, whose query is in `select_source`.
@@ -841,10 +878,12 @@ pub enum MergeWhen {
     },
     /// `WHEN NOT MATCHED BY SOURCE [AND <cond>] THEN DELETE`.
     DeleteNotMatchedBySource { condition: Option<Expr> },
-    /// `WHEN NOT MATCHED [AND <cond>] THEN INSERT (cols) VALUES (vals)`.
+    /// `WHEN NOT MATCHED [AND <cond>] THEN INSERT (cols) [OVERRIDING ...] VALUES (vals)`.
     InsertNotMatched {
         condition: Option<Expr>,
         columns: Vec<AssignmentTarget>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        overriding: Option<OverridingKind>,
         values: Vec<Expr>,
     },
     /// `WHEN MATCHED [AND <cond>] THEN DO NOTHING`.

@@ -714,7 +714,7 @@ fn private_capture_failures_keep_transaction_diagnostics_and_the_original_view()
         DocumentChanges::from_shared([(2, None)], &engine.query_retention_control().unwrap())
             .unwrap();
     let failures: [(SnapshotErrorFactory, &str); 3] = [
-        (|| uqa_core::QueryCancelled.into(), "57014"),
+        (|| uqa_core::QueryCancelled::USER_REQUEST.into(), "57014"),
         (
             || uqa_core::memory::MemoryError::SizeOverflow.into(),
             "53200",

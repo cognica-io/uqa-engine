@@ -94,26 +94,7 @@ pub fn ensure_insert_target_privileges(
             TableAclPrivilege::Insert,
         )?;
     } else {
-        let insert_columns = if stmt.columns.is_empty() {
-            let supplied = stmt.source.as_deref().map_or_else(
-                || stmt.rows.first().map(Vec::len),
-                |source| {
-                    crate::semantics::projection::query_plan_output_columns(source)
-                        .map(|columns| columns.len())
-                },
-            );
-            let columns = catalog.bound_table_column_names(&stmt.table)?;
-            match supplied {
-                Some(supplied) => columns.into_iter().take(supplied).collect(),
-                None => columns,
-            }
-        } else {
-            stmt.columns
-                .iter()
-                .map(|target| target.column.clone())
-                .collect()
-        };
-        for column in insert_columns {
+        for column in insert_target_columns(catalog, stmt)? {
             catalog.ensure_column_privilege_for(
                 &stmt.table,
                 &column,
@@ -170,6 +151,35 @@ pub fn ensure_insert_target_privileges(
             .map_or(&[][..], |conflict| conflict.conflict_columns.as_slice()),
     })?;
     Ok(())
+}
+
+/// The columns an `INSERT` supplies, as `PostgreSQL` records them in its target's `insertedCols`: the columns it names, or else the leading columns of the table, one for each value a row supplies; `DEFAULT VALUES` supplies none.
+pub fn insert_target_columns(
+    catalog: &dyn MutationPrivilegeCatalog,
+    stmt: &crate::plan::InsertPlan,
+) -> Result<Vec<String>, SQLError> {
+    if !stmt.columns.is_empty() {
+        return Ok(stmt
+            .columns
+            .iter()
+            .map(|target| target.column.clone())
+            .collect());
+    }
+    let supplied = stmt.source.as_deref().map_or_else(
+        || stmt.rows.first().map(Vec::len),
+        |source| {
+            crate::semantics::projection::query_plan_output_columns(source)
+                .map(|columns| columns.len())
+        },
+    );
+    if supplied == Some(0) {
+        return Ok(Vec::new());
+    }
+    let columns = catalog.bound_table_column_names(&stmt.table)?;
+    Ok(match supplied {
+        Some(supplied) => columns.into_iter().take(supplied).collect(),
+        None => columns,
+    })
 }
 
 /// Fill missing DML privilege subjects from the surrounding WITH definition.

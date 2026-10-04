@@ -12,7 +12,8 @@ use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
     binding::stored_columns::StoredSourceCatalog,
     routines::{
-        compilation::compile_function_body,
+        body_parameters::record_sql_standard_body_parameters,
+        compilation::{compile_function_body, defer_function_body},
         dependencies::{self, RoutineCompilationMode},
         regclass::{self, RoutineRegclassCatalog},
         CompiledFunctionBody, RoutineBody,
@@ -24,6 +25,26 @@ pub struct RoutineDefinitionContext<'a> {
     pub compilation: StoredRoutineCompilationContext<'a>,
     pub sources: &'a dyn StoredSourceCatalog,
     pub regclasses: &'a dyn RoutineRegclassCatalog,
+}
+
+/// How a routine's body is compiled with its definition. A SQL-standard body belongs to the statement that creates the routine, so it is always compiled and bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoutineBodyCompilation {
+    /// `CREATE FUNCTION` under `check_function_bodies`: a body given as a string is compiled under the routine's own settings, and its errors are reported.
+    Checked,
+    /// `CREATE FUNCTION` with `check_function_bodies` off: a body given as a string is stored unexamined.
+    Unchecked,
+    /// A stored definition: a body given as a string is left for each session to compile when it first calls the routine, as each `PostgreSQL` backend compiles a function at its first call, so that a body that no longer compiles reports its error then.
+    Stored,
+}
+
+impl RoutineBodyCompilation {
+    const fn mode(self) -> RoutineCompilationMode {
+        match self {
+            Self::Checked | Self::Unchecked => RoutineCompilationMode::Definition,
+            Self::Stored => RoutineCompilationMode::Persisted,
+        }
+    }
 }
 
 /// A routine definition bound to the catalog.
@@ -39,8 +60,9 @@ pub struct BoundRoutine {
 pub fn compile_catalog_bound_routine(
     context: &RoutineDefinitionContext<'_>,
     def: &mut CreateFunction,
-    mode: RoutineCompilationMode,
+    bodies: RoutineBodyCompilation,
 ) -> Result<BoundRoutine, SQLError> {
+    let mode = bodies.mode();
     if matches!(mode, RoutineCompilationMode::Definition) {
         if matches!(def.body, FunctionBody::Statements(_))
             || def
@@ -54,13 +76,16 @@ pub fn compile_catalog_bound_routine(
         }
     }
     let mut changed = bind_routine_definition_dependencies(context, def, mode)?;
-    let mut compiled = compile_routine_for_mode(&context.compilation, def, mode)?;
+    if matches!(mode, RoutineCompilationMode::Definition) {
+        changed |= record_sql_standard_body_parameters(&context.compilation.analysis, def)?;
+    }
+    let mut compiled = compile_routine_body(&context.compilation, def, bodies)?;
     let body_changed = with_creation_search_path(context, def, |def| {
         dependencies::bind_sql_standard_body_routines(&context.compilation.analysis, def, mode)
     })? | bind_routine_regclass_constants(context, def)?;
     changed |= body_changed;
     if body_changed {
-        compiled = compile_routine_for_mode(&context.compilation, def, mode)?;
+        compiled = compile_routine_body(&context.compilation, def, bodies)?;
     }
     if !matches!(def.body, FunctionBody::Statements(_)) {
         return Ok(BoundRoutine {
@@ -82,20 +107,30 @@ pub fn compile_catalog_bound_routine(
     })
 }
 
-/// Compile the body when the mode needs it: a SQL-standard body always, and a source body only to validate a new definition. The sessions that run a stored source body compile it.
-fn compile_routine_for_mode(
+/// Compile the body as `bodies` asks: a SQL-standard body always, and a source body only to validate a new definition under `check_function_bodies`. The sessions that run a source body compile it.
+fn compile_routine_body(
     context: &StoredRoutineCompilationContext<'_>,
     def: &CreateFunction,
-    mode: RoutineCompilationMode,
+    bodies: RoutineBodyCompilation,
 ) -> Result<Option<CompiledFunctionBody>, SQLError> {
-    match (mode, &def.body) {
-        (RoutineCompilationMode::Definition, _) => {
-            compile_function_body(&context.analysis, def).map(Some)
-        }
-        (RoutineCompilationMode::Persisted, FunctionBody::Statements(_)) => {
+    match (bodies, &def.body) {
+        (
+            RoutineBodyCompilation::Checked | RoutineBodyCompilation::Unchecked,
+            FunctionBody::Statements(_),
+        ) => compile_function_body(&context.analysis, def).map(Some),
+        (RoutineBodyCompilation::Stored, FunctionBody::Statements(_)) => {
             compilation::compile_persisted_sql_function(context, def).map(Some)
         }
-        (RoutineCompilationMode::Persisted, FunctionBody::Source(_)) => Ok(None),
+        (RoutineBodyCompilation::Checked, FunctionBody::Source(_)) => {
+            compilation::with_routine_settings(context, def, || {
+                compile_function_body(&context.analysis, def)
+            })
+            .map(Some)
+        }
+        (RoutineBodyCompilation::Unchecked, FunctionBody::Source(_)) => {
+            defer_function_body(&context.analysis, def)
+        }
+        (RoutineBodyCompilation::Stored, FunctionBody::Source(_)) => Ok(None),
     }
 }
 

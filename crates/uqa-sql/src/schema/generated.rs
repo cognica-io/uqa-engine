@@ -7,7 +7,7 @@
 //! `PostgreSQL` 18 generated-column validation and row computation.
 
 use crate::ast::ForeignKey;
-use crate::ast::{ColumnDef, Expr, GeneratedColumnKind, TableKeyConstraint};
+use crate::ast::{ColumnDef, Expr, GeneratedColumnKind};
 use crate::{
     assignment::conversion::convert_value_to_column_type, semantics::aggregates, ColumnType,
     SQLError,
@@ -21,7 +21,6 @@ pub fn prepare_generated_columns(
     context: &super::SchemaBindingContext<'_, '_>,
     qualifier: &str,
     columns: &mut [ColumnDef],
-    key_constraints: &[TableKeyConstraint],
     foreign_keys: &[ForeignKey],
 ) -> Result<(), SQLError> {
     let engine = context.catalog;
@@ -43,7 +42,7 @@ pub fn prepare_generated_columns(
             )));
         }
         if generated.kind == GeneratedColumnKind::Virtual {
-            validate_virtual_column_envelope(column, key_constraints, foreign_keys)?;
+            validate_virtual_column_envelope(column, foreign_keys)?;
         }
         let plan = crate::plan::ExpressionPlan::lower((*generated.expression).clone());
         if !plan.subqueries.is_empty() {
@@ -107,9 +106,9 @@ pub fn prepare_generated_columns(
     Ok(())
 }
 
+/// A virtual generated column cannot take a user-defined type or a foreign key; `DefineIndex` rejects it as a key column, after the key's other checks.
 fn validate_virtual_column_envelope(
     column: &ColumnDef,
-    key_constraints: &[TableKeyConstraint],
     foreign_keys: &[ForeignKey],
 ) -> Result<(), SQLError> {
     if virtual_security::is_user_defined_type(&column.ty) {
@@ -129,26 +128,6 @@ fn validate_virtual_column_envelope(
             column.name
         )));
     }
-    if column.primary_key
-        || key_constraints.iter().any(|constraint| {
-            constraint.kind == crate::ast::TableKeyConstraintKind::PrimaryKey
-                && constraint.columns.iter().any(|name| name == &column.name)
-        })
-    {
-        return Err(SQLError::TypeMismatch(
-            "primary keys on virtual generated columns are not supported".into(),
-        ));
-    }
-    if column.unique
-        || key_constraints.iter().any(|constraint| {
-            constraint.kind == crate::ast::TableKeyConstraintKind::Unique
-                && constraint.columns.iter().any(|name| name == &column.name)
-        })
-    {
-        return Err(SQLError::TypeMismatch(
-            "unique constraints on virtual generated columns are not supported".into(),
-        ));
-    }
     if column.references.is_some()
         || foreign_keys.iter().any(|foreign_key| {
             foreign_key
@@ -157,7 +136,7 @@ fn validate_virtual_column_envelope(
                 .any(|name| name == &column.name)
         })
     {
-        return Err(SQLError::TypeMismatch(
+        return Err(SQLError::Unsupported(
             "foreign key constraints on virtual generated columns are not supported".into(),
         ));
     }

@@ -10,9 +10,12 @@
 use uqa_engine::Engine;
 
 #[test]
-fn search_path_default_is_public_only() {
+fn search_path_default_names_the_user_schema_then_public() {
     let eng = Engine::new();
-    assert_eq!(eng.search_path(), vec!["public".to_string()]);
+    assert_eq!(
+        eng.search_path(),
+        vec!["$user".to_string(), "public".to_string()]
+    );
 }
 
 #[test]

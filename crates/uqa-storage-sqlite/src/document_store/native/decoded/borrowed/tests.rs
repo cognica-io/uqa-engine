@@ -1,0 +1,728 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+use crate::{Catalog, ManagedConnection, SQLiteDocumentStore};
+use std::collections::BTreeMap;
+use uqa_core::Value;
+use uqa_storage::{mvcc::VersionedSessionOptions, DocumentStore, StorageBackendError};
+
+fn fixture() -> SQLiteDocumentStore {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    SQLiteDocumentStore::new(connection, "docs")
+}
+
+#[test]
+fn borrowed_native_rows_use_bounded_queries_and_keep_the_decoding_allowance() {
+    use rusqlite::hooks::{AuthAction, Authorization};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let mut store = fixture();
+    store.conn.begin_transaction().unwrap();
+    for id in 1..=1024 {
+        store
+            .put(
+                id,
+                BTreeMap::from([("value".into(), Value::Int(id as i64))]),
+            )
+            .unwrap();
+    }
+    store.conn.commit_transaction().unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let control = store.conn.retention_control().unwrap();
+    let retained = control.memory().used();
+    let queries = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&queries);
+    store
+        .conn
+        .with_physical(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                if matches!(context.action, AuthAction::Select) {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    let mut ids = Vec::new();
+    assert_eq!(
+        snapshot
+            .for_each_next_fields_borrowed(
+                None,
+                1024,
+                &["value", "missing", "value"],
+                &mut |id, values| {
+                    assert_eq!(values[0], &Value::Int(id as i64));
+                    assert_eq!(values[1], &Value::Null);
+                    assert!(std::ptr::eq(values[0], values[2]));
+                    assert!(control.memory().used() > retained);
+                    ids.push(id);
+                    true
+                }
+            )
+            .unwrap(),
+        Some(1024)
+    );
+    assert_eq!(ids, (1..=1024).collect::<Vec<_>>());
+    assert!(
+        queries.load(Ordering::Relaxed) <= 30,
+        "projected scan performed {} SELECTs",
+        queries.load(Ordering::Relaxed)
+    );
+    assert_eq!(control.memory().used(), retained);
+    store
+        .conn
+        .with_physical(|sqlite| {
+            sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn borrowed_native_rows_hydrate_selected_blobs_on_the_original_boundary() {
+    let mut store = fixture();
+    for id in [1, 3, 5] {
+        store
+            .put(
+                id,
+                BTreeMap::from([
+                    ("value".into(), Value::Int(id as i64)),
+                    ("body".into(), Value::Str(format!("body{id}").repeat(2048))),
+                ]),
+            )
+            .unwrap();
+    }
+    let snapshot = store.snapshot().unwrap();
+    store
+        .put(
+            3,
+            BTreeMap::from([("body".into(), Value::Str("replacement".into()))]),
+        )
+        .unwrap();
+    let mut actual = Vec::new();
+    assert_eq!(
+        snapshot
+            .for_each_next_fields_borrowed(Some(1), 2, &["body", "value"], &mut |id, values| {
+                assert_eq!(values[0], &Value::Str(format!("body{id}").repeat(2048)));
+                actual.push(id);
+                true
+            })
+            .unwrap(),
+        Some(2)
+    );
+    assert_eq!(actual, [3, 5]);
+    let mut actual = Vec::new();
+    assert_eq!(
+        snapshot
+            .for_each_next_fields_borrowed(None, 3, &["value"], &mut |id, _| {
+                actual.push(id);
+                false
+            })
+            .unwrap(),
+        Some(1)
+    );
+    assert_eq!(actual, [1]);
+}
+
+#[test]
+fn borrowed_native_rows_stop_before_later_payload_admission_and_release_failed_reads() {
+    let mut store = fixture();
+    store
+        .put(
+            1,
+            BTreeMap::from([("body".into(), Value::Str("small".into()))]),
+        )
+        .unwrap();
+    store
+        .put(
+            2,
+            BTreeMap::from([("body".into(), Value::Str("large".repeat(1 << 18)))]),
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let control = store.conn.retention_control().unwrap();
+    let retained = control.memory().used();
+    let hold = control
+        .memory()
+        .reserve(control.memory().limit() - retained - 65536)
+        .unwrap();
+    let baseline = control.memory().used();
+    assert_eq!(
+        snapshot
+            .for_each_next_fields_borrowed(None, 2, &["body"], &mut |id, values| {
+                assert_eq!(id, 1);
+                assert_eq!(values, [&Value::Str("small".into())]);
+                false
+            })
+            .unwrap(),
+        Some(1)
+    );
+    assert_eq!(control.memory().used(), baseline);
+    let mut visited = 0;
+    assert!(matches!(
+        snapshot.for_each_next_fields_borrowed(None, 2, &["body"], &mut |_, _| {
+            visited += 1;
+            true
+        }),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(visited, 1);
+    assert_eq!(control.memory().used(), baseline);
+    drop(hold);
+    assert_eq!(control.memory().used(), retained);
+}
+
+#[test]
+fn borrowed_native_rows_honor_cancellation_after_the_last_visitor() {
+    let mut store = fixture();
+    store
+        .put(1, BTreeMap::from([("value".into(), Value::Int(1))]))
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let control = store.conn.retention_control().unwrap();
+    let retained = control.memory().used();
+    let mut visited = 0;
+    assert!(matches!(
+        snapshot.for_each_next_fields_borrowed(None, 1, &["value"], &mut |_, _| {
+            visited += 1;
+            control.cancellation().cancel();
+            false
+        }),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert_eq!(visited, 1);
+    assert_eq!(control.memory().used(), retained);
+    assert!(matches!(
+        snapshot
+            .for_each_next_fields_borrowed(None, 0, &["value"], &mut |_, _| panic!("empty cursor")),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    control.cancellation().reset();
+}
+
+#[test]
+fn native_projection_avoids_unselected_inline_payload_allocation_and_keeps_field_presence() {
+    let mut store = fixture();
+    for id in 1..=8 {
+        store
+            .put(
+                id,
+                BTreeMap::from([
+                    ("body".into(), Value::Str("x".repeat(4096))),
+                    ("value".into(), Value::Int(id as i64)),
+                ]),
+            )
+            .unwrap();
+    }
+    let snapshot = store.snapshot().unwrap();
+    let visit = |fields: &[&str]| {
+        assert_eq!(
+            snapshot
+                .for_each_next_fields_borrowed(None, 8, fields, &mut |id, values| {
+                    assert_eq!(values[0], &Value::Int(id as i64));
+                    true
+                })
+                .unwrap(),
+            Some(8)
+        );
+    };
+    visit(&["value"]);
+    visit(&["value", "body"]);
+    let selected = allocation_counter::measure(|| visit(&["value"]));
+    let complete = allocation_counter::measure(|| visit(&["value", "body"]));
+    assert!(selected.bytes_total + 8 * 4096 <= complete.bytes_total);
+    let control = uqa_storage::read_control::StorageReadControl::with_limit(1 << 20);
+    let presence = snapshot
+        .field_presence_controlled(&[1, 99], &["body", "value", "missing"], &control)
+        .unwrap();
+    assert_eq!(&*presence, &[true, true, false, false, false, false]);
+    drop(presence);
+    assert_eq!(control.memory().used(), 0);
+}
+
+type Scanned = Vec<(u64, Vec<Value>)>;
+type TablesRead = std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>;
+
+/// Record the physical tables that the statements of `store`'s connection read from now on. A transaction cannot reach the physical connection, so a test that scans inside one starts recording before it begins.
+fn record_tables_read(store: &SQLiteDocumentStore) -> TablesRead {
+    use rusqlite::hooks::{AuthAction, Authorization};
+    let tables = TablesRead::default();
+    let seen = std::sync::Arc::clone(&tables);
+    store
+        .conn
+        .with_physical(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                if let AuthAction::Read { table_name, .. } = context.action {
+                    seen.lock().unwrap().insert(table_name.to_owned());
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    tables
+}
+
+fn stop_recording_tables(store: &SQLiteDocumentStore) {
+    use rusqlite::hooks::Authorization;
+    store
+        .conn
+        .with_physical(|sqlite| {
+            sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+fn scan(
+    snapshot: &dyn DocumentStore,
+    after: Option<u64>,
+    limit: usize,
+    fields: &[&str],
+) -> Scanned {
+    let mut scanned = Vec::new();
+    snapshot
+        .for_each_next_fields_borrowed(after, limit, fields, &mut |id, values| {
+            scanned.push((id, values.iter().map(|value| (*value).clone()).collect()));
+            true
+        })
+        .unwrap();
+    scanned
+}
+
+/// Scan `fields` and record which physical tables the scan's statements read.
+fn scan_reading(
+    store: &SQLiteDocumentStore,
+    snapshot: &dyn DocumentStore,
+    after: Option<u64>,
+    limit: usize,
+    fields: &[&str],
+) -> (Scanned, std::collections::BTreeSet<String>) {
+    let tables = record_tables_read(store);
+    let scanned = scan(snapshot, after, limit, fields);
+    stop_recording_tables(store);
+    let tables = tables.lock().unwrap().clone();
+    (scanned, tables)
+}
+
+#[test]
+fn latest_committed_rows_read_the_physical_projection_and_match_the_records() {
+    let mut store = fixture();
+    let mut other = SQLiteDocumentStore::new(store.conn.clone(), "other");
+    for id in 1..=300_u64 {
+        let mut fields = BTreeMap::from([("value".into(), Value::Int(id as i64))]);
+        if id == 150 {
+            // A body above the inline limit is admitted and read by itself.
+            fields.extend((0..2000).map(|field| (format!("f{field}"), Value::Int(field))));
+        }
+        if id % 50 == 0 {
+            // Values stored outside the body end a physical read to hydrate.
+            fields.insert(
+                "body".into(),
+                Value::Bytes(format!("body{id}").repeat(2048).into_bytes()),
+            );
+        }
+        store.put(id, fields).unwrap();
+    }
+    let stale = store.snapshot().unwrap();
+    other
+        .put(1, BTreeMap::from([("x".into(), Value::Int(1))]))
+        .unwrap();
+    let latest = store.snapshot().unwrap();
+    for (after, limit) in [
+        (None, usize::MAX),
+        (Some(100), 120),
+        (Some(149), 3),
+        (None, 1),
+    ] {
+        for fields in [&["value"][..], &["body", "value", "f7"][..]] {
+            let (expected, record_tables) =
+                scan_reading(&store, stale.as_ref(), after, limit, fields);
+            let (actual, latest_tables) =
+                scan_reading(&store, latest.as_ref(), after, limit, fields);
+            assert_eq!(
+                actual, expected,
+                "after {after:?}, limit {limit}, {fields:?}"
+            );
+            assert!(!record_tables.contains("_documents"), "{record_tables:?}");
+            // The first complete scan of ["value"] caches its column; byte values are stored outside the body and never cached.
+            let cached = fields == ["value"] && (after, limit) != (None, usize::MAX);
+            assert_eq!(
+                latest_tables.contains("_documents"),
+                !cached,
+                "after {after:?}, limit {limit}, {fields:?}: {latest_tables:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn private_documents_merge_into_the_physical_rows_in_document_order() {
+    let mut store = fixture();
+    let blob = |id: u64| Value::Bytes(format!("blob{id}").repeat(2048).into_bytes());
+    for id in [10_u64, 20, 30, 40] {
+        store
+            .put(
+                id,
+                BTreeMap::from([("value".into(), Value::Int(id as i64))]),
+            )
+            .unwrap();
+    }
+    // Values stored outside the body end a physical read to hydrate, committed or private.
+    store
+        .put(
+            50,
+            BTreeMap::from([("value".into(), Value::Int(50)), ("raw".into(), blob(50))]),
+        )
+        .unwrap();
+    let tables = record_tables_read(&store);
+    let scan_tables = |snapshot: &dyn DocumentStore, after, limit, fields: &[&str]| {
+        tables.lock().unwrap().clear();
+        let scanned = scan(snapshot, after, limit, fields);
+        (scanned, tables.lock().unwrap().clone())
+    };
+    store.conn.begin_transaction().unwrap();
+    for (id, value) in [(5_u64, 5_i64), (20, 200), (35, 35), (60, 60)] {
+        store
+            .put(id, BTreeMap::from([("value".into(), Value::Int(value))]))
+            .unwrap();
+    }
+    store.delete(30).unwrap();
+    store
+        .put(
+            70,
+            BTreeMap::from([("value".into(), Value::Int(70)), ("raw".into(), blob(70))]),
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let row = |id: u64, value: i64, raw: Option<u64>| {
+        (id, vec![Value::Int(value), raw.map_or(Value::Null, blob)])
+    };
+    let merged = vec![
+        row(5, 5, None),
+        row(10, 10, None),
+        row(20, 200, None),
+        row(35, 35, None),
+        row(40, 40, None),
+        row(50, 50, Some(50)),
+        row(60, 60, None),
+        row(70, 70, Some(70)),
+    ];
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value", "raw"]);
+    assert_eq!(scanned, merged);
+    assert!(read.contains("_documents"), "{read:?}");
+    // Pages resume after the last document they visited, whether it was stored or private.
+    for (after, limit, expected) in [
+        (Some(10), 2, &merged[2..4]),
+        (Some(35), 2, &merged[4..6]),
+        (Some(50), 5, &merged[6..]),
+        (Some(70), 5, &merged[8..]),
+        (None, 1, &merged[..1]),
+    ] {
+        let (scanned, read) = scan_tables(snapshot.as_ref(), after, limit, &["value", "raw"]);
+        assert_eq!(scanned, expected, "after {after:?}, limit {limit}");
+        assert!(read.contains("_documents"), "{read:?}");
+    }
+    assert_eq!(snapshot.len().unwrap(), 8);
+    // Merged rows are the transaction's own, so a complete scan of them records no decoded columns for others to serve.
+    let values = merged
+        .iter()
+        .map(|(id, values)| (*id, vec![values[0].clone()]))
+        .collect::<Vec<_>>();
+    for _ in 0..2 {
+        let (scanned, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value"]);
+        assert_eq!(scanned, values);
+        assert!(read.contains("_documents"), "{read:?}");
+    }
+    store.conn.rollback_transaction().unwrap();
+
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, _) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value"]);
+    assert_eq!(
+        scanned,
+        [10, 20, 30, 40, 50]
+            .into_iter()
+            .map(|id| (id, vec![Value::Int(id as i64)]))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(snapshot.len().unwrap(), 5);
+    stop_recording_tables(&store);
+}
+
+#[test]
+fn repeated_latest_scans_serve_decoded_columns_until_the_table_changes() {
+    let mut store = fixture();
+    let mut other = SQLiteDocumentStore::new(store.conn.clone(), "other");
+    for id in 1..=200_u64 {
+        store
+            .put(
+                id,
+                BTreeMap::from([
+                    ("value".into(), Value::Int(id as i64)),
+                    ("label".into(), Value::Str(format!("item {id}"))),
+                    ("raw".into(), Value::Bytes(vec![1, 2, 3])),
+                ]),
+            )
+            .unwrap();
+    }
+    let fields = ["value", "label"];
+    let first = store.snapshot().unwrap();
+    let (expected, tables) = scan_reading(&store, first.as_ref(), None, usize::MAX, &fields);
+    assert_eq!(expected.len(), 200);
+    assert!(tables.contains("_documents"), "{tables:?}");
+    let (cached, tables) = scan_reading(&store, first.as_ref(), None, usize::MAX, &fields);
+    assert_eq!(cached, expected);
+    assert!(!tables.contains("_documents"), "{tables:?}");
+    let (page, tables) = scan_reading(&store, first.as_ref(), Some(100), 20, &fields);
+    assert_eq!(page, expected[100..120]);
+    assert!(!tables.contains("_documents"), "{tables:?}");
+    // Another table's commit leaves this table's generation, and its columns, unchanged.
+    other
+        .put(1, BTreeMap::from([("x".into(), Value::Int(1))]))
+        .unwrap();
+    let second = store.snapshot().unwrap();
+    let (unchanged, tables) = scan_reading(&store, second.as_ref(), None, usize::MAX, &fields);
+    assert_eq!(unchanged, expected);
+    assert!(!tables.contains("_documents"), "{tables:?}");
+    // A commit to the table advances its generation, so the next scan reads and decodes rows again.
+    store
+        .put(5, BTreeMap::from([("value".into(), Value::Int(500))]))
+        .unwrap();
+    let third = store.snapshot().unwrap();
+    let (changed, tables) = scan_reading(&store, third.as_ref(), None, usize::MAX, &fields);
+    assert!(tables.contains("_documents"), "{tables:?}");
+    assert_eq!(changed[4], (5, vec![Value::Int(500), Value::Null]));
+    // Non-scalar columns are never cached.
+    for _ in 0..2 {
+        let (raw, tables) = scan_reading(&store, third.as_ref(), None, usize::MAX, &["raw"]);
+        assert_eq!(raw.len(), 200);
+        assert!(tables.contains("_documents"), "{tables:?}");
+    }
+}
+
+#[test]
+fn paged_latest_scans_build_decoded_columns_across_pages() {
+    let mut store = fixture();
+    for id in 1..=200_u64 {
+        store
+            .put(
+                id,
+                BTreeMap::from([("value".into(), Value::Int(id as i64))]),
+            )
+            .unwrap();
+    }
+    let snapshot = store.snapshot().unwrap();
+    let page = |after: Option<u64>| scan_reading(&store, snapshot.as_ref(), after, 64, &["value"]);
+    // 200 rows in pages of 64: the fourth page reaches the last row and records the columns.
+    let mut first = Vec::new();
+    let mut after = None;
+    loop {
+        let (rows, tables) = page(after);
+        if rows.is_empty() {
+            // The page that reached the last row recorded the columns, so this page reads them.
+            assert!(!tables.contains("_documents"), "{tables:?}");
+            break;
+        }
+        assert!(tables.contains("_documents"), "{tables:?}");
+        after = rows.last().map(|(id, _)| *id);
+        first.extend(rows);
+    }
+    assert_eq!(first.len(), 200);
+    let mut second = Vec::new();
+    let mut after = None;
+    loop {
+        let (rows, tables) = page(after);
+        assert!(!tables.contains("_documents"), "{tables:?}");
+        if rows.is_empty() {
+            break;
+        }
+        after = rows.last().map(|(id, _)| *id);
+        second.extend(rows);
+    }
+    assert_eq!(second, first);
+}
+
+#[test]
+fn private_records_of_another_table_leave_the_physical_rows_as_they_are() {
+    let mut store = fixture();
+    let mut other = SQLiteDocumentStore::new(store.conn.clone(), "other");
+    for id in 1..=3 {
+        store
+            .put(
+                id,
+                BTreeMap::from([("value".into(), Value::Int(id as i64))]),
+            )
+            .unwrap();
+    }
+    other
+        .put(1, BTreeMap::from([("x".into(), Value::Int(1))]))
+        .unwrap();
+    let committed = [
+        (1, vec![Value::Int(1)]),
+        (2, vec![Value::Int(2)]),
+        (3, vec![Value::Int(3)]),
+    ];
+    let tables = record_tables_read(&store);
+    // Only a scan from the table's first row keeps its decoded columns, and the one that does selects a field the later scans add another to, so every scan reads rows.
+    let scan_tables = |snapshot: &dyn DocumentStore, after, fields: &[&str]| {
+        tables.lock().unwrap().clear();
+        let scanned = scan(snapshot, after, usize::MAX, fields);
+        (scanned, tables.lock().unwrap().clone())
+    };
+    store.conn.begin_transaction().unwrap();
+    // A change and an insertion in another table are not among this table's rows.
+    other
+        .put(1, BTreeMap::from([("x".into(), Value::Int(10))]))
+        .unwrap();
+    other
+        .put(2, BTreeMap::from([("x".into(), Value::Int(2))]))
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, &["value"]);
+    assert_eq!(scanned, committed);
+    assert!(read.contains("_documents"), "{read:?}");
+    assert_eq!(snapshot.len().unwrap(), 3);
+    // Nor is a deletion there.
+    other.delete(1).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), Some(1), &["value", "absent"]);
+    assert_eq!(
+        scanned,
+        [
+            (2, vec![Value::Int(2), Value::Null]),
+            (3, vec![Value::Int(3), Value::Null])
+        ]
+    );
+    assert!(read.contains("_documents"), "{read:?}");
+
+    // A private record of the table itself, a deletion as much as a write, is merged into its rows.
+    store.delete(3).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, &["absent", "value"]);
+    assert_eq!(
+        scanned,
+        [
+            (1, vec![Value::Null, Value::Int(1)]),
+            (2, vec![Value::Null, Value::Int(2)])
+        ]
+    );
+    assert!(read.contains("_documents"), "{read:?}");
+    assert_eq!(snapshot.len().unwrap(), 2);
+    store.conn.rollback_transaction().unwrap();
+
+    // The rollback leaves no private record, and the rows are read where they are stored again.
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), Some(2), &["absent", "value"]);
+    assert_eq!(scanned, [(3, vec![Value::Null, Value::Int(3)])]);
+    assert!(read.contains("_documents"), "{read:?}");
+    stop_recording_tables(&store);
+}
+
+#[test]
+fn private_documents_merge_into_the_decoded_columns_of_the_stored_rows() {
+    let mut store = fixture();
+    let blob = Value::Bytes("private blob".repeat(2048).into_bytes());
+    for id in [10_u64, 20, 30, 40] {
+        store
+            .put(
+                id,
+                BTreeMap::from([("value".into(), Value::Int(id as i64))]),
+            )
+            .unwrap();
+    }
+    let tables = record_tables_read(&store);
+    let scan_tables = |snapshot: &dyn DocumentStore, after, limit, fields: &[&str]| {
+        tables.lock().unwrap().clear();
+        let scanned = scan(snapshot, after, limit, fields);
+        (scanned, tables.lock().unwrap().clone())
+    };
+    // Complete scans of the stored rows record their columns, which the next scans serve.
+    let snapshot = store.snapshot().unwrap();
+    for fields in [&["value"][..], &["value", "raw"][..]] {
+        scan_tables(snapshot.as_ref(), None, usize::MAX, fields);
+        let (_, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, fields);
+        assert!(!read.contains("_documents"), "{fields:?}: {read:?}");
+    }
+    store.conn.begin_transaction().unwrap();
+    for (id, value) in [(5_u64, 5_i64), (20, 200), (35, 35), (60, 60)] {
+        store
+            .put(id, BTreeMap::from([("value".into(), Value::Int(value))]))
+            .unwrap();
+    }
+    store.delete(30).unwrap();
+    // A private value stored outside the body ends the visit of the columns to hydrate.
+    store
+        .put(
+            70,
+            BTreeMap::from([
+                ("value".into(), Value::Int(70)),
+                ("raw".into(), blob.clone()),
+            ]),
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let row = |id: u64, value: i64| (id, vec![Value::Int(value), Value::Null]);
+    let mut merged = vec![
+        row(5, 5),
+        row(10, 10),
+        row(20, 200),
+        row(35, 35),
+        row(40, 40),
+        row(60, 60),
+        row(70, 70),
+    ];
+    merged[6].1[1] = blob;
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value", "raw"]);
+    assert_eq!(scanned, merged);
+    assert!(!read.contains("_documents"), "{read:?}");
+    for (after, limit, expected) in [
+        (Some(10), 2, &merged[2..4]),
+        (Some(35), 3, &merged[4..]),
+        (Some(60), 3, &merged[6..]),
+        (None, 1, &merged[..1]),
+    ] {
+        let (scanned, read) = scan_tables(snapshot.as_ref(), after, limit, &["value", "raw"]);
+        assert_eq!(scanned, expected, "after {after:?}, limit {limit}");
+        assert!(!read.contains("_documents"), "{read:?}");
+    }
+    let (scanned, _) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value"]);
+    assert_eq!(
+        scanned,
+        merged
+            .iter()
+            .map(|(id, values)| (*id, vec![values[0].clone()]))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(snapshot.len().unwrap(), 7);
+    store.conn.rollback_transaction().unwrap();
+
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value"]);
+    assert_eq!(
+        scanned,
+        [10, 20, 30, 40]
+            .into_iter()
+            .map(|id| (id, vec![Value::Int(id as i64)]))
+            .collect::<Vec<_>>()
+    );
+    assert!(!read.contains("_documents"), "{read:?}");
+    stop_recording_tables(&store);
+}

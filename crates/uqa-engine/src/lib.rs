@@ -111,6 +111,7 @@ mod schema_security;
 mod search;
 mod sequence_catalog;
 mod sequence_session;
+mod sequence_snapshot;
 mod sequences;
 mod session;
 mod sql_registry;
@@ -169,7 +170,7 @@ pub use sql::{SQLCursor, SQLCursorSummary};
 pub use uqa_execution::{ColumnVector, ColumnarBatch};
 pub use uqa_sql::{
     ast::{SequenceBound, SequenceDataType, SequenceRestart},
-    AsyncSQLEngine, NoticeSeverity, SQLNotice, SQLParam, SQLResult,
+    AsyncSQLEngine, NoticeLevel, SQLNotice, SQLParam, SQLResult,
 };
 pub use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 
@@ -298,6 +299,14 @@ struct TransactionCharacteristicsState {
     isolation: uqa_sql::ast::TransactionIsolationLevel,
     read_only: bool,
     deferrable: bool,
+    /// The characteristics the transaction assigned itself with `BEGIN`, `SET TRANSACTION` or `SET transaction_*`, which `pg_settings` reports with the source `session` rather than `override`.
+    assigned: u8,
+}
+
+impl TransactionCharacteristicsState {
+    const ISOLATION_ASSIGNED: u8 = 1;
+    const READ_ONLY_ASSIGNED: u8 = 2;
+    const DEFERRABLE_ASSIGNED: u8 = 4;
 }
 
 impl Default for TransactionCharacteristicsState {
@@ -306,6 +315,7 @@ impl Default for TransactionCharacteristicsState {
             isolation: uqa_sql::ast::TransactionIsolationLevel::ReadCommitted,
             read_only: false,
             deferrable: false,
+            assigned: 0,
         }
     }
 }
@@ -345,7 +355,11 @@ struct TransactionFrame {
     next_lock_mark: u32,
     snapshot_change_baseline: row_locks::RowChangeBaseline,
     row_changes: Vec<TransactionRowChange>,
+    /// The index of the rows the transaction changed, which reads at a fixed snapshot take views of; only the outer frame keeps one.
+    fixed_identities: Option<uqa_execution::query::document_changes::ChangedIdentities>,
     statistics_changes: statistics::StatisticsChanges,
+    /// What this frame's commit did with its statistics changes, for the session to take over when the commit has succeeded.
+    statistics_settlement: statistics::StatisticsSettlement,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events:
         Vec<uqa_execution::mutation::triggers::DeferredConstraintTriggerEvent>,
@@ -408,7 +422,8 @@ struct TransactionSavepoint {
     data_snapshot: Option<EngineDataSnapshot>,
     dirty: TransactionDirtyState,
     lock_mark: u32,
-    row_changes: Vec<TransactionRowChange>,
+    /// The length of the frame's row changes at the savepoint. The changes only grow after it, so a rollback truncates them to this length.
+    row_changes: usize,
     statistics_changes: statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events:
@@ -566,6 +581,7 @@ struct TableDataSnapshot {
     column_stats: BTreeMap<String, uqa_planner::ColumnStats>,
     column_stats_loaded: bool,
     column_stats_dirty: bool,
+    statistics_maintenance: statistics::MaintenanceState,
     table_checks: Vec<uqa_sql::ast::TableCheck>,
     foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
     key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
@@ -592,6 +608,8 @@ pub(crate) struct TableState {
     columns_declared: state::CatalogCell<bool>,
     /// Retained document-ID floor. Capable persistent backends reserve from the storage-owned durable namespace; temporary, memory and serialized backends use this local state. `u128` preserves the exhausted `u64::MAX + 1` value.
     next_id: parking_lot::Mutex<u128>,
+    /// Whether the table's single integer primary key, if it has one, names its rows' identities (see `MutationIdentifiers::maps_integer_keys`). A table an earlier version wrote with a row at an identity its key does not name resolves its keys through the key's index instead.
+    maps_integer_keys: AtomicBool,
     analyzer: state::CatalogCell<Analyzer>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
@@ -599,6 +617,8 @@ pub(crate) struct TableState {
     column_stats: state::CatalogCell<BTreeMap<String, uqa_planner::ColumnStats>>,
     column_stats_loaded: AtomicBool,
     column_stats_dirty: AtomicBool,
+    /// Changes since the last analysis of a table that no catalog tracks: tables of a memory-only engine and temporary tables. Their lazy analysis follows the maintenance policy of durable tables instead of re-analyzing after every write.
+    statistics_maintenance: parking_lot::Mutex<statistics::MaintenanceState>,
     /// Table-level `CHECK` constraints, evaluated against every row
     /// at INSERT / UPDATE time.
     table_checks: state::CatalogCell<Vec<uqa_sql::ast::TableCheck>>,
@@ -655,6 +675,16 @@ impl TableState {
                 &self.object_id,
             )
         })
+    }
+
+    /// The namespace this table's document identities are allocated and observed in.
+    fn document_id_namespace(
+        &self,
+    ) -> uqa_storage::document_store::identifiers::DocumentIdNamespace {
+        uqa_storage::document_store::identifiers::DocumentIdNamespace {
+            object: self.object_id(),
+            generation: self.storage_generation(),
+        }
     }
 
     fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {

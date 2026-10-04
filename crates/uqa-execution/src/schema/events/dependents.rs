@@ -172,7 +172,9 @@ impl EventLifecycleContext<'_> {
                 if_exists: false,
                 cascade: true,
             })?;
-            self.notice(format!("drop cascades to trigger {name} on table {table}"));
+            self.notice(uqa_sql::SQLNotice::notice(format!(
+                "drop cascades to trigger {name} on table {table}"
+            )));
         }
         for (event_relation, name) in dependent_rules {
             let event_table = event_relation.qualified_name();
@@ -182,9 +184,9 @@ impl EventLifecycleContext<'_> {
                 if_exists: false,
                 cascade: true,
             })?;
-            self.notice(format!(
+            self.notice(uqa_sql::SQLNotice::notice(format!(
                 "drop cascades to rule {name} on table {event_table}"
-            ));
+            )));
         }
         Ok(())
     }

@@ -21,10 +21,24 @@ impl Engine {
         let table = self
             .try_resolve_table_name(table)?
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
-        let catalog = self.catalog_read_view();
-        let mut resolution = self.session_execution_view().relation_name_resolution();
-        resolution.set_lookup_mode(RelationLookupMode::Bound);
-        uqa_execution::catalog::index::enforced_keys(&catalog, &resolution, &table, constraints)
+        // The index rows the catalog view of this statement holds.
+        let indexes = match self.query_catalog_snapshot.as_ref() {
+            Some(snapshot) => std::sync::Arc::clone(&snapshot.catalog_indexes),
+            None => self.durable.catalog_indexes.snapshot(),
+        };
+        self.runtime
+            .enforced_key_cache
+            .keys(&table, constraints, &indexes, |constraints| {
+                let catalog = self.catalog_read_view();
+                let mut resolution = self.session_execution_view().relation_name_resolution();
+                resolution.set_lookup_mode(RelationLookupMode::Bound);
+                uqa_execution::catalog::index::enforced_keys(
+                    &catalog,
+                    &resolution,
+                    &table,
+                    constraints,
+                )
+            })
     }
 }
 

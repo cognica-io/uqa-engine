@@ -7,6 +7,23 @@
 //! `PostgreSQL` type display with nullable typmods and catalog-visible names.
 
 use super::{format_regtype, regtype_output_catalog, CatalogContext, SQLError, Value};
+use uqa_sql::ColumnType;
+
+/// The name `PostgreSQL`'s `format_type_be` gives a type in messages: a built-in type by its SQL name without type modifiers, and a domain by its name, qualified only when the search path does not find it.
+pub fn format_type_name(context: &CatalogContext<'_>, ty: &ColumnType) -> Result<String, SQLError> {
+    match ty {
+        ColumnType::Domain { oid, .. } => {
+            match format_type_value(context, &[Value::Int(i64::from(*oid)), Value::Null])? {
+                Value::Str(name) => Ok(name),
+                other => Err(SQLError::Internal(format!(
+                    "format_type of domain {oid} returned {other:?}"
+                ))),
+            }
+        }
+        ColumnType::Array(element) => Ok(format!("{}[]", format_type_name(context, element)?)),
+        _ => Ok(ty.regtype_name()),
+    }
+}
 
 pub fn format_type_value(context: &CatalogContext<'_>, args: &[Value]) -> Result<Value, SQLError> {
     let [oid, modifier] = args else {

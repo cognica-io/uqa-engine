@@ -93,15 +93,33 @@ fn filter_table_rows<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let doc_ids = context.documents.document_ids(table)?;
+    let definitions = context
+        .documents
+        .column_definitions(table)
+        .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let candidates = crate::query::key_candidates::key_candidates(
+        filter,
+        params,
+        crate::query::key_candidates::IdentityColumns::new(&definitions, false, |name| name),
+    );
     // When the predicate reads a known column set, evaluate it against
     // a per-row field projection fetched in one storage scan instead
-    // of materialising every document.
+    // of materialising every document. `_doc_id` names the row's identity, which the filter schema carries, unless the table stores a column of that name.
     let mut columns = std::collections::BTreeSet::new();
     let collected_columns = filter.collect_columns(&mut columns);
     let references_tableoid = columns.contains(uqa_sql::semantics::TABLE_OID_COLUMN);
-    if collected_columns && !references_tableoid {
-        let names: Vec<String> = columns.into_iter().collect();
+    if candidates.is_none() && collected_columns && !references_tableoid {
+        let doc_ids = context.documents.document_ids(table)?;
+        let names: Vec<String> = columns
+            .into_iter()
+            .filter(|name| {
+                name != uqa_sql::semantics::DOC_ID_COLUMN
+                    || definitions
+                        .iter()
+                        .any(|definition| definition.name == *name)
+            })
+            .collect();
         let documents = if names.is_empty() {
             // A constant predicate needs only the candidate document ids. Some persistent stores represent a zero-column projection as an empty result map, so asking storage for no fields incorrectly makes every listed row look missing.
             vec![uqa_storage::document_store::Document::new(); doc_ids.len()]
@@ -137,23 +155,15 @@ fn filter_table_rows<S: Clone + Send + Sync + 'static>(
             ctes,
         );
     }
-    let mut documents = Vec::with_capacity(doc_ids.len());
-    for &doc_id in &doc_ids {
-        let mut document = context.documents.document(table, doc_id)?.ok_or_else(|| {
-            SQLError::Internal(format!(
-                "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
-            ))
-        })?;
-        if references_tableoid {
-            document.insert(
-                uqa_sql::semantics::TABLE_OID_COLUMN.into(),
-                uqa_core::Value::Int(crate::catalog::projection::table_relation_oid(
-                    &context.catalog,
-                    table,
-                )?),
-            );
+    let (doc_ids, mut documents) = whole_rows(context, table, candidates)?;
+    if references_tableoid && !documents.is_empty() {
+        let oid = uqa_core::Value::Int(crate::catalog::projection::table_relation_oid(
+            &context.catalog,
+            table,
+        )?);
+        for document in &mut documents {
+            document.insert(uqa_sql::semantics::TABLE_OID_COLUMN.into(), oid.clone());
         }
-        documents.push(document);
     }
     let mut columns = context.text_indexes.column_names(table).map_err(|error| {
         SQLError::Internal(format!("read table columns for `{table}`: {error}"))
@@ -178,6 +188,35 @@ fn filter_table_rows<S: Clone + Send + Sync + 'static>(
         params,
         ctes,
     )
+}
+
+/// The whole rows a filter is evaluated on: each row at an identity `candidates` names that exists, read once, or every row of the table.
+fn whole_rows<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    table: &str,
+    candidates: Option<Vec<DocId>>,
+) -> Result<(Vec<DocId>, Vec<uqa_storage::document_store::Document>), SQLError> {
+    let Some(candidates) = candidates else {
+        let doc_ids = context.documents.document_ids(table)?;
+        let mut documents = Vec::with_capacity(doc_ids.len());
+        for &doc_id in &doc_ids {
+            documents.push(context.documents.document(table, doc_id)?.ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
+                ))
+            })?);
+        }
+        return Ok((doc_ids, documents));
+    };
+    let mut doc_ids = Vec::with_capacity(candidates.len());
+    let mut documents = Vec::with_capacity(candidates.len());
+    for doc_id in candidates {
+        if let Some(document) = context.documents.document(table, doc_id)? {
+            doc_ids.push(doc_id);
+            documents.push(document);
+        }
+    }
+    Ok((doc_ids, documents))
 }
 
 fn table_filter_schema<S: Clone + Send + Sync + 'static>(
@@ -213,6 +252,35 @@ fn table_filter_schema<S: Clone + Send + Sync + 'static>(
         &schema,
         &[(document_id, Some(uqa_sql::ast::ColumnType::BigInteger))],
     );
+    // The row's identity answers `_meta.doc_id`, and `_doc_id` unless the table stores a column of that name.
+    let slot = schema
+        .internal_slot(document_id)
+        .ok_or_else(|| SQLError::Internal("filter document identity has no slot".into()))?;
+    let ty = Some(uqa_sql::ast::ColumnType::BigInteger);
+    let mut aliases = vec![(
+        crate::ColumnIdentity::qualified(
+            uqa_sql::semantics::META_QUALIFIER,
+            uqa_sql::semantics::META_DOC_ID_COLUMN,
+        ),
+        slot,
+        ty.clone(),
+    )];
+    if !definitions
+        .iter()
+        .any(|definition| definition.name == uqa_sql::semantics::DOC_ID_COLUMN)
+    {
+        aliases.push((
+            crate::ColumnIdentity::qualified(qualifier, uqa_sql::semantics::DOC_ID_COLUMN),
+            slot,
+            ty.clone(),
+        ));
+        aliases.push((
+            crate::ColumnIdentity::unqualified(uqa_sql::semantics::DOC_ID_COLUMN),
+            slot,
+            ty,
+        ));
+    }
+    let schema = crate::RowSchema::with_physical_identity_aliases(&schema, &aliases);
     Ok((schema, document_id))
 }
 

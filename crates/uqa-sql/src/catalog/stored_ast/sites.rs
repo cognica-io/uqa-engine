@@ -59,6 +59,7 @@ fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError
         source: None,
         merge: None,
         expression: Some(&mut expression),
+        projection: None,
         ty: None,
         relation: &mut relation,
         routine: &mut routine,

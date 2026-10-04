@@ -189,7 +189,3 @@ pub fn validate_sequence_grant_target_kinds(
     }
     Ok(())
 }
-
-pub fn sequence_acl_warning(is_grant: bool, partial: bool, name: &str) -> crate::SQLNotice {
-    super::object_acl::privilege_warning(is_grant, partial, name)
-}

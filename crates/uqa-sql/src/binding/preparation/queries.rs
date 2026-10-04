@@ -149,6 +149,7 @@ impl Preparation<'_> {
                 expression,
                 &block.projections,
                 &source,
+                None,
                 &self.parameters.values(),
             )?;
             let mut value = self.expression(&expression, &input, &block.subqueries)?;
@@ -167,6 +168,7 @@ impl Preparation<'_> {
             self.routines,
             block,
             &source,
+            None,
             &self.parameters.values(),
         )?;
         if !preserve_unknown {

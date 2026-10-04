@@ -79,6 +79,8 @@ const TAG_PATH_INDEX_DATA: u8 = b'Q';
 const TAG_COLUMN_STATS: u8 = b'c';
 const TAG_SCHEMA: u8 = b's';
 const TAG_SEQUENCE: u8 = b'q';
+/// Value records of sequence definition generations, keyed by object identity and generation.
+const TAG_SEQUENCE_VALUE: u8 = b'L';
 const TAG_RELATION: u8 = b'R';
 const TAG_VIEW: u8 = b'w';
 const TAG_DOCUMENT: u8 = b'd';
@@ -129,6 +131,10 @@ pub trait KeyValueBatch {
         Err(StorageBackendError::Other(
             "atomic serializable write observations are not supported".into(),
         ))
+    }
+    /// Write a record at a key that never had one, as the caller has established. Such a key has no committed revision, so the write expects none without reading one, and a record that exists after all fails the commit as a write conflict instead of being replaced. The default reads the revision as `put` does; capable wrappers must forward this method to keep the write blind.
+    fn put_unused(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
+        self.put(key, value)
     }
     /// Require this record's original committed revision at publication without replacing it. This permits independent data writers to share a definition. Stores without commit-time read validation reject this operation; capable wrappers must forward it.
     fn require_unchanged(&mut self, _key: &[u8]) -> StorageBackendResult<()> {
@@ -621,6 +627,11 @@ pub trait KeyValueStore: Send + Sync {
     fn transaction_has_written(&self) -> StorageBackendResult<bool>;
 
     fn change_version(&self) -> StorageBackendResult<Option<u64>> {
+        Ok(None)
+    }
+
+    /// Complete committed/private visibility identity, including savepoint undo. `None` requires consumers to use their existing refresh path. Tokens are process-local and do not replace transaction isolation or logical read observations.
+    fn read_view_revision(&self) -> StorageBackendResult<Option<KeyValueReadRevision>> {
         Ok(None)
     }
 

@@ -61,6 +61,9 @@ fn publish_property(
                 publication::set_column_generated(context, table, column, generated)?
             }
             ColumnProperty::Type(ty) => publication::set_column_type(context, table, column, ty)?,
+            ColumnProperty::AutoIncrement(provenance) => {
+                publication::set_column_auto_increment(context, table, column, provenance)?
+            }
         };
         Ok(())
     }))?;
@@ -85,6 +88,26 @@ pub fn set_default<S: Clone + 'static>(
             table, name,
         ));
     }
+    context
+        .fields
+        .persist_schema(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ALTER COLUMN", error))?;
+    Ok(())
+}
+/// Give the column `name` of `table` the `SERIAL` or identity provenance `provenance`, or none.
+pub fn set_auto_increment<S: Clone + 'static>(
+    context: &ColumnAlterContext<'_, S>,
+    table: &str,
+    name: &str,
+    provenance: Option<uqa_sql::ast::AutoIncrement>,
+) -> Result<(), SQLError> {
+    publish_property(
+        context.transactions,
+        table,
+        name,
+        ColumnProperty::AutoIncrement(provenance),
+    )
+    .map_err(|error| ddl_storage_error("ALTER COLUMN identity", error))?;
     context
         .fields
         .persist_schema(table)
@@ -197,7 +220,11 @@ pub fn alter_type<S: Clone + 'static>(
     publish_property(context.transactions, table, name, ColumnProperty::Type(ty))
         .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
     if target_generated_kind.is_none() {
-        super::rewrite_column_values_to_type(&context.rewrite, table, name, &old_ty, ty, using)?;
+        let rows = super::converted_column_rows(&context.rewrite, table, name, &old_ty, ty, using)?;
+        let mut changed =
+            super::generated::stored_generated_columns(context.generated.keys.constraints, table)?;
+        changed.push(name.to_string());
+        super::generated::rewrite_table_rows(&context.generated, table, rows, true, &changed)?;
     }
     match ty {
         ColumnType::Text if target_generated_kind != Some(GeneratedColumnKind::Virtual) => {
@@ -218,10 +245,6 @@ pub fn alter_type<S: Clone + 'static>(
             kind == GeneratedColumnKind::Stored,
         )?;
     }
-    super::generated::validate_all_table_rows(
-        context.generated.state,
-        context.generated.keys.constraints,
-    )?;
     context
         .fields
         .persist_schema(table)

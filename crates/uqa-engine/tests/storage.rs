@@ -12,6 +12,10 @@ mod catalog_atomicity;
 mod concurrency;
 #[path = "direct_rmw_concurrency.rs"]
 mod direct_rmw_concurrency;
+#[path = "storage/hnsw_spill.rs"]
+mod hnsw_spill;
+#[path = "large_transactions.rs"]
+mod large_transactions;
 #[path = "python_db_migration.rs"]
 mod python_db_migration;
 #[path = "redb_backend.rs"]
@@ -22,6 +26,10 @@ mod sessions;
 mod sql_callback_transactions;
 #[path = "sql_cancellation.rs"]
 mod sql_cancellation;
+#[path = "sql_session_timeouts.rs"]
+mod sql_session_timeouts;
+#[path = "sql_statement_timeouts.rs"]
+mod sql_statement_timeouts;
 #[path = "sqlite_backend_parity.rs"]
 mod sqlite_backend_parity;
 #[path = "sqlite_compression.rs"]

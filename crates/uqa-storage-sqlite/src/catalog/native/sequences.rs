@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Sequence definitions and relation claims share the native catalog session.
+//! Sequence definitions and relation claims share the native catalog session. The value state of each definition generation is a record of its own, which value operations move outside the transactions that change the definition.
 
 mod records;
 mod values;
@@ -17,6 +17,7 @@ use crate::catalog::{
     RelationIdentity, RelationKind, SequenceRow,
 };
 use rusqlite::types::ValueRef;
+use uqa_storage::catalog::SequenceValuePosition;
 use uqa_storage::KeyValueBatch;
 
 fn owner_id(owner: NativeRecordOwner) -> ([u8; 16], [u8; 16]) {
@@ -45,6 +46,30 @@ impl Catalog {
                 Ok(!snapshot
                     .view
                     .private_keys(&prefix, None, 1, &snapshot.control)?
+                    .is_empty())
+            })?
+            .unwrap_or(false))
+    }
+
+    /// Whether the value record of this definition generation has transaction-private changes, which holds when the current transaction created the generation.
+    pub(in crate::catalog) fn native_sequence_value_has_private_changes(
+        &self,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+    ) -> Result<bool> {
+        Ok(self
+            .read_native(|snapshot| {
+                let key = crate::mvcc::native::NativeRecordIdentity::new(
+                    Family::SequenceValues,
+                    NativeRecordOwner::Object {
+                        identity: object_id,
+                        generation: definition_generation,
+                    },
+                )?
+                .encode_key(&[], &snapshot.control)?;
+                Ok(!snapshot
+                    .view
+                    .private_keys(&key, None, 1, &snapshot.control)?
                     .is_empty())
             })?
             .unwrap_or(false))
@@ -80,10 +105,43 @@ impl Catalog {
             if !replace {
                 snapshot.claim_relation(batch, &sequence.relation, RelationKind::Sequence)?;
             }
-            if let Some(old) = previous.filter(|old| *old != owner) {
-                snapshot.delete_prefix(batch, Family::Sequences, old, &[])?;
+            let mut sequence = std::borrow::Cow::Borrowed(sequence);
+            match previous {
+                // The allocation generation is unchanged, so the stored value state is.
+                Some(old) if old == owner => {
+                    let stored = snapshot.read_row(Family::Sequences, old, &[], |row| {
+                        Ok((
+                            values::integer(row[5]),
+                            values::integer(row[6]) != 0,
+                            values::integer(row[20]),
+                        ))
+                    })?;
+                    if let Some((current, called, log_count)) = stored {
+                        let kept = sequence.to_mut();
+                        kept.current = current;
+                        kept.called = called;
+                        kept.log_count = log_count;
+                    }
+                }
+                Some(old) => {
+                    snapshot.delete_prefix(batch, Family::Sequences, old, &[])?;
+                    snapshot.delete_prefix(batch, Family::SequenceValues, old, &[])?;
+                }
+                None => {}
             }
-            snapshot.put_sequence(batch, sequence, owner)?;
+            snapshot.put_sequence(batch, &sequence, owner)?;
+            // A new generation starts a value record of its own; the record of a kept generation moves only with value operations.
+            if previous != Some(owner) {
+                snapshot.put_sequence_value(
+                    batch,
+                    owner,
+                    SequenceValuePosition {
+                        current: sequence.current,
+                        called: sequence.called,
+                        log_count: sequence.log_count,
+                    },
+                )?;
+            }
             Ok(true)
         })
     }
@@ -127,6 +185,7 @@ impl Catalog {
                 return Ok(false);
             };
             snapshot.delete_prefix(batch, Family::Sequences, owner, &[])?;
+            snapshot.delete_prefix(batch, Family::SequenceValues, owner, &[])?;
             snapshot.release_relation(batch, relation, RelationKind::Sequence)?;
             Ok(true)
         })
@@ -139,6 +198,22 @@ impl Catalog {
                 sequences.push(decode_native_sequence_row(row)?);
                 Ok(())
             })?;
+            for sequence in &mut sequences {
+                let position = snapshot
+                    .sequence_value(NativeRecordOwner::Object {
+                        identity: sequence.object_id,
+                        generation: sequence.definition_generation,
+                    })?
+                    .ok_or_else(|| {
+                        SQLiteError::StorageBackend(format!(
+                            "sequence `{}` has no value record",
+                            sequence.relation.qualified_name()
+                        ))
+                    })?;
+                sequence.current = position.current;
+                sequence.called = position.called;
+                sequence.log_count = position.log_count;
+            }
             sequences.sort_unstable_by(|left, right| left.relation.cmp(&right.relation));
             Ok(sequences)
         })
@@ -146,6 +221,46 @@ impl Catalog {
 }
 
 impl NativeSnapshot {
+    /// The value state in the value record of a definition generation.
+    pub(super) fn sequence_value(
+        &self,
+        owner: NativeRecordOwner,
+    ) -> Result<Option<SequenceValuePosition>> {
+        self.read_row(Family::SequenceValues, owner, &[], |row| {
+            Ok(SequenceValuePosition {
+                current: values::integer(row[2]),
+                called: values::integer(row[3]) != 0,
+                log_count: values::integer(row[4]),
+            })
+        })
+    }
+
+    pub(super) fn put_sequence_value(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        owner: NativeRecordOwner,
+        position: SequenceValuePosition,
+    ) -> Result<()> {
+        if position.log_count < 0 {
+            return Err(SQLiteError::StorageBackend(
+                "sequence log count cannot be negative".into(),
+            ));
+        }
+        let (identity, generation) = owner_id(owner);
+        self.put_row(
+            batch,
+            Family::SequenceValues,
+            owner,
+            &[
+                ValueRef::Blob(&identity),
+                ValueRef::Blob(&generation),
+                ValueRef::Integer(position.current),
+                ValueRef::Integer(i64::from(position.called)),
+                ValueRef::Integer(position.log_count),
+            ],
+        )
+    }
+
     fn put_sequence(
         &self,
         batch: &mut dyn KeyValueBatch,

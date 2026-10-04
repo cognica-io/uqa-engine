@@ -19,6 +19,7 @@ impl Engine {
         committed: TransactionFrame,
         change_publication: Option<RowChangePublication<'_>>,
         notification_commit: Option<NotificationCommitGuard<'_>>,
+        wrote_records: bool,
     ) -> Result<(), SQLError> {
         if committed.storage_savepoint.is_none() {
             self.session.state.write().graph_overlay = None;
@@ -29,8 +30,18 @@ impl Engine {
             );
             drop(change_publication);
             self.row_locks.release_session(self.session_id);
+            let data_only = wrote_records
+                && self.epochs.table_data.dirty.load(Ordering::Acquire)
+                && !self.epochs.table_catalog.dirty.load(Ordering::Acquire)
+                && !self.epochs.catalog_registry.dirty.load(Ordering::Acquire);
             self.publish_committed_transaction_epochs();
-            if !committed.statistics_changes.is_empty() {
+            if data_only {
+                self.adopt_own_commit_revisions();
+            }
+            let recorded = committed.statistics_settlement.recorded();
+            self.settle_statistics_changes(committed.statistics_settlement.clone());
+            // A commit that wrote no maintenance record changed nothing the worker decides by.
+            if recorded {
                 self.wake_automatic_statistics();
             }
             let notification_result = notification_commit.map_or(Ok(()), |notification_commit| {
@@ -43,6 +54,7 @@ impl Engine {
             publication_result?;
             notification_result?;
         }
+        let nested_savepoint = committed.storage_savepoint;
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
             parent.constraint_modes = committed.constraint_modes;
@@ -57,6 +69,12 @@ impl Engine {
             parent.merge_pending_listen_actions(committed.pending_listen_actions);
             parent.merge_pending_notifications(committed.pending_notifications);
             parent.first_snapshot_set |= committed.first_snapshot_set;
+        }
+        if let Some(savepoint) = nested_savepoint {
+            // The parent keeps the nested frame's changes.
+            super::fixed_identities::follow_identities(stack, |identities| {
+                identities.release(savepoint)
+            });
         }
         Ok(())
     }

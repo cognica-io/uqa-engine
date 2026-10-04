@@ -170,7 +170,7 @@ fn sequence_storage_resource_failures_preserve_the_sql_error_category() {
     assert_eq!(error.sqlstate(), Some("53200"));
     let error = sequence_storage_error(
         "reserve sequence values",
-        StorageBackendError::Cancelled(uqa_core::QueryCancelled),
+        StorageBackendError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST),
     )
     .into_sql_error();
     assert_eq!(error.sqlstate(), Some("57014"));

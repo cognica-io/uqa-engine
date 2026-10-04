@@ -23,10 +23,7 @@ pub fn run_drop_index(
         context.constraints.lock_session,
         &stmt,
         &mut |message| {
-            context
-                .notices
-                .lock()
-                .push(uqa_sql::SQLNotice::notice(message));
+            context.notices.push(uqa_sql::SQLNotice::notice(message));
         },
     )?;
     for index in &indexes {

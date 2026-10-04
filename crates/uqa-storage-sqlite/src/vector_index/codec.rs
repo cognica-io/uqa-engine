@@ -60,23 +60,41 @@ pub(super) fn validate_vector_ordinal_count(count: u64) -> SQLiteResult<()> {
 pub(super) fn validate_persisted_ordinal_sequence(
     rows: &[(DocId, u32, Vec<f32>)],
 ) -> SQLiteResult<()> {
-    let mut current_doc = None;
-    let mut expected = 0_u64;
-    for (doc_id, ordinal, _) in rows {
-        if current_doc != Some(*doc_id) {
-            current_doc = Some(*doc_id);
-            expected = 0;
-        }
-        if u64::from(*ordinal) != expected {
-            return Err(SQLiteError::StorageBackend(format!(
-                "invalid persisted vector ordinal sequence for document {doc_id}: expected {expected}, found {ordinal}"
-            )));
-        }
-        expected = expected.checked_add(1).ok_or_else(|| {
-            SQLiteError::StorageBackend("persisted vector ordinal sequence overflow".into())
-        })?;
+    validate_persisted_ordinals(rows.iter().map(|(id, ordinal, _)| (*id, *ordinal)))
+}
+
+pub(super) fn validate_persisted_ordinals(
+    rows: impl IntoIterator<Item = (DocId, u32)>,
+) -> SQLiteResult<()> {
+    let mut sequence = PersistedOrdinalSequence::default();
+    for (doc_id, ordinal) in rows {
+        sequence.push(doc_id, ordinal)?;
     }
     Ok(())
+}
+
+#[derive(Default)]
+pub(super) struct PersistedOrdinalSequence {
+    current_doc: Option<DocId>,
+    expected: u64,
+}
+
+impl PersistedOrdinalSequence {
+    pub(super) fn push(&mut self, doc_id: DocId, ordinal: u32) -> SQLiteResult<()> {
+        if self.current_doc != Some(doc_id) {
+            self.current_doc = Some(doc_id);
+            self.expected = 0;
+        }
+        if u64::from(ordinal) != self.expected {
+            return Err(SQLiteError::StorageBackend(format!(
+                "invalid persisted vector ordinal sequence for document {doc_id}: expected {}, found {ordinal}", self.expected
+            )));
+        }
+        self.expected = self.expected.checked_add(1).ok_or_else(|| {
+            SQLiteError::StorageBackend("persisted vector ordinal sequence overflow".into())
+        })?;
+        Ok(())
+    }
 }
 
 pub(super) fn blob_to_vector(blob: &[u8]) -> SQLiteResult<Vec<f32>> {

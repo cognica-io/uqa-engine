@@ -121,6 +121,16 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteStorageBackend {
             .allocate_native_identifiers(namespace, request)
             .map_err(Into::into)
     }
+
+    fn observe_identifier(
+        &self,
+        namespace: &[u8],
+        value: u64,
+    ) -> StorageBackendResult<uqa_storage::mvcc::ObservedIdentifier> {
+        self.conn
+            .observe_native_identifier(namespace, value)
+            .map_err(Into::into)
+    }
 }
 
 impl PersistentStorageBackend for SQLiteStorageBackend {
@@ -463,6 +473,18 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(())
     }
 
+    fn apply_unused_btree_index_write(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        values: &BTreeMap<uqa_storage::ValueIndexKey, Value>,
+        namespace: uqa_storage::document_store::identifiers::DocumentIdNamespace,
+    ) -> StorageBackendResult<()> {
+        SQLiteBTreeIndexStore::new(self.conn.clone())
+            .apply_unused_write(table, doc_id, values, namespace)?;
+        Ok(())
+    }
+
     fn drop_btree_index(
         &self,
         table: &str,
@@ -523,6 +545,16 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
 
     fn change_version(&self) -> StorageBackendResult<Option<u64>> {
         Ok(self.conn.data_version()?)
+    }
+
+    fn read_view_revision(
+        &self,
+    ) -> StorageBackendResult<Option<uqa_storage::key_value::KeyValueReadRevision>> {
+        Ok(self.conn.read_view_revision()?)
+    }
+
+    fn commit_monitor_version(&self) -> StorageBackendResult<Option<u64>> {
+        Ok(self.conn.commit_monitor_version()?)
     }
 
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {

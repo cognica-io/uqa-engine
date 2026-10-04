@@ -38,6 +38,7 @@ impl Engine {
         }
         let epochs = self.epochs.published_epochs();
         let cache_revisions = self.epochs.storage_cache_revisions.lock().clone();
+        let read_view = self.epochs.seen_storage_read_view.lock().clone();
         let session = Self::empty_persistent_session(
             PersistentStorageSession::new(
                 Arc::clone(&storage.catalog),
@@ -73,6 +74,13 @@ impl Engine {
                 .store(version, Ordering::Release);
         }
         *session.epochs.storage_cache_revisions.lock() = cache_revisions;
+        if let Some(current) = storage.backend.read_view_revision()? {
+            if read_view.as_ref() == Some(&current)
+                && source_backend.read_view_revision()?.as_ref() == Some(&current)
+            {
+                *session.epochs.seen_storage_read_view.lock() = Some(current);
+            }
+        }
         Ok(Some(session))
     }
 
@@ -107,12 +115,14 @@ impl Engine {
             columns: CatalogCell::from_snapshot(source.columns.snapshot()),
             columns_declared: CatalogCell::from_snapshot(source.columns_declared.snapshot()),
             next_id: Mutex::new(*source.next_id.lock()),
+            maps_integer_keys: AtomicBool::new(source.maps_integer_keys.load(Ordering::Acquire)),
             analyzer: CatalogCell::from_snapshot(source.analyzer.snapshot()),
             column_stats: CatalogCell::from_snapshot(source.column_stats.snapshot()),
             column_stats_loaded: AtomicBool::new(
                 source.column_stats_loaded.load(Ordering::Acquire),
             ),
             column_stats_dirty: AtomicBool::new(source.column_stats_dirty.load(Ordering::Acquire)),
+            statistics_maintenance: Mutex::new(source.statistics_maintenance.lock().clone()),
             table_checks: CatalogCell::from_snapshot(source.table_checks.snapshot()),
             foreign_keys: CatalogCell::from_snapshot(source.foreign_keys.snapshot()),
             key_constraints: CatalogCell::from_snapshot(source.key_constraints.snapshot()),

@@ -20,6 +20,7 @@ pub(super) use binary::{
     append_batches, decode_batch, decode_physical_row_record, encode_physical_row_record,
     encoded_batch_overhead_size, encoded_batch_size, encoded_physical_row_record_size,
 };
+pub(crate) use binary::{decode_document, encode_document, encoded_document_size};
 
 pub(super) const RECORD_PREFIX_BYTES: usize = std::mem::size_of::<u64>();
 

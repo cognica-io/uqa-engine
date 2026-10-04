@@ -36,7 +36,7 @@ pub fn analyze_index_field_budgeted(
             StorageBackendError::Memory(memory)
         }
         StorageBackendError::Analysis(AnalysisError::Cancelled) => {
-            StorageBackendError::Cancelled(uqa_core::QueryCancelled)
+            StorageBackendError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST)
         }
         other => other,
     })

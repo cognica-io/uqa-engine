@@ -4,7 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Durable row-change journal publication, lookup, and codec.
+//! Row-change journal publication, lookup, and codec.
+//!
+//! The journal coordinates the statements of running processes. A statement reads only the entries after the journal length it observed as its baseline, and a baseline lives in the memory of the process that took it, so no reader of an entry outlives a machine failure. Entries therefore reach other processes through the file cache without a sync of their own, and entries that a machine failure loses were readable by no statement that still exists. Such a failure may also leave the file ending inside an entry; the sequence counts whole entries only, and the next publication writes over the partial one.
 
 use super::{
     lock_strengths_conflict, lock_would_block, read_exact_at, write_all_at, FileLockCoordinator,
@@ -59,16 +61,13 @@ impl FileLockCoordinator {
                     "row-change journal sequence overflow during publication".to_string()
                 })?;
             }
-            self.change_file
-                .sync_data()
-                .map_err(|error| format!("sync row-change journal failed: {error}"))
+            Ok(())
         })();
         let publication = match (publication, original_len) {
             (Err(error), Some(original_len)) => {
                 let rollback = self
                         .change_file
                         .set_len(original_len)
-                        .and_then(|()| self.change_file.sync_data())
                         .map_err(|rollback_error| {
                             format!(
                                 "{error}; restore row-change journal to {original_len} bytes failed: {rollback_error}"
@@ -94,11 +93,6 @@ impl FileLockCoordinator {
             .metadata()
             .map_err(|error| format!("read row-change journal length failed: {error}"))?
             .len();
-        if bytes % CHANGE_ENTRY_SIZE != 0 {
-            return Err(format!(
-                "row-change journal length {bytes} is not a multiple of {CHANGE_ENTRY_SIZE}"
-            ));
-        }
         Ok(bytes / CHANGE_ENTRY_SIZE)
     }
 
@@ -300,3 +294,6 @@ const fn decode_strength(code: u8) -> Option<LockStrength> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests;

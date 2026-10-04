@@ -367,6 +367,21 @@ impl Engine {
         )
     }
 
+    /// Allocate an identity at or above `KEY_IDENTITY_LIMIT` for a row whose integer primary key names none. The table's floor rises to the limit first, so every later identity it generates lies there as well, where no key names one.
+    pub(crate) fn allocate_unmapped_id(&self, table: &str) -> Result<u64, SQLError> {
+        {
+            let state = self
+                .try_table(table)
+                .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+                .ok_or_else(|| SQLError::Internal(format!("unknown table `{table}`")))?;
+            let mut next = state.next_id.lock();
+            *next = (*next).max(u128::from(
+                uqa_sql::semantics::key_identity::KEY_IDENTITY_LIMIT,
+            ));
+        }
+        self.allocate_next_id(table)
+    }
+
     fn document_identity_is_occupied(
         &self,
         table: &str,
@@ -420,15 +435,13 @@ impl Engine {
         )
     }
 
-    /// Move the watermark past `doc_id` if needed (called after a manual
-    /// id assignment so the next allocation does not collide).
+    /// Move the local watermark past `doc_id` after a supplied identity, so the next allocation of this session does not collide. The document write that publishes the row makes the identity durable.
     pub(crate) fn advance_next_id(&self, table: &str, doc_id: DocId) -> StorageBackendResult<()> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
         let mut next = t.next_id.lock();
-        self.table_identifier_allocator(&t)?
-            .observe(&mut next, doc_id)
+        DocumentIdAllocator::observe(&mut next, doc_id)
     }
 
     pub(crate) fn persist_next_id(&self, table: &str) -> StorageBackendResult<()> {

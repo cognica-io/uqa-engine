@@ -28,10 +28,14 @@ mod concurrent_inserts;
 mod concurrent_writes;
 #[path = "sessions/identifiers.rs"]
 mod identifiers;
+#[path = "sessions/latest_reads.rs"]
+mod latest_reads;
 #[path = "sessions/native_publication.rs"]
 mod native_publication;
 #[path = "sessions/native_records.rs"]
 mod native_records;
+#[path = "sessions/sequence_positions.rs"]
+mod sequence_positions;
 #[path = "sessions/serializable_observations.rs"]
 mod serializable_observations;
 
@@ -90,7 +94,7 @@ fn one_engine_serializes_overlapping_sql_statements() {
     let first_engine = engine.clone();
     let first = thread::spawn(move || first_engine.sql("SELECT block_same_session() AS n", &[]));
     entered_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("first statement did not enter the blocking scalar");
 
     let second_engine = engine.clone();
@@ -103,7 +107,7 @@ fn one_engine_serializes_overlapping_sql_statements() {
     release_tx.send(()).unwrap();
     assert_eq!(first.join().unwrap().unwrap().rows[0]["n"], Value::Int(1));
     entered_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("second statement did not enter after the first released the gate");
     release_tx.send(()).unwrap();
     assert_eq!(second.join().unwrap().unwrap().rows[0]["n"], Value::Int(1));
@@ -122,10 +126,10 @@ fn independent_sessions_run_read_statements_concurrently() {
     let second = thread::spawn(move || second.sql("SELECT block_independent_session() AS n", &[]));
 
     entered_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("first session did not enter its read statement");
     entered_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("second session was serialized behind the first read statement");
     release_tx.send(()).unwrap();
     release_tx.send(()).unwrap();
@@ -152,7 +156,7 @@ fn persistent_sessions_isolate_all_session_state() {
     beta.sql("SET work_mem TO '8MB'", &[]).unwrap();
     assert_eq!(alpha.search_path(), vec!["alpha", "public"]);
     assert_eq!(beta.search_path(), vec!["beta", "public"]);
-    assert_eq!(root.search_path(), vec!["public"]);
+    assert_eq!(root.search_path(), vec!["$user", "public"]);
     assert_eq!(alpha.show_variable("work_mem").unwrap(), "64MB");
     assert_eq!(beta.show_variable("work_mem").unwrap(), "8MB");
     assert_eq!(root.show_variable("work_mem").unwrap(), "64MB");
@@ -481,7 +485,7 @@ fn one_session_transaction_is_atomic_across_catalog_documents_text_and_vectors()
                 .send((scoring, document, text_hits, vector_hits))
                 .unwrap();
         });
-        let read_result = observed_rx.recv_timeout(Duration::from_secs(2));
+        let read_result = observed_rx.recv_timeout(crate::waits::COMPLETION);
         // Always release the writer before the scope joins, even when the
         // read timed out, so a serialization regression cannot hang the test.
         writer.rollback().unwrap();

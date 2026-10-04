@@ -20,6 +20,7 @@ use uqa_storage::{
 use super::layout::RowLayout;
 use crate::query::document_changes::DocumentChanges;
 
+mod borrowed;
 mod identifiers;
 mod owned;
 pub(super) mod projection;
@@ -45,7 +46,7 @@ impl RetainedDocuments {
         memory: &mut MemoryReservation,
     ) -> StorageBackendResult<Option<Value>> {
         self.checked_read(|| {
-            if self.0.changes.contains_change(id) {
+            if self.0.changes.contains_change(id)? {
                 self.0
                     .private_layout
                     .base_field(&self.0.changes, id, field, memory)
@@ -75,10 +76,50 @@ impl RetainedDocuments {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
+        let (count, all_rows_changed) = match changes.identity_counts() {
+            // The rows a transaction changed carry their counts relative to the snapshot it reads, so the rows need not be visited.
+            Some(counts) => {
+                let stored = u64::try_from(source.len()?).map_err(|_| {
+                    StorageBackendError::Other("query document count overflow".into())
+                })?;
+                let visible = counts.visible_rows(stored).ok_or_else(|| {
+                    StorageBackendError::Other("query base document count underflow".into())
+                })?;
+                (
+                    usize::try_from(visible).map_err(|_| {
+                        StorageBackendError::Other("query document count overflow".into())
+                    })?,
+                    counts.before == stored,
+                )
+            }
+            None => Self::count_changes(source.as_ref(), &changes, control)?,
+        };
+        control.check()?;
+        let state = State {
+            source,
+            layout,
+            private_layout,
+            changes,
+            count,
+            all_rows_changed,
+            control: control.clone(),
+        };
+        Ok(Self(
+            Budgeted::new(state, control.memory().empty_reservation()).into_shared()?,
+        ))
+    }
+
+    /// The rows `source` and `changes` hold together, and whether `changes` changes every row of `source`.
+    fn count_changes(
+        source: &dyn DocumentStore,
+        changes: &DocumentChanges,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<(usize, bool)> {
         let mut count = source.len()?;
         let mut unselected = count;
-        for (id, replacement) in changes.changes() {
+        for change in changes.changes() {
             control.check()?;
+            let (id, replacement) = change?;
             let present = source.contains_doc_id(id)?;
             if present {
                 unselected = unselected.checked_sub(1).ok_or_else(|| {
@@ -92,19 +133,7 @@ impl RetainedDocuments {
             }
             .ok_or_else(|| StorageBackendError::Other("query document count overflow".into()))?;
         }
-        control.check()?;
-        let state = State {
-            source,
-            layout,
-            private_layout,
-            changes,
-            count,
-            all_rows_changed: unselected == 0,
-            control: control.clone(),
-        };
-        Ok(Self(
-            Budgeted::new(state, control.memory().empty_reservation()).into_shared()?,
-        ))
+        Ok((count, unselected == 0))
     }
 
     pub(super) fn vector_sources<'a>(
@@ -221,7 +250,7 @@ impl DocumentStore for RetainedDocuments {
 
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
         self.checked_read(|| {
-            if self.0.changes.contains_change(id) {
+            if self.0.changes.contains_change(id)? {
                 self.0.changes.get_metadata(id)
             } else {
                 self.0.source.get_metadata(id)
@@ -244,7 +273,7 @@ impl DocumentStore for RetainedDocuments {
         for id in ids {
             self.0.control.check()?;
             control.check()?;
-            let private = self.0.changes.contains_change(*id);
+            let private = self.0.changes.contains_change(*id)?;
             let (source, layout): (&dyn DocumentStore, &RowLayout) = if private {
                 (&self.0.changes, &self.0.private_layout)
             } else {
@@ -291,7 +320,7 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
-        self.checked_read(|| match self.0.changes.change_presence(id) {
+        self.checked_read(|| match self.0.changes.change_presence(id)? {
             Some(present) => Ok(present),
             None => self.0.source.contains_doc_id(id),
         })
@@ -349,6 +378,15 @@ impl DocumentStore for RetainedDocuments {
         self.visit_projection(ids, fields, visitor)
     }
 
+    fn for_each_fields_multi_borrowed(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        self.visit_borrowed_points(ids, fields, visitor)
+    }
+
     fn for_each_fields_multi_ref(
         &self,
         ids: &[DocId],
@@ -380,7 +418,7 @@ impl DocumentStore for RetainedDocuments {
         };
         for id in ids {
             self.0.control.check()?;
-            if self.0.changes.contains_change(*id) {
+            if self.0.changes.contains_change(*id)? {
                 return Ok(None);
             }
         }
@@ -438,6 +476,16 @@ impl DocumentStore for RetainedDocuments {
             visitor(id, values)
         })?;
         Ok(Some(visited))
+    }
+
+    fn for_each_next_fields_borrowed(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        self.visit_borrowed_projection(after, limit, fields, visitor)
     }
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {

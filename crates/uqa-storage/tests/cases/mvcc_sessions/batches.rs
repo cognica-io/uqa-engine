@@ -94,3 +94,57 @@ fn abort_acknowledgement_failure_preserves_the_confirmed_abort_for_retry() {
     );
     assert_eq!(store.get(b"aborted").unwrap(), None);
 }
+
+#[test]
+fn a_write_to_an_unused_key_expects_no_record_without_reading_one() {
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    let conflict = |result: uqa_storage::StorageBackendResult<()>| {
+        let StorageBackendError::Backend { source, .. } = result.unwrap_err() else {
+            panic!("typed MVCC conflict required")
+        };
+        assert!(matches!(
+            source.downcast_ref::<VersionError>(),
+            Some(VersionError::WriteConflict { .. })
+        ));
+    };
+    // A key that never had a record takes the write.
+    store
+        .with_mutation(&mut |_, batch| batch.put_unused(b"new", b"first"))
+        .unwrap();
+    assert_eq!(store.get(b"new").unwrap().unwrap(), b"first");
+
+    // A key with a record refuses it at commit and keeps its record.
+    store.put(b"taken", b"kept").unwrap();
+    store.begin_transaction().unwrap();
+    store
+        .with_mutation(&mut |_, batch| batch.put_unused(b"taken", b"replaced"))
+        .unwrap();
+    conflict(store.commit_transaction());
+    store.rollback_transaction().unwrap();
+    assert_eq!(store.get(b"taken").unwrap().unwrap(), b"kept");
+
+    // So does a key whose record was deleted: its tombstone still has a revision, which is why a key that is merely absent does not qualify.
+    store.delete(b"taken").unwrap();
+    store.begin_transaction().unwrap();
+    store
+        .with_mutation(&mut |_, batch| batch.put_unused(b"taken", b"again"))
+        .unwrap();
+    conflict(store.commit_transaction());
+    store.rollback_transaction().unwrap();
+    assert!(store.get(b"taken").unwrap().is_none());
+
+    // A key the transaction itself changed takes its condition from that change.
+    store.begin_transaction().unwrap();
+    store.put(b"own", b"first").unwrap();
+    store
+        .with_mutation(&mut |_, batch| batch.put_unused(b"own", b"second"))
+        .unwrap();
+    store.delete(b"new").unwrap();
+    store
+        .with_mutation(&mut |_, batch| batch.put_unused(b"new", b"restored"))
+        .unwrap();
+    store.commit_transaction().unwrap();
+    assert_eq!(store.get(b"own").unwrap().unwrap(), b"second");
+    assert_eq!(store.get(b"new").unwrap().unwrap(), b"restored");
+}

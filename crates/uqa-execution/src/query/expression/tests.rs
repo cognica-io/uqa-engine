@@ -13,6 +13,8 @@ use uqa_sql::expr::EngineHook;
 use uqa_sql::plan::{AggregateClassifier, QueryPlan};
 use uqa_sql::ResultRow;
 
+mod aggregate_types;
+
 #[derive(Default)]
 struct Context {
     events: Mutex<Vec<&'static str>>,

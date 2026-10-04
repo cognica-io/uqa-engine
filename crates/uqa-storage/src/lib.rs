@@ -40,6 +40,7 @@ pub mod read_control;
 mod read_only_snapshot;
 pub use read_only_snapshot::ReadOnlySnapshot;
 pub mod spatial_index;
+mod spill_map;
 pub mod statistics_maintenance;
 pub mod temporary_file;
 pub mod term_key;
@@ -54,13 +55,14 @@ pub use backend::{
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
 pub use catalog::{
-    sequence_value_reservation, CatalogCacheRevisions, CatalogFacade, CatalogIndexRow,
-    ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow, GraphEntityFilter, GraphEntityKind,
-    GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, RelationSecurityRow,
-    SchemaAclEntry, SchemaPrivileges, SchemaRow, SequenceAclEntry, SequenceOptions, SequenceOwner,
-    SequenceOwnerDependency, SequencePrivileges, SequenceReservationResult, SequenceRow,
-    SequenceSecurityRow, SequenceSetValueResult, SequenceValuePosition, SequenceValueReservation,
-    TableAclEntry, TablePrivileges, TableSchema, VectorFieldSchema, ViewRow, MAX_GRAPH_ID_PAGE,
+    sequence_value_allocation, sequence_value_reservation, CatalogCacheRevisions, CatalogFacade,
+    CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow, GraphEntityFilter,
+    GraphEntityKind, GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind,
+    RelationSecurityRow, SchemaAclEntry, SchemaPrivileges, SchemaRow, SequenceAclEntry,
+    SequenceLogResult, SequenceOptions, SequenceOwner, SequenceOwnerDependency, SequencePrivileges,
+    SequenceReservationResult, SequenceRow, SequenceSecurityRow, SequenceSetValueResult,
+    SequenceValueAllocation, SequenceValuePosition, SequenceValueReservation, TableAclEntry,
+    TablePrivileges, TableSchema, VectorFieldSchema, ViewRow, MAX_GRAPH_ID_PAGE,
 };
 pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,

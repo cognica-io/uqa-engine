@@ -8,6 +8,7 @@
 mod allocation;
 pub mod context;
 mod persistence;
+mod positions;
 mod resolution;
 use super::{
     session::{NontransactionalSequenceValue, SessionSequenceValue},
@@ -51,21 +52,20 @@ impl SequenceValueContext<'_> {
                 );
                 return Ok(current);
             }
-            let Some((reservation, autonomous)) = self.reserve_nextval_block(&target)? else {
+            let Some(block) = self.reserve_nextval_block(&target)? else {
                 drop(caches);
                 continue;
             };
-            let physical =
-                self.install_nextval_reservation(&target, reservation, autonomous, &mut caches)?;
+            let physical = self.install_nextval_reservation(&target, block, &mut caches)?;
             drop(caches);
             self.complete_nextval(
                 &target.relation,
                 target.object_id,
-                reservation.first_value,
+                block.reservation.first_value,
                 physical,
-                autonomous,
+                block.autonomous,
             );
-            return Ok(reservation.first_value);
+            return Ok(block.reservation.first_value);
         }
     }
     pub fn currval(&self, name: &str) -> Result<i64, SequenceValueError> {
@@ -141,7 +141,7 @@ impl SequenceValueContext<'_> {
             let (min, max) = (target.state.min_value, target.state.max_value);
             if !(min..=max).contains(&value) {
                 return Err(SequenceValueError::SetvalOutOfBounds {
-                    name: target.name,
+                    name: target.relation.name,
                     value,
                     min,
                     max,
@@ -158,6 +158,13 @@ impl SequenceValueContext<'_> {
         value: i64,
         is_called: bool,
     ) -> Result<Option<i64>, SequenceValueError> {
+        let private = self.sequence_value_is_private(
+            target.temporary,
+            target.object_id,
+            target.state.definition_generation,
+        )?;
+        // The assigned value replaces the position, which no session may advance meanwhile.
+        let mut position = self.discard_position(&target)?;
         let NextvalTarget {
             name,
             relation,
@@ -167,8 +174,7 @@ impl SequenceValueContext<'_> {
         } = target;
         let persisted = self.mutate_persistent_value(
             temporary,
-            &relation,
-            object_id,
+            private,
             "persist sequence value",
             |catalog| {
                 catalog.set_sequence_value(
@@ -182,13 +188,19 @@ impl SequenceValueContext<'_> {
             },
         )?;
         let autonomous = match persisted {
-            Some((uqa_storage::SequenceSetValueResult::Set(_), autonomous)) => Some(autonomous),
+            Some((uqa_storage::SequenceSetValueResult::Set(_), autonomous)) => {
+                if let Some(position) = position.as_mut() {
+                    position.discard()?;
+                }
+                Some(autonomous)
+            }
             Some((uqa_storage::SequenceSetValueResult::DefinitionChanged, _)) => return Ok(None),
             Some((uqa_storage::SequenceSetValueResult::Missing, _)) => {
                 return Err(SequenceValueError::Undefined(name))
             }
             None => None,
         };
+        drop(position);
         let mut seqs = self.runtime.states_write();
         match seqs.get_mut(&relation) {
             Some(seq) if seq.definition_generation == previous.definition_generation => {

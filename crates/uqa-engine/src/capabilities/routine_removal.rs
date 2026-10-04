@@ -21,7 +21,7 @@ impl RoutineNameCatalog for Engine {
         Engine::current_role(self)
     }
     fn search_path(&self) -> Vec<String> {
-        self.session.state.read().search_path.clone()
+        crate::session::effective_search_path(&self.session.state.read())
     }
     fn require_schema_usage(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError> {
         self.require_schema_privilege(schema, role, SchemaAclPrivilege::Usage)

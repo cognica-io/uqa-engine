@@ -94,7 +94,7 @@ fn validated_addresses<'a>(
                 || !definition.unique
                 || definition.nulls_not_distinct != expected.nulls_not_distinct
                 || definition.predicate.is_some()
-                || !definition.included_columns.is_empty()
+                || definition.included_columns != key.included_columns
                 || row.index_type
                     != if key.without_overlaps {
                         "gist"

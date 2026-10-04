@@ -79,6 +79,7 @@ impl ExpressionReferences<'_> {
             source: None,
             merge: None,
             expression: Some(&mut expression_nodes),
+            projection: None,
             ty: Some(&mut type_names),
             relation: &mut relation,
             routine: &mut routine,

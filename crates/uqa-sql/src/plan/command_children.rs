@@ -6,7 +6,10 @@
 
 //! Direct relational children of data-modifying commands.
 
-use super::{CommandPlan, CtePlan, ProjectionPlan, QueryPlan, SourcePlan};
+use super::{
+    CommandPlan, CtePlan, DeletePlan, InsertPlan, MergePlan, ProjectionPlan, QueryPlan, SourcePlan,
+    UpdatePlan,
+};
 
 impl CommandPlan {
     /// WITH definitions owned by this command, in declaration order.
@@ -33,15 +36,10 @@ impl CommandPlan {
     /// Query children evaluated in the command's WITH scope, including every `scalar_subqueries` entry. Source-plan subqueries are owned by `source_input`; visitors should not traverse `scalar_subqueries` separately.
     pub fn query_inputs(&self) -> Vec<&QueryPlan> {
         match self {
-            Self::Insert(plan) => plan
-                .source
-                .iter()
-                .map(Box::as_ref)
-                .chain(plan.subqueries.iter())
-                .collect(),
-            Self::Update(plan) => plan.subqueries.iter().collect(),
-            Self::Delete(plan) => plan.subqueries.iter().collect(),
-            Self::Merge(plan) => plan.subqueries.iter().collect(),
+            Self::Insert(plan) => plan.query_inputs(),
+            Self::Update(plan) => plan.query_inputs(),
+            Self::Delete(plan) => plan.query_inputs(),
+            Self::Merge(plan) => plan.query_inputs(),
             _ => Vec::new(),
         }
     }
@@ -63,9 +61,9 @@ impl CommandPlan {
 
     pub fn source_input(&self) -> Option<&SourcePlan> {
         match self {
-            Self::Update(plan) => plan.source.as_deref(),
-            Self::Delete(plan) => plan.source.as_deref(),
-            Self::Merge(plan) => Some(&plan.source),
+            Self::Update(plan) => plan.source_input(),
+            Self::Delete(plan) => plan.source_input(),
+            Self::Merge(plan) => plan.source_input(),
             _ => None,
         }
     }
@@ -105,6 +103,16 @@ impl CommandPlan {
             Self::Update(plan) => Some(&plan.returning),
             Self::Delete(plan) => Some(&plan.returning),
             Self::Merge(plan) => Some(&plan.returning),
+            _ => None,
+        }
+    }
+
+    pub fn returning_mut(&mut self) -> Option<&mut [ProjectionPlan]> {
+        match self {
+            Self::Insert(plan) => Some(&mut plan.returning),
+            Self::Update(plan) => Some(&mut plan.returning),
+            Self::Delete(plan) => Some(&mut plan.returning),
+            Self::Merge(plan) => Some(&mut plan.returning),
             _ => None,
         }
     }
@@ -180,6 +188,7 @@ impl CommandPlan {
                             condition,
                             columns,
                             values,
+                            ..
                         } => {
                             expressions.extend(condition.as_ref());
                             expressions.extend(
@@ -299,6 +308,7 @@ impl CommandPlan {
                             condition,
                             columns,
                             values,
+                            ..
                         } => {
                             expressions.extend(condition.as_mut());
                             expressions.extend(
@@ -361,5 +371,52 @@ impl CommandPlan {
             Self::Merge(plan) => Some(&plan.returning_aliases),
             _ => None,
         }
+    }
+}
+
+impl InsertPlan {
+    /// Query children evaluated in the command's WITH scope: the source query and every `subqueries` entry.
+    pub fn query_inputs(&self) -> Vec<&QueryPlan> {
+        self.source
+            .iter()
+            .map(Box::as_ref)
+            .chain(self.subqueries.iter())
+            .collect()
+    }
+}
+
+impl UpdatePlan {
+    /// Query children evaluated in the command's WITH scope, which are its `subqueries` entries.
+    pub fn query_inputs(&self) -> Vec<&QueryPlan> {
+        self.subqueries.iter().collect()
+    }
+
+    /// The `FROM` relation the command joins to its target.
+    pub fn source_input(&self) -> Option<&SourcePlan> {
+        self.source.as_deref()
+    }
+}
+
+impl DeletePlan {
+    /// Query children evaluated in the command's WITH scope, which are its `subqueries` entries.
+    pub fn query_inputs(&self) -> Vec<&QueryPlan> {
+        self.subqueries.iter().collect()
+    }
+
+    /// The `USING` relation the command joins to its target.
+    pub fn source_input(&self) -> Option<&SourcePlan> {
+        self.source.as_deref()
+    }
+}
+
+impl MergePlan {
+    /// Query children evaluated in the command's WITH scope, which are its `subqueries` entries.
+    pub fn query_inputs(&self) -> Vec<&QueryPlan> {
+        self.subqueries.iter().collect()
+    }
+
+    /// The `USING` relation the command merges into its target.
+    pub fn source_input(&self) -> Option<&SourcePlan> {
+        Some(&self.source)
     }
 }

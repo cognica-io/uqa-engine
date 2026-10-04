@@ -26,10 +26,7 @@ pub fn run_drop(
         .transactions
         .with_relation_write(Box::new(move |context| {
             let names = binding::bind_drop_targets(context, &stmt, &mut |message| {
-                context
-                    .notices
-                    .lock()
-                    .push(uqa_sql::SQLNotice::notice(message));
+                context.notices.push(uqa_sql::SQLNotice::notice(message));
             })?;
             if names.is_empty() {
                 return Ok(SQLResult::empty());

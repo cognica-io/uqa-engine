@@ -77,6 +77,15 @@ fn build_analyze_stats(
     Ok(stats)
 }
 
+/// When the lazy statistics of a memory-only table are collected again after writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StatisticsRefresh {
+    /// An explicit statistics request reports the current rows.
+    Current,
+    /// Planning keeps its estimates until enough rows changed, as autovacuum decides for `PostgreSQL`, so a write is not followed by a full ANALYZE of its table.
+    Maintained,
+}
+
 impl Engine {
     /// Refresh per-column statistics for one table, or every table when
     /// `table` is `None`. The analysis scans each document and collects per-
@@ -140,6 +149,7 @@ impl Engine {
         Ok(())
     }
 
+    /// Record a change whose effect on the stored documents its caller does not know, such as a schema rewrite or a truncation.
     pub(crate) fn mark_column_stats_dirty(
         &self,
         canonical_table_name: &str,
@@ -154,11 +164,32 @@ impl Engine {
         table: &Arc<TableState>,
         count: u64,
     ) -> StorageBackendResult<()> {
+        self.record_table_change(canonical_table_name, table, count, None)
+    }
+
+    /// Record one row write, which changes the stored documents of its own table alone and by a known amount.
+    pub(crate) fn mark_row_write(
+        &self,
+        canonical_table_name: &str,
+        table: &Arc<TableState>,
+        documents: crate::table_storage::DocumentCountChange,
+    ) -> StorageBackendResult<()> {
+        self.record_table_change(canonical_table_name, table, 1, Some(documents))
+    }
+
+    fn record_table_change(
+        &self,
+        canonical_table_name: &str,
+        table: &Arc<TableState>,
+        count: u64,
+        documents: Option<crate::table_storage::DocumentCountChange>,
+    ) -> StorageBackendResult<()> {
         let ancestors = self
             .hierarchy_ancestor_tables(canonical_table_name)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         for name in ancestors {
-            let state = if name == canonical_table_name {
+            let written = name == canonical_table_name;
+            let state = if written {
                 Arc::clone(table)
             } else {
                 self.try_table(&name)?.ok_or_else(|| {
@@ -170,7 +201,12 @@ impl Engine {
             // Estimates remain useful while a replacement is pending. Track
             // changes transactionally instead of deleting durable statistics.
             self.record_statistics_change(&name, &state, count)?;
-            state.doc_count_dirty.store(true, Ordering::Release);
+            match documents {
+                Some(change) if written => state.apply_document_count_change(change),
+                // An ancestor stores its own documents, which a row write below it leaves alone.
+                Some(_) => {}
+                None => state.discard_document_count(),
+            }
             state.column_stats_dirty.store(true, Ordering::Release);
         }
         self.note_table_data_changed();
@@ -206,6 +242,8 @@ impl Engine {
                 "column `{column}` of relation `{canonical_table_name}` does not exist"
             )));
         }
+        // Read before the sample, which reads at this sequence or a later one.
+        let sampled_at = self.statistics_sample_sequence();
         let inputs = self.collect_hierarchy_analyze_inputs(
             canonical_table_name,
             &columns,
@@ -229,12 +267,19 @@ impl Engine {
                     &stats_out,
                     t.object_id(),
                     row_count,
+                    sampled_at,
                 )?;
             }
         }
         *t.column_stats.write() = stats_out;
         t.column_stats_loaded.store(true, Ordering::Release);
         t.column_stats_dirty.store(false, Ordering::Release);
+        t.statistics_maintenance.lock().analyzed(
+            t.object_id(),
+            row_count,
+            crate::statistics::value_size::FORMAT_VERSION,
+            None,
+        )?;
         self.clear_pending_statistics_changes(canonical_table_name, t.object_id());
         Ok(())
     }
@@ -306,12 +351,14 @@ impl Engine {
         })
     }
 
+    /// `sampled_at` is the commit sequence the statistics were sampled at, or `None` when it is not known.
     pub(crate) fn persist_column_stats(
         catalog: &dyn CatalogFacade,
         table_name: &str,
         stats: &BTreeMap<String, uqa_planner::ColumnStats>,
         object_id: [u8; 16],
         row_count: u64,
+        sampled_at: Option<u64>,
     ) -> StorageBackendResult<()> {
         struct EncodedColumnStats {
             column_name: String,
@@ -374,6 +421,7 @@ impl Engine {
             object_id,
             row_count,
             crate::statistics::value_size::FORMAT_VERSION,
+            sampled_at,
         )
     }
 
@@ -404,7 +452,7 @@ impl Engine {
     ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
         self.with_direct_query_snapshot(
             false,
-            |engine| engine.column_stats_in_execution(table),
+            |engine| engine.column_stats_in_execution(table, StatisticsRefresh::Current),
             |error| StorageBackendError::backend("column statistics query", error),
         )
     }
@@ -412,6 +460,7 @@ impl Engine {
     pub(crate) fn column_stats_in_execution(
         &self,
         table: &str,
+        refresh: StatisticsRefresh,
     ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
         self.synchronize_table_data()?;
         let canonical_name = self
@@ -424,7 +473,20 @@ impl Engine {
             if self.storage.catalog.is_none() {
                 // Memory-only lazy collection has no durable publication and
                 // must not invalidate the statement currently being planned.
-                self.analyze_table(&canonical_name, &t, false, None, true)?;
+                let due = match refresh {
+                    StatisticsRefresh::Current => true,
+                    StatisticsRefresh::Maintained => {
+                        let maintenance = t.statistics_maintenance.lock();
+                        maintenance.due(
+                            maintenance.missing(t.column_stats.read().is_empty()),
+                            crate::statistics::now_ms(),
+                            crate::statistics::value_size::FORMAT_VERSION,
+                        )
+                    }
+                };
+                if due {
+                    self.analyze_table(&canonical_name, &t, false, None, true)?;
+                }
                 return Ok(t.column_stats.read().clone());
             }
             self.run_analyze(Some(&canonical_name))?;
@@ -445,7 +507,7 @@ impl Engine {
         // Memory-only engines have no durable independent sessions or blob
         // I/O. Retain their automatic lazy refresh at this boundary.
         if self.storage.provider.is_none() && self.query_table_snapshots.is_none() {
-            return self.column_stats_in_execution(table);
+            return self.column_stats_in_execution(table, StatisticsRefresh::Maintained);
         }
         let table = self
             .try_query_table(table)?

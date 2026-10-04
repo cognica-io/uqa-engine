@@ -242,6 +242,43 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
         self.0.max_doc_id()
     }
 
+    fn for_each_next_fields_borrowed(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        if let Some(control) = &self.2 {
+            control.check()?;
+        }
+        let result = self
+            .0
+            .for_each_next_fields_borrowed(after, limit, fields, visitor)?;
+        if let Some(control) = &self.2 {
+            control.check()?;
+        }
+        Ok(result)
+    }
+
+    fn for_each_fields_multi_borrowed(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        if let Some(control) = &self.2 {
+            control.check()?;
+        }
+        let result = self
+            .0
+            .for_each_fields_multi_borrowed(ids, fields, visitor)?;
+        if let Some(control) = &self.2 {
+            control.check()?;
+        }
+        Ok(result)
+    }
+
     fn len(&self) -> StorageBackendResult<usize> {
         self.0.len()
     }

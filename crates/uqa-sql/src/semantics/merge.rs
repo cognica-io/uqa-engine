@@ -136,6 +136,7 @@ pub fn validate_merge_action_scopes(
                 condition,
                 columns,
                 values,
+                ..
             } => (
                 condition.as_ref(),
                 columns
@@ -248,6 +249,43 @@ pub fn merge_returning_source_schema(
     crate::RowSchema::with_physical_internal_aliases(source_schema, &aliases)
 }
 
+/// The columns a `MERGE` supplies, as `PostgreSQL` records them in its target's `insertedCols` and `updatedCols`: those each `INSERT` action fills and those each `UPDATE` action sets.
+pub fn merge_target_columns(
+    catalog: &dyn super::mutation_privileges::MutationPrivilegeCatalog,
+    stmt: &MergePlan,
+) -> Result<Vec<String>, SQLError> {
+    let table_columns = catalog.bound_table_column_names(&stmt.target)?;
+    let mut supplied = Vec::new();
+    for clause in &stmt.when_clauses {
+        match clause {
+            MergeWhenPlan::InsertNotMatched {
+                columns, values, ..
+            } => supplied.extend(merge_insert_columns(&table_columns, columns, values)),
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => supplied.extend(
+                assignments
+                    .iter()
+                    .map(|assignment| assignment.target.column.clone()),
+            ),
+            _ => {}
+        }
+    }
+    Ok(supplied)
+}
+
+/// The columns an `INSERT` action fills: those it names, or else the leading columns of the table, one for each value; `DEFAULT VALUES` fills none.
+fn merge_insert_columns<T, V>(
+    table_columns: &[String],
+    columns: &[crate::ast::AssignmentTarget<T>],
+    values: &[V],
+) -> Vec<String> {
+    if columns.is_empty() {
+        table_columns.iter().take(values.len()).cloned().collect()
+    } else {
+        columns.iter().map(|target| target.column.clone()).collect()
+    }
+}
+
 pub fn ensure_merge_mutation_privileges(
     catalog: &dyn super::mutation_privileges::MutationPrivilegeCatalog,
     stmt: &MergePlan,
@@ -268,15 +306,7 @@ pub fn ensure_merge_mutation_privileges(
                 if columns.is_empty() && values.is_empty() {
                     requires_any_insert = true;
                 } else {
-                    let columns = if columns.is_empty() {
-                        table_columns
-                            .iter()
-                            .take(values.len())
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    } else {
-                        columns.iter().map(|target| target.column.clone()).collect()
-                    };
+                    let columns = merge_insert_columns(&table_columns, columns, values);
                     column_privileges.extend(columns.into_iter().map(|column| {
                         (
                             crate::catalog::security::table::TableAclPrivilege::Insert,
@@ -413,6 +443,57 @@ pub fn validate_merge_target_columns(
                 "MERGE INSERT",
                 true,
             )?,
+            _ => {}
+        }
+    }
+    validate_merge_identity_targets(catalog, stmt)
+}
+
+/// Reject a `MERGE` update that assigns a `GENERATED ALWAYS` identity column anything but `DEFAULT`, and an insert that supplies a value for one without an `OVERRIDING` clause, whether or not a row reaches the action.
+fn validate_merge_identity_targets(
+    catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
+    stmt: &MergePlan,
+) -> Result<(), SQLError> {
+    let identity = super::generated_values::GeneratedValueColumns::of(catalog, &stmt.target)?;
+    for clause in &stmt.when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
+                identity.validate_update(assignments.iter().map(|assignment| {
+                    (
+                        assignment.target.column.as_str(),
+                        matches!(assignment.value, crate::ScalarExpr::Default),
+                    )
+                }))?;
+            }
+            MergeWhenPlan::InsertNotMatched {
+                columns,
+                overriding,
+                values,
+                ..
+            } => {
+                let targets = if columns.is_empty() {
+                    catalog
+                        .try_describe_table(&stmt.target)
+                        .map_err(|error| {
+                            SQLError::Internal(format!("read MERGE target columns: {error}"))
+                        })?
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|column| column.name)
+                        .collect::<Vec<_>>()
+                } else {
+                    columns.iter().map(|target| target.column.clone()).collect()
+                };
+                identity.validate_insert(
+                    targets.iter().map(String::as_str).zip(
+                        values
+                            .iter()
+                            .map(|value| !matches!(value, crate::ScalarExpr::Default)),
+                    ),
+                    *overriding,
+                )?;
+            }
             _ => {}
         }
     }

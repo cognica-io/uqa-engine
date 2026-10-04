@@ -14,8 +14,7 @@ use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::resolution::ResolutionMode;
 use crate::mvcc::{
     CommitSequence, CommittedRecordSnapshot, DatabaseId, MergedRecordSnapshot,
-    PreparedRecordCommit, PrivateRecordChanges, RecordWrite, ScannedVisibleRecord, VersionError,
-    VersionResult,
+    PreparedRecordCommit, PrivateRecordChanges, ScannedVisibleRecord, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 
@@ -46,10 +45,8 @@ pub(in crate::mvcc) fn resolve(
         .expect("graph effects were requested");
     let changes = PrivateRecordChanges::new(control.memory());
     let preview = PrivateRecordChanges::new(control.memory());
-    preview.apply_owned(original.records(), control)?;
-    let writes = initial_writes(original, &*committed, layout, mode, control)?;
-    changes.apply_owned(&writes, control)?;
-    drop(writes);
+    preview.apply_prepared(original, control)?;
+    stage_initial_writes(original, &*committed, layout, mode, &changes, control)?;
     let resolver = Resolver {
         final_view: MergedRecordSnapshot::new(committed.clone(), changes.snapshot()?),
         private_preview: MergedRecordSnapshot::new(committed.clone(), preview.snapshot()?),
@@ -95,17 +92,22 @@ pub(in crate::mvcc) fn resolve(
         .resolved(original, resolver.committed.sequence()))
 }
 
-fn initial_writes(
+/// Stage the writes of `original` that survive graph resolution into `changes`: canonical writes whose preconditions still hold, rebased graph caches, and the kinds other resolution steps own.
+fn stage_initial_writes(
     original: &PreparedRecordCommit,
     committed: &dyn CommittedRecordSnapshot,
     layout: &dyn GraphRecordLayout,
     mode: ResolutionMode,
+    changes: &PrivateRecordChanges,
     control: &StorageReadControl,
-) -> VersionResult<BudgetedVec<crate::mvcc::PreparedRecordWrite>> {
-    let mut writes = BudgetedVec::new(control.memory());
-    writes.reserve(original.records().len())?;
-    for (mutation, write) in original.records().iter().enumerate() {
-        control.cancellation().check()?;
+) -> VersionResult<()> {
+    let stage = |write: crate::mvcc::PreparedRecordWrite| {
+        changes.apply_owned(std::slice::from_ref(&write), control)
+    };
+    let mut originals = original.writes();
+    let mut mutation = 0;
+    while let Some(write) = originals.next(control)? {
+        mutation += 1;
         if matches!(
             write.kind(),
             RecordWriteKind::Marker
@@ -122,7 +124,7 @@ fn initial_writes(
                     | RecordWriteKind::DiskANNPopulationPreview
             ))
         {
-            writes.push(write.clone())?;
+            stage(write)?;
             continue;
         }
         let actual = committed
@@ -131,12 +133,12 @@ fn initial_writes(
         if write.kind() == RecordWriteKind::Canonical {
             if write.expected() != actual {
                 return Err(VersionError::WriteConflict {
-                    mutation,
+                    mutation: mutation - 1,
                     expected: write.expected(),
                     actual,
                 });
             }
-            writes.push(write.clone())?;
+            stage(write)?;
         } else {
             if !layout.is_validity_key(write.key())? {
                 return Err(VersionError::InvalidEncoding(
@@ -144,16 +146,15 @@ fn initial_writes(
                 ));
             }
             if write.kind() == RecordWriteKind::GraphCache {
-                writes.push(
+                stage(
                     write
-                        .clone()
                         .rebase(actual)
                         .with_kind(mode.kind(RecordWriteKind::GraphCache)),
                 )?;
             }
         }
     }
-    Ok(writes)
+    Ok(())
 }
 
 impl Resolver<'_> {
@@ -171,25 +172,15 @@ impl Resolver<'_> {
             .committed
             .metadata(key, self.control)?
             .and_then(|record| record.revision);
-        let prepared = PreparedRecordCommit::new(
-            &[RecordWrite {
-                key,
-                expected,
-                value,
-            }],
-            self.control,
-        )?;
+        let write =
+            crate::mvcc::PreparedRecordWrite::copy_bytes(key, expected, value, self.control)?;
         let kind = if kind == RecordWriteKind::GraphPreview {
             self.changes.write_kind(key, self.control)?.unwrap_or(kind)
         } else {
             kind
         };
-        self.changes.apply_owned(
-            &[prepared.records()[0]
-                .clone()
-                .with_kind(self.mode.kind(kind))],
-            self.control,
-        )
+        self.changes
+            .apply_owned(&[write.with_kind(self.mode.kind(kind))], self.control)
     }
 
     fn invalidate_graph(&self, graph: &str) -> VersionResult<()> {

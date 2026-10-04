@@ -24,8 +24,8 @@ pub(super) fn initialize(
     control: &StorageReadControl,
 ) -> PhysicalResult<DatabaseId> {
     control.cancellation().check().map_err(VersionError::from)?;
-    let _permit = schema::WritePermit::acquire(connection)?;
-    let transaction = schema::begin(connection)?;
+    let _permit = super::admission::permit(connection, control)?;
+    let transaction = super::admission::begin(connection, control)?;
     super::native::reject_mapped(&transaction)?;
     let legacy: Option<i64> = transaction
         .query_row(
@@ -40,7 +40,7 @@ pub(super) fn initialize(
     if header.key_value_mapping {
         validate_mapping(&transaction)?;
         if initialized.upgraded {
-            transaction.commit()?;
+            super::admission::commit(transaction, control)?;
         }
         return Ok(identity);
     }
@@ -48,7 +48,7 @@ pub(super) fn initialize(
         return Err(VersionError::InvalidEncoding("unexpected legacy KeyValue object").into());
     }
     let unrelated: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name IN ('_metadata', '_meta') OR (type = 'table' AND name NOT IN ('_key_value', '_uqa_mvcc_metadata', '_uqa_mvcc_heads', '_uqa_mvcc_versions', '_uqa_mvcc_transactions', '_uqa_mvcc_identifiers', '_uqa_mvcc_runs') AND name NOT GLOB 'sqlite_*'))",
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name IN ('_metadata', '_meta') OR (type = 'table' AND name NOT IN ('_key_value', '_uqa_mvcc_metadata', '_uqa_mvcc_heads', '_uqa_mvcc_versions', '_uqa_mvcc_version_metadata', '_uqa_mvcc_transactions', '_uqa_mvcc_identifiers', '_uqa_mvcc_runs') AND name NOT GLOB 'sqlite_*'))",
         [],
         |row| row.get(0),
     )?;
@@ -73,7 +73,7 @@ pub(super) fn initialize(
     transaction.execute_batch(CATALOG_GUARD)?;
     transaction.execute_batch("UPDATE _uqa_mvcc_metadata SET mapping = 1 WHERE singleton = 1")?;
     control.cancellation().check().map_err(VersionError::from)?;
-    transaction.commit()?;
+    super::admission::commit(transaction, control)?;
     Ok(identity)
 }
 

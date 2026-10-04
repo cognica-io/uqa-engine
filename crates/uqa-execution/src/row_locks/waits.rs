@@ -14,18 +14,15 @@ use super::{
 };
 
 impl RowLockManager {
-    pub(super) fn release_row_claims(
-        &self,
-        session_id: u64,
-        key: RowLockKey,
-        strength: LockStrength,
-    ) {
+    /// Release the cross-process claims of `rows` in one coordinator release, which clears their holder slots under one slot metadata lock.
+    pub(super) fn release_row_claims(&self, session_id: u64, rows: &[(RowLockKey, LockStrength)]) {
         if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
-            let relation = self.relation_bytes(key.table);
-            coordinator.release(
-                session_id,
-                &row_byte_claims(&relation, key.doc_id, strength),
-            );
+            let mut claims = Vec::with_capacity(rows.len() * 2);
+            for (key, strength) in rows {
+                let relation = self.relation_bytes(key.table);
+                claims.extend(row_byte_claims(&relation, key.doc_id, *strength));
+            }
+            coordinator.release(session_id, &claims);
         }
     }
 
@@ -57,9 +54,14 @@ impl RowLockManager {
         let cross_wait = CrossWaitGuard::new(self, coordinator, request.session_id);
         let mut waited = false;
         let mut foreign_waited = false;
+        let mut wait_started = None;
         loop {
             let mut state = self.state.lock();
-            if let Err(error) = request.cancel.check() {
+            let checked = wait_started.map_or_else(
+                || request.cancel.check(),
+                |started| request.cancel.check_lock_wait(started),
+            );
+            if let Err(error) = checked {
                 self.finish_row_wait(state, request.session_id);
                 return Err(error.into());
             }
@@ -135,7 +137,9 @@ impl RowLockManager {
                         .or_default()
                         .insert(request.key, request.strength);
                     waited = true;
-                    self.wake.wait_for(&mut state, WAIT_SLICE);
+                    let started = *wait_started.get_or_insert_with(std::time::Instant::now);
+                    let slice = request.cancel.lock_wait_slice(started, WAIT_SLICE);
+                    self.wake.wait_for(&mut state, slice);
                 }
             }
         }

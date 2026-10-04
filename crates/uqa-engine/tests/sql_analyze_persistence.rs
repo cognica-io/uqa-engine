@@ -169,7 +169,7 @@ fn persisted_column_stats_refresh_after_an_external_commit() {
             "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER)",
         );
         exec(&engine, "INSERT INTO t (id, val) VALUES (1, 10)");
-        // An analyzed table without later changes is not due for automatic statistics, which would otherwise replace the externally committed values whenever its worker runs.
+        // A table that was never analyzed is due for an automatic analysis, which the maintenance worker of the engine below would publish over the externally committed values; an analyzed table without later changes is not due.
         exec(&engine, "ANALYZE t");
     }
 

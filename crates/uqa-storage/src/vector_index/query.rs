@@ -8,8 +8,8 @@
 
 mod buffer;
 mod centroids;
-mod containers;
 mod scores;
+mod spill;
 pub mod statistics;
 
 #[cfg(test)]
@@ -18,9 +18,9 @@ mod tests;
 pub use buffer::VectorQueryBuffer;
 pub use centroids::nearest_centroids;
 pub(crate) use centroids::nearest_normalized_centroids;
-pub(crate) use containers::{QueryHeap, QuerySet};
 pub use scores::scored_posting_list;
 pub(crate) use scores::{postings_from_scores, postings_from_unique_scores};
+pub use spill::SpillingVectorScores;
 
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 

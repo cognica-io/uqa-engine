@@ -92,6 +92,29 @@ impl Session {
             .sql(sql, &[])
             .unwrap_or_else(|error| panic!("{sql}: {error:?}"))
     }
+
+    /// Take `ACCESS EXCLUSIVE` on a table whose test transactions have finished. Automatic analysis may hold its own lock on the table, so the request waits for it instead of failing as `NOWAIT` would, and a bound ends the wait for a lock that a finished transaction leaked.
+    fn lock_released_table(&self, table: &str) {
+        let cancellation = self.engine.cancellation_token();
+        std::thread::scope(|scope| {
+            let (done, completed) = std::sync::mpsc::channel::<()>();
+            let watchdog = scope.spawn(move || {
+                if matches!(
+                    completed.recv_timeout(std::time::Duration::from_secs(15)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                ) {
+                    cancellation.cancel();
+                }
+            });
+            let result = self.engine.sql(
+                &format!("BEGIN; LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE; COMMIT"),
+                &[],
+            );
+            drop(done);
+            watchdog.join().unwrap();
+            result.unwrap();
+        });
+    }
 }
 
 fn prepare_tables(session: &Session) {

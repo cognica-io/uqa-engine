@@ -177,7 +177,10 @@ fn populated_fields_require_atomic_source_rebuilds_for_a_new_index_revision() {
             "body",
             next.clone(),
             AnalyzerPhase::Index,
-            vec![(1, fields("gap a gap"))],
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![(
+                1,
+                fields("gap a gap"),
+            )]),
         )
         .unwrap();
     assert_eq!(
@@ -212,7 +215,7 @@ fn tokenless_fields_also_retain_their_revision_until_a_source_rebuild() {
             "body",
             next,
             AnalyzerPhase::Index,
-            vec![(1, fields("gap gap"))],
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![(1, fields("gap gap"))]),
         )
         .unwrap();
     assert_eq!(index.get_term_freq(1, "body", "gap").unwrap(), 2);
@@ -285,7 +288,10 @@ fn failed_point_batch_and_revision_rebuilds_preserve_original_graph_metadata() {
             "body",
             whitespace_analyzer().compile().unwrap(),
             AnalyzerPhase::Both,
-            vec![(1, fields("b")), (2, malformed)]
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![
+                (1, fields("b")),
+                (2, malformed)
+            ])
         )
         .is_err());
     assert_eq!(metadata(&index, 1), saved);

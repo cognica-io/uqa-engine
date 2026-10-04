@@ -11,7 +11,7 @@ use uqa_execution::mutation::{
     identity::{IdentitySequences, InsertIdentityCatalog, InsertIdentityContext},
 };
 use uqa_sql::{
-    assignment::columns::AssignmentColumnCatalog,
+    assignment::columns::{AssignmentColumnCatalog, ColumnShape},
     ast::{AutoIncrement, ColumnDef, Expr},
     SQLError,
 };
@@ -39,6 +39,34 @@ impl AssignmentColumnCatalog for Engine {
         Engine::try_column_insert_default_expr(self, table, column)
             .map_err(|error| Box::new(error) as uqa_sql::assignment::columns::ColumnCatalogError)
     }
+    fn try_column_shape(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<Option<Option<ColumnShape>>, uqa_sql::assignment::columns::ColumnCatalogError> {
+        let table = self
+            .try_table(table)
+            .map_err(|error| Box::new(error) as uqa_sql::assignment::columns::ColumnCatalogError)?;
+        Ok(table.map(|table| {
+            table
+                .columns
+                .read()
+                .iter()
+                .find(|definition| definition.name == column)
+                .map(|definition| ColumnShape {
+                    ty: definition.ty.clone(),
+                    generated: definition
+                        .generated
+                        .as_ref()
+                        .map(|generated| generated.kind),
+                    identity_sequence: definition
+                        .auto_increment
+                        .as_ref()
+                        .filter(|provenance| provenance.is_identity())
+                        .and_then(|provenance| provenance.sequence.clone()),
+                })
+        }))
+    }
 }
 impl InsertIdentityCatalog for Engine {
     fn auto_increment_column(&self, table: &str) -> Result<Option<String>, String> {
@@ -63,7 +91,6 @@ impl Engine {
             rows: self.mutation_row_context(),
             expressions: self.mutation_expression_context(),
             scopes: self,
-            diagnostics: self,
         }
     }
     pub(crate) fn insert_identity_context(&self) -> InsertIdentityContext<'_> {

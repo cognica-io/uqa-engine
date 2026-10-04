@@ -6,8 +6,9 @@
 
 //! Random access to the rows of one sorted window partition: row reads, expression evaluation on a row, and the peer comparison of the window's `ORDER BY` keys that `are_peers` makes.
 
+use crate::spill::BufferedIndexedSpill;
 use crate::{
-    IndexedSpill, PhysicalRow, RowSchema, RowSchemaExecution, ScalarEvalContext, ScalarOrder,
+    PhysicalRow, RowSchema, RowSchemaExecution, ScalarEvalContext, ScalarOrder,
     ScalarSubqueryRunner,
 };
 use std::cmp::Ordering;
@@ -25,7 +26,7 @@ struct CachedRow {
 }
 
 pub(super) struct PartitionRows<'a> {
-    rows: &'a mut IndexedSpill,
+    rows: &'a mut BufferedIndexedSpill,
     schema: RowSchema,
     len: i64,
     order_by: &'a [ScalarOrder],
@@ -38,7 +39,7 @@ pub(super) struct PartitionRows<'a> {
 
 impl<'a> PartitionRows<'a> {
     pub(super) fn new(
-        rows: &'a mut IndexedSpill,
+        rows: &'a mut BufferedIndexedSpill,
         order_by: &'a [ScalarOrder],
         params: &'a [SQLParam],
         hook: &'a dyn uqa_sql::expr::EngineHook,

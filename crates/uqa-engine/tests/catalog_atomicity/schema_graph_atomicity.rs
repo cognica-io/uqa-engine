@@ -53,7 +53,7 @@ fn unqualified_analyzer_assignment_uses_the_resolved_schema_identity() {
     {
         let engine = Engine::open(&path).unwrap();
         engine.sql("CREATE SCHEMA app", &[]).unwrap();
-        engine.set_search_path(vec!["app".to_string()]);
+        engine.set_search_path(&["app".to_string()]).unwrap();
         engine
             .sql("CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT)", &[])
             .unwrap();

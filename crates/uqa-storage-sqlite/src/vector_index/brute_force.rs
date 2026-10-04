@@ -6,6 +6,12 @@
 
 //! Persistent brute-force vector index and exact search contract.
 
+use parking_lot::RwLock;
+use uqa_core::memory::BudgetedVec;
+use uqa_storage::read_control::StorageReadControl;
+
+mod cache;
+
 use super::native::NativeVectorRead;
 use super::{
     blob_to_vector, cosine_similarity, decode_doc_id, encode_doc_id, i64_to_usize, params,
@@ -22,6 +28,7 @@ pub struct SQLiteVectorIndex {
     pub(super) field: String,
     pub(super) dimensions: u32,
     pub(super) retained: Option<Arc<crate::mvcc::native::NativeSnapshot>>,
+    cached_vectors: Arc<RwLock<Option<cache::CachedVectors>>>,
 }
 
 impl SQLiteVectorIndex {
@@ -37,24 +44,117 @@ impl SQLiteVectorIndex {
             field: field.into(),
             dimensions,
             retained: None,
+            cached_vectors: Arc::default(),
         }
     }
 
-    fn with_vectors<R>(
+    fn score_vectors(
         &self,
-        read: impl FnOnce(&[(DocId, u32, Vec<f32>)]) -> SQLiteResult<R>,
-    ) -> SQLiteResult<R> {
-        if let Some(snapshot) = self.native_snapshot()? {
-            let native = NativeVectorRead::new(&snapshot, self)?;
-            read(&native.vectors()?)
+        query: &[f32],
+        threshold: Option<f32>,
+    ) -> SQLiteResult<Option<BudgetedVec<(DocId, f32)>>> {
+        if let Some(snapshot) = self.read_releasing_cache(|| self.native_snapshot())? {
+            let native = self.read_releasing_cache(|| NativeVectorRead::new(&snapshot, self))?;
+            self.score_cached_vectors(&native, query, threshold)
         } else {
-            read(&self.load_all_with_ordinals()?)
+            let control = StorageReadControl::with_limit(usize::MAX);
+            Self::score_stream(query, threshold, |visit| {
+                for (id, _, vector) in self.load_all_with_ordinals()? {
+                    visit(id, &vector, &control)?;
+                }
+                Ok(())
+            })
         }
+    }
+
+    fn score_stream(
+        query: &[f32],
+        threshold: Option<f32>,
+        read: impl FnOnce(
+            &mut dyn FnMut(DocId, &[f32], &StorageReadControl) -> SQLiteResult<()>,
+        ) -> SQLiteResult<()>,
+    ) -> SQLiteResult<Option<BudgetedVec<(DocId, f32)>>> {
+        let mut scores: Option<BudgetedVec<(DocId, f32)>> = None;
+        read(&mut |doc_id, vector, control| {
+            let score = cosine_similarity(query, vector);
+            if threshold.is_none_or(|threshold| score >= threshold) {
+                let scores = scores.get_or_insert_with(|| BudgetedVec::new(control.memory()));
+                // Canonical and legacy cursors both order vectors by document and tensor ordinal.
+                if let Some((last_id, best)) = scores.last_mut().filter(|(id, _)| *id == doc_id) {
+                    debug_assert_eq!(*last_id, doc_id);
+                    if score > *best {
+                        *best = score;
+                    }
+                } else {
+                    scores.push((doc_id, score))?;
+                }
+            }
+            Ok(())
+        })?;
+        Ok(scores)
+    }
+
+    fn score_postings(
+        &self,
+        scores: Vec<(DocId, f32)>,
+        memory: &uqa_core::memory::MemoryBudget,
+    ) -> SQLiteResult<PostingList> {
+        let mut entries = BudgetedVec::new(memory);
+        self.read_releasing_cache(|| Ok(entries.reserve(scores.len())?))?;
+        for (doc_id, score) in scores {
+            entries.push(PostingEntry::new(
+                doc_id,
+                Payload::with_score(f64::from(score)),
+            ))?;
+        }
+        let (entries, _entry_memory) = entries.into_parts();
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     pub(super) fn load_all_with_ordinals(&self) -> SQLiteResult<Vec<(DocId, u32, Vec<f32>)>> {
         self.conn
             .with(|connection| self.load_all_with_ordinals_from(connection))
+    }
+
+    pub(super) fn visit_ordered_vectors_from(
+        &self,
+        connection: &rusqlite::Connection,
+        control: &StorageReadControl,
+        mut visit: impl FnMut(DocId, u32, &[f32]) -> SQLiteResult<()>,
+    ) -> SQLiteResult<()> {
+        control.check()?;
+        let mut statement = connection.prepare(
+            "SELECT doc_id, vector_ordinal, vector FROM _vectors
+             WHERE table_name = ?1 AND field = ?2 ORDER BY doc_id, vector_ordinal",
+        )?;
+        let mut rows = statement.query(params![self.table, self.field])?;
+        let mut ordinals = super::codec::PersistedOrdinalSequence::default();
+        while let Some(row) = rows.next()? {
+            control.check()?;
+            let document = decode_doc_id(row.get(0)?)?;
+            let ordinal: i64 = row.get(1)?;
+            let ordinal = u32::try_from(ordinal).map_err(|_| {
+                SQLiteError::StorageBackend(format!(
+                    "invalid vector ordinal {ordinal} for {}.{}",
+                    self.table, self.field
+                ))
+            })?;
+            let bytes = row
+                .get_ref(2)?
+                .as_blob()
+                .map_err(|_| SQLiteError::StorageBackend("invalid vector payload".into()))?;
+            let mut payload = control.memory().reserve(bytes.len())?;
+            let vector = blob_to_vector(bytes)?;
+            let capacity = vector
+                .capacity()
+                .checked_mul(size_of::<f32>())
+                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+            payload.grow(capacity.saturating_sub(bytes.len()))?;
+            self.validate_dimensions_sqlite(&vector)?;
+            ordinals.push(document, ordinal)?;
+            visit(document, ordinal, &vector)?;
+        }
+        Ok(())
     }
 
     pub(super) fn load_all_with_ordinals_from(
@@ -228,32 +328,13 @@ impl VectorIndex for SQLiteVectorIndex {
         if k == 0 {
             return Ok(PostingList::new());
         }
-        Ok(self.with_vectors(|entries| {
-            if entries.is_empty() {
-                return Ok(PostingList::new());
-            }
-            let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
-                std::collections::BTreeMap::new();
-            for (doc_id, _, vector) in entries {
-                let sim = cosine_similarity(query, vector);
-                best_by_doc
-                    .entry(*doc_id)
-                    .and_modify(|best| {
-                        if sim > *best {
-                            *best = sim;
-                        }
-                    })
-                    .or_insert(sim);
-            }
-            let mut scored: Vec<(DocId, f32)> = best_by_doc.into_iter().collect();
-            select_top_k_scored(&mut scored, k);
-            scored.sort_by_key(|(id, _)| *id);
-            let entries: Vec<PostingEntry> = scored
-                .into_iter()
-                .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
-                .collect();
-            Ok(PostingList::from_sorted_unchecked(entries))
-        })?)
+        let Some(scores) = self.score_vectors(query, None)? else {
+            return Ok(PostingList::new());
+        };
+        let (mut scores, score_memory) = scores.into_parts();
+        select_top_k_scored(&mut scores, k);
+        scores.sort_by_key(|(id, _)| *id);
+        Ok(self.score_postings(scores, score_memory.budget())?)
     }
 
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
@@ -263,29 +344,12 @@ impl VectorIndex for SQLiteVectorIndex {
                 "vector similarity threshold must be finite, got {threshold}"
             )));
         }
-        Ok(self.with_vectors(|entries| {
-            let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
-                std::collections::BTreeMap::new();
-            for (doc_id, _, vector) in entries {
-                let sim = cosine_similarity(query, vector);
-                if sim >= threshold {
-                    best_by_doc
-                        .entry(*doc_id)
-                        .and_modify(|best| {
-                            if sim > *best {
-                                *best = sim;
-                            }
-                        })
-                        .or_insert(sim);
-                }
-            }
-            let mut out: Vec<PostingEntry> = best_by_doc
-                .into_iter()
-                .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
-                .collect();
-            out.sort_by_key(|e| e.doc_id);
-            Ok(PostingList::from_sorted_unchecked(out))
-        })?)
+        let Some(scores) = self.score_vectors(query, Some(threshold))? else {
+            return Ok(PostingList::new());
+        };
+        let (mut scores, score_memory) = scores.into_parts();
+        scores.sort_by_key(|(id, _)| *id);
+        Ok(self.score_postings(scores, score_memory.budget())?)
     }
 
     fn count(&self) -> StorageBackendResult<usize> {
@@ -312,3 +376,6 @@ impl VectorIndex for SQLiteVectorIndex {
         super::native::canonical::capture(self, control)
     }
 }
+
+#[cfg(test)]
+mod tests;

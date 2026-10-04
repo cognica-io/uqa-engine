@@ -8,6 +8,8 @@
 
 mod admission;
 mod codec;
+mod commit_cache;
+mod connection_functions;
 mod identifiers;
 mod key_value;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -22,9 +24,11 @@ mod retention;
 mod runs;
 mod schema;
 mod serializable;
+mod synchronization;
 #[cfg(test)]
 mod tests;
 mod tombstones;
+mod version_metadata;
 mod write;
 
 pub(crate) use schema::WritePermit;
@@ -84,6 +88,16 @@ pub struct SQLiteRecordStore {
     identity: DatabaseId,
     native: Option<native::NativeRecordNamespace>,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    receipt_leases: receipts::ReceiptLeaseFile,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many reads of this thread ran the full validation.
+    static READ_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many record reads this thread ran, each in its own physical transaction.
+    static RECORD_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl SQLiteRecordStore {
@@ -103,6 +117,8 @@ impl SQLiteRecordStore {
         } = native::initialize_in(transaction, control).map_err(Error::into_version)?;
         Ok(Self {
             snapshots: retention::registry(connection, identity)?,
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+            receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection: connection.record_connection(),
             identity,
             native: Some(namespace),
@@ -122,6 +138,8 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)?;
         Ok(Self {
             snapshots: retention::registry(&connection, identity)?,
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+            receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection,
             identity,
             native: None,
@@ -148,6 +166,8 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)?;
         Ok(Self {
             snapshots: retention::registry(&connection, identity)?,
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+            receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection,
             identity,
             native: Some(namespace),
@@ -165,6 +185,8 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)?;
         Ok(Self {
             snapshots: retention::registry(&connection, identity)?,
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+            receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection,
             identity,
             native: None,
@@ -183,6 +205,43 @@ impl SQLiteRecordStore {
     ) -> VersionResult<T> {
         self.connection
             .with(|connection| Ok(operation(connection)))
+            .map_err(|error| VersionError::Storage(error.into()))?
+            .map_err(Error::into_version)
+    }
+
+    /// Run a read in one physical transaction of a database that still is this store's. Its native format, history identity and restoration state are checked, unless the connection found them valid at the committed state it now reads: every read begins this way, and the checks cost more than a point read.
+    fn read<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
+    ) -> VersionResult<T> {
+        #[cfg(test)]
+        RECORD_READS.with(|count| count.set(count.get() + 1));
+        self.connection
+            .with_record_read(|connection, validated| {
+                Ok((|| {
+                    let transaction = connection.unchecked_transaction()?;
+                    let state = crate::connection::ValidatedRead {
+                        store: (
+                            self.identity.as_bytes(),
+                            self.native.map(|namespace| namespace.0.as_bytes()),
+                        ),
+                        data_version: transaction
+                            .prepare_cached("PRAGMA data_version")?
+                            .query_row([], |row| row.get(0))?,
+                        changes: connection.total_changes(),
+                    };
+                    if validated.get() != Some(state) {
+                        native::check_mapping(&transaction, self.native)?;
+                        codec::header(&transaction, self.identity)?;
+                        validated.set(Some(state));
+                        #[cfg(test)]
+                        READ_VALIDATIONS.with(|count| count.set(count.get() + 1));
+                    }
+                    let result = operation(&transaction)?;
+                    transaction.commit()?;
+                    Ok(result)
+                })())
+            })
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)
     }
@@ -341,6 +400,8 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
         control.cancellation().check()?;
+        // Read before the capture: a commit that lands in between changes the monitor and is in the snapshot, which then only looks older than it is.
+        let monitor = self.commit_monitor_version()?;
         let mut reclamation_epoch = 0;
         let lease = self.snapshots.capture(control, || {
             self.with(|connection| {
@@ -357,10 +418,18 @@ impl VersionedPersistence for SQLiteRecordStore {
                 store: self.clone(),
                 sequence: lease.sequence(),
                 reclamation_epoch,
+                monitor: monitor.map(std::sync::atomic::AtomicU64::new),
+                table_owners: read::table_owners::TableOwners::default(),
+                row_presence: read::row_presence::RowPresence::default(),
                 _lease: lease,
             },
             control,
         )
+    }
+    fn commit_monitor_version(&self) -> VersionResult<Option<u64>> {
+        self.connection
+            .commit_monitor_version()
+            .map_err(|error| VersionError::Storage(error.into()))
     }
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
         self.snapshots.reclaim(control, |oldest| {
@@ -419,6 +488,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control.cancellation().check().map_err(VersionError::from)?;
         let _bindings = write::reserve_bindings(prepared, control)?;
         self.with_write(control, |connection| {
+            let _cache = commit_cache::CommitCache::grow(connection, prepared, control)?;
             Ok(write::commit(
                 connection,
                 transaction,

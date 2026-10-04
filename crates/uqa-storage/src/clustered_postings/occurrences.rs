@@ -9,14 +9,16 @@
 use uqa_core::TokenOffsets;
 
 use super::{
-    cluster_id, corrupt, read_varint, validate_header, validate_scores, DocId, PostingScore,
-    StorageBackendResult, TokenOccurrence, HEADER_LEN, OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC,
-    SCORE_MAGIC,
+    corrupt, read_varint, validate_header, DocId, PostingScore, StorageBackendResult,
+    TokenOccurrence, OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC, SCORE_MAGIC,
 };
 
 mod allocation;
+mod builder;
 pub(crate) use allocation::validate_occurrence_cluster;
 pub use allocation::{decode_occurrence_cluster_budgeted, decode_occurrence_document_budgeted};
+pub(crate) use builder::encode_posting;
+pub use builder::OccurrenceClusterBuilder;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OccurrencePosting {
@@ -43,7 +45,6 @@ impl OccurrencePosting {
     }
 }
 
-use super::encoding::{put_u32, put_varint};
 use uqa_core::memory::BudgetedVec;
 
 pub fn encode_occurrence_cluster(
@@ -62,69 +63,16 @@ pub fn encode_occurrence_cluster_controlled<'a>(
     control: &crate::read_control::StorageReadControl,
 ) -> StorageBackendResult<(BudgetedVec<u8>, BudgetedVec<u8>)> {
     control.cancellation().check()?;
-    let Some(first) = entries.clone().next() else {
+    if entries.len() == 0 {
         return Err(corrupt("cannot encode an empty occurrence cluster"));
-    };
-    let count = entries.len();
-    let mut scores = BudgetedVec::new(control.memory());
-    scores.reserve(count)?;
-    let mut payload = BudgetedVec::new(control.memory());
-    let mut offsets = BudgetedVec::new(control.memory());
-    offsets.reserve(
-        count
-            .checked_add(1)
-            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?,
-    )?;
-    offsets.push(0_usize)?;
+    }
+    let mut builder = OccurrenceClusterBuilder::new(control)?;
+    builder.reserve(entries.len())?;
     for entry in entries {
         control.cancellation().check()?;
-        if cluster_id(entry.doc_id) != cluster_id(first.doc_id) {
-            return Err(corrupt("one occurrence value spans multiple clusters"));
-        }
-        let mut previous = 0_u32;
-        for occurrence in &entry.occurrences {
-            control.cancellation().check()?;
-            occurrence
-                .validate()
-                .map_err(|error| corrupt(error.to_string()))?;
-            let delta = occurrence
-                .position
-                .checked_sub(previous)
-                .ok_or_else(|| corrupt("occurrence positions are not ordered"))?;
-            put_varint(&mut payload, u64::from(delta))?;
-            put_varint(&mut payload, u64::from(occurrence.position_length))?;
-            payload.push(u8::from(occurrence.offsets.is_some()))?;
-            if let Some(offsets) = occurrence.offsets {
-                put_varint(&mut payload, offsets.start_utf8)?;
-                put_varint(&mut payload, offsets.end_utf8 - offsets.start_utf8)?;
-                put_varint(&mut payload, offsets.start_utf16)?;
-                put_varint(&mut payload, offsets.end_utf16 - offsets.start_utf16)?;
-            }
-            previous = occurrence.position;
-        }
-        scores.push(entry.score())?;
-        offsets.push(payload.len())?;
+        builder.push(entry.doc_id, entry.doc_length, &entry.occurrences, control)?;
     }
-    validate_scores(&scores)?;
-    let score_blob =
-        super::scores::encode_scores_controlled(&scores, OCCURRENCE_FORMAT_VERSION, control)?;
-    let mut blob = BudgetedVec::new(control.memory());
-    let blob_len = offsets
-        .len()
-        .checked_mul(size_of::<u32>())
-        .and_then(|directory| HEADER_LEN.checked_add(directory))
-        .and_then(|header| header.checked_add(payload.len()))
-        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
-    blob.reserve(blob_len)?;
-    blob.extend_from_slice(POSITIONS_MAGIC)?;
-    blob.extend_from_slice(&[OCCURRENCE_FORMAT_VERSION, 0, 0, 0])?;
-    put_u32(&mut blob, count, "occurrence posting count")?;
-    put_u32(&mut blob, offsets.len(), "occurrence offset count")?;
-    for &offset in offsets.iter() {
-        put_u32(&mut blob, offset, "occurrence payload offset")?;
-    }
-    blob.extend_from_slice(&payload)?;
-    Ok((score_blob, blob))
+    builder.finish(control)
 }
 
 /// Read complete occurrence payloads. Legacy positions require rebuilding from source, not inferred edges.

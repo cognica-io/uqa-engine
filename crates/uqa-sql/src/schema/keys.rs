@@ -6,88 +6,85 @@
 
 //! Declaration and identity rules for newly added PRIMARY KEY and UNIQUE constraints.
 use crate::{
-    ast::{ColumnDef, ColumnType, ForeignKey, TableCheck, TableKeyConstraint},
+    ast::{ColumnDef, TableKeyConstraint, TableKeyConstraintKind},
     SQLError,
 };
-pub fn validate_added_key_columns(
-    table: &str,
-    constraint: &TableKeyConstraint,
-    columns: &[ColumnDef],
+/// The relation that ALTER TABLE adds a key to.
+pub struct AddedKeyRelation<'a> {
+    pub table: &'a str,
+    pub columns: &'a [ColumnDef],
+    pub keys: &'a [TableKeyConstraint],
+    /// The relation's own partition key, when it is partitioned.
+    pub partition: Option<&'a crate::ast::PartitionSpec>,
+}
+
+/// Validate a key that ALTER TABLE adds, before its index is named: the `WITHOUT OVERLAPS` period as `transformIndexConstraint` checks it, a primary key's columns as the NOT NULL constraints that `ATPrepAddPrimaryKey` adds before the index, and then the checks of `DefineIndex`, which resolves the key's columns. A column repeated in the key was rejected while the statement was compiled.
+pub fn validate_added_key(
+    relation: &AddedKeyRelation<'_>,
+    key: &TableKeyConstraint,
 ) -> Result<(), SQLError> {
-    let column_names: std::collections::BTreeSet<&str> =
-        columns.iter().map(|column| column.name.as_str()).collect();
-    for column in &constraint.columns {
-        if !column_names.contains(column.as_str()) {
-            return Err(SQLError::TypeMismatch(format!(
-                "ALTER TABLE ADD CONSTRAINT references unknown column `{column}`"
-            )));
+    let column = |name: &str| relation.columns.iter().find(|column| column.name == name);
+    let system = definition::is_system_column;
+    if key.without_overlaps {
+        if let Some(period) = key.columns.last() {
+            if let Some(found) = column(period) {
+                definition::validate_overlaps_column(period, Some(&found.ty))?;
+            } else if system(period) {
+                definition::validate_overlaps_column(period, None)?;
+            }
         }
     }
-    if constraint.without_overlaps {
-        let period_column = constraint.columns.last().ok_or_else(|| {
-            SQLError::TypeMismatch(
-                "constraint using WITHOUT OVERLAPS needs at least two columns".into(),
-            )
-        })?;
-        let period_type = columns
-            .iter()
-            .find(|column| column.name == *period_column)
-            .map(|column| &column.ty)
-            .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{period_column}")))?;
-        if !matches!(
-            period_type,
-            ColumnType::Range(_) | ColumnType::Multirange(_)
-        ) {
+    definition::validate_overlaps_key_length(key)?;
+    if key.kind == TableKeyConstraintKind::PrimaryKey {
+        for name in &key.columns {
+            if column(name).is_some() {
+                continue;
+            }
+            if system(name) {
+                return Err(SQLError::Routine {
+                    sqlstate: "0A000".into(),
+                    message: format!("cannot add not-null constraint on system column \"{name}\""),
+                });
+            }
+            let local = uqa_core::RelationIdentity::from_legacy_name(relation.table)
+                .map_err(SQLError::Internal)?;
             return Err(SQLError::Routine {
-                sqlstate: "42804".into(),
+                sqlstate: "42703".into(),
                 message: format!(
-                    "column \"{period_column}\" in WITHOUT OVERLAPS is not a range or multirange type"
+                    "column \"{name}\" of relation \"{}\" does not exist",
+                    local.name
                 ),
             });
         }
-        if constraint.columns.len() < 2 {
-            return Err(SQLError::TypeMismatch(
-                "constraint using WITHOUT OVERLAPS needs at least two columns".into(),
-            ));
-        }
     }
-
-    Ok(())
+    definition::validate_key_definition(
+        &definition::KeyRelation {
+            table: relation.table,
+            columns: relation.columns,
+            partition: relation.partition,
+            has_primary_key: relation
+                .keys
+                .iter()
+                .any(|existing| existing.kind == TableKeyConstraintKind::PrimaryKey),
+        },
+        key,
+    )
 }
-pub fn validate_added_key_identity(
-    table: &str,
-    constraint: &TableKeyConstraint,
-    existing_keys: &[TableKeyConstraint],
-    checks: &[TableCheck],
-    foreign_keys: &[ForeignKey],
-) -> Result<(), SQLError> {
-    if let Some(name) = constraint.name.as_deref() {
-        let check_name_exists = checks
-            .iter()
-            .any(|existing| existing.name.as_deref() == Some(name));
-        let foreign_name_exists = foreign_keys
-            .iter()
-            .any(|existing| existing.name.as_deref() == Some(name));
-        let key_name_exists = existing_keys
-            .iter()
-            .any(|existing| existing.name.as_deref() == Some(name));
-        if check_name_exists || foreign_name_exists || key_name_exists {
-            return Err(SQLError::TypeMismatch(format!(
-                "constraint `{name}` already exists on table `{table}`"
-            )));
-        }
-    }
-    if constraint.kind == crate::ast::TableKeyConstraintKind::PrimaryKey
-        && existing_keys
-            .iter()
-            .any(|existing| existing.kind == crate::ast::TableKeyConstraintKind::PrimaryKey)
-    {
-        return Err(SQLError::TypeMismatch(format!(
-            "multiple PRIMARY KEY constraints are not allowed on table `{table}`"
-        )));
-    }
 
-    Ok(())
+/// The keys that ALTER TABLE ADD COLUMN declares on the new column, transformed as `transformIndexConstraints` transforms the statement: a second primary key fails with the relation's name as written, and a key repeating an earlier key's index is dropped.
+pub fn transform_column_keys(
+    relation: &str,
+    keys: &[TableKeyConstraint],
+) -> Result<Vec<TableKeyConstraint>, SQLError> {
+    if keys
+        .iter()
+        .filter(|key| key.kind == TableKeyConstraintKind::PrimaryKey)
+        .count()
+        > 1
+    {
+        return Err(definition::multiple_primary_keys(relation));
+    }
+    Ok(definition::index_order(keys.to_vec()))
 }
 
 /// Apply the NOT NULL requirement of a primary key to the stored column candidate.
@@ -96,7 +93,7 @@ pub fn apply_primary_key_columns(
     constraint: &TableKeyConstraint,
     columns: &mut [ColumnDef],
 ) -> Result<(), String> {
-    if constraint.kind == crate::ast::TableKeyConstraintKind::PrimaryKey {
+    if constraint.kind == TableKeyConstraintKind::PrimaryKey {
         for key_column in &constraint.columns {
             let column = columns
                 .iter_mut()
@@ -109,3 +106,5 @@ pub fn apply_primary_key_columns(
     }
     Ok(())
 }
+
+pub mod definition;

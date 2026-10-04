@@ -61,7 +61,7 @@ fn table_alter_if_exists_rechecks_a_source_removed_while_waiting() {
         result.unwrap();
         assert_eq!(
             second.take_sql_notices(),
-            [uqa_sql::SQLNotice::notice(
+            [crate::SQLNotice::notice(
                 "relation \"t\" does not exist, skipping"
             )]
         );

@@ -48,6 +48,7 @@ impl Engine {
             assignment: self.mutation_assignment_context(),
             storage: self,
             state: self,
+            identifiers: self,
         }
     }
 }
@@ -63,9 +64,6 @@ impl ColumnBackfillState for Engine {
     }
 }
 impl GeneratedRewriteState for Engine {
-    fn table_names(&self) -> StorageBackendResult<Vec<String>> {
-        Engine::table_names_in_execution(self)
-    }
     fn advance_next_id(&self, table: &str, id: DocId) -> StorageBackendResult<()> {
         Engine::advance_next_id(self, table, id)
     }
@@ -84,6 +82,8 @@ impl Engine {
                 foreign_keys: self.foreign_key_definition_context(),
             },
             namespace: self.relation_creation_context(),
+            sequences: self.implicit_sequence_context(),
+            ownership: self.implicit_ownership_context(),
             state: self,
             transactions: self,
             generated: self.generated_rewrite_context(),

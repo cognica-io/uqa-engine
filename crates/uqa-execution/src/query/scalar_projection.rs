@@ -173,7 +173,7 @@ fn query_candidates<'a>(
 
 fn highlight_error(error: AnalysisError) -> SQLError {
     match error {
-        AnalysisError::Cancelled => SQLError::Cancelled(uqa_core::QueryCancelled),
+        AnalysisError::Cancelled => SQLError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST),
         AnalysisError::Memory(error) => SQLError::Routine {
             sqlstate: "53200".into(),
             message: format!("highlight analysis failed: {error}"),

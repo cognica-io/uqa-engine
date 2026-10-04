@@ -321,7 +321,7 @@ impl TableGrantApplication<'_> {
     ) {
         let requested = self.requested.table.len() + self.requested.columns.len();
         if grantable != requested {
-            notices.push(table_acl_warning(
+            notices.push(super::acl_warning::acl_warning(
                 self.statement.is_grant,
                 grantable != 0,
                 &relation.name,
@@ -474,9 +474,6 @@ pub fn table_sequence_privileges(
     (mapped, inapplicable)
 }
 
-fn table_acl_warning(is_grant: bool, partial: bool, name: &str) -> crate::SQLNotice {
-    super::object_acl::privilege_warning(is_grant, partial, name)
-}
 pub fn view_privilege_updates(
     targets: Vec<(&ResolvedTableGrantTarget, StoredView)>,
     application: &TableGrantApplication<'_>,

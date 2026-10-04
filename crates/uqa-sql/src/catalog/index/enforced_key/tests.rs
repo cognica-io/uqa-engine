@@ -18,6 +18,7 @@ fn declared(name: &str) -> EnforcedKey {
         name: Some(name.into()),
         kind: TableKeyConstraintKind::Unique,
         columns: vec!["value".into()],
+        included_columns: Vec::new(),
         nulls_not_distinct: true,
         without_overlaps: false,
     }

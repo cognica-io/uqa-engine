@@ -88,6 +88,8 @@ pub struct ConstraintCatalogRow {
     pub foreign_key: Option<ForeignKeyCatalogData>,
     /// The expression of a CHECK constraint.
     pub expression: Option<uqa_sql::ast::Expr>,
+    /// The catalog row of the constraint this one derives from, which `pg_constraint.conparentid` names; such a constraint is not local and is inherited once.
+    pub parent_oid: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -194,6 +196,7 @@ pub struct PendingConstraintCatalogRow {
     pub period: bool,
     pub foreign_key: Option<ForeignKeyCatalogData>,
     pub expression: Option<uqa_sql::ast::Expr>,
+    pub parent_oid: Option<i64>,
 }
 
 #[expect(
@@ -243,6 +246,7 @@ pub fn constraint_catalog_rows(
                     period: false,
                     foreign_key: None,
                     expression: None,
+                    parent_oid: None,
                 });
             }
             if let Some(expr) = &col.check {
@@ -262,6 +266,7 @@ pub fn constraint_catalog_rows(
                     period: false,
                     foreign_key: None,
                     expression: Some(expr.clone()),
+                    parent_oid: None,
                 });
             }
             if let Some(reference) = &col.references {
@@ -272,6 +277,13 @@ pub fn constraint_catalog_rows(
                     &schema,
                     &table,
                     &table_name,
+                    &columns,
+                    &foreign_key,
+                )?);
+                pending.extend(derived_constraint_catalog_rows(
+                    catalog,
+                    &schema,
+                    &table,
                     &columns,
                     &foreign_key,
                 )?);
@@ -302,6 +314,7 @@ pub fn constraint_catalog_rows(
                 name: None,
                 kind,
                 columns: vec![column.name.clone()],
+                included_columns: Vec::new(),
                 nulls_not_distinct: false,
                 without_overlaps: false,
             });
@@ -330,6 +343,7 @@ pub fn constraint_catalog_rows(
                 period: constraint.without_overlaps,
                 foreign_key: None,
                 expression: None,
+                parent_oid: None,
             });
         }
 
@@ -350,6 +364,7 @@ pub fn constraint_catalog_rows(
                 period: false,
                 foreign_key: None,
                 expression: Some(constraint.expr.clone()),
+                parent_oid: None,
             });
         }
 
@@ -360,6 +375,13 @@ pub fn constraint_catalog_rows(
                 &schema,
                 &table,
                 &table_name,
+                &columns,
+                foreign_key,
+            )?);
+            pending.extend(derived_constraint_catalog_rows(
+                catalog,
+                &schema,
+                &table,
                 &columns,
                 foreign_key,
             )?);
@@ -384,6 +406,7 @@ pub fn constraint_catalog_rows(
                 period: constraint.period,
                 foreign_key: constraint.foreign_key,
                 expression: constraint.expression,
+                parent_oid: constraint.parent_oid,
             });
         }
     }
@@ -423,6 +446,7 @@ pub fn constraint_catalog_rows(
                     period: false,
                     foreign_key: None,
                     expression: None,
+                    parent_oid: None,
                 });
             }
             if let Some(expression) = &column.check {
@@ -445,6 +469,7 @@ pub fn constraint_catalog_rows(
                     period: false,
                     foreign_key: None,
                     expression: Some(expression.clone()),
+                    parent_oid: None,
                 });
             }
         }
@@ -465,6 +490,7 @@ pub fn constraint_catalog_rows(
                 period: false,
                 foreign_key: None,
                 expression: Some(check.expr.clone()),
+                parent_oid: None,
             });
         }
         for constraint in pending {
@@ -486,6 +512,7 @@ pub fn constraint_catalog_rows(
                 period: constraint.period,
                 foreign_key: constraint.foreign_key,
                 expression: constraint.expression,
+                parent_oid: constraint.parent_oid,
             });
         }
     }
@@ -538,20 +565,8 @@ fn foreign_key_catalog_row(
         .map(|row| serde_json::from_str::<Vec<uqa_sql::ast::IndexKey>>(&row.columns_json))
         .transpose()
         .map_err(|error| SQLError::Internal(error.to_string()))?;
-    let positions_in_unique_constraint = foreign_key
-        .ref_columns
-        .iter()
-        .map(|column| {
-            referenced_key
-                .as_ref()
-                .and_then(|keys| {
-                    keys.iter()
-                        .position(|key| key.column() == Some(column.as_str()))
-                })
-                .map(|index| catalog_ordinal(index, "referenced key column"))
-                .transpose()
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
+    let positions_in_unique_constraint =
+        referenced_key_positions(&foreign_key.ref_columns, referenced_key.as_deref())?;
     Ok(PendingConstraintCatalogRow {
         schema: schema.to_string(),
         table: table.to_string(),
@@ -580,5 +595,170 @@ fn foreign_key_catalog_row(
             match_type: foreign_key.match_type,
         }),
         expression: None,
+        parent_oid: None,
     })
+}
+
+/// The positions of the referenced columns in the referenced key's index, as `information_schema.key_column_usage` reports them.
+fn referenced_key_positions(
+    ref_columns: &[String],
+    keys: Option<&[uqa_sql::ast::IndexKey]>,
+) -> Result<Vec<Option<i64>>, SQLError> {
+    ref_columns
+        .iter()
+        .map(|column| {
+            keys.and_then(|keys| {
+                keys.iter()
+                    .position(|key| key.column() == Some(column.as_str()))
+            })
+            .map(|index| catalog_ordinal(index, "referenced key column"))
+            .transpose()
+        })
+        .collect()
+}
+
+/// A partition's index that a referenced key's index derives, and its keys.
+struct ReferencedKeyIndex {
+    index: [u8; 16],
+    keys: Vec<uqa_sql::ast::IndexKey>,
+}
+
+/// The index of `partition` derived from the referenced key's index `referenced` through the chain of parent indexes, and its keys.
+fn partition_referenced_key(
+    catalog: &CatalogReadView,
+    partition: &str,
+    referenced: Option<[u8; 16]>,
+) -> Result<Option<ReferencedKeyIndex>, SQLError> {
+    let parent_index = catalog
+        .catalog_indexes()
+        .filter_map(|row| crate::catalog::index::index_definition(row).ok())
+        .filter_map(|definition| {
+            Some((
+                definition.catalog?.identity.object_id,
+                definition.relationships.parent_index,
+            ))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let derives_from_referenced_key = |mut index: [u8; 16]| {
+        let mut visited = std::collections::BTreeSet::new();
+        while visited.insert(index) {
+            if Some(index) == referenced {
+                return true;
+            }
+            match parent_index.get(&index).copied().flatten() {
+                Some(parent) => index = parent,
+                None => return false,
+            }
+        }
+        false
+    };
+    for row in catalog
+        .catalog_indexes()
+        .filter(|row| row.table_name == partition)
+    {
+        let Some(identity) = crate::catalog::index::index_definition(row)
+            .ok()
+            .and_then(|definition| definition.catalog)
+        else {
+            continue;
+        };
+        if derives_from_referenced_key(identity.identity.object_id) {
+            let keys = serde_json::from_str::<Vec<uqa_sql::ast::IndexKey>>(&row.columns_json)
+                .map_err(|error| SQLError::Internal(error.to_string()))?;
+            return Ok(Some(ReferencedKeyIndex {
+                index: identity.identity.object_id,
+                keys,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+/// The catalog rows of the constraints `foreign_key` derives on the partitions of the partitioned table it references: rows of the referencing table that reference the partition through its own columns and its index derived from the referenced key, and derive from the foreign key or the parent partition's constraint.
+fn derived_constraint_catalog_rows(
+    catalog: &CatalogReadView,
+    schema: &str,
+    table: &str,
+    columns: &[SQLColumnDef],
+    foreign_key: &ForeignKey,
+) -> Result<Vec<PendingConstraintCatalogRow>, SQLError> {
+    if foreign_key.referenced_partitions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let table_name = format!("{schema}.{table}");
+    let local_columns = named_constraint_columns(&foreign_key.local_columns, columns, &table_name)?;
+    let foreign_key_oid = foreign_key
+        .catalog_identity
+        .ok_or_else(|| SQLError::Internal("FOREIGN KEY has no valid catalog identity".into()))?
+        .oid;
+    let mut rows = Vec::with_capacity(foreign_key.referenced_partitions.len());
+    for derived in &foreign_key.referenced_partitions {
+        let (partition, partition_table) = catalog
+            .snapshot()
+            .tables
+            .iter()
+            .find(|(_, candidate)| candidate.object_id == derived.partition)
+            .ok_or_else(|| SQLError::Internal("referenced partition disappeared".into()))?;
+        let partition_name = partition.qualified_name();
+        let referenced_column_rows = named_constraint_columns(
+            &foreign_key.ref_columns,
+            &partition_table.columns,
+            &partition_name,
+        )?;
+        let referenced_key =
+            partition_referenced_key(catalog, &partition_name, foreign_key.referenced_index)?;
+        let positions_in_unique_constraint = referenced_key_positions(
+            &foreign_key.ref_columns,
+            referenced_key.as_ref().map(|key| key.keys.as_slice()),
+        )?;
+        let referenced_index = referenced_key.map(|key| key.index);
+        let parent_oid = match derived.parent {
+            None => foreign_key_oid,
+            Some(parent) => {
+                foreign_key
+                    .referenced_partitions
+                    .iter()
+                    .find(|candidate| candidate.partition == parent)
+                    .ok_or_else(|| {
+                        SQLError::Internal("derived constraint parent disappeared".into())
+                    })?
+                    .catalog_identity
+                    .oid
+            }
+        };
+        rows.push(PendingConstraintCatalogRow {
+            schema: schema.to_string(),
+            table: table.to_string(),
+            requested_name: Some(derived.name.clone()),
+            object_id: Some(derived.catalog_identity.object_id),
+            catalog_oid: Some(derived.catalog_identity.oid),
+            kind: ConstraintCatalogKind::ForeignKey,
+            columns: local_columns.clone(),
+            state: ConstraintCatalogState::new(
+                ConstraintValidationState::new(foreign_key.enforced, derived.validated),
+                ConstraintDeferralState::new(
+                    foreign_key.deferrable,
+                    foreign_key.initially_deferred,
+                ),
+                ConstraintInheritanceState::new(false),
+            ),
+            period: foreign_key.period,
+            foreign_key: Some(ForeignKeyCatalogData {
+                referenced_index,
+                schema: partition.schema.clone(),
+                table: partition.name.clone(),
+                column_ordinals: referenced_column_rows
+                    .iter()
+                    .map(|column| column.table_ordinal)
+                    .collect(),
+                positions_in_unique_constraint,
+                on_update: foreign_key.on_update,
+                on_delete: foreign_key.on_delete,
+                match_type: foreign_key.match_type,
+            }),
+            parent_oid: Some(parent_oid),
+            expression: None,
+        });
+    }
+    Ok(rows)
 }

@@ -143,7 +143,7 @@ pub fn analyze_text(
                 .map_err(|_| AnalysisError::Cancelled)
         })
         .map_err(|error| match error {
-            AnalysisError::Cancelled => SQLError::Cancelled(uqa_core::QueryCancelled),
+            AnalysisError::Cancelled => SQLError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST),
             AnalysisError::Memory(error) => SQLError::Routine {
                 sqlstate: "53200".into(),
                 message: format!("analysis diagnostic failed: {error}"),

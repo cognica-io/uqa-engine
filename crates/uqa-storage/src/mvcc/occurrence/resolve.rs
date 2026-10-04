@@ -11,13 +11,13 @@ use super::{
     OccurrenceRelatedKey as Related,
 };
 use crate::mvcc::{
-    commit::RecordWriteKind, resolution::ResolutionMode, CommitSequence, CommittedRecordSnapshot,
-    PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges, RecordWrite, VersionError,
-    VersionResult,
+    commit::{PreparedLookup, RecordWriteKind},
+    resolution::ResolutionMode,
+    CommitSequence, CommittedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite,
+    PrivateRecordChanges, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
-use std::collections::BTreeMap;
-use uqa_core::memory::{BudgetedVec, MemoryError};
+use uqa_core::memory::BudgetedVec;
 
 pub(in crate::mvcc) fn resolve(
     original: &PreparedRecordCommit,
@@ -28,18 +28,7 @@ pub(in crate::mvcc) fn resolve(
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
     let changes = PrivateRecordChanges::new(control.memory());
-    let size = original
-        .records()
-        .len()
-        .checked_mul(std::mem::size_of::<(&[u8], &PreparedRecordWrite)>())
-        .ok_or(MemoryError::SizeOverflow)?;
-    // Charge logical entries; allocator-specific tree-node bookkeeping follows the other record maps.
-    let _lookup_memory = control.memory().reserve(size)?;
-    let mut writes = BTreeMap::new();
-    for write in original.records() {
-        control.cancellation().check()?;
-        writes.insert(write.key(), write);
-    }
+    let writes = PreparedLookup::new(original, control)?;
     let resolver = Resolver {
         base,
         current,
@@ -48,8 +37,10 @@ pub(in crate::mvcc) fn resolve(
         changes: &changes,
         control,
     };
-    for (mutation, write) in original.records().iter().enumerate() {
-        control.cancellation().check()?;
+    let mut originals = original.writes();
+    let mut mutation = 0;
+    while let Some(write) = originals.next(control)? {
+        let write = &write;
         match write.kind() {
             RecordWriteKind::Canonical => {
                 resolver.validate(mutation, write)?;
@@ -70,6 +61,7 @@ pub(in crate::mvcc) fn resolve(
                 resolver.merge_write(mutation, write, &writes)?;
             }
         }
+        mutation += 1;
     }
     Ok(changes
         .prepare(control)?
@@ -108,7 +100,7 @@ impl Resolver<'_> {
         &self,
         mutation: usize,
         write: &PreparedRecordWrite,
-        writes: &BTreeMap<&[u8], &PreparedRecordWrite>,
+        writes: &PreparedLookup<'_>,
     ) -> VersionResult<()> {
         let control = self.control;
         let changes = self.changes;
@@ -122,10 +114,12 @@ impl Resolver<'_> {
         let marker = self
             .layout
             .related_key(write.key(), Related::Format, control)?;
-        let source = writes.get(&*marker).ok_or(VersionError::InvalidEncoding(
-            "occurrence changes lack their source marker",
-        ))?;
-        if writes.contains_key(&*fence) || source.kind() == RecordWriteKind::Canonical {
+        let source = writes
+            .get(&marker, control)?
+            .ok_or(VersionError::InvalidEncoding(
+                "occurrence changes lack their source marker",
+            ))?;
+        if writes.contains(&fence, control)? || source.kind() == RecordWriteKind::Canonical {
             self.validate(mutation, write)?;
             changes.apply_owned(
                 &[write.clone().with_kind(RecordWriteKind::Canonical)],
@@ -176,9 +170,12 @@ impl Resolver<'_> {
                     },
                     control,
                 )?;
-                let paired = writes.get(&*peer_key).ok_or(VersionError::InvalidEncoding(
-                    "unpaired occurrence cluster replacement",
-                ))?;
+                let paired =
+                    writes
+                        .get(&peer_key, control)?
+                        .ok_or(VersionError::InvalidEncoding(
+                            "unpaired occurrence cluster replacement",
+                        ))?;
                 if paired.kind() != RecordWriteKind::Occurrence {
                     self.validate(mutation, write)?;
                     changes.apply_owned(
@@ -186,7 +183,7 @@ impl Resolver<'_> {
                         control,
                     )?;
                 } else if let Kind::Score(cluster) = kind {
-                    self.merge_cluster(mutation, write, Some(paired), cluster)?;
+                    self.merge_cluster(mutation, write, Some(&paired), cluster)?;
                 }
             }
             (RecordWriteKind::Occurrence, Kind::Cluster(cluster)) => {
@@ -245,20 +242,14 @@ impl Resolver<'_> {
         } else {
             RecordWriteKind::Occurrence
         };
-        let prepared = PreparedRecordCommit::new(
-            &[RecordWrite {
-                key,
-                expected: revision(self.current, key, self.control)?,
-                value,
-            }],
+        let write = PreparedRecordWrite::copy_bytes(
+            key,
+            revision(self.current, key, self.control)?,
+            value,
             self.control,
         )?;
-        self.changes.apply_owned(
-            &[prepared.records()[0]
-                .clone()
-                .with_kind(self.mode.kind(kind))],
-            self.control,
-        )
+        self.changes
+            .apply_owned(&[write.with_kind(self.mode.kind(kind))], self.control)
     }
     fn invalidate(&self, marker: &[u8]) -> VersionResult<()> {
         for kind in [Related::Skips, Related::BlockMax] {

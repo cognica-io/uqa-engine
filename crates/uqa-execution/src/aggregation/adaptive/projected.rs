@@ -35,7 +35,9 @@ impl AdaptiveAggregateSet {
             return Ok(());
         }
         let hook = context;
-        let context = ScalarEvalContext::from_row_lookup(row, params).with_function_hook(hook);
+        let context = ScalarEvalContext::from_row_lookup(row, params)
+            .with_row_schema(row.row_schema())
+            .with_function_hook(hook);
         if self.consume_projected_group(row, &context)? {
             return Ok(());
         }

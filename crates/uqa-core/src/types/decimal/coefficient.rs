@@ -42,6 +42,19 @@ pub(super) fn multiply(
     )
 }
 
+/// Multiply by one machine word, which needs no power-of-ten coefficient of its own.
+pub(super) fn multiply_by_word(
+    value: &BigInt,
+    factor: u64,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<BigInt>> {
+    run(
+        control,
+        || workspace::multiplication(limbs(value)?, 1),
+        || value * factor,
+    )
+}
+
 pub(super) fn divide(
     left: &BigInt,
     right: &BigInt,

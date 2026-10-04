@@ -40,6 +40,8 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 
 `SMALLINT`, `INTEGER`, and `BIGINT` retain distinct declared identities and enforce PostgreSQL's signed 16-bit, 32-bit, and 64-bit ranges at casts, writes, schema rewrites, and supported migration boundaries. `OID` casts preserve the source integer width, including PostgreSQL's sign-extension behavior for negative `SMALLINT` and `INTEGER`, while negative `BIGINT` to `OID` raises `22003`; `XID` accepts its PostgreSQL text input but rejects integer and OID cast sources with `42846`.
 
+Text input to an integer type reads what PostgreSQL's `int2in`, `int4in` and `int8in` read: surrounding whitespace, an optional sign, and decimal digits or `0x`, `0o` and `0b` digits that single underscores may separate, so `'0x1F'::integer` is 31 and `' 1_000 '::bigint` is 1000. A text outside the type's range reports `22003`, `value "40000" is out of range for type smallint`, and any other text `22P02`.
+
 Serial declarations allocate generated integer identities. Sequence functions `nextval`, `currval`, `lastval`, and `setval` are available, and standalone sequences can be created explicitly. Identity-owned sequence syntax is not implemented.
 
 ## Catalog vectors
@@ -179,7 +181,7 @@ Object key order and formatting are not an application contract for JSONB. Use J
 
 ## BYTEA
 
-`BYTEA` carries arbitrary bytes. `encode` and `decode` convert supported textual encodings, and bytea text input validates hexadecimal digit pairs and legacy escape/octal sequences. When an integer expression has an explicit `SMALLINT`, `INTEGER`, or `BIGINT` source type, its PostgreSQL 18 cast to `BYTEA` emits a signed two-, four-, or eight-byte network-order representation; an unannotated integer expression defaults to `INTEGER`, while boolean, numeric, and floating sources are rejected with PostgreSQL cast SQLSTATEs. `BYTEA`-to-integer casts zero-extend shorter inputs before interpreting the target-width sign bit. Language bindings map byte values to their native byte container, such as Python `bytes` or Node.js `Buffer` and `Uint8Array`.
+`BYTEA` carries arbitrary bytes. `encode` and `decode` convert supported textual encodings. Text input reads PostgreSQL's two formats, as `byteain` does, whether a cast, a literal or parameter written to a column, or `COPY` supplies it: the hex format, `\x` followed by pairs of hex digits that spaces, tabs and line breaks may separate, as in `'\x01 02'`, and the escape format, in which a backslash introduces another backslash or three octal digits, as in `'a\\b\001'`. An odd number of hex digits reports `22023`, `invalid hexadecimal data: odd number of digits`, another character among them `22023`, `invalid hexadecimal digit: "g"`, and any other backslash in the escape format `22P02`, `invalid input syntax for type bytea`. A typed text or integer expression is not written to a `BYTEA` column without a cast and reports `42804`. When an integer expression has an explicit `SMALLINT`, `INTEGER`, or `BIGINT` source type, its PostgreSQL 18 cast to `BYTEA` emits a signed two-, four-, or eight-byte network-order representation; an unannotated integer expression defaults to `INTEGER`, while boolean, numeric, and floating sources are rejected with PostgreSQL cast SQLSTATEs. `BYTEA`-to-integer casts zero-extend shorter inputs before interpreting the target-width sign bit. Language bindings map byte values to their native byte container, such as Python `bytes` or Node.js `Buffer` and `Uint8Array`.
 
 ## REFCURSOR
 

@@ -122,7 +122,7 @@ pub(crate) fn render_relation_component(component: &str) -> String {
     output
 }
 
-fn write_relation_component(
+pub(crate) fn write_relation_component(
     component: &str,
     output: &mut impl std::fmt::Write,
 ) -> std::fmt::Result {

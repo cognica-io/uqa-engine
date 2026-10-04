@@ -98,7 +98,7 @@ fn analyze_text_rejects_wrong_arity_and_argument_types() {
 #[test]
 fn analyze_text_preserves_work_mem_errors_and_recovers() {
     let engine = Engine::new();
-    engine.sql("SET work_mem = '32kB'", &[]).unwrap();
+    engine.set_query_memory_limit(Some(32 * 1024));
     let input = "\u{1f}\"\\\n".repeat(8192);
     let error = engine
         .sql(
@@ -107,6 +107,7 @@ fn analyze_text_preserves_work_mem_errors_and_recovers() {
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("53200"));
+    engine.set_query_memory_limit(None);
     engine.sql("SET work_mem = '16MB'", &[]).unwrap();
     let result = engine
         .sql(

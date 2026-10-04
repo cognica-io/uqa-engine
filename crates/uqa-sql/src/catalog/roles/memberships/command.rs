@@ -222,6 +222,7 @@ impl MembershipTarget {
 pub enum MembershipChange {
     Insert(MembershipInsertion),
     Update(Vec<MembershipUpdate>),
+    /// The membership exists with the requested options, which `PostgreSQL` reports with a notice.
     Notice(crate::SQLNotice),
 }
 

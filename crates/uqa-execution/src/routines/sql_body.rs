@@ -11,16 +11,28 @@ use super::{
 };
 use uqa_sql::{
     assignment::routines::coerce_routine_value_from,
-    plpgsql::runtime_diagnostics::result_row_values, routines::routine_returns_anonymous_record,
+    ast::FunctionBody,
+    binding::{bind_routine_parameter_references, statements::AnalyzedResult},
+    plan::{CommandPlan, UnifiedPlan},
+    plpgsql::runtime_diagnostics::result_row_values,
+    routines::{
+        body_parameters::{is_sql_body_parameter, sql_body_parameter_scope},
+        body_validation::{reject_output_argument_call, reject_undefined_parameters},
+        declaration::RoutineTypeCatalog,
+        resolution::RoutineOverloadContext,
+        result_check::check_sql_function_result,
+        routine_returns_anonymous_record,
+    },
 };
 
-/// `LANGUAGE sql` body: run every statement; the last statement's
-/// result shapes the routine output.
+/// `LANGUAGE sql` body: run every statement, each analyzed just before it runs as `PostgreSQL` analyzes them, with the final statement checked against the declared result before it runs; the last statement's result shapes the routine output. A body given as a string resolves the names of its parameters in each statement when that statement is analyzed.
 #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
 pub fn execute_sql_language(
     context: RoutineContext<'_>,
+    types: &dyn RoutineTypeCatalog,
+    overloads: &RoutineOverloadContext<'_>,
     def: &CreateFunction,
-    plans: &[uqa_sql::plan::UnifiedPlan],
+    plans: &[UnifiedPlan],
     bound: &[Value],
 ) -> Result<RoutineOutcome, SQLError> {
     let call_params = def.call_params();
@@ -36,6 +48,7 @@ pub fn execute_sql_language(
         .iter()
         .cloned()
         .zip(call_params)
+        .filter(|(_, parameter)| is_sql_body_parameter(parameter))
         .map(|(value, parameter)| {
             let ty = uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name)
                 .ok()
@@ -50,19 +63,52 @@ pub fn execute_sql_language(
             Ok(SQLParam::typed_scalar(value, ty))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
+    if plans.is_empty() {
+        check_sql_function_result(types, def, None)?;
+    }
+    let check_result =
+        |result: &AnalyzedResult| check_sql_function_result(types, def, Some(result));
+    let parameters = matches!(def.body, FunctionBody::Source(_))
+        .then(|| sql_body_parameter_scope(def, &params))
+        .transpose()?;
     let mut last = SQLResult::empty();
-    for plan in plans {
+    for (position, plan) in plans.iter().enumerate() {
+        let mut statement = plan.clone();
+        if let Some(parameters) = &parameters {
+            context
+                .statements
+                .with_statement_scope(&mut |routines, ctes| {
+                    bind_routine_parameter_references(
+                        routines,
+                        &mut statement,
+                        &params,
+                        ctes,
+                        parameters,
+                    )
+                })?;
+        }
+        reject_undefined_parameters(&mut statement, params.len())?;
+        if let UnifiedPlan::Command(command) = &statement {
+            if let CommandPlan::Call { name, args } = command.as_ref() {
+                reject_output_argument_call(overloads, types, name, args, &mut |argument| {
+                    context.expressions.expression_type(argument, &params)
+                })?;
+            }
+        }
         let _direct_routine_command = matches!(
-            plan,
-            uqa_sql::plan::UnifiedPlan::Command(command)
+            &statement,
+            UnifiedPlan::Command(command)
                 if matches!(
                     command.as_ref(),
-                    uqa_sql::plan::CommandPlan::Call { .. }
-                        | uqa_sql::plan::CommandPlan::DoBlock { .. }
+                    CommandPlan::Call { .. } | CommandPlan::DoBlock { .. }
                 )
         )
         .then(|| DirectRoutineCommandGuard::enter(context.session));
-        last = context.statements.execute_plan(plan, &params)?;
+        let check = (position + 1 == plans.len())
+            .then_some(&check_result as super::context::StatementResultCheck<'_>);
+        last = context
+            .statements
+            .execute_body_statement(statement, &params, check)?;
     }
     let out_params = def.output_params();
     let returns_anonymous_record = routine_returns_anonymous_record(def);
@@ -75,24 +121,16 @@ pub fn execute_sql_language(
     } else {
         out_params.len()
     };
-    // PostgreSQL enforces the final statement's column shape at
-    // CREATE time; the engine has no schema binding there, so the
-    // same 42P13 error surfaces on the first call instead.
-    let shape_checked =
-        !returns_void && !returns_anonymous_record && (!def.is_procedure || !out_params.is_empty());
-    if shape_checked && last.columns.len() != expected {
-        return Err(sql_body_shape_error(def));
-    }
     if def.returns_set() {
         let mut set_rows = Vec::with_capacity(last.rows.len());
         for row_index in 0..last.rows.len() {
-            let mut values = result_row_values(&last, row_index).unwrap_or_default();
-            if !returns_anonymous_record && values.len() != expected {
-                return Err(sql_body_shape_error(def));
-            }
+            let values = result_row_values(&last, row_index).unwrap_or_default();
             if returns_anonymous_record {
-                values = vec![anonymous_record_value(&last.columns, values)];
-            } else if out_params.is_empty() {
+                set_rows.push(vec![anonymous_record_value(&last.columns, values)]);
+                continue;
+            }
+            let (mut values, expanded) = expand_lone_row(values, expected)?;
+            if out_params.is_empty() {
                 if let FunctionReturns::SetOf { type_name } = &def.returns {
                     values[0] = coerce_routine_value_from(
                         context.expressions,
@@ -102,14 +140,17 @@ pub fn execute_sql_language(
                     )?;
                 }
             } else {
-                for ((value, parameter), source) in
-                    values.iter_mut().zip(&out_params).zip(&last.column_types)
-                {
+                for (index, (value, parameter)) in values.iter_mut().zip(&out_params).enumerate() {
+                    let source = if expanded {
+                        None
+                    } else {
+                        last.column_types.get(index).and_then(Option::as_ref)
+                    };
                     *value = coerce_routine_value_from(
                         context.expressions,
                         value,
                         &parameter.type_name,
-                        source.as_ref(),
+                        source,
                     )?;
                 }
             }
@@ -127,12 +168,18 @@ pub fn execute_sql_language(
     if !out_params.is_empty() {
         let mut out_values = vec![Value::Null; out_params.len()];
         if let Some(values) = first {
+            let (values, expanded) = expand_lone_row(values, expected)?;
             for (idx, value) in values.into_iter().take(out_values.len()).enumerate() {
+                let source = if expanded {
+                    None
+                } else {
+                    last.column_types.get(idx).and_then(Option::as_ref)
+                };
                 out_values[idx] = coerce_routine_value_from(
                     context.expressions,
                     &value,
                     &out_params[idx].type_name,
-                    last.column_types.get(idx).and_then(Option::as_ref),
+                    source,
                 )?;
             }
         }
@@ -176,15 +223,35 @@ fn anonymous_record_value(columns: &[String], values: Vec<Value>) -> Value {
     Value::Record(columns.iter().cloned().zip(values).collect())
 }
 
-fn sql_body_shape_error(def: &CreateFunction) -> SQLError {
-    let declared = match &def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            type_name.clone()
-        }
-        FunctionReturns::Table | FunctionReturns::None => "record".into(),
-    };
-    SQLError::Routine {
-        sqlstate: "42P13".into(),
-        message: format!("return type mismatch in function declared to return {declared}"),
+/// The output columns of a result row, and whether they came from a row value: a lone row value that the final statement returns for several output columns is the whole result, and its fields fill the columns in order, as `PostgreSQL` returns it.
+fn expand_lone_row(
+    mut values: Vec<Value>,
+    expected: usize,
+) -> Result<(Vec<Value>, bool), SQLError> {
+    if expected < 2 || values.len() != 1 {
+        return Ok((values, false));
     }
+    let fields = match values.remove(0) {
+        Value::Row(fields) => fields,
+        Value::Record(fields) => fields.into_iter().map(|(_, value)| value).collect(),
+        Value::Null => return Ok((vec![Value::Null; expected], true)),
+        other => {
+            return Err(SQLError::Internal(format!(
+                "the lone row column of a SQL function result held {other:?}"
+            )))
+        }
+    };
+    if fields.len() != expected {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42804".into(),
+            message: "function return row and query-specified return row do not match".into(),
+            detail: Some(format!(
+                "Returned row contains {} attribute{}, but query expects {expected}.",
+                fields.len(),
+                if fields.len() == 1 { "" } else { "s" }
+            )),
+            hint: None,
+        });
+    }
+    Ok((fields, true))
 }

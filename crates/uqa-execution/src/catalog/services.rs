@@ -18,8 +18,10 @@ pub trait CatalogSession: Sync {
     fn current_role(&self) -> RoleReference;
     fn temporary_schema_name(&self) -> String;
     fn relation_name_resolution(&self) -> RelationNameResolution;
-    fn show_variable(&self, name: &str) -> Result<String, SQLError>;
-    fn runtime_parameter_source(&self, name: &str) -> &'static str;
+    /// The canonical name of the parameter `name` refers to and its value as `SHOW` reports it.
+    fn show_parameter(&self, name: &str) -> Result<(String, String), SQLError>;
+    /// Every parameter that `SHOW ALL` and `pg_settings` report, in name order.
+    fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting>;
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata>;
     fn cursors(&self) -> Vec<CursorMetadata>;
 }

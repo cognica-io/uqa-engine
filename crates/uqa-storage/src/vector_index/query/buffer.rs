@@ -24,14 +24,6 @@ impl<T> VectorQueryBuffer<T> {
         })
     }
 
-    pub(crate) fn ordinary(values: Vec<T>) -> Self {
-        Self(Buffer::Ordinary(values))
-    }
-
-    pub(crate) fn controlled(values: BudgetedVec<T>) -> Self {
-        Self(Buffer::Controlled(values))
-    }
-
     pub(crate) fn reserve(&mut self, additional: usize) -> StorageBackendResult<()> {
         match &mut self.0 {
             Buffer::Ordinary(values) => values.reserve(additional),

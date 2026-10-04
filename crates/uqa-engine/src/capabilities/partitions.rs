@@ -39,20 +39,10 @@ impl PartitionCatalog for Engine {
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Engine::describe_table_in_execution(self, table).map_err(|error| error.to_string())
     }
-    fn can_view_partition_key(
-        &self,
-        table: &str,
-        columns: &[Option<&str>],
-    ) -> Result<bool, SQLError> {
-        self.table_authorization_context()
-            .can_view_key_columns(table, columns)
-    }
-    fn failing_row_detail(&self, table: &str, row: &ResultRow) -> Result<Option<String>, SQLError> {
-        let columns = self
-            .describe_table_in_execution(table)
-            .map_err(|error| SQLError::Internal(format!("read failing row type: {error}")))?
-            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-        uqa_execution::mutation::constraints::failing_row_detail(self, table, &columns, row)
+    fn try_table_object_id(&self, table: &str) -> Result<Option<[u8; 16]>, String> {
+        Engine::try_table(self, table)
+            .map(|table| table.map(|table| table.object_id()))
+            .map_err(|error| error.to_string())
     }
 }
 

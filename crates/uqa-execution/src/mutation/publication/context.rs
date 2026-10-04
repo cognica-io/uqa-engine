@@ -12,14 +12,18 @@ use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 pub type DocumentVectors = BTreeMap<FieldName, Vec<Vec<f32>>>;
 pub trait MutationStorage {
+    /// Deferral is valid only while physical row publication cannot invoke expressions that observe earlier text changes.
+    fn can_defer_document_text(&self, table: &str) -> Result<bool, SQLError>;
     fn delete_document(&self, table: &str, doc_id: DocId) -> Result<(), SQLError>;
+    /// Delete under the original tuple lock; the publication owner removes text before observers run.
+    fn delete_document_deferred_text(&self, table: &str, doc_id: DocId) -> Result<(), SQLError>;
     fn insert_document(
         &self,
         table: &str,
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: super::InsertedIdentity,
     ) -> Result<(), SQLError>;
     fn insert_document_deferred_text(
         &self,
@@ -27,7 +31,7 @@ pub trait MutationStorage {
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: super::InsertedIdentity,
     ) -> Result<(), SQLError>;
     fn rewrite_document(
         &self,
@@ -35,6 +39,19 @@ pub trait MutationStorage {
         doc_id: DocId,
         document: Document,
     ) -> Result<(), SQLError>;
+    /// Publish a prepared rewrite under its existing tuple lock; the caller publishes text before allowing statement observers to run.
+    fn rewrite_document_deferred_text(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+    ) -> Result<(), SQLError>;
+    /// Raise the table's document identity watermark to a supplied identity before the rows that carry identities up to it are published. The answer tells which identities no document of the table ever had.
+    fn observe_document_identity(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<uqa_storage::mvcc::ObservedIdentifier, SQLError>;
 }
 pub trait MutationTextIndex {
     fn text_fields(

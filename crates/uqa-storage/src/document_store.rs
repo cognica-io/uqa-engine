@@ -184,6 +184,17 @@ pub trait DocumentStore: Send + Sync {
     /// Persist one typed storage record. Every backend owns the physical representation of tuple metadata and must keep it outside the public field map.
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()>;
 
+    /// Persist a document whose identity no document of the table ever had, as the caller has established from the identity watermark of `namespace`. A provider that keys its records by that namespace may write them without reading what they would replace, and only while it stores the table under that namespace; a record that exists after all fails the commit. The default replaces as `put_stored` does.
+    fn put_stored_unused(
+        &mut self,
+        doc_id: DocId,
+        document: StoredDocument,
+        namespace: identifiers::DocumentIdNamespace,
+    ) -> StorageBackendResult<()> {
+        let _ = namespace;
+        self.put_stored(doc_id, document)
+    }
+
     /// Read one typed storage record without projecting metadata into user fields.
     fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>>;
 
@@ -563,6 +574,27 @@ pub trait DocumentStore: Send + Sync {
         _limit: usize,
         _fields: &[&str],
         _visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        Ok(None)
+    }
+
+    /// Visit a bounded ascending projection while permitting the provider to retain a physical read borrow. The caller must not reenter storage, invoke host callbacks, or execute nested SQL from `visitor`. Missing fields are SQL NULL; stopping the visitor must not decode later rows. `None` must leave the visitor uncalled. Providers without a physical borrow reuse their ordinary projected cursor.
+    fn for_each_next_fields_borrowed(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        self.for_each_next_fields(after, limit, fields, visitor)
+    }
+
+    /// Visit requested point projections, including missing rows and duplicate IDs, in caller order while allowing a physical read borrow. Neither the visitor nor its callees may reenter storage, invoke host callbacks, or execute nested SQL. A stopped visitor must not read later IDs. `Some(count)` counts callbacks; `None` must leave the visitor uncalled and selects the ordinary projection path.
+    fn for_each_fields_multi_borrowed(
+        &self,
+        _ids: &[DocId],
+        _fields: &[&str],
+        _visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<Option<usize>> {
         Ok(None)
     }

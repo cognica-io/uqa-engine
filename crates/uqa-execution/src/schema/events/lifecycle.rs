@@ -33,11 +33,15 @@ impl EventLifecycleContext<'_> {
             .resolve_visible_relation_kind(requested)?;
         match resolution {
             RelationResolution::MissingSchema(schema) if if_exists => {
-                self.notice(format!("schema \"{schema}\" does not exist, skipping"));
+                self.notice(uqa_sql::SQLNotice::notice(format!(
+                    "schema \"{schema}\" does not exist, skipping"
+                )));
                 Ok(None)
             }
             RelationResolution::MissingRelation if if_exists => {
-                self.notice(format!("relation \"{requested}\" does not exist, skipping"));
+                self.notice(uqa_sql::SQLNotice::notice(format!(
+                    "relation \"{requested}\" does not exist, skipping"
+                )));
                 Ok(None)
             }
             resolution => Ok(Some(resolution)),
@@ -189,10 +193,10 @@ impl EventLifecycleContext<'_> {
             .and_then(|entries| entries.remove(&statement.name));
         if removed.is_none() {
             if statement.if_exists {
-                self.notice(format!(
+                self.notice(uqa_sql::SQLNotice::notice(format!(
                     "rule \"{}\" for relation \"{}\" does not exist, skipping",
                     statement.name, table
-                ));
+                )));
                 return Ok(());
             }
             return Err(undefined_rule(&statement.name, &table));
@@ -390,10 +394,10 @@ impl EventLifecycleContext<'_> {
             .and_then(|entries| entries.remove(&statement.name));
         let Some(removed) = removed else {
             if statement.if_exists {
-                self.notice(format!(
+                self.notice(uqa_sql::SQLNotice::notice(format!(
                     "trigger \"{}\" for relation \"{}\" does not exist, skipping",
                     statement.name, table
-                ));
+                )));
                 return Ok(());
             }
             return Err(undefined_object("trigger", &statement.name, &relation.name));
@@ -532,10 +536,8 @@ fn new_trigger_object_id() -> Result<[u8; 16], SQLError> {
 }
 
 impl EventLifecycleContext<'_> {
-    pub(super) fn notice(&self, message: impl Into<String>) {
-        self.notices
-            .lock()
-            .push(uqa_sql::SQLNotice::notice(message));
+    pub(super) fn notice(&self, notice: uqa_sql::SQLNotice) {
+        self.notices.push(notice);
     }
 
     /// The OID of the rule `InsertRule` creates, or `None` when it replaces a rule, whose OID it keeps. Reserving reads a catalog snapshot, which includes the rule registry, so it precedes the registry's write guard.

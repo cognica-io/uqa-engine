@@ -388,10 +388,12 @@ fn rebuild_analysis_failure_preserves_existing_index() {
     idx.add_document(1, fields([("title", "rust")])).unwrap();
 
     let error = idx
-        .try_rebuild_documents(vec![
-            (2, fields([("title", "sqlite")])),
-            (3, fields([("body", "failure")])),
-        ])
+        .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+            vec![
+                (2, fields([("title", "sqlite")])),
+                (3, fields([("body", "failure")])),
+            ],
+        ))
         .unwrap_err();
     assert!(error.to_string().contains("gram"));
     assert_eq!(idx.doc_count().unwrap(), 1);
@@ -469,10 +471,12 @@ fn batch_coalesces_replacements_removals_and_clusters() {
 #[test]
 fn rebuild_duplicate_document_uses_only_final_lengths() {
     let mut idx = idx();
-    idx.try_rebuild_documents(vec![
-        (1, fields([("title", "old old")])),
-        (1, fields([("title", "new")])),
-    ])
+    idx.try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+        vec![
+            (1, fields([("title", "old old")])),
+            (1, fields([("title", "new")])),
+        ],
+    ))
     .unwrap();
 
     assert_eq!(idx.doc_count().unwrap(), 1);
@@ -487,10 +491,12 @@ fn rebuild_documents_replaces_postings_and_stats() {
     idx.add_document(1, fields([("title", "old rust")]))
         .unwrap();
 
-    idx.try_rebuild_documents(vec![
-        (2, fields([("title", "new search")])),
-        (3, fields([("title", "new rust search")])),
-    ])
+    idx.try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+        vec![
+            (2, fields([("title", "new search")])),
+            (3, fields([("title", "new rust search")])),
+        ],
+    ))
     .unwrap();
 
     assert!(idx.get_posting_list("title", "old").unwrap().is_empty());

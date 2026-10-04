@@ -12,10 +12,10 @@ use parking_lot::RwLock;
 
 use super::{ManagedConnection, SQLiteResult, SQLiteVectorIndex};
 use uqa_storage::hnsw_index::HNSWIndex;
+use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::vector_index::HNSWIndexParams;
 use uqa_storage::ReadOnlySnapshot;
 
-mod consistency;
 mod encoding;
 mod lifecycle;
 mod loading;
@@ -36,6 +36,7 @@ pub struct SQLiteHNSWIndex {
     pub(super) params: HNSWIndexParams,
     pub(super) graph: Arc<RwLock<Option<CachedGraph>>>,
     pub(super) require_persisted_graph: bool,
+    pub(super) physical_control: StorageReadControl,
 }
 
 #[derive(Clone)]
@@ -73,6 +74,9 @@ impl SQLiteHNSWIndex {
             params,
             graph: Arc::new(RwLock::new(None)),
             require_persisted_graph: false,
+            physical_control: StorageReadControl::with_limit(
+                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+            ),
         }
     }
 

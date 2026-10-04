@@ -266,7 +266,7 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         let connection = open(mode, &path);
         Catalog::open(connection.clone()).unwrap();
         bind(&connection);
-        let mut vectors = index(&connection, IndexKind::Ivf, "new\0日本語");
+        let mut vectors = index(&connection, IndexKind::Ivf, "new\0\u{65e5}\u{672c}\u{8a9e}");
         let empty = vectors.snapshot().unwrap();
         vectors.initialize().unwrap();
         vectors.add(1, X.to_vec()).unwrap();
@@ -277,7 +277,10 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         let private = vectors.snapshot().unwrap();
         let observer = connection.new_session();
         assert_eq!(
-            nearest(&*index(&observer, IndexKind::Ivf, "new\0日本語"), &X),
+            nearest(
+                &*index(&observer, IndexKind::Ivf, "new\0\u{65e5}\u{672c}\u{8a9e}"),
+                &X
+            ),
             vec![1]
         );
         observer.with_physical(|sqlite| {
@@ -287,7 +290,7 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         assert!(connection.commit_transaction().is_err());
         assert!(connection.in_transaction());
         assert_eq!(
-            index(&observer, IndexKind::Ivf, "new\0日本語")
+            index(&observer, IndexKind::Ivf, "new\0\u{65e5}\u{672c}\u{8a9e}")
                 .count()
                 .unwrap(),
             3
@@ -309,11 +312,12 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         drop((vectors, empty, old, private, observer, connection));
         let reopened = open(mode, &path);
         bind(&reopened);
-        let mut restored = index(&reopened, IndexKind::Ivf, "new\0日本語");
+        let mut restored = index(&reopened, IndexKind::Ivf, "new\0\u{65e5}\u{672c}\u{8a9e}");
         assert_eq!(restored.count().unwrap(), 4);
         assert_eq!(nearest(&*restored, &Y), vec![1]);
         let retained = restored.snapshot().unwrap();
-        SQLiteIVFIndex::drop_metadata(&reopened, "new\0日本語", "embedding").unwrap();
+        SQLiteIVFIndex::drop_metadata(&reopened, "new\0\u{65e5}\u{672c}\u{8a9e}", "embedding")
+            .unwrap();
         assert_eq!(restored.count().unwrap(), 4);
         assert_eq!(nearest(&*retained, &Y), vec![1]);
         assert!(restored
@@ -408,14 +412,29 @@ fn native_vector_budget_failures_do_not_leave_partial_private_replacements() {
         let mut vectors = index(&connection, kind, "docs");
         vectors.add(1, X.to_vec()).unwrap();
         vectors.initialize().unwrap();
+        let backend = uqa_storage_sqlite::SQLiteStorageBackend::new(connection.clone());
+        let control = uqa_storage::PersistentStorageBackend::retention_control(&backend).unwrap();
+        let reject_at_capacity = |vectors: &mut dyn VectorIndex| {
+            // Large inputs may spill; exhaust the shared allowance to require a budget error.
+            let held = control
+                .memory()
+                .reserve(control.memory().limit() - control.memory().used())
+                .unwrap();
+            let error = vectors.add_many(1, vec![Z.to_vec(); 2]).unwrap_err();
+            assert!(
+                matches!(error, uqa_storage::StorageBackendError::Memory(_)),
+                "{kind:?}: {error}"
+            );
+            drop(held);
+        };
         connection.begin_transaction().unwrap();
         vectors.add(2, Y.to_vec()).unwrap();
-        assert!(vectors.add_many(1, vec![Z.to_vec(); 4096]).is_err());
+        reject_at_capacity(&mut *vectors);
         assert_eq!(vectors.count().unwrap(), 2);
         assert_eq!(ids(&*vectors, &X), vec![1]);
         connection.commit_transaction().unwrap();
         let mut absent = index(&connection, kind, "absent");
-        assert!(absent.add_many(1, vec![Z.to_vec(); 4096]).is_err());
+        reject_at_capacity(&mut *absent);
         assert!(!connection.in_transaction());
         assert_eq!(absent.count().unwrap(), 0);
         absent.add(1, X.to_vec()).unwrap();
@@ -424,7 +443,40 @@ fn native_vector_budget_failures_do_not_leave_partial_private_replacements() {
 }
 
 #[test]
-fn native_exact_materialization_accounts_for_the_aggregate_vector_collection() {
+fn oversized_native_hnsw_input_preserves_private_and_committed_vectors() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions {
+            retained_bytes: 64 << 10,
+        })
+        .unwrap();
+    let mut vectors = index(&connection, IndexKind::Hnsw, "docs");
+    vectors.add(1, X.to_vec()).unwrap();
+    vectors.initialize().unwrap();
+    for explicit in [false, true] {
+        if explicit {
+            connection.begin_transaction().unwrap();
+            vectors.add(2, Y.to_vec()).unwrap();
+        }
+        let error = vectors.add_many(1, vec![Z.to_vec(); 4096]).unwrap_err();
+        assert!(
+            matches!(error, uqa_storage::StorageBackendError::Memory(_)),
+            "{error}"
+        );
+        assert_eq!(connection.in_transaction(), explicit);
+        assert_eq!(vectors.count().unwrap(), if explicit { 2 } else { 1 });
+        assert_eq!(ids(&*vectors, &X), vec![1]);
+        if explicit {
+            connection.commit_transaction().unwrap();
+        }
+    }
+    vectors.add(3, Z.to_vec()).unwrap();
+    assert_eq!(vectors.count().unwrap(), 3);
+}
+
+#[test]
+fn native_exact_scoring_bounds_resident_payloads_and_rejects_unadmitted_reads() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();
     let mut vectors = SQLiteVectorIndex::new(connection.clone(), "docs", "embedding", 64);
@@ -438,11 +490,24 @@ fn native_exact_materialization_accounts_for_the_aggregate_vector_collection() {
         })
         .unwrap();
     assert_eq!(vectors.count().unwrap(), 512);
+    let found = vectors.search_knn(&[1.0; 64], 1).unwrap();
+    assert_eq!(found.entries().len(), 1);
+    assert_eq!(found.entries()[0].doc_id, 0);
+    assert!((found.entries()[0].payload.score - 1.0).abs() < 1e-6);
+    let backend = uqa_storage_sqlite::SQLiteStorageBackend::new(connection.clone());
+    let control = uqa_storage::PersistentStorageBackend::retention_control(&backend).unwrap();
+    let retained = control.memory().used();
+    let held = control
+        .memory()
+        .reserve(control.memory().limit() - retained)
+        .unwrap();
     let error = vectors.search_knn(&[1.0; 64], 1).unwrap_err();
     assert!(
         matches!(error, uqa_storage::StorageBackendError::Memory(_)),
         "{error}"
     );
+    drop(held);
+    assert_eq!(control.memory().used(), retained);
     assert_eq!(vectors.count().unwrap(), 512);
     vectors.add(0, vec![0.0; 64]).unwrap();
     assert_eq!(vectors.count().unwrap(), 512);

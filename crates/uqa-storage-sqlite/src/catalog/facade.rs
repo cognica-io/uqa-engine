@@ -83,6 +83,14 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::graph_vertex(self, id))
     }
 
+    fn for_each_graph_vertex_borrowed(
+        &self,
+        ids: &[u64],
+        visit: &mut dyn FnMut(u64, Option<&uqa_storage::GraphVertexRow>) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        into_storage_result(Catalog::for_each_graph_vertex_borrowed(self, ids, visit))
+    }
+
     fn graph_edge(&self, id: u64) -> StorageBackendResult<Option<EdgeRow>> {
         into_storage_result(Catalog::graph_edge(self, id))
     }
@@ -362,6 +370,16 @@ impl CatalogFacade for Catalog {
         into_storage_result(self.native_sequence_has_private_changes(object_id))
     }
 
+    fn sequence_value_has_private_changes(
+        &self,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(
+            self.native_sequence_value_has_private_changes(object_id, definition_generation),
+        )
+    }
+
     fn reserve_sequence_values(
         &self,
         name: &str,
@@ -393,6 +411,24 @@ impl CatalogFacade for Catalog {
             value,
             called,
             log_count,
+        ))
+    }
+
+    fn log_sequence_values(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+        expected: (i64, bool),
+        logged: uqa_storage::catalog::SequenceValuePosition,
+    ) -> StorageBackendResult<uqa_storage::catalog::SequenceLogResult> {
+        into_storage_result(Catalog::log_sequence_values(
+            self,
+            name,
+            object_id,
+            definition_generation,
+            expected,
+            logged,
         ))
     }
 

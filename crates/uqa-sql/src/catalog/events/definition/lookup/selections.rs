@@ -81,6 +81,40 @@ impl EventLookupContext<'_> {
     ) -> Result<Vec<StoredTrigger>, SQLError> {
         let relation = self.analysis.resolve_trigger_table(table)?;
         let replica = self.state.session_replication_role_is_replica();
+        Ok(self
+            .matching_triggers(&relation, timing, event, row, updated_columns)?
+            .into_iter()
+            .filter(|trigger| {
+                if replica {
+                    trigger.enabled.fires_in_replica()
+                } else {
+                    trigger.enabled.fires_in_origin()
+                }
+            })
+            .collect())
+    }
+
+    /// The triggers of `table` for a timing, a level and an event, whatever replication role fires them. `PostgreSQL` copies a relation's trigger descriptor when a statement begins to write the relation and reads the replication role at each firing, so a statement takes its triggers from here once and applies the role itself.
+    pub fn trigger_definitions_for(
+        &self,
+        table: &str,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+        row: bool,
+        updated_columns: &[String],
+    ) -> Result<Vec<StoredTrigger>, SQLError> {
+        let relation = self.analysis.resolve_trigger_table(table)?;
+        self.matching_triggers(&relation, timing, event, row, updated_columns)
+    }
+
+    fn matching_triggers(
+        &self,
+        relation: &uqa_core::RelationIdentity,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+        row: bool,
+        updated_columns: &[String],
+    ) -> Result<Vec<StoredTrigger>, SQLError> {
         let relations = if row {
             self.partition_trigger_sources(&relation.qualified_name())?
         } else {
@@ -91,7 +125,7 @@ impl EventLookupContext<'_> {
         for source in relations {
             for trigger in triggers.get(&source).into_iter().flat_map(BTreeMap::values) {
                 let mut trigger = trigger.clone();
-                if source != relation {
+                if source != *relation {
                     trigger.definition.table = relation.qualified_name();
                 }
                 candidates
@@ -102,11 +136,7 @@ impl EventLookupContext<'_> {
         Ok(candidates
             .into_values()
             .filter(|trigger| {
-                (if replica {
-                    trigger.enabled.fires_in_replica()
-                } else {
-                    trigger.enabled.fires_in_origin()
-                }) && trigger.definition.timing == timing
+                trigger.definition.timing == timing
                     && trigger.definition.row == row
                     && trigger.definition.events.contains(&event)
                     && (event != TriggerEvent::Update

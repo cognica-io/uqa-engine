@@ -17,6 +17,10 @@ use super::VersionResult;
 pub(super) struct RecordKey(Arc<BudgetedVec<u8>>);
 
 impl RecordKey {
+    pub(super) fn from_budgeted(bytes: BudgetedVec<u8>) -> Self {
+        Self(Arc::new(bytes))
+    }
+
     pub(super) fn new(bytes: &[u8], memory: &MemoryBudget) -> VersionResult<Self> {
         let mut owned = BudgetedVec::new(memory);
         owned.extend_from_slice(bytes)?;

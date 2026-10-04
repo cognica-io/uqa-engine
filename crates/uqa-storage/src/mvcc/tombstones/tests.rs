@@ -125,11 +125,11 @@ fn tombstone_reclamation_checks_read_only_absence_requirements_and_preserves_kno
         .unwrap()
         .with_reclamation_epoch(Some(3));
     assert!(matches!(
-        prepared.validate_reclamation_epoch(b"owned/", 4, 4, control.cancellation()),
+        prepared.validate_reclamation_epoch(b"owned/", 4, 4, &control),
         Err(VersionError::ReclaimedObservation { .. })
     ));
     prepared
-        .validate_reclamation_epoch(b"outside/", 4, 4, control.cancellation())
+        .validate_reclamation_epoch(b"outside/", 4, 4, &control)
         .unwrap();
     for epoch in [None, Some(2), Some(5)] {
         let changed = PreparedRecordCommit::new(&[], &control)
@@ -138,11 +138,11 @@ fn tombstone_reclamation_checks_read_only_absence_requirements_and_preserves_kno
             .unwrap()
             .with_reclamation_epoch(epoch);
         assert!(changed
-            .validate_reclamation_epoch(b"owned/", 3, 4, control.cancellation())
+            .validate_reclamation_epoch(b"owned/", 3, 4, &control)
             .is_err());
     }
     prepared
-        .validate_reclamation_epoch(b"owned/", 3, 4, control.cancellation())
+        .validate_reclamation_epoch(b"owned/", 3, 4, &control)
         .unwrap();
 }
 

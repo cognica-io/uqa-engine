@@ -15,6 +15,8 @@ mod legacy_vectors;
 mod native_storage;
 #[path = "support/pg18_oracle.rs"]
 mod pg18_oracle;
+#[path = "support/waits.rs"]
+mod waits;
 
 #[path = "catalog.rs"]
 mod catalog;

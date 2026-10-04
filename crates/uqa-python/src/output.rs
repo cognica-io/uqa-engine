@@ -8,23 +8,8 @@
 
 use super::{
     BTreeMap, CalibrationReport, Py, PyAny, PyDict, PyDictMethods, PyList, PyListMethods, PyResult,
-    PyValueError, Python, PythonMigrationReport, SQLNotice, ScoredEntry,
+    PyValueError, Python, PythonMigrationReport, ScoredEntry,
 };
-
-/// Each notice as a dict of its severity, SQLSTATE, message, DETAIL and HINT.
-pub(super) fn sql_notices_to_py(py: Python<'_>, notices: &[SQLNotice]) -> PyResult<Py<PyAny>> {
-    let list = PyList::empty(py);
-    for notice in notices {
-        let dict = PyDict::new(py);
-        dict.set_item("level", notice.severity.as_str())?;
-        dict.set_item("sqlstate", &notice.sqlstate)?;
-        dict.set_item("message", &notice.message)?;
-        dict.set_item("detail", notice.detail.as_deref())?;
-        dict.set_item("hint", notice.hint.as_deref())?;
-        list.append(dict)?;
-    }
-    Ok(list.into_any().unbind())
-}
 
 pub(super) fn parse_scoring_params(name: &str, json: &str) -> PyResult<BTreeMap<String, f64>> {
     serde_json::from_str(json).map_err(|err| {

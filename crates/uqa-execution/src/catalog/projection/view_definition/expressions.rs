@@ -362,13 +362,7 @@ impl Deparser<'_> {
             _ => {}
         }
         if let [left, right] = args {
-            let operator = match name {
-                "like" => Some(("~~", 40)),
-                "ilike" => Some(("~~*", 40)),
-                "concat_op" => Some(("||", 45)),
-                _ => None,
-            };
-            if let Some((operator, precedence)) = operator {
+            if let Some((operator, precedence)) = binary_function_operator(name) {
                 return Ok(self.parenthesize(format!(
                     "{} {operator} {}",
                     self.operand(left, precedence, false, scope, subqueries)?,
@@ -799,4 +793,31 @@ fn operator(op: BinaryOp) -> &'static str {
         BinaryOp::Multiply => "*",
         BinaryOp::Divide => "/",
     }
+}
+
+/// The operator and its precedence that a function of two arguments prints as.
+fn binary_function_operator(name: &str) -> Option<(&'static str, u8)> {
+    match name {
+        "like" => Some(("~~", 40)),
+        "ilike" => Some(("~~*", 40)),
+        "concat_op" => Some(("||", 45)),
+        _ => None,
+    }
+}
+
+/// Whether a function node prints as a call, `name(arguments)`, rather than as subscripts or an operator.
+pub(super) fn prints_as_call(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+) -> bool {
+    let printed_otherwise = matches!(
+        binding.and_then(|binding| binding.dispatch),
+        Some(
+            FunctionDispatch::ArraySubscripts
+                | FunctionDispatch::ArraySlices
+                | FunctionDispatch::NumericOperator(_)
+        )
+    ) || (args.len() == 2 && binary_function_operator(name).is_some());
+    !printed_otherwise
 }

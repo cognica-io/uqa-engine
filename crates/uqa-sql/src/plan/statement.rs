@@ -129,6 +129,7 @@ impl UnifiedPlan {
                     target_alias: statement.target_alias,
                     include_descendants: statement.include_descendants,
                     columns: lower_targets(statement.columns, aggregates, &mut subqueries),
+                    overriding: statement.overriding,
                     ctes,
                     rows,
                     source,

@@ -30,9 +30,27 @@ pub(crate) struct StatisticsChange {
     object_id: [u8; 16],
     count: u64,
     reset: bool,
+    /// For changes a session keeps: a commit sequence at or after the last commit that made them, or `None` when its provider numbers no commits. An analysis that sampled at or after it has seen them.
+    through: Option<u64>,
 }
 
 pub(crate) type StatisticsChanges = BTreeMap<String, StatisticsChange>;
+
+/// What a commit did with the statistics changes of its transaction. The session takes it over once the commit has succeeded: a failed or undone commit leaves what the session kept as it was.
+#[derive(Clone, Default)]
+pub(crate) struct StatisticsSettlement {
+    /// Tables whose maintenance record the transaction wrote, with every change the session had kept of them.
+    recorded: Vec<String>,
+    /// Changes the session keeps to itself, including the ones it kept before.
+    kept: StatisticsChanges,
+}
+
+impl StatisticsSettlement {
+    /// Whether the transaction wrote a maintenance record, which the automatic statistics worker should see.
+    pub(crate) fn recorded(&self) -> bool {
+        !self.recorded.is_empty()
+    }
+}
 
 /// Process-local health of the database's automatic statistics worker.
 /// A failed refresh retains its durable pending state and is retried.
@@ -93,7 +111,18 @@ impl Engine {
         if self.storage.catalog.is_none()
             || table.persistence == uqa_sql::ast::RelationPersistence::Temporary
         {
-            return Ok(());
+            let previous_rows = table
+                .column_stats
+                .read()
+                .values()
+                .next()
+                .map(|stats| stats.row_count);
+            return table.statistics_maintenance.lock().record_changes(
+                table.object_id(),
+                count,
+                previous_rows,
+                now_ms(),
+            );
         }
         let mut stack = self.session.transactions.lock();
         if let Some(frame) = stack.last_mut() {
@@ -103,6 +132,7 @@ impl Engine {
                     object_id: table.object_id(),
                     count: 0,
                     reset: false,
+                    through: None,
                 };
             }
             change.count = change.count.saturating_add(count);
@@ -115,20 +145,33 @@ impl Engine {
                 object_id: table.object_id(),
                 count,
                 reset: false,
+                through: None,
             },
         )]);
-        self.persist_statistics_changes(&changes)?;
+        let settlement = self.persist_statistics_changes(&changes)?;
+        self.settle_statistics_changes(settlement);
         self.wake_automatic_statistics();
         Ok(())
     }
 
+    /// Write the maintenance records the changes of a committing transaction call for. A session keeps the changes that decide nothing ([`MaintenanceState::defers`]) to itself and records them with a later commit, where an analysis learns of every committed write from the table's data generation instead of from this record.
     pub(crate) fn persist_statistics_changes(
         &self,
         changes: &StatisticsChanges,
-    ) -> StorageBackendResult<()> {
+    ) -> StorageBackendResult<StatisticsSettlement> {
+        let mut settlement = StatisticsSettlement::default();
         let Some(catalog) = self.storage.catalog.as_deref() else {
-            return Ok(());
+            return Ok(settlement);
         };
+        // A session keeps changes only where an analysis can do without the record: cache generations tell it of every committed write to what it sampled, and numbered commits tell the session which of its changes the analysis saw.
+        let keeps = self.epochs.storage_cache_revisions.lock().is_some()
+            && self
+                .storage
+                .backend
+                .as_ref()
+                .is_some_and(|backend| backend.transaction_model().is_versioned());
+        let kept = self.session.kept_statistics.lock().clone();
+        let now = now_ms();
         let tables = self.storage.tables.read();
         for (name, change) in changes {
             if change.count == 0 {
@@ -143,20 +186,74 @@ impl Engine {
                 continue;
             };
             let mut state = MaintenanceState::load_for(catalog, name, change.object_id)?;
+            // What the session kept counts unless an analysis has sampled the commits that made it.
+            let earlier = kept
+                .get(name)
+                .filter(|earlier| {
+                    earlier.object_id == change.object_id && !state.covers(earlier.through)
+                })
+                .map_or(0, |earlier| earlier.count);
+            let count = earlier.saturating_add(change.count);
+            if keeps && state.defers(count, now) {
+                settlement.kept.insert(
+                    name.clone(),
+                    StatisticsChange {
+                        object_id: change.object_id,
+                        count,
+                        reset: false,
+                        through: None,
+                    },
+                );
+                continue;
+            }
             state.record_changes(
                 change.object_id,
-                change.count,
+                count,
                 table
                     .column_stats
                     .read()
                     .values()
                     .next()
                     .map(|stats| stats.row_count),
-                now_ms(),
+                now,
             )?;
             state.save(catalog, name)?;
+            settlement.recorded.push(name.clone());
         }
-        Ok(())
+        Ok(settlement)
+    }
+
+    /// Take over what a successful commit did with its statistics changes. The caller has left the transaction that committed them.
+    pub(crate) fn settle_statistics_changes(&self, settlement: StatisticsSettlement) {
+        // Read after the commit, so that it lies at or after every commit of the kept changes. A session that is still inside a transaction would read that transaction's earlier view.
+        let through = (!settlement.kept.is_empty())
+            .then(|| {
+                let backend = self.storage.backend.as_ref()?;
+                if backend.in_transaction() {
+                    return None;
+                }
+                backend.change_version().ok()?
+            })
+            .flatten();
+        let mut kept = self.session.kept_statistics.lock();
+        for name in settlement.recorded {
+            kept.remove(&name);
+        }
+        kept.extend(settlement.kept.into_iter().map(|(name, mut change)| {
+            change.through = through;
+            (name, change)
+        }));
+    }
+
+    /// The commit sequence an analysis that samples now reads at, for the record it writes. `None` where commits are not numbered, and in a transaction that reads its data at an earlier fixed snapshot than its storage view.
+    pub(crate) fn statistics_sample_sequence(&self) -> Option<u64> {
+        let backend = self.storage.backend.as_ref()?;
+        if !backend.transaction_model().is_versioned()
+            || self.current_transaction_uses_fixed_snapshot()
+        {
+            return None;
+        }
+        backend.change_version().ok().flatten()
     }
 
     pub(crate) fn merge_statistics_changes(
@@ -182,6 +279,7 @@ impl Engine {
                     object_id,
                     count: 0,
                     reset: true,
+                    through: None,
                 },
             );
         }

@@ -81,8 +81,11 @@ pub fn build_pg_constraint(
             };
             let index_oid = constraint_index_oid(&constraint, &indexes);
             let parent_index_constraint_oid = constraint_parent_oid(catalog, &constraint, &indexes);
-            let (inheritance_count, is_local) =
-                constraint_inheritance_state(catalog, resolution, &constraint)?;
+            let (inheritance_count, is_local) = if constraint.parent_oid.is_some() {
+                (1, false)
+            } else {
+                constraint_inheritance_state(catalog, resolution, &constraint)?
+            };
             Ok(row([
                 ("oid", int_value(constraint_row_oid(&constraint))),
                 ("conname", str_value(constraint.name)),
@@ -314,12 +317,15 @@ pub(crate) fn constraint_index_oid(
         .map_or(0, super::CatalogIndexRelation::oid)
 }
 
-/// `conparentid`: the constraint of the parent partitioned table whose index is the parent of this key constraint's index; zero otherwise.
+/// `conparentid`: the foreign key that a constraint derived on a referenced partition belongs to, or the constraint of the parent partitioned table whose index is the parent of this key constraint's index; zero otherwise.
 pub(crate) fn constraint_parent_oid(
     catalog: &CatalogReadView,
     constraint: &ConstraintCatalogRow,
     indexes: &[super::CatalogIndexRelation],
 ) -> i64 {
+    if let Some(parent) = constraint.parent_oid {
+        return parent;
+    }
     let Some(owner) = constraint.object_id else {
         return 0;
     };

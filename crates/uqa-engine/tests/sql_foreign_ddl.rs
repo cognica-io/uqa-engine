@@ -486,7 +486,7 @@ fn foreign_tables_preserve_declared_postgresql_type_identity() {
 #[test]
 fn memory_foreign_scan_is_pull_based_under_tiny_work_mem() {
     let eng = Engine::new();
-    eng.sql("SET work_mem TO '1B'", &[]).unwrap();
+    eng.set_query_memory_limit(Some(1));
     eng.sql(
         "CREATE SERVER mem FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory')",
         &[],

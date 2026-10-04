@@ -9,7 +9,7 @@
 pub(super) mod columns;
 
 use rusqlite::types::{FromSql, ValueRef};
-use uqa_storage::{KeyValueBatch, ValueIndexKey};
+use uqa_storage::{document_store::identifiers::DocumentIdNamespace, KeyValueBatch, ValueIndexKey};
 
 use super::{
     decode_doc_id, decode_value, encode_doc_id, encode_value, BTreeMap, DocId, Result, SQLiteError,
@@ -115,6 +115,19 @@ pub(super) fn load(
         return Ok(None);
     }
     let mut values = Vec::new();
+    // The latest committed entries are read where they are stored, with the session's private entries merged in; any other snapshot visits its records.
+    if snapshot.visit_latest_index_entries(
+        table,
+        owner,
+        field.as_value_ref(),
+        &snapshot.control,
+        &mut |doc_id, value| {
+            values.push((decode_doc_id(doc_id)?, decode_value(value)?));
+            Ok(true)
+        },
+    )? {
+        return Ok(Some(values));
+    }
     snapshot.visit_rows(
         Family::BtreeIndexEntries,
         Some(owner),
@@ -161,13 +174,7 @@ fn entry(
     doc_id: DocId,
     value: &Value,
 ) -> Result<()> {
-    let id = encode_doc_id(doc_id)?;
-    if !snapshot.contains_row(Family::Documents, owner, &[ValueRef::Integer(id)])? {
-        return Err(SQLiteError::StorageBackend(
-            "persistent B-tree entry has no backing document".into(),
-        ));
-    }
-    let encoded = encode_value(value)?;
+    let (id, row) = entry_row(snapshot, owner, doc_id, value)?;
     snapshot.put_row(
         batch,
         Family::BtreeIndexEntries,
@@ -176,9 +183,49 @@ fn entry(
             ValueRef::Text(table.as_bytes()),
             field,
             ValueRef::Integer(id),
-            ValueRef::Text(encoded.as_bytes()),
+            ValueRef::Text(row.as_bytes()),
         ],
     )
+}
+
+/// The entry of a document whose identity no document of the table ever had: no entry of that identity exists to replace.
+fn unused_entry(
+    snapshot: &NativeSnapshot,
+    batch: &mut dyn KeyValueBatch,
+    table: &str,
+    owner: NativeRecordOwner,
+    field: ValueRef<'_>,
+    doc_id: DocId,
+    value: &Value,
+) -> Result<()> {
+    let (id, row) = entry_row(snapshot, owner, doc_id, value)?;
+    snapshot.put_unused_row(
+        batch,
+        Family::BtreeIndexEntries,
+        owner,
+        &[
+            ValueRef::Text(table.as_bytes()),
+            field,
+            ValueRef::Integer(id),
+            ValueRef::Text(row.as_bytes()),
+        ],
+    )
+}
+
+/// The stored identity and value of an entry, whose document must exist.
+fn entry_row(
+    snapshot: &NativeSnapshot,
+    owner: NativeRecordOwner,
+    doc_id: DocId,
+    value: &Value,
+) -> Result<(i64, String)> {
+    let id = encode_doc_id(doc_id)?;
+    if !snapshot.contains_row(Family::Documents, owner, &[ValueRef::Integer(id)])? {
+        return Err(SQLiteError::StorageBackend(
+            "persistent B-tree entry has no backing document".into(),
+        ));
+    }
+    Ok((id, encode_value(value)?))
 }
 
 pub(super) fn replace_many(
@@ -258,22 +305,33 @@ pub(super) fn repair(
     Ok(())
 }
 
+/// Apply one document write. `unused` names the namespace in which no document ever had `doc_id`; while the table's rows are stored under it, the document's entries replace none.
 pub(super) fn apply_write(
     snapshot: &NativeSnapshot,
     batch: &mut dyn KeyValueBatch,
     table: &str,
     doc_id: DocId,
     values: Option<&BTreeMap<ValueIndexKey, Value>>,
+    unused: Option<DocumentIdNamespace>,
 ) -> Result<()> {
     let id = encode_doc_id(doc_id)?;
     let Some(owner) = snapshot.table_owner(table)? else {
         return Ok(());
     };
     if let Some(values) = values {
+        let write = if unused.is_some_and(|namespace| owner.stores(namespace)) {
+            unused_entry
+        } else {
+            entry
+        };
         for (field, value) in values {
             let field = SQLiteValueIndexKey(field);
-            if snapshot.contains_row(Family::BtreeIndexes, owner, &[field.as_value_ref()])? {
-                entry(
+            if snapshot.contains_definition_row(
+                Family::BtreeIndexes,
+                owner,
+                &[field.as_value_ref()],
+            )? {
+                write(
                     snapshot,
                     batch,
                     table,

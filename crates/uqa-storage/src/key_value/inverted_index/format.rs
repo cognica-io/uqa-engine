@@ -58,6 +58,16 @@ pub(super) fn legacy_prefixes(table: &str) -> StorageBackendResult<Vec<Vec<u8>>>
 
 impl OccurrenceRead<'_> {
     pub(super) fn needs_source_rebuild(&self) -> StorageBackendResult<bool> {
+        self.store.control().check()?;
+        if let Some(required) = self.format_requires_rebuild.get() {
+            return Ok(required);
+        }
+        let required = self.read_source_rebuild_requirement()?;
+        self.format_requires_rebuild.set(Some(required));
+        Ok(required)
+    }
+
+    fn read_source_rebuild_requirement(&self) -> StorageBackendResult<bool> {
         let format = self
             .store
             .get(&keys::kind_prefix(self.table, keys::FORMAT)?)?;

@@ -160,17 +160,17 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn try_rebuild_documents(
         &mut self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn super::TextIndexSource,
     ) -> StorageBackendResult<()> {
-        self.rebuild_documents_inner(documents, None)
+        self.rebuild_documents_inner(source, None)
     }
 
     fn try_rebuild_documents_cancellable(
         &mut self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn super::TextIndexSource,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
-        self.rebuild_documents_inner(documents, Some(cancellation))
+        self.rebuild_documents_inner(source, Some(cancellation))
     }
 
     fn try_add_documents(
@@ -603,13 +603,13 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         revision: Arc<uqa_analysis::CompiledAnalyzer>,
         phase: AnalyzerPhase,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn super::TextIndexSource,
     ) -> StorageBackendResult<()> {
         let mut replacement = Self::with_bindings(self.bindings.clone());
         replacement
             .set_field_analyzer_revision(field, revision, phase)
             .map_err(crate::StorageBackendError::Other)?;
-        replacement.try_rebuild_documents(documents)?;
+        replacement.try_rebuild_documents(source)?;
         *self = replacement;
         Ok(())
     }
@@ -619,7 +619,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         revision: Arc<uqa_analysis::CompiledAnalyzer>,
         phase: AnalyzerPhase,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn super::TextIndexSource,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         cancellation.check()?;
@@ -627,7 +627,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         replacement
             .set_field_analyzer_revision(field, revision, phase)
             .map_err(crate::StorageBackendError::Other)?;
-        replacement.rebuild_documents_inner(documents, Some(cancellation))?;
+        replacement.rebuild_documents_inner(source, Some(cancellation))?;
         *self = replacement;
         Ok(())
     }
@@ -636,11 +636,11 @@ impl InvertedIndex for MemoryInvertedIndex {
 impl MemoryInvertedIndex {
     fn rebuild_documents_inner(
         &mut self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn super::TextIndexSource,
         cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<()> {
         let mut replacement = Self::with_bindings(self.bindings.clone());
-        for (doc_id, fields) in documents {
+        while let Some((doc_id, fields)) = source.next_document()? {
             if let Some(cancellation) = cancellation {
                 cancellation.check()?;
             }

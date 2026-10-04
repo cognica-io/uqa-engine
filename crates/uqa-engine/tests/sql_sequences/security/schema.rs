@@ -359,7 +359,7 @@ fn schema_grant_error_precedence_and_atomicity_match_postgresql() {
             &[],
         )
         .unwrap();
-    assert_single_warning(
+    assert_single_grant_warning(
         &engine,
         "no privileges were granted for \"schema_grant_space\"",
     );

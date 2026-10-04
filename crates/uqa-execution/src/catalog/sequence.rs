@@ -46,6 +46,44 @@ const fn sequence_cache_size_default() -> i64 {
     1
 }
 
+impl SequenceState {
+    /// The key of this allocation generation's position.
+    #[must_use]
+    pub const fn position_key(&self, object_id: [u8; 16]) -> crate::row_locks::SequencePositionKey {
+        crate::row_locks::SequencePositionKey {
+            object: object_id,
+            definition: self.definition_generation,
+        }
+    }
+
+    /// The state with the value state of the durable record its generation's latest commit holds, when there is one.
+    #[must_use]
+    pub fn with_record(mut self, record: Option<&uqa_storage::SequenceValuePosition>) -> Self {
+        if let Some(record) = record {
+            self.current = record.current;
+            self.called = record.called;
+            self.log_count = record.log_count;
+        }
+        self
+    }
+
+    /// The state at the exact position recorded for it. The value state held here is the durable record's, which runs ahead of the values handed out while a position is recorded.
+    #[must_use]
+    pub fn at_position(
+        mut self,
+        recorded: Option<crate::row_locks::RecordedSequencePosition>,
+    ) -> Self {
+        if let Some(position) =
+            recorded.and_then(|recorded| recorded.continuing((self.current, self.called)))
+        {
+            self.current = position.current;
+            self.called = position.called;
+            self.log_count = position.log_count;
+        }
+        self
+    }
+}
+
 use super::security::BoundSequenceSecurity;
 use uqa_core::RelationIdentity;
 use uqa_storage::{SequenceOptions, SequenceRow, StorageBackendError, StorageBackendResult};
@@ -80,6 +118,7 @@ pub fn sequence_row(
 }
 
 pub mod catalog_oids;
+pub mod latest_values;
 pub mod restoration;
 
 pub mod session;

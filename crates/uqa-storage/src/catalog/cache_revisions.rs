@@ -13,8 +13,9 @@ use std::collections::BTreeMap;
 /// mutation, including direct storage writes, and restore them on rollback.
 /// Missing support is distinct from an empty, unchanged database.
 /// Generations are opaque equality tokens, not clocks or counts. A logical
-/// provider may use a separate domain for transaction-private changes; rollback
-/// restores the prior tokens and commit replaces them with durable generations.
+/// provider may use the domain at or above [`Self::PRIVATE_GENERATION_BASE`]
+/// for transaction-private changes; rollback restores the prior tokens and
+/// commit replaces them with durable generations.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CatalogCacheRevisions {
     pub table_catalog: u64,
@@ -28,4 +29,14 @@ pub struct CatalogCacheRevisions {
     /// Physical schema changes also invalidate bindings, even when a caller
     /// changed the storage schema without an ordinary catalog operation.
     pub storage_schema: u64,
+}
+
+impl CatalogCacheRevisions {
+    /// The first generation of the domain reserved for changes private to the reading transaction. Durable generations stay below it.
+    pub const PRIVATE_GENERATION_BASE: u64 = 1 << 63;
+
+    /// Whether `generation` identifies a change private to the reading transaction instead of a committed generation.
+    pub fn is_private_generation(generation: u64) -> bool {
+        generation >= Self::PRIVATE_GENERATION_BASE
+    }
 }

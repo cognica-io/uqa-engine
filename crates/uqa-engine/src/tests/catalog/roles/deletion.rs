@@ -65,7 +65,7 @@ fn drop_preflight_rejects_special_targets_without_partial_role_publication() {
         error(&first, "DROP ROLE IF EXISTS absent, CURRENT_USER", "22023");
         assert_eq!(
             first.take_sql_notices(),
-            vec![uqa_sql::SQLNotice::notice(
+            vec![crate::SQLNotice::notice(
                 "role \"absent\" does not exist, skipping"
             )]
         );

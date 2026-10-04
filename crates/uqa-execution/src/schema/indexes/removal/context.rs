@@ -51,5 +51,5 @@ pub struct IndexRemovalContext<'a> {
     pub publication: &'a dyn IndexRemovalPublication,
     pub constraints: ConstraintAlterContext<'a>,
     pub transactions: &'a dyn IndexRemovalTransactions,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }

@@ -150,6 +150,7 @@ pub(super) fn lower_merge_when(
         crate::ast::MergeWhen::InsertNotMatched {
             condition,
             columns,
+            overriding,
             values,
         } => {
             let condition = lower_optional(condition);
@@ -160,6 +161,7 @@ pub(super) fn lower_merge_when(
             MergeWhenPlan::InsertNotMatched {
                 condition,
                 columns: lower_targets(columns, aggregates, subqueries),
+                overriding,
                 values,
             }
         }

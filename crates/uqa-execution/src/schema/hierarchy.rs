@@ -5,12 +5,14 @@
 //
 
 //! Execute inheritance changes and partition attachment against active catalog and row state.
+use super::constraints::partition_foreign_keys::{
+    PartitionForeignKeyInheritance, PartitionForeignKeyTables,
+};
 use super::publication::{hierarchy::HierarchySchemaChange, SchemaPublicationContext};
 use crate::catalog::RelationResolution;
 use crate::mutation::constraints::context::ConstraintContext;
 use uqa_sql::schema::inheritance::alter::{
-    append_inherited_foreign_keys, append_inherited_keys, install_inherited_identity,
-    normalize_parent_sequence_numbers,
+    append_inherited_keys, install_inherited_identity, normalize_parent_sequence_numbers,
 };
 use uqa_sql::semantics::partition::PartitionContext;
 use uqa_sql::{
@@ -51,6 +53,7 @@ pub struct HierarchyContext<'a> {
     pub constraint_modes: &'a dyn detachment::DetachedConstraintModes,
 }
 
+mod attached_indexes;
 pub mod detachment;
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
@@ -226,22 +229,31 @@ fn attach_partition(
         &partition,
         &bound,
     )?;
+    // PostgreSQL builds the partition's indexes while it attaches the partition, and scans the rows against the partition constraint and the foreign keys afterwards.
+    let prior_indexes = attached_indexes::prior_indexes(context, parent, &partition)?;
+    let (subtree, foreign_keys) = inherit_partition_schema(context, parent, &partition, &bound)?;
+    attached_indexes::validate_attached_indexes(context, parent, &prior_indexes)?;
     validate_attached_rows(context, parent, &partition, &bound)?;
     validate_default_partition_exclusion(context, parent, &bound)?;
-
-    let subtree = inherit_partition_schema(context, parent, &partition, &bound)?;
+    foreign_keys.validate(context)?;
     for target in subtree {
         validate_existing_constraints(context, &target)?;
     }
-    Ok(())
+    // The foreign keys referencing the parent or its ancestors derive constraints on the attached subtree.
+    super::publication::referenced_partitions::republish_referencing_tables(
+        &context.publication,
+        parent,
+        crate::row_locks::RelationLockMode::ShareRowExclusive,
+    )
 }
 
+/// Publish the attached subtree as partitions: the parent's keys and foreign keys reach each table that lacks them. The inherited foreign keys are returned for validation once the rows are known to belong to the partition.
 fn inherit_partition_schema(
     context: &HierarchyContext<'_>,
     parent: &str,
     partition: &str,
     bound: &PartitionBound,
-) -> Result<Vec<String>, SQLError> {
+) -> Result<(Vec<String>, PartitionForeignKeyInheritance), SQLError> {
     let parent_columns = table_columns(context, parent, "ATTACH PARTITION")?;
     let inherited_identity = parent_columns
         .iter()
@@ -261,17 +273,29 @@ fn inherit_partition_schema(
         .catalog
         .try_foreign_keys(parent)
         .map_err(|error| ddl_storage_error("ATTACH PARTITION constraints", error))?;
-    let subtree = context
-        .constraints
-        .catalog
-        .hierarchy_scan_tables(partition, true)?;
-    for target in &subtree {
+    // The partition first, then its own partitions, each after its parent, as the foreign keys recurse.
+    let mut subtree = vec![(partition.to_string(), parent.to_string())];
+    subtree.extend(
+        uqa_sql::semantics::partition::partition_tree(&context.partitions, partition, false)?
+            .into_iter()
+            .map(|node| (node.table, node.parent)),
+    );
+    let mut foreign_keys = PartitionForeignKeyInheritance::default();
+    for (target, target_parent) in &subtree {
         let mut columns = table_columns(context, target, "ATTACH PARTITION")?;
         let identity_overrides = install_inherited_identity(&mut columns, &inherited_identity)?;
         let mut constraints = declared_constraints(context, target, "ATTACH PARTITION")?;
         let inherited_keys = append_inherited_keys(&mut constraints.key_constraints, &parent_keys);
-        let inherited_foreign_keys =
-            append_inherited_foreign_keys(&mut constraints.foreign_keys, &parent_foreign_keys);
+        let inherited_foreign_keys = foreign_keys
+            .inherit(
+                context,
+                target,
+                target_parent,
+                &parent_foreign_keys,
+                &mut columns,
+                &mut constraints,
+            )?
+            .copies;
         let mut hierarchy = constraints.hierarchy.clone();
         hierarchy.partition_identity_overrides = identity_overrides;
         hierarchy.partition_inherited_key_constraints = inherited_keys;
@@ -295,7 +319,51 @@ fn inherit_partition_schema(
         )
         .map_err(|error| ddl_storage_error("ATTACH PARTITION", error))?;
     }
-    Ok(subtree)
+    Ok((
+        subtree.into_iter().map(|(table, _)| table).collect(),
+        foreign_keys,
+    ))
+}
+
+impl PartitionForeignKeyTables for HierarchyContext<'_> {
+    fn declared(&self, table: &str) -> Result<(Vec<ColumnDef>, TableConstraintSet), SQLError> {
+        Ok((
+            table_columns(self, table, "ALTER TABLE hierarchy")?,
+            declared_constraints(self, table, "ALTER TABLE hierarchy")?,
+        ))
+    }
+    fn bound_foreign_keys(&self, table: &str) -> Result<Vec<ForeignKey>, SQLError> {
+        self.catalog
+            .try_foreign_keys(table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE hierarchy foreign keys", error))
+    }
+    fn publish(
+        &self,
+        table: &str,
+        columns: Vec<ColumnDef>,
+        constraints: TableConstraintSet,
+    ) -> Result<(), SQLError> {
+        super::publication::replace_constraint_state(&self.publication, table, columns, constraints)
+            .map_err(|error| ddl_storage_error("ALTER TABLE hierarchy constraints", error))
+    }
+    fn constraint_names(
+        &self,
+        table: &str,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        self.publication.constraint_names().existing_names(table)
+    }
+    fn schema_constraint_names(
+        &self,
+        table: &str,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        self.publication.constraint_names().automatic_names(table)
+    }
+    fn partitions(&self) -> PartitionContext<'_> {
+        self.partitions
+    }
+    fn rows(&self) -> ConstraintContext<'_> {
+        self.constraints
+    }
 }
 
 fn detach_partition(
@@ -335,7 +403,8 @@ fn detach_partition(
         return Err(routine(
             "42P01",
             format!(
-                "relation \"{requested_partition}\" is not a partition of relation \"{}\"",
+                "relation \"{}\" is not a partition of relation \"{}\"",
+                local_relation_name(requested_partition),
                 local_relation_name(parent)
             ),
         ));
@@ -351,6 +420,7 @@ fn detach_partition(
         .as_ref()
         .ok_or_else(|| SQLError::Internal("attached partition lost its bound".into()))?
         .clone();
+    detachment::ensure_no_referencing_rows(context, &partition)?;
     detachment::publish(
         context,
         parent,
@@ -506,6 +576,7 @@ fn validate_existing_constraints(
         };
         crate::mutation::constraints::validate_document_constraints(
             context.constraints,
+            None,
             table,
             &document,
             &[],
@@ -642,8 +713,10 @@ fn validate_matching_persistence(
     )
 }
 
-fn local_relation_name(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
+/// The relation's own name, which `PostgreSQL`'s messages print without its schema.
+fn local_relation_name(name: &str) -> String {
+    uqa_core::RelationIdentity::from_legacy_name(name)
+        .map_or_else(|_| name.to_string(), |identity| identity.name)
 }
 
 fn wrong_object(message: impl Into<String>) -> SQLError {

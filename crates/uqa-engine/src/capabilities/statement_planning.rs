@@ -31,6 +31,24 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
             params,
         )
     }
+
+    fn plan_with_result(
+        &self,
+        plan: uqa_sql::plan::UnifiedPlan,
+        params: &[uqa_sql::SQLParam],
+    ) -> Result<
+        (
+            uqa_sql::plan::UnifiedPlan,
+            uqa_sql::binding::statements::AnalyzedResult,
+        ),
+        SQLError,
+    > {
+        uqa_sql::plan::ExecutablePlanOptimizer::plan_with_result(
+            &self.statement_planning_context(),
+            plan,
+            params,
+        )
+    }
 }
 
 impl Engine {
@@ -61,7 +79,7 @@ impl PlannerStatisticsCatalog for Engine {
         self.query_hierarchy_scan_tables(table, true)
     }
     fn table_row_count(&self, table: &str) -> Result<u64, SQLError> {
-        self.table_doc_count(table)
+        self.table_row_estimate(table)
     }
     fn column_statistics(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
         self.try_query_column_stats(table)

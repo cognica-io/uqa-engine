@@ -58,6 +58,10 @@ impl RoutineTypeCatalog for Catalog {
     fn require_type_usage(&self, _: &ColumnType) -> Result<(), SQLError> {
         Ok(())
     }
+
+    fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        Ok(ty.regtype_name())
+    }
 }
 
 impl RoutineOverloadCatalog for Catalog {

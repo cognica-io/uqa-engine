@@ -435,6 +435,33 @@ impl SQLiteBTreeIndexStore {
         })
     }
 
+    /// Write the entries of a document whose identity no document of the table ever had in `namespace`, so that no entry of that identity exists to replace. The legacy tables replace by primary key either way.
+    pub fn apply_unused_write(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        values: &BTreeMap<uqa_storage::ValueIndexKey, Value>,
+        namespace: uqa_storage::document_store::identifiers::DocumentIdNamespace,
+    ) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                native::apply_write(
+                    snapshot,
+                    batch,
+                    table,
+                    doc_id,
+                    Some(values),
+                    Some(namespace),
+                )
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
+        self.apply_write(table, doc_id, Some(values))
+    }
+
     /// Apply one document write to every persisted field currently loaded by
     /// the engine. A replacement uses the `(table, field, doc_id)` primary key,
     /// so updates never need a separate old-value delete.
@@ -447,7 +474,7 @@ impl SQLiteBTreeIndexStore {
         if self
             .conn
             .with_native_write(|snapshot, batch| {
-                native::apply_write(snapshot, batch, table, doc_id, values)
+                native::apply_write(snapshot, batch, table, doc_id, values, None)
             })?
             .is_some()
         {

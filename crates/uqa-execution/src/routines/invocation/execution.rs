@@ -17,6 +17,7 @@ use uqa_sql::{
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
+
 pub(super) fn execute_routine(
     context: &RoutineInvocationContext<'_>,
     function: &SQLUserFunction,
@@ -46,25 +47,35 @@ pub(super) fn execute_routine(
     uqa_sql::routines::security::ensure_routine_execute_privilege(context.authority, definition)?;
     super::scopes::with_routine_context(context.session, definition, || {
         let body = context.lookup.routine_body(function)?;
-        match &*body {
-            CompiledFunctionBody::PLpgSQL(parsed) => {
-                if specialized.is_some() {
-                    let mut parsed = parsed.clone();
-                    for (index, parameter) in definition.params.iter().enumerate() {
-                        if let Some(PLpgSQLDatum::Var(variable)) = parsed.datums.get_mut(index) {
-                            variable.type_name.clone_from(&parameter.type_name);
-                        }
+        execute_compiled_body(context, definition, specialized.is_some(), &body, bound)
+    })
+}
+
+fn execute_compiled_body(
+    context: &RoutineInvocationContext<'_>,
+    definition: &CreateFunction,
+    specialized: bool,
+    compiled: &CompiledFunctionBody,
+    bound: Vec<Value>,
+) -> Result<RoutineOutcome, SQLError> {
+    match compiled {
+        CompiledFunctionBody::PLpgSQL(parsed) => {
+            if specialized {
+                let mut parsed = parsed.clone();
+                for (index, parameter) in definition.params.iter().enumerate() {
+                    if let Some(PLpgSQLDatum::Var(variable)) = parsed.datums.get_mut(index) {
+                        variable.type_name.clone_from(&parameter.type_name);
                     }
-                    execute_plpgsql_language(context, definition, &parsed, bound)
-                } else {
-                    execute_plpgsql_language(context, definition, parsed, bound)
                 }
-            }
-            CompiledFunctionBody::SQL(statements) => {
-                execute_sql_language(context, definition, statements, &bound)
+                execute_plpgsql_language(context, definition, &parsed, bound)
+            } else {
+                execute_plpgsql_language(context, definition, parsed, bound)
             }
         }
-    })
+        CompiledFunctionBody::SQL(statements) => {
+            execute_sql_language(context, definition, statements, &bound)
+        }
+    }
 }
 
 pub fn execute_trigger_routine(
@@ -105,5 +116,12 @@ fn execute_sql_language(
     plans: &[uqa_sql::plan::UnifiedPlan],
     bound: &[Value],
 ) -> Result<RoutineOutcome, SQLError> {
-    crate::routines::sql_body::execute_sql_language(context.runtime, definition, plans, bound)
+    crate::routines::sql_body::execute_sql_language(
+        context.runtime,
+        context.types,
+        &context.overloads,
+        definition,
+        plans,
+        bound,
+    )
 }

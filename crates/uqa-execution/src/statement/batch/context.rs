@@ -20,6 +20,19 @@ use uqa_sql::{
     SQLError, Statement,
 };
 
+/// Cancel the statement that begins now once the session's `statement_timeout` passes, as `PostgreSQL`'s `start_xact_command` enables the timeout for each statement of a query and `finish_xact_command` disables it; the returned deadline disarms when the statement ends.
+pub fn statement_deadline<S: Clone + 'static>(
+    context: &BatchExecutionContext<'_, S>,
+) -> Option<uqa_core::CancellationDeadline> {
+    let timeout = context.statements.statement_timeout()?;
+    Some(
+        context
+            .runtime
+            .cancellation
+            .deadline(timeout, uqa_core::CancellationReason::StatementTimeout),
+    )
+}
+
 /// Owned cache contents after the session has validated its catalog epochs.
 pub struct CachedStatement {
     pub statement: Arc<Statement>,

@@ -19,8 +19,12 @@ fn unpinned_replacements_reclaim_obsolete_payloads_before_the_transaction_ends()
         assert_eq!(current.value(), Some(payload.as_slice()));
     }
     let prepared = changes.prepare(&control).unwrap();
-    assert_eq!(prepared.records().len(), 1);
-    assert_eq!(prepared.records()[0].value(), Some(payload.as_slice()));
+    assert_eq!(prepared.len(), 1);
+    let mut writes = prepared.writes();
+    let write = writes.next(&control).unwrap().unwrap();
+    assert_eq!(write.value(), Some(payload.as_slice()));
+    drop(write);
+    drop(writes);
     drop(prepared);
     drop(changes);
     assert_eq!(control.memory().used(), 0);
@@ -78,7 +82,11 @@ fn releasing_the_last_savepoint_reclaims_its_obsolete_values_immediately() {
     }
     let final_records = changes.prepare(&control).unwrap();
     changes.rollback().unwrap();
-    assert_eq!(final_records.records()[0].value(), Some(payload.as_slice()));
+    let mut writes = final_records.writes();
+    let write = writes.next(&control).unwrap().unwrap();
+    assert_eq!(write.value(), Some(payload.as_slice()));
+    drop(write);
+    drop(writes);
     drop(final_records);
     assert_eq!(control.memory().used(), 0);
 }

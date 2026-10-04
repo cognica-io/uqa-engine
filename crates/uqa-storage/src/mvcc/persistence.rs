@@ -178,7 +178,7 @@ pub trait VersionedPersistence: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<Option<u64>>;
 
-    /// Atomically observe or reserve identifiers under the database's physical admission. Persist the high watermark before returning; an error may consume identifiers but must never permit their reuse. This operation advances neither record visibility nor transaction allocation, publishes no private records, and survives transaction/savepoint rollback. Implementations and wrappers must preserve the caller's resource/cancellation control and reject a different database incarnation.
+    /// Atomically observe or reserve identifiers under the database's physical admission. Commit the high watermark before returning. A reservation must be durable before it returns, because its identifiers can be used before any record commit; an observation must be durable no later than the next durable commit. An error may consume identifiers but must never permit their reuse. This operation advances neither record visibility nor transaction allocation, publishes no private records, and survives transaction/savepoint rollback. Implementations and wrappers must preserve the caller's resource/cancellation control and reject a different database incarnation.
     fn allocate_identifiers(
         &self,
         namespace: &[u8],
@@ -238,6 +238,11 @@ pub trait VersionedPersistence: Send + Sync {
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>>;
+
+    /// A value that changes whenever any session or process commits to this database, read without capturing a snapshot. Two equal values prove that no commit lies between the two reads. A provider with a monitor reads it before it captures a snapshot and reports that value through [`CommittedRecordSnapshot::commit_monitor`], which lets a session keep its snapshot instead of capturing an identical one. `None` when the provider has no monitor that may read at any time.
+    fn commit_monitor_version(&self) -> VersionResult<Option<u64>> {
+        Ok(None)
+    }
 
     /// Atomically remove obsolete historical revisions under snapshot admission. Preserve the newest revision at/before every live snapshot, all newer revisions, head tombstones and every transaction receipt. Neither visibility nor transaction allocation advances. Wrappers must forward the capability and its resource/cancellation control.
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64>;

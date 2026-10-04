@@ -7,12 +7,14 @@
 //! Table INSERT scheduling, snapshot reads, row staging, and publication.
 use super::{
     codec::{decode_prepared_insert_spill_row, PreparedInsertSpillRow},
+    known_new::KnownNewInserts,
     rows::prepare_values_insert_row,
     source::{
         insert_source_expression_rows, InsertSelectConsumer, InsertSelectIdentity,
         PreparedInsertSelect,
     },
-    triggers::fire_insert_after_triggers,
+    supplied_identities::SuppliedIdentities,
+    triggers::insert_statement_events,
 };
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::{
@@ -22,16 +24,16 @@ use crate::{
         },
         command_scope::MutationOverlayScope,
         conflict::update::InsertConflictLocks,
+        constraints::{partition_insert_target, ConstraintStatement},
         errors::dml_storage_error,
         identity::{
             insert_identity_columns, persist_auto_increment_identity,
             prepare_auto_increment_identity, prepare_insert_identity,
         },
-        prepared::PreparedInsertConflict,
-        publication::{
-            apply_validated_prepared_insert, finish_mutation_publication, MutationPublicationBatch,
-        },
+        publication::{apply_validated_prepared_insert, finish_mutation_publication},
         returning::{dml_returning_result, DmlReturningShape},
+        statement_end,
+        triggers::queue::StatementEvent,
     },
     query::{statement::consumer::QueryOutputMode, CteScope},
 };
@@ -41,10 +43,7 @@ use uqa_sql::{
     plan::{ConflictActionPlan, ConflictPlan, InsertPlan, QueryPlan},
     semantics::{
         conflict::InferenceContext,
-        partition::partition_insert_target,
-        returning::{
-            document_supplied_id, validate_returning_alias_relations, ReturningAnalysisContext,
-        },
+        returning::{validate_returning_alias_relations, ReturningAnalysisContext},
         rules::insert_inputs::{
             required_view_rule_insert_input_positions, view_rule_insert_column_type,
         },
@@ -72,7 +71,9 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
     let preparation = mutation.preparation;
     let assignment = preparation.referential.assignment;
     let triggers = preparation.referential.triggers;
-    let _transition_capture_scope = crate::mutation::triggers::TransitionCaptureScope::enter();
+    let (statement_commands, _running_statement) =
+        statement_end::statement_commands(inherited_ctes);
+    let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     preparation.referential.locking.session.lock_relation(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,
@@ -159,6 +160,9 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             true,
         )?;
     }
+    if stmt.view_rule_relations.is_empty() {
+        super::identity_targets::validate_insert_identity_targets(mutation.identities, stmt)?;
+    }
     uqa_sql::semantics::returning::validate_insert_returning(
         planning.returning,
         stmt,
@@ -170,6 +174,17 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         stmt,
         conflict_update_columns.as_deref(),
     )?;
+    // The columns the statement supplies, which its constraint violations show to a role that may not read the table.
+    let supplied_columns =
+        uqa_sql::semantics::mutation_privileges::insert_target_columns(mutation.privileges, stmt)?
+            .into_iter()
+            .chain(conflict_update_columns.iter().flatten().cloned())
+            .collect::<Vec<_>>();
+    let statement_relation = crate::mutation::constraints::statement_relation(
+        preparation.referential.constraints,
+        &stmt.table,
+    )?;
+    let statement = ConstraintStatement::new(&statement_relation, &supplied_columns);
     let view_original_query = !stmt.view_rule_relations.iter().try_fold(
         false,
         |suppressed, relation| -> Result<bool, SQLError> {
@@ -225,43 +240,46 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         None => None,
     };
     if insert_original_query {
-        crate::mutation::triggers::fire_statement_triggers(
+        statement_commands.after_triggers().fire_before_statement(
             &triggers,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Insert,
-            &[],
+            &StatementEvent::new(&stmt.table, uqa_sql::ast::TriggerEvent::Insert, &[]),
         )?;
     }
     if let Some(columns) = conflict_update_columns.as_deref() {
-        crate::mutation::triggers::fire_statement_triggers(
+        statement_commands.after_triggers().fire_before_statement(
             &triggers,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Update,
-            columns,
+            &StatementEvent::new(&stmt.table, uqa_sql::ast::TriggerEvent::Update, columns),
         )?;
     }
-    let execute_read =
+    let mut statement_scope = None;
+    let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
             let read_assignment = read_context.mutation.preparation.referential.assignment;
-            let mut scope = read_context.mutation.scopes.command_scope(
+            let scope = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
-            )?;
+            )?);
             if let Some(parent) = inherited_ctes {
                 scope.inherit_cte_bindings(parent);
             }
+            scope.set_statement_commands(Arc::clone(&statement_commands));
             scope.set_command_cte_snapshot(statement_snapshot.clone());
-            crate::query::cte::materialize_plan_ctes(
+            crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
                 &stmt.ctes,
+                || {
+                    uqa_sql::semantics::primary_command_cte_references(
+                        &stmt.ctes,
+                        &stmt.query_inputs(),
+                        None,
+                    )
+                },
                 params,
-                &mut scope,
+                scope,
             )?;
             scope.scalar_subqueries.clone_from(&stmt.subqueries);
-            // Resolve the table's primary-key column name. Auto-increment (SERIAL / BIGSERIAL) wins; otherwise the scalar PRIMARY KEY column wins; otherwise use the conventional legacy `id` slot. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.
-            let (auto_id_col, id_column, accepts_supplied_identity) =
+            // Resolve the column that names an inserted row: the table's single PRIMARY KEY column, whether a sequence generates its values or not, and otherwise the conventional legacy `id` slot of a table without declared columns. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.
+            let (auto_id_col, id_column, identity_source) =
                 insert_identity_columns(mutation.identities, &stmt.table, "INSERT")?;
             let mut rule_source_rows = None;
             // INSERT ... SELECT: the query executor feeds each positional physical row directly into the INSERT sink. Ordinary source scans and scalar subqueries retain the statement snapshot, while a VOLATILE callback observes the logical mutations staged by preceding rows of this command.
@@ -286,7 +304,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         InsertSelectIdentity {
                             auto_id_column: auto_id_col.clone(),
                             id_column: id_column.clone(),
-                            accepts_supplied_identity,
+                            identity_source,
                         },
                         conflict_update_columns.clone().unwrap_or_default(),
                     )?);
@@ -311,6 +329,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         events,
                         has_prepared_effect,
                         has_prepared_auto_identity,
+                        supplied_identities,
                     } = consumer.take_prepared()?;
                     drop(overlay);
                     if has_prepared_effect || has_prepared_auto_identity {
@@ -323,11 +342,17 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         )?;
                     }
                     drop(conflict_locks);
+                    let observed = supplied_identities.observe(mutation.publication.storage)?;
                     let cancel = context.query.source.relational.runtime.cancellation_token();
                     let apply_reader = prepared_rows
                         .read_rows()
                         .map_err(crate::physical::physical_exec_error)?;
-                    let mut publication = MutationPublicationBatch::default();
+                    let mut publication = statement_end::publication_batch(&statement_commands);
+                    let mut known_new = KnownNewInserts::new(
+                        preparation.referential.constraints.catalog,
+                        &id_column,
+                        stmt.on_conflict.is_some(),
+                    );
                     for prepared_row in apply_reader {
                         cancel.check()?;
                         let prepared_row =
@@ -337,22 +362,32 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                             document,
                             conflict: prepared,
                         } = decode_prepared_insert_spill_row(prepared_row)?;
+                        let inserted = known_new.identity(
+                            &target_table,
+                            &prepared,
+                            &observed,
+                            mutation.publication.identifiers,
+                        )?;
                         apply_validated_prepared_insert(
                             mutation.publication,
                             &target_table,
                             document,
                             prepared,
-                            false,
+                            inserted,
                             &mut publication,
                         )?;
                     }
                     finish_mutation_publication(mutation.publication, &mut publication)?;
-                    fire_insert_after_triggers(
+                    statement_end::note_written_rows(&statement_commands, &mut publication);
+                    statement_end::end_command(
+                        &statement_commands,
                         &triggers,
-                        &stmt.table,
-                        insert_original_query,
-                        conflict_update_columns.as_deref(),
-                        &events,
+                        &insert_statement_events(
+                            &stmt.table,
+                            insert_original_query,
+                            conflict_update_columns.as_deref(),
+                        ),
+                        events.into_after_rows(),
                     )?;
                     if !stmt.returning.is_empty() {
                         return dml_returning_result(
@@ -363,7 +398,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                                 aliases: &stmt.returning_aliases,
                                 returning: &stmt.returning,
                                 params,
-                                ctes: &scope,
+                                ctes: scope,
                                 supplemental_schema: None,
                             },
                             returning_rows,
@@ -433,18 +468,6 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let overlay = MutationOverlayScope::new(mutation.state);
             let mut conflict_locks = InsertConflictLocks::new(&preparation.referential);
             let input_rows = rule_source_rows.as_deref().unwrap_or(&stmt.rows);
-            let supplied_width = if implicit_columns {
-                input_rows.first().map_or(0, Vec::len)
-            } else {
-                columns.len()
-            };
-            let _supplied_columns = crate::mutation::supplied_columns::SuppliedColumnsScope::enter(
-                crate::mutation::supplied_columns::insert_supplied_columns(
-                    &columns,
-                    supplied_width,
-                    stmt.on_conflict.as_ref(),
-                ),
-            );
             let mut documents = Vec::with_capacity(input_rows.len());
             let mut target_tables = Vec::with_capacity(input_rows.len());
             let mut prepared_conflicts = Vec::with_capacity(input_rows.len());
@@ -452,6 +475,11 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let mut has_prepared_effect = false;
             let mut has_prepared_auto_identity = false;
             let mut pending_rule_rows = Vec::with_capacity(input_rows.len());
+            let discarded_identities = super::identity_targets::user_value_identity_columns(
+                mutation.identities,
+                stmt,
+                columns.iter().map(|column| column.column.as_str()),
+            )?;
             let required_rule_input_positions = (!view_original_query)
                 .then(|| {
                     required_view_rule_insert_input_positions(mutation.rules.rules.analysis, stmt)
@@ -473,6 +501,9 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 }
                 let mut document = Document::new();
                 for (i, col) in columns.iter().take(row.len()).enumerate() {
+                    if discarded_identities.contains(&col.column) {
+                        continue;
+                    }
                     if required_rule_input_positions
                         .as_ref()
                         .is_some_and(|required| !required.contains(&i))
@@ -513,6 +544,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                                     .iter()
                                     .any(|next| next.column == col.column),
                                 action: "INSERT",
+                                new_row: true,
                             },
                             &row[i],
                             None,
@@ -532,13 +564,16 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     mutation.identities,
                     &stmt.table,
                     &id_column,
+                    identity_source,
                     auto_id_col.as_deref(),
+                    stmt.overriding,
                     &mut document,
                     "prepare INSERT identity",
                 )?;
                 has_prepared_auto_identity |= prepared_auto_identity.is_some();
                 let target_table = partition_insert_target(
-                    &preparation.referential.constraints.partitions,
+                    preparation.referential.constraints,
+                    statement,
                     &stmt.table,
                     &document,
                     params,
@@ -554,7 +589,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         mutation.identities,
                         &target_table,
                         &id_column,
-                        accepts_supplied_identity,
+                        identity_source,
                         None,
                         &mut document,
                         "prepare INSERT identity",
@@ -563,17 +598,16 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 if let Some(staged) = prepare_values_insert_row(
                     preparation,
                     stmt,
+                    statement,
                     params,
                     &snapshot_scope,
                     conflict_update_columns.as_deref().unwrap_or(&[]),
-                    auto_id_col.as_deref(),
                     &id_column,
-                    accepts_supplied_identity,
+                    identity_source,
                     target_table,
                     document,
                     insert_identity,
                     &mut conflict_locks,
-                    events.referential_actions_mut(),
                 )? {
                     if let Some(returning) = staged.returning {
                         returning_rows.push(returning);
@@ -590,10 +624,10 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             }
             let mut view_rule_rows = Vec::with_capacity(pending_rule_rows.len());
             for document in &pending_rule_rows {
-                let rule_doc_id = document_supplied_id(
+                let rule_doc_id = crate::mutation::identity::supplied_document_identity(
+                    identity_source,
                     document,
                     &id_column,
-                    auto_id_col.as_deref() == Some(id_column.as_str()),
                 )?;
                 view_rule_rows.push(crate::mutation::rules::RuleRowImage {
                     old_storage_table: None,
@@ -628,7 +662,9 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     mutation.identities,
                     &stmt.table,
                     &id_column,
+                    identity_source,
                     auto_id_col.as_deref(),
+                    stmt.overriding,
                     &mut document,
                     "prepare INSERT identity",
                 )?;
@@ -646,11 +682,12 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                                 &stmt.table,
                                 &mut rule_document,
                             )?;
-                            let rule_doc_id = document_supplied_id(
-                                &rule_document,
-                                &id_column,
-                                auto_id_col.as_deref() == Some(id_column.as_str()),
-                            )?;
+                            let rule_doc_id =
+                                crate::mutation::identity::supplied_document_identity(
+                                    identity_source,
+                                    &rule_document,
+                                    &id_column,
+                                )?;
                             Ok(crate::mutation::rules::RuleRowImage {
                                 old_storage_table: None,
                                 old_doc_id: None,
@@ -681,7 +718,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         continue;
                     }
                     let target_table = partition_insert_target(
-                        &preparation.referential.constraints.partitions,
+                        preparation.referential.constraints,
+                        statement,
                         &stmt.table,
                         &document,
                         params,
@@ -697,7 +735,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                             mutation.identities,
                             &target_table,
                             &id_column,
-                            accepts_supplied_identity,
+                            identity_source,
                             None,
                             &mut document,
                             "prepare INSERT identity",
@@ -706,17 +744,16 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     let Some(staged) = prepare_values_insert_row(
                         preparation,
                         stmt,
+                        statement,
                         params,
                         &snapshot_scope,
                         conflict_update_columns.as_deref().unwrap_or(&[]),
-                        auto_id_col.as_deref(),
                         &id_column,
-                        accepts_supplied_identity,
+                        identity_source,
                         target_table,
                         document,
                         insert_identity,
                         &mut conflict_locks,
-                        events.referential_actions_mut(),
                     )?
                     else {
                         continue;
@@ -745,26 +782,29 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 )?;
             }
             drop(conflict_locks);
-            let mut publication = MutationPublicationBatch::default();
+            let mut supplied_identities = SuppliedIdentities::default();
+            for (target_table, prepared) in target_tables.iter().zip(&prepared_conflicts) {
+                supplied_identities.note(target_table, prepared);
+            }
+            let observed = supplied_identities.observe(mutation.publication.storage)?;
+            let mut publication = statement_end::publication_batch(&statement_commands);
+            let mut known_new = KnownNewInserts::new(
+                preparation.referential.constraints.catalog,
+                &id_column,
+                stmt.on_conflict.is_some(),
+            );
             for ((target_table, document), prepared) in target_tables
                 .into_iter()
                 .zip(documents)
                 .zip(prepared_conflicts)
             {
                 cancel.check()?;
-                let supplied = matches!(
+                let inserted = known_new.identity(
+                    &target_table,
                     &prepared,
-                    PreparedInsertConflict::Insert { supplied: true, .. }
-                );
-                let id_column_is_unique_key = preparation
-                    .referential
-                    .constraints
-                    .catalog
-                    .try_unique_columns(&target_table)
-                    .map_err(|err| dml_storage_error("INSERT", err))?
-                    .contains(&id_column);
-                let known_new =
-                    stmt.on_conflict.is_none() && (!supplied || id_column_is_unique_key);
+                    &observed,
+                    mutation.publication.identifiers,
+                )?;
                 let document = Arc::try_unwrap(document).map_err(|_| {
                     SQLError::Internal("INSERT command overlay retained a staged document".into())
                 })?;
@@ -773,17 +813,21 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     &target_table,
                     document,
                     prepared,
-                    known_new,
+                    inserted,
                     &mut publication,
                 )?;
             }
             finish_mutation_publication(mutation.publication, &mut publication)?;
-            fire_insert_after_triggers(
+            statement_end::note_written_rows(&statement_commands, &mut publication);
+            statement_end::end_command(
+                &statement_commands,
                 &triggers,
-                &stmt.table,
-                insert_original_query,
-                conflict_update_columns.as_deref(),
-                &events,
+                &insert_statement_events(
+                    &stmt.table,
+                    insert_original_query,
+                    conflict_update_columns.as_deref(),
+                ),
+                events.into_after_rows(),
             )?;
             let (rule_returning, rule_affected, rule_sets_command_tag) =
                 if let Some(rule_batch) = rule_batch.as_ref() {
@@ -816,12 +860,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             }
             if !stmt.returning.is_empty() {
                 if let Some(view_rule_returning) = view_rule_returning {
-                    return view_rule_returning.project(
-                        preparation.returning,
-                        params,
-                        &scope,
-                        None,
-                    );
+                    return view_rule_returning.project(preparation.returning, params, scope, None);
                 }
                 let shape = DmlReturningShape {
                     table: &stmt.table,
@@ -829,7 +868,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     aliases: &stmt.returning_aliases,
                     returning: &stmt.returning,
                     params,
-                    ctes: &scope,
+                    ctes: scope,
                     supplemental_schema: None,
                 };
                 if let Some(rule_returning) = rule_returning {
@@ -857,8 +896,10 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 },
             ))
         };
-    match statement_snapshot.as_deref() {
+    let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
         None => execute_read(context),
-    }
+    }?;
+    statement_end::finish_statement(context, params, &stmt.ctes, statement_scope.as_mut())?;
+    Ok(result)
 }

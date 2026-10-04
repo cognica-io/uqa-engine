@@ -27,7 +27,7 @@ fn occurrence_validation_borrows_complete_graphs_and_preserves_cancellation() {
     let result = validate_occurrence_cluster(0, &scores, &positions, || {
         polls += 1;
         if polls == 20 {
-            Err(QueryCancelled.into())
+            Err(QueryCancelled::USER_REQUEST.into())
         } else {
             Ok(())
         }
@@ -346,7 +346,7 @@ fn decoder_limits_and_every_callback_failure_release_only_their_output() {
             decode_occurrence_cluster_budgeted(0, &scores, &positions, &budget, || {
                 current += 1;
                 if current == stop {
-                    Err(QueryCancelled.into())
+                    Err(QueryCancelled::USER_REQUEST.into())
                 } else {
                     Ok(())
                 }
@@ -381,7 +381,7 @@ fn decoder_limits_and_every_callback_failure_release_only_their_output() {
                     || {
                         current += 1;
                         if current == stop {
-                            Err(QueryCancelled.into())
+                            Err(QueryCancelled::USER_REQUEST.into())
                         } else {
                             Ok(())
                         }

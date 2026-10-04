@@ -39,14 +39,16 @@ impl SQLiteDocumentStore {
         })?)
     }
 
+    /// `unused` names the namespace in which no document ever had `doc_id`. The legacy tables replace the row either way.
     pub(super) fn put_stored_inner(
         &self,
         doc_id: DocId,
         document: &Document,
         metadata: DocumentMetadata,
+        unused: Option<uqa_storage::document_store::identifiers::DocumentIdNamespace>,
     ) -> SQLiteResult<()> {
         if self
-            .write_native(|read, batch| read.put(batch, doc_id, document, metadata))?
+            .write_native(|read, batch| read.put(batch, doc_id, document, metadata, unused))?
             .is_some()
         {
             return Ok(());

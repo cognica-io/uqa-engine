@@ -25,6 +25,8 @@ pub(super) struct SetOperationClauses<'a> {
     pub(super) offset: Option<&'a ScalarExpr>,
     pub(super) subqueries: &'a [QueryPlan],
     pub(super) output: &'a RowSchema,
+    /// The scope of the queries that enclose the set operation, which its LIMIT and OFFSET can name.
+    pub(super) outer: Option<&'a RowSchema>,
 }
 
 pub(super) struct TableFunctionSourceValidation<'a> {
@@ -36,6 +38,16 @@ pub(super) struct TableFunctionSourceValidation<'a> {
     pub(super) params: &'a [SQLParam],
 }
 
+/// A LIMIT or OFFSET argument with the scopes it is validated against.
+struct LimitArgument<'a> {
+    expression: &'a ScalarExpr,
+    construct: &'static str,
+    /// The block's own columns over the enclosing scope.
+    source: &'a RowSchema,
+    enclosing: &'a RowSchema,
+    subqueries: &'a [QueryPlan],
+}
+
 struct AliasReferenceScope<'a> {
     primary: &'a RowSchema,
     fallback: &'a RowSchema,
@@ -45,7 +57,36 @@ struct AliasReferenceScope<'a> {
 }
 
 impl SchemaScope {
-    /// Check a query block's clauses in `transformSelectStmt`'s order after its target list: `WHERE`, `GROUP BY`, `HAVING`, `DISTINCT ON`, `ORDER BY`, `LIMIT` and `OFFSET`, then its window frames.
+    /// `DISTINCT ON` and `ORDER BY` items name an output column before a column of the block's source.
+    fn validate_output_references(
+        &mut self,
+        engine: &dyn RoutineResolution,
+        block: &QueryBlockPlan,
+        output: &RowSchema,
+        source: &RowSchema,
+        params: &[SQLParam],
+    ) -> Result<(), SQLError> {
+        for expression in block
+            .distinct_on
+            .iter()
+            .chain(block.order_by.iter().map(|order| &order.expr))
+        {
+            self.validate_alias_reference(
+                engine,
+                expression,
+                AliasReferenceScope {
+                    primary: output,
+                    fallback: source,
+                    nested: source,
+                    subqueries: &block.subqueries,
+                    params,
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Check a query block's clauses in `transformSelectStmt`'s order after its target list, against `source`, the block's own columns over `outer`, the scope of the queries that enclose it: `WHERE`, `GROUP BY`, `HAVING`, `DISTINCT ON`, `ORDER BY`, `LIMIT` and `OFFSET`, then its window frames.
     pub(super) fn validate_query_block_clauses(
         &mut self,
         engine: &dyn RoutineResolution,
@@ -53,6 +94,7 @@ impl SchemaScope {
         source: &RowSchema,
         output: &RowSchema,
         params: &[SQLParam],
+        outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         if let Some(predicate) = block.r#where.as_ref() {
             self.validate_expression_references(
@@ -82,6 +124,7 @@ impl SchemaScope {
                 expression,
                 &block.projections,
                 source,
+                outer,
                 params,
             )?;
             self.validate_expression_references(
@@ -104,40 +147,23 @@ impl SchemaScope {
             )?;
             self.validate_condition(engine, having, "HAVING", source, &block.subqueries, params)?;
         }
-        for expression in &block.distinct_on {
-            self.validate_alias_reference(
+        self.validate_output_references(engine, block, output, source, params)?;
+        let enclosing = outer.cloned().unwrap_or_default();
+        for (expression, construct) in block
+            .limit
+            .iter()
+            .map(|expression| (expression, "LIMIT"))
+            .chain(block.offset.iter().map(|expression| (expression, "OFFSET")))
+        {
+            self.validate_limit_argument(
                 engine,
-                expression,
-                AliasReferenceScope {
-                    primary: output,
-                    fallback: source,
-                    nested: source,
+                LimitArgument {
+                    expression,
+                    construct,
+                    source,
+                    enclosing: &enclosing,
                     subqueries: &block.subqueries,
-                    params,
                 },
-            )?;
-        }
-        for order in &block.order_by {
-            self.validate_alias_reference(
-                engine,
-                &order.expr,
-                AliasReferenceScope {
-                    primary: output,
-                    fallback: source,
-                    nested: source,
-                    subqueries: &block.subqueries,
-                    params,
-                },
-            )?;
-        }
-        let empty = RowSchema::default();
-        for expression in block.limit.iter().chain(block.offset.iter()) {
-            self.validate_expression_references(
-                engine,
-                expression,
-                &empty,
-                None,
-                &block.subqueries,
                 params,
             )?;
         }
@@ -150,7 +176,48 @@ impl SchemaScope {
                 params,
             },
         )?;
-        crate::semantics::grouping_sets::validate_grouped_expressions(engine, block, source, params)
+        crate::semantics::grouping_sets::validate_grouped_expressions(
+            engine, block, source, outer, params,
+        )
+    }
+
+    /// Validate a LIMIT or OFFSET argument, which can name the columns of the enclosing queries and the parameters but no column of its own query level, as `checkExprIsVarFree` requires.
+    fn validate_limit_argument(
+        &mut self,
+        engine: &dyn RoutineResolution,
+        argument: LimitArgument<'_>,
+        params: &[SQLParam],
+    ) -> Result<(), SQLError> {
+        let Err(error) = self.validate_expression_references(
+            engine,
+            argument.expression,
+            argument.enclosing,
+            None,
+            argument.subqueries,
+            params,
+        ) else {
+            return Ok(());
+        };
+        if self
+            .validate_expression_references(
+                engine,
+                argument.expression,
+                argument.source,
+                None,
+                argument.subqueries,
+                params,
+            )
+            .is_ok()
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "42P10".into(),
+                message: format!(
+                    "argument of {} must not contain variables",
+                    argument.construct
+                ),
+            });
+        }
+        Err(error)
     }
 
     pub(super) fn validate_set_operation_clauses(
@@ -169,12 +236,13 @@ impl SchemaScope {
                 params,
             )?;
         }
-        let empty = RowSchema::default();
+        // The output columns leave the namespace before LIMIT and OFFSET, as `transformSetOperationStmt` restores it.
+        let enclosing = clauses.outer.cloned().unwrap_or_default();
         for expression in clauses.limit.into_iter().chain(clauses.offset) {
             self.validate_expression_references(
                 engine,
                 expression,
-                &empty,
+                &enclosing,
                 None,
                 clauses.subqueries,
                 params,

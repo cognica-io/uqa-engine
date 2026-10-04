@@ -116,10 +116,11 @@ impl<'a> SerializableColumnWrites<'a> {
 
     /// Observe the original and replacement column keys before any private index or row publication. Savepoint ownership remains with the surrounding statement.
     pub fn observe(&self, change: ColumnIndexChange<'_>) -> Result<(), SQLError> {
-        let fields = change
-            .definitions
-            .indexable_fields(change.table, change.columns, change.constraints)
-            .map_err(|error| storage_error("bind serializable column indexes", &error))?;
+        // A column that an index only carries answers no predicate, so no reader observed its keys.
+        let fields =
+            change
+                .definitions
+                .search_fields(change.table, change.columns, change.constraints);
         let mut projected_old: Option<Option<Document>> = None;
         for field in fields {
             let ValueIndexKey::Column(name) = &field else {

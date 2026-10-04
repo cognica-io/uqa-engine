@@ -44,6 +44,29 @@ pub struct RetrievalQueryContext<'a> {
     pub graphs: &'a dyn GraphLifecycle,
 }
 impl<'a> RetrievalQueryContext<'a> {
+    /// Lower `expression` on `table`, whose declared columns decide how a predicate on an engine pseudo column lowers. They are read only for an expression that names one.
+    fn lower_relation_where(
+        &self,
+        table: &str,
+        expression: &ScalarExpr,
+        params: &[SQLParam],
+    ) -> Result<Option<OperatorTree>, SQLError> {
+        let columns = if uqa_sql::retrieval::names_engine_pseudo_column(expression) {
+            self.trees
+                .driver
+                .relations
+                .try_describe_query_table(table)
+                .map_err(|error| {
+                    SQLError::Internal(format!("resolve retrieval table `{table}`: {error}"))
+                })?
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        self.binding
+            .lower_relation_where(&columns, expression, params)
+    }
+
     pub fn optimized(
         &self,
         table: &str,
@@ -53,7 +76,7 @@ impl<'a> RetrievalQueryContext<'a> {
         let Some(expr) = where_expr else {
             return Ok(None);
         };
-        let Some(tree) = self.binding.lower_where(expr, params)? else {
+        let Some(tree) = self.lower_relation_where(table, expr, params)? else {
             return Ok(None);
         };
         let pl = expect_posting_output(
@@ -76,7 +99,7 @@ impl<'a> RetrievalQueryContext<'a> {
         let Some(expression) = where_expr else {
             return Ok(None);
         };
-        let Some(tree) = self.binding.lower_where(expression, params)? else {
+        let Some(tree) = self.lower_relation_where(table, expression, params)? else {
             return Ok(None);
         };
         let Some(optimized) = self.planner.accelerated_tree(table, expression, tree)? else {

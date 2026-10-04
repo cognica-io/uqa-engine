@@ -27,6 +27,7 @@ pub mod relation_acl;
 mod relation_security;
 mod schema;
 mod sequence_security;
+mod sequence_values;
 
 pub use cache_revisions::CatalogCacheRevisions;
 pub use graph_access::validate_graph_page;
@@ -37,6 +38,11 @@ pub use identity::new_nonzero_catalog_identity;
 pub use relation::RelationIdentity;
 pub use relation_security::{BoundRelationSecurity, LegacyRelationSecurity, RelationSecurityRow};
 pub use sequence_security::{BoundSequenceSecurity, LegacySequenceSecurity, SequenceSecurityRow};
+pub use sequence_values::{
+    sequence_value_allocation, sequence_value_reservation, SequenceLogResult,
+    SequenceReservationResult, SequenceSetValueResult, SequenceValueAllocation,
+    SequenceValuePosition, SequenceValueReservation,
+};
 mod table;
 
 pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
@@ -262,98 +268,6 @@ pub struct SequenceRow {
     pub options: SequenceOptions,
 }
 
-/// Physical sequence position consumed by one atomic reservation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SequenceValuePosition {
-    pub current: i64,
-    pub called: bool,
-    pub log_count: i64,
-}
-
-/// One atomic sequence reservation. `first_value` is returned immediately, while the remaining values through `last_value` belong to the allocating session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SequenceValueReservation {
-    pub first_value: i64,
-    pub last_value: i64,
-    pub count: i64,
-    pub log_count: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SequenceReservationResult {
-    Missing,
-    DefinitionChanged,
-    Exhausted,
-    Reserved(SequenceValueReservation),
-}
-
-/// A value update applies only to the definition whose bounds the caller validated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SequenceSetValueResult {
-    Missing,
-    DefinitionChanged,
-    Set(i64),
-}
-
-/// Reserve up to `cache_size` values without crossing a sequence bound. Cycling is applied when selecting the first value of a new reservation, matching `PostgreSQL`'s boundary-truncated cache blocks.
-#[must_use]
-pub fn sequence_value_reservation(
-    position: SequenceValuePosition,
-    increment: i64,
-    min_value: i64,
-    max_value: i64,
-    cycle: bool,
-    cache_size: i64,
-) -> Option<SequenceValueReservation> {
-    let SequenceValuePosition {
-        current,
-        called,
-        log_count,
-    } = position;
-    debug_assert_ne!(increment, 0);
-    debug_assert!(cache_size > 0);
-    let first_value = if called {
-        match current
-            .checked_add(increment)
-            .filter(|value| (min_value..=max_value).contains(value))
-        {
-            Some(value) => value,
-            None if cycle && increment > 0 => min_value,
-            None if cycle => max_value,
-            None => return None,
-        }
-    } else {
-        current
-    };
-    let distance = if increment > 0 {
-        i128::from(max_value) - i128::from(first_value)
-    } else {
-        i128::from(first_value) - i128::from(min_value)
-    };
-    let step = i128::from(increment).abs();
-    let available = distance / step + 1;
-    let count = available.min(i128::from(cache_size));
-    let last_value = i128::from(first_value) + i128::from(increment) * (count - 1);
-    let initial_count = i128::from(!called);
-    let cache_fetch = i128::from(cache_size) - initial_count;
-    let mut fetch = cache_fetch;
-    let mut next_log_count = i128::from(log_count);
-    if i128::from(log_count) < cache_fetch || !called {
-        fetch += 32;
-        next_log_count = fetch;
-    }
-    let fetched = fetch.min(available - initial_count);
-    next_log_count -= fetched.min(cache_fetch);
-    next_log_count -= fetch - fetched;
-    Some(SequenceValueReservation {
-        first_value,
-        last_value: i64::try_from(last_value).expect("reserved sequence value stays in bounds"),
-        count: i64::try_from(count).expect("reservation count cannot exceed cache size"),
-        log_count: i64::try_from(next_log_count)
-            .expect("persisted sequence log count cannot exceed the cache request"),
-    })
-}
-
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
     /// Transaction model and database incarnation shared with the paired backend. Wrappers must forward this with the session affinity.
@@ -476,14 +390,18 @@ pub trait CatalogFacade: Send + Sync {
     fn load_all_scoring_params(&self) -> StorageBackendResult<Vec<(String, String)>>;
     fn drop_scoring_params(&self, name: &str) -> StorageBackendResult<()>;
 
+    /// Create a sequence's definition and the value record of its definition generation, which starts at the value state of `sequence`.
     fn create_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool>;
+    /// Replace a sequence's definition, ownership and security. A row that keeps its object identity and definition generation leaves the generation's value record, which only value operations move; a row with a new generation replaces the old generation's value record with one that starts at the value state of `sequence`.
     fn replace_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool>;
-    /// Atomically move one sequence catalog row and its shared relation claim while preserving object identity and physical value state.
+    /// Atomically move one sequence catalog row and its shared relation claim while preserving object identity and the generation's value record.
     fn rename_sequence_row(&self, from: &str, to: &str) -> StorageBackendResult<bool>;
+    /// Remove a sequence's definition together with the value record of its generation.
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool>;
+    /// Sequence definitions, each with the value state of its generation's value record.
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>>;
 
-    /// Whether this sequence has transaction-private state that an autonomous value allocation must not bypass. Versioned catalogs must inspect their retained private records, including creation, rename and definition replacement.
+    /// Whether this sequence's definition has transaction-private changes, including creation, rename, deletion and definition replacement, which the transaction's own catalog reads must select.
     fn sequence_has_private_changes(
         &self,
         _relation: &RelationIdentity,
@@ -496,6 +414,26 @@ pub trait CatalogFacade: Send + Sync {
         }
         Ok(false)
     }
+
+    /// Whether the value record of this definition generation has transaction-private changes, which holds exactly when the current transaction created the generation. Values of such a generation are allocated in the transaction, since no other session can see it; the value record of a committed generation is moved only outside any transaction, as `PostgreSQL` moves a sequence's state whatever happens to the transaction that drew from it.
+    fn sequence_value_has_private_changes(
+        &self,
+        _object_id: [u8; 16],
+        _definition_generation: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private sequence value provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
+
+    /// Move the value state that earlier releases kept in sequence definitions into value records. Only an initial open runs this, inside its catalog preparation.
+    fn migrate_sequence_values(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+    /// Reserve the next block of values from the value record of this generation of `object_id`, whatever name the sequence currently has. `DefinitionChanged` reports that another generation of the sequence has replaced this one, and `Missing` that the sequence no longer exists.
     fn reserve_sequence_values(
         &self,
         name: &str,
@@ -532,6 +470,7 @@ pub trait CatalogFacade: Send + Sync {
             }
         }
     }
+    /// Replace the value state in the value record of this generation of `object_id`, with the results `reserve_sequence_values` reports.
     fn set_sequence_value(
         &self,
         name: &str,
@@ -541,6 +480,15 @@ pub trait CatalogFacade: Send + Sync {
         called: bool,
         log_count: i64,
     ) -> StorageBackendResult<SequenceSetValueResult>;
+    /// Move the durable position in the value record of this generation of `object_id` to `logged` when its value and called flag still are `expected`. Nothing is written otherwise, and `Changed` reports the position the record holds. A caller that hands out values at or below a logged value records that value here before it hands any of them out.
+    fn log_sequence_values(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+        expected: (i64, bool),
+        logged: SequenceValuePosition,
+    ) -> StorageBackendResult<SequenceLogResult>;
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()>;
     /// Atomically move one view catalog row and its shared relation claim.
@@ -565,6 +513,20 @@ pub trait CatalogFacade: Send + Sync {
 
     /// Read one entity without loading any other graph payload.
     fn graph_vertex(&self, id: u64) -> StorageBackendResult<Option<GraphVertexRow>>;
+
+    /// Visit requested vertices on the pinned view, including missing rows and
+    /// duplicates in caller order. The internal callback must not reenter
+    /// storage. A false result stops before the next identity is admitted.
+    /// `None` declines the capability without invoking the callback; `Some`
+    /// counts all invocations, including the one that stopped the read.
+    fn for_each_graph_vertex_borrowed(
+        &self,
+        _ids: &[u64],
+        _visit: &mut dyn FnMut(u64, Option<&GraphVertexRow>) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        Ok(None)
+    }
+
     fn graph_edge(&self, id: u64) -> StorageBackendResult<Option<EdgeRow>>;
 
     /// Read a bounded, strictly ascending identity page from the pinned
@@ -798,22 +760,7 @@ pub trait CatalogFacade: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        sequence_value_reservation, RelationIdentity, SequenceValuePosition,
-        SequenceValueReservation,
-    };
-
-    const fn sequence_position(
-        current: i64,
-        called: bool,
-        log_count: i64,
-    ) -> SequenceValuePosition {
-        SequenceValuePosition {
-            current,
-            called,
-            log_count,
-        }
-    }
+    use super::RelationIdentity;
 
     #[test]
     fn relation_identity_rendering_is_reversible_and_collision_free() {
@@ -862,62 +809,6 @@ mod tests {
                 "\"Upper\"".to_string(),
                 "Upper".to_string()
             ]
-        );
-    }
-
-    #[test]
-    fn sequence_reservations_track_postgresql_log_counts() {
-        assert_eq!(
-            sequence_value_reservation(sequence_position(1, false, 0), 1, 1, i64::MAX, false, 1),
-            Some(SequenceValueReservation {
-                first_value: 1,
-                last_value: 1,
-                count: 1,
-                log_count: 32,
-            })
-        );
-        assert_eq!(
-            sequence_value_reservation(sequence_position(1, true, 32), 1, 1, i64::MAX, false, 1),
-            Some(SequenceValueReservation {
-                first_value: 2,
-                last_value: 2,
-                count: 1,
-                log_count: 31,
-            })
-        );
-        assert_eq!(
-            sequence_value_reservation(sequence_position(1, false, 0), 1, 1, i64::MAX, false, 10),
-            Some(SequenceValueReservation {
-                first_value: 1,
-                last_value: 10,
-                count: 10,
-                log_count: 32,
-            })
-        );
-        assert_eq!(
-            sequence_value_reservation(sequence_position(5, false, 0), 2, 3, 9, true, 3),
-            Some(SequenceValueReservation {
-                first_value: 5,
-                last_value: 9,
-                count: 3,
-                log_count: 0,
-            })
-        );
-        assert_eq!(
-            sequence_value_reservation(
-                sequence_position(1, false, 0),
-                1,
-                1,
-                i64::MAX,
-                false,
-                i64::MAX,
-            ),
-            Some(SequenceValueReservation {
-                first_value: 1,
-                last_value: i64::MAX,
-                count: i64::MAX,
-                log_count: 0,
-            })
         );
     }
 }

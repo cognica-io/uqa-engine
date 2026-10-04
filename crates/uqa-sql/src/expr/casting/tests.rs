@@ -256,9 +256,49 @@ fn bytea_cast_preserves_postgresql_source_type_and_input_rules() {
         let error = cast_value_from(&value, "bytea", Some(source)).unwrap_err();
         assert_eq!(error.sqlstate(), Some("42846"));
     }
-    for input in ["\\x1", "\\xzz", "\\9"] {
+    // `byteain` skips whitespace between the digit pairs of the hex format, and an empty hex value is empty.
+    for (input, expected) in [
+        ("\\x01 02\t0a\r\n", vec![0x01, 0x02, 0x0a]),
+        ("\\xE282ac", vec![0xe2, 0x82, 0xac]),
+        ("\\x", Vec::new()),
+        ("\u{3ba}", "\u{3ba}".as_bytes().to_vec()),
+    ] {
+        assert_eq!(
+            cast_value(&Value::Str(input.into()), "bytea").unwrap(),
+            Value::Bytes(expected),
+            "{input:?}"
+        );
+    }
+    for (input, sqlstate, message) in [
+        (
+            "\\x1",
+            "22023",
+            "invalid hexadecimal data: odd number of digits",
+        ),
+        (
+            "\\x01 0",
+            "22023",
+            "invalid hexadecimal data: odd number of digits",
+        ),
+        ("\\xzz", "22023", "invalid hexadecimal digit: \"z\""),
+        // A digit pair may not be split by whitespace.
+        ("\\x0 1", "22023", "invalid hexadecimal digit: \" \""),
+        (
+            "\\x\u{e9}",
+            "22023",
+            "invalid hexadecimal digit: \"\u{e9}\"",
+        ),
+        ("\\9", "22P02", "invalid input syntax for type bytea"),
+        ("a\\", "22P02", "invalid input syntax for type bytea"),
+        ("\\X0102", "22P02", "invalid input syntax for type bytea"),
+        ("\\08", "22P02", "invalid input syntax for type bytea"),
+    ] {
         let error = cast_value(&Value::Str(input.into()), "bytea").unwrap_err();
-        assert_eq!(error.sqlstate(), Some("22023"));
+        assert_eq!(
+            (error.sqlstate(), error.to_string().as_str()),
+            (Some(sqlstate), message),
+            "{input:?}"
+        );
     }
 }
 
@@ -302,4 +342,62 @@ fn unary_minus_preserves_interval_fields() {
             micros: -4,
         })
     );
+}
+
+#[test]
+fn integer_text_input_reads_what_postgresql_reads() {
+    for (text, target, expected) in [
+        ("0x10", "bigint", 16),
+        (" 1_000 ", "integer", 1000),
+        ("0o17", "smallint", 15),
+        ("-0b101", "integer", -5),
+        ("+7", "bigint", 7),
+        ("-32768", "smallint", -32768),
+    ] {
+        assert_eq!(
+            cast_value(&Value::Str(text.into()), target).unwrap(),
+            Value::Int(expected),
+            "{text} as {target}"
+        );
+    }
+    // An integer outside the type's range names the text, unlike a number converted to a narrower type.
+    for (text, target, sqlstate, message) in [
+        (
+            "99999999999999999999",
+            "bigint",
+            "22003",
+            "value \"99999999999999999999\" is out of range for type bigint",
+        ),
+        (
+            "40000",
+            "smallint",
+            "22003",
+            "value \"40000\" is out of range for type smallint",
+        ),
+        (
+            "2147483648",
+            "integer",
+            "22003",
+            "value \"2147483648\" is out of range for type integer",
+        ),
+        (
+            "1__0",
+            "integer",
+            "22P02",
+            "invalid input syntax for type integer: \"1__0\"",
+        ),
+        (
+            "1.5",
+            "integer",
+            "22P02",
+            "invalid input syntax for type integer: \"1.5\"",
+        ),
+    ] {
+        let error = cast_value(&Value::Str(text.into()), target).unwrap_err();
+        assert_eq!(
+            (error.sqlstate(), error.to_string().as_str()),
+            (Some(sqlstate), message),
+            "{text} as {target}"
+        );
+    }
 }

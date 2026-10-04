@@ -126,6 +126,52 @@ fn automatic_maintenance_counts_follow_commit_savepoint_and_rollback() {
     assert_eq!(stored_rows(&path, "public.t"), Some(1));
 }
 
+fn maintenance(path: &Path, table: &str) -> serde_json::Value {
+    let catalog = crate::native_storage::catalog(ManagedConnection::open(path).unwrap()).unwrap();
+    let json = catalog
+        .get_metadata(&format!("uqa.statistics.maintenance.v1:{table}"))
+        .unwrap()
+        .unwrap();
+    serde_json::from_str(&json).unwrap()
+}
+
+#[test]
+fn a_session_records_the_changes_that_decide_and_keeps_the_rest() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("automatic-kept.sqlite3");
+    let engine = Engine::open(&path).unwrap();
+    exec(&engine, "CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    exec(
+        &engine,
+        "INSERT INTO t SELECT n FROM generate_series(1, 1000) AS g(n)",
+    );
+    wait_for_rows(&engine, &path, "public.t", 1000);
+    // An analysis of 1,000 rows is due after 150 changes, and a session keeps fewer than 37 of them to itself. The first change marks the statistics stale.
+    exec(&engine, "INSERT INTO t VALUES (1001)");
+    let first = maintenance(&path, "public.t");
+    assert_eq!(first["changes"], 1);
+    for id in 1002..1038 {
+        exec(&engine, &format!("INSERT INTO t VALUES ({id})"));
+    }
+    assert_eq!(maintenance(&path, "public.t"), first);
+    // A transaction that is rolled back leaves what the session kept as it was.
+    exec(&engine, "BEGIN; INSERT INTO t VALUES (2000); ROLLBACK");
+    assert_eq!(maintenance(&path, "public.t"), first);
+    // The change that fills the session's share is recorded with everything it kept.
+    exec(&engine, "INSERT INTO t VALUES (1038)");
+    let second = maintenance(&path, "public.t");
+    assert_eq!(second["changes"], 38);
+    exec(&engine, "INSERT INTO t VALUES (1039)");
+    assert_eq!(maintenance(&path, "public.t"), second);
+    // The changes that make the analysis due are recorded at once, with the one kept before them.
+    exec(
+        &engine,
+        "INSERT INTO t SELECT n FROM generate_series(1040, 1200) AS g(n)",
+    );
+    wait_for_rows(&engine, &path, "public.t", 1200);
+    assert_eq!(maintenance(&path, "public.t")["changes"], 0);
+}
+
 #[test]
 fn failed_automatic_refresh_retains_pending_work_and_recovers_after_reopen() {
     let dir = tempdir().unwrap();

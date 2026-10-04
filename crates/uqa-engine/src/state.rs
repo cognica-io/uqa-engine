@@ -16,6 +16,8 @@ use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
 mod catalog_cell;
 pub(crate) use catalog_cell::CatalogCell;
+mod session_state_lock;
+pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
     BayesianBM25Params, CommandMutationOverlay, DeepModel, RegisteredSQLFunction, RelationIdentity,
@@ -281,13 +283,24 @@ pub(super) struct SessionContext {
     /// Transactional session values share one lock so snapshots and restores
     /// cannot observe a mixture of old and new search-path, sequence,
     /// or statement-cache state.
-    pub(super) state: RwLock<super::SessionStateSnapshot>,
+    pub(super) state: SessionStateLock,
+    /// Configuration state that transactions do not restore: custom parameter placeholders, loaded libraries and the values the client set at startup.
+    pub(super) parameters: Mutex<crate::session::SessionParameterRegistry>,
+    /// The bytes a query workspace may hold before it spills when the host bounds it below `work_mem`; 0 leaves `work_mem` in effect.
+    pub(super) query_memory_limit: std::sync::atomic::AtomicUsize,
+    /// Whether a terminated session has rolled back its transaction and dropped what it held.
+    pub(super) termination_finished: AtomicBool,
     /// Prepared definitions belong to the connection and survive transaction or
     /// savepoint rollback, including definitions created or removed after a boundary.
     pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
     /// `PostgreSQL` sequence reservations are session-local and nontransactional. They are intentionally kept outside `SessionStateSnapshot` so rollback never rewinds consumption or restores blocks discarded by `ALTER SEQUENCE`.
     pub(super) sequence_caches:
         Mutex<BTreeMap<super::RelationIdentity, super::SessionSequenceCache>>,
+    /// The sequence catalog as this session last read it from the latest commit, kept while nothing it was read from has changed.
+    pub(super) sequence_snapshot: Mutex<Option<crate::sequence_snapshot::SequenceSnapshotMemo>>,
+    /// How many times this session read the sequence catalog instead of reusing its last read.
+    #[cfg(test)]
+    pub(super) sequence_snapshot_reads: std::sync::atomic::AtomicU64,
     /// `PostgreSQL`'s session PRNG is not transactional: failed statements and
     /// transaction or savepoint rollback leave every consumed draw in place.
     pub(super) random_state: Mutex<super::SessionRandomState>,
@@ -309,6 +322,8 @@ pub(super) struct SessionContext {
     pub(crate) uncommitted_enum_labels: Mutex<uqa_execution::schema::enums::UncommittedEnumLabels>,
     /// Routine source bodies this session compiled, as `PostgreSQL`'s backend-local function cache keeps them. The cache is not transactional, and portal workers share it with their session.
     pub(crate) routine_bodies: uqa_execution::routines::invocation::bodies::SessionRoutineBodies,
+    /// Row changes of this session's commits that no maintenance record counts yet.
+    pub(crate) kept_statistics: Mutex<crate::statistics::StatisticsChanges>,
 }
 
 #[derive(Clone)]
@@ -326,7 +341,7 @@ impl SessionContext {
     pub(super) fn new(random_state: super::SessionRandomState) -> Self {
         let state = super::SessionStateSnapshot {
             graph_overlay: None,
-            search_path: vec!["public".to_string()],
+            search_path: crate::session::default_search_path(),
             temporary_namespace: None,
             session_vars: BTreeMap::new(),
             parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),
@@ -343,9 +358,15 @@ impl SessionContext {
             backend_process_id: AtomicI32::new(crate::notifications::allocate_backend_process_id()),
             backend_process_id_is_local: AtomicBool::new(true),
             notification_subscriptions_required: AtomicBool::new(false),
-            state: RwLock::new(state),
+            state: SessionStateLock::new(state),
+            parameters: Mutex::new(crate::session::SessionParameterRegistry::default()),
+            query_memory_limit: std::sync::atomic::AtomicUsize::new(0),
+            termination_finished: AtomicBool::new(false),
             prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
+            sequence_snapshot: Mutex::new(None),
+            #[cfg(test)]
+            sequence_snapshot_reads: std::sync::atomic::AtomicU64::new(0),
             random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),
             query_retention: uqa_core::memory::MemoryBudget::new(
@@ -366,6 +387,7 @@ impl SessionContext {
             ),
             routine_bodies:
                 uqa_execution::routines::invocation::bodies::SessionRoutineBodies::default(),
+            kept_statistics: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -442,6 +464,11 @@ impl StatementGate {
         (!delegated).then(|| self.mutex.lock())
     }
 
+    /// Hold the gate only if no other thread holds it.
+    pub(super) fn try_lock(&self) -> Option<parking_lot::ReentrantMutexGuard<'_, ()>> {
+        self.mutex.try_lock()
+    }
+
     pub(super) fn lock_with_cancellation(
         &self,
         cancellation: &uqa_core::CancellationToken,
@@ -495,8 +522,10 @@ pub(super) struct QueryRuntime {
     pub(super) statement_gate: Arc<StatementGate>,
     pub(super) sql_execution_depth: AtomicUsize,
     pub(super) cancellation: uqa_core::CancellationToken,
-    pub(super) notices: Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
+    pub(super) notices: Arc<uqa_execution::query::NoticeQueue>,
     pub(super) notifications: Arc<Mutex<VecDeque<crate::SQLNotification>>>,
+    /// The terminations the session has scheduled for its idle period and transaction.
+    pub(super) terminations: crate::session::SessionTerminations,
     pub(super) notification_wake: Arc<parking_lot::Condvar>,
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
@@ -505,24 +534,35 @@ pub(super) struct QueryRuntime {
     pub(super) composite_descriptor_cache:
         uqa_execution::catalog::composite_type::CompositeDescriptorCache,
     pub(super) physical_index_cache: uqa_execution::catalog::index::physical::PhysicalIndexCache,
+    pub(super) enforced_key_cache: uqa_execution::catalog::index::EnforcedKeyCache,
 }
 
 impl QueryRuntime {
-    pub(super) fn new(function_depth_limit: usize) -> Self {
-        Self::with_cancellation(function_depth_limit, uqa_core::CancellationToken::new())
+    /// The runtime of a session whose notices reach the client at `client_level` (`client_min_messages`).
+    pub(super) fn new(
+        function_depth_limit: usize,
+        client_level: Arc<std::sync::atomic::AtomicU8>,
+    ) -> Self {
+        Self::with_cancellation(
+            function_depth_limit,
+            uqa_core::CancellationToken::new(),
+            client_level,
+        )
     }
 
     pub(super) fn with_cancellation(
         function_depth_limit: usize,
         cancellation: uqa_core::CancellationToken,
+        client_level: Arc<std::sync::atomic::AtomicU8>,
     ) -> Self {
         Self {
             diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics::default(),
             statement_gate: Arc::new(StatementGate::new()),
             sql_execution_depth: AtomicUsize::new(0),
             cancellation,
-            notices: Arc::new(Mutex::new(Vec::new())),
+            notices: Arc::new(uqa_execution::query::NoticeQueue::new(client_level)),
             notifications: Arc::new(Mutex::new(VecDeque::new())),
+            terminations: crate::session::SessionTerminations::new(true),
             notification_wake: Arc::new(parking_lot::Condvar::new()),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
@@ -532,6 +572,7 @@ impl QueryRuntime {
                 uqa_execution::catalog::composite_type::CompositeDescriptorCache::default(),
             physical_index_cache:
                 uqa_execution::catalog::index::physical::PhysicalIndexCache::default(),
+            enforced_key_cache: uqa_execution::catalog::index::EnforcedKeyCache::default(),
         }
     }
 }
@@ -556,6 +597,7 @@ impl EpochChannel {
 
 pub(super) struct EpochCoordinator {
     pub(super) storage_cache_revisions: Mutex<Option<uqa_storage::CatalogCacheRevisions>>,
+    pub(super) seen_storage_read_view: Mutex<Option<uqa_storage::key_value::KeyValueReadRevision>>,
     pub(super) seen_storage_change_version: AtomicU64,
     pub(super) external_commit_refresh: Mutex<()>,
     pub(super) table_catalog: EpochChannel,
@@ -574,6 +616,7 @@ impl EpochCoordinator {
     pub(super) fn new() -> Self {
         Self {
             storage_cache_revisions: Mutex::new(None),
+            seen_storage_read_view: Mutex::new(None),
             seen_storage_change_version: AtomicU64::new(0),
             external_commit_refresh: Mutex::new(()),
             table_catalog: EpochChannel::new(1),

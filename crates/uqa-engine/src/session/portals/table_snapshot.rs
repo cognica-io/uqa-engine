@@ -144,6 +144,11 @@ impl Engine {
                 metadata.columns_declared.snapshot(),
             ),
             next_id: parking_lot::Mutex::new(*metadata.next_id.lock()),
+            maps_integer_keys: std::sync::atomic::AtomicBool::new(
+                metadata
+                    .maps_integer_keys
+                    .load(std::sync::atomic::Ordering::Acquire),
+            ),
             analyzer: crate::state::CatalogCell::from_snapshot(metadata.analyzer.snapshot()),
             column_stats: crate::state::CatalogCell::from_snapshot(
                 metadata.column_stats.snapshot(),
@@ -157,6 +162,9 @@ impl Engine {
                 metadata
                     .column_stats_dirty
                     .load(std::sync::atomic::Ordering::Acquire),
+            ),
+            statistics_maintenance: parking_lot::Mutex::new(
+                metadata.statistics_maintenance.lock().clone(),
             ),
             table_checks: crate::state::CatalogCell::from_snapshot(
                 metadata.table_checks.snapshot(),

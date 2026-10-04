@@ -447,10 +447,6 @@ pub fn validate_schema_acl_roles(
     Ok(())
 }
 
-pub fn schema_acl_warning(is_grant: bool, partial: bool, name: &str) -> crate::SQLNotice {
-    super::object_acl::privilege_warning(is_grant, partial, name)
-}
-
 pub fn resolve_schema_grant_targets(
     registry: &BTreeMap<String, super::BoundSchemaSecurity>,
     schemas: &[String],

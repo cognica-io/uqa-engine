@@ -18,16 +18,27 @@ use super::{
     text, Document, StorageBackendResult, StorageReadControl,
 };
 
+mod flat;
 mod normalized;
 use normalized::{private_text, PrivateKind};
 
 #[derive(Clone, Copy)]
-enum Mode {
+pub(super) enum Mode {
     Legacy,
     Modern,
 }
 
 pub(super) fn fields(
+    input: &str,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<Document>> {
+    if let Some(fields) = flat::fields(input, control)? {
+        return Ok(fields);
+    }
+    normalized_fields(input, control)
+}
+
+pub(super) fn normalized_fields(
     input: &str,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<Document>> {
@@ -195,7 +206,7 @@ fn array(
     }
 }
 
-fn number(
+pub(super) fn number(
     text: &str,
     mode: Mode,
     control: &StorageReadControl,

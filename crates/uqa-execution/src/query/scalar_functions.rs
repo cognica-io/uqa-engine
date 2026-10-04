@@ -156,6 +156,7 @@ fn is_catalog_scalar(name: &str) -> bool {
             | "pg_backend_pid"
             | "pg_my_temp_schema"
             | "pg_is_other_temp_schema"
+            | "pg_trigger_depth"
             | "pg_notify"
             | "pg_notification_queue_usage"
             | "pg_get_serial_sequence"
@@ -209,6 +210,8 @@ pub fn catalog_scalar_value(
             &context.catalog.catalog_read_view(),
             arguments,
         ),
+        "pg_trigger_depth" => no_scalar_arguments(&lower, arguments)
+            .map(|()| Value::Int(crate::mutation::triggers::trigger_depth())),
         "pg_notify" => (|| {
             let (channel, payload) = notification_arguments(arguments)?;
             context.session.notify(channel, payload)?;

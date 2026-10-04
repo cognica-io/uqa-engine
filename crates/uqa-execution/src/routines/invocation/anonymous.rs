@@ -17,12 +17,13 @@ pub fn run_do_block(
     body: &str,
     nested_statement: bool,
 ) -> Result<SQLResult, SQLError> {
-    let (def, parsed) = uqa_sql::routines::anonymous_block::compile_do_block(
+    let (def, mut parsed) = uqa_sql::routines::anonymous_block::compile_do_block(
         context.types,
         context.parsers,
         language,
         body,
     )?;
+    crate::routines::compilation::apply_session_compile_options(context.session, &mut parsed);
     let _guard = DepthGuard::enter(context.session)?;
     let _transaction_context = RoutineTransactionGuard::enter(
         context.runtime.session,

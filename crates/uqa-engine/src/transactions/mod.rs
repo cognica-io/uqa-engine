@@ -18,6 +18,7 @@ mod characteristics;
 mod control;
 mod coordinator;
 mod failure;
+mod fixed_identities;
 use failure::{failed_transaction_error, panic_description};
 mod frame_finish;
 mod implicit;
@@ -28,6 +29,7 @@ use scope::TransactionScope;
 mod snapshots;
 
 mod constraints;
+pub(crate) use constraints::DeferredReferencedKey;
 mod row_locks_session;
 
 #[cfg(test)]

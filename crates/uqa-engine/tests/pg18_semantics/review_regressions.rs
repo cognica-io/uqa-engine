@@ -379,7 +379,7 @@ fn common_type_selection_coerces_runtime_values_before_aggregation() {
         &[],
     )
     .unwrap();
-    eng.sql("SET work_mem TO '1B'", &[]).unwrap();
+    eng.set_query_memory_limit(Some(1));
 
     let rows = eng
         .sql(

@@ -2,7 +2,7 @@
 
 This document defines the physical vector-index contract shared by the memory engine, persistent providers, SQL DDL, catalog restore, and calibration checks. A vector field starts with exact brute-force search; `CREATE INDEX ... USING ivf`, `USING hnsw` and `USING diskann` install different algorithms and retain different catalog identities.
 
-The [native DiskANN design](diskann-vector-index.md) is implemented in current development sources through memory, native SQLite, SQLite Key/Value and redb. It uses direct Rust graph/PQ construction, paged query execution and existing MVCC publication. It is unreleased; the [implementation ledger](../plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger) distinguishes completed ownership/SQL gates from remaining binding and integrated acceptance.
+The [native DiskANN design](diskann-vector-index.md) was released in 0.4.5 through memory, native SQLite, SQLite Key/Value and redb. It uses direct Rust graph/PQ construction, paged query execution and existing MVCC publication. The [completed implementation ledger](../plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger) records ownership, SQL, binding and integrated acceptance, including its fixed-fixture quality and resource boundaries.
 
 ## Selection and SQL surface
 

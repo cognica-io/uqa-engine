@@ -12,10 +12,12 @@ use crate::routines::RoutineResolution;
 use crate::semantics::aggregates::{has_aggregate, is_aggregate};
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 
+/// Validate the grouped expressions of a query whose own columns `schema` holds over `outer`, the scope of the queries that enclose it.
 pub fn validate_grouped_expressions(
     routines: &dyn RoutineResolution,
     statement: &QueryBlockPlan,
     schema: &RowSchema,
+    outer: Option<&RowSchema>,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
     let aggregates = |name: &str| routines.has_registered_aggregate_function(name);
@@ -36,6 +38,7 @@ pub fn validate_grouped_expressions(
                 expression,
                 &statement.projections,
                 schema,
+                outer,
                 params,
             )?;
             expression_identity(routines, &expression, schema, params)

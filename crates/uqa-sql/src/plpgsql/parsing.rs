@@ -7,6 +7,7 @@
 //! PL/pgSQL parser invocation, datum lowering, and condition normalization.
 
 use super::lowering_expression::lower_sourced_statement;
+use super::options::{compile_options, CompileOptions, VariableConflict};
 use super::{
     condition_sqlstate, ensure_single_tag, expect_tag, json_bool_or_false, json_kind,
     json_optional_i64, json_usize_or_zero, lower_block, lower_cursor_scroll_options, lower_expr,
@@ -23,7 +24,7 @@ pub fn parse_function(def: &CreateFunction) -> Result<PLpgSQLFunction> {
         ));
     };
     let text = synthesize_create_text(def, body, &|type_name| Ok(type_name.to_string()))?;
-    parse_plpgsql_text(&text)
+    Ok(with_compile_options(parse_plpgsql_text(&text)?, body))
 }
 
 /// Parse a stored routine using the engine's catalog type snapshot.
@@ -39,7 +40,10 @@ pub fn parse_function_with_catalog(
     let text = synthesize_create_text(def, body, &|type_name| {
         catalog_type_spelling(catalog, type_name)
     })?;
-    lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(&text, catalog)?)
+    Ok(with_compile_options(
+        lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(&text, catalog)?)?,
+        body,
+    ))
 }
 
 /// Signatures name user-defined types by identity; the synthesized declaration spells them by their current qualified name, which the snapshot resolves to the same OID.
@@ -72,17 +76,20 @@ pub fn parse_do_block_with_catalog(
     catalog: &pg_query::PlpgsqlCatalog,
 ) -> Result<PLpgSQLFunction> {
     let tag = fresh_dollar_tag(body);
-    lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(
-        &format!("DO {tag}{body}{tag} LANGUAGE plpgsql;"),
-        catalog,
-    )?)
+    Ok(with_compile_options(
+        lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(
+            &format!("DO {tag}{body}{tag} LANGUAGE plpgsql;"),
+            catalog,
+        )?)?,
+        body,
+    ))
 }
 
 /// Parse a `DO $$ ... $$` body through `PostgreSQL`'s native inline-code path.
 pub fn parse_do_block(body: &str) -> Result<PLpgSQLFunction> {
     let tag = fresh_dollar_tag(body);
     let text = format!("DO {tag}{body}{tag} LANGUAGE plpgsql;");
-    parse_plpgsql_text(&text)
+    Ok(with_compile_options(parse_plpgsql_text(&text)?, body))
 }
 
 /// Canonical `CREATE FUNCTION` / `CREATE PROCEDURE` text used solely
@@ -261,7 +268,16 @@ pub(super) fn lower_function(function: &JSONValue) -> Result<PLpgSQLFunction> {
         new_datum,
         old_datum,
         found_datum,
+        options: CompileOptions::default(),
+        variable_conflict: VariableConflict::default(),
     })
+}
+
+/// The function a body compiles to, with the options the body declares.
+fn with_compile_options(mut function: PLpgSQLFunction, body: &str) -> PLpgSQLFunction {
+    function.options = compile_options(body);
+    function.variable_conflict = function.options.variable_conflict.unwrap_or_default();
+    function
 }
 
 fn has_percent_type_suffix(type_name: &str) -> bool {

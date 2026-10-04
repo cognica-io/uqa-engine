@@ -6,6 +6,77 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Support PostgreSQL 18 configuration definitions, custom parameter placeholders, `set_config`, `SHOW ALL`, `client_min_messages` and startup values restored by `RESET`.
+- Implement `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `idle_session_timeout`, `transaction_timeout`, and the `pg_sleep` functions. Report the cancellation reason and preserve permanent session termination through `Engine::session_termination`.
+- Expose `Engine::set_query_memory_limit` for host-controlled query workspace limits below SQL `work_mem`'s 64 kB minimum.
+
+### Changed
+
+- Default `search_path` to `"$user", public`, preserve its assigned text and empty paths, and make `Engine::set_search_path` return a `Result`. `QueryCancelled` now carries a `CancellationReason` instead of being a unit struct; see the [unreleased upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-changes-after-049).
+
+### Fixed
+
+- Stream individual private spill entries through a charged 1 KiB buffer when complete read blocks cannot fit; preserve lookup/cursor bounds and record metadata while allowing native HNSW deletion/rebuild publication under its unchanged session allowance.
+- Reuse resident record prefixes when evaluated MVCC batches spill, share their memory allowance across record groups, and avoid unnecessary cursor allocations and spilled-run handle overhead.
+- Admit retained HNSW mutation inputs before constructing a derived graph, so an oversized input fails without first building a graph that cannot be published.
+- Release completed IVF reconstruction scratch before later resident preparation; stream native SQLite and shared commit-time IVF vectors/assignments through encrypted temporary roots, and spill native tensor-score reduction under the unchanged session allowance. Preserve centroids, cosine payloads, retained readers and transaction undo; see the [preservation argument](docs/plans/0017-native-ivf-bounded-storage.md).
+- Synchronize deadline cancellation with handle cleanup so a dequeued timer cannot cancel the next statement after its original handle is dropped; retain explicit cancellation and permanent session termination.
+- Validate PRIMARY KEY, UNIQUE and partitioned unique-index declarations with PostgreSQL's column requirements, duplicate-declaration handling, creation order and index-build diagnostics.
+- Check immediate foreign keys after the statement writes its rows, and order referential actions with AFTER triggers in one statement queue. Preserve statement-trigger sharing and reject rows already modified by triggered commands with SQLSTATE `27000`; expose `pg_trigger_depth()`.
+- Finish unreferenced data-modifying CTEs after the main query in reverse definition order, defer their AFTER events to the complete statement, and preserve command-level repeated-row handling.
+- Validate SQL and PL/pgSQL routine bodies under `check_function_bodies`, check declared result types, and defer string-body analysis when validation is disabled. Preserve SQL-standard body validation and reopen of deferred bodies.
+- Avoid waiting on unrelated relation locks whose cross-process lock-byte hashes collide within one process.
+
+## [0.4.9] - 2026-10-03
+
+This release bounds HNSW and transaction retention with encrypted temporary storage and corrects PostgreSQL 18 sequence, foreign-key, transaction and diagnostic behavior. Native SQLite mapping advances from 13 to 14, and persistent sequence definitions and values are stored separately. Stop every database owner, retain a closed pre-upgrade backup and update all owners together. Rust persistence and HNSW adapters and consumers of Rust/Python notices need API updates; see the [0.4.9 upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/reference/10-upgrading.md).
+
+### Changed
+
+- Store sequence values independently of catalog definitions, avoiding catalog refreshes when reserved values are published. Native SQLite migrates retained sequence revisions to mapping format 14; SQLite Key/Value and redb migrate sequence definitions and value records on open. Earlier binaries cannot consume the upgraded sequence representation.
+- Preserve PostgreSQL notice levels, SQLSTATEs, messages, details and hints through Rust, Python, Node.js, WASM, the PostgreSQL server and `usql`. Rust returns `SQLNotice` values and Python returns dictionaries instead of pairs; Node.js and WASM notice objects gain the diagnostic fields.
+
+### Fixed
+
+- Spill private transaction changes and prepared publication records to encrypted temporary files under the existing session allowance. Preserve savepoints and conflict preconditions, stream SQLite/redb publication and release decoded run caches when reading ends.
+- Keep HNSW graph construction, restoration, mutation generations, publication and search workspaces bounded by their retention allowance using encrypted temporary storage across memory, native SQLite, standalone SQLite, SQLite Key/Value and redb. Preserve graph topology, canonical scores, retained snapshots and transaction rollback while streaming provider inputs and persistence deltas; see the [Rust API changes](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/reference/10-upgrading.md).
+- Keep committed sequence allocation outside transactions that change sequence names, ownership or privileges, preventing duplicate values, allocation conflicts and rollback to values already issued by another session. Preserve transactional allocation for newly created or restarted sequence generations.
+- Match PostgreSQL foreign-key behavior across ordinary inheritance and partitioned tables: restrict referential actions to the declaring relation, propagate and validate partition constraints, preserve derived constraint identities and deferrability, and reject dropping, truncating or detaching referenced partitions when required.
+- Validate table rewrites against the affected rows and validated constraints, including referencing foreign keys. Check unique keys across the complete rewritten result so values moved by `USING` do not conflict with rows being replaced, and preserve PostgreSQL index-build diagnostics.
+- Treat a repeated SQL `BEGIN` as a warning without opening another transaction frame; the first `COMMIT` commits the block. Report PostgreSQL warnings for `SET LOCAL` and `SET TRANSACTION` outside transaction blocks while preserving explicit Rust nested frames.
+- Keep error details and hints separate from primary messages, preserve referenced-side diagnostics for deferred foreign-key failures, and follow PostgreSQL partition-attachment validation order.
+
+## [0.4.8] - 2026-10-03
+
+This release improves embedded reads and writes and corrects PostgreSQL 18 identity, input and diagnostic behavior. SQLite databases advance to record format 55, and cooperating processes use new row-lock and sequence sidecars. Stop all database owners, retain a closed pre-upgrade backup and update every owner together; see the [0.4.8 upgrade guide](docs/manual/reference/10-upgrading.md).
+
+### Added
+
+- Answer eligible relational queries from B-tree key and included-column postings without fetching documents, controlled by `enable_indexonlyscan`. Support `INCLUDE` on PRIMARY KEY and UNIQUE constraints with PostgreSQL column validation, naming, catalog output and rename/drop dependencies.
+- Honor identity sequence declarations and ALTER COLUMN identity actions, including sequence options, generated mode, restart and removal. Adding serial or identity columns creates the sequence and populates existing rows.
+
+### Changed
+
+- Reduce embedded query work with projected native reads, retained decoded scalar columns, shared graph scans, bounded top-K and window storage, HNSW visited bitmaps and generation-checked exact-vector reuse. Reduce repeated snapshot, catalog, index, trigger and commit preparation during writes while retaining transaction visibility and resource ownership.
+- Advance SQLite main records from format 54 to 55 with atomic, validated migration of version metadata; native SQLite mapping 13, redb main records 53 and SQL catalog 49 remain unchanged. Older SQLite binaries reject the new record format.
+- Coordinate row claims through `.uqa-row-claims` and sequence positions through `.uqa-sequences` beside the database. Update all cooperating processes together; orderly close retains exact sequence continuation, while an unclean final close may skip reserved values.
+- Coalesce statistics maintenance counts between durable refresh thresholds. Stored change counts can be a lower bound between publications; the existing stale-age limit still schedules refreshes. SQLite commit connections use a temporary page-cache allowance bounded at 256 MiB and release it after commit.
+
+### Fixed
+
+- Match PostgreSQL 18 identity writes for `OVERRIDING SYSTEM VALUE`, `OVERRIDING USER VALUE`, explicit NULL, DEFAULT, COPY and GENERATED ALWAYS diagnostics. Reject non-DEFAULT writes to generated columns before row execution, including empty sources.
+- Preserve distinct rows when a serial or identity column is not the primary key, and handle negative or large integer keys without colliding with generated document identities. Repair legacy key mappings on open and evaluate `_doc_id` and `_meta.doc_id` filters against the correct row identity.
+- Keep the statement's row-trigger definitions stable across trigger creation or deletion inside a trigger, while applying the replication role at each firing.
+- Match PostgreSQL integer text prefixes, underscores and range errors; parse BYTEA assignment and COPY input through the binary input rules and preserve PostgreSQL hex, escape and base64 behavior in `encode` and `decode`.
+- Match PostgreSQL NOT NULL, CHECK and partition violation messages, constraint ordering and permission-filtered row details. Keep their row details and COPY diagnostic hints separate from the primary message.
+- Preserve private row/count/index visibility and rollback state while reusing committed caches; reject stale automatic-statistics publication and retain committed notification outcomes when background delivery fails.
+- Avoid repeated operand-tree type inference during non-integer scalar arithmetic and comparisons while preserving exact NUMERIC results, REAL precision, integer overflow checks and SQL NULL behavior.
+- Avoid full native document scans for maximum-ID lookups, repeated catalog restoration for unchanged committed/private command views, per-key SQLite metadata statements and unchanged maintenance metadata reads. Preserve pinned visibility, savepoint undo, serializable observations, resource limits and existing maintenance deadlines.
+- Restore named analyzer bindings on document tables without requiring declared SQL columns. Declared SQL tables retain TEXT-column and physical FTS validation, and missing field bindings remain rejected.
+- Release notification test resources on the supported Node.js 16 runtime, including assertion failures and cancellation, so the HTTP compatibility suite completes without requiring newer test-context hooks.
+
 ## [0.4.7] - 2026-09-29
 
 ### Fixed

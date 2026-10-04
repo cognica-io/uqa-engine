@@ -4,15 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Canonical reads use active raw vectors, independently of graph navigation and normalization.
+//! Canonical reads seek active identities without materializing a document directory.
 
-use super::HNSWIndex;
+use super::{types::active_key, HNSWIndex};
 use crate::{
     read_control::StorageReadControl,
-    vector_index::{copy_vector, ordinal_count, VectorRead},
+    vector_index::{copy_vector, VectorRead},
     StorageBackendResult,
 };
-use std::ops::Bound::{Excluded, Unbounded};
 use uqa_core::{memory::BudgetedVec, DocId};
 
 impl VectorRead for HNSWIndex {
@@ -22,6 +21,7 @@ impl VectorRead for HNSWIndex {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+
     fn next_document_after(
         &self,
         after: Option<DocId>,
@@ -30,25 +30,34 @@ impl VectorRead for HNSWIndex {
         control.check()?;
         Ok(self
             .active
-            .range((
-                after.map_or(Unbounded, |document| Excluded((document, u32::MAX))),
-                Unbounded,
-            ))
-            .next()
-            .map(|(key, _)| key.0))
+            .next(after.map(|doc| active_key(doc, u32::MAX)))?
+            .map(|(key, _)| (key >> 32) as u64))
     }
+
     fn document_vector_count(
         &self,
         document: DocId,
         control: &StorageReadControl,
     ) -> StorageBackendResult<u64> {
-        ordinal_count(
-            self.active
-                .range((document, 0)..=(document, u32::MAX))
-                .map(|(key, _)| key.1),
-            control,
-        )
+        let mut after = active_key(document, 0).checked_sub(1);
+        let mut count = 0;
+        while let Some((key, _)) = self.active.next(after)? {
+            control.check()?;
+            if key >> 32 != u128::from(document) {
+                break;
+            }
+            if u64::from(key as u32) != count {
+                return Err(crate::mvcc::VersionError::InvalidEncoding(
+                    "HNSW live document vector ordinals are not contiguous",
+                )
+                .into_storage_error());
+            }
+            count += 1;
+            after = Some(key);
+        }
+        Ok(count)
     }
+
     fn read_vector(
         &self,
         document: DocId,
@@ -56,12 +65,11 @@ impl VectorRead for HNSWIndex {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<BudgetedVec<f32>>> {
         control.check()?;
-        let Some(node) = self.active.get(&(document, ordinal)) else {
+        let Some(node_id) = self.active.get(active_key(document, ordinal))? else {
             return Ok(None);
         };
         let node = self
-            .nodes
-            .get(node)
+            .node(*node_id)?
             .filter(|node| {
                 !node.deleted && node.doc_id == document && node.vector_ordinal == ordinal
             })

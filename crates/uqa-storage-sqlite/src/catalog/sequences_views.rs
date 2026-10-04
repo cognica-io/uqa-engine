@@ -11,7 +11,7 @@ use super::{
     SQLiteError, SequenceOptions, SequenceReservationResult, SequenceRow, SequenceSetValueResult,
     ViewRow,
 };
-use uqa_storage::catalog::{sequence_value_reservation, SequenceValuePosition};
+use uqa_storage::catalog::{sequence_value_reservation, SequenceLogResult, SequenceValuePosition};
 
 pub(in crate::catalog) mod codec;
 use codec::{
@@ -38,95 +38,125 @@ fn with_sequence_value_write<T>(
     })
 }
 
-fn reserve_sequence_values_in_connection(
-    connection: &rusqlite::Connection,
-    relation: &RelationIdentity,
-    object_id: [u8; 16],
+/// The physical row of a sequence object, found by its object identity whatever name it currently has.
+struct PhysicalSequenceValue {
+    relation: RelationIdentity,
     definition_generation: [u8; 16],
-) -> Result<SequenceReservationResult> {
-    let stored = connection
-        .query_row(
-            "SELECT object_id, definition_generation, current, called, increment, min_value, max_value, cycle, cache_size, log_count
-               FROM _sequences WHERE schema_name = ?1 AND relation_name = ?2",
-            params![relation.schema, relation.name],
-            |row| {
-                Ok((
-                    row.get::<_, Vec<u8>>(0)?,
-                    row.get::<_, Vec<u8>>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, bool>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, bool>(7)?,
-                    row.get::<_, i64>(8)?,
-                    row.get::<_, i64>(9)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((
-        stored_object_id,
-        stored_generation,
-        current,
-        called,
-        increment,
-        min,
-        max,
-        cycle,
-        cache_size,
-        log_count,
-    )) = stored
-    else {
-        return Ok(SequenceReservationResult::Missing);
+    position: SequenceValuePosition,
+    increment: i64,
+    min_value: i64,
+    max_value: i64,
+    cycle: bool,
+    cache_size: i64,
+}
+
+fn physical_sequence_value(
+    connection: &rusqlite::Connection,
+    object_id: [u8; 16],
+) -> Result<Option<PhysicalSequenceValue>> {
+    let mut statement = connection.prepare_cached(
+        "SELECT schema_name, relation_name, definition_generation, current, called, log_count, increment, min_value, max_value, cycle, cache_size
+           FROM _sequences WHERE object_id = ?1",
+    )?;
+    let mut rows = statement.query(params![object_id.as_slice()])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
     };
-    let stored_object_id = decode_sequence_identity(relation, "object identity", stored_object_id)?;
-    if stored_object_id != object_id {
-        return Ok(SequenceReservationResult::Missing);
-    }
-    let stored_generation =
-        decode_sequence_identity(relation, "definition generation", stored_generation)?;
-    if stored_generation != definition_generation {
-        return Ok(SequenceReservationResult::DefinitionChanged);
-    }
-    if increment == 0 || cache_size <= 0 {
+    let relation = RelationIdentity::new(row.get::<_, String>(0)?, row.get::<_, String>(1)?);
+    let stored = PhysicalSequenceValue {
+        definition_generation: decode_sequence_identity(
+            &relation,
+            "definition generation",
+            row.get::<_, Vec<u8>>(2)?,
+        )?,
+        position: SequenceValuePosition {
+            current: row.get(3)?,
+            called: row.get(4)?,
+            log_count: row.get(5)?,
+        },
+        increment: row.get(6)?,
+        min_value: row.get(7)?,
+        max_value: row.get(8)?,
+        cycle: row.get(9)?,
+        cache_size: row.get(10)?,
+        relation,
+    };
+    if rows.next()?.is_some() {
         return Err(SQLiteError::StorageBackend(format!(
-            "corrupt sequence `{}` has increment {increment} and cache size {cache_size}",
-            relation.qualified_name()
+            "sequence `{}` shares its object identity with another sequence",
+            stored.relation.qualified_name()
         )));
     }
-    let Some(reservation) = sequence_value_reservation(
-        SequenceValuePosition {
-            current,
-            called,
-            log_count,
-        },
-        increment,
-        min,
-        max,
-        cycle,
-        cache_size,
-    ) else {
-        return Ok(SequenceReservationResult::Exhausted);
-    };
+    Ok(Some(stored))
+}
+
+fn update_physical_sequence_value(
+    connection: &rusqlite::Connection,
+    stored: &PhysicalSequenceValue,
+    object_id: [u8; 16],
+    position: SequenceValuePosition,
+    action: &str,
+) -> Result<()> {
     let updated = connection.execute(
-        "UPDATE _sequences SET current = ?5, called = 1, log_count = ?6
-          WHERE schema_name = ?1 AND relation_name = ?2 AND object_id = ?3 AND definition_generation = ?4",
+        "UPDATE _sequences SET current = ?3, called = ?4, log_count = ?5
+          WHERE object_id = ?1 AND definition_generation = ?2",
         params![
-            relation.schema,
-            relation.name,
             object_id.as_slice(),
-            definition_generation.as_slice(),
-            reservation.last_value,
-            reservation.log_count,
+            stored.definition_generation.as_slice(),
+            position.current,
+            position.called,
+            position.log_count,
         ],
     )?;
     if updated != 1 {
         return Err(SQLiteError::StorageBackend(format!(
-            "sequence `{}` changed while reserving cached values",
-            relation.qualified_name()
+            "sequence `{}` changed while {action}",
+            stored.relation.qualified_name()
         )));
     }
+    Ok(())
+}
+
+fn reserve_sequence_values_in_connection(
+    connection: &rusqlite::Connection,
+    object_id: [u8; 16],
+    definition_generation: [u8; 16],
+) -> Result<SequenceReservationResult> {
+    let Some(stored) = physical_sequence_value(connection, object_id)? else {
+        return Ok(SequenceReservationResult::Missing);
+    };
+    if stored.definition_generation != definition_generation {
+        return Ok(SequenceReservationResult::DefinitionChanged);
+    }
+    if stored.increment == 0 || stored.cache_size <= 0 {
+        return Err(SQLiteError::StorageBackend(format!(
+            "corrupt sequence `{}` has increment {} and cache size {}",
+            stored.relation.qualified_name(),
+            stored.increment,
+            stored.cache_size
+        )));
+    }
+    let Some(reservation) = sequence_value_reservation(
+        stored.position,
+        stored.increment,
+        stored.min_value,
+        stored.max_value,
+        stored.cycle,
+        stored.cache_size,
+    ) else {
+        return Ok(SequenceReservationResult::Exhausted);
+    };
+    update_physical_sequence_value(
+        connection,
+        &stored,
+        object_id,
+        SequenceValuePosition {
+            current: reservation.last_value,
+            called: true,
+            log_count: reservation.log_count,
+        },
+        "reserving cached values",
+    )?;
     Ok(SequenceReservationResult::Reserved(reservation))
 }
 
@@ -203,9 +233,12 @@ impl Catalog {
             let (role_owner, acl_json) = crate::catalog::role_security::encode_sequence(&sequence.security)?;
             Ok(connection.execute(
                 "UPDATE _sequences
-                    SET object_id = ?3, definition_generation = ?4, start = ?5, increment = ?6, current = ?7, called = ?8, persistence = ?9,
-                        data_type = ?10, min_value = ?11, max_value = ?12, cycle = ?13, cache_size = ?14,
-                        owner_table_object_id = ?15, owner_column_object_id = ?16, owner_dependency = ?17, role_owner = ?18, acl_json = ?19, log_count = ?20
+                    SET object_id = ?3, definition_generation = ?4, start = ?5, increment = ?6,
+                        current = CASE WHEN object_id = ?3 AND definition_generation = ?4 THEN current ELSE ?7 END,
+                        called = CASE WHEN object_id = ?3 AND definition_generation = ?4 THEN called ELSE ?8 END,
+                        persistence = ?9, data_type = ?10, min_value = ?11, max_value = ?12, cycle = ?13, cache_size = ?14,
+                        owner_table_object_id = ?15, owner_column_object_id = ?16, owner_dependency = ?17, role_owner = ?18, acl_json = ?19,
+                        log_count = CASE WHEN object_id = ?3 AND definition_generation = ?4 THEN log_count ELSE ?20 END
                   WHERE schema_name = ?1 AND relation_name = ?2",
                 params![
                     sequence.relation.schema,
@@ -344,12 +377,7 @@ impl Catalog {
             return Ok(result);
         }
         with_sequence_value_write(&self.conn, |connection| {
-            reserve_sequence_values_in_connection(
-                connection,
-                &relation,
-                object_id,
-                definition_generation,
-            )
+            reserve_sequence_values_in_connection(connection, object_id, definition_generation)
         })
     }
 
@@ -374,36 +402,68 @@ impl Catalog {
             return Ok(result);
         }
         with_sequence_value_write(&self.conn, |connection| {
-            let stored = connection
-                .query_row(
-                    "SELECT object_id, definition_generation FROM _sequences
-                  WHERE schema_name = ?1 AND relation_name = ?2",
-                    params![relation.schema, relation.name],
-                    |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?)),
-                )
-                .optional()?;
-            let Some((identity, generation)) = stored else {
+            let Some(stored) = physical_sequence_value(connection, object_id)? else {
                 return Ok(SequenceSetValueResult::Missing);
             };
-            if decode_sequence_identity(&relation, "object identity", identity)? != object_id {
-                return Ok(SequenceSetValueResult::Missing);
-            }
-            if decode_sequence_identity(&relation, "definition generation", generation)?
-                != definition_generation
-            {
+            if stored.definition_generation != definition_generation {
                 return Ok(SequenceSetValueResult::DefinitionChanged);
             }
-            let updated = connection.execute(
-                "UPDATE _sequences SET current = ?5, called = ?6, log_count = ?7
-                  WHERE schema_name = ?1 AND relation_name = ?2 AND object_id = ?3 AND definition_generation = ?4",
-                params![relation.schema, relation.name, object_id.as_slice(), definition_generation.as_slice(), value, called, log_count],
+            update_physical_sequence_value(
+                connection,
+                &stored,
+                object_id,
+                SequenceValuePosition {
+                    current: value,
+                    called,
+                    log_count,
+                },
+                "setting its value",
             )?;
-            if updated != 1 {
-                return Err(SQLiteError::StorageBackend(format!(
-                    "sequence `{name}` changed while setting its value"
-                )));
-            }
             Ok(SequenceSetValueResult::Set(value))
+        })
+    }
+
+    pub fn log_sequence_values(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+        expected: (i64, bool),
+        logged: SequenceValuePosition,
+    ) -> Result<SequenceLogResult> {
+        let relation = migration_relation(name)?;
+        if let Some(result) = self.log_native_sequence_values(
+            &relation,
+            object_id,
+            definition_generation,
+            expected,
+            logged,
+        )? {
+            return Ok(result);
+        }
+        with_sequence_value_write(&self.conn, |connection| {
+            let Some(stored) = physical_sequence_value(connection, object_id)? else {
+                return Ok(SequenceLogResult::Missing);
+            };
+            if stored.definition_generation != definition_generation {
+                return Ok(SequenceLogResult::DefinitionChanged);
+            }
+            if logged.log_count < 0 {
+                return Err(SQLiteError::StorageBackend(
+                    "sequence log count cannot be negative".into(),
+                ));
+            }
+            if (stored.position.current, stored.position.called) != expected {
+                return Ok(SequenceLogResult::Changed(stored.position));
+            }
+            update_physical_sequence_value(
+                connection,
+                &stored,
+                object_id,
+                logged,
+                "logging its value",
+            )?;
+            Ok(SequenceLogResult::Logged)
         })
     }
 

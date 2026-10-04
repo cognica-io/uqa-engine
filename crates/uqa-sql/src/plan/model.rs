@@ -389,6 +389,8 @@ pub struct InsertPlan {
     pub target_alias: Option<String>,
     pub include_descendants: bool,
     pub columns: Vec<crate::ast::AssignmentTarget<ScalarExpr>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overriding: Option<crate::ast::OverridingKind>,
     pub ctes: Vec<CtePlan>,
     pub rows: Vec<Vec<ScalarExpr>>,
     pub source: Option<Box<QueryPlan>>,
@@ -512,6 +514,8 @@ pub enum MergeWhenPlan {
     InsertNotMatched {
         condition: Option<ScalarExpr>,
         columns: Vec<crate::ast::AssignmentTarget<ScalarExpr>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        overriding: Option<crate::ast::OverridingKind>,
         values: Vec<ScalarExpr>,
     },
     NothingMatched {

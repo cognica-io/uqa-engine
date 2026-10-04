@@ -76,7 +76,6 @@ pub fn add_foreign_key_constraint(
         },
         qualifier,
         &mut columns,
-        &constraints.key_constraints,
         &constraints.foreign_keys,
     )?;
     materialize_constraint_candidate(context, table, &mut columns, &mut constraints)?;
@@ -86,10 +85,30 @@ pub fn add_foreign_key_constraint(
         .and_then(|constraint| constraint.name.clone())
         .ok_or_else(|| SQLError::Internal("new FOREIGN KEY constraint has no name".into()))?;
     publish_constraint_state(context, table, columns, constraints)?;
+    if is_partitioned(context, table)? {
+        let (_, constraints) = table_constraint_state(context, table)?;
+        let key = constraints
+            .foreign_keys
+            .iter()
+            .find(|constraint| constraint.name.as_deref() == Some(name.as_str()))
+            .ok_or_else(|| SQLError::Internal("new FOREIGN KEY constraint disappeared".into()))?;
+        super::partition_foreign_keys::inherit_partition_foreign_key(context, table, key)?;
+    }
     if should_validate {
         validate_and_mark_constraint(context, table, &name)?;
     }
     Ok(())
+}
+
+fn is_partitioned(context: &ConstraintAlterContext<'_>, table: &str) -> Result<bool, SQLError> {
+    Ok(context
+        .rows
+        .partitions
+        .catalog
+        .try_table_hierarchy(table)
+        .map_err(SQLError::Internal)?
+        .partition_spec
+        .is_some())
 }
 
 pub fn set_not_null_constraint(
@@ -208,6 +227,19 @@ pub fn validate_and_mark_constraint(
         )
     })?;
     match location {
+        ConstraintLocation::ReferencedPartition(foreign_key, index) => {
+            if !validate_referenced_partition(
+                context,
+                table,
+                name,
+                &mut columns,
+                &mut constraints,
+                foreign_key,
+                index,
+            )? {
+                return Ok(());
+            }
+        }
         ConstraintLocation::NotNull(index) => {
             if columns[index].not_null_validated {
                 return Ok(());
@@ -253,18 +285,11 @@ pub fn validate_and_mark_constraint(
             if reference.validated {
                 return Ok(());
             }
-            if !reference.enforced {
-                return Err(constraint_error(
-                    "55000",
-                    "cannot validate NOT ENFORCED constraint",
-                ));
-            }
-            let foreign_key = column_foreign_key(&columns[index], reference);
-            crate::schema::validation::validate_foreign_key_rows(
-                context.rows,
+            validate_foreign_key(
+                context,
                 table,
                 name,
-                &foreign_key,
+                &column_foreign_key(&columns[index], reference),
             )?;
             columns[index]
                 .references
@@ -276,18 +301,7 @@ pub fn validate_and_mark_constraint(
             if constraints.foreign_keys[index].validated {
                 return Ok(());
             }
-            if !constraints.foreign_keys[index].enforced {
-                return Err(constraint_error(
-                    "55000",
-                    "cannot validate NOT ENFORCED constraint",
-                ));
-            }
-            crate::schema::validation::validate_foreign_key_rows(
-                context.rows,
-                table,
-                name,
-                &constraints.foreign_keys[index],
-            )?;
+            validate_foreign_key(context, table, name, &constraints.foreign_keys[index])?;
             constraints.foreign_keys[index].validated = true;
         }
         ConstraintLocation::Key(_) => {
@@ -300,6 +314,91 @@ pub fn validate_and_mark_constraint(
         }
     }
     publish_constraint_state(context, table, columns, constraints)
+}
+
+/// Validate a constraint a foreign key derives on a referenced partition, and the constraints deriving from it, which `PostgreSQL` marks valid without validating the foreign key. A referencing table that is not partitioned has its rows validated against that partition alone, as `QueueFKConstraintValidation` validates them against the derived constraint's referenced relation. Reports whether the constraint was not yet valid.
+fn validate_referenced_partition(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+    name: &str,
+    columns: &mut [uqa_sql::ast::ColumnDef],
+    constraints: &mut uqa_sql::ast::TableConstraintSet,
+    foreign_key: uqa_sql::schema::constraint_changes::ForeignKeyLocation,
+    index: usize,
+) -> Result<bool, SQLError> {
+    let holder = match foreign_key {
+        uqa_sql::schema::constraint_changes::ForeignKeyLocation::Column(position) => {
+            uqa_sql::schema::inheritance::foreign_keys::DeclaredForeignKey::Column(position)
+        }
+        uqa_sql::schema::constraint_changes::ForeignKeyLocation::Table(position) => {
+            uqa_sql::schema::inheritance::foreign_keys::DeclaredForeignKey::Table(position)
+        }
+    };
+    let mut scoped = holder
+        .foreign_key(columns, constraints)
+        .ok_or_else(|| SQLError::Internal("FOREIGN KEY disappeared".into()))?;
+    let derived = scoped
+        .referenced_partitions
+        .get(index)
+        .cloned()
+        .ok_or_else(|| SQLError::Internal("derived constraint disappeared".into()))?;
+    if derived.validated {
+        return Ok(false);
+    }
+    if !scoped.enforced {
+        return Err(constraint_error(
+            "55000",
+            "cannot validate NOT ENFORCED constraint",
+        ));
+    }
+    if !is_partitioned(context, table)? {
+        scoped.ref_table = context
+            .lock_catalog
+            .table_name(derived.partition)
+            .ok_or_else(|| SQLError::Internal("referenced partition disappeared".into()))?;
+        crate::schema::validation::validate_foreign_key_rows(context.rows, table, name, &scoped)?;
+    }
+    let entries = foreign_key
+        .derived_mut(columns, constraints)
+        .ok_or_else(|| SQLError::Internal("FOREIGN KEY disappeared".into()))?;
+    let mut validated = std::collections::BTreeSet::from([derived.partition]);
+    for entry in entries.iter_mut() {
+        if entry.partition == derived.partition
+            || entry
+                .parent
+                .is_some_and(|parent| validated.contains(&parent))
+        {
+            entry.validated = true;
+            validated.insert(entry.partition);
+        }
+    }
+    Ok(true)
+}
+
+/// Validate the rows of an enforced foreign key: the table's own rows, and on a partitioned table the rows of each leaf partition through its copy.
+fn validate_foreign_key(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+    name: &str,
+    foreign_key: &uqa_sql::ast::ForeignKey,
+) -> Result<(), SQLError> {
+    if !foreign_key.enforced {
+        return Err(constraint_error(
+            "55000",
+            "cannot validate NOT ENFORCED constraint",
+        ));
+    }
+    crate::schema::validation::validate_foreign_key_rows(context.rows, table, name, foreign_key)?;
+    if is_partitioned(context, table)? {
+        super::partition_foreign_keys::validate_partition_foreign_keys(
+            context,
+            table,
+            foreign_key.object_id.ok_or_else(|| {
+                SQLError::Internal("materialized foreign key has no object identity".into())
+            })?,
+        )?;
+    }
+    Ok(())
 }
 
 pub fn validate_not_null_rows(
@@ -328,25 +427,36 @@ fn validate_check_rows(
     )
 }
 
+/// `ALTER CONSTRAINT`, which a partitioned table's foreign key applies to the copies on its partitions as well, and which a partition's copy refuses, as `PostgreSQL` does. `ONLY` cannot alter a constraint of a partitioned table.
 pub fn alter_constraint(
     context: &ConstraintAlterContext<'_>,
     table: &str,
     name: &str,
-    enforceability: Option<bool>,
-    deferrability: Option<(bool, bool)>,
-    no_inherit: Option<bool>,
+    mut options: uqa_sql::schema::constraint_changes::ConstraintAlterOptions,
+    recurse: bool,
 ) -> Result<(), SQLError> {
+    let partitioned = is_partitioned(context, table)?;
+    if !recurse && partitioned {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42P16".into(),
+            message: "constraint must be altered in child tables too".into(),
+            detail: None,
+            hint: Some("Do not specify the ONLY keyword.".into()),
+        });
+    }
     let (mut columns, mut constraints) = table_constraint_state(context, table)?;
+    let family = foreign_key_family(&columns, &constraints, name);
+    if let Some(family) = family {
+        options.ancestor =
+            super::partition_foreign_keys::foreign_key_ancestor(context, table, family)?;
+    }
+    let (enforceability, deferrability) = (options.enforceability, options.deferrability);
     let effects = uqa_sql::schema::constraint_changes::apply_constraint_alteration(
         table,
         name,
         &mut columns,
         &mut constraints,
-        uqa_sql::schema::constraint_changes::ConstraintAlterOptions {
-            enforceability,
-            deferrability,
-            no_inherit,
-        },
+        options,
     )?;
     let recreated_foreign_key = effects
         .recreated_foreign_key
@@ -354,6 +464,15 @@ pub fn alter_constraint(
         .map(|foreign_key| foreign_key_constraint_identity(context, table, foreign_key))
         .transpose()?;
     publish_constraint_state(context, table, columns, constraints)?;
+    if let Some(family) = family.filter(|_| partitioned) {
+        super::partition_foreign_keys::alter_partition_foreign_keys(
+            context,
+            table,
+            family,
+            enforceability,
+            deferrability,
+        )?;
+    }
     if effects.validate_after_publish {
         validate_and_mark_constraint(context, table, name)?;
     }
@@ -363,59 +482,142 @@ pub fn alter_constraint(
     Ok(())
 }
 
+/// The object identity of the foreign key named `name`, which its partition copies share.
+fn foreign_key_family(
+    columns: &[uqa_sql::ast::ColumnDef],
+    constraints: &uqa_sql::ast::TableConstraintSet,
+    name: &str,
+) -> Option<[u8; 16]> {
+    match find_constraint(columns, constraints, name)? {
+        ConstraintLocation::ColumnForeignKey(index) => {
+            columns[index].references.as_ref()?.object_id
+        }
+        ConstraintLocation::TableForeignKey(index) => constraints.foreign_keys[index].object_id,
+        _ => None,
+    }
+}
+
+/// Add a key as ALTER TABLE does: the declaration's checks, the index's name, the rows of a plain table, and then, through the index that `DefineIndex` builds or adopts on each partition, the partition keys and the rows of each partition, before the NOT NULL constraints of a primary key are verified.
 pub fn add_key_constraint(
     context: &ConstraintAlterContext<'_>,
     table: &str,
-    qualifier: &str,
     mut constraint: uqa_sql::ast::TableKeyConstraint,
 ) -> Result<(), SQLError> {
-    let mut columns = context
+    let columns = context
         .catalog
         .try_describe_table(table)
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    context
-        .publication
-        .constraint_names()
-        .ensure_available(table, constraint.name.as_deref())?;
+    let keys = context
+        .catalog
+        .try_key_constraints(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+    let partition = context
+        .rows
+        .partitions
+        .catalog
+        .try_table_hierarchy(table)
+        .map_err(SQLError::Internal)?
+        .partition_spec;
+    uqa_sql::schema::keys::validate_added_key(
+        &uqa_sql::schema::keys::AddedKeyRelation {
+            table,
+            columns: &columns,
+            keys: &keys,
+            partition: partition.as_ref(),
+        },
+        &constraint,
+    )?;
     uqa_sql::schema::indexes::names::name_constraint_indexes(
         context.names,
         table,
         std::slice::from_mut(&mut constraint),
     )?;
-    let mut key_constraints = context
-        .catalog
-        .try_key_constraints(table)
-        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-    key_constraints.push(constraint.clone());
-    let foreign_keys = context
-        .catalog
-        .try_foreign_keys(table)
-        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-    let binding = context.publication.bindings.bindings.binding_scope()?;
-    uqa_sql::schema::generated::prepare_generated_columns(
-        &uqa_sql::schema::SchemaBindingContext {
-            catalog: context.publication.bindings.schema,
-            binding: &binding.context(),
-        },
-        qualifier,
-        &mut columns,
-        &key_constraints,
-        &foreign_keys,
-    )?;
-    crate::schema::keys::validate_added_key_constraint(
-        &crate::schema::keys::KeyValidationContext {
-            catalog: context.catalog,
-            constraints: context.rows,
-        },
-        table,
-        &constraint,
-    )?;
+    context
+        .publication
+        .constraint_names()
+        .ensure_available(table, constraint.name.as_deref())?;
+    let validation = crate::schema::keys::KeyValidationContext {
+        catalog: context.catalog,
+        constraints: context.rows,
+    };
+    let partitions = partition_keys(context, table)?;
+    if partition.is_none() {
+        crate::schema::keys::validate_key_index_rows(&validation, table, &constraint)?;
+    }
     context
         .writes
         .with_schema_write(Box::new(|publication| {
             crate::schema::publication::keys::append_key_constraint(publication, table, &constraint)
         }))
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+    let mut built = Vec::new();
+    for state in &partitions {
+        let index = uqa_sql::schema::keys::definition::define_partition_key(
+            &uqa_sql::schema::keys::definition::KeyPartition {
+                table: &state.table,
+                partition: state.partition.as_ref(),
+                keys: &state.keys,
+            },
+            &constraint,
+        )?;
+        if index == uqa_sql::schema::keys::definition::PartitionKeyIndex::Created
+            && state.partition.is_none()
+        {
+            let copy = context
+                .catalog
+                .try_key_constraints(&state.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+                .into_iter()
+                .find(|key| uqa_sql::schema::inheritance::alter::key_equivalent(key, &constraint))
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "partition `{}` did not receive its key",
+                        state.table
+                    ))
+                })?;
+            crate::schema::keys::validate_key_index_rows(&validation, &state.table, &copy)?;
+            built.push((state.table.as_str(), copy));
+        }
+    }
+    if partition.is_none() {
+        crate::schema::keys::validate_primary_key_rows(&validation, table, &constraint)?;
+    }
+    for (leaf, copy) in &built {
+        crate::schema::keys::validate_primary_key_rows(&validation, leaf, copy)?;
+    }
     Ok(())
+}
+
+/// A partition below a relation that receives a key, with its keys before the key reaches it.
+struct PartitionKeys {
+    table: String,
+    partition: Option<uqa_sql::ast::PartitionSpec>,
+    keys: Vec<uqa_sql::ast::TableKeyConstraint>,
+}
+
+/// The partitions below `table` in the order `DefineIndex` recurses into them.
+fn partition_keys(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+) -> Result<Vec<PartitionKeys>, SQLError> {
+    uqa_sql::semantics::partition::partition_tree(&context.rows.partitions, table, false)?
+        .into_iter()
+        .map(|node| {
+            Ok(PartitionKeys {
+                partition: context
+                    .rows
+                    .partitions
+                    .catalog
+                    .try_table_hierarchy(&node.table)
+                    .map_err(SQLError::Internal)?
+                    .partition_spec,
+                keys: context
+                    .catalog
+                    .try_key_constraints(&node.table)
+                    .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?,
+                table: node.table,
+            })
+        })
+        .collect()
 }

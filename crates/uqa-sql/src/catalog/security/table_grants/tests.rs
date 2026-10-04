@@ -246,24 +246,21 @@ fn partial_grant_publishes_only_authorized_privileges_and_reports_a_warning() {
 fn absent_grant_authority_preserves_security_and_distinguishes_grant_and_revoke_warnings() {
     let roles = roles();
     let current = TableSecurity::owner("uqa");
-    for (sql, message) in [
+    for (sql, message, sqlstate) in [
         (
             "GRANT SELECT ON items TO reader",
             "no privileges were granted for \"items\"",
+            "01007",
         ),
         (
             "REVOKE SELECT ON items FROM reader",
             "no privileges could be revoked for \"items\"",
+            "01006",
         ),
     ] {
         let (next, count, notices) = apply(sql, "alice", &roles, &current).unwrap();
         assert_eq!(next, current);
         assert_eq!(count, 0);
-        let sqlstate = if sql.starts_with("GRANT") {
-            "01007"
-        } else {
-            "01006"
-        };
         assert_eq!(
             notices,
             vec![crate::SQLNotice::warning(message).with_sqlstate(sqlstate)]

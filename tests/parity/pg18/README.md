@@ -11,7 +11,7 @@ The [official upstream regression harness](upstream/README.md) separately import
 
 ## Index declaration reference
 
-The [index declaration reference](index_definition_order.expected.json) separately captures 56 PostgreSQL 18.4 index-definition, option and error-order cases. The [SQL probe](index_definition_order_oracle.sql) rolls back every attempted index and its temporary setup. SQL owner tests check option parsing and diagnostics; Engine tests execute the complete statements against the independently captured results and assert that rollback retains the original index. Regenerate into an ignored output directory with `python3 tests/parity/pg18/capture_index_definition_order.py --container uqa-pg18 --output target/index-definition-order.reference.json`, then review the difference before changing the committed expectation.
+The [index declaration reference](index_definition_order.expected.json) separately captures 66 PostgreSQL 18.4 index-definition, option, included-column and error-order cases. The [SQL probe](index_definition_order_oracle.sql) rolls back every attempted index and its temporary setup. SQL owner tests check option parsing and diagnostics; Engine tests execute the complete statements against the independently captured results and assert that rollback retains the original index. Regenerate into an ignored output directory with `python3 tests/parity/pg18/capture_index_definition_order.py --container uqa-pg18 --output target/index-definition-order.reference.json`, then review the difference before changing the committed expectation.
 
 ## Numeric comparison reference
 

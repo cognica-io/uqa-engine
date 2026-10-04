@@ -16,6 +16,24 @@ use uqa_sql::{
 };
 use uqa_storage::StorageBackendResult;
 impl Engine {
+    /// Give partitions the copies of their partitioned ancestors' foreign keys that earlier releases left them without, when a writer opens the database.
+    pub(crate) fn repair_partition_foreign_keys_on_open(&self) -> StorageBackendResult<()> {
+        let needed =
+            uqa_execution::schema::constraints::partition_foreign_keys::partition_foreign_keys_need_repair(
+                &self.constraint_alter_context(),
+            )
+            .map_err(|error| uqa_storage::StorageBackendError::backend("partition foreign key repair", error))?;
+        if !needed {
+            return Ok(());
+        }
+        self.with_implicit_storage_transaction(|engine| {
+            uqa_execution::schema::constraints::partition_foreign_keys::repair_partition_foreign_keys(
+                &engine.constraint_alter_context(),
+            )
+            .map_err(|error| uqa_storage::StorageBackendError::backend("partition foreign key repair", error))
+        })
+    }
+
     pub(crate) fn constraint_alter_context(&self) -> ConstraintAlterContext<'_> {
         let runtime = self.query_runtime_view();
         ConstraintAlterContext {

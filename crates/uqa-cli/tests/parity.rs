@@ -45,7 +45,7 @@ fn banner_matches_expected_usql_shape() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(
-        out.contains("usql 0.4.7 -- UQA interactive SQL shell"),
+        out.contains("usql 0.4.9 -- UQA interactive SQL shell"),
         "{out}"
     );
     assert!(out.contains("Database: :memory:"), "{out}");
@@ -226,6 +226,39 @@ fn command_string_routes_sql_notices_to_stderr() {
     assert_eq!(
         stderr(&output),
         "WARNING: there is no transaction in progress\n"
+    );
+}
+
+#[test]
+fn command_string_prints_error_detail_and_hint_lines() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(
+        &["-c", "SET session_replication_role = rep"],
+        "",
+        dir.path(),
+    );
+    assert!(!output.status.success(), "stdout: {}", stdout(&output));
+    assert!(
+        stdout(&output).contains(
+            "ERROR: 22023: invalid value for parameter \"session_replication_role\": \"rep\"\nHINT: Available values: origin, replica, local.\n"
+        ),
+        "{}",
+        stdout(&output)
+    );
+    let output = run_usql(
+        &[
+            "-c",
+            "CREATE TABLE pt (k int) PARTITION BY RANGE (k); CREATE TABLE p1 PARTITION OF pt FOR VALUES FROM (0) TO (10); ALTER TABLE pt DETACH PARTITION p1 FINALIZE",
+        ],
+        "",
+        dir.path(),
+    );
+    assert!(
+        stdout(&output).contains(
+            "ERROR: 55000: cannot complete detaching partition \"p1\"\nDETAIL: There's no pending concurrent detach.\n"
+        ),
+        "{}",
+        stdout(&output)
     );
 }
 

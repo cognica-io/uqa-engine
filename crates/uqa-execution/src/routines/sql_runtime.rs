@@ -80,35 +80,29 @@ impl Interpreter<'_> {
                 })?
                 .to_string(),
         };
-        if level == RaiseLevel::Error {
-            let sqlstate = match condition {
-                Some(name) => {
-                    if let Some(state) = condition_sqlstate(name) {
-                        state.to_string()
-                    } else if looks_like_sqlstate(name) {
-                        name.to_ascii_uppercase()
-                    } else {
-                        return Err(SQLError::Internal(format!(
-                            "unrecognized PL/pgSQL RAISE condition `{name}`"
-                        )));
-                    }
-                }
-                None => "P0001".to_string(),
-            };
+        let sqlstate = match condition {
+            Some(name) => Some(if let Some(state) = condition_sqlstate(name) {
+                state.to_string()
+            } else if looks_like_sqlstate(name) {
+                name.to_ascii_uppercase()
+            } else {
+                return Err(SQLError::Internal(format!(
+                    "unrecognized PL/pgSQL RAISE condition `{name}`"
+                )));
+            }),
+            None => None,
+        };
+        let Some(level) = level.notice_level() else {
             return Err(SQLError::Routine {
-                sqlstate,
+                sqlstate: sqlstate.unwrap_or_else(|| "P0001".to_string()),
                 message: text,
             });
-        }
-        let severity = uqa_sql::NoticeSeverity::parse(level.as_str()).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "PL/pgSQL RAISE level {} is not a notice",
-                level.as_str()
-            ))
-        })?;
-        self.services
-            .runtime
-            .push_notice(uqa_sql::SQLNotice::new(severity, text));
+        };
+        let notice = uqa_sql::SQLNotice::new(level, text);
+        self.services.runtime.push_notice(match sqlstate {
+            Some(sqlstate) => notice.with_sqlstate(sqlstate),
+            None => notice,
+        });
         Ok(Flow::Normal)
     }
 

@@ -180,6 +180,9 @@ pub trait KeyValueRead {
     }
 }
 
+#[cfg(test)]
+mod tests;
+
 /// Opaque cache identity. Numeric index revisions alone do not distinguish undo branches or independent private transactions.
 #[derive(Clone)]
 pub struct KeyValueReadRevision(Revision);
@@ -209,6 +212,41 @@ impl KeyValueReadRevision {
             Revision::Records { database: a, private: ap, .. },
             Revision::Records { database: b, private: bp, .. }
         ) if a == b && ap == bp)
+    }
+
+    /// Whether this committed view follows the committed state of `earlier` by exactly one record commit of the same database. `earlier` may include changes private to the transaction that observed it; this view may not. A session whose transaction wrote records after observing `earlier`, and then observes this view after committing, knows that its own commit is the only one between them.
+    pub fn follows_by_one_commit(&self, earlier: &Self) -> bool {
+        match (earlier.committed_state(), self.committed_state()) {
+            (Some((database, before, _)), Some((current, after, false))) => {
+                database == current && before.successor().ok() == Some(after)
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether both views include the same committed record state of one database, whatever private changes accompany either. Differences between them are then private to the observing transaction.
+    pub fn same_committed_state(&self, other: &Self) -> bool {
+        match (self.committed_state(), other.committed_state()) {
+            (Some((database, sequence, _)), Some((other_database, other_sequence, _))) => {
+                database == other_database && sequence == other_sequence
+            }
+            _ => false,
+        }
+    }
+
+    /// The database, committed sequence and presence of private changes of a record view.
+    fn committed_state(&self) -> Option<(DatabaseId, CommitSequence, bool)> {
+        match &self.0 {
+            Revision::Record(record) => record
+                .committed_sequence()
+                .map(|sequence| (record.database(), sequence, record.is_private())),
+            Revision::Records {
+                database,
+                committed,
+                private,
+            } => Some((*database, *committed, private.is_some())),
+            Revision::Memory(_) => None,
+        }
     }
 
     pub(crate) fn record_database(&self) -> Option<DatabaseId> {

@@ -17,11 +17,11 @@
 //! Variable references inside embedded SQL are plain column
 //! references after compilation. At execution time the interpreter
 //! rewrites them into literals through [`VariableResolver`] /
-//! [`bind_expr`] / [`bind_statement`] before handing the statement to
-//! the engine. This matches `plpgsql.variable_conflict =
-//! use_variable` resolution: a name that is both a `PL/pgSQL`
-//! variable and a column of a queried table resolves to the variable
-//! (stock `PostgreSQL` raises an ambiguity error instead).
+//! [`bind_statement_variables`] / [`bind_expression_variables`] before
+//! handing the statement to the engine, after the binder has checked
+//! each reference against the columns and relations the statement can
+//! see, so that a name that is both a variable and a column resolves
+//! as `plpgsql.variable_conflict` directs.
 
 use serde_json::Value as JSONValue;
 use uqa_core::Value;
@@ -48,6 +48,10 @@ pub struct PLpgSQLFunction {
     pub old_datum: Option<usize>,
     /// Index of the implicit `FOUND` variable in [`Self::datums`].
     pub found_datum: Option<usize>,
+    /// The options the body declares before its first block.
+    pub options: CompileOptions,
+    /// How a name that is both a variable and a column resolves in this compilation of the body: the body's own option, or the setting of the session that compiled it.
+    pub variable_conflict: VariableConflict,
 }
 
 impl PLpgSQLFunction {
@@ -282,6 +286,18 @@ impl RaiseLevel {
             RaiseLevel::Error => "ERROR",
         }
     }
+
+    /// The level of the notice a `RAISE` at this level reports, or `None` for `EXCEPTION`, which raises an error.
+    pub const fn notice_level(self) -> Option<crate::NoticeLevel> {
+        match self {
+            RaiseLevel::Debug => Some(crate::NoticeLevel::Debug),
+            RaiseLevel::Log => Some(crate::NoticeLevel::Log),
+            RaiseLevel::Info => Some(crate::NoticeLevel::Info),
+            RaiseLevel::Notice => Some(crate::NoticeLevel::Notice),
+            RaiseLevel::Warning => Some(crate::NoticeLevel::Warning),
+            RaiseLevel::Error => None,
+        }
+    }
 }
 
 /// Assignment / `INTO` target.
@@ -468,7 +484,9 @@ mod conditions;
 mod json_validation;
 mod lowering_expression;
 mod lowering_statement;
+mod options;
 mod parsing;
+mod variable_conflicts;
 
 use json_validation::{
     ensure_single_tag, expect_tag, json_bool_or_false, json_i64_or_zero, json_kind,
@@ -483,10 +501,14 @@ use parsing::{lower_row_fields, normalize_condition};
 pub use binding::{bind_expr, bind_select, bind_statement, ResolvedVariable, VariableResolver};
 pub use conditions::{condition_sqlstate, condition_sqlstates};
 pub use lowering_expression::compile_expression_text;
+pub use options::{compile_options, CompileOptions, VariableConflict};
 pub use parsing::{
     parse_do_block, parse_do_block_with_catalog, parse_function, parse_function_with_catalog,
 };
 pub use pg_query::{PlpgsqlCatalog, PlpgsqlType};
+pub use variable_conflicts::{
+    bind_expression_variables, bind_statement_variables, VariableSiteResolver,
+};
 
 #[cfg(test)]
 mod tests;

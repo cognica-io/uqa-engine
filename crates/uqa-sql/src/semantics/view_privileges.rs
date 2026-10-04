@@ -393,6 +393,7 @@ pub fn merge_privilege_expressions(stmt: &MergePlan) -> Vec<&crate::ScalarExpr> 
                 condition,
                 columns,
                 values,
+                ..
             } => {
                 expressions.extend(condition.iter());
                 expressions.extend(

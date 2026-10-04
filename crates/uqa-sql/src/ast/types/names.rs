@@ -190,12 +190,11 @@ impl fmt::Display for TypeName<'_> {
             ColumnType::Domain { schema, name, .. } if self.regtype => {
                 f.write_str(&super::display::visible_type_name(schema, name))
             }
-            ColumnType::Domain { schema, name, .. } => write!(
-                f,
-                "{}.{}",
-                crate::expr::quote_ident(schema),
-                crate::expr::quote_ident(name)
-            ),
+            ColumnType::Domain { schema, name, .. } => {
+                crate::compiler::write_relation_component(schema, f)?;
+                f.write_str(".")?;
+                crate::compiler::write_relation_component(name, f)
+            }
         }
     }
 }

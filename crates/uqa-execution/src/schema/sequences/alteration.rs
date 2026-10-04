@@ -17,7 +17,8 @@ use uqa_storage::{SequenceOwner, SequenceOwnerDependency, StorageBackendResult};
 
 pub trait SequenceDefinitionCatalog {
     fn object_id(&self, relation: &RelationIdentity) -> Option<[u8; 16]>;
-    fn state(&self, relation: &RelationIdentity) -> Option<SequenceState>;
+    /// The state of a sequence at its exact position: a replaced definition continues the values handed out, not the durable record that runs ahead of them.
+    fn state(&self, relation: &RelationIdentity) -> Result<Option<SequenceState>, SQLError>;
     fn owner_target(&self, owner: SequenceOwner) -> Option<(String, String, bool)>;
 }
 pub trait SequenceDefinitionPublication {
@@ -61,7 +62,7 @@ pub fn alter_sequence_definition(
         .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` has no object identity")))?;
     let state = context
         .catalog
-        .state(relation)
+        .state(relation)?
         .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
     let mut state = crate::catalog::sequence::altered_sequence_state(state, alter)?;
     if alter.ownership != uqa_sql::ast::SequenceOwnership::Unchanged {
@@ -77,14 +78,17 @@ pub fn alter_sequence_definition(
             let owner_table = context
                 .catalog
                 .owner_target(state.owner.expect("identity owner was checked"))
-                .map_or_else(|| "<missing>".into(), |(table, _, _)| table);
-            return Err(SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message: format!(
-                        "cannot change ownership of identity sequence; sequence \"{}\" is linked to table \"{owner_table}\"",
-                        relation.name
-                    ),
-                });
+                .and_then(|(table, _, _)| RelationIdentity::from_legacy_name(&table).ok())
+                .map_or_else(|| "<missing>".into(), |table| table.name);
+            return Err(SQLError::Diagnostic {
+                sqlstate: "0A000".into(),
+                message: "cannot change ownership of identity sequence".into(),
+                detail: Some(format!(
+                    "Sequence \"{}\" is linked to table \"{owner_table}\".",
+                    relation.name
+                )),
+                hint: None,
+            });
         }
         state.owner = owner;
     }

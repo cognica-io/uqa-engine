@@ -450,7 +450,103 @@ impl Engine {
         self.reload_table_catalog(target_epoch)
     }
 
+    /// Reload the table catalog and the registries after a rollback, pushing their failures to `cleanup_errors`. Both read one snapshot: the open transaction's, or else a read transaction pinned for them, since separate captures would leave the reloaded tables at different states when another session commits in between. When both succeed, the cache revisions and the read view they read are recorded, as a refresh records them, so the next statement refreshes only what other sessions committed since instead of reloading every table again.
+    pub(crate) fn reload_catalogs_after_rollback(&self, cleanup_errors: &mut Vec<String>) {
+        let Some(backend) = self.storage.backend.as_ref() else {
+            return;
+        };
+        let table_data_epoch = self
+            .epochs
+            .table_data
+            .published
+            .load(std::sync::atomic::Ordering::Acquire);
+        let in_transaction = backend.in_transaction();
+        let (pinned, stable_version) = if in_transaction {
+            (false, None)
+        } else {
+            match Self::pin_rollback_snapshot(backend.as_ref()) {
+                Ok(stable_version) => (true, stable_version),
+                Err(error) => {
+                    cleanup_errors.push(format!("rollback read snapshot: {error}"));
+                    (false, None)
+                }
+            }
+        };
+        let tables = self.reload_table_catalog_after_rollback();
+        if let Err(error) = &tables {
+            cleanup_errors.push(format!("table catalog restore: {error}"));
+        }
+        let registries = self.reload_catalog_registries_after_rollback();
+        if let Err(error) = &registries {
+            cleanup_errors.push(format!("registry restore: {error}"));
+        }
+        if tables.is_ok() && registries.is_ok() && (pinned || in_transaction) {
+            if let Err(error) = self.record_reloaded_snapshot(table_data_epoch, stable_version) {
+                cleanup_errors.push(format!("cache revision record: {error}"));
+            }
+        }
+        if pinned {
+            if let Err(error) = backend.rollback_transaction() {
+                cleanup_errors.push(format!("rollback read snapshot release: {error}"));
+            }
+        }
+    }
+
+    /// Begin a read transaction and pin its snapshot. Returns the commit version when the monitor shows that no commit came between the two reads around the pin, as a refresh reads them.
+    fn pin_rollback_snapshot(
+        backend: &dyn uqa_storage::PersistentStorageBackend,
+    ) -> StorageBackendResult<Option<u64>> {
+        backend.begin_read_transaction()?;
+        let pinned = (|| {
+            if !backend.change_version_monitor_is_nonblocking()? {
+                backend.pin_transaction_snapshot()?;
+                return Ok(None);
+            }
+            let before = backend.change_version()?;
+            backend.pin_transaction_snapshot()?;
+            let after = backend.change_version()?;
+            Ok(before.filter(|before| after == Some(*before)))
+        })();
+        if pinned.is_err() {
+            let _ = backend.rollback_transaction();
+        }
+        pinned
+    }
+
+    /// Record what the reload after a rollback read: the catalog's cache revisions, the read view, the data epoch it loaded, and the commit version when it stood still around the pin.
+    fn record_reloaded_snapshot(
+        &self,
+        table_data_epoch: u64,
+        stable_version: Option<u64>,
+    ) -> StorageBackendResult<()> {
+        let revisions = match self.storage.catalog.as_ref() {
+            Some(catalog) => catalog.cache_revisions()?,
+            None => None,
+        };
+        let read_view = self
+            .storage
+            .backend
+            .as_ref()
+            .map(|backend| backend.read_view_revision())
+            .transpose()?
+            .flatten();
+        *self.epochs.storage_cache_revisions.lock() = revisions;
+        *self.epochs.seen_storage_read_view.lock() = read_view;
+        self.epochs
+            .table_data
+            .seen
+            .store(table_data_epoch, std::sync::atomic::Ordering::Release);
+        if let Some(version) = stable_version {
+            self.epochs
+                .seen_storage_change_version
+                .store(version, std::sync::atomic::Ordering::Release);
+        }
+        Ok(())
+    }
+
     pub(crate) fn reload_table_catalog_after_rollback(&self) -> StorageBackendResult<()> {
+        // First, so that a failed reload cannot leave a count ahead of its store.
+        self.discard_persistent_document_counts();
         *self.epochs.storage_cache_revisions.lock() = None;
         self.clear_persistent_table_bindings_for_catalog_reload();
         let target_epoch = self

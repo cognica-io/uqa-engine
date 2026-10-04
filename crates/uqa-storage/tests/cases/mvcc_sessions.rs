@@ -34,6 +34,8 @@ mod identifiers;
 mod maintenance;
 #[path = "mvcc_sessions/metadata.rs"]
 mod metadata;
+#[path = "mvcc_sessions/monitor.rs"]
+mod monitor;
 #[path = "mvcc_sessions/notifications.rs"]
 mod notifications;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
@@ -61,6 +63,39 @@ use uqa_core::memory::MemoryBudget;
 use uqa_storage::mvcc::*;
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::{KeyValueStore, StorageBackendError};
+
+#[test]
+fn complete_read_view_identity_distinguishes_private_branches_and_pinned_commits() {
+    let persistence = Persistence::new();
+    let a = persistence.session(1 << 20);
+    let b = persistence.session(1 << 20);
+    let baseline = a.read_view_revision().unwrap().unwrap();
+    assert!(Some(baseline.clone()) == b.read_view_revision().unwrap());
+    a.begin_transaction().unwrap();
+    a.savepoint("empty").unwrap();
+    assert!(Some(baseline.clone()) == a.read_view_revision().unwrap());
+    a.put(b"a", b"first").unwrap();
+    let first = a.read_view_revision().unwrap().unwrap();
+    assert!(first != baseline);
+    assert!(Some(baseline.clone()) == b.read_view_revision().unwrap());
+    a.savepoint("first").unwrap();
+    a.put(b"a", b"second").unwrap();
+    let discarded = a.read_view_revision().unwrap().unwrap();
+    assert!(discarded != first);
+    a.rollback_to_savepoint("first").unwrap();
+    assert!(Some(first.clone()) == a.read_view_revision().unwrap());
+    a.put(b"a", b"second").unwrap();
+    assert!(Some(discarded) != a.read_view_revision().unwrap());
+    a.rollback_to_savepoint("empty").unwrap();
+    assert!(Some(baseline.clone()) == a.read_view_revision().unwrap());
+    b.put(b"b", b"committed").unwrap();
+    assert!(Some(baseline.clone()) == a.read_view_revision().unwrap());
+    a.refresh_transaction_snapshot(&uqa_core::CancellationToken::new())
+        .unwrap();
+    assert!(Some(baseline) != a.read_view_revision().unwrap());
+    assert!(a.read_view_revision().unwrap() == b.read_view_revision().unwrap());
+    a.rollback_transaction().unwrap();
+}
 
 #[test]
 fn paired_handles_require_the_same_reported_transaction_context() {
@@ -118,6 +153,8 @@ enum AbortFault {
 struct State {
     next: u64,
     identifiers: BTreeMap<Vec<u8>, u64>,
+    /// Each physical allocation's namespace and observed value; reservations record no value.
+    identifier_requests: Vec<(Vec<u8>, Option<u64>)>,
     identifier_fault: bool,
     receipts: BTreeMap<u64, CommitStatus>,
     commit_fault: CommitFault,
@@ -126,6 +163,11 @@ struct State {
     required_keys: Vec<Vec<u8>>,
     acknowledgements: Vec<ReceiptAcknowledgement>,
     acknowledgement_fault: bool,
+    /// The commit monitor's value, for a test that gives the persistence one.
+    monitor: Option<u64>,
+    captures: usize,
+    /// Counts the monitor values its snapshots adopt, for a test whose snapshots can.
+    adoptions: Option<Arc<std::sync::atomic::AtomicUsize>>,
 }
 struct Persistence {
     store: MemoryVersionStore,
@@ -143,6 +185,7 @@ impl Persistence {
             state: Mutex::new(State {
                 next: 0,
                 identifiers: BTreeMap::new(),
+                identifier_requests: Vec::new(),
                 identifier_fault: false,
                 receipts: BTreeMap::new(),
                 commit_fault: CommitFault::None,
@@ -151,6 +194,9 @@ impl Persistence {
                 required_keys: Vec::new(),
                 acknowledgements: Vec::new(),
                 acknowledgement_fault: false,
+                monitor: None,
+                captures: 0,
+                adoptions: None,
             }),
         })
     }
@@ -242,6 +288,13 @@ impl VersionedPersistence for Persistence {
             return Err(StorageBackendError::Other("injected identifier failure".into()).into());
         }
         let allocation = request.prepare(state.identifiers.get(namespace).copied())?;
+        let observed = match request {
+            IdentifierRequest::Observe(value) => Some(value),
+            IdentifierRequest::Reserve { .. } => None,
+        };
+        state
+            .identifier_requests
+            .push((namespace.to_vec(), observed));
         state
             .identifiers
             .insert(namespace.to_vec(), allocation.watermark());
@@ -273,7 +326,26 @@ impl VersionedPersistence for Persistence {
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
-        retain_record_snapshot(self.store.snapshot()?, control)
+        let (monitor, adoptions) = {
+            let mut state = self.state.lock();
+            state.captures += 1;
+            (state.monitor, state.adoptions.clone())
+        };
+        let source = self.store.snapshot()?;
+        match monitor {
+            Some(monitor) => retain_record_snapshot(
+                monitor::MonitoredSnapshot {
+                    source,
+                    monitor: std::sync::atomic::AtomicU64::new(monitor),
+                    adoptions,
+                },
+                control,
+            ),
+            None => retain_record_snapshot(source, control),
+        }
+    }
+    fn commit_monitor_version(&self) -> VersionResult<Option<u64>> {
+        Ok(self.state.lock().monitor)
     }
     fn commit(
         &self,
@@ -344,6 +416,8 @@ impl VersionedPersistence for Persistence {
             sequence: self.store.commit_prepared(prepared, control)?,
             fingerprint: prepared.fingerprint(),
         };
+        // A provider's monitor moves with every commit.
+        state.monitor = state.monitor.map(|monitor| monitor + 1);
         state
             .receipts
             .insert(transaction.allocation(), CommitStatus::Committed(receipt));

@@ -116,7 +116,7 @@ fn schema_qualifiers(schema: &RowSchema) -> BTreeSet<String> {
 }
 
 fn is_pseudo_column(column: &str) -> bool {
-    matches!(column, "_doc_id" | "_score" | "tableoid" | "xmin")
+    crate::semantics::is_engine_pseudo_column(column)
 }
 
 pub(super) struct ScalarFunctionValidation<'a> {

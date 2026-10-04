@@ -18,7 +18,7 @@ type KeptEntryVisitor<'visitor> =
     dyn FnMut(DocId, &ScoredEntry, &[&str], &[&Value]) -> ExecResult<()> + 'visitor;
 
 impl ScoredDocumentSource {
-    /// Feed an unranked in-memory scan directly from storage-owned values into a projected aggregate. `Some(true)` means the scan reached EOF, `Some(false)` means another batch remains, and `None` selects the backend-neutral fallback.
+    /// Feed an unranked scan directly from storage-owned values into a projected aggregate that cannot reenter storage. `Some(true)` means the scan reached EOF, `Some(false)` means another batch remains, and `None` selects the backend-neutral fallback.
     pub(super) fn aggregate_shared_batch(
         &mut self,
         max_rows: usize,
@@ -55,7 +55,7 @@ impl ScoredDocumentSource {
         let visited = self
             .table
             .read_documents()
-            .for_each_next_fields(after, max_rows, &fields, &mut |doc_id, values| {
+            .for_each_next_fields_borrowed(after, max_rows, &fields, &mut |doc_id, values| {
                 last = Some(doc_id);
                 let result = (|| -> ExecResult<()> {
                     if let Some(predicate) = self.predicate.as_ref() {
@@ -85,13 +85,13 @@ impl ScoredDocumentSource {
                     self.table_name
                 ))
                 .into()
-            })?;
-        let Some(visited) = visited else {
-            return Ok(None);
-        };
+            });
         if let Some(error) = aggregate_error {
             return Err(error);
         }
+        let Some(visited) = visited? else {
+            return Ok(None);
+        };
         let Some(last) = last else {
             return Ok(Some(true));
         };
@@ -99,7 +99,7 @@ impl ScoredDocumentSource {
             unreachable!("shared aggregate input changed variants")
         };
         *after = Some(last);
-        Ok(Some(visited < max_rows))
+        Ok(Some(visited == 0))
     }
 
     pub(super) fn next_shared_physical_batch(
@@ -147,7 +147,6 @@ impl ScoredDocumentSource {
             let Some(shared_rows) = shared_rows else {
                 return Ok(None);
             };
-            let reached_end = shared_rows.len() < max_rows;
             let Some(last) = shared_rows.last().map(|(doc_id, _)| *doc_id) else {
                 return Ok(Some(Vec::new()));
             };
@@ -166,7 +165,7 @@ impl ScoredDocumentSource {
                     rows.push(self.physical_row_from_shared(doc_id, 0.0, shared)?);
                 }
             }
-            if !rows.is_empty() || reached_end {
+            if !rows.is_empty() {
                 return Ok(Some(rows));
             }
         }
@@ -217,7 +216,7 @@ impl ScoredDocumentSource {
         entries: &[ScoredEntry],
     ) -> ExecResult<Vec<ResultRow>> {
         let mut rows = Vec::with_capacity(entries.len());
-        self.for_each_kept_entry(entries, &mut |doc_id, entry, fields, values| {
+        self.for_each_kept_entry(entries, true, &mut |doc_id, entry, fields, values| {
             let mut row = fields
                 .iter()
                 .zip(values)
@@ -246,7 +245,7 @@ impl ScoredDocumentSource {
         entries: &[ScoredEntry],
     ) -> ExecResult<Vec<crate::PhysicalRow>> {
         let mut rows = Vec::with_capacity(entries.len());
-        self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
+        self.for_each_kept_entry(entries, true, &mut |doc_id, entry, _fields, values| {
             let metadata = self.row_metadata(doc_id, entry.score);
             let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
             let row =
@@ -266,7 +265,7 @@ impl ScoredDocumentSource {
         storage_name: &std::sync::Arc<str>,
     ) -> ExecResult<Vec<crate::PhysicalRow>> {
         let mut rows = Vec::with_capacity(entries.len());
-        self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
+        self.for_each_kept_entry(entries, true, &mut |doc_id, entry, _fields, values| {
             let metadata = self.row_metadata(doc_id, entry.score);
             let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
             let row =
@@ -291,12 +290,13 @@ impl ScoredDocumentSource {
     fn for_each_kept_entry(
         &self,
         entries: &[ScoredEntry],
+        allow_borrowed: bool,
         visitor: &mut KeptEntryVisitor<'_>,
     ) -> ExecResult<()> {
         if self.recheck_pinned {
             return self.for_each_pinned_entry(entries, visitor);
         }
-        self.for_each_snapshot_entry(entries, visitor)
+        self.for_each_snapshot_entry(entries, allow_borrowed, visitor)
     }
 
     #[expect(
@@ -306,6 +306,7 @@ impl ScoredDocumentSource {
     fn for_each_snapshot_entry(
         &self,
         entries: &[ScoredEntry],
+        allow_borrowed: bool,
         visitor: &mut KeptEntryVisitor<'_>,
     ) -> ExecResult<()> {
         let fields = self
@@ -377,65 +378,88 @@ impl ScoredDocumentSource {
         }
         let mut index = 0usize;
         let mut materialization_error = None;
-        store
-            .for_each_fields_multi_ref_with_presence(
-                &doc_ids,
-                &fields,
-                &mut |doc_id, exists, values| {
-                    if !exists {
-                        materialization_error = Some(
-                            SQLError::Internal(format!(
-                                "access path returned document {doc_id}, but table `{}` omitted it",
-                                self.table_name
-                            ))
-                            .into(),
-                        );
+        let mut consume = |doc_id: DocId, exists: bool, values: &[&Value]| {
+            if !exists {
+                materialization_error = Some(
+                    SQLError::Internal(format!(
+                        "access path returned document {doc_id}, but table `{}` omitted it",
+                        self.table_name
+                    ))
+                    .into(),
+                );
+                return false;
+            }
+            let Some(entry) = entries.get(index) else {
+                materialization_error = Some(
+                    SQLError::Internal("document projection produced too many rows".into()).into(),
+                );
+                return false;
+            };
+            index += 1;
+            if entry.doc_id != doc_id || values.len() != fields.len() {
+                materialization_error = Some(
+                    SQLError::Internal(format!(
+                        "document projection for `{}` lost row alignment",
+                        self.table_name
+                    ))
+                    .into(),
+                );
+                return false;
+            }
+            if let Some(predicate) = self.predicate.as_ref() {
+                match predicate.keep(values) {
+                    Ok(true) => {}
+                    Ok(false) => return true,
+                    Err(error) => {
+                        materialization_error = Some(error.into());
                         return false;
                     }
-                    let Some(entry) = entries.get(index) else {
-                        materialization_error = Some(
-                            SQLError::Internal("document projection produced too many rows".into())
-                                .into(),
-                        );
-                        return false;
-                    };
-                    index += 1;
-                    if entry.doc_id != doc_id || values.len() != fields.len() {
-                        materialization_error = Some(
-                            SQLError::Internal(format!(
-                                "document projection for `{}` lost row alignment",
-                                self.table_name
-                            ))
-                            .into(),
-                        );
-                        return false;
-                    }
-                    if let Some(predicate) = self.predicate.as_ref() {
-                        match predicate.keep(values) {
-                            Ok(true) => {}
-                            Ok(false) => return true,
-                            Err(error) => {
-                                materialization_error = Some(error.into());
-                                return false;
-                            }
-                        }
-                    }
-                    if let Err(error) = visitor(doc_id, entry, &fields, values) {
-                        materialization_error = Some(error);
-                        return false;
-                    }
-                    true
-                },
-            )
-            .map_err(|error| -> crate::ExecError {
-                SQLError::Internal(format!(
-                    "read `{}` projected documents: {error}",
-                    self.table_name
-                ))
-                .into()
-            })?;
+                }
+            }
+            if let Err(error) = visitor(doc_id, entry, &fields, values) {
+                materialization_error = Some(error);
+                return false;
+            }
+            true
+        };
+        let indexed = if self.index_only {
+            self.for_each_indexed_entry(&doc_ids, &fields, allow_borrowed, &mut consume)
+        } else {
+            None
+        };
+        let read = if let Some(count) = indexed {
+            Ok(Some(count))
+        } else {
+            let borrowed = if allow_borrowed {
+                store.for_each_fields_multi_borrowed(&doc_ids, &fields, &mut consume)
+            } else {
+                Ok(None)
+            };
+            borrowed.and_then(|result| {
+                if let Some(count) = result {
+                    Ok(Some(count))
+                } else {
+                    store
+                        .for_each_fields_multi_ref_with_presence(&doc_ids, &fields, &mut consume)
+                        .map(|()| None)
+                }
+            })
+        };
         if let Some(error) = materialization_error {
             return Err(error);
+        }
+        let borrowed_count = read.map_err(|error| -> crate::ExecError {
+            SQLError::Internal(format!(
+                "read `{}` projected documents: {error}",
+                self.table_name
+            ))
+            .into()
+        })?;
+        if borrowed_count.is_some_and(|count| count != index) {
+            return Err(SQLError::Internal(
+                "borrowed point projection returned an invalid count".into(),
+            )
+            .into());
         }
         if index != entries.len() {
             return Err(SQLError::Internal(format!(
@@ -446,6 +470,38 @@ impl ScoredDocumentSource {
             .into());
         }
         Ok(())
+    }
+
+    /// Project `fields` of `doc_ids` from the table's index entries, or return `None` when they do not hold every field. A consumer that may call back into the engine receives copies after the index entries are released.
+    fn for_each_indexed_entry(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        allow_borrowed: bool,
+        consume: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> Option<usize> {
+        if allow_borrowed {
+            return self.table.for_each_indexed_fields(doc_ids, fields, consume);
+        }
+        let mut rows: Vec<(DocId, bool, Vec<Value>)> = Vec::with_capacity(doc_ids.len());
+        self.table
+            .for_each_indexed_fields(doc_ids, fields, &mut |doc_id, exists, values| {
+                rows.push((
+                    doc_id,
+                    exists,
+                    values.iter().map(|value| (*value).clone()).collect(),
+                ));
+                true
+            })?;
+        let mut visited = 0;
+        for (doc_id, exists, values) in &rows {
+            visited += 1;
+            let values = values.iter().collect::<Vec<_>>();
+            if !consume(*doc_id, *exists, &values) {
+                break;
+            }
+        }
+        Some(visited)
     }
 
     /// Materialize tuples for a pinned tuple-local recheck scan: a changed tuple projects its latest committed image, an unchanged join partner reads the statement snapshot, and a tuple missing from the snapshot is skipped so the recheck drops the candidate naturally.
@@ -512,12 +568,17 @@ impl ScoredDocumentSource {
         entries: &[ScoredEntry],
         executor: &mut dyn crate::AggregateExecutor,
     ) -> ExecResult<()> {
-        self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
-            let metadata = self.row_metadata(doc_id, entry.score);
-            let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
-            let row =
-                crate::ProjectedRow::new(&self.schema, &self.projected_slots, values, &extras);
-            executor.consume_projected_row(&row)
-        })
+        let allow_borrowed = executor.supports_storage_borrowed_rows();
+        self.for_each_kept_entry(
+            entries,
+            allow_borrowed,
+            &mut |doc_id, entry, _fields, values| {
+                let metadata = self.row_metadata(doc_id, entry.score);
+                let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
+                let row =
+                    crate::ProjectedRow::new(&self.schema, &self.projected_slots, values, &extras);
+                executor.consume_projected_row(&row)
+            },
+        )
     }
 }

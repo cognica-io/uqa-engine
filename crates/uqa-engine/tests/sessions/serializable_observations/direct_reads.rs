@@ -274,7 +274,7 @@ fn direct_reads_retain_access_share_until_their_transaction_finishes() {
             );
             b.sql("ROLLBACK");
             a.sql("ROLLBACK");
-            b.sql("BEGIN; LOCK TABLE left_t IN ACCESS EXCLUSIVE MODE NOWAIT; COMMIT");
+            b.lock_released_table("left_t");
         }
     }
 }

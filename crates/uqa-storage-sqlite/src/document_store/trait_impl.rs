@@ -24,6 +24,7 @@ impl DocumentStore for SQLiteDocumentStore {
                     doc_id,
                     &document,
                     read.metadata(doc_id)?.unwrap_or_default(),
+                    None,
                 )
             })?
             .is_some()
@@ -31,7 +32,7 @@ impl DocumentStore for SQLiteDocumentStore {
             return Ok(());
         }
         let metadata = self.get_metadata(doc_id)?.unwrap_or_default();
-        self.put_stored_inner(doc_id, &document, metadata)?;
+        self.put_stored_inner(doc_id, &document, metadata, None)?;
         Ok(())
     }
 
@@ -41,7 +42,18 @@ impl DocumentStore for SQLiteDocumentStore {
 
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
         let (fields, metadata) = document.into_parts();
-        self.put_stored_inner(doc_id, &fields, metadata)?;
+        self.put_stored_inner(doc_id, &fields, metadata, None)?;
+        Ok(())
+    }
+
+    fn put_stored_unused(
+        &mut self,
+        doc_id: DocId,
+        document: StoredDocument,
+        namespace: uqa_storage::document_store::identifiers::DocumentIdNamespace,
+    ) -> StorageBackendResult<()> {
+        let (fields, metadata) = document.into_parts();
+        self.put_stored_inner(doc_id, &fields, metadata, Some(namespace))?;
         Ok(())
     }
 
@@ -675,6 +687,28 @@ impl DocumentStore for SQLiteDocumentStore {
             return Ok(None);
         }
         Ok(self.read_native(|read| read.visit_next_ids(after, limit, visitor))?)
+    }
+
+    fn for_each_next_fields_borrowed(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        Ok(self.read_native(|read| read.visit_borrowed_fields(after, limit, fields, visitor))?)
+    }
+
+    fn for_each_fields_multi_borrowed(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        if fields.is_empty() {
+            return Ok(None);
+        }
+        Ok(self.read_native(|read| read.visit_borrowed_points(ids, fields, visitor))?)
     }
 
     #[expect(

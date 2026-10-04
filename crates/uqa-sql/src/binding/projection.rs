@@ -153,13 +153,14 @@ pub fn validate_query_block_expression_types(
     Ok(())
 }
 
-/// Validate every query-block reference only after the caller has the authoritative source schema. This preserves registered table-function row shapes and checks recursive argument references before definitive routine namespace lookup.
+/// Validate every query-block reference only after the caller has the authoritative source schema. This preserves registered table-function row shapes and checks recursive argument references before definitive routine namespace lookup. `schema` holds the block's columns over `outer`, the scope of the queries that enclose the block.
 pub fn validate_query_block_references(
     routines: &dyn RoutineResolution,
     statement: &QueryBlockPlan,
     schema: &RowSchema,
     params: &[SQLParam],
     ctes: &BindingContext,
+    outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let output = analyze_projection_output_schema(
         routines,
@@ -176,7 +177,7 @@ pub fn validate_query_block_references(
         }
     }
     SchemaScope::for_analysis(ctes)?
-        .validate_query_block_clauses(routines, statement, schema, &output, params)
+        .validate_query_block_clauses(routines, statement, schema, &output, params, outer)
 }
 
 pub(super) fn projection_star_columns(

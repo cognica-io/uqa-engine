@@ -26,7 +26,7 @@ pub struct BuiltinRoutineCatalogEntry {
 impl BuiltinRoutineCatalogEntry {
     pub const fn language(self) -> i64 {
         match self.oid {
-            1810 | 1811 => 14,
+            1810 | 1811 | 3935 | 3936 => 14,
             _ => 12,
         }
     }
@@ -35,6 +35,8 @@ impl BuiltinRoutineCatalogEntry {
         let (function_oid, parameter_type, collation_oid) = match self.oid {
             1810 => (720, 17, 0),
             1811 => (1374, 25, 100),
+            3935 => return Some(sleep_bodies::PG_SLEEP_FOR_SQL_BODY.into()),
+            3936 => return Some(sleep_bodies::PG_SLEEP_UNTIL_SQL_BODY.into()),
             _ => return None,
         };
         let mut body = String::from(BIT_LENGTH_SQL_BODY_PREFIX);
@@ -153,6 +155,7 @@ mod ranges;
 mod records;
 mod scalar;
 mod sequences;
+mod sleep_bodies;
 
 const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalogEntry {
     BuiltinRoutineCatalogEntry {

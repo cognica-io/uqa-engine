@@ -57,6 +57,17 @@ impl uqa_sql::schema::inheritance::InheritanceCatalog for Engine {
         self.check_constraint_definitions_in_execution(table)
             .map_err(|error| error.to_string())
     }
+    fn unique_index_keys(&self, table: &str) -> Result<Vec<Vec<uqa_sql::ast::IndexKey>>, String> {
+        uqa_execution::schema::indexes::registry::lifecycle::standalone_unique_index_keys(
+            &self
+                .catalog_read_view()
+                .snapshot()
+                .definitions
+                .catalog_indexes,
+            table,
+        )
+        .map_err(|error| error.to_string())
+    }
 }
 
 impl uqa_sql::schema::indexes::names::IndexNameCatalog for Engine {
@@ -102,6 +113,25 @@ impl uqa_execution::schema::indexes::IndexBuildCatalog for Engine {
     }
     fn scan_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
         self.hierarchy_scan_tables(table, true)
+    }
+    fn partition_tree(
+        &self,
+        table: &str,
+    ) -> Result<Vec<uqa_sql::semantics::partition::PartitionTreeNode>, SQLError> {
+        uqa_sql::semantics::partition::partition_tree(&self.partition_context(), table, false)
+    }
+}
+
+impl uqa_execution::schema::indexes::unique_build::IndexKeyDescription for Engine {
+    fn describe_index_key(
+        &self,
+        table: &str,
+        keys: &[uqa_sql::ast::IndexKey],
+        key_types: &[uqa_sql::ColumnType],
+        values: &[uqa_core::Value],
+    ) -> Result<Option<String>, SQLError> {
+        self.constraint_execution_context()
+            .describe_index_key(table, keys, key_types, values)
     }
 }
 

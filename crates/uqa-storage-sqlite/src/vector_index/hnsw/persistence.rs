@@ -6,8 +6,6 @@
 
 //! Immutable graph caches identify both the metadata revision and its evaluated physical view.
 
-use std::sync::Arc;
-
 use super::{loading::load_meta_from, CachedGraph, GraphIdentity, SQLiteHNSWIndex};
 use crate::connection::SnapshotIdentity;
 use crate::Result;
@@ -46,7 +44,7 @@ impl SQLiteHNSWIndex {
         let loaded = CachedGraph {
             revision,
             identity: GraphIdentity::Physical(identity.clone()),
-            graph: ReadOnlySnapshot::new(Arc::new(graph)),
+            graph: ReadOnlySnapshot::from_budgeted(graph)?,
         };
         *self.graph.write() = Some(loaded.clone());
         Ok(loaded)
@@ -54,14 +52,14 @@ impl SQLiteHNSWIndex {
 
     pub(super) fn publish_graph(
         &self,
-        graph: HNSWIndex,
+        graph: ReadOnlySnapshot<HNSWIndex>,
         revision: u64,
         identity: SnapshotIdentity,
     ) {
         *self.graph.write() = Some(CachedGraph {
             revision,
             identity: GraphIdentity::Physical(identity),
-            graph: ReadOnlySnapshot::new(Arc::new(graph)),
+            graph,
         });
     }
 

@@ -10,6 +10,7 @@ use crate::{Catalog, ManagedConnection, SQLiteRecordStore};
 mod changes;
 mod diskann;
 mod populations;
+mod sequence_values;
 
 fn retired_search_layout(connection: &ManagedConnection) {
     Catalog::open(connection.clone()).unwrap();

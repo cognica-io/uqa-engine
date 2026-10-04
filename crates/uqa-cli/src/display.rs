@@ -7,8 +7,7 @@
 //! Backslash help and schema/catalog value formatting.
 
 use super::{
-    print_result, sql_error_text, value_to_display, BTreeMap, ColumnDef, ColumnType, Expr,
-    SQLResult, Value, Write,
+    print_result, value_to_display, BTreeMap, ColumnDef, ColumnType, Expr, SQLResult, Value, Write,
 };
 
 pub(super) fn print_backslash_help(out: &mut impl Write) {
@@ -92,9 +91,10 @@ pub(super) fn print_columns(cols: &[ColumnDef], out: &mut impl Write) {
 
 pub(super) fn optional_value_to_display_value(value: Option<&Value>) -> Result<Value, String> {
     Ok(match value {
-        Some(value) => {
-            Value::Str(value_to_display(Some(value)).map_err(|error| sql_error_text(&error))?)
-        }
+        Some(value) => Value::Str(
+            value_to_display(Some(value))
+                .map_err(|error| super::diagnostics::sql_error_text(&error))?,
+        ),
         None => Value::Str(String::new()),
     })
 }

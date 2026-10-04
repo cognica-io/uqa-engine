@@ -102,6 +102,24 @@ impl crate::schema::indexes::IndexBuildCatalog for Fixture {
     fn scan_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
         Ok(vec![table.into()])
     }
+    fn partition_tree(
+        &self,
+        _: &str,
+    ) -> Result<Vec<uqa_sql::semantics::partition::PartitionTreeNode>, SQLError> {
+        Ok(Vec::new())
+    }
+}
+
+impl crate::schema::indexes::unique_build::IndexKeyDescription for Fixture {
+    fn describe_index_key(
+        &self,
+        _: &str,
+        _: &[uqa_sql::ast::IndexKey],
+        _: &[uqa_sql::ast::ColumnType],
+        _: &[uqa_core::Value],
+    ) -> Result<Option<String>, SQLError> {
+        Ok(None)
+    }
 }
 
 impl crate::mutation::constraints::context::MutationRead for Fixture {
@@ -120,7 +138,10 @@ impl crate::mutation::constraints::context::MutationRead for Fixture {
             .get(id)
             .map_err(|error| SQLError::Internal(error.to_string()))
     }
-    fn command_overlay_changed_ids(&self, _: &str) -> Result<Option<BTreeSet<DocId>>, SQLError> {
+    fn command_overlay_changes(
+        &self,
+        _: &str,
+    ) -> Result<Option<crate::query::document_changes::DocumentChanges>, SQLError> {
         Ok(None)
     }
 }

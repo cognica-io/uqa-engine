@@ -45,6 +45,9 @@ impl LocalTableRowSource {
         if self.recheck_pins.is_some() {
             return self.next_pinned_physical_rows_batch(max_rows);
         }
+        if self.candidates.is_some() {
+            return self.next_candidate_physical_rows_batch(max_rows);
+        }
         self.serializable.observe_relation()?;
         if self.command_changes.is_some() {
             return self.next_command_physical_rows_batch(max_rows);
@@ -58,6 +61,9 @@ impl LocalTableRowSource {
         ) {
             return self.next_stored_physical_rows_batch(max_rows);
         }
+        if let Some(rows) = self.next_borrowed_physical_rows_batch(max_rows)? {
+            return Ok(rows);
+        }
         let store = self.table.read_documents();
         let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
         let mut rows = Vec::with_capacity(max_rows);
@@ -67,35 +73,6 @@ impl LocalTableRowSource {
             let remaining = max_rows - rows.len();
             if remaining == 0 {
                 break;
-            }
-            let direct_shared = store
-                .next_shared_fields(self.after, remaining, &fields)
-                .map_err(|error| {
-                    SQLError::Internal(format!(
-                        "scan shared projected fields from `{}`: {error}",
-                        self.table_name
-                    ))
-                })?;
-            if let Some(shared_rows) = direct_shared {
-                let Some(last) = shared_rows.last().map(|(doc_id, _)| *doc_id) else {
-                    break;
-                };
-                self.after = Some(last);
-                for (doc_id, shared) in shared_rows {
-                    let keep = shared.with_projected(|projected| {
-                        self.predicate
-                            .as_ref()
-                            .map_or(Ok(true), |predicate| predicate.keep(projected))
-                    })?;
-                    if keep {
-                        let (values, projection) = shared.into_parts();
-                        rows.push(self.with_lock_identity(
-                            crate::PhysicalRow::from_shared_values(values, projection),
-                            doc_id,
-                        )?);
-                    }
-                }
-                continue;
             }
             let doc_ids = store.next_doc_ids(self.after, remaining).map_err(|error| {
                 SQLError::Internal(format!(

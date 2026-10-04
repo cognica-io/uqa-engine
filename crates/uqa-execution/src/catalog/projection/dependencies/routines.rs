@@ -124,6 +124,7 @@ impl DependencyBuilder<'_> {
             source: None,
             merge: None,
             expression: Some(&mut expression),
+            projection: None,
             ty: Some(&mut type_names),
             relation: &mut relation,
             routine: &mut routine,

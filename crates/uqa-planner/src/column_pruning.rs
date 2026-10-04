@@ -21,6 +21,9 @@ use uqa_sql::{
     SQLError, ScalarExpr,
 };
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Copy)]
 pub struct ColumnPruneContext<'a> {
     pub catalog: &'a dyn AnalysisCatalog,
@@ -601,13 +604,19 @@ fn collect_expr_prune_columns(
             }
         }
         ScalarExpr::Func {
+            name,
             args,
             order_by,
             filter,
             ..
         } => {
-            for arg in args {
-                collect_expr_prune_columns(arg, scope, prune, valid);
+            // COUNT(*) consumes one unit per input row; the star is not a whole-row value. Its FILTER and aggregate ordering still depend on ordinary source columns.
+            if !(name.eq_ignore_ascii_case("count")
+                && matches!(args.as_slice(), [ScalarExpr::Star]))
+            {
+                for arg in args {
+                    collect_expr_prune_columns(arg, scope, prune, valid);
+                }
             }
             for order in order_by {
                 collect_expr_prune_columns(&order.expr, scope, prune, valid);

@@ -211,6 +211,41 @@ impl crate::Engine {
         Ok(supported)
     }
 
+    /// Make the accelerators of `fields` available to an index-only read of `table`, the handle a query bound for `name`. Only the live table loads or builds an accelerator: a detached snapshot table lives for one statement, and building its accelerators would read every document to save reading a few.
+    pub(crate) fn prepare_index_only_read(
+        &self,
+        name: &str,
+        table: &std::sync::Arc<dyn uqa_execution::query::table_read::TableRead>,
+        fields: &[String],
+    ) -> Result<bool, SQLError> {
+        if !self.index_only_scans_enabled() {
+            return Ok(false);
+        }
+        let prepare = || -> StorageBackendResult<bool> {
+            let Some(table_name) = self.try_resolve_query_table_name(name)? else {
+                return Ok(false);
+            };
+            let Some(live) = self.try_table(&table_name)? else {
+                return Ok(false);
+            };
+            if !std::ptr::addr_eq(std::sync::Arc::as_ptr(&live), std::sync::Arc::as_ptr(table)) {
+                return Ok(false);
+            }
+            for field in fields {
+                let field = ValueIndexKey::Column(field.clone());
+                // A loaded accelerator answers without consulting the catalog or the durable postings again.
+                if !self.ensure_query_value_index(&table_name, &live, &field)? {
+                    return Ok(false);
+                }
+            }
+            // A read of no field asks whichever accelerator its access path has loaded by then whether each row exists.
+            Ok(true)
+        };
+        prepare().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("prepare index-only read", &error)
+        })
+    }
+
     fn ensure_query_value_index(
         &self,
         table_name: &str,
@@ -237,10 +272,8 @@ impl crate::Engine {
         }
         let ids = table.document_store.read().doc_ids()?;
         let values = self.project_value_index_rows(table, &table_name, field, &ids)?;
-        table.value_indexes.write().insert(
-            field.clone(),
-            ColumnValueIndex::build(field.name(), values.into_iter()),
-        );
+        let built = self.build_value_index(&table_name, table, field, values)?;
+        table.value_indexes.write().insert(field.clone(), built);
         Ok(true)
     }
 
@@ -345,7 +378,7 @@ impl crate::Engine {
             }
         }
         if !memory_index_exists || support_changed {
-            let built = ColumnValueIndex::build(field.name(), values.into_iter());
+            let built = self.build_value_index(&table_name, &t, field, values)?;
             let mut indexes = t.value_indexes.write();
             if support_changed {
                 indexes.insert(field.clone(), built);
@@ -388,9 +421,22 @@ impl crate::Engine {
                 persisted_fields.remove(field);
             }
         }
-        t.value_indexes
-            .write()
-            .retain(|field, _| desired.contains(field));
+        let carried = self.value_index_carried_fields(&table_name, &t)?;
+        {
+            let mut indexes = t.value_indexes.write();
+            indexes.retain(|field, _| desired.contains(field));
+            // An index definition may have turned a carried column into a search key, or the reverse.
+            for (field, index) in indexes.iter_mut() {
+                let carry = carried.contains(field);
+                if index.is_carried() != carry {
+                    let current = std::mem::replace(
+                        index,
+                        ColumnValueIndex::build_carried(std::iter::empty()),
+                    );
+                    *index = current.with_use(field.name(), carry);
+                }
+            }
+        }
 
         if let Some(backend) = persistent_backend {
             let missing = desired
@@ -499,48 +545,32 @@ impl crate::Engine {
     }
 
     /// Restore hot accelerators directly from rolled-back postings. Recovery can hold the transaction mutex, so it must never bind SQL expressions or execute callbacks; missing indexes remain cold until the next statement.
-    pub(crate) fn reload_persistent_value_indexes(&self) -> StorageBackendResult<()> {
-        let Some(backend) = self
-            .storage
-            .backend
-            .as_ref()
-            .filter(|backend| backend.persists_btree_indexes())
-        else {
-            return Ok(());
-        };
+    /// Drop the in-memory value indexes of every durable table after a rollback. The table catalog reload that follows every rollback builds a new state for each durable table, without indexes, so reloading them from storage beforehand was thrown away: a query builds the indexes it needs again from the snapshot it reads. Dropping them here keeps the earlier states from serving rolled-back keys when that reload fails. A temporary table's indexes are restored with its data snapshot instead, and a memory-only engine restores every table that way.
+    pub(crate) fn drop_persistent_value_indexes(&self) {
+        if self.storage.backend.is_none() {
+            return;
+        }
         let tables = self
             .storage
             .tables
             .read()
-            .iter()
-            .map(|(name, table)| (name.qualified_name(), table.clone()))
+            .values()
+            .cloned()
             .collect::<Vec<_>>();
-        for (name, table) in tables {
-            if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-                continue;
-            }
-            let fields = table
-                .value_indexes
-                .read()
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>();
-            table.value_indexes.write().clear();
-            for field in fields {
-                if let Some(values) = backend.load_btree_index(&name, &field)? {
-                    let index = ColumnValueIndex::build(field.name(), values.into_iter());
-                    table.value_indexes.write().insert(field, index);
-                }
+        for table in tables {
+            if table.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+                table.value_indexes.write().clear();
             }
         }
-        Ok(())
     }
 
+    /// `unused` names the namespace in which no document ever had `doc_id`, so that the document's entries replace none.
     pub(crate) fn persist_value_indexes_apply_write(
         &self,
         table: &str,
         doc_id: DocId,
         new: Option<&BTreeMap<ValueIndexKey, Value>>,
+        unused: Option<uqa_storage::document_store::identifiers::DocumentIdNamespace>,
     ) -> Result<(), SQLError> {
         let Some(backend) = self
             .storage
@@ -557,9 +587,13 @@ impl crate::Engine {
         if self.value_index_table_is_temporary(&table_name)? {
             return Ok(());
         }
-        backend
-            .apply_btree_index_write(&table_name, doc_id, new)
-            .map_err(|err| SQLError::Internal(format!("btree index write failed: {err}")))
+        match (new, unused) {
+            (Some(new), Some(namespace)) => {
+                backend.apply_unused_btree_index_write(&table_name, doc_id, new, namespace)
+            }
+            (new, _) => backend.apply_btree_index_write(&table_name, doc_id, new),
+        }
+        .map_err(|err| SQLError::Internal(format!("btree index write failed: {err}")))
     }
 
     /// TRUNCATE keeps index definitions installed but removes all postings.
@@ -640,13 +674,6 @@ impl crate::Engine {
     /// store replacement, schema changes).
     pub(crate) fn value_indexes_clear(t: &TableState) {
         t.value_indexes.write().clear();
-    }
-
-    /// Named memory indexes own evaluated SQL keys; data-epoch invalidation may discard only reconstructible column accelerators.
-    pub(crate) fn value_indexes_clear_column_accelerators(t: &TableState) {
-        t.value_indexes
-            .write()
-            .retain(|key, _| matches!(key, ValueIndexKey::Index(_)));
     }
 }
 

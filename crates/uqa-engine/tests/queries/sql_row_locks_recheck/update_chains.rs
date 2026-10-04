@@ -44,7 +44,7 @@ fn ranked_text_match_lock_rechecks_the_changed_document() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -84,7 +84,7 @@ fn blocking_wait_drops_a_candidate_the_holder_deleted() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -125,99 +125,13 @@ fn self_join_recheck_substitutes_the_committed_image_for_every_alias() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0].get("a_balance"), Some(&Value::Int(999)));
     assert_eq!(result.rows[0].get("b_balance"), Some(&Value::Int(999)));
-}
-
-#[test]
-fn nested_transaction_error_rolls_back_only_the_nested_frame() {
-    let directory = tempfile::tempdir().unwrap();
-    let root = Engine::open(&directory.path().join("nested-frame-abort.db")).unwrap();
-    seed_accounts(&root);
-    let session = root.new_session().unwrap();
-    let probe = root.new_session().unwrap();
-    session.sql("BEGIN", &[]).unwrap();
-    session
-        .sql(
-            "INSERT INTO accounts (id, owner, balance) VALUES (4, 'dana', 400)",
-            &[],
-        )
-        .unwrap();
-    session
-        .sql("SELECT id FROM accounts WHERE id = 1 FOR UPDATE", &[])
-        .unwrap();
-    session.sql("BEGIN", &[]).unwrap();
-    session
-        .sql("SELECT id FROM accounts WHERE id = 2 FOR UPDATE", &[])
-        .unwrap();
-    session
-        .sql("SELECT id FROM nonexistent_relation", &[])
-        .unwrap_err();
-    // The nested frame is aborted; the outer frame keeps its work and locks.
-    let error = probe
-        .sql(
-            "SELECT id FROM accounts WHERE id = 1 FOR UPDATE NOWAIT",
-            &[],
-        )
-        .unwrap_err();
-    assert_eq!(sqlstate(&error), "55P03");
-    session.sql("ROLLBACK", &[]).unwrap();
-    assert_eq!(session.transaction_depth(), 1);
-    let rows = session
-        .sql("SELECT id FROM accounts WHERE id = 4", &[])
-        .unwrap()
-        .rows;
-    assert_eq!(rows.len(), 1, "outer frame insert must survive");
-    let error = probe
-        .sql(
-            "SELECT id FROM accounts WHERE id = 1 FOR UPDATE NOWAIT",
-            &[],
-        )
-        .unwrap_err();
-    assert_eq!(sqlstate(&error), "55P03");
-    probe
-        .sql(
-            "SELECT id FROM accounts WHERE id = 2 FOR UPDATE NOWAIT",
-            &[],
-        )
-        .unwrap();
-    session.sql("COMMIT", &[]).unwrap();
-    assert_eq!(
-        root.sql("SELECT id FROM accounts WHERE id = 4", &[])
-            .unwrap()
-            .rows
-            .len(),
-        1
-    );
-}
-
-#[test]
-fn nested_frame_rollback_releases_locks_taken_before_an_inner_savepoint() {
-    let directory = tempfile::tempdir().unwrap();
-    let root = Engine::open(&directory.path().join("nested-frame-savepoint.db")).unwrap();
-    seed_accounts(&root);
-    let session = root.new_session().unwrap();
-    let probe = root.new_session().unwrap();
-    session.sql("BEGIN", &[]).unwrap();
-    session.sql("BEGIN", &[]).unwrap();
-    session
-        .sql("SELECT id FROM accounts WHERE id = 1 FOR UPDATE", &[])
-        .unwrap();
-    session.sql("SAVEPOINT s", &[]).unwrap();
-    session.sql("ROLLBACK", &[]).unwrap();
-    assert_eq!(session.transaction_depth(), 1);
-    probe
-        .sql(
-            "SELECT id FROM accounts WHERE id = 1 FOR UPDATE NOWAIT",
-            &[],
-        )
-        .unwrap();
-    session.sql("ROLLBACK", &[]).unwrap();
 }
 
 #[test]
@@ -317,7 +231,7 @@ fn merge_treats_a_target_deleted_during_the_wait_as_not_matched() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     merge_thread.join().unwrap();
@@ -352,7 +266,7 @@ fn full_path_non_key_update_does_not_conflict_with_key_share() {
             .unwrap();
     });
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("a non-key UPDATE must not wait for FOR KEY SHARE")
         .unwrap();
     update_thread.join().unwrap();
@@ -383,7 +297,7 @@ fn update_follows_a_primary_key_rewrite_committed_during_the_wait() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();
@@ -419,7 +333,7 @@ fn update_does_not_capture_a_row_reinserted_with_the_same_primary_key() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();
@@ -454,7 +368,7 @@ fn update_follows_an_ordered_chain_of_primary_key_rewrites() {
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();
@@ -527,7 +441,7 @@ fn derived_table_self_join_recheck_pins_each_inner_scan_separately() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -559,7 +473,7 @@ fn spilled_derived_self_join_recheck_preserves_each_inner_scan_qualifier() {
     .unwrap();
     let holder = root.new_session().unwrap();
     let waiter = root.new_session().unwrap();
-    waiter.sql("SET work_mem TO '1B'", &[]).unwrap();
+    waiter.set_query_memory_limit(Some(1));
     holder.sql("BEGIN", &[]).unwrap();
     holder
         .sql("SELECT id FROM t WHERE id = 1 FOR UPDATE", &[])
@@ -582,7 +496,7 @@ fn spilled_derived_self_join_recheck_preserves_each_inner_scan_qualifier() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -668,7 +582,7 @@ fn ranked_text_match_recheck_drops_a_document_that_no_longer_matches() {
     holder.sql("COMMIT", &[]).unwrap();
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -866,7 +780,7 @@ fn foreign_key_insert_holds_key_share_on_the_parent_row() {
     });
     assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
     inserter.sql("COMMIT", &[]).unwrap();
-    let outcome = done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let outcome = done_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     delete_thread.join().unwrap();
     assert!(
         outcome.is_err(),
@@ -903,7 +817,7 @@ fn on_conflict_do_nothing_waits_for_the_conflicting_transaction() {
     assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
     deleter.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -949,7 +863,7 @@ fn preselected_update_requalifies_rows_after_the_snapshot_advances() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();

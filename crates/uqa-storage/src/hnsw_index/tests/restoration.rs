@@ -98,6 +98,36 @@ fn reconstruction_rejects_a_missing_live_tensor_ordinal() {
 }
 
 #[test]
+fn dense_and_sparse_restored_identities_preserve_search_scores_and_tombstones() {
+    let source = fixture();
+    for (offset, stride) in [(u64::MAX / 2, 1), (0, 1_000_000)] {
+        let remap = |id| offset + id * stride;
+        let mut snapshot = source.persistence_snapshot();
+        snapshot.meta.entry_point = snapshot.meta.entry_point.map(remap);
+        snapshot.meta.next_node_id = remap(snapshot.meta.next_node_id);
+        for node in &mut snapshot.nodes {
+            node.node_id = remap(node.node_id);
+            for layer in &mut node.neighbors {
+                for neighbor in layer {
+                    *neighbor = remap(*neighbor);
+                }
+            }
+        }
+        let restored =
+            HNSWIndex::from_persistence(4, source.params(), snapshot.meta, snapshot.nodes).unwrap();
+        restored.validate_invariants().unwrap();
+        for seed in 0..32 {
+            for k in [1, 7, 20] {
+                let query = vector(seed, 4);
+                let expected = source.search_knn(&query, k).unwrap();
+                let actual = restored.search_knn(&query, k).unwrap();
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+}
+
+#[test]
 fn restoration_charges_transferred_vector_and_adjacency_capacity() {
     let source = fixture();
     let mut snapshot = source.persistence_snapshot();
@@ -110,7 +140,7 @@ fn restoration_charges_transferred_vector_and_adjacency_capacity() {
         &control,
     )
     .unwrap();
-    let compact_bytes = compact.reserved_bytes();
+    let compact_bytes = control.memory().used();
     drop(compact);
     let node = &mut snapshot.nodes[0];
     node.raw_vector.reserve_exact(4096);
@@ -120,7 +150,7 @@ fn restoration_charges_transferred_vector_and_adjacency_capacity() {
     }
     let raw_capacity = node.raw_vector.capacity();
     let node_id = node.node_id;
-    let limited = StorageReadControl::with_limit(compact_bytes);
+    let limited = StorageReadControl::with_limit(size_of::<HNSWIndex>() - 1);
     let rejected = HNSWIndex::from_persistence_controlled(
         4,
         source.params(),
@@ -153,8 +183,16 @@ fn restoration_charges_transferred_vector_and_adjacency_capacity() {
         &control,
     )
     .unwrap();
-    assert!(restored.reserved_bytes() > compact_bytes);
-    assert_eq!(restored.nodes[&node_id].raw_vector.capacity(), raw_capacity);
+    assert!(control.memory().used() > compact_bytes);
+    assert_eq!(
+        restored
+            .node(node_id)
+            .unwrap()
+            .unwrap()
+            .raw_vector
+            .capacity(),
+        raw_capacity
+    );
     assert_eq!(
         restored.persistence_snapshot(),
         source.persistence_snapshot()

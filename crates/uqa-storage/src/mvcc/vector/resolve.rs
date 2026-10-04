@@ -10,9 +10,10 @@ mod canonical;
 
 use super::{layout::Layout, IndexKind, Key, Mutation};
 use crate::mvcc::{
-    commit::RecordWriteKind, resolution::ResolutionMode, CommittedRecordSnapshot,
-    PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges, RecordWrite, VersionError,
-    VersionResult,
+    commit::{PreparedLookup, RecordWriteKind},
+    resolution::ResolutionMode,
+    CommittedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges,
+    RecordWrite, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 use std::collections::BTreeMap;
@@ -21,7 +22,7 @@ use uqa_core::memory::{BudgetedVec, MemoryError};
 struct Scope<'a> {
     layout: Layout<'a>,
     kind: IndexKind,
-    header: &'a PreparedRecordWrite,
+    header: PreparedRecordWrite,
     operations: BudgetedVec<Mutation<'a>>,
     rebase: bool,
 }
@@ -35,26 +36,20 @@ pub(in crate::mvcc) fn resolve(
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
     let effects = original.vector.as_ref().expect("requested vector effects");
-    let lookup_bytes = original
-        .records()
+    let scope_bytes = effects
+        .operations
         .len()
-        .checked_mul(size_of::<(&[u8], &PreparedRecordWrite)>())
-        .and_then(|n| {
-            effects
-                .operations
-                .len()
-                .checked_mul(size_of::<((IndexKind, &[u8]), Scope<'_>)>())
-                .and_then(|m| n.checked_add(m))
-        })
+        .checked_mul(size_of::<((IndexKind, &[u8]), Scope<'_>)>())
         .ok_or(MemoryError::SizeOverflow)?;
-    let _lookups = control.memory().reserve(lookup_bytes)?;
-    let mut writes = BTreeMap::new();
-    for (position, write) in original.records().iter().enumerate() {
-        control.cancellation().check()?;
-        writes.insert(write.key(), write);
+    let _scopes = control.memory().reserve(scope_bytes)?;
+    let writes = PreparedLookup::new(original, control)?;
+    let mut originals = original.writes();
+    let mut position = 0;
+    while let Some(write) = originals.next_metadata(control)? {
         if write.kind() == RecordWriteKind::Canonical {
-            validate(current, position, write, control)?;
+            validate(current, position, write.key(), write.expected(), control)?;
         }
+        position += 1;
     }
     let mut scopes = BTreeMap::<(IndexKind, &[u8]), Scope<'_>>::new();
     for operation in effects.operations.iter() {
@@ -63,9 +58,11 @@ pub(in crate::mvcc) fn resolve(
         let scope = if let std::collections::btree_map::Entry::Vacant(entry) =
             scopes.entry((operation.kind, key))
         {
-            let header = *writes.get(key).ok_or(VersionError::InvalidEncoding(
-                "vector input lacks a metadata replacement",
-            ))?;
+            let header = writes
+                .get(key, control)?
+                .ok_or(VersionError::InvalidEncoding(
+                    "vector input lacks a metadata replacement",
+                ))?;
             entry.insert(Scope {
                 layout: operation.kind.layout(persistence)?,
                 kind: operation.kind,
@@ -81,11 +78,15 @@ pub(in crate::mvcc) fn resolve(
         scope.operations.push(operation.borrowed())?;
     }
     for ((_, key), scope) in &mut scopes {
-        validate_scope(key, scope, &writes, base, current, control)?;
+        validate_scope(key, scope, original, &writes, base, current, control)?;
     }
     let changes = PrivateRecordChanges::new(control.memory());
-    for (position, write) in original.records().iter().enumerate() {
-        control.cancellation().check()?;
+    let mut originals = original.writes();
+    let mut position = 0;
+    while let Some(write) = originals.next(control)? {
+        let write = &write;
+        position += 1;
+        let position = position - 1;
         let Some(kind) = IndexKind::from_preview(write.kind()) else {
             changes.apply_owned(std::slice::from_ref(write), control)?;
             continue;
@@ -103,7 +104,7 @@ pub(in crate::mvcc) fn resolve(
                 "vector preview lacks evaluated document input",
             ))?;
         if !scope.rebase {
-            validate(current, position, write, control)?;
+            validate(current, position, write.key(), write.expected(), control)?;
             changes.apply_owned(&[write.clone().with_kind(mode.kind(write.kind()))], control)?;
         }
     }
@@ -133,11 +134,10 @@ impl Scope<'_> {
         let merged = PrivateRecordChanges::new(control.memory());
         self.layout
             .merge(key, &self.operations, &merged, current, control)?;
-        for write in merged.prepare(control)?.records() {
-            changes.apply_owned(
-                &[write.clone().with_kind(mode.kind(self.kind.preview()))],
-                control,
-            )?;
+        let merged = merged.prepare(control)?;
+        let mut merged_writes = merged.writes();
+        while let Some(write) = merged_writes.next(control)? {
+            changes.apply_owned(&[write.with_kind(mode.kind(self.kind.preview()))], control)?;
         }
         Ok(())
     }
@@ -146,7 +146,8 @@ impl Scope<'_> {
 fn validate_scope(
     key: &[u8],
     scope: &mut Scope<'_>,
-    writes: &BTreeMap<&[u8], &PreparedRecordWrite>,
+    original: &PreparedRecordCommit,
+    writes: &PreparedLookup<'_>,
     base: &dyn CommittedRecordSnapshot,
     current: &dyn CommittedRecordSnapshot,
     control: &StorageReadControl,
@@ -165,15 +166,14 @@ fn validate_scope(
             actual,
         });
     }
-    if writes.contains_key(&*guard) {
+    if writes.contains(&guard, control)? {
         return Ok(());
     }
-    for write in writes
-        .values()
-        .filter(|write| write.kind() == RecordWriteKind::Canonical)
-    {
-        control.cancellation().check()?;
-        if layout.metadata_key(write.key(), control)?.as_deref() == Some(key) {
+    let mut originals = original.writes();
+    while let Some(write) = originals.next_metadata(control)? {
+        if write.kind() == RecordWriteKind::Canonical
+            && layout.metadata_key(write.key(), control)?.as_deref() == Some(key)
+        {
             return Err(VersionError::InvalidEncoding(
                 "vector input mixes with unjournaled derived records",
             ));
@@ -231,14 +231,15 @@ pub(in crate::mvcc) fn revision(
 pub(in crate::mvcc) fn validate(
     view: &dyn CommittedRecordSnapshot,
     mutation: usize,
-    write: &PreparedRecordWrite,
+    key: &[u8],
+    expected: Option<crate::mvcc::CommitSequence>,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
-    let actual = revision(view, write.key(), control)?;
-    if actual != write.expected() {
+    let actual = revision(view, key, control)?;
+    if actual != expected {
         return Err(VersionError::WriteConflict {
             mutation,
-            expected: write.expected(),
+            expected,
             actual,
         });
     }

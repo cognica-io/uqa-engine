@@ -52,13 +52,17 @@ impl Engine {
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
+        let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
+        let client_level = session.state.client_level();
+        let runtime = super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT, client_level);
+        session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::memory(),
             durable: Arc::new(super::DurableCatalogState::new()),
-            session: Arc::new(super::SessionContext::new(super::initial_random_state())),
+            session,
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
-            runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
+            runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
             notification_hub,
@@ -218,7 +222,7 @@ impl Engine {
     /// must return catalog and data handles bound to one session transaction
     /// so every durable mutation commits atomically.
     pub fn new_session(&self) -> StorageBackendResult<Self> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         self.new_sibling_session(false, None)
     }
 
@@ -413,16 +417,21 @@ impl Engine {
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
+        let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
+        let client_level = session.state.client_level();
+        let runtime = super::QueryRuntime::with_cancellation(
+            super::SQL_FUNCTION_DEPTH_LIMIT,
+            cancellation,
+            client_level,
+        );
+        session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
             durable: Arc::new(super::DurableCatalogState::new()),
-            session: Arc::new(super::SessionContext::new(super::initial_random_state())),
+            session,
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
-            runtime: super::QueryRuntime::with_cancellation(
-                super::SQL_FUNCTION_DEPTH_LIMIT,
-                cancellation,
-            ),
+            runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
             notification_hub,
@@ -437,6 +446,13 @@ impl Engine {
         }
     }
 
+    /// Repair what earlier releases left inconsistent once a writer has restored the catalog: physical value indexes, partitions without the copies of their parent's foreign keys, and foreign keys without the constraints they derive on referenced partitions.
+    fn repair_catalog_on_open(&self) -> StorageBackendResult<()> {
+        self.repair_persistent_value_indexes_on_open()?;
+        self.repair_partition_foreign_keys_on_open()?;
+        self.repair_derived_constraints_on_open()
+    }
+
     fn build_persistent_session(
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
@@ -445,8 +461,21 @@ impl Engine {
         storage_session.validate_transaction_affinity()?;
         let restore_catalog = Arc::clone(&storage_session.catalog);
         let restore_backend = Arc::clone(&storage_session.backend);
-        let cache_revisions_before;
         let mut engine = Self::empty_persistent_session(storage_session, provider);
+        let own_read = !initialize_catalog && !restore_backend.in_transaction();
+        let version_before_read = if own_read {
+            let version = restore_backend.change_version()?;
+            restore_backend.begin_read_transaction()?;
+            restore_backend.pin_transaction_snapshot()?;
+            Some(version)
+        } else {
+            None
+        };
+        // A load-only restore owns one read boundary. Registry validators may
+        // resolve tables without recursively restoring a newer catalog. The
+        // unpublished Engine releases this transaction on errors and unwinds.
+        let read_view_before = restore_backend.read_view_revision()?;
+        let cache_revisions_before;
         if initialize_catalog {
             restore_backend.migrate_document_storage()?;
             // A clean restore remains read-only on backends that can promote a transaction, while backends without promotion reserve their writer before the atomic migration scan.
@@ -497,7 +526,7 @@ impl Engine {
             )?;
         }
         if initialize_catalog {
-            engine.repair_persistent_value_indexes_on_open()?;
+            engine.repair_catalog_on_open()?;
         }
         // Eagerly and fallibly populate read caches. Once open succeeds,
         // cache misses mean absence rather than a swallowed catalog error.
@@ -515,12 +544,28 @@ impl Engine {
         let stable_restore = cache_revisions_before == cache_revisions_after;
         if stable_restore {
             *engine.epochs.storage_cache_revisions.lock() = cache_revisions_after;
+            let read_view_after = restore_backend.read_view_revision()?;
+            if read_view_before == read_view_after {
+                *engine.epochs.seen_storage_read_view.lock() = read_view_after;
+            }
         }
         if let Some(version) = restore_backend.change_version()?.filter(|_| stable_restore) {
             engine
                 .epochs
                 .seen_storage_change_version
                 .store(version, std::sync::atomic::Ordering::Release);
+        }
+        if let Some(before) = version_before_read {
+            restore_backend.rollback_transaction()?;
+            if restore_backend.change_version()? != before {
+                // The restored definitions belong to the pinned snapshot,
+                // even when the independent monitor saw a later commit.
+                engine.epochs.seen_storage_change_version.store(
+                    before.unwrap_or_default(),
+                    std::sync::atomic::Ordering::Release,
+                );
+                *engine.epochs.seen_storage_read_view.lock() = None;
+            }
         }
         Ok(engine)
     }

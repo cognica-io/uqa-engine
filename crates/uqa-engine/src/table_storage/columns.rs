@@ -318,7 +318,11 @@ impl Engine {
         }
         Self::rename_column_acl(&t, from, to);
         for constraint in t.key_constraints.write().iter_mut() {
-            for column in &mut constraint.columns {
+            for column in constraint
+                .columns
+                .iter_mut()
+                .chain(&mut constraint.included_columns)
+            {
                 if column == from {
                     *column = to.to_string();
                 }

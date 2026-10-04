@@ -30,9 +30,10 @@ pub(super) fn validate_partition_keys(
             &format!("cannot partition using more than {PARTITION_MAX_KEYS} columns"),
         ));
     }
+    // `transformPartitionSpec` counts the key columns before it resolves any of them.
     if spec.strategy == PartitionStrategy::List && spec.keys.len() != 1 {
         return Err(error(
-            "42P16",
+            "42P17",
             "cannot use \"list\" partition strategy with more than one column",
         ));
     }

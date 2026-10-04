@@ -25,7 +25,7 @@ pub struct EventLifecycleContext<'a> {
     pub lookup: EventLookupContext<'a>,
     pub catalog: EventCatalogContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
     pub views: &'a dyn ViewCreationTransactions,
     pub constraint_names: ConstraintNameContext<'a>,
     pub pending: &'a dyn ConstraintTriggerEvents,

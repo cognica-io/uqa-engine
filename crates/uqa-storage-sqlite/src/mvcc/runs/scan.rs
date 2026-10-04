@@ -12,6 +12,18 @@ use uqa_storage::{mvcc::VersionError, read_control::StorageReadControl};
 
 use super::{suffix, Bounds, PhysicalResult, MAX_KEY};
 
+/// A candidate stays in the existing bounded run-codec workspace until selected for a visitor; it never allocates a future key from the caller's allowance.
+pub(in crate::mvcc) struct KeyCandidate {
+    bytes: [u8; MAX_KEY],
+    length: usize,
+}
+
+impl KeyCandidate {
+    pub(in crate::mvcc) fn bytes(&self) -> &[u8] {
+        &self.bytes[..self.length]
+    }
+}
+
 pub(in crate::mvcc) fn next_key(
     connection: &Connection,
     lower: &[u8],
@@ -19,14 +31,26 @@ pub(in crate::mvcc) fn next_key(
     upper: Option<&[u8]>,
     control: &StorageReadControl,
 ) -> PhysicalResult<Option<BudgetedVec<u8>>> {
+    next_candidate(connection, lower, exclusive, upper, control)?
+        .map(|key| crate::read_control::copy_bytes(key.bytes(), 0, control).map_err(Into::into))
+        .transpose()
+}
+
+pub(in crate::mvcc) fn next_candidate(
+    connection: &Connection,
+    lower: &[u8],
+    exclusive: bool,
+    upper: Option<&[u8]>,
+    control: &StorageReadControl,
+) -> PhysicalResult<Option<KeyCandidate>> {
     let _bindings = crate::read_control::reserve_bindings(control, &[lower])?;
-    let mut lengths = connection.prepare(
+    let mut lengths = connection.prepare_cached(
         "SELECT key_length FROM _uqa_mvcc_runs WHERE key_length > ?1 ORDER BY key_length LIMIT 1",
     )?;
-    let mut predecessor = connection.prepare(super::LOOKUP)?;
-    let mut successor = connection.prepare("SELECT first_key, last_key, sequence, kind, CASE WHEN value IS NULL THEN NULL WHEN typeof(value) = 'blob' THEN length(value) ELSE -1 END, key_length FROM _uqa_mvcc_runs WHERE key_length = ?1 AND first_key > ?2 ORDER BY first_key LIMIT 1")?;
+    let mut predecessor = connection.prepare_cached(super::LOOKUP)?;
+    let mut successor = connection.prepare_cached("SELECT first_key, last_key, sequence, kind, CASE WHEN value IS NULL THEN NULL WHEN typeof(value) = 'blob' THEN length(value) ELSE -1 END, key_length FROM _uqa_mvcc_runs WHERE key_length = ?1 AND first_key > ?2 ORDER BY first_key LIMIT 1")?;
     let mut previous = 0;
-    let mut selected: Option<BudgetedVec<u8>> = None;
+    let mut selected: Option<KeyCandidate> = None;
     while let Some(length) = lengths
         .query_row([previous], |row| row.get::<_, i64>(0))
         .optional()?
@@ -50,11 +74,14 @@ pub(in crate::mvcc) fn next_key(
             }
         }
         if let Some(key) = candidate {
-            let key = &key[..usize::try_from(length).expect("validated length")];
-            if upper.is_none_or(|upper| key < upper)
-                && selected.as_deref().is_none_or(|selected| key < selected)
+            let length = usize::try_from(length).expect("validated length");
+            let bytes = &key[..length];
+            if upper.is_none_or(|upper| bytes < upper)
+                && selected
+                    .as_ref()
+                    .is_none_or(|selected| bytes < selected.bytes())
             {
-                selected = Some(crate::read_control::copy_bytes(key, 0, control)?);
+                selected = Some(KeyCandidate { bytes: key, length });
             }
         }
     }

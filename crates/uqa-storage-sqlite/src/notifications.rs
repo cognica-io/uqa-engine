@@ -301,7 +301,7 @@ fn registry_error(action: &str, error: &rusqlite::Error) -> StorageBackendError 
             Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::OperationInterrupted)
         )
     {
-        return uqa_core::QueryCancelled.into();
+        return uqa_core::QueryCancelled::USER_REQUEST.into();
     }
     StorageBackendError::Other(format!(
         "{action} in asynchronous notification registry: {error}"

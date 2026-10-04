@@ -37,6 +37,11 @@ pub trait CteBodyExecutor<S: Clone>: Sync {
         params: &[SQLParam],
         ctes: &CteScope<S>,
     ) -> Result<SQLResult, SQLError>;
+    /// Fire the AFTER events that the commands of a statement queued, once the statement has finished.
+    fn fire_after_triggers(
+        &self,
+        queue: &crate::mutation::triggers::queue::AfterTriggerQueue,
+    ) -> Result<(), SQLError>;
 }
 
 pub trait QueryOutputRewriter: Sync {

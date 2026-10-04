@@ -108,12 +108,11 @@ impl MemoryVersionStore {
                 prefix.bytes(),
                 *minimum,
                 state.reclamation_epoch,
-                control.cancellation(),
+                control,
             )?;
         }
-        let writes = commit.records();
         let validate = || {
-            commit.validate(control.cancellation(), |key| {
+            commit.validate(control, |key| {
                 Ok(state
                     .records
                     .get(key)
@@ -121,19 +120,18 @@ impl MemoryVersionStore {
                     .map(RecordVersion::sequence))
             })
         };
-        if writes.is_empty() {
+        if values.is_empty() {
             validate()?;
             return Ok(state.sequence);
         }
         let sequence = state.sequence.successor()?;
         validate()?;
         let mut prepared = BudgetedVec::new(&self.database.memory);
-        prepared.reserve(writes.len())?;
-        for (write, value) in writes.iter().zip(values.iter()) {
+        prepared.reserve(values.len())?;
+        for (key, value) in values.iter() {
             control.cancellation().check()?;
-            let key = RecordKey::new(write.key(), &self.database.memory)?;
             let value = value.clone();
-            let history = if let Some(entry) = state.records.get(write.key()) {
+            let history = if let Some(entry) = state.records.get(key.bytes()) {
                 entry.history.fork_appending(sequence, value)?
             } else {
                 let mut history = History::new(&self.database.memory);
@@ -145,7 +143,7 @@ impl MemoryVersionStore {
                 .memory
                 .reserve(std::mem::size_of::<(RecordKey, RecordEntry)>())?;
             prepared.push((
-                key,
+                key.clone(),
                 RecordEntry {
                     history,
                     _memory: memory,
@@ -166,11 +164,12 @@ impl MemoryVersionStore {
         &self,
         commit: &PreparedRecordCommit,
         control: &StorageReadControl,
-    ) -> VersionResult<BudgetedVec<Option<SharedRecordValue>>> {
+    ) -> VersionResult<BudgetedVec<(RecordKey, Option<SharedRecordValue>)>> {
         let mut values = BudgetedVec::new(&self.database.memory);
-        values.reserve(commit.records().len())?;
-        for write in commit.records() {
-            control.cancellation().check()?;
+        values.reserve(commit.len())?;
+        let mut writes = commit.writes();
+        while let Some(write) = writes.next(control)? {
+            let key = RecordKey::new(write.key(), &self.database.memory)?;
             let mut value = write.shared_value();
             if let Some(source) = value
                 .as_ref()
@@ -184,7 +183,7 @@ impl MemoryVersionStore {
                 }
                 value = Some(Arc::new(owned));
             }
-            values.push(value)?;
+            values.push((key, value))?;
         }
         Ok(values)
     }

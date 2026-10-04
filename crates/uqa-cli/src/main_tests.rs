@@ -401,7 +401,9 @@ fn terminator_detection_waits_for_atomic_body_end() {
 fn meta_ds_lists_sequences_using_search_path() {
     let engine = Engine::new();
     engine.sql("CREATE SCHEMA app", &[]).unwrap();
-    engine.set_search_path(vec!["app".into(), "public".into()]);
+    engine
+        .set_search_path(&["app".into(), "public".into()])
+        .unwrap();
     assert!(engine.create_sequence("acct_seq", 10, 2, false).unwrap());
     assert_eq!(engine.nextval("acct_seq").unwrap(), 10);
     let mut session = Session {
@@ -452,4 +454,31 @@ fn highlighter_keeps_uppercase_keywords_case_insensitive() {
     assert!(highlighted.contains("\x1b[1;34mtext_match\x1b[0m"));
     assert!(highlighted.contains("\x1b[32m'rust'\x1b[0m"));
     assert!(highlighted.contains("\x1b[90m-- comment\x1b[0m"));
+}
+
+#[test]
+fn diagnostics_print_detail_and_hint_on_lines_of_their_own() {
+    let notice = uqa_sql::SQLNotice::warning("NOTIFY queue is 50% full")
+        .with_detail("The server process with PID 42 is among those with the oldest transactions.")
+        .with_hint(
+            "The NOTIFY queue cannot be emptied until that process ends its current transaction.",
+        );
+    assert_eq!(
+        super::diagnostics::sql_notice_text(&notice),
+        "WARNING: NOTIFY queue is 50% full\nDETAIL: The server process with PID 42 is among those with the oldest transactions.\nHINT: The NOTIFY queue cannot be emptied until that process ends its current transaction."
+    );
+    assert_eq!(
+        super::diagnostics::sql_notice_text(&uqa_sql::SQLNotice::notice("plain")),
+        "NOTICE: plain"
+    );
+    let error = uqa_sql::SQLError::Diagnostic {
+        sqlstate: "2BP01".into(),
+        message: "cannot drop rule _RETURN on view v because view v requires it".into(),
+        detail: None,
+        hint: Some("You can drop view v instead.".into()),
+    };
+    assert_eq!(
+        super::diagnostics::sql_error_text(&error),
+        "2BP01: cannot drop rule _RETURN on view v because view v requires it\nHINT: You can drop view v instead."
+    );
 }

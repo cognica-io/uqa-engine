@@ -54,7 +54,7 @@ fn role_deletion_resolves_later_targets_after_prior_waits_for_every_provider() {
                         result.unwrap();
                     }
                     let expected_notices = if later == "IF_EXISTS" {
-                        vec![uqa_sql::SQLNotice::notice(
+                        vec![crate::SQLNotice::notice(
                             "role \"absent\" does not exist, skipping",
                         )]
                     } else {

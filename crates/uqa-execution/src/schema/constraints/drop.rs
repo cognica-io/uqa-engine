@@ -54,13 +54,10 @@ pub fn drop_constraint(
             let relation =
                 uqa_core::RelationIdentity::from_legacy_name(&table).map_err(SQLError::Internal)?;
             if if_exists {
-                context
-                    .notices
-                    .lock()
-                    .push(uqa_sql::SQLNotice::notice(format!(
-                        "constraint \"{name}\" of relation \"{}\" does not exist, skipping",
-                        relation.name
-                    )));
+                context.notices.push(uqa_sql::SQLNotice::notice(format!(
+                    "constraint \"{name}\" of relation \"{}\" does not exist, skipping",
+                    relation.name
+                )));
                 return Ok(());
             }
             return Err(constraint_error(
@@ -164,6 +161,13 @@ fn ensure_direct_constraint_removal(
             }
         }
     }
+    // A constraint derived on a referenced partition belongs to its foreign key, as an inherited constraint belongs to its parent's.
+    if matches!(
+        find_constraint(&columns, &constraints, name),
+        Some(ConstraintLocation::ReferencedPartition(..))
+    ) {
+        return ensure_inherited_constraint_removable(table, name, 1);
+    }
     Ok(())
 }
 
@@ -195,6 +199,8 @@ fn drop_constraint_one(
         return Ok(());
     };
     match location {
+        // The constraint is part of a foreign key the same deletion removes, whose removal removes it.
+        ConstraintLocation::ReferencedPartition(..) => return Ok(()),
         ConstraintLocation::NotNull(index) => {
             uqa_sql::schema::constraint_changes::not_null_removal::validate_constraint_removal(
                 table,

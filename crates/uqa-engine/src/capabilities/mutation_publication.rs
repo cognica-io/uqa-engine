@@ -34,16 +34,69 @@ impl MutationIdentifiers for Engine {
     fn allocate_next_id(&self, table: &str) -> Result<DocId, SQLError> {
         Engine::allocate_next_id(self, table)
     }
+    fn allocate_unmapped_id(&self, table: &str) -> Result<DocId, SQLError> {
+        Engine::allocate_unmapped_id(self, table)
+    }
+    fn maps_integer_keys(&self, table: &str) -> Result<bool, SQLError> {
+        Ok(self
+            .require_table(table)?
+            .maps_integer_keys
+            .load(std::sync::atomic::Ordering::Acquire))
+    }
     fn advance_next_id(&self, table: &str, doc_id: DocId) -> uqa_storage::StorageBackendResult<()> {
         Engine::advance_next_id(self, table, doc_id)
     }
     fn persist_next_id(&self, table: &str) -> uqa_storage::StorageBackendResult<()> {
         Engine::persist_next_id(self, table)
     }
+    fn generates_unused_identities(&self, table: &str) -> Result<bool, SQLError> {
+        // A member of a partition hierarchy draws its identities from the hierarchy's owner, whose watermark is not this table's.
+        if uqa_sql::semantics::partition::partition_hierarchy_root(self, table)?.is_some() {
+            return Ok(false);
+        }
+        let state = self
+            .try_table(table)
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+        self.table_identifier_allocator(&state)
+            .map(|allocator| allocator.is_durable())
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("inspect document identities", &error)
+            })
+    }
 }
 impl MutationStorage for Engine {
+    fn can_defer_document_text(&self, table: &str) -> Result<bool, SQLError> {
+        let table = self
+            .try_resolve_table_name(table)
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+        Ok(!self
+            .physical_index_definitions()
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .row_publication_uses_expressions(&table))
+    }
+
     fn delete_document(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
         Engine::delete_document(self, table, doc_id)
+    }
+    fn observe_document_identity(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<uqa_storage::mvcc::ObservedIdentifier, SQLError> {
+        let state = self
+            .try_table(table)
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+        self.table_identifier_allocator(&state)
+            .and_then(|allocator| allocator.observe_durably(doc_id))
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("observe document identity", &error)
+            })
+    }
+    fn delete_document_deferred_text(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
+        self.delete_prepared_document_deferred_fts(table, doc_id)
     }
     fn insert_document(
         &self,
@@ -51,9 +104,9 @@ impl MutationStorage for Engine {
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
-        self.add_prepared_document_with_vector_values(table, doc_id, document, vectors, known_new)
+        self.add_prepared_document_with_vector_values(table, doc_id, document, vectors, inserted)
     }
     fn insert_document_deferred_text(
         &self,
@@ -61,10 +114,10 @@ impl MutationStorage for Engine {
         doc_id: DocId,
         document: Document,
         vectors: DocumentVectors,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         self.add_prepared_document_with_vector_values_deferred_fts(
-            table, doc_id, document, vectors, known_new,
+            table, doc_id, document, vectors, inserted,
         )
     }
     fn rewrite_document(
@@ -74,6 +127,14 @@ impl MutationStorage for Engine {
         document: Document,
     ) -> Result<(), SQLError> {
         self.rewrite_prepared_document(table, doc_id, document)
+    }
+    fn rewrite_document_deferred_text(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+    ) -> Result<(), SQLError> {
+        self.rewrite_prepared_document_deferred_fts(table, doc_id, document)
     }
 }
 impl MutationTextIndex for Engine {

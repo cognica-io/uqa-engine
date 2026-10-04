@@ -20,8 +20,8 @@ fn named_keywords_and_duplicate_grants_preserve_membership_identity_and_notice_o
         drop(roles);
         sql(&first, "GRANT target TO \"CURRENT_USER\", CURRENT_USER");
         assert_eq!(first.take_sql_notices(), vec![
-            uqa_sql::SQLNotice::notice("role \"CURRENT_USER\" has already been granted membership in role \"target\" by role \"uqa\""),
-            uqa_sql::SQLNotice::notice("role \"uqa\" has already been granted membership in role \"target\" by role \"uqa\""),
+            crate::SQLNotice::notice("role \"CURRENT_USER\" has already been granted membership in role \"target\" by role \"uqa\""),
+            crate::SQLNotice::notice("role \"uqa\" has already been granted membership in role \"target\" by role \"uqa\""),
         ]);
         assert_eq!(membership_rows(&first), rows);
         sql(
@@ -30,7 +30,7 @@ fn named_keywords_and_duplicate_grants_preserve_membership_identity_and_notice_o
         );
         assert!(first.take_sql_notices().is_empty());
         sql(&first, "REVOKE target FROM \"SESSION_USER\"");
-        assert_eq!(first.take_sql_notices(), vec![uqa_sql::SQLNotice::warning("role \"SESSION_USER\" has not been granted membership in role \"target\" by role \"uqa\"")]);
+        assert_eq!(first.take_sql_notices(), vec![crate::SQLNotice::warning("role \"SESSION_USER\" has not been granted membership in role \"target\" by role \"uqa\"")]);
         let remaining = membership_rows(&first);
         assert_eq!(remaining.len(), 1);
         drop(second);

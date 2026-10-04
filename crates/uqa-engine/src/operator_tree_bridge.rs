@@ -77,7 +77,7 @@ pub fn optimised_tree_for(
     engine.with_direct_query_snapshot(
         false,
         |engine| {
-            let Some(tree) = engine.retrieval_binding().lower_where(where_expr, params)? else {
+            let Some(tree) = lower_relation_where(engine, table, where_expr, params)? else {
                 return Ok(None);
             };
             Ok(Some(query_optimizer(engine, table, &tree)?.optimize(tree)))
@@ -94,10 +94,32 @@ pub(crate) fn estimate_local_access(
     where_expr: &ScalarExpr,
     params: &[SQLParam],
 ) -> DriverResult<Option<uqa_planner::LocalAccessEstimate>> {
-    let Some(tree) = engine.retrieval_binding().lower_where(where_expr, params)? else {
+    let Some(tree) = lower_relation_where(engine, table, where_expr, params)? else {
         return Ok(None);
     };
     estimate_operator_tree_access(engine, table, tree, true).map(Some)
+}
+
+/// Lower `where_expr` on `table` as execution does: the table's declared columns decide how a predicate on an engine pseudo column lowers, and are read only for an expression that names one.
+fn lower_relation_where(
+    engine: &Engine,
+    table: &str,
+    where_expr: &ScalarExpr,
+    params: &[SQLParam],
+) -> DriverResult<Option<OperatorTree>> {
+    let columns = if uqa_sql::retrieval::names_engine_pseudo_column(where_expr) {
+        engine
+            .try_describe_query_table(table)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve retrieval table `{table}`: {error}"))
+            })?
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    engine
+        .retrieval_binding()
+        .lower_relation_where(&columns, where_expr, params)
 }
 
 mod execution;

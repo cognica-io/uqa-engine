@@ -238,9 +238,7 @@ fn aggregate_results_preserve_postgresql_return_types() {
 #[test]
 fn window_results_preserve_postgresql_return_types_through_spill() {
     let engine = Engine::new();
-    engine
-        .set_variable("work_mem", "1kB")
-        .expect("set tiny window spill budget");
+    engine.set_query_memory_limit(Some(1024));
     exec(
         &engine,
         "CREATE TABLE window_types (small_value SMALLINT, real_value REAL)",

@@ -773,7 +773,7 @@ fn rows_from_is_implicitly_lateral_and_left_lateral_null_extends_empty_groups() 
 #[test]
 fn lateral_rows_from_spills_correlated_function_groups_under_tiny_work_mem() {
     let eng = Engine::new();
-    eng.sql("SET work_mem TO '1B'", &[]).unwrap();
+    eng.set_query_memory_limit(Some(1));
 
     let result = eng
         .sql(

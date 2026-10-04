@@ -33,6 +33,14 @@ pub trait TriggerCatalog {
         row: bool,
         updated_columns: &[String],
     ) -> Result<Vec<StoredTrigger>, SQLError>;
+    /// The row triggers of `table` for a timing and an event, whatever replication role fires them. A statement resolves them once and applies the role at each firing.
+    fn row_trigger_definitions(
+        &self,
+        table: &str,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+        updated_columns: &[String],
+    ) -> Result<Vec<StoredTrigger>, SQLError>;
     fn has_trigger_definition(
         &self,
         table: &str,
@@ -55,7 +63,7 @@ pub trait TriggerRoutineInvoker {
     ) -> Result<Arc<SQLUserFunction>, SQLError>;
     fn execute_trigger_routine(
         &self,
-        function: &SQLUserFunction,
+        function: &Arc<SQLUserFunction>,
         context: &TriggerRoutineContext,
     ) -> Result<Value, SQLError>;
 }
@@ -65,6 +73,14 @@ pub trait ConstraintTriggerQueue {
     fn defer_constraint_trigger_event(
         &self,
         event: DeferredConstraintTriggerEvent,
+    ) -> Result<(), SQLError>;
+}
+/// Runs the foreign key checks and referential actions that row events carry when a statement's AFTER ROW triggers fire. A referential action queues the events of the rows it writes in `queue`, the queue of the statement whose event fired it.
+pub trait ForeignKeyCheckRunner {
+    fn run_foreign_key_check(
+        &self,
+        check: &crate::mutation::referential::checks::ForeignKeyCheck,
+        queue: &super::queue::AfterTriggerQueue,
     ) -> Result<(), SQLError>;
 }
 #[derive(Clone, Copy)]
@@ -77,4 +93,5 @@ pub struct TriggerContext<'a> {
     pub expressions: &'a dyn RoutineExpressions,
     pub projection: CatalogContext<'a>,
     pub runtime: QueryRuntimeView<'a>,
+    pub foreign_keys: &'a dyn ForeignKeyCheckRunner,
 }

@@ -34,6 +34,7 @@ fn diskann_explain_description_keeps_field_identity_without_evaluating_deferred_
     let constants = RetrievalConstants {
         params: &[],
         evaluate: &|_, _| panic!("deferred arguments must not run"),
+        stores: &|_: &str| false,
     };
     let description = describe_vector_call(&expression, &constants, &|_| false)
         .unwrap()
@@ -59,6 +60,7 @@ fn diskann_explain_description_reuses_the_checked_vector_contract() {
                 "fixture contains a nonliteral value".into(),
             )),
         },
+        stores: &|_: &str| false,
     };
     let args = vec![
         ScalarExpr::Column("embedding".into()),

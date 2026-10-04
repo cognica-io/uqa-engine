@@ -25,6 +25,36 @@ impl<S: Clone> CteScope<S> {
         self.command_cte_snapshot = snapshot;
     }
 
+    /// Make this scope part of the statement whose commands `commands` holds.
+    pub fn set_statement_commands(&mut self, commands: std::sync::Arc<super::StatementCommands>) {
+        self.statement_commands = Some(commands);
+    }
+
+    /// The commands of the statement this scope belongs to.
+    pub fn statement_commands(&self) -> Option<&std::sync::Arc<super::StatementCommands>> {
+        self.statement_commands.as_ref()
+    }
+
+    /// Whether a command of the statement this scope belongs to wrote `row`. A later command finds the row's earlier version in its snapshot, which `PostgreSQL` reports as `TM_SelfModified` because the statement's command id already modified it.
+    pub fn statement_wrote(
+        &self,
+        row: &crate::mutation::candidate::PhysicalDocumentIdentity,
+    ) -> bool {
+        self.statement_commands
+            .as_ref()
+            .is_some_and(|commands| commands.wrote(row))
+    }
+
+    /// Whether a statement that the statement this scope belongs to started wrote `row`, which `PostgreSQL` finds modified under a later command id.
+    pub fn statement_triggered_write(
+        &self,
+        row: &crate::mutation::candidate::PhysicalDocumentIdentity,
+    ) -> bool {
+        self.statement_commands
+            .as_ref()
+            .is_some_and(|commands| commands.triggered_write(row))
+    }
+
     pub fn inherit_cte_bindings(&mut self, parent: &Self) {
         self.rows.clone_from(&parent.rows);
         self.deferred_ctes.clone_from(&parent.deferred_ctes);
@@ -35,6 +65,8 @@ impl<S: Clone> CteScope<S> {
             .clone_from(&parent.recursive_control_widths);
         self.command_cte_snapshot
             .clone_from(&parent.command_cte_snapshot);
+        self.statement_commands
+            .clone_from(&parent.statement_commands);
         if self.privilege_subject.is_none() {
             self.privilege_subject.clone_from(&parent.privilege_subject);
         }

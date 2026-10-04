@@ -95,14 +95,21 @@ fn routine_identity(function: &SQLUserFunction) -> Result<[u8; 16], SQLError> {
     })
 }
 
-/// Compile a source body in the routine's own settings and security context, as `fmgr_security_definer` applies them before the language handler compiles the body.
+/// Compile a source body in the routine's own settings and security context, as `fmgr_security_definer` applies them before the language handler compiles the body: a `PL/pgSQL` body takes the `plpgsql.variable_conflict` then in effect unless it declares its own.
 pub fn compile_session_body(
     session: &dyn RoutineInvocationSession,
     compilation: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
+    let compile = || {
+        let mut body = compile_function_body(compilation, def)?;
+        if let CompiledFunctionBody::PLpgSQL(parsed) = &mut body {
+            crate::routines::compilation::apply_session_compile_options(session, parsed);
+        }
+        Ok(body)
+    };
     if def.config.is_empty() && !def.security.security_definer {
-        return compile_function_body(compilation, def);
+        return compile();
     }
-    super::scopes::with_routine_context(session, def, || compile_function_body(compilation, def))
+    super::scopes::with_routine_context(session, def, compile)
 }

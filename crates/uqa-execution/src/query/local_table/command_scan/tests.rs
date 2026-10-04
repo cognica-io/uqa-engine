@@ -24,6 +24,10 @@ impl crate::query::table_read::TableRead for Table {
     fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
         self.documents.read()
     }
+
+    fn maps_integer_keys(&self) -> bool {
+        true
+    }
 }
 
 fn row(a: i64, xmin: u32) -> StoredDocument {
@@ -86,6 +90,7 @@ fn scan(projection: &[&str]) -> LocalTableRowSource {
         estimated_cardinality: 4,
         lock_origin: Some(("t".into(), "public.t".into())),
         recheck_pins: None,
+        candidates: None,
         command_changes: Some(changes),
     })
 }

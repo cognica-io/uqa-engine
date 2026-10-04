@@ -282,18 +282,11 @@ pub fn analyze_dml_returning_plan(
     .map(Some)
 }
 
-pub fn document_supplied_id(
-    document: &Document,
-    id_column: &str,
-    auto_increment: bool,
-) -> Result<Option<DocId>, SQLError> {
+/// The identity the `id` field of a document without declared columns names, as the document API addresses it: any nonnegative integer.
+pub fn document_supplied_id(document: &Document, id_column: &str) -> Option<DocId> {
     match document.get(id_column) {
-        Some(Value::Int(value)) if *value >= 0 => Ok(Some(*value as DocId)),
-        Some(Value::Null) | None => Ok(None),
-        Some(other) if auto_increment => Err(SQLError::TypeMismatch(format!(
-            "auto-increment id must be an integer, got {other:?}"
-        ))),
-        Some(_) => Ok(None),
+        Some(Value::Int(value)) => DocId::try_from(*value).ok(),
+        _ => None,
     }
 }
 

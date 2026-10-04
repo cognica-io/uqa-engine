@@ -115,6 +115,8 @@ pub fn copy_from(
             target_alias: None,
             include_descendants: true,
             columns: columns.into_iter().map(Into::into).collect(),
+            // COPY FROM writes the values its input supplies, also to a GENERATED ALWAYS identity column.
+            overriding: Some(uqa_sql::ast::OverridingKind::SystemValue),
             with: Vec::new(),
             rows: insert_rows,
             select_source: None,

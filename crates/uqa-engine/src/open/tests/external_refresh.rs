@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use uqa_storage::{
@@ -21,6 +21,7 @@ struct CommitDuringRestore {
     reader: ManagedConnection,
     writer: ManagedConnection,
     armed: AtomicBool,
+    opened_tables: AtomicUsize,
 }
 
 impl PersistentStorageBackend for CommitDuringRestore {
@@ -33,6 +34,7 @@ impl PersistentStorageBackend for CommitDuringRestore {
     }
 
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore> {
+        self.opened_tables.fetch_add(1, Ordering::Relaxed);
         if self.armed.swap(false, Ordering::AcqRel) {
             assert!(
                 self.inner.in_transaction(),
@@ -161,6 +163,7 @@ fn external_refresh_keeps_one_snapshot_when_a_writer_commits_during_restore() {
         reader,
         writer,
         armed: AtomicBool::new(true),
+        opened_tables: AtomicUsize::new(0),
     });
     engine.storage.backend = Some(backend.clone());
 
@@ -191,5 +194,71 @@ fn external_refresh_keeps_one_snapshot_when_a_writer_commits_during_restore() {
     assert_eq!(
         engine.sql("SELECT id FROM audit", &[]).unwrap().rows.len(),
         1
+    );
+}
+
+#[test]
+fn initialized_session_restores_once_on_a_pinned_view_and_keeps_racing_commits_visible() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("initialized-restore-race.db");
+    let reader = ManagedConnection::open(&path).unwrap();
+    let catalog = Arc::new(Catalog::open(reader.clone()).unwrap());
+    let root = Engine::from_persistent_backends(
+        catalog.clone(),
+        Arc::new(uqa_storage_sqlite::SQLiteStorageBackend::new(
+            reader.clone(),
+        )),
+    )
+    .unwrap();
+    root.release_automatic_statistics_client();
+    root.session
+        .statistics_worker
+        .store(true, Ordering::Release);
+    root.sql("CREATE TABLE items(id INTEGER PRIMARY KEY, body TEXT); CREATE INDEX items_text ON items USING gin(body); INSERT INTO items VALUES(1, 'alpha beta'); ANALYZE items", &[]).unwrap();
+    catalog.set_metadata("refresh_probe", "before").unwrap();
+    let backend = Arc::new(CommitDuringRestore {
+        inner: root.storage.backend.as_ref().unwrap().clone(),
+        reader,
+        writer: ManagedConnection::open(&path).unwrap(),
+        armed: AtomicBool::new(true),
+        opened_tables: AtomicUsize::new(0),
+    });
+    let restored = Engine::from_initialized_persistent_session(
+        uqa_storage::PersistentStorageSession {
+            catalog,
+            backend: backend.clone(),
+        },
+        None,
+    )
+    .unwrap();
+    assert!(!backend.armed.load(Ordering::Acquire));
+    assert!(!backend.in_transaction());
+    assert_eq!(backend.opened_tables.load(Ordering::Relaxed), 1,
+        "GIN restoration must reuse its already-restored table instead of recursively reloading the catalog");
+    assert_ne!(
+        Some(
+            restored
+                .epochs
+                .seen_storage_change_version
+                .load(Ordering::Acquire)
+        ),
+        backend.change_version().unwrap()
+    );
+    restored.synchronize_catalog_registries().unwrap();
+    assert_eq!(
+        Some(
+            restored
+                .epochs
+                .seen_storage_change_version
+                .load(Ordering::Acquire)
+        ),
+        backend.change_version().unwrap()
+    );
+    assert_eq!(
+        restored
+            .sql("SELECT body FROM items WHERE id = 1", &[])
+            .unwrap()
+            .rows[0]["body"],
+        uqa_core::Value::Str("alpha beta".into())
     );
 }

@@ -6,13 +6,14 @@
 
 //! Greedy hierarchy traversal and bounded layer search.
 
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Ordering;
 
 use super::metric::distance;
 use super::prepare::{check, Control};
+use super::queue::{Candidates, Queue};
 use super::types::{HNSWIndex, NodeId};
-use crate::vector_index::query::{QueryHeap, QuerySet, VectorQueryBuffer};
-use crate::StorageBackendResult;
+use super::visited::Visited;
+use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Candidate {
@@ -51,26 +52,26 @@ impl HNSWIndex {
         control: Control<'_>,
     ) -> StorageBackendResult<NodeId> {
         check(control)?;
-        let Some(entry_node) = self.nodes.get(&entry) else {
+        let Some(entry_node) = self.node(entry)? else {
             return Ok(entry);
         };
         let mut best = Candidate {
             distance: distance(query, &entry_node.normalized_vector),
             node_id: entry,
         };
+        drop(entry_node);
         loop {
             check(control)?;
             let mut improved = false;
-            let Some(neighbors) = self
-                .nodes
-                .get(&best.node_id)
-                .and_then(|node| node.neighbors.get(layer))
-            else {
+            let Some(node) = self.node(best.node_id)? else {
+                return Ok(best.node_id);
+            };
+            let Some(neighbors) = node.neighbors.get(layer) else {
                 return Ok(best.node_id);
             };
             for &neighbor_id in neighbors {
                 check(control)?;
-                let Some(neighbor) = self.nodes.get(&neighbor_id) else {
+                let Some(neighbor) = self.node(neighbor_id)? else {
                     continue;
                 };
                 let candidate = Candidate {
@@ -96,16 +97,22 @@ impl HNSWIndex {
         layer: usize,
         control: Control<'_>,
         workspace: Control<'_>,
-    ) -> StorageBackendResult<VectorQueryBuffer<Candidate>> {
+    ) -> StorageBackendResult<Candidates> {
         check(control)?;
+        let fallback = StorageReadControl::new(&self.memory, &uqa_core::CancellationToken::new());
+        let workspace = workspace.unwrap_or(&fallback);
         let ef = ef.max(1);
-        let mut visited =
-            QuerySet::with_capacity(ef.saturating_mul(2).min(self.nodes.len()), workspace)?;
-        let mut candidates = QueryHeap::<Reverse<Candidate>>::new(workspace);
-        let mut nearest = QueryHeap::<Candidate>::new(workspace);
+        let mut visited = Visited::new(
+            self.nodes.next(None)?.map(|(id, _)| id as u64),
+            self.next_node_id.checked_sub(1),
+            ef.saturating_mul(2).min(self.nodes.len()),
+            Some(workspace),
+        )?;
+        let mut candidates = Queue::<true>::new(workspace);
+        let mut nearest = Queue::<false>::new(workspace);
         for entry in entries {
             check(control)?;
-            let Some(node) = self.nodes.get(entry) else {
+            let Some(node) = self.node(*entry)? else {
                 continue;
             };
             if !visited.insert(*entry)? {
@@ -115,19 +122,18 @@ impl HNSWIndex {
                 distance: distance(query, &node.normalized_vector),
                 node_id: *entry,
             };
-            candidates.push(Reverse(candidate))?;
+            candidates.push(candidate)?;
             nearest.push(candidate)?;
         }
-        while let Some(Reverse(current)) = candidates.pop() {
+        while let Some(current) = candidates.pop()? {
             check(control)?;
-            if nearest.len() >= ef && nearest.peek().is_some_and(|worst| current > *worst) {
+            if nearest.len() >= ef && nearest.peek()?.is_some_and(|worst| current > worst) {
                 break;
             }
-            let Some(neighbors) = self
-                .nodes
-                .get(&current.node_id)
-                .and_then(|node| node.neighbors.get(layer))
-            else {
+            let Some(node) = self.node(current.node_id)? else {
+                continue;
+            };
+            let Some(neighbors) = node.neighbors.get(layer) else {
                 continue;
             };
             for &neighbor_id in neighbors {
@@ -135,26 +141,24 @@ impl HNSWIndex {
                 if !visited.insert(neighbor_id)? {
                     continue;
                 }
-                let Some(neighbor) = self.nodes.get(&neighbor_id) else {
+                let Some(neighbor) = self.node(neighbor_id)? else {
                     continue;
                 };
                 let candidate = Candidate {
                     distance: distance(query, &neighbor.normalized_vector),
                     node_id: neighbor_id,
                 };
-                if nearest.len() < ef || nearest.peek().is_some_and(|worst| candidate < *worst) {
-                    candidates.push(Reverse(candidate))?;
+                if nearest.len() < ef || nearest.peek()?.is_some_and(|worst| candidate < worst) {
+                    candidates.push(candidate)?;
                     nearest.push(candidate)?;
                     if nearest.len() > ef {
-                        nearest.pop();
+                        nearest.pop()?;
                     }
                 }
             }
         }
-        let mut result = nearest.into_vec();
-        result.sort_unstable();
         check(control)?;
-        Ok(result)
+        Ok(nearest.into_sorted())
     }
 
     pub(super) fn query_candidates(
@@ -162,10 +166,12 @@ impl HNSWIndex {
         query: &[f32],
         ef: usize,
         control: Control<'_>,
-    ) -> StorageBackendResult<VectorQueryBuffer<Candidate>> {
+    ) -> StorageBackendResult<Candidates> {
         check(control)?;
         let Some(mut entry) = self.entry_point else {
-            return Ok(VectorQueryBuffer::new(control));
+            let fallback =
+                StorageReadControl::new(&self.memory, &uqa_core::CancellationToken::new());
+            return Ok(Queue::<false>::new(control.unwrap_or(&fallback)).into_sorted());
         };
         for layer in (1..=self.max_level).rev() {
             entry = self.greedy_search_layer(query, entry, layer, control)?;

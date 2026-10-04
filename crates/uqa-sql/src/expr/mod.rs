@@ -21,6 +21,7 @@ mod array_transform;
 mod encoding;
 mod floating;
 mod in_range;
+pub(crate) mod integer_input;
 mod json;
 mod json_strip;
 mod random;
@@ -63,6 +64,7 @@ mod scalar_postgres;
 mod scalar_range;
 mod scalar_temporal;
 mod session_settings;
+mod session_sleep;
 pub mod variadic_any;
 
 #[cfg(test)]

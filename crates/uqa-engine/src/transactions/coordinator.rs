@@ -53,7 +53,7 @@ impl Engine {
     }
 
     pub fn begin(&self) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         if let Some(error) = stack
             .last()
@@ -190,6 +190,7 @@ impl Engine {
         // sibling sessions. Closing one session must not erase them from the
         // sessions that remain alive.
         self.release_automatic_statistics_client();
+        self.runtime.terminations.disarm();
         Ok(())
     }
 
@@ -210,7 +211,7 @@ impl Engine {
         &self,
         read_only: bool,
     ) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         if !stack.is_empty() {
             return Err(SQLError::Internal(
@@ -229,7 +230,7 @@ impl Engine {
 
     /// Start the implicit transaction segment owned by a multi-statement simple-query message.
     pub fn begin_simple_query_transaction(&self) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         if !stack.is_empty() {
             return Err(SQLError::Internal(
@@ -313,13 +314,7 @@ impl Engine {
             frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
             (lock_mark, frame.next_lock_mark)
         });
-        let backend_mode = if self.versioned_backend_transactions() {
-            BackendTransactionMode::Versioned
-        } else if stack.is_empty() && defer_write_lock && self.storage.backend.is_some() {
-            BackendTransactionMode::Deferred
-        } else {
-            BackendTransactionMode::Writer
-        };
+        let backend_mode = self.frame_backend_mode(outer, defer_write_lock);
         let (implicit_statement, explicit_transaction_block) = match kind {
             TransactionFrameKind::ExplicitBlock => (false, true),
             TransactionFrameKind::ImplicitStatement => (true, false),
@@ -351,7 +346,9 @@ impl Engine {
             next_lock_mark,
             snapshot_change_baseline,
             row_changes: Vec::new(),
+            fixed_identities: None,
             statistics_changes: crate::statistics::StatisticsChanges::new(),
+            statistics_settlement: crate::statistics::StatisticsSettlement::default(),
             deferred_foreign_key_checks,
             deferred_constraint_trigger_events,
             pending_listen_actions: Vec::new(),
@@ -360,8 +357,22 @@ impl Engine {
             constraint_modes,
             nontransactional_sequence_values: NontransactionalSequenceValues::new(),
         });
+        if let Some(savepoint) = storage_savepoint {
+            super::fixed_identities::save_identities(stack, savepoint);
+        }
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
+    }
+
+    /// The backend transaction mode of a new frame: every frame of a versioned backend is versioned, and an outer frame that defers its write lock on a backend begins without it.
+    fn frame_backend_mode(&self, outer: bool, defer_write_lock: bool) -> BackendTransactionMode {
+        if self.versioned_backend_transactions() {
+            BackendTransactionMode::Versioned
+        } else if outer && defer_write_lock && self.storage.backend.is_some() {
+            BackendTransactionMode::Deferred
+        } else {
+            BackendTransactionMode::Writer
+        }
     }
 
     fn begin_outer_transaction_with_notifications(
@@ -511,15 +522,8 @@ impl Engine {
             cleanup_errors.push(format!("storage rollback: {error}"));
         } else {
             self.restore_graph_transaction_overlay(session_snapshot);
-            if let Err(error) = self.reload_persistent_value_indexes() {
-                cleanup_errors.push(format!("btree restore: {error}"));
-            }
-            if let Err(error) = self.reload_table_catalog_after_rollback() {
-                cleanup_errors.push(format!("table catalog restore: {error}"));
-            }
-            if let Err(error) = self.reload_catalog_registries_after_rollback() {
-                cleanup_errors.push(format!("registry restore: {error}"));
-            }
+            self.drop_persistent_value_indexes();
+            self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         self.restore_session_state(session_snapshot);
         if cleanup_errors.is_empty() {

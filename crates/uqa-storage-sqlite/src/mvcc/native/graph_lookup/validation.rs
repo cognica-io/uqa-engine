@@ -87,9 +87,10 @@ pub(in crate::mvcc::native) fn validate_deletions(
     prepared: &PreparedRecordCommit,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    for record in prepared.records() {
+    let mut records = prepared.writes();
+    while let Some(record) = records.next_metadata(control)? {
         let family = NativeRecordIdentity::decode(record.key())?.family();
-        if record.value().is_some()
+        if record.live()
             || !matches!(
                 family,
                 Family::GraphLookups | Family::StandaloneGraphLookups

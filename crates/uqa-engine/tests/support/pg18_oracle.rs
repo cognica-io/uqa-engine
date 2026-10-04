@@ -93,7 +93,7 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
         .into_iter()
         .map(|notice| {
             serde_json::json!({
-                "severity": notice.severity.as_str(),
+                "severity": notice.level.as_str(),
                 "sqlstate": notice.sqlstate,
                 "message": notice.message,
                 "detail": notice.detail,

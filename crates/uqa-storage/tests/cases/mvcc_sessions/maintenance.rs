@@ -25,7 +25,7 @@ fn changes(catalog: &KeyValueCatalog, count: u64) {
 }
 
 fn analyze(catalog: &KeyValueCatalog, rows: u64) {
-    StatisticsMaintenance::analyzed_for(catalog, TABLE, OBJECT, rows, 1).unwrap();
+    StatisticsMaintenance::analyzed_for(catalog, TABLE, OBJECT, rows, 1, None).unwrap();
 }
 
 fn state(catalog: &KeyValueCatalog) -> serde_json::Value {
@@ -142,7 +142,7 @@ fn removed_or_replaced_relations_reject_old_maintenance() {
         changes(&left, 3);
         let key = a.scan_prefix(b"m").unwrap().remove(0).0;
         if replace {
-            StatisticsMaintenance::analyzed_for(&right, TABLE, [2; 16], 0, 1).unwrap();
+            StatisticsMaintenance::analyzed_for(&right, TABLE, [2; 16], 0, 1, None).unwrap();
         } else {
             b.delete(&key).unwrap();
         }

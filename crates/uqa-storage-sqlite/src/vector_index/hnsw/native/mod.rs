@@ -7,7 +7,7 @@
 //! Native record adapters keep canonical vectors and HNSW generations on one logical boundary.
 
 use uqa_storage::{
-    hnsw_index::{HNSWIndex, HNSWMutation},
+    hnsw_index::{HNSWCanonicalBuilder, HNSWMutation},
     KeyValueBatch,
 };
 
@@ -50,13 +50,15 @@ impl SQLiteHNSWIndex {
             return Err(missing_metadata(self).into());
         }
         let read = read.owned(batch)?;
-        let entries = read.vectors()?;
-        let delta = HNSWIndex::prepare_canonical(
+        let mut builder = HNSWCanonicalBuilder::new(
             self.persistent.dimensions,
             self.params,
-            &entries,
             &read.snapshot.control,
         )?;
+        read.visit_ordered_vectors(|document, ordinal, vector| {
+            Ok(builder.push(document, ordinal, vector)?)
+        })?;
+        let delta = builder.finish_delta()?;
         writing::persist_delta(
             &read,
             batch,
@@ -83,8 +85,8 @@ impl SQLiteHNSWIndex {
         let cached = self
             .cached_native_graph(read)?
             .ok_or_else(|| missing_metadata(self))?;
-        let delta = cached.prepare_delta(mutation, &read.snapshot.control)?;
-        canonical(read, batch)?;
+        // Admit the retained mutation before spending resources on a derived graph.
+        // A failed candidate still discards this entire evaluated batch.
         let publication = if matches!(mutation, HNSWMutation::Clear) {
             VectorPublication::Canonical
         } else {
@@ -96,6 +98,8 @@ impl SQLiteHNSWIndex {
             batch.hnsw_mutation(&key, mutation)?;
             VectorPublication::HNSWPreview
         };
+        let delta = cached.prepare_delta(mutation, &read.snapshot.control)?;
+        canonical(read, batch)?;
         // Cache publication is read-side only: a candidate must never be tagged with a later session view.
         writing::persist_delta(
             read,

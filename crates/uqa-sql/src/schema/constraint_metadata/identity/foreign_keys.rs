@@ -44,19 +44,33 @@ fn validate_identity(identity: ConstraintCatalogIdentity) -> ConstraintMetadataR
     }
 }
 
+/// The catalog rows of a declaration's foreign keys, the constraints they derive on referenced partitions included.
 pub fn identities<'a>(
     columns: &'a [ColumnDef],
     constraints: &'a TableConstraintSet,
 ) -> impl Iterator<Item = Option<ConstraintCatalogIdentity>> + 'a {
-    columns
+    let references = columns
         .iter()
-        .filter_map(|column| column.references.as_ref())
+        .filter_map(|column| column.references.as_ref());
+    references
+        .clone()
         .map(|reference| reference.catalog_identity)
         .chain(
             constraints
                 .foreign_keys
                 .iter()
                 .map(|key| key.catalog_identity),
+        )
+        .chain(
+            references
+                .flat_map(|reference| &reference.referenced_partitions)
+                .chain(
+                    constraints
+                        .foreign_keys
+                        .iter()
+                        .flat_map(|key| &key.referenced_partitions),
+                )
+                .map(|derived| Some(derived.catalog_identity)),
         )
 }
 

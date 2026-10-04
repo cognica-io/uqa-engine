@@ -22,6 +22,11 @@ fn evaluate_constant(expression: &ScalarExpr, params: &[SQLParam]) -> Result<Val
     eval_scalar(expression, &ScalarEvalContext::new(None, params))
 }
 
+/// A predicate lowered without its relation stores no engine pseudo column.
+fn stores_nothing(_: &str) -> bool {
+    false
+}
+
 /// Preserve the public syntax-lowering API while constructing its physical models in execution.
 pub fn lower_where(expression: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTree> {
     retrieval::lower_where(
@@ -29,6 +34,7 @@ pub fn lower_where(expression: &ScalarExpr, params: &[SQLParam]) -> Option<Opera
         &RetrievalConstants {
             params,
             evaluate: &evaluate_constant,
+            stores: &stores_nothing,
         },
     )
     .and_then(|logical| instantiate(logical).ok())
@@ -61,12 +67,24 @@ impl RetrievalBinding<'_> {
         expression: &ScalarExpr,
         params: &[SQLParam],
     ) -> Result<Option<OperatorTree>, SQLError> {
+        self.lower_relation_where(&[], expression, params)
+    }
+
+    /// Lower a predicate on the relation that declares `columns`. A predicate on an engine pseudo column such as `_doc_id` filters the stored column of that name where the relation declares one, and otherwise stays relational.
+    pub fn lower_relation_where(
+        &self,
+        columns: &[uqa_sql::ast::ColumnDef],
+        expression: &ScalarExpr,
+        params: &[SQLParam],
+    ) -> Result<Option<OperatorTree>, SQLError> {
+        let stores = |column: &str| columns.iter().any(|definition| definition.name == column);
         retrieval::lower_where_bound(
             self,
             expression,
             &RetrievalConstants {
                 params,
                 evaluate: &evaluate_constant,
+                stores: &stores,
             },
         )?
         .map(instantiate)
@@ -85,6 +103,7 @@ impl RetrievalBinding<'_> {
             &RetrievalConstants {
                 params,
                 evaluate: &evaluate_constant,
+                stores: &stores_nothing,
             },
         )?)
     }
@@ -103,6 +122,7 @@ impl RetrievalBinding<'_> {
             &RetrievalConstants {
                 params,
                 evaluate: &evaluate_constant,
+                stores: &stores_nothing,
             },
         )?;
         Ok((relations, instantiate(logical)?))

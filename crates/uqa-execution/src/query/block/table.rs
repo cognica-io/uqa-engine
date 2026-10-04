@@ -213,11 +213,44 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     }
 
     let table_state = context.scans.tables.table(table)?;
-    let ordered_primary_key = table_snapshot
+    // A filter that names its rows by `_doc_id` or by an integer primary key whose values are the rows' identities reads only those of them that exist and evaluates the whole filter on them.
+    if matches!(scored, ScoredInput::All) {
+        if let Some(identities) = physical_filter.as_ref().and_then(|filter| {
+            crate::query::key_candidates::key_candidates(
+                filter,
+                params,
+                crate::query::key_candidates::IdentityColumns::new(
+                    &table_snapshot.columns,
+                    table_state.maps_integer_keys(),
+                    |name| name,
+                ),
+            )
+        }) {
+            let serializable = context.scans.tables.serializable_read(table)?;
+            let documents = table_state.read_documents();
+            let mut entries = Vec::with_capacity(identities.len());
+            for doc_id in identities {
+                if documents.contains_doc_id(doc_id).map_err(|error| {
+                    crate::storage_errors::storage_error("probe a named document identity", &error)
+                })? {
+                    entries.push(uqa_core::ScoredEntry { doc_id, score: 0.0 });
+                } else if let Some(serializable) = serializable.as_ref() {
+                    // The read of a named identity that holds no row still depends on that identity; the source observes the rows it returns.
+                    serializable.observe_row(doc_id)?;
+                }
+            }
+            drop(documents);
+            scored = ScoredInput::entries(entries, false);
+        }
+    }
+    let ordered_primary_key = match table_snapshot
         .columns
         .iter()
         .find(|column| column.primary_key && column.ty.is_integer())
-        .map(|column| column.name.clone());
+    {
+        Some(column) if identities_follow_keys(table_state.as_ref())? => Some(column.name.clone()),
+        _ => None,
+    };
     let predicate_schema = crate::RowSchema::with_qualified_types(
         qualifier,
         source_schema.clone(),
@@ -232,8 +265,30 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             })
             .collect(),
     );
+    // A pushed predicate reads the stored fields alone. A column the scan attaches from row metadata is left to the residual filter, which sees the whole row.
+    let stored_fields = source_schema
+        .iter()
+        .filter(|name| {
+            !crate::query::scored_input::is_attached_metadata_column(name, &table_snapshot.columns)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let stored_schema = crate::RowSchema::with_qualified_types(
+        qualifier,
+        stored_fields.clone(),
+        stored_fields
+            .iter()
+            .map(|name| {
+                table_snapshot
+                    .columns
+                    .iter()
+                    .find(|column| column.name == *name)
+                    .map(|column| column.ty.clone())
+            })
+            .collect(),
+    );
     let (pushed_predicate, residual_filter) =
-        split_projected_filter(physical_filter.take(), &predicate_schema, params)?;
+        split_projected_filter(physical_filter.take(), &stored_schema, params)?;
     physical_filter = residual_filter;
     let cutoff =
         post_retrieval_top_k.filter(|_| pushed_predicate.is_none() && physical_filter.is_none());
@@ -256,6 +311,14 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         .and_then(|(origin_qualifier, storage_name)| {
             ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
         });
+    // An access path that yields row identities needs the documents only for the projected fields. When the table's indexes hold all of them, the rows are projected from the index entries. A row-locking read and a pinned recheck read the current documents.
+    let index_only = pending.is_some()
+        && lock_origin.is_none()
+        && recheck_pins.is_none()
+        && context
+            .scans
+            .tables
+            .index_holds_fields(table, &table_state, &source_schema)?;
     let source = ScoredDocumentSource::new_with_metadata(
         table,
         table_state,
@@ -265,6 +328,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         pushed_predicate,
         metadata_projection,
     )
+    .with_index_only(index_only)
     .with_serializable_read(context.scans.tables.serializable_read(table)?)
     .with_table_oid(crate::catalog::projection::snapshot_table_relation_oid(
         &catalog,
@@ -311,10 +375,12 @@ fn split_projected_filter(
     if expression_references_tableoid(&predicate) {
         return Ok((None, Some(predicate)));
     }
-    if let Some(compiled) =
-        crate::ProjectedPredicate::compile_with_schema(&predicate, source_schema, params)?
-    {
-        return Ok((Some(compiled), None));
+    if reads_stored_fields_only(&predicate, source_schema) {
+        if let Some(compiled) =
+            crate::ProjectedPredicate::compile_with_schema(&predicate, source_schema, params)?
+        {
+            return Ok((Some(compiled), None));
+        }
     }
     if !matches!(predicate, ScalarExpr::And(_)) {
         return Ok((None, Some(predicate)));
@@ -324,6 +390,7 @@ fn split_projected_filter(
     let mut residual = Vec::new();
     for conjunct in flatten_and_filter_parts(&predicate) {
         if !expression_references_tableoid(conjunct)
+            && reads_stored_fields_only(conjunct, source_schema)
             && crate::ProjectedPredicate::compile_with_schema(conjunct, source_schema, params)?
                 .is_some()
         {
@@ -349,4 +416,36 @@ fn split_projected_filter(
 fn expression_references_tableoid(expression: &ScalarExpr) -> bool {
     let mut columns = std::collections::BTreeSet::new();
     expression.collect_columns(&mut columns) && columns.contains(TABLE_OID_COLUMN)
+}
+
+/// Whether a scan in identity order reads the rows of `table` in integer key order: the table maps its keys to identities and holds no row at an identity no key names, all of which lie above the identities keys name.
+fn identities_follow_keys(
+    table: &dyn crate::query::table_read::TableRead,
+) -> Result<bool, SQLError> {
+    if !table.maps_integer_keys() {
+        return Ok(false);
+    }
+    let unmapped = table
+        .read_documents()
+        .next_doc_ids(
+            Some(uqa_sql::semantics::key_identity::KEY_IDENTITY_LIMIT - 1),
+            1,
+        )
+        .map_err(|error| {
+            crate::storage_errors::storage_error("probe identities no key names", &error)
+        })?;
+    Ok(unmapped.is_empty())
+}
+
+/// Whether every column `expression` reads is one of the stored fields a pushed predicate sees. A column the scan attaches from row metadata, or the `_meta` namespace, is left to the residual filter.
+fn reads_stored_fields_only(expression: &ScalarExpr, stored: &crate::RowSchema) -> bool {
+    let mut stored_only = true;
+    expression.visit(&mut |node| match node {
+        ScalarExpr::Column(column) => stored_only &= stored.has_unqualified_column(column),
+        ScalarExpr::QualifiedColumn { qualifier, column } => {
+            stored_only &= stored.has_qualified_column(qualifier, column);
+        }
+        _ => {}
+    });
+    stored_only
 }

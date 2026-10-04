@@ -192,3 +192,34 @@ fn multiplication_and_division_preserve_fractional_scale_limits_and_midpoint_rou
         .is_none());
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn the_integer_digit_limit_holds_without_counting_every_coefficient() {
+    let budget = MemoryBudget::new(64 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let largest = numeric(&"9".repeat(MAX_INTEGER_DIGITS));
+    let sum = |left: &DecimalValue, right: &str| {
+        left.checked_add_with_control(&numeric(right), &control)
+            .unwrap()
+            .map(|value| value.to_canonical_string())
+    };
+    assert_eq!(
+        sum(&largest, "0").map(|text| text.len()),
+        Some(MAX_INTEGER_DIGITS)
+    );
+    assert_eq!(sum(&largest, "1"), None);
+    // Fractional digits do not count toward the limit.
+    let fractional = numeric(&format!("{}.5", "9".repeat(MAX_INTEGER_DIGITS)));
+    assert!(sum(&fractional, "0.4").is_some());
+    assert_eq!(sum(&fractional, "0.5"), None);
+    // The bit-length bound may only overestimate the digit count.
+    for digits in [1_u32, 2, 18, 19, 20, 38, 39, 40, 309, 310] {
+        let below = num_bigint::BigInt::from(10_u8).pow(digits) - 1_u8;
+        let exact = below.to_string().len() as u128;
+        let bound = u128::from(below.bits()) * 30_103 / 100_000 + 1;
+        assert!(bound >= exact, "{digits} digits");
+        assert!(!integer_digits_may_exceed_limit(&below, 0));
+    }
+}

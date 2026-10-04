@@ -225,14 +225,14 @@ impl Engine {
         let rebuild = matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field);
         if rebuild {
-            let documents = Self::project_fts_sources_cancellable(&t, &self.runtime.cancellation)?;
+            let mut source = Self::fts_source(&t, Some(&self.runtime.cancellation))?;
             t.inverted_index
                 .write()
                 .rebuild_with_analyzer_revision_cancellable(
                     field,
                     analyzer,
                     phase,
-                    documents,
+                    &mut source,
                     &self.runtime.cancellation,
                 )
                 .map_err(|error| format!("set_table_analyzer: {error}"))?;
@@ -317,19 +317,19 @@ impl Engine {
         search_analyzer: Arc<uqa_analysis::CompiledAnalyzer>,
         rebuild: bool,
     ) -> Result<(), String> {
-        let documents = if rebuild {
-            Some(Self::project_fts_sources(table)?)
+        let source = if rebuild {
+            Some(Self::fts_source(table, None)?)
         } else {
             None
         };
         let mut index = table.inverted_index.write();
-        if let Some(documents) = documents {
+        if let Some(mut source) = source {
             index
                 .rebuild_with_analyzer_revision(
                     field,
                     index_analyzer,
                     AnalyzerPhase::Index,
-                    documents,
+                    &mut source,
                 )
                 .map_err(|error| error.to_string())?;
         } else {

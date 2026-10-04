@@ -78,7 +78,6 @@ impl Engine {
                         },
                         &table_name,
                         &mut columns,
-                        &key_constraints,
                         &foreign_keys,
                     )
                 };

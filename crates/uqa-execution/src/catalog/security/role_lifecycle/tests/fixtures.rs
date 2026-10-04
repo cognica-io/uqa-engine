@@ -327,7 +327,7 @@ impl RolePublication for Catalog {
 impl RoleNotices for Catalog {
     fn notice(&self, notice: uqa_sql::SQLNotice) {
         self.released();
-        self.event(&format!("{}: {}", notice.severity.as_str(), notice.message));
+        self.event(&format!("{}: {}", notice.level.as_str(), notice.message));
     }
 }
 struct EmptyTables;

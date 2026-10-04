@@ -673,10 +673,11 @@ fn conflict_update_key_rewrite_exposes_the_freed_key_to_later_inputs() {
 fn insert_select_conflict_cardinality_state_is_disk_backed() {
     let eng = Engine::new();
     eng.sql(
-        "CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER); CREATE TABLE incoming (seq INTEGER PRIMARY KEY, target_id INTEGER, value INTEGER); INSERT INTO incoming VALUES (1, 1, 1), (2, 1, 2); SET work_mem TO '1B'",
+        "CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER); CREATE TABLE incoming (seq INTEGER PRIMARY KEY, target_id INTEGER, value INTEGER); INSERT INTO incoming VALUES (1, 1, 1), (2, 1, 2)",
         &[],
     )
     .unwrap();
+    eng.set_query_memory_limit(Some(1));
 
     let error = eng
         .sql(

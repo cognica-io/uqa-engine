@@ -16,6 +16,46 @@ use crate::inverted_index::{
     visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor,
 };
 
+#[cfg(test)]
+mod tests;
+
+fn cluster_replacement_changes(
+    entries: &[OccurrencePosting],
+    changes: &BTreeMap<DocId, Option<OccurrencePosting>>,
+    control: &crate::read_control::StorageReadControl,
+) -> StorageBackendResult<bool> {
+    for (doc_id, replacement) in changes {
+        control.check()?;
+        let previous = entries
+            .binary_search_by_key(doc_id, |entry| entry.doc_id)
+            .ok()
+            .map(|position| &entries[position]);
+        match (previous, replacement) {
+            (None, None) => {}
+            (Some(previous), Some(replacement)) => {
+                if previous.doc_length != replacement.doc_length
+                    || previous.occurrences.len() != replacement.occurrences.len()
+                {
+                    return Ok(true);
+                }
+                for (old, new) in previous
+                    .occurrences
+                    .chunks(128)
+                    .zip(replacement.occurrences.chunks(128))
+                {
+                    control.check()?;
+                    if old != new {
+                        return Ok(true);
+                    }
+                }
+            }
+            _ => return Ok(true),
+        }
+    }
+    control.check()?;
+    Ok(false)
+}
+
 fn visit_replacement(
     visit: &mut InvertedIndexChangeVisitor<'_>,
     doc_id: DocId,
@@ -90,6 +130,25 @@ impl OccurrenceRead<'_> {
             batch.replace_occurrence_record(&graph_key, Some(&graph))?;
         }
         Ok(())
+    }
+
+    /// Write a cluster whose score and positions values are already encoded.
+    pub(super) fn put_encoded_cluster(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        cluster: &crate::inverted_index::StagedCluster<'_>,
+    ) -> StorageBackendResult<()> {
+        let key = |kind| {
+            keys::cluster_key(
+                self.table,
+                kind,
+                cluster.field,
+                cluster.term,
+                cluster.cluster,
+            )
+        };
+        batch.replace_occurrence_record(&key(keys::SCORE)?, Some(cluster.score))?;
+        batch.replace_occurrence_record(&key(keys::POSITIONS)?, Some(cluster.positions))
     }
 
     pub(super) fn put_document(
@@ -241,8 +300,11 @@ impl OccurrenceRead<'_> {
             }
         }
         for ((field, term, cluster), updates) in changes {
-            let merged = merge_cluster_changes(self.load_cluster(&field, &term, cluster)?, updates);
-            self.put_cluster(batch, &field, &term, cluster, &merged)?;
+            let entries = self.load_cluster(&field, &term, cluster)?;
+            if cluster_replacement_changes(&entries, &updates, self.store.control())? {
+                let merged = merge_cluster_changes(entries, updates);
+                self.put_cluster(batch, &field, &term, cluster, &merged)?;
+            }
         }
         self.put_field_statistics(batch, totals)?;
         batch.replace_occurrence_record(

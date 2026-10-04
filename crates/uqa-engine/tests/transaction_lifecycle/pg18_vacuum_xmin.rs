@@ -175,8 +175,9 @@ fn pg18_vacuum_full_waits_for_relation_holders_before_reserving_the_backend_writ
         .unwrap();
     assert!(receiver.try_recv().is_err());
     root.sql("COMMIT", &[]).unwrap();
+    // The bound detects a VACUUM that never resumes; the rewrite and its syncs may take seconds on a busy disk.
     receiver
-        .recv_timeout(std::time::Duration::from_secs(5))
+        .recv_timeout(std::time::Duration::from_secs(60))
         .unwrap()
         .unwrap();
     vacuum_thread.join().unwrap();

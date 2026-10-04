@@ -89,8 +89,8 @@ export interface SQLNotice {
   level: string;
   sqlstate: string;
   message: string;
-  detail: string | null;
-  hint: string | null;
+  detail?: string;
+  hint?: string;
 }
 
 export interface ReliabilityBin {

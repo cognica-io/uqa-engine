@@ -141,7 +141,7 @@ fn register_view_plan_inner(
     context.bindings.lock_relations(&plan)?;
     let uses_temporary_relation = context.bindings.bind_relations(&mut plan)?;
     if view_becomes_temporary(persistence, uses_temporary_relation) {
-        context.notices.lock().push(temporary_view_notice(name)?);
+        context.notices.push(temporary_view_notice(name)?);
     }
     let (name, persistence) = view_creation_target(
         &context.namespace,

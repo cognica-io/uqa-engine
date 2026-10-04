@@ -119,6 +119,9 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
         .map(|path| uqa_sql::ast::TypeDisplayScope::enter(&path));
     if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
         if let Some(plan) = context.cache.cached_optimized_sql_plan(sql) {
+            let _statement_deadline = (!nested_statement)
+                .then(|| context::statement_deadline(context))
+                .flatten();
             let can_execute_without_transaction = match plan.as_ref() {
                 uqa_sql::plan::UnifiedPlan::Query(query) => !query_requires_statement_transaction(
                     &context.effects.query_effect_context(),
@@ -202,6 +205,9 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     let execution = (|| -> Result<SQLResult, SQLError> {
         let mut last = SQLResult::empty();
         for (statement_index, statement) in statements.into_iter().enumerate() {
+            let _statement_deadline = (!nested_statement)
+                .then(|| context::statement_deadline(context))
+                .flatten();
             if let Err(error) = context.runtime.cancellation.check() {
                 return Err(abort_explicit_statement_error(
                     context.transactions,
@@ -304,9 +310,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         )
                     })
                 {
-                    context.runtime.notices.lock().push(
-                        uqa_sql::SQLNotice::warning("there is no transaction in progress")
-                            .with_sqlstate("25P01"),
+                    context.runtime.notices.push(
+                        uqa_sql::semantics::effects::transaction_blocks::no_transaction_in_progress_warning(),
                     );
                     last = SQLResult::empty();
                     last.command_tag = Some(
@@ -331,9 +336,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         )
                     })
                 {
-                    context.runtime.notices.lock().push(
-                        uqa_sql::SQLNotice::warning("there is no transaction in progress")
-                            .with_sqlstate("25P01"),
+                    context.runtime.notices.push(
+                        uqa_sql::semantics::effects::transaction_blocks::no_transaction_in_progress_warning(),
                     );
                 }
                 last = UnifiedPlanExecutor::with_nested_statement(

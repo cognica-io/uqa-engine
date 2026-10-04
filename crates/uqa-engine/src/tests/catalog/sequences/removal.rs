@@ -58,6 +58,7 @@ fn an_identity_sequence_in_a_multi_sequence_drop_prevents_removing_an_earlier_se
         })
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("2BP01"));
+    // `PostgreSQL` names a relation the search path finds by its own name.
     assert_eq!(
         error.to_string(),
         "cannot drop sequence items_id_seq because column id of table items requires it"
@@ -109,7 +110,7 @@ impl SequenceRemovalPublication for FailedPublication<'_> {
             1
         );
         assert!(
-            self.engine.runtime.notices.lock().is_empty(),
+            self.engine.runtime.notices.is_empty(),
             "the cascade notice follows the removal of every object"
         );
         self.reached.set(true);

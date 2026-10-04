@@ -40,7 +40,7 @@ fn insert_conflict_wait_precedes_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     let insert_result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -78,7 +78,7 @@ fn foreign_key_wait_precedes_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -115,7 +115,7 @@ fn multirow_insert_foreign_keys_precede_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -169,7 +169,7 @@ fn multirow_insert_conflicts_precede_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -217,7 +217,7 @@ fn multirow_update_foreign_keys_precede_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();
@@ -256,7 +256,7 @@ fn delete_cascade_dependencies_precede_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     delete_thread.join().unwrap();
@@ -279,7 +279,7 @@ fn insert_select_dependencies_precede_the_data_writer() {
     .unwrap();
     let holder = root.new_session().unwrap();
     let inserter = root.new_session().unwrap();
-    inserter.sql("SET work_mem TO '1B'", &[]).unwrap();
+    inserter.set_query_memory_limit(Some(1));
     holder.sql("BEGIN", &[]).unwrap();
     holder
         .sql(
@@ -303,7 +303,7 @@ fn insert_select_dependencies_precede_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -349,7 +349,7 @@ fn conflict_update_dependencies_precede_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();
@@ -372,7 +372,7 @@ fn merge_insert_dependencies_precede_the_data_writer() {
     .unwrap();
     let holder = root.new_session().unwrap();
     let merger = root.new_session().unwrap();
-    merger.sql("SET work_mem TO '1B'", &[]).unwrap();
+    merger.set_query_memory_limit(Some(1));
     holder.sql("BEGIN", &[]).unwrap();
     holder
         .sql(
@@ -396,7 +396,7 @@ fn merge_insert_dependencies_precede_the_data_writer() {
         .unwrap();
     holder.sql("COMMIT", &[]).unwrap();
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     merge_thread.join().unwrap();
@@ -435,7 +435,7 @@ fn create_table_as_locking_select_rechecks_concurrent_updates() {
     holder.sql("COMMIT", &[]).unwrap();
 
     done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     create_thread.join().unwrap();

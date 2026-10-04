@@ -88,11 +88,9 @@ fn open_plpgsql_command_portal<S: Clone + Send + Sync + 'static>(
         | CommandPlan::Merge(_) => cursor_command_returning_schema(inputs, command, params)?,
         CommandPlan::Call { name, args } => analyze_call_result_schema(inputs, name, args, params)?,
         CommandPlan::ShowVariable { name } => {
-            inputs.session.show_variable(name)?;
-            Some(crate::RowSchema::with_types(
-                vec![name.clone()],
-                vec![Some(uqa_sql::ColumnType::Text)],
-            ))
+            let columns = crate::statement::show::show_columns(inputs.session, name)?;
+            let types = vec![Some(uqa_sql::ColumnType::Text); columns.len()];
+            Some(crate::RowSchema::with_types(columns, types))
         }
         CommandPlan::Explain { body, format, .. } => {
             validate_explain_cursor_body(inputs, params, body)?;

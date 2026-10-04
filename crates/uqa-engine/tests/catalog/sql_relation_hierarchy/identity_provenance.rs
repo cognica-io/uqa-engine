@@ -225,6 +225,7 @@ fn legacy_boolean_auto_increment_metadata_remains_readable() {
                 table: "public.parent".into(),
                 column: "id".into(),
             }),
+            declaration: None,
         }),
         unique: false,
         default: None,

@@ -246,7 +246,7 @@ pub fn validate_rule_returning_shape(
             sqlstate: "42P17".into(),
             message: format!(
                 "RETURNING list's entry {} has different {difference} from column \"{column}\"",
-                position + 1,
+                position + 1
             ),
             detail: Some(format!(
                 "RETURNING list entry has type {}, but column has type {}.",

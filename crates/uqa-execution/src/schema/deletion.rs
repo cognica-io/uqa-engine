@@ -40,7 +40,7 @@ pub struct CatalogRemovalContext<'a> {
     pub composites: crate::schema::composites::attributes::CompositeAttributeContext<'a>,
     pub schemas: EmptySchemaRemovalContext<'a>,
     pub events: &'a dyn crate::schema::removal::RelationRemovalEvents,
-    pub notices: &'a parking_lot::Mutex<Vec<SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }
 
 /// Build the removal services lazily, so a statement's own context does not contain them.
@@ -92,10 +92,11 @@ fn delete_objects(
         let notice = targets.report(cascade, original, &describe)?;
         plan.execute(context)?;
         if let Some(notice) = notice.filter(|_| !quiet) {
-            context
-                .notices
-                .lock()
-                .push(SQLNotice::notice(notice.message).with_detail(notice.detail));
+            let report = SQLNotice::notice(notice.message);
+            context.notices.push(match notice.detail {
+                Some(detail) => report.with_detail(detail),
+                None => report,
+            });
         }
         return Ok(());
     }

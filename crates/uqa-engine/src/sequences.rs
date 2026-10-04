@@ -83,16 +83,14 @@ impl Engine {
     pub(crate) fn create_implicit_sequence_with_persistence(
         &self,
         name: &str,
-        start: i64,
-        increment: i64,
-        data_type: SequenceDataType,
+        state: SequenceState,
         persistence: uqa_sql::ast::RelationPersistence,
     ) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| {
             uqa_execution::schema::sequences::creation::create_sequence(
                 &engine.sequence_creation_context(),
                 name,
-                SequenceState::initial(start, increment, data_type),
+                state,
                 false,
                 persistence,
                 &uqa_sql::ast::SequenceOwnership::Unchanged,
@@ -204,7 +202,12 @@ impl Engine {
     /// Snapshot of all registered sequences as `(name, state)` pairs.
     pub fn try_sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
         self.with_catalog_read_snapshot(|engine| {
-            Ok(engine.query_sequence_snapshot()?.named_states())
+            let snapshot = engine.query_sequence_snapshot()?;
+            Ok(engine
+                .sequence_states_at_positions(&snapshot)?
+                .into_iter()
+                .map(|(relation, state)| (relation.qualified_name(), state))
+                .collect())
         })
     }
 
@@ -219,8 +222,20 @@ impl Engine {
         name: &str,
     ) -> StorageBackendResult<Option<(String, SequenceState)>> {
         self.with_catalog_read_snapshot(|engine| {
+            use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
             let snapshot = engine.query_sequence_snapshot()?;
-            Ok(snapshot.first_state(&engine.relation_lookup_candidates(name)?))
+            let Some((name, state)) =
+                snapshot.first_state(&engine.relation_lookup_candidates(name)?)
+            else {
+                return Ok(None);
+            };
+            let relation =
+                RelationIdentity::from_legacy_name(&name).map_err(StorageBackendError::Other)?;
+            let position = match snapshot.object_ids.get(&relation) {
+                Some(object_id) => engine.sequence_position(state.position_key(*object_id))?,
+                None => None,
+            };
+            Ok(Some((name, state.at_position(position))))
         })
     }
 }

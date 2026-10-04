@@ -31,8 +31,8 @@ impl Engine {
         self.query_runtime_view().push_notice(notice);
     }
 
-    /// Drain queued notices and warnings in emission order.
+    /// Drain the queued notices in emission order, each with its level, SQLSTATE, message, and the detail and hint `PostgreSQL` reports as fields of their own.
     pub fn take_sql_notices(&self) -> Vec<uqa_sql::SQLNotice> {
-        std::mem::take(&mut *self.runtime.notices.lock())
+        self.runtime.notices.take()
     }
 }

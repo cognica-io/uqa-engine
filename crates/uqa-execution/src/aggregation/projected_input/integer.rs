@@ -9,7 +9,7 @@
 use crate::{RowSchema, ScalarExpr};
 use uqa_core::Value;
 use uqa_sql::ast::BinaryOp;
-use uqa_sql::expr::RowLookup;
+use uqa_sql::expr::{IntegerWidth, RowLookup};
 use uqa_sql::SQLError;
 
 use super::column_slot;
@@ -27,7 +27,7 @@ pub(super) enum ProjectedIntegerValue {
 enum ProjectedIntegerInstruction {
     Slot(usize),
     Literal(Option<i64>),
-    Binary(BinaryOp),
+    Binary(BinaryOp, Option<IntegerWidth>),
 }
 
 #[derive(Clone, Copy)]
@@ -39,6 +39,7 @@ enum ProjectedIntegerOperand {
 enum ProjectedIntegerPlan {
     DirectBinary {
         operator: BinaryOp,
+        width: Option<IntegerWidth>,
         left: ProjectedIntegerOperand,
         right: ProjectedIntegerOperand,
     },
@@ -63,6 +64,12 @@ impl ProjectedIntegerExpression {
                     return Some(Self {
                         plan: ProjectedIntegerPlan::DirectBinary {
                             operator: *op,
+                            width: crate::scalar::scalar_integer_binary_width(
+                                lhs,
+                                rhs,
+                                input_schema,
+                                &[],
+                            ),
                             left,
                             right,
                         },
@@ -92,6 +99,7 @@ impl ProjectedIntegerExpression {
         let instructions = match &self.plan {
             ProjectedIntegerPlan::DirectBinary {
                 operator,
+                width,
                 left,
                 right,
             } => {
@@ -99,6 +107,7 @@ impl ProjectedIntegerExpression {
                     *operator,
                     evaluate_integer_operand(*left, row),
                     evaluate_integer_operand(*right, row),
+                    *width,
                 )
             }
             ProjectedIntegerPlan::Program(instructions) => instructions,
@@ -120,12 +129,12 @@ impl ProjectedIntegerExpression {
                         value.map_or(ProjectedIntegerValue::Null, ProjectedIntegerValue::Integer);
                     stack_len += 1;
                 }
-                ProjectedIntegerInstruction::Binary(operator) => {
+                ProjectedIntegerInstruction::Binary(operator, width) => {
                     debug_assert!(stack_len >= 2);
                     let right = stack[stack_len - 1];
                     let left = stack[stack_len - 2];
                     stack_len -= 1;
-                    stack[stack_len - 1] = evaluate_integer_binary(operator, left, right)?;
+                    stack[stack_len - 1] = evaluate_integer_binary(operator, left, right, width)?;
                 }
             }
         }
@@ -192,6 +201,19 @@ fn emit_integer_expression(
             instructions.push(ProjectedIntegerInstruction::Literal(None));
             *stack_depth += 1;
         }
+        ScalarExpr::Cast { expr, ty }
+            if (ty.eq_ignore_ascii_case("bigint") || ty.eq_ignore_ascii_case("int8"))
+                && compile_integer_operand(expr, input_schema).is_some() =>
+        {
+            // BIGINT is the identity on the compiled i64/NULL operand carrier. Non-integer values retain canonical scalar fallback.
+            emit_integer_expression(
+                expr,
+                input_schema,
+                instructions,
+                stack_depth,
+                max_stack_depth,
+            )?;
+        }
         ScalarExpr::Binary { op, lhs, rhs }
             if matches!(
                 op,
@@ -212,7 +234,10 @@ fn emit_integer_expression(
                 stack_depth,
                 max_stack_depth,
             )?;
-            instructions.push(ProjectedIntegerInstruction::Binary(*op));
+            instructions.push(ProjectedIntegerInstruction::Binary(
+                *op,
+                crate::scalar::scalar_integer_binary_width(lhs, rhs, input_schema, &[]),
+            ));
             *stack_depth = stack_depth.checked_sub(1)?;
         }
         _ => return None,
@@ -225,6 +250,7 @@ fn evaluate_integer_binary(
     operator: BinaryOp,
     left: ProjectedIntegerValue,
     right: ProjectedIntegerValue,
+    width: Option<IntegerWidth>,
 ) -> Result<ProjectedIntegerValue, SQLError> {
     match (left, right) {
         (ProjectedIntegerValue::Integer(left), ProjectedIntegerValue::Integer(right)) => {
@@ -237,10 +263,21 @@ fn evaluate_integer_binary(
                 _ => unreachable!("compiled integer aggregate operator"),
             };
             if let Some(value) = value {
-                return Ok(ProjectedIntegerValue::Integer(value));
+                let fits = match width {
+                    Some(IntegerWidth::SmallInt) => i16::try_from(value).is_ok(),
+                    Some(IntegerWidth::Integer) => i32::try_from(value).is_ok(),
+                    Some(IntegerWidth::BigInt) | None => true,
+                };
+                if fits {
+                    return Ok(ProjectedIntegerValue::Integer(value));
+                }
             }
-            let value =
-                uqa_sql::expr::eval_binary_values(operator, &Value::Int(left), &Value::Int(right))?;
+            let value = uqa_sql::expr::eval_binary_values_with_integer_width(
+                operator,
+                &Value::Int(left),
+                &Value::Int(right),
+                width,
+            )?;
             Ok(match value {
                 Value::Int(value) => ProjectedIntegerValue::Integer(value),
                 _ => ProjectedIntegerValue::General,

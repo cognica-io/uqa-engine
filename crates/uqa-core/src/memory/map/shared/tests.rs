@@ -183,6 +183,14 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
     for key in ["", "a", "b", "c", "m", "z"] {
         assert_eq!(map.get(key), expected.get(key));
         for bound in [Bound::Included(key), Bound::Excluded(key)] {
+            assert_eq!(
+                map.last_before(bound)
+                    .map(|(key, value)| (key.as_str(), value)),
+                expected
+                    .range::<str, _>((Bound::Unbounded, bound))
+                    .next_back()
+                    .map(|(key, value)| (*key, value))
+            );
             assert!(map
                 .range_from(bound)
                 .map(|(key, value)| (key.as_str(), value))
@@ -198,6 +206,54 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
     assert_eq!(budget.used(), used);
     let empty = BudgetedSharedMap::<String, usize>::new(&budget);
     assert!(empty.range_from(Bound::Included("a")).next().is_none());
+    assert!(empty.last_before(Bound::Included("a")).is_none());
+    assert_eq!(
+        map.last_before::<str>(Bound::Unbounded)
+            .map(|(key, value)| (key.as_str(), *value)),
+        Some(("m", 13))
+    );
+}
+
+#[test]
+fn greatest_entry_seeks_without_linear_work_or_allocation() {
+    #[derive(Eq, PartialEq)]
+    struct Key(usize);
+    static COMPARISONS: AtomicUsize = AtomicUsize::new(0);
+    impl Ord for Key {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            COMPARISONS.fetch_add(1, AtomicOrdering::Relaxed);
+            self.0.cmp(&other.0)
+        }
+    }
+    impl PartialOrd for Key {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    let budget = MemoryBudget::new(2 << 20);
+    let mut map = BudgetedSharedMap::new(&budget);
+    for key in 0..8192 {
+        map.try_insert(Key(key), key).unwrap();
+    }
+    for (bound, expected) in [
+        (Bound::Included(Key(8191)), 8191),
+        (Bound::Excluded(Key(4096)), 4095),
+    ] {
+        COMPARISONS.store(0, AtomicOrdering::Relaxed);
+        let allocated = allocation_counter::measure(|| {
+            let bound = match &bound {
+                Bound::Included(key) => Bound::Included(key),
+                Bound::Excluded(key) => Bound::Excluded(key),
+                Bound::Unbounded => unreachable!(),
+            };
+            assert_eq!(
+                map.last_before(bound).map(|(_, value)| *value),
+                Some(expected)
+            );
+        });
+        assert_eq!(allocated.count_total, 0);
+        assert!(COMPARISONS.load(AtomicOrdering::Relaxed) < 32);
+    }
 }
 
 #[test]
@@ -216,7 +272,7 @@ fn nonclone_entries_keep_addresses_and_drop_with_the_last_referencing_root() {
         .with_insert(2, Value(drops.clone()))
         .unwrap();
     let first = std::ptr::from_ref(original.get(&1).unwrap());
-    let retained = original.clone();
+    let retained = original.snapshot();
     let changed = original.with_insert(2, Value(drops.clone())).unwrap();
     assert_eq!(std::ptr::from_ref(changed.get(&1).unwrap()), first);
     drop(original);
@@ -226,6 +282,60 @@ fn nonclone_entries_keep_addresses_and_drop_with_the_last_referencing_root() {
     drop(changed);
     assert_eq!(drops.load(AtomicOrdering::Relaxed), 3);
     assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn immutable_roots_restore_values_and_cardinality_without_headroom_or_allocation() {
+    let budget = MemoryBudget::new(1 << 16);
+    let mut map = BudgetedSharedMap::new(&budget);
+    let empty = map.snapshot();
+    assert!(empty.is_empty());
+    map.try_insert("a".to_owned(), 10).unwrap();
+    map.try_insert("b".to_owned(), 20).unwrap();
+    let retained = map.snapshot();
+    map.try_insert("a".to_owned(), 30).unwrap();
+    map.try_insert("c".to_owned(), 40).unwrap();
+    assert_eq!(retained.get("a"), Some(&10));
+    assert!(retained.get("c").is_none());
+    let blocker = budget.reserve(budget.limit() - budget.used()).unwrap();
+    let allocations = allocation_counter::measure(|| map.restore(&retained));
+    assert_eq!(allocations.count_total, 0);
+    assert_eq!(map.len(), retained.len());
+    assert_eq!(map.get("a"), Some(&10));
+    assert_eq!(map.get("b"), Some(&20));
+    assert!(map.get("c").is_none());
+    drop(blocker);
+    drop(retained);
+    map.restore(&empty);
+    assert!(map.is_empty());
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn immutable_root_restoration_rejects_another_allowance_before_changing_values() {
+    let original = MemoryBudget::new(4096);
+    let other = MemoryBudget::new(4096);
+    let mut source = BudgetedSharedMap::new(&original);
+    source.try_insert(1, 10).unwrap();
+    let retained = source.snapshot();
+    let mut destination = BudgetedSharedMap::new(&other);
+    destination.try_insert(2, 20).unwrap();
+    let used = other.used();
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        destination.restore(&retained);
+    }))
+    .is_err());
+    assert_eq!(destination.len(), 1);
+    assert_eq!(destination.get(&2), Some(&20));
+    assert!(destination.get(&1).is_none());
+    assert_eq!(other.used(), used);
+    drop(destination);
+    drop(source);
+    assert!(original.used() > 0);
+    assert_eq!(retained.get(&1), Some(&10));
+    drop(retained);
+    assert_eq!(original.used(), 0);
+    assert_eq!(other.used(), 0);
 }
 
 #[test]

@@ -158,7 +158,6 @@ impl ForeignSchemaContext<'_> {
             &qualifier,
             columns,
             &[],
-            &[],
         )?;
         let mut constraints = crate::ast::TableConstraintSet {
             checks: std::mem::take(checks),

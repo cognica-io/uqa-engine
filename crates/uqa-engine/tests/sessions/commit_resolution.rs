@@ -10,6 +10,8 @@
 mod conflicts;
 #[path = "commit_resolution/diskann.rs"]
 mod diskann;
+#[path = "commit_resolution/identities.rs"]
+mod identities;
 #[path = "commit_resolution/notifications.rs"]
 mod notifications;
 #[path = "commit_resolution/serializable.rs"]
@@ -51,7 +53,7 @@ fn rejected_commit_error(fault: u8) -> Option<uqa_storage::mvcc::VersionError> {
     use uqa_storage::mvcc::{CommitSequence, VersionError};
     Some(match fault {
         REJECT_MEMORY => uqa_core::memory::MemoryError::SizeOverflow.into(),
-        REJECT_CANCELLED => uqa_core::QueryCancelled.into(),
+        REJECT_CANCELLED => uqa_core::QueryCancelled::USER_REQUEST.into(),
         REJECT_CONSTRAINT => StorageBackendError::backend(
             "fixture",
             SQLError::Routine {
@@ -70,6 +72,15 @@ fn rejected_commit_error(fault: u8) -> Option<uqa_storage::mvcc::VersionError> {
     })
 }
 
+/// One foreground presentation of a prepared batch to the provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Presentation {
+    transaction: StorageTransactionId,
+    fingerprint: CommitFingerprint,
+    /// The provider rejected the snapshot the batch's derived effects were resolved at, because another transaction committed since. Only this rejection lets storage resolve those effects again and present the same batch once more.
+    snapshot_changed: bool,
+}
+
 struct FaultPersistence {
     inner: Arc<dyn VersionedPersistence>,
     fault: AtomicU8,
@@ -78,8 +89,8 @@ struct FaultPersistence {
     serializable_completion: Mutex<Option<uqa_storage::mvcc::SerializableTransactionId>>,
     foreground: std::thread::ThreadId,
     foreground_transaction_allocations: AtomicUsize,
-    foreground_record_commits: AtomicUsize,
-    last_foreground_record_commit: Mutex<Option<(StorageTransactionId, CommitFingerprint)>>,
+    foreground_identifier_observations: AtomicUsize,
+    foreground_presentations: Mutex<Vec<Presentation>>,
     attempt: Mutex<Option<StorageTransactionId>>,
     aborts: AtomicUsize,
 }
@@ -89,8 +100,21 @@ impl FaultPersistence {
         (
             self.foreground_transaction_allocations
                 .load(Ordering::Acquire),
-            self.foreground_record_commits.load(Ordering::Acquire),
+            self.foreground_presentations.lock().unwrap().len(),
         )
+    }
+
+    /// The foreground presentations after the first `skip`.
+    fn foreground_presentations_after(&self, skip: usize) -> Vec<Presentation> {
+        self.foreground_presentations.lock().unwrap()[skip..].to_vec()
+    }
+
+    fn last_foreground_presentation(&self) -> Option<Presentation> {
+        self.foreground_presentations
+            .lock()
+            .unwrap()
+            .last()
+            .copied()
     }
 
     fn fault_for(&self, transaction: StorageTransactionId) -> u8 {
@@ -109,6 +133,40 @@ impl FaultPersistence {
         } else {
             HEALTHY
         }
+    }
+
+    fn commit_with_fault(
+        &self,
+        transaction: StorageTransactionId,
+        prepared: &PreparedRecordCommit,
+        control: &StorageReadControl,
+    ) -> CommitResult {
+        let fault = self.fault_for(transaction);
+        if let Some(error) = rejected_commit_error(fault) {
+            return Err(CommitFailure::Rejected(error));
+        }
+        if fault == UNAVAILABLE {
+            return Err(CommitFailure::Rejected(
+                StorageBackendError::Other("injected unavailable receipt read".into()).into(),
+            ));
+        }
+        if !matches!(fault, LOSE_UNCOMMITTED_REPLY | LOSE_CONFLICT_REPLY) {
+            let receipt = self.inner.commit(transaction, prepared, control)?;
+            if fault == HEALTHY {
+                return Ok(receipt);
+            }
+        }
+        self.fault.store(UNAVAILABLE, Ordering::Release);
+        Err(CommitFailure::Indeterminate {
+            transaction,
+            source: if fault == LOSE_CONFLICT_REPLY {
+                rejected_commit_error(REJECT_DEPENDENCY)
+                    .unwrap()
+                    .into_storage_error()
+            } else {
+                StorageBackendError::Other("injected lost native commit reply".into())
+            },
+        })
     }
 }
 
@@ -153,6 +211,8 @@ impl VersionedPersistence for FaultPersistence {
             {
                 return Err(error);
             }
+            self.foreground_identifier_observations
+                .fetch_add(1, Ordering::AcqRel);
         }
         self.inner.allocate_identifiers(namespace, request, control)
     }
@@ -198,38 +258,23 @@ impl VersionedPersistence for FaultPersistence {
         prepared: &PreparedRecordCommit,
         control: &StorageReadControl,
     ) -> CommitResult {
+        let result = self.commit_with_fault(transaction, prepared, control);
         if std::thread::current().id() == self.foreground {
-            self.foreground_record_commits
-                .fetch_add(1, Ordering::AcqRel);
-            *self.last_foreground_record_commit.lock().unwrap() =
-                Some((transaction, prepared.fingerprint()));
+            self.foreground_presentations
+                .lock()
+                .unwrap()
+                .push(Presentation {
+                    transaction,
+                    fingerprint: prepared.fingerprint(),
+                    snapshot_changed: matches!(
+                        result,
+                        Err(CommitFailure::Rejected(
+                            uqa_storage::mvcc::VersionError::CommitSnapshotChanged { .. }
+                        ))
+                    ),
+                });
         }
-        let fault = self.fault_for(transaction);
-        if let Some(error) = rejected_commit_error(fault) {
-            return Err(CommitFailure::Rejected(error));
-        }
-        if fault == UNAVAILABLE {
-            return Err(CommitFailure::Rejected(
-                StorageBackendError::Other("injected unavailable receipt read".into()).into(),
-            ));
-        }
-        if !matches!(fault, LOSE_UNCOMMITTED_REPLY | LOSE_CONFLICT_REPLY) {
-            let receipt = self.inner.commit(transaction, prepared, control)?;
-            if fault == HEALTHY {
-                return Ok(receipt);
-            }
-        }
-        self.fault.store(UNAVAILABLE, Ordering::Release);
-        Err(CommitFailure::Indeterminate {
-            transaction,
-            source: if fault == LOSE_CONFLICT_REPLY {
-                rejected_commit_error(REJECT_DEPENDENCY)
-                    .unwrap()
-                    .into_storage_error()
-            } else {
-                StorageBackendError::Other("injected lost native commit reply".into())
-            },
-        })
+        result
     }
     fn commit_status(
         &self,
@@ -313,8 +358,8 @@ fn fixture(directory: &std::path::Path, provider: &str) -> Arc<FaultPersistence>
         serializable_completion: Mutex::new(None),
         foreground: std::thread::current().id(),
         foreground_transaction_allocations: AtomicUsize::new(0),
-        foreground_record_commits: AtomicUsize::new(0),
-        last_foreground_record_commit: Mutex::new(None),
+        foreground_identifier_observations: AtomicUsize::new(0),
+        foreground_presentations: Mutex::new(Vec::new()),
         attempt: Mutex::new(None),
         aborts: AtomicUsize::new(0),
     })

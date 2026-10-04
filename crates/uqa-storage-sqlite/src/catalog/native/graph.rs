@@ -9,7 +9,9 @@
 pub(in crate::catalog) mod lifecycle;
 pub(in crate::catalog) mod paths;
 mod restore;
+mod vertices;
 mod write;
+pub(in crate::catalog) use vertices::for_each_vertex_borrowed;
 pub(in crate::catalog) use write::{membership, named_graph, source};
 
 #[cfg(test)]
@@ -88,8 +90,27 @@ pub(in crate::catalog) fn ids(
     limit: usize,
 ) -> Result<Vec<u64>> {
     uqa_storage::catalog::validate_graph_page(limit).map_err(crate::SQLiteError::from)?;
+    if let (GraphEntityKind::Vertex, Some(graph), Some(label), None, None) = (
+        filter.kind,
+        filter.graph,
+        filter.label,
+        filter.source,
+        filter.target,
+    ) {
+        let cursor = after
+            .map(|id| encode_catalog_id("graph scan cursor", id))
+            .transpose()?;
+        if let Some(found) =
+            snapshot.latest_labeled_vertex_ids(graph, label, cursor, limit, &snapshot.control)?
+        {
+            return found
+                .iter()
+                .map(|id| decode_catalog_id("graph entity", *id))
+                .collect();
+        }
+    }
     let mut ids = Vec::new();
-    snapshot.visit_graph_ids(None, filter, after, |id| {
+    snapshot.visit_graph_ids_with_page_size(None, filter, after, limit, |id| {
         ids.push(decode_catalog_id("graph entity", id)?);
         Ok(ids.len() < limit)
     })?;

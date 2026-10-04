@@ -23,15 +23,17 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.4.7
+## New in 0.4.9
 
-Version 0.4.7 corrects legacy catalog migration and reopen for default document-API full-text fields, Python graph-name aliases and historical FTS accelerator declarations while preserving stored values and index semantics. See the [release history](HISTORY.md#047---2026-09-29).
+Version 0.4.9 keeps HNSW graphs, search workspaces and private transaction records bounded by their memory allowances using encrypted temporary storage. It also corrects PostgreSQL 18 sequence allocation, partition and inheritance foreign keys, table rewrites, transaction commands and diagnostic fields. See the [release history](HISTORY.md#049---2026-10-03).
+
+The current `main` branch additionally implements PostgreSQL configuration and timeout behavior, routine-body validation, and corrections to key declarations, foreign-key checks, trigger ordering and data-modifying CTEs. These changes follow 0.4.9 and are not included in its published packages; see [Unreleased](https://github.com/cognica-io/uqa-engine/blob/main/HISTORY.md#unreleased) and the [upgrade notes](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/10-upgrading.md#unreleased-changes-after-049).
 
 The engine provides native DiskANN vector indexes through memory, native SQLite, SQLite Key/Value and redb. Bounded graph navigation and product quantization select candidates; complete-tensor reranking preserves canonical cosine scores and the existing probability conversion. Indexes retain transaction, rollback and reopen behavior, and EXPLAIN distinguishes estimated work from actual query counters. See the [SQL configuration and score contract](docs/manual/sql/02-ddl.md#diskann-vector-indexes) and [matching Rust, Python, Node.js and browser examples](examples/README.md).
 
 Independent SQL notification subscriptions retain their original database and selected role, with bounded queues and explicit cleanup. Rust, Python, Node.js and Browser WASM also provide authenticated HTTP/SSE clients with visible loss and reconnection events for compatible servers. See the [direct Rust API](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
 
-The engine also provides PostgreSQL-compatible `pg_get_userbyid(oid)` and PostgreSQL diagnostics for non-immutable generated expressions. Persistent databases upgrade to SQLite record format 54, native mapping 13 or redb record format 53; earlier incompatible binaries cannot reopen upgraded state. Close every database owner before taking a pre-upgrade backup, update all owners together, and follow the [0.4.7 upgrade guide](docs/manual/reference/10-upgrading.md). See the [release history](HISTORY.md#047---2026-09-29) for the complete changes.
+Persistent databases use SQLite record format 55, native mapping 14 or redb record format 53. Native SQLite upgrades mapping 13 to 14, and SQLite Key/Value and redb upgrade their sequence records; earlier binaries cannot consume the upgraded sequence representation. Close every database owner before taking a pre-upgrade backup, update all owners together, and follow the [0.4.9 upgrade guide](docs/manual/reference/10-upgrading.md), including Rust persistence/HNSW APIs and the changed Rust/Python notice shape.
 
 ## Mathematical foundation
 
@@ -44,7 +46,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.4.7
+python -m pip install uqa==0.4.9
 usql
 ```
 
@@ -96,8 +98,10 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.4.7
+cargo add uqa@0.4.9
 ```
+
+Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.4.9 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 
@@ -278,7 +282,7 @@ bash scripts/run-beir-benchmark.sh
 
 The combined report includes exact, IVF, and HNSW SQL query latency and throughput, SQL load and index-construction throughput, recall@10, top-1 accuracy, MRR@10, exact top-k set rate, and cosine-score error. Pass `smoke` or `large` to select the 10,000-row or 1,000,000-row profile; the deterministic workload, measured boundary, metric definitions, quality floors, output files, and limitations are documented in the [vector-search benchmark](benchmarks/vector-search/README.md).
 
-Integration tests are consolidated into a small set of domain harnesses so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
+Each crate has one integration-test executable with domain modules, so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
 
 ```sh
 cargo test -p uqa-engine --test integration queries::sql_joins::
@@ -324,7 +328,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Runnable examples](examples/README.md) | Comparing the same search, vector, graph, storage, and extension scenarios across Rust, Python, Node.js, and Browser WASM |
 | [Design documentation index](docs/design/README.md) | Finding the right technical contract or architecture document |
 | [System architecture](docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
-| [Vector indexes](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/vector-indexes.md) | Brute-force, IVF, HNSW and development DiskANN behavior, parameters, persistence and correctness contracts |
+| [Vector indexes](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/vector-indexes.md) | Brute-force, IVF, HNSW and DiskANN behavior, parameters, persistence and correctness contracts |
 | [Vector-search benchmark](benchmarks/vector-search/README.md) | Reproducing vector latency, throughput, construction cost, recall, and accuracy reports |
 | [Engine state ownership](docs/design/engine-state-ownership.md) | Session isolation, locks, epochs, and publication rules |
 | [Concurrent storage transactions](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/concurrent-storage-transactions.md) | Overlapping logical writes, snapshots, conflicts, atomic publication, and provider ownership |

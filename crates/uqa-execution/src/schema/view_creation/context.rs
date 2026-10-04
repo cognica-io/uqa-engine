@@ -61,7 +61,7 @@ pub struct ViewCreationContext<'a> {
     pub query_owners: &'a dyn ViewQueryOwners,
     pub publication: &'a dyn ViewPublication,
     pub changes: &'a dyn CatalogPublicationChanges,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }
 pub type ViewCreationWrite<'a> =
     Box<dyn FnOnce(&ViewCreationContext<'_>) -> Result<(), SQLError> + 'a>;

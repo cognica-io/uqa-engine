@@ -41,6 +41,10 @@ impl TableRead for Table {
     fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
         self.documents.read()
     }
+
+    fn maps_integer_keys(&self) -> bool {
+        true
+    }
 }
 
 fn postings(ids: &[DocId]) -> PostingList {
@@ -66,7 +70,7 @@ fn indexed_conflict(
 }
 
 #[test]
-fn primary_key_mapping_requires_an_integer_column_and_nonnegative_integer_value() {
+fn primary_key_mapping_requires_a_mapped_integer_column_and_a_key_that_names_an_identity() {
     let uqa_sql::Statement::CreateTable(table) =
         uqa_sql::compile("CREATE TABLE t (id INTEGER PRIMARY KEY, other INTEGER, word TEXT)")
             .unwrap()
@@ -74,23 +78,43 @@ fn primary_key_mapping_requires_an_integer_column_and_nonnegative_integer_value(
     else {
         unreachable!()
     };
+    let limit = uqa_sql::semantics::key_identity::KEY_IDENTITY_LIMIT;
     assert_eq!(
-        primary_key_doc_id(&table.columns, "id", &Value::Int(0)),
+        primary_key_doc_id(true, &table.columns, "id", &Value::Int(0)),
         Some(0)
     );
     assert_eq!(
-        primary_key_doc_id(&table.columns, "id", &Value::Int(19)),
+        primary_key_doc_id(true, &table.columns, "id", &Value::Int(19)),
         Some(19)
+    );
+    assert_eq!(
+        primary_key_doc_id(
+            true,
+            &table.columns,
+            "id",
+            &Value::Int(i64::try_from(limit - 1).unwrap())
+        ),
+        Some(limit - 1)
+    );
+    // A table written before keys named identities resolves every key through its index.
+    assert_eq!(
+        primary_key_doc_id(false, &table.columns, "id", &Value::Int(19)),
+        None
     );
     for (column, value) in [
         ("id", Value::Int(-1)),
+        ("id", Value::Int(i64::try_from(limit).unwrap())),
+        ("id", Value::Int(i64::MAX)),
         ("id", Value::Float(19.0)),
         ("id", Value::Null),
         ("other", Value::Int(19)),
         ("word", Value::Int(19)),
         ("missing", Value::Int(19)),
     ] {
-        assert_eq!(primary_key_doc_id(&table.columns, column, &value), None);
+        assert_eq!(
+            primary_key_doc_id(true, &table.columns, column, &value),
+            None
+        );
     }
     let uqa_sql::Statement::CreateTable(text_table) =
         uqa_sql::compile("CREATE TABLE words (word TEXT PRIMARY KEY)")
@@ -100,7 +124,7 @@ fn primary_key_mapping_requires_an_integer_column_and_nonnegative_integer_value(
         unreachable!()
     };
     assert_eq!(
-        primary_key_doc_id(&text_table.columns, "word", &Value::Int(19)),
+        primary_key_doc_id(true, &text_table.columns, "word", &Value::Int(19)),
         None
     );
 }

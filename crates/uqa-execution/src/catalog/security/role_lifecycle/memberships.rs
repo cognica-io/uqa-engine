@@ -140,11 +140,8 @@ impl MembershipWork<'_, '_> {
             let RoleCatalogValues { roles, memberships } = self.view()?;
             let mut plan = MembershipRevocation::new(&bound, &memberships);
             for member in &bound.members {
-                if let Some(message) = plan.member(&roles, member)? {
-                    self.context
-                        .analysis
-                        .notices
-                        .notice(uqa_sql::SQLNotice::warning(message));
+                if let Some(notice) = plan.member(&roles, member)? {
+                    self.context.analysis.notices.notice(notice);
                 }
             }
             for update in plan.into_updates() {

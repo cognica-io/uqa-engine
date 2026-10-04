@@ -32,8 +32,8 @@ use super::{
     KeyValueBatch, KeyValueStore, TAG_ANALYZER, TAG_ANALYZER_DESCRIPTOR, TAG_CATALOG_INDEX,
     TAG_COLUMN_STATS, TAG_EDGE, TAG_FIELD_ANALYZER_BINDING, TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE,
     TAG_GRAPH_MEMBERSHIP, TAG_METADATA, TAG_MODEL, TAG_NAMED_GRAPH, TAG_PATH_INDEX, TAG_RELATION,
-    TAG_SCHEMA, TAG_SCORING_PARAMS, TAG_SEQUENCE, TAG_TABLE, TAG_TABLE_FIELD_ANALYZER, TAG_VERTEX,
-    TAG_VIEW,
+    TAG_SCHEMA, TAG_SCORING_PARAMS, TAG_SEQUENCE, TAG_SEQUENCE_VALUE, TAG_TABLE,
+    TAG_TABLE_FIELD_ANALYZER, TAG_VERTEX, TAG_VIEW,
 };
 
 mod analyzers;
@@ -74,7 +74,7 @@ use migration::{
 };
 use records::{
     StoredCatalogIndex, StoredColumnStats, StoredEdge, StoredForeignServer, StoredForeignTable,
-    StoredRelation, StoredSequence, StoredVertex, StoredView,
+    StoredRelation, StoredSequence, StoredSequenceValue, StoredVertex, StoredView,
     STORED_FOREIGN_TABLE_SECURITY_VERSION,
 };
 
@@ -377,6 +377,18 @@ impl CatalogFacade for KeyValueCatalog {
         self.sequence_has_private_changes_impl(relation)
     }
 
+    fn sequence_value_has_private_changes(
+        &self,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        self.sequence_value_has_private_changes_impl(object_id, definition_generation)
+    }
+
+    fn migrate_sequence_values(&self) -> StorageBackendResult<()> {
+        self.migrate_sequence_values_impl()
+    }
+
     fn reserve_sequence_values(
         &self,
         name: &str,
@@ -403,6 +415,17 @@ impl CatalogFacade for KeyValueCatalog {
             called,
             log_count,
         )
+    }
+
+    fn log_sequence_values(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+        expected: (i64, bool),
+        logged: crate::catalog::SequenceValuePosition,
+    ) -> StorageBackendResult<crate::catalog::SequenceLogResult> {
+        self.log_sequence_values_impl(name, object_id, definition_generation, expected, logged)
     }
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()> {

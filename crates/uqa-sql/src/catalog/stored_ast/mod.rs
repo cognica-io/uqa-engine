@@ -28,12 +28,16 @@ pub use types::*;
 pub type MergeCallback<'a> = &'a mut dyn FnMut(&mut crate::ast::MergeStmt) -> Result<(), SQLError>;
 
 pub type ExpressionCallback<'a> = &'a mut dyn FnMut(&mut Expr) -> Result<(), SQLError>;
+pub type ProjectionCallback<'a> =
+    &'a mut dyn FnMut(&mut crate::ast::Projection) -> Result<(), SQLError>;
 pub type SourceCallback<'a> = &'a mut dyn FnMut(&mut FromClause) -> Result<(), SQLError>;
 
 pub struct StoredAstVisitor<'a, R, F> {
     pub source: Option<SourceCallback<'a>>,
     pub merge: Option<MergeCallback<'a>>,
     pub expression: Option<ExpressionCallback<'a>>,
+    /// Called for each item of a select list or `RETURNING` list before its expression is visited.
+    pub projection: Option<ProjectionCallback<'a>>,
     pub ty: Option<&'a mut dyn FnMut(&mut String)>,
     pub relation: &'a mut R,
     pub routine: &'a mut F,
@@ -106,7 +110,7 @@ where
             }
         }
         for projection in &mut insert.returning {
-            self.bind_expr(&mut projection.expr, &visible)?;
+            self.bind_projection(projection, &visible)?;
         }
         Ok(())
     }
@@ -132,7 +136,7 @@ where
             self.bind_expr(expression, &visible)?;
         }
         for projection in &mut update.returning {
-            self.bind_expr(&mut projection.expr, &visible)?;
+            self.bind_projection(projection, &visible)?;
         }
         Ok(())
     }
@@ -151,7 +155,7 @@ where
             self.bind_expr(expression, &visible)?;
         }
         for projection in &mut delete.returning {
-            self.bind_expr(&mut projection.expr, &visible)?;
+            self.bind_projection(projection, &visible)?;
         }
         Ok(())
     }
@@ -198,7 +202,7 @@ where
             self.bind_from(source, &visible)?;
         }
         for projection in &mut select.projections {
-            self.bind_expr(&mut projection.expr, &visible)?;
+            self.bind_projection(projection, &visible)?;
         }
         for expression in select.values.iter_mut().flatten() {
             self.bind_expr(expression, &visible)?;
@@ -355,6 +359,17 @@ where
             }
         }
         Ok(())
+    }
+
+    fn bind_projection(
+        &mut self,
+        projection: &mut crate::ast::Projection,
+        visible_ctes: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        if let Some(visit) = self.projection.as_mut() {
+            visit(projection)?;
+        }
+        self.bind_expr(&mut projection.expr, visible_ctes)
     }
 
     pub fn bind_expr(

@@ -89,7 +89,7 @@ fn bind_sql_standard_body_relations(
     Ok(changed)
 }
 
-/// Bind a copy of every statement of a SQL-standard body and carry the bound routine identities, user-defined type identities and enum constants back into the stored statements, then convert the result literals the final statement assigns to the declared result.
+/// Bind a copy of every statement of a SQL-standard body and carry the bound routine identities, user-defined type identities and enum constants back into the stored statements, then convert the result literals the final statement assigns to the declared result. A name resolves to a parameter only when no column of its statement takes it, as `sql_fn_post_column_ref` resolves it; the final statement's result is checked when the body is validated.
 pub fn bind_sql_standard_body_routines(
     context: &RoutineCompilationContext<'_>,
     def: &mut CreateFunction,
@@ -98,7 +98,8 @@ pub fn bind_sql_standard_body_routines(
     if !matches!(def.body, FunctionBody::Statements(_)) {
         return Ok(false);
     }
-    let parameters = super::compilation::sql_routine_parameters(context, def)?;
+    let positional = super::body_validation::routine_parameter_values(context.types, def);
+    let parameters = super::body_parameters::sql_body_parameter_scope(def, &positional)?;
     let result_types = def_result_types(context, &def.params, &def.returns)?;
     let FunctionBody::Statements(statements) = &mut def.body else {
         return Ok(false);
@@ -109,42 +110,29 @@ pub fn bind_sql_standard_body_routines(
         preserve_target_expressions: true,
     };
     let mut changed = false;
-    let statement_count = statements.len();
-    let mut final_output = None;
-    for (index, statement) in statements.iter_mut().enumerate() {
+    for statement in statements.iter_mut() {
         let mut lowered =
             super::compilation::lower_sql_routine_statement(context, statement.clone(), lowering)?;
-        parameters.bind_references(&mut lowered);
         let binding = context.catalog.binding_snapshot()?;
+        crate::binding::bind_routine_parameter_references(
+            context.routines,
+            &mut lowered,
+            &positional,
+            &binding.context(),
+            &parameters,
+        )?;
         let routines = bind_catalog_statement_routines(
             &CatalogRoutineContext {
                 routines: context.routines,
                 binding: &binding.context(),
             },
             &lowered,
-            &parameters.positional,
+            &positional,
         )?;
         changed |= stored_ast::bind_stored_statement_sites(statement, &routines.sites)?;
-        // A definition's final statement must return what the routine declares.
-        if matches!(mode, RoutineCompilationMode::Definition) && index + 1 == statement_count {
-            final_output = Some(match &lowered {
-                crate::plan::UnifiedPlan::Query(_) => routines.query_output,
-                crate::plan::UnifiedPlan::Command(command) => {
-                    crate::binding::analyze_prepared_command_schema(
-                        context.routines,
-                        command,
-                        &parameters.positional,
-                        &binding.context(),
-                    )?
-                }
-            });
-        }
     }
     if let Some(statement) = statements.last_mut() {
         changed |= fold_sql_function_result(context, result_types, statement)?;
-    }
-    if let Some(output) = final_output {
-        super::result_shape::check_final_statement_result(context.types, def, output.as_ref())?;
     }
     Ok(changed)
 }

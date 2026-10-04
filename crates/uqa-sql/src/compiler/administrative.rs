@@ -7,10 +7,7 @@
 //! Session control, ANALYZE, EXPLAIN, TRUNCATE, and transactions.
 
 use super::dispatch::compile_stmt;
-use super::{
-    range_var_name, render_relation_component, NodeEnum, Result, SQLError, Statement,
-    TransactionStmt,
-};
+use super::{range_var_name, NodeEnum, Result, SQLError, Statement, TransactionStmt};
 
 fn compile_vacuum_option_value(node: &NodeEnum) -> Result<crate::ast::VacuumOptionValue> {
     use crate::ast::VacuumOptionValue;
@@ -310,32 +307,27 @@ pub(super) fn compile_variable_set(
         };
     }
 
-    // Capture each argument as a string and join with commas. PG's
-    // SET search_path TO a, b, c arrives as a list of A_Const nodes.
-    let mut parts: Vec<String> = Vec::new();
+    use crate::semantics::parameters::arguments::{flatten_set_arguments, SetArgument};
+    let mut arguments = Vec::with_capacity(stmt.args.len());
     for arg in &stmt.args {
         let node = arg
             .node
             .as_ref()
             .ok_or_else(|| SQLError::Internal("SET contains an empty argument".into()))?;
-        match node {
+        let argument = match node {
             NodeEnum::AConst(constant) => match constant.val.as_ref() {
                 Some(pg_query::protobuf::a_const::Val::Sval(value)) => {
-                    parts.push(value.sval.clone());
+                    SetArgument::Text(value.sval.clone())
                 }
                 Some(pg_query::protobuf::a_const::Val::Ival(value)) => {
-                    parts.push(value.ival.to_string());
+                    SetArgument::Integer(i64::from(value.ival))
                 }
                 Some(pg_query::protobuf::a_const::Val::Fval(value)) => {
-                    parts.push(value.fval.clone());
+                    SetArgument::Number(value.fval.clone())
                 }
-                Some(pg_query::protobuf::a_const::Val::Boolval(value)) => {
-                    parts.push(value.boolval.to_string());
-                }
-                None if constant.isnull => parts.push("NULL".into()),
                 other => {
-                    return Err(SQLError::Unsupported(format!(
-                        "SET argument {other:?} is not supported"
+                    return Err(SQLError::Internal(format!(
+                        "unrecognized SET argument {other:?}"
                     )));
                 }
             },
@@ -355,28 +347,19 @@ pub(super) fn compile_variable_set(
                         "SET type-cast argument must contain a string literal".into(),
                     ));
                 };
-                parts.push(value.sval.clone());
+                SetArgument::Text(value.sval.clone())
             }
-            NodeEnum::String(value) => parts.push(value.sval.clone()),
             other => {
-                return Err(SQLError::Unsupported(format!(
-                    "SET argument {other:?} is not supported"
+                return Err(SQLError::Internal(format!(
+                    "unrecognized SET argument {other:?}"
                 )));
             }
-        }
+        };
+        arguments.push(argument);
     }
-    let value = if stmt.name.eq_ignore_ascii_case("search_path") {
-        parts
-            .iter()
-            .map(|part| render_relation_component(part))
-            .collect::<Vec<_>>()
-            .join(",")
-    } else {
-        parts.join(",")
-    };
     Ok(Statement::SetVariable {
+        value: flatten_set_arguments(&stmt.name, &arguments)?,
         name: stmt.name.clone(),
-        value,
         local: stmt.is_local,
         is_default: false,
     })

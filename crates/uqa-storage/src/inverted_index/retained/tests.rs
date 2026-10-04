@@ -246,7 +246,7 @@ fn nested_readers_retain_one_charge_and_reject_mutation() {
             "body",
             uqa_analysis::keyword_analyzer().compile().unwrap(),
             AnalyzerPhase::Both,
-            vec![]
+            &mut crate::inverted_index::TextIndexDocuments::new(vec![])
         )
         .is_err());
     drop(retained);

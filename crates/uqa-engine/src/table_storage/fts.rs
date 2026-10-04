@@ -89,7 +89,7 @@ impl Engine {
                 fts.push(field.clone());
             }
         }
-        let documents = Self::project_fts_sources_cancellable(&t, &self.runtime.cancellation)?;
+        let mut source = Self::fts_source(&t, Some(&self.runtime.cancellation))?;
         let phase = if analyzer.is_some() {
             AnalyzerPhase::Both
         } else {
@@ -101,7 +101,7 @@ impl Engine {
                 &field,
                 candidate.index.compiled.clone(),
                 phase,
-                documents,
+                &mut source,
                 &self.runtime.cancellation,
             )
             .map_err(|error| format!("add_fts_field: {error}"))?;
@@ -220,14 +220,14 @@ impl Engine {
             .map_err(|error| error.to_string())?;
         let binding =
             uqa_storage::FieldAnalyzerBinding::unassigned(revision.clone(), revision.clone());
-        let documents = Self::project_fts_sources_cancellable(&t, &self.runtime.cancellation)?;
+        let mut source = Self::fts_source(&t, Some(&self.runtime.cancellation))?;
         t.inverted_index
             .write()
             .rebuild_with_analyzer_revision_cancellable(
                 field,
                 revision.clone(),
                 AnalyzerPhase::Both,
-                documents,
+                &mut source,
                 &self.runtime.cancellation,
             )
             .map_err(|error| error.to_string())?;

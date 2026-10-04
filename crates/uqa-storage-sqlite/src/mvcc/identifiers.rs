@@ -13,6 +13,7 @@ use uqa_storage::mvcc::{
 };
 use uqa_storage::read_control::StorageReadControl;
 
+use super::synchronization::RelaxedSynchronization;
 use super::{admission, codec, native, PhysicalResult};
 
 pub(super) const TABLE: (&str, &str) = (
@@ -64,11 +65,10 @@ pub(super) fn consolidate_diskann_generations(connection: &Connection) -> Physic
 
 pub(super) fn watermark(connection: &Connection, namespace: &[u8]) -> PhysicalResult<Option<u64>> {
     connection
-        .query_row(
-            "SELECT watermark FROM _uqa_mvcc_identifiers WHERE namespace = ?1",
-            [namespace],
-            |row| Ok(codec::bytes(row, 0).and_then(codec::integer)),
-        )
+        .prepare_cached("SELECT watermark FROM _uqa_mvcc_identifiers WHERE namespace = ?1")?
+        .query_row([namespace], |row| {
+            Ok(codec::bytes(row, 0).and_then(codec::integer))
+        })
         .optional()?
         .transpose()
 }
@@ -102,17 +102,21 @@ pub(super) fn allocate(
     control: &StorageReadControl,
 ) -> PhysicalResult<IdentifierAllocation> {
     let _workspace = request.reserve_workspace(namespace, control)?;
-    let _permit = admission::permit(connection, control)?;
+    let permit = admission::permit(connection, control)?;
+    // An observation must be durable before a row carrying the observed identifier is published, and must survive the rollback of the transaction that observed it. The record commit that publishes the row makes the earlier observation durable, so a power loss can discard only observations that no durable commit follows, together with every other unpublished write. A reservation hands out identifiers before any record commit, so it keeps its own sync.
+    let _synchronization = match request {
+        IdentifierRequest::Observe(_) => RelaxedSynchronization::relax(connection, &permit)?,
+        IdentifierRequest::Reserve { .. } => None,
+    };
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     codec::header(&transaction, database)?;
     let previous = watermark(&transaction, namespace)?;
     let allocation = request.prepare(previous)?;
     if previous != Some(allocation.watermark()) {
-        transaction.execute(
-            "INSERT INTO _uqa_mvcc_identifiers VALUES (?1, ?2) ON CONFLICT(namespace) DO UPDATE SET watermark = excluded.watermark",
-            params![namespace, allocation.watermark().to_be_bytes().as_slice()],
-        )?;
+        transaction
+            .prepare_cached("INSERT INTO _uqa_mvcc_identifiers VALUES (?1, ?2) ON CONFLICT(namespace) DO UPDATE SET watermark = excluded.watermark")?
+            .execute(params![namespace, allocation.watermark().to_be_bytes().as_slice()])?;
     }
     control
         .cancellation()

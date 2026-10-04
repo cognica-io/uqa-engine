@@ -677,6 +677,7 @@ pub(super) fn bind_merge_when(when: &MergeWhen, r: &mut dyn VariableResolver) ->
         MergeWhen::InsertNotMatched {
             condition,
             columns,
+            overriding,
             values,
         } => MergeWhen::InsertNotMatched {
             condition: bind_opt_expr(condition.as_ref(), r)?,
@@ -684,6 +685,7 @@ pub(super) fn bind_merge_when(when: &MergeWhen, r: &mut dyn VariableResolver) ->
                 .iter()
                 .map(|target| bind_assignment_target(target, r))
                 .collect::<Result<_>>()?,
+            overriding: *overriding,
             values: bind_exprs(values, r)?,
         },
         MergeWhen::NothingMatched { condition } => MergeWhen::NothingMatched {

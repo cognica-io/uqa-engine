@@ -19,6 +19,114 @@ fn expression(source: &str, schema: &crate::RowSchema) -> ScalarExpr {
     uqa_sql::bind_type_introspection(expression, schema, &[])
 }
 
+fn arithmetic_oracle() -> serde_json::Value {
+    let oracle: serde_json::Value =
+        serde_json::from_str(include_str!("pg18_arithmetic.json")).unwrap();
+    assert!(oracle["postgresql"]
+        .as_str()
+        .unwrap()
+        .starts_with("PostgreSQL 18."));
+    assert!(oracle["image"].as_str().unwrap().starts_with("sha256:"));
+    oracle
+}
+
+#[test]
+fn nested_numeric_arithmetic_keeps_exact_results_with_a_small_allowance() {
+    let oracle = arithmetic_oracle();
+    let numeric = ColumnType::Numeric {
+        precision: None,
+        scale: None,
+    };
+    let schema = crate::RowSchema::with_types(
+        ["price", "discount", "tax", "cost", "quantity"]
+            .map(str::to_string)
+            .to_vec(),
+        vec![Some(numeric); 5],
+    );
+    let row = ResultRow::from(
+        [
+            ("price".into(), "100.00"),
+            ("discount".into(), "0.07"),
+            ("tax".into(), "0.20"),
+            ("cost".into(), "1.25"),
+            ("quantity".into(), "3.00"),
+        ]
+        .map(|(name, value)| {
+            (
+                name,
+                Value::Decimal(uqa_core::DecimalValue::parse(value).unwrap()),
+            )
+        }),
+    );
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (source, key) in [
+        ("price * (1 - discount) * (1 + tax)", "charge"),
+        ("price * (1 - discount) - cost * quantity", "profit"),
+    ] {
+        let expected = oracle[key].as_str().unwrap();
+        let expression = expression(source, &schema);
+        let context = ScalarEvalContext::from_row_lookup(&row, &[]).with_row_schema(&schema);
+        let output = eval_scalar_inner(&expression, &context, &control).unwrap();
+        let Value::Decimal(value) = &*output else {
+            panic!("numeric result for {source}");
+        };
+        assert_eq!(value.to_sql_string(), expected, "{source}");
+        assert_eq!(budget.used(), output.reserved_bytes(), "{source}");
+        drop(output);
+        assert_eq!(budget.used(), 0, "{source}");
+        assert_eq!(
+            eval_scalar(&expression, &context).unwrap(),
+            Value::Decimal(uqa_core::DecimalValue::parse(expected).unwrap()),
+            "ordinary {source}"
+        );
+    }
+}
+
+#[test]
+fn integer_arithmetic_retains_declared_width_errors_and_null_results() {
+    let oracle = arithmetic_oracle();
+    for (ty, value, name) in [
+        (ColumnType::SmallInteger, i64::from(i16::MAX), "int2"),
+        (ColumnType::Integer, i64::from(i32::MAX), "int4"),
+        (ColumnType::BigInteger, i64::MAX, "int8"),
+    ] {
+        let schema = crate::RowSchema::with_types(
+            vec!["v".into(), "w".into()],
+            vec![Some(ty.clone()), Some(ty)],
+        );
+        let mut row =
+            ResultRow::from([("v".into(), Value::Int(value)), ("w".into(), Value::Int(1))]);
+        let budget = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        for (source, key) in [
+            ("v + w", format!("{name}_overflow")),
+            ("(v + w) - w", format!("nested_{name}_overflow")),
+        ] {
+            let expression = expression(source, &schema);
+            let context = ScalarEvalContext::from_row_lookup(&row, &[]).with_row_schema(&schema);
+            assert_eq!(
+                eval_scalar_inner(&expression, &context, &control)
+                    .unwrap_err()
+                    .sqlstate(),
+                oracle[key].as_str(),
+                "{source}"
+            );
+            assert_eq!(budget.used(), 0);
+        }
+        row.insert("w".into(), Value::Null);
+        let expression = expression("v + w", &schema);
+        let context = ScalarEvalContext::from_row_lookup(&row, &[]).with_row_schema(&schema);
+        let output = eval_scalar_inner(&expression, &context, &control).unwrap();
+        assert_eq!(oracle[format!("{name}_null")], true);
+        assert_eq!(*output, Value::Null);
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
 #[test]
 fn generated_scalar_results_keep_the_original_allowance_through_shared_evaluation() {
     let budget = MemoryBudget::new(1 << 20);

@@ -29,14 +29,16 @@ fn legacy_vector_comparison_errors_survive_in_memory_and_spilled_sort() {
                     ("input".into(), Value::Int(input)),
                 ])
             };
-            let mut single = sort(vec![make_row(0)], budget, None);
-            assert_eq!(run_to_rows(&mut single).unwrap().1.len(), 1);
-            let mut pair = sort(vec![make_row(0), make_row(1)], budget, None);
-            let ExecError::SQL(error) = run_to_rows(&mut pair).unwrap_err() else {
-                panic!("expected SQL operator failure")
-            };
-            assert_eq!(error.sqlstate(), Some("42804"));
-            assert_eq!(error.to_string(), "array is not a valid oidvector");
+            for keep in [None, Some(1), Some(2)] {
+                let mut single = sort(vec![make_row(0)], budget, keep);
+                assert_eq!(run_to_rows(&mut single).unwrap().1.len(), 1);
+                let mut pair = sort(vec![make_row(0), make_row(1)], budget, keep);
+                let ExecError::SQL(error) = run_to_rows(&mut pair).unwrap_err() else {
+                    panic!("expected SQL operator failure")
+                };
+                assert_eq!(error.sqlstate(), Some("42804"));
+                assert_eq!(error.to_string(), "array is not a valid oidvector");
+            }
         }
     }
 }

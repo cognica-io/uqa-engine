@@ -12,6 +12,7 @@ use crate::vector_index::{HNSWIndexParams, MemoryVectorIndex, VectorIndex};
 mod preparation;
 #[path = "tests/restoration.rs"]
 mod restoration;
+mod spill;
 
 fn vector(seed: u64, dimensions: usize) -> Vec<f32> {
     let mut state = seed;
@@ -49,6 +50,22 @@ fn tensor_vectors_collapse_to_unique_documents() {
     index.add(2, vec![0.8, 0.2]).unwrap();
     let result = index.search_knn(&[1.0, 0.0], 2).unwrap();
     assert_eq!(ids(&result), vec![1, 2]);
+}
+
+#[test]
+fn tensor_maxima_reduce_overflow_before_top_k_and_preserve_document_ties() {
+    let mut index = HNSWIndex::new(2);
+    index
+        .add_many(1, vec![vec![1.0e30, 0.0], vec![1.0, 0.0]])
+        .unwrap();
+    index
+        .add_many(2, vec![vec![1.0, 0.0], vec![1.0e30, 0.0]])
+        .unwrap();
+    for k in [1, 2] {
+        let postings = index.search_knn(&[1.0e30, 0.0], k).unwrap();
+        assert_eq!(ids(&postings), (1..=k as u64).collect::<Vec<_>>());
+        assert!(postings.iter().all(|posting| posting.payload.score == 0.0));
+    }
 }
 
 #[test]

@@ -120,6 +120,20 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             ),
         });
     }
+    // The name a filter writes for each column of the table: its alias, or its own name.
+    let visible_names = table_columns
+        .iter()
+        .enumerate()
+        .map(|(position, physical)| {
+            (
+                physical.clone(),
+                column_aliases
+                    .get(position)
+                    .cloned()
+                    .unwrap_or_else(|| physical.clone()),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
     // An unqualified reference is conservatively requested from every FROM source during pruning. The scan schema must still describe only real table columns: advertising those over-inclusive requests as columns can make later joins bind an unqualified name to a non-existent value.
     let selected_columns = table_columns
         .into_iter()
@@ -276,9 +290,10 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
         )?;
         let predicate_expression = qualifier_filter(filters, &qualifier);
         let predicate = predicate_expression
+            .as_ref()
             .filter(|predicate| !expression_references_tableoid(predicate))
             .map(|predicate| {
-                crate::ProjectedPredicate::compile_with_schema(&predicate, &physical_schema, params)
+                crate::ProjectedPredicate::compile_with_schema(predicate, &physical_schema, params)
             })
             .transpose()?
             .flatten();
@@ -288,12 +303,31 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             .and_then(|(origin_qualifier, storage_name)| {
                 ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
             });
+        // A filter that names its rows by identity, or by an integer primary key whose values are the identities, reads only those rows, from storage or from the changes above it, instead of scanning the table.
+        let candidates = if recheck_pins.is_none() {
+            predicate_expression.as_ref().and_then(|filter| {
+                crate::query::key_candidates::key_candidates(
+                    filter,
+                    params,
+                    crate::query::key_candidates::IdentityColumns::new(
+                        &column_definitions,
+                        table.maps_integer_keys(),
+                        |name| visible_names.get(name).map_or(name, String::as_str),
+                    ),
+                )
+            })
+        } else {
+            None
+        };
         let command_changes = if ctes.reads_command_overlay() {
             context.tables.command_overlay_changes(&table_name)?
         } else {
             None
         };
-        let estimated_cardinality = context.tables.table_doc_count(&table_name)?;
+        let estimated_cardinality = match &candidates {
+            Some(candidates) => u64::try_from(candidates.len()).unwrap_or(u64::MAX),
+            None => context.tables.table_row_estimate(&table_name)?,
+        };
         let table_oid = include_table_oid
             .then(|| {
                 crate::catalog::projection::snapshot_table_relation_oid(
@@ -319,6 +353,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             estimated_cardinality,
             lock_origin,
             recheck_pins,
+            candidates: candidates.map(std::sync::Arc::from),
             command_changes,
         }));
     }

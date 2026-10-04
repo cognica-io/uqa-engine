@@ -567,3 +567,13 @@ pub fn stored_expression_text(
 ) -> Result<String, SQLError> {
     stored_expression_definition(catalog, resolution, expression, false)
 }
+
+/// Whether a stored expression prints as a function call, which needs no parentheses of its own where `PostgreSQL` prints an expression in an index or partition key (`looks_like_function`).
+pub fn stored_expression_prints_as_call(expression: &uqa_sql::ast::Expr) -> bool {
+    let expression = uqa_sql::plan::ExpressionPlan::lower(expression.clone());
+    matches!(
+        &expression.scalar,
+        ScalarExpr::Func { name, binding, args, .. }
+            if expressions::prints_as_call(name, binding.as_ref(), args)
+    )
+}

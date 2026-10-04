@@ -221,11 +221,6 @@ impl Engine {
         Ok(output)
     }
 
-    /// Return the top declarative-partitioning root that owns `table`, or `None` when the relation is not a partitioned table or partition.
-    pub(crate) fn partition_hierarchy_root(&self, table: &str) -> Result<Option<String>, SQLError> {
-        uqa_sql::semantics::partition::partition_hierarchy_root(self, table)
-    }
-
     /// Rebuild a partitioned parent's shared legacy auto-increment watermark from every physical partition. Persistent table counters are reconstructed from document ids, so the logical owner must observe the maximum restored descendant watermark before it can allocate another value.
     pub(crate) fn synchronize_partition_identity_watermarks(&self) -> StorageBackendResult<()> {
         let entries = self

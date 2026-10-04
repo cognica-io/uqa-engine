@@ -30,6 +30,8 @@ use format::{
     append_batches, decode_batch, encoded_batch_overhead_size, encoded_batch_size,
     encoded_physical_row_record_size, open_spill_reader, read_bounded_spill_record, spill_error,
 };
+pub(crate) use format::{decode_document, encode_document, encoded_document_size};
+pub(crate) use indexed::BufferedIndexedSpill;
 pub use indexed::IndexedSpill;
 
 const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x01\n";
@@ -40,7 +42,7 @@ pub(crate) struct EncodedBatchSizer {
     physical_width: usize,
     bytes: usize,
     origin_free_rows: usize,
-    has_lock_origins: bool,
+    lock_origin_rows: usize,
 }
 
 impl EncodedBatchSizer {
@@ -49,7 +51,7 @@ impl EncodedBatchSizer {
             physical_width: schema.physical_width(),
             bytes: encoded_batch_overhead_size(schema)?,
             origin_free_rows: 0,
-            has_lock_origins: false,
+            lock_origin_rows: 0,
         })
     }
 
@@ -59,19 +61,23 @@ impl EncodedBatchSizer {
             self.origin_free_rows = self.origin_free_rows.checked_add(1).ok_or_else(|| {
                 spill_error("incremental spill batch origin-free row count overflow")
             })?;
-            if self.has_lock_origins {
+            if self.lock_origin_rows != 0 {
                 additional = additional.checked_add(8).ok_or_else(|| {
                     spill_error("incremental spill batch lock-origin size overflow")
                 })?;
             }
-        } else if !self.has_lock_origins {
-            let preceding_metadata = self.origin_free_rows.checked_mul(8).ok_or_else(|| {
-                spill_error("incremental spill batch lock-origin metadata overflow")
+        } else {
+            if self.lock_origin_rows == 0 {
+                let preceding_metadata = self.origin_free_rows.checked_mul(8).ok_or_else(|| {
+                    spill_error("incremental spill batch lock-origin metadata overflow")
+                })?;
+                additional = additional.checked_add(preceding_metadata).ok_or_else(|| {
+                    spill_error("incremental spill batch lock-origin size overflow")
+                })?;
+            }
+            self.lock_origin_rows = self.lock_origin_rows.checked_add(1).ok_or_else(|| {
+                spill_error("incremental spill batch lock-origin row count overflow")
             })?;
-            additional = additional
-                .checked_add(preceding_metadata)
-                .ok_or_else(|| spill_error("incremental spill batch lock-origin size overflow"))?;
-            self.has_lock_origins = true;
         }
         self.bytes = self
             .bytes
@@ -82,6 +88,39 @@ impl EncodedBatchSizer {
 
     pub(crate) fn bytes(self) -> usize {
         self.bytes
+    }
+
+    /// Remove one retained row, including the origin-count fields that disappear when the last row carrying origins leaves the batch.
+    pub(crate) fn remove(&mut self, row: &PhysicalRow) -> ExecResult<()> {
+        let mut removed = encoded_physical_row_record_size(row, self.physical_width)?;
+        if row.lock_origins().is_empty() {
+            self.origin_free_rows = self
+                .origin_free_rows
+                .checked_sub(1)
+                .ok_or_else(|| spill_error("spill batch origin-free row count underflow"))?;
+            if self.lock_origin_rows != 0 {
+                removed = removed
+                    .checked_add(8)
+                    .ok_or_else(|| spill_error("spill batch lock-origin size overflow"))?;
+            }
+        } else {
+            self.lock_origin_rows = self
+                .lock_origin_rows
+                .checked_sub(1)
+                .ok_or_else(|| spill_error("spill batch lock-origin row count underflow"))?;
+            if self.lock_origin_rows == 0 {
+                removed = self
+                    .origin_free_rows
+                    .checked_mul(8)
+                    .and_then(|bytes| removed.checked_add(bytes))
+                    .ok_or_else(|| spill_error("spill batch lock-origin size overflow"))?;
+            }
+        }
+        self.bytes = self
+            .bytes
+            .checked_sub(removed)
+            .ok_or_else(|| spill_error("spill batch size underflow"))?;
+        Ok(())
     }
 }
 

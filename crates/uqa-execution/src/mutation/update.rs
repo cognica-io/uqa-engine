@@ -7,9 +7,7 @@
 //! Prepare UPDATE row images, routing, transition events, and RETURNING before publication.
 use super::{
     assignment::{validate_view_checks, ViewCheckContext},
-    constraints::validate_key_constraints_with_previous,
-    events::ReferentialActionContext,
-    identity::integer_primary_key_doc_id,
+    constraints::{validate_key_constraints_with_previous, ConstraintStatement},
     preparation::MutationPreparationContext,
     prepared::PreparedDocumentRewrite,
     referential::{prepare_partition_update_route, prepare_routed_document_rewrite},
@@ -40,12 +38,11 @@ pub fn prepare_update_row<S: Clone + 'static>(
     stmt: &UpdatePlan,
     params: &[SQLParam],
     snapshot_ctes: &CteScope<S>,
-    assigned_columns: &[String],
+    statement: ConstraintStatement<'_>,
     storage_table: &str,
     doc_id: uqa_core::DocId,
     original_document: Document,
     document: Document,
-    referential_actions: &mut ReferentialActionContext,
 ) -> Result<Option<PreparedUpdateRow>, SQLError> {
     let Some(triggered_document) = fire_before_row_triggers(
         &context.referential.triggers,
@@ -54,13 +51,14 @@ pub fn prepare_update_row<S: Clone + 'static>(
         doc_id,
         Some(&original_document),
         Some(&document),
-        assigned_columns,
+        statement.columns,
     )?
     else {
         return Ok(None);
     };
     let Some(route) = prepare_partition_update_route(
         &context.referential,
+        statement,
         storage_table,
         doc_id,
         &original_document,
@@ -72,23 +70,14 @@ pub fn prepare_update_row<S: Clone + 'static>(
     else {
         return Ok(None);
     };
-    let Some(mut rewrite) = prepare_routed_document_rewrite(
+    let mut rewrite = prepare_routed_document_rewrite(
         &context.referential,
         storage_table,
         doc_id,
         original_document,
         route,
-        params,
-        referential_actions,
-    )?
-    else {
-        return Ok(None);
-    };
-    let primary_key_doc_id = integer_primary_key_doc_id(
-        context.referential.constraints.catalog,
-        &stmt.table,
-        &rewrite.new_document,
     )?;
+    let primary_key_doc_id = rewrite.relocation;
     let rewritten_doc_id = rewrite
         .destination
         .as_ref()
@@ -108,6 +97,8 @@ pub fn prepare_update_row<S: Clone + 'static>(
     )?;
     validate_view_checks(ViewCheckContext {
         services: context.referential.assignment,
+        constraints: context.referential.constraints,
+        statement,
         table: &stmt.table,
         storage_table: &rewritten_storage_table,
         target_qualifier: &stmt.target_qualifier,
@@ -129,7 +120,8 @@ pub fn prepare_update_row<S: Clone + 'static>(
         context.staging,
         &mut rewrite,
         params,
-        Some(assigned_columns),
+        statement,
+        Some(statement.columns),
         &mut after_row_events,
     )?;
     let returning = if !affected || stmt.returning.is_empty() {

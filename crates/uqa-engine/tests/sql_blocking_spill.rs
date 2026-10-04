@@ -13,7 +13,7 @@ use uqa_engine::Engine;
 
 fn corpus() -> Engine {
     let engine = Engine::new();
-    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
+    engine.set_query_memory_limit(Some(1));
     engine
         .sql(
             "CREATE TABLE spill_data (id INTEGER PRIMARY KEY, g INTEGER, v INTEGER)",
@@ -179,7 +179,7 @@ fn tiny_work_mem_spills_window_input_sort_and_random_access_partition() {
 #[test]
 fn tiny_work_mem_streams_union_children_before_final_rows() {
     let engine = Engine::new();
-    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
+    engine.set_query_memory_limit(Some(1));
 
     let union = engine
         .sql(
@@ -198,7 +198,7 @@ fn tiny_work_mem_streams_union_children_before_final_rows() {
 #[test]
 fn tiny_work_mem_streams_intersect_children_before_final_rows() {
     let engine = Engine::new();
-    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
+    engine.set_query_memory_limit(Some(1));
     let intersect = engine
         .sql(
             "SELECT generate_series(1, 2048) AS value
@@ -213,7 +213,7 @@ fn tiny_work_mem_streams_intersect_children_before_final_rows() {
 #[test]
 fn tiny_work_mem_streams_distinct_before_final_rows() {
     let engine = Engine::new();
-    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
+    engine.set_query_memory_limit(Some(1));
     let distinct_limit = engine
         .sql(
             "SELECT DISTINCT generate_series(1, 2048) AS value
@@ -235,7 +235,7 @@ fn tiny_work_mem_streams_distinct_before_final_rows() {
 #[test]
 fn tiny_work_mem_bounds_recursive_cte_working_accumulated_and_dedup_state() {
     let engine = Engine::new();
-    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
+    engine.set_query_memory_limit(Some(1));
 
     let deduplicated = engine
         .sql(

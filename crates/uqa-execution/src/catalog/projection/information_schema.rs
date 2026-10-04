@@ -7,11 +7,13 @@
 //! Virtual `information_schema` relation builders.
 
 mod foreign_tables;
+mod identity;
 mod routines;
 
 use std::collections::BTreeSet;
 
 use foreign_tables::insert_foreign_table_column_privileges;
+use identity::{owned_identity_sequence, IdentityAttributes};
 pub use routines::build_info_routines;
 
 use super::helpers::constraints::{constraint_catalog_rows, ConstraintCatalogKind};
@@ -233,13 +235,14 @@ fn describe_column_type(catalog: &CatalogReadView, ty: &ColumnType) -> ColumnTyp
 fn information_schema_column_row(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
-    schema: String,
-    table: String,
+    (schema, table): (String, String),
     index: usize,
     column: &SQLColumnDef,
     updatable: bool,
+    sequence: Option<&crate::catalog::sequence::SequenceState>,
 ) -> Result<ResultRow, SQLError> {
     let description = describe_column_type(catalog, &column.ty);
+    let identity = IdentityAttributes::of(column, sequence);
     Ok(row([
         ("table_catalog", catalog_name()),
         ("table_schema", str_value(schema)),
@@ -349,33 +352,11 @@ fn information_schema_column_row(
                 _ => Value::Null,
             },
         ),
-        (
-            "identity_start",
-            if column
-                .auto_increment
-                .as_ref()
-                .is_some_and(|provenance| provenance.is_identity() || provenance.is_legacy())
-            {
-                str_value("1")
-            } else {
-                Value::Null
-            },
-        ),
-        (
-            "identity_increment",
-            if column
-                .auto_increment
-                .as_ref()
-                .is_some_and(|provenance| provenance.is_identity() || provenance.is_legacy())
-            {
-                str_value("1")
-            } else {
-                Value::Null
-            },
-        ),
-        ("identity_maximum", Value::Null),
-        ("identity_minimum", Value::Null),
-        ("identity_cycle", str_value("NO")),
+        ("identity_start", identity.start),
+        ("identity_increment", identity.increment),
+        ("identity_maximum", identity.maximum),
+        ("identity_minimum", identity.minimum),
+        ("identity_cycle", identity.cycle),
         (
             "is_generated",
             str_value(if column.generated.is_some() {
@@ -408,6 +389,11 @@ pub fn build_info_columns(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
+    let sequences = catalog
+        .sequence_definitions()?
+        .into_iter()
+        .map(|(relation, state, _, _)| (relation.qualified_name(), state))
+        .collect::<std::collections::BTreeMap<_, _>>();
     for tname in catalog.table_names() {
         let table_snapshot = catalog
             .table(resolution, &tname)?
@@ -428,11 +414,11 @@ pub fn build_info_columns(
             out.push(information_schema_column_row(
                 catalog,
                 resolution,
-                schema.clone(),
-                table.clone(),
+                (schema.clone(), table.clone()),
                 idx,
                 col,
                 true,
+                owned_identity_sequence(&sequences, &tname, col)?,
             )?);
         }
     }
@@ -451,8 +437,7 @@ pub fn build_info_columns(
             out.push(information_schema_column_row(
                 catalog,
                 resolution,
-                schema.clone(),
-                view.clone(),
+                (schema.clone(), view.clone()),
                 idx,
                 column,
                 updatability
@@ -460,6 +445,7 @@ pub fn build_info_columns(
                     .get(idx)
                     .copied()
                     .unwrap_or(false),
+                None,
             )?);
         }
     }
@@ -479,11 +465,11 @@ pub fn build_info_columns(
             out.push(information_schema_column_row(
                 catalog,
                 resolution,
-                schema.clone(),
-                table.clone(),
+                (schema.clone(), table.clone()),
                 idx,
                 column,
                 false,
+                owned_identity_sequence(&sequences, &foreign_name, column)?,
             )?);
         }
     }
@@ -769,7 +755,7 @@ pub fn build_info_sequences(
     let current_user = session.current_role();
     let temporary_schema = session.temporary_schema_name();
     Ok(catalog
-        .sequence_states()?
+        .sequence_definitions()?
         .into_iter()
         .filter(|(relation, state, persistence, security)| {
             (*persistence != uqa_sql::ast::RelationPersistence::Temporary

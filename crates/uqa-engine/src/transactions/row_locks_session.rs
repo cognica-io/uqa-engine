@@ -39,7 +39,7 @@ impl Engine {
         table: &str,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         self.ensure_row_mutation_allowed(table)?;
         self.with_implicit_transaction_mutation(f)
     }
@@ -52,7 +52,39 @@ impl Engine {
         strength: uqa_sql::ast::LockStrength,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        self.row_write_transaction(table, Some((doc_id, strength)), true, f)
+    }
+
+    /// Run the write of an inserted row. One that may replace a row locks it as any typed row mutation does.
+    ///
+    /// A new row takes no lock of its own. No other transaction can address its identity before this one commits: a supplied identity is a unique key whose value this transaction has reserved, a generated one was reserved for the row, and a versioned transaction keeps the row private until it commits. `PostgreSQL` likewise locks no tuple it inserts and makes no session wait for a row that session cannot see. The row may still be written over the revision a deleted row left, which the write must expect as it stands now, so the storage target is refreshed unless the identity was never used.
+    pub(crate) fn with_inserted_row_write_transaction<R>(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        if inserted.is_vacant() && self.versioned_backend_transactions() {
+            return self.row_write_transaction(table, None, !inserted.is_unused(), f);
+        }
+        self.with_implicit_row_write_transaction(
+            table,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForUpdate,
+            f,
+        )
+    }
+
+    /// `row` is the tuple to lock before the write, and `refresh` says whether the write needs the latest committed state, as it does after a lock that may have waited for a writer that has since committed.
+    fn row_write_transaction<R>(
+        &self,
+        table: &str,
+        row: Option<(uqa_core::DocId, uqa_sql::ast::LockStrength)>,
+        refresh: bool,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        let _statement = self.lock_statement_gate();
         self.ensure_row_mutation_allowed(table)?;
         if self.storage.backend.is_none() && self.transaction_depth() == 0 {
             return f(self);
@@ -68,21 +100,27 @@ impl Engine {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.prepare_serializable_transaction_snapshot()?;
             self.lock_relation(table, crate::row_locks::RelationLockMode::RowExclusive)?;
-            match self.lock_row(
-                table,
-                doc_id,
-                strength,
-                uqa_sql::ast::LockWait::Block,
-                table,
-            )? {
-                crate::row_locks::LockAcquire::Granted { .. } => {}
-                crate::row_locks::LockAcquire::Skipped => {
-                    return Err(SQLError::Internal(
-                        "blocking typed row mutation unexpectedly skipped a row".into(),
-                    ));
+            if let Some((doc_id, strength)) = row {
+                match self.lock_row(
+                    table,
+                    doc_id,
+                    strength,
+                    uqa_sql::ast::LockWait::Block,
+                    table,
+                )? {
+                    crate::row_locks::LockAcquire::Granted { .. } => {}
+                    crate::row_locks::LockAcquire::Skipped => {
+                        return Err(SQLError::Internal(
+                            "blocking typed row mutation unexpectedly skipped a row".into(),
+                        ));
+                    }
                 }
             }
-            self.prepare_explicit_transaction_writer()?;
+            if refresh {
+                self.prepare_explicit_transaction_writer()?;
+            } else {
+                self.prepare_unrefreshed_transaction_writer()?;
+            }
             f(self)
         }));
 
@@ -379,6 +417,7 @@ impl Engine {
                     constraint: self.foreign_key_constraint_identity(table, &foreign_key)?,
                     firing_relation: firing_relation.clone(),
                     row: Some(row),
+                    referenced: false,
                 });
             }
         }
@@ -400,15 +439,16 @@ impl Engine {
         let mut stack = self.session.transactions.lock();
         let pending = crate::row_locks::PendingRowChange { key, kind };
         if let Some(frame) = stack.last_mut() {
-            frame.row_changes.push(TransactionRowChange {
+            let change = TransactionRowChange {
                 pending,
                 source_generation,
                 successor_generation: None,
                 query_origin: self
                     .session_execution_view()
                     .transaction_snapshot_identity(),
-            });
-            Ok(())
+            };
+            frame.row_changes.push(change);
+            self.follow_row_change(&mut stack, &change)
         } else {
             drop(stack);
             let publication = self
@@ -501,29 +541,22 @@ impl Engine {
         Ok(())
     }
 
+    /// Defer the check of a referencing row that a change to a referenced row fired, under the constraint whose deferral governs it.
     pub(crate) fn defer_foreign_key_check(
         &self,
-        constraint_table: &str,
-        firing_table: &str,
+        event: super::DeferredReferencedKey<'_>,
         row_table: &str,
         doc_id: uqa_core::DocId,
-        foreign_key: &uqa_sql::ast::ForeignKey,
     ) -> Result<(), SQLError> {
         let canonical_row_table = self.row_lock_table_name(row_table)?;
-        let canonical_firing_table = self.row_lock_table_name(firing_table)?;
-        let firing_relation = crate::RelationIdentity::from_legacy_name(&canonical_firing_table)
-            .map_err(|error| {
-                SQLError::Internal(format!(
-                    "decode deferred foreign-key firing relation '{canonical_firing_table}': {error}"
-                ))
-            })?;
         let check = crate::DeferredForeignKeyCheck {
-            constraint: self.foreign_key_constraint_identity(constraint_table, foreign_key)?,
-            firing_relation,
+            constraint: self.referenced_key_constraint_identity(&event)?,
+            firing_relation: self.deferred_firing_relation(event.firing_table)?,
             row: Some(crate::row_locks::RowLockKey {
                 table: self.row_locks.table_key(&canonical_row_table),
                 doc_id,
             }),
+            referenced: true,
         };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
@@ -533,23 +566,27 @@ impl Engine {
         Ok(())
     }
 
+    fn deferred_firing_relation(
+        &self,
+        firing_table: &str,
+    ) -> Result<crate::RelationIdentity, SQLError> {
+        let canonical_firing_table = self.row_lock_table_name(firing_table)?;
+        crate::RelationIdentity::from_legacy_name(&canonical_firing_table).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode deferred foreign-key firing relation '{canonical_firing_table}': {error}"
+            ))
+        })
+    }
+
     pub(crate) fn defer_foreign_key_parent_event(
         &self,
-        constraint_table: &str,
-        firing_table: &str,
-        foreign_key: &uqa_sql::ast::ForeignKey,
+        event: super::DeferredReferencedKey<'_>,
     ) -> Result<(), SQLError> {
-        let canonical_firing_table = self.row_lock_table_name(firing_table)?;
-        let firing_relation = crate::RelationIdentity::from_legacy_name(&canonical_firing_table)
-            .map_err(|error| {
-                SQLError::Internal(format!(
-                    "decode deferred foreign-key firing relation '{canonical_firing_table}': {error}"
-                ))
-            })?;
         let check = crate::DeferredForeignKeyCheck {
-            constraint: self.foreign_key_constraint_identity(constraint_table, foreign_key)?,
-            firing_relation,
+            constraint: self.referenced_key_constraint_identity(&event)?,
+            firing_relation: self.deferred_firing_relation(event.firing_table)?,
             row: None,
+            referenced: true,
         };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
@@ -589,15 +626,16 @@ impl Engine {
                     check.row = Some(new);
                 }
             }
-            frame.row_changes.push(TransactionRowChange {
+            let change = TransactionRowChange {
                 pending,
                 source_generation,
                 successor_generation: Some(successor_generation),
                 query_origin: self
                     .session_execution_view()
                     .transaction_snapshot_identity(),
-            });
-            Ok(())
+            };
+            frame.row_changes.push(change);
+            self.follow_row_change(&mut stack, &change)
         } else {
             drop(stack);
             let publication = self

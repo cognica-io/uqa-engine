@@ -37,7 +37,7 @@ pub(super) fn initialize(connection: &ManagedConnection) {
     });
 }
 
-pub(super) fn records(
+pub(in crate::mvcc::native) fn records(
     connection: &ManagedConnection,
     store: &SQLiteRecordStore,
     family: NativeRecordFamily,
@@ -60,7 +60,7 @@ pub(super) fn records(
     })
 }
 
-pub(super) fn replace(
+pub(in crate::mvcc::native) fn replace(
     record: &NativeRecord,
     column: usize,
     value: ValueRef<'_>,

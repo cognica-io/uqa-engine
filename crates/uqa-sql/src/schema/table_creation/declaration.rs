@@ -10,6 +10,7 @@ use crate::schema::constraints::validate_foreign_key_definition;
 use crate::schema::foreign_keys::{resolve_foreign_key_parent, ForeignKeyDefinitionContext};
 use crate::schema::indexes::names::IndexNameCatalog;
 use crate::schema::inheritance::InheritanceContext;
+pub use crate::schema::table_creation::keys::InheritedKeys;
 use crate::schema::{SchemaBindingContext, SchemaExpressionCatalog};
 use crate::semantics::conflict::InferenceBindingScope;
 use crate::type_resolution::FunctionTypeResolver;
@@ -24,8 +25,8 @@ pub struct CreateTableAnalysisContext<'a> {
     pub foreign_keys: ForeignKeyDefinitionContext<'a>,
 }
 
-/// Describe the new table's columns before its name is claimed: the declared types resolve, the parents' columns merge ahead of the local ones as `MergeAttributes` merges them, `BuildDescForRelation` requires `USAGE` on every column's type, and `CheckAttributeNamesTypes` rejects system column names and pseudo-types.
-pub fn prepare_create_table_declaration(
+/// Resolve the declared column types and validate the declared keys, which `PostgreSQL` does while it analyzes the statement, before the relation's name is checked.
+pub fn transform_create_table(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
 ) -> Result<(), SQLError> {
@@ -33,25 +34,82 @@ pub fn prepare_create_table_declaration(
         column.ty =
             crate::type_resolution::resolve_declared_column_type(context.types, &column.ty)?;
     }
+    super::keys::transform_declared_keys(&context.inheritance, c)
+}
+
+/// Describe the new table's columns before its name is claimed: the parents' columns merge ahead of the local ones as `MergeAttributes` merges them, the declared primary key's columns take their NOT NULL constraints, `BuildDescForRelation` requires `USAGE` on every column's type, and `CheckAttributeNamesTypes` rejects system column names and pseudo-types.
+pub fn prepare_create_table_declaration(
+    context: &CreateTableAnalysisContext<'_>,
+    c: &mut CreateTable,
+) -> Result<InheritedKeys, SQLError> {
+    let declared = c.key_constraints.len();
     super::super::inheritance::merge_create_table_hierarchy(&context.inheritance, c)?;
+    let keys = c.key_constraints.len() - declared;
+    super::keys::declare_primary_key_not_null(&mut c.columns, &c.key_constraints[keys..]);
     for column in &c.columns {
         context.types.require_type_usage(&column.ty)?;
     }
-    super::validate_create_table_columns(c)
+    super::validate_create_table_columns(c)?;
+    let unique_indexes = match c.hierarchy.parents.first() {
+        Some(parent) if c.hierarchy.is_partition() && c.hierarchy.partition_spec.is_some() => {
+            context
+                .inheritance
+                .catalog
+                .unique_index_keys(parent)
+                .map_err(|error| SQLError::Internal(format!("read parent indexes: {error}")))?
+        }
+        _ => Vec::new(),
+    };
+    Ok(InheritedKeys {
+        keys,
+        unique_indexes,
+    })
 }
 
-/// Bind what depends on the created relation, in `DefineRelation` order: the partition bound and key, the indexes of key constraints, and the relations that foreign keys reference.
-pub fn bind_create_table_relation(
+/// Bind the partition bound and key of the created relation, which `DefineRelation` computes once the relation exists.
+pub fn bind_create_table_partitioning(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
 ) -> Result<(), SQLError> {
-    super::super::inheritance::bind_create_table_partitioning(&context.inheritance, c)?;
-    super::super::indexes::names::name_constraint_indexes(
-        context.index_names,
-        &c.name,
-        &mut c.key_constraints,
-    )?;
-    bind_create_table_relation_references(context.foreign_keys.catalog, c)
+    super::super::inheritance::bind_create_table_partitioning(&context.inheritance, c)
+}
+
+/// Define the keys and then bind the foreign keys, which `PostgreSQL` creates after the keys so that a foreign key can reference a key of its own table.
+pub fn define_create_table_constraints(
+    context: &CreateTableAnalysisContext<'_>,
+    c: &mut CreateTable,
+    inherited: &InheritedKeys,
+) -> Result<(), SQLError> {
+    super::keys::define_created_keys(context.index_names, c, inherited)?;
+    bind_create_table_relation_references(context.foreign_keys.catalog, c)?;
+    for foreign_key in &mut c.foreign_keys {
+        if !foreign_key.period {
+            continue;
+        }
+        if foreign_key.ref_table == c.name {
+            validate_foreign_key_definition(
+                &c.name,
+                &c.columns,
+                &c.name,
+                &c.columns,
+                &c.key_constraints,
+                foreign_key,
+            )?;
+        } else {
+            let (canonical, parent_columns, parent_keys) =
+                resolve_foreign_key_parent(&context.foreign_keys, &foreign_key.ref_table)?;
+            validate_foreign_key_definition(
+                &c.name,
+                &c.columns,
+                &canonical,
+                &parent_columns,
+                &parent_keys,
+                foreign_key,
+            )?;
+            foreign_key.ref_table = canonical;
+        }
+    }
+    Ok(())
 }
 
 pub fn validate_create_table_expressions(
@@ -87,39 +145,6 @@ pub fn validate_create_table_expressions(
         )?;
     }
     super::super::check_inheritance::merge_create_checks(c)?;
-    for foreign_key in &mut c.foreign_keys {
-        if !foreign_key.period {
-            continue;
-        }
-        let self_reference = foreign_key.ref_table == c.name
-            || foreign_key.ref_table == c.qualifier
-            || c.name
-                .rsplit_once('.')
-                .is_some_and(|(_, local_name)| local_name == foreign_key.ref_table);
-        if self_reference {
-            validate_foreign_key_definition(
-                &c.name,
-                &c.columns,
-                &c.name,
-                &c.columns,
-                &c.key_constraints,
-                foreign_key,
-            )?;
-            foreign_key.ref_table.clone_from(&c.name);
-        } else {
-            let (canonical, parent_columns, parent_keys) =
-                resolve_foreign_key_parent(&context.foreign_keys, &foreign_key.ref_table)?;
-            validate_foreign_key_definition(
-                &c.name,
-                &c.columns,
-                &canonical,
-                &parent_columns,
-                &parent_keys,
-                foreign_key,
-            )?;
-            foreign_key.ref_table = canonical;
-        }
-    }
     let binding = context.bindings.binding_scope()?;
     super::super::generated::prepare_generated_columns(
         &SchemaBindingContext {
@@ -128,7 +153,6 @@ pub fn validate_create_table_expressions(
         },
         &c.qualifier,
         &mut c.columns,
-        &c.key_constraints,
         &c.foreign_keys,
     )?;
     Ok(())

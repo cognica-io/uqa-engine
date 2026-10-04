@@ -12,10 +12,7 @@ use uqa_execution::schema::sequences::{
     implicit::{ImplicitSequenceContext, ImplicitSequencePublication},
 };
 use uqa_sql::schema::sequences::ownership::{SequenceOwnerCatalog, SequenceOwnerColumns};
-use uqa_sql::{
-    ast::{RelationPersistence, SequenceDataType},
-    SQLError,
-};
+use uqa_sql::{ast::RelationPersistence, SQLError};
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
@@ -31,6 +28,7 @@ impl Engine {
     pub(crate) fn implicit_sequence_context(&self) -> ImplicitSequenceContext<'_> {
         ImplicitSequenceContext {
             namespace: self,
+            owners: self,
             publication: self,
         }
     }
@@ -48,18 +46,10 @@ impl ImplicitSequencePublication for Engine {
     fn create_implicit_sequence(
         &self,
         name: &str,
-        start: i64,
-        increment: i64,
-        data_type: SequenceDataType,
+        state: SequenceState,
         persistence: RelationPersistence,
     ) -> Result<(), SQLError> {
-        self.create_implicit_sequence_with_persistence(
-            name,
-            start,
-            increment,
-            data_type,
-            persistence,
-        )
+        self.create_implicit_sequence_with_persistence(name, state, persistence)
     }
 }
 impl SequenceOwnerCatalog for Engine {
@@ -238,8 +228,23 @@ impl uqa_execution::schema::sequences::alteration::SequenceDefinitionCatalog for
             .get(relation)
             .copied()
     }
-    fn state(&self, relation: &RelationIdentity) -> Option<SequenceState> {
-        self.durable.sequences.read().get(relation).copied()
+    fn state(&self, relation: &RelationIdentity) -> Result<Option<SequenceState>, SQLError> {
+        let Some(state) = self.durable.sequences.read().get(relation).copied() else {
+            return Ok(None);
+        };
+        let object_id = self
+            .durable
+            .sequence_object_ids
+            .read()
+            .get(relation)
+            .copied();
+        let (Some(positions), Some(object_id)) = (self.shared_sequence_positions(), object_id)
+        else {
+            return Ok(Some(state));
+        };
+        Ok(Some(state.at_position(
+            positions.sequence_position(state.position_key(object_id))?,
+        )))
     }
     fn owner_target(&self, owner: uqa_storage::SequenceOwner) -> Option<(String, String, bool)> {
         self.sequence_owner_target(owner)

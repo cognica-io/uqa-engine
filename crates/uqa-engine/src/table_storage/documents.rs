@@ -201,7 +201,9 @@ impl Engine {
             })?;
         if let Some(changes) = self.command_overlay_changes(table)? {
             for doc_id in doc_ids {
-                if !changes.contains_change(*doc_id) {
+                if !changes.contains_change(*doc_id).map_err(|error| {
+                    document_store_read_error("read private generated document projection", &error)
+                })? {
                     continue;
                 }
                 if let Some(document) = changes.get_stored(*doc_id).map_err(|error| {
@@ -249,15 +251,23 @@ impl Engine {
         let table_state = self.require_query_table(table)?;
         let columns = table_state.columns.read().clone();
         let changes = self.command_overlay_changes(table)?;
-        let persisted_ids = doc_ids
-            .iter()
-            .copied()
-            .filter(|id| {
-                changes
-                    .as_ref()
-                    .is_none_or(|changes| !changes.contains_change(*id))
-            })
-            .collect::<Vec<_>>();
+        let changes_error =
+            |error| document_store_read_error("read private document projection", &error);
+        let mut persisted_ids = Vec::with_capacity(doc_ids.len());
+        let mut private_ids = Vec::new();
+        for id in doc_ids.iter().copied() {
+            match changes
+                .as_ref()
+                .map(|changes| changes.change_presence(id))
+                .transpose()
+                .map_err(changes_error)?
+                .flatten()
+            {
+                None => persisted_ids.push(id),
+                Some(true) => private_ids.push(id),
+                Some(false) => {}
+            }
+        }
         let mut projected = uqa_execution::query::document_projection::read_document_projection(
             &**table_state.document_store.read(),
             &persisted_ids,
@@ -265,11 +275,6 @@ impl Engine {
             &columns,
         )?;
         if let Some(changes) = changes {
-            let private_ids = doc_ids
-                .iter()
-                .copied()
-                .filter(|id| changes.change_presence(*id) == Some(true))
-                .collect::<Vec<_>>();
             projected.extend(
                 uqa_execution::query::document_projection::read_document_projection(
                     &changes,
@@ -372,7 +377,13 @@ impl Engine {
         // Each index's replacement path validates/stages before publishing.
         // Never delete the old row/index state first: an analyzer or backend
         // failure must leave the prior version queryable.
-        self.add_document_with_vector_values_inner(table, doc_id, doc, replacement_vectors, false)?;
+        self.add_document_with_vector_values_inner(
+            table,
+            doc_id,
+            doc,
+            replacement_vectors,
+            uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+        )?;
         Ok(true)
     }
 
@@ -464,7 +475,7 @@ impl Engine {
             doc_id,
             document,
             replacement_vectors,
-            false,
+            uqa_execution::mutation::publication::InsertedIdentity::Unknown,
         )?;
         Ok(true)
     }
@@ -476,6 +487,25 @@ impl Engine {
         doc_id: DocId,
         document: Document,
     ) -> Result<(), SQLError> {
+        self.rewrite_prepared_document_with_fts(table, doc_id, document, true)
+    }
+
+    pub(crate) fn rewrite_prepared_document_deferred_fts(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+    ) -> Result<(), SQLError> {
+        self.rewrite_prepared_document_with_fts(table, doc_id, document, false)
+    }
+
+    fn rewrite_prepared_document_with_fts(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+        index_fts: bool,
+    ) -> Result<(), SQLError> {
         let table_name = self
             .try_resolve_table_name(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
@@ -486,13 +516,23 @@ impl Engine {
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
         let vectors = Self::document_vector_values(&table_state, &document)?;
         self.with_prepared_row_write_transaction(&table_name, |engine| {
-            engine.add_prepared_document_with_vector_values_inner(
-                &table_name,
-                doc_id,
-                document,
-                vectors,
-                false,
-            )
+            if index_fts {
+                engine.add_prepared_document_with_vector_values_inner(
+                    &table_name,
+                    doc_id,
+                    document,
+                    vectors,
+                    uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+                )
+            } else {
+                engine.add_prepared_document_with_vector_values_deferred_fts_inner(
+                    &table_name,
+                    doc_id,
+                    document,
+                    vectors,
+                    uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+                )
+            }
         })
     }
 
@@ -566,7 +606,7 @@ impl Engine {
                 .add_many(doc_id, vectors.remove(field).unwrap_or_default())
                 .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
         }
-        self.mark_column_stats_dirty(&table_name, &t)
+        self.mark_row_write(&table_name, &t, super::DocumentCountChange::Unchanged)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         self.note_row_changed(&table_name, doc_id)?;
         Ok(())
@@ -582,6 +622,25 @@ impl Engine {
     }
 
     pub(super) fn delete_document_inner(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
+        self.delete_document_with_text(table, doc_id, true)
+    }
+
+    pub(crate) fn delete_prepared_document_deferred_fts(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<(), SQLError> {
+        self.with_prepared_row_write_transaction(table, |engine| {
+            engine.delete_document_with_text(table, doc_id, false)
+        })
+    }
+
+    fn delete_document_with_text(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        index_text: bool,
+    ) -> Result<(), SQLError> {
         let table_name = self
             .try_resolve_table_name(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
@@ -626,18 +685,20 @@ impl Engine {
         store
             .delete(doc_id)
             .map_err(|err| document_store_write_error(&err))?;
-        self.persist_value_indexes_apply_write(&table_name, doc_id, None)?;
+        self.persist_value_indexes_apply_write(&table_name, doc_id, None, None)?;
         if let Some(old) = old_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
         drop(store);
-        uqa_execution::serializable::text::remove_document(
-            self,
-            &table_name,
-            t.columns.snapshot(),
-            t.inverted_index.write().as_mut(),
-            doc_id,
-        )?;
+        if index_text {
+            uqa_execution::serializable::text::remove_document(
+                self,
+                &table_name,
+                t.columns.snapshot(),
+                t.inverted_index.write().as_mut(),
+                doc_id,
+            )?;
+        }
         for idx in t
             .vector_indexes
             .write()
@@ -651,7 +712,12 @@ impl Engine {
                 .delete(doc_id)
                 .map_err(|error| SQLError::Internal(format!("delete indexed vector: {error}")))?;
         }
-        self.mark_column_stats_dirty(&table_name, &t)
+        let documents = if existed {
+            super::DocumentCountChange::Removed
+        } else {
+            super::DocumentCountChange::Unchanged
+        };
+        self.mark_row_write(&table_name, &t, documents)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         if existed {
             self.note_row_deleted(&table_name, doc_id)?;

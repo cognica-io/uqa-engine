@@ -57,9 +57,24 @@ pub(in crate::mvcc::native) fn remove_empty_changes(
     Ok(())
 }
 
+/// Remove the sequence value records of a database without sequences, as formats before them lacked.
+pub(in crate::mvcc::native) fn remove_empty_sequence_values(
+    sqlite: &rusqlite::Connection,
+) -> crate::Result<()> {
+    let table = NativeRecordFamily::SequenceValues.layout().table;
+    assert_eq!(
+        sqlite.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
+            .get::<_, i64>(0))?,
+        0
+    );
+    sqlite.execute_batch(&format!("DROP TABLE {table}"))?;
+    Ok(())
+}
+
 pub(in crate::mvcc::native) fn remove_empty_populations(
     sqlite: &rusqlite::Connection,
 ) -> crate::Result<()> {
+    remove_empty_sequence_values(sqlite)?;
     for (family, _) in super::super::populations::schema::TABLES {
         let table = family.layout().table;
         assert_eq!(

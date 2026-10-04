@@ -76,6 +76,7 @@ impl StoredColumnBinder<'_> {
                     condition,
                     columns,
                     values,
+                    ..
                 } => {
                     if columns.is_empty() {
                         *columns = target

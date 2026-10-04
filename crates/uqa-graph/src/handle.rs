@@ -442,6 +442,16 @@ impl GraphStore for GraphStoreHandle {
             Self::Persistent(store) => GraphStore::get_vertex(store, vertex_id),
         }
     }
+    fn for_each_vertex_borrowed(
+        &self,
+        ids: &[u64],
+        visit: &mut dyn FnMut(u64, Option<&Vertex>) -> bool,
+    ) -> GraphStoreResult<Option<usize>> {
+        match self {
+            Self::Memory(store) => store.for_each_vertex_borrowed(ids, visit),
+            Self::Persistent(store) => store.for_each_vertex_borrowed(ids, visit),
+        }
+    }
     fn get_edge(&self, edge_id: u64) -> GraphStoreResult<Option<Edge>> {
         match self {
             Self::Memory(store) => GraphStore::get_edge(store, edge_id),

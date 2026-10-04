@@ -13,11 +13,9 @@ use uqa_core::{
     memory::{Budgeted, BudgetedVec, MemoryReservation},
     DocId,
 };
-use uqa_storage::{mvcc::VersionError, KeyValueBatch};
+use uqa_storage::{mvcc::VersionError, read_control::StorageReadControl, KeyValueBatch};
 
-use super::{
-    blob_to_vector, decode_doc_id, validate_persisted_ordinal_sequence, SQLiteVectorIndex,
-};
+use super::{blob_to_vector, decode_doc_id, SQLiteVectorIndex};
 use crate::mvcc::native::{
     NativeRecordFamily as Family, NativeRecordIdentity, NativeRecordOwner, NativeSnapshot,
 };
@@ -25,10 +23,9 @@ use crate::{Result, SQLiteError};
 
 pub(super) mod canonical;
 mod guards;
+pub(super) mod identity;
 pub(in crate::vector_index) mod publication;
 pub(in crate::vector_index) mod records;
-
-type VectorRows = Vec<(DocId, u32, Vec<f32>)>;
 
 // Payload allocations are destroyed before either of their reservations, including on failed reads.
 pub(super) struct VectorBuffer<T> {
@@ -38,10 +35,15 @@ pub(super) struct VectorBuffer<T> {
 
 impl<T> VectorBuffer<T> {
     pub(super) fn new(read: &NativeVectorRead<'_>) -> Result<Self> {
-        Ok(Self {
-            rows: BudgetedVec::new(read.snapshot.control.memory()),
-            payload: read.snapshot.control.memory().reserve(0)?,
-        })
+        read.snapshot.control.check()?;
+        Ok(Self::with_memory(read.snapshot.control.memory()))
+    }
+
+    pub(super) fn with_memory(memory: &uqa_core::memory::MemoryBudget) -> Self {
+        Self {
+            rows: BudgetedVec::new(memory),
+            payload: memory.empty_reservation(),
+        }
     }
 
     pub(super) fn finish(self) -> Budgeted<Vec<T>> {
@@ -138,28 +140,6 @@ impl<'a> NativeVectorRead<'a> {
         })
     }
 
-    pub(super) fn vectors(&self) -> Result<Budgeted<VectorRows>> {
-        let mut output = VectorBuffer::new(self)?;
-        let (rows, payload) = (&mut output.rows, &mut output.payload);
-        if let Some(owner) = self.owner {
-            self.snapshot
-                .visit_rows(Family::Vectors, Some(owner), &[self.field()], |row| {
-                    let blob = blob(row[4])?;
-                    payload.grow(blob.len())?;
-                    rows.reserve(1)?;
-                    let vector = blob_to_vector(blob)?;
-                    self.index.validate_dimensions_sqlite(&vector)?;
-                    let ordinal = u32::try_from(integer(row[3])?).map_err(|_| {
-                        SQLiteError::StorageBackend("invalid native vector ordinal".into())
-                    })?;
-                    rows.push((decode_doc_id(integer(row[2])?)?, ordinal, vector))?;
-                    Ok(())
-                })?;
-        }
-        validate_persisted_ordinal_sequence(rows)?;
-        Ok(output.finish())
-    }
-
     pub(super) fn count(&self) -> Result<usize> {
         let Some(owner) = self.owner else {
             return Ok(0);
@@ -182,6 +162,47 @@ impl<'a> NativeVectorRead<'a> {
             },
         )?;
         Ok(count)
+    }
+
+    /// Score one canonical vector at a time without retaining the corpus. The internal consumer cannot reenter persistence.
+    pub(super) fn visit_vectors(
+        &self,
+        mut visit: impl FnMut(DocId, &[f32], &StorageReadControl) -> Result<()>,
+    ) -> Result<()> {
+        self.visit_ordered_vectors(|document, _, vector| {
+            visit(document, vector, &self.snapshot.control)
+        })
+    }
+
+    /// Native vector keys order the field's nonnegative document and ordinal identities lexicographically.
+    pub(super) fn visit_ordered_vectors(
+        &self,
+        mut visit: impl FnMut(DocId, u32, &[f32]) -> Result<()>,
+    ) -> Result<()> {
+        let mut ordinals = super::codec::PersistedOrdinalSequence::default();
+        self.snapshot.control.check()?;
+        if let Some(owner) = self.owner {
+            self.snapshot
+                .visit_rows(Family::Vectors, Some(owner), &[self.field()], |row| {
+                    let blob = blob(row[4])?;
+                    let mut payload = self.snapshot.control.memory().reserve(blob.len())?;
+                    let vector = blob_to_vector(blob)?;
+                    let capacity = vector
+                        .capacity()
+                        .checked_mul(size_of::<f32>())
+                        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+                    payload.grow(capacity.saturating_sub(blob.len()))?;
+                    self.index.validate_dimensions_sqlite(&vector)?;
+                    let ordinal = u32::try_from(integer(row[3])?).map_err(|_| {
+                        SQLiteError::StorageBackend("invalid native vector ordinal".into())
+                    })?;
+                    let id = decode_doc_id(integer(row[2])?)?;
+                    ordinals.push(id, ordinal)?;
+                    visit(id, ordinal, &vector)?;
+                    Ok(())
+                })?;
+        }
+        Ok(())
     }
 
     pub(super) fn contains_document(&self, doc_id: i64) -> Result<bool> {

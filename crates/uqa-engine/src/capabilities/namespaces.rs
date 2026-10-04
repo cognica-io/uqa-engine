@@ -245,9 +245,8 @@ impl uqa_sql::catalog::resolution::candidates::RelationCandidateState for Engine
         Engine::temporary_schema_name(self)
     }
     fn search_path(&self) -> uqa_sql::catalog::resolution::candidates::SearchPathRead<'_> {
-        Box::new(parking_lot::RwLockReadGuard::map(
+        Box::new(crate::session::LockedSearchPath::new(
             self.session.state.read(),
-            |state| &state.search_path,
         ))
     }
 }

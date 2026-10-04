@@ -8,13 +8,12 @@
 
 use super::{
     catalog::{RoutineRegistryPublication, RoutineRegistryState, FUNCTIONS_METADATA_KEY},
-    definition::{compile_catalog_bound_routine, RoutineDefinitionContext},
+    definition::{compile_catalog_bound_routine, RoutineBodyCompilation, RoutineDefinitionContext},
 };
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::{
     ast::CreateFunction,
     routines::{
-        dependencies::RoutineCompilationMode,
         lifecycle::{restoration as analysis, RoutineRegistry},
         routine_signature_types, CompiledFunctionBody, RoutineBody, SQLUserFunction,
     },
@@ -159,7 +158,7 @@ pub fn finalize_sql_function_restore(
                 let bound = compile_catalog_bound_routine(
                     &context.definition,
                     &mut def,
-                    RoutineCompilationMode::Persisted,
+                    RoutineBodyCompilation::Stored,
                 )
                 .map_err(|err| StorageBackendError::Other(err.to_string()))?;
                 migrated |= bound.changed;

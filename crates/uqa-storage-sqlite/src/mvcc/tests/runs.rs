@@ -153,6 +153,110 @@ fn verify(snapshot: &dyn CommittedRecordSnapshot, records: &Records, sequence: C
         assert_eq!(metadata.revision, Some(sequence));
         assert_eq!(metadata.live, value.is_some());
     }
+    for before in [
+        None,
+        records.keys().next().map(Vec::as_slice),
+        records.keys().next_back().map(Vec::as_slice),
+    ] {
+        let expected = records
+            .iter()
+            .filter(|(key, _)| before.is_none_or(|before| key.as_slice() < before))
+            .next_back();
+        let mut found = None;
+        snapshot
+            .visit_last_key(b"", before, &control, &mut |key, record| {
+                assert!(found.is_none());
+                found = Some((key.to_vec(), record.live, record.revision));
+                Ok(true)
+            })
+            .unwrap();
+        assert_eq!(
+            found,
+            expected.map(|(key, value)| (key.clone(), value.is_some(), Some(sequence)))
+        );
+    }
+}
+
+#[test]
+fn descending_run_seeks_match_ordered_oracle_across_prefixes_and_history() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let mut records = Records::new();
+    for prefix in [b"".as_slice(), b"p", b"p/", b"\xff", b"\xff\xff"] {
+        for index in 0..130 {
+            records.insert(key(prefix, index), Some(vec![7]));
+        }
+    }
+    records.insert(b"p".to_vec(), None);
+    records.insert(b"p/z".to_vec(), Some(vec![9]));
+    let initial = publish(&store, &records, None);
+    let retained = store.snapshot(&control()).unwrap();
+    let newest_key = key(b"\xff\xff", 129);
+    publish(
+        &store,
+        &Records::from([(newest_key.clone(), None)]),
+        Some(initial.sequence),
+    );
+    store.reclaim_versions(&control()).unwrap();
+    assert!(count(&store, "_uqa_mvcc_runs") > 0);
+    let current = store.snapshot(&control()).unwrap();
+    for (snapshot, deleted) in [(retained.as_ref(), false), (current.as_ref(), true)] {
+        for prefix in [
+            b"".as_slice(),
+            b"p",
+            b"p/",
+            b"p/z",
+            b"absent",
+            b"\xff",
+            b"\xff\xff",
+        ] {
+            for before in [
+                None,
+                Some(b"".as_slice()),
+                Some(b"p"),
+                Some(b"p/"),
+                Some(b"q"),
+                Some(newest_key.as_slice()),
+                Some(b"\xff\xff\xff"),
+            ] {
+                let expected = records
+                    .iter()
+                    .filter(|(key, _)| {
+                        key.starts_with(prefix)
+                            && before.is_none_or(|before| key.as_slice() < before)
+                    })
+                    .next_back();
+                let mut found = None;
+                snapshot
+                    .visit_last_key(prefix, before, &control(), &mut |key, record| {
+                        assert!(found.is_none());
+                        found = Some((key.to_vec(), record.live));
+                        Ok(false)
+                    })
+                    .unwrap();
+                assert_eq!(
+                    found,
+                    expected.map(|(key, value)| (
+                        key.clone(),
+                        value.is_some() && !(deleted && key == &newest_key)
+                    ))
+                );
+            }
+        }
+    }
+    let cancelled = control();
+    cancelled.cancellation().cancel();
+    assert!(current
+        .visit_last_key(b"", None, &cancelled, &mut |_, _| panic!(
+            "cancelled seek must not visit"
+        ))
+        .is_err());
+    let limited = StorageReadControl::with_limit(0);
+    assert!(current
+        .visit_last_key(b"p", None, &limited, &mut |_, _| panic!(
+            "rejected seek must not visit"
+        ))
+        .is_err());
 }
 
 fn count(store: &SQLiteRecordStore, table: &str) -> i64 {

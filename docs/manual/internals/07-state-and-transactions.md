@@ -63,7 +63,9 @@ stateDiagram-v2
 
 An implicit statement transaction performs the same candidate, persistence, and publication ordering within one statement. An explicit transaction retains staged state across statements until commit or rollback.
 
-For persistent tables, sessions reserve generated physical row identities before mutation staging exposes them to triggers, command overlays, or RETURNING. Session-local watermarks select candidates; transaction-owned reservation locks prevent another session or process from reserving the same identity. These reservations use a separate key namespace from tuple locks and SQL constraint keys to preserve their acquisition order. Allocation skips reserved candidates without waiting and checks occupied identities after acquiring the reservation, including commits newer than a pinned statement snapshot. The reservation survives backend writer promotion and follows ordinary transaction and savepoint lock cleanup. The allocation loop belongs to mutation execution; Engine supplies watermark, lock, and retained committed-reader adapters.
+For persistent tables, sessions reserve generated physical row identities before mutation staging exposes them to triggers, command overlays, or RETURNING. Session-local watermarks select candidates; transaction-owned reservation locks prevent another session or process from reserving the same identity. These reservations use a separate key namespace from tuple locks and SQL constraint keys to preserve their acquisition order. Allocation skips reserved candidates without waiting and checks occupied identities after acquiring the reservation, including commits newer than a pinned statement snapshot. The reservation survives backend writer promotion and follows ordinary transaction and savepoint lock cleanup. A supplied identity advances only the session-local watermark; the batch that stages its row observes the identity durably before the row is published, and the observation survives the row's rollback. The allocation loop belongs to mutation execution; Engine supplies watermark, lock, and retained committed-reader adapters.
+
+A row write takes the tuple lock of its row and then refreshes its storage target, because the lock may have waited for a writer that has since committed. A newly inserted row of a versioned transaction takes no tuple lock (`with_inserted_row_write_transaction`). No other transaction can address its identity before this one commits: a supplied identity is a unique key whose value the transaction has reserved, a generated one was reserved for the row, and the row stays private until the commit. PostgreSQL likewise locks no tuple it inserts, and a session does not wait for a row it cannot see: a child row that references an uncommitted parent is rejected at once. The write is still refreshed, since it may meet the revision a deleted row left, unless the identity was never used. An insert that may replace a row, which a typed `add_document` and an INSERT that resolves conflicts are, locks the identity it names as before.
 
 `Engine::transaction` gives one scoped owner the frame depth it opened. The owner commits on success, rolls back returned errors and panics, and performs a final rollback if it is dropped before either transition completes. `sql_batch` uses the same owner and commits its complete statement list or rolls the list back.
 
@@ -79,7 +81,7 @@ Runtime extension registrations are outside SQL catalog rollback by design. In-m
 
 ## Savepoints
 
-A savepoint captures provider and transaction-owned in-memory state at an inner boundary. `ROLLBACK TO` restores that state while preserving the outer transaction. `RELEASE` discards the marker. Every new mutable subsystem participating in SQL must define how it snapshots or stages across savepoints.
+A savepoint captures provider and transaction-owned in-memory state at an inner boundary. `ROLLBACK TO` restores that state while preserving the outer transaction. `RELEASE` discards the marker. Every new mutable subsystem participating in SQL must define how it snapshots or stages across savepoints. The row changes of a frame only grow between a savepoint and its release, so a savepoint records their length and `ROLLBACK TO` truncates them instead of copying them; the frame's index of changed rows for fixed-snapshot reads follows the same boundaries through the savepoints of its own record set, as [storage](03-storage.md) describes.
 
 ## Epoch coordination
 
@@ -88,6 +90,8 @@ Each epoch channel keeps its published generation, local observation, dirty flag
 A backend committed-change version detects commits made outside the in-process session family. Before using a private durable cache, a session compares versions and refreshes under the channel mutex when required.
 
 Epochs are invalidation signals, not data. A refresh still reads and validates authoritative provider state.
+
+A rollback, of a transaction, a savepoint or a failed statement, rebuilds the state of every durable table and reloads the registries ([`reload_catalogs_after_rollback`](../../../crates/uqa-engine/src/open/catalog_sync.rs)). Both read one snapshot: the transaction's when one remains open, and otherwise a read transaction pinned for them, so a commit of another session cannot leave the rebuilt tables at different states. When both succeed, the session records the catalog's cache revisions, the read view, the data epoch and the commit version they read, as a refresh records them, and its next statement refreshes only what other sessions committed since. A refresh keeps the caches when the read view is the one they reflect, since a view is recorded only after the caches reflect it; when the committed state is that view's and only the transaction's own writes changed the view, a catalog with cache revisions ignores their private generations and one without them keeps its caches unless the transaction changed definitions. A data-only commit of the session itself is adopted when it is the only commit since the recorded view: the cache revisions show that no definition changed, and for a catalog without them, as the SQLite Key/Value and redb providers have, the session's dirty state does.
 
 ## Cache publication rules
 
@@ -103,11 +107,13 @@ Avoid holding a registry lock across provider I/O, callback execution, or anothe
 
 One logical operation that needs several registries should use the domain snapshot or publication method rather than acquiring individual locks in an ad hoc order.
 
-The lock manager separates stable identities, in-process grants, relation locks, wait-graph and deadlock traversal, committed row-change publication, shared manager registration, and the durable cross-process adapter. Scoped snapshot, publication, wait-advertisement, row-observation, statement, and transaction owners release their claims on every ordinary return and on drop; timeout and cancellation paths remove the same wait edges before they return an error.
+The lock manager separates stable identities, in-process grants, relation locks, wait-graph and deadlock traversal, committed row-change publication, shared manager registration, and the durable cross-process adapter. Scoped snapshot, publication, wait-advertisement, row-observation, statement, and transaction owners release their claims on every ordinary return and on drop; timeout and cancellation paths remove the same wait edges before they return an error. The cross-process adapter publishes the holder attributions that other processes' deadlock traversal reads only when a local session advertises a wait, because a wait-for cycle closes only when its last member starts waiting; claims therefore write no attribution, and a release clears the published attributions under one slot lock before it unlocks its bytes in ascending order.
 
 ## Cancellation and notices
 
 Cancellation tokens and SQL notices belong to `QueryRuntime`, so one session does not cancel or drain another session's work. Cancellation is cooperative and is checked at execution boundaries. Resetting the token is explicit before later work proceeds.
+
+A notice is a [`uqa_sql::SQLNotice`](../../../crates/uqa-sql/src/notice.rs) with PostgreSQL's level, SQLSTATE, message, detail and hint. The code that reports one names its SQLSTATE where PostgreSQL's `ereport` names one, and otherwise takes the level's default, `00000` or `01000` for a warning. The PostgreSQL server and `usql` render the fields separately, as they do for a `SQLError::Diagnostic`.
 
 ## Adding mutable state
 

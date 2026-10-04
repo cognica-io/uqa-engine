@@ -108,7 +108,10 @@ fn installed_revisions_survive_file_changes_and_preserve_independent_sides() {
                 "body",
                 next.clone(),
                 AnalyzerPhase::Index,
-                vec![(1, fields("seed")), (2, fields("seed"))],
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![
+                    (1, fields("seed")),
+                    (2, fields("seed")),
+                ]),
             )
             .unwrap();
         assert_eq!(index.doc_freq("body", "old").unwrap(), 0);
@@ -200,13 +203,13 @@ fn rebuild_analysis_failure_preserves_bindings_and_the_complete_old_document_set
                 "body",
                 next.clone(),
                 AnalyzerPhase::Both,
-                vec![
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![
                     (2, fields("new value")),
                     (
                         3,
                         BTreeMap::from([("bad_default".into(), "failure".into())]),
                     ),
-                ],
+                ]),
             )
             .unwrap_err();
         assert!(error.to_string().contains("gram"));
@@ -244,7 +247,10 @@ fn sqlite_rebuild_storage_failure_rolls_back_deleted_postings_and_new_bindings()
             "body",
             next,
             AnalyzerPhase::Both,
-            vec![(2, fields("new value"))],
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![(
+                2,
+                fields("new value"),
+            )]),
         )
         .unwrap_err();
     assert!(error.to_string().contains("forced posting failure"));
@@ -279,7 +285,10 @@ fn key_value_rebuild_write_rejection_preserves_postings_and_bound_revisions() {
             "body",
             next,
             AnalyzerPhase::Both,
-            vec![(2, fields("new value"))],
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![(
+                2,
+                fields("new value"),
+            )]),
         )
         .unwrap_err();
     assert!(error.to_string().contains("read-only"));
@@ -339,7 +348,10 @@ fn sqlite_persists_explicit_normalization_policies_after_atomic_source_rebuild()
                 "body",
                 revision.clone(),
                 AnalyzerPhase::Both,
-                vec![(2, fields("new words"))],
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![(
+                    2,
+                    fields("new words"),
+                )]),
             )
             .unwrap();
         let metadata = index.indexed_field_metadata(2, "body").unwrap().unwrap();
@@ -511,11 +523,14 @@ fn sqlite_cancellation_after_a_posting_write_rolls_back_complete_rebuilds() {
                 "body",
                 next.clone(),
                 AnalyzerPhase::Both,
-                documents.clone(),
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(documents.clone()),
                 &cancellation,
             )
         } else {
-            index.try_rebuild_documents_cancellable(documents.clone(), &cancellation)
+            index.try_rebuild_documents_cancellable(
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(documents.clone()),
+                &cancellation,
+            )
         }
         .unwrap_err();
         assert!(
@@ -547,7 +562,7 @@ fn sqlite_cancellation_after_a_posting_write_rolls_back_complete_rebuilds() {
                 "body",
                 next,
                 AnalyzerPhase::Both,
-                documents,
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(documents),
                 &cancellation,
             )
             .unwrap();

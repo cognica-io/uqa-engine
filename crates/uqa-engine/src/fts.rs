@@ -8,9 +8,8 @@ use super::{
     analyzer_registry, Arc, BTreeMap, DocId, Document, Engine, FieldName, FtsIndexStat, SQLError,
     TableState, Value,
 };
+use uqa_storage::inverted_index::DocumentTextSource;
 use uqa_storage::InvertedIndex;
-
-type TextIndexDocuments = Vec<(DocId, BTreeMap<FieldName, String>)>;
 
 impl Engine {
     pub(crate) fn fts_fields_for_table(&self, name: &str) -> Result<Vec<FieldName>, SQLError> {
@@ -146,60 +145,31 @@ impl Engine {
         Ok(names)
     }
 
-    pub(crate) fn project_fts_sources(t: &Arc<TableState>) -> Result<TextIndexDocuments, String> {
-        Self::project_fts_sources_inner(t, None)
-    }
-
-    pub(crate) fn project_fts_sources_cancellable(
-        t: &Arc<TableState>,
-        cancellation: &uqa_core::CancellationToken,
-    ) -> Result<TextIndexDocuments, String> {
-        Self::project_fts_sources_inner(t, Some(cancellation))
-    }
-
-    fn project_fts_sources_inner(
+    /// The text of the table's indexed fields, which a rebuild reads a page at a time from a snapshot of its documents instead of collecting it first.
+    pub(crate) fn fts_source(
         t: &Arc<TableState>,
         cancellation: Option<&uqa_core::CancellationToken>,
-    ) -> Result<TextIndexDocuments, String> {
+    ) -> Result<DocumentTextSource, String> {
         if let Some(cancellation) = cancellation {
             cancellation.check().map_err(|error| error.to_string())?;
         }
-        let fts_fields = t.fts_fields();
-        let indexed_docs = {
-            let store = t.document_store.read();
-            let doc_ids = store.doc_ids().map_err(|error| error.to_string())?;
-            let fields: Vec<&str> = fts_fields.iter().map(String::as_str).collect();
-            let mut indexed_docs = Vec::with_capacity(doc_ids.len());
-            store
-                .for_each_fields_multi_ref(&doc_ids, &fields, &mut |doc_id, projected_values| {
-                    if cancellation.is_some_and(uqa_core::CancellationToken::is_cancelled) {
-                        return false;
-                    }
-                    let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
-                    for (field, value) in fts_fields.iter().zip(projected_values) {
-                        if let Value::Str(text) = value {
-                            text_fields.insert(field.clone(), text.clone());
-                        }
-                    }
-                    if !text_fields.is_empty() {
-                        indexed_docs.push((doc_id, text_fields));
-                    }
-                    true
-                })
-                .map_err(|error| error.to_string())?;
-            if let Some(cancellation) = cancellation {
-                cancellation.check().map_err(|error| error.to_string())?;
-            }
-            indexed_docs
-        };
-        Ok(indexed_docs)
+        let documents = t
+            .document_store
+            .read()
+            .snapshot()
+            .map_err(|error| error.to_string())?;
+        Ok(DocumentTextSource::new(
+            documents,
+            t.fts_fields(),
+            cancellation.cloned(),
+        ))
     }
 
     pub(crate) fn rebuild_fts_index(t: &Arc<TableState>) -> Result<(), String> {
-        let documents = Self::project_fts_sources(t)?;
+        let mut source = Self::fts_source(t, None)?;
         t.inverted_index
             .write()
-            .try_rebuild_documents(documents)
+            .try_rebuild_documents(&mut source)
             .map_err(|error| error.to_string())
     }
 
@@ -207,10 +177,10 @@ impl Engine {
         t: &Arc<TableState>,
         cancellation: &uqa_core::CancellationToken,
     ) -> Result<(), String> {
-        let documents = Self::project_fts_sources_cancellable(t, cancellation)?;
+        let mut source = Self::fts_source(t, Some(cancellation))?;
         t.inverted_index
             .write()
-            .try_rebuild_documents_cancellable(documents, cancellation)
+            .try_rebuild_documents_cancellable(&mut source, cancellation)
             .map_err(|error| error.to_string())
     }
 
@@ -224,7 +194,14 @@ impl Engine {
             table,
             doc_id,
             uqa_sql::ast::LockStrength::ForUpdate,
-            |engine| engine.add_document_impl(table, doc_id, document, false),
+            |engine| {
+                engine.add_document_impl(
+                    table,
+                    doc_id,
+                    document,
+                    uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+                )
+            },
         )
     }
 
@@ -233,7 +210,7 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         mut document: Document,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         uqa_execution::mutation::assignment::refresh_stored_generated_columns(
             self.mutation_assignment_context(),
@@ -241,7 +218,7 @@ impl Engine {
             &mut document,
         )?;
         uqa_execution::serializable::observe_row_write(self, table, doc_id)?;
-        self.add_prepared_document_impl(table, doc_id, document, known_new)
+        self.add_prepared_document_impl(table, doc_id, document, inserted)
     }
 
     pub(crate) fn add_prepared_document_impl(
@@ -249,9 +226,9 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         document: Document,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
-        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, true, None)
+        self.add_prepared_document_impl_with_fts(table, doc_id, document, inserted, true, None)
     }
 
     pub(crate) fn add_prepared_document_without_fts_impl(
@@ -259,9 +236,9 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         document: Document,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
-        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, false, None)
+        self.add_prepared_document_impl_with_fts(table, doc_id, document, inserted, false, None)
     }
 
     pub(crate) fn add_prepared_stored_document_impl(
@@ -269,14 +246,14 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         document: uqa_storage::StoredDocument,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
         let (fields, metadata) = document.into_parts();
         self.add_prepared_document_impl_with_fts(
             table,
             doc_id,
             fields,
-            known_new,
+            inserted,
             true,
             Some(metadata),
         )
@@ -323,15 +300,41 @@ impl Engine {
         result
     }
 
+    /// Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails. Only a document known to be new has no previous version, and without indexed text it leaves the index alone.
+    fn publish_prepared_document_text(
+        &self,
+        table_name: &str,
+        table: &TableState,
+        doc_id: DocId,
+        text_fields: BTreeMap<FieldName, String>,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
+        if !uqa_execution::mutation::publication::document_changes_text_index(
+            known_new,
+            &text_fields,
+        ) {
+            return Ok(());
+        }
+        uqa_execution::serializable::text::add_document(
+            self,
+            table_name,
+            table.columns.snapshot(),
+            table.inverted_index.write().as_mut(),
+            doc_id,
+            text_fields,
+        )
+    }
+
     fn add_prepared_document_impl_with_fts(
         &self,
         table: &str,
         doc_id: DocId,
         mut document: Document,
-        known_new: bool,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
         index_fts: bool,
         metadata: Option<uqa_storage::DocumentMetadata>,
     ) -> Result<(), SQLError> {
+        let known_new = inserted.is_vacant();
         let Some(table_name) = self
             .try_resolve_table_name(table)
             .map_err(|err| SQLError::Internal(format!("resolve table `{table}`: {err}")))?
@@ -391,15 +394,7 @@ impl Engine {
         )?;
         if index_fts {
             let text_fields = self.prepared_document_text_fields(table, &document)?;
-            // Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails.
-            uqa_execution::serializable::text::add_document(
-                self,
-                &table_name,
-                t.columns.snapshot(),
-                t.inverted_index.write().as_mut(),
-                doc_id,
-                text_fields,
-            )?;
+            self.publish_prepared_document_text(&table_name, &t, doc_id, text_fields, known_new)?;
         }
         let columns = t.columns.read().clone();
         crate::generated::strip_virtual_generated_columns(&columns, &mut document);
@@ -413,21 +408,28 @@ impl Engine {
                 &error,
             )
         })?;
+        // An identity no document ever had has no earlier records in the namespace its watermark was read in, so a store that keeps the table under that namespace writes without reading what it replaces.
+        let unused = inserted.is_unused().then(|| t.document_id_namespace());
         let mut store = t.document_store.write();
-        store
-            .put_stored(
-                doc_id,
-                uqa_storage::StoredDocument::with_metadata(document, metadata),
-            )
-            .map_err(|err| crate::table_storage::document_store_write_error(&err))?;
+        let stored = uqa_storage::StoredDocument::with_metadata(document, metadata);
+        match unused {
+            Some(namespace) => store.put_stored_unused(doc_id, stored, namespace),
+            None => store.put_stored(doc_id, stored),
+        }
+        .map_err(|err| crate::table_storage::document_store_write_error(&err))?;
         if let Some(new) = persistent_indexed.as_ref() {
-            self.persist_value_indexes_apply_write(&table_name, doc_id, Some(new))?;
+            self.persist_value_indexes_apply_write(&table_name, doc_id, Some(new), unused)?;
         }
         if let Some(new) = new_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, old_indexed.as_ref(), Some(new));
         }
         drop(store);
-        self.mark_column_stats_dirty(&table_name, &t)
+        let documents = if existed {
+            crate::table_storage::DocumentCountChange::Unchanged
+        } else {
+            crate::table_storage::DocumentCountChange::Added
+        };
+        self.mark_row_write(&table_name, &t, documents)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         if existed {
             self.note_row_changed(&table_name, doc_id)?;

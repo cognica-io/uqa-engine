@@ -56,6 +56,9 @@ impl RoutineTypeCatalog for Engine {
             oid,
         )
     }
+    fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        uqa_execution::catalog::projection::format_type_name(&self.catalog_execution(), ty)
+    }
     fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
         uqa_execution::catalog::security::type_inquiry::require_type_usage(
             &self.catalog_execution(),
@@ -163,13 +166,23 @@ impl Engine {
 }
 impl RoutineCompilationSession for Engine {
     fn routine_search_path(&self) -> Vec<String> {
-        self.session.state.read().search_path.clone()
+        crate::session::effective_search_path(&self.session.state.read())
     }
     fn replace_routine_search_path(&self, path: Vec<String>) -> Vec<String> {
         std::mem::replace(&mut self.session.state.write().search_path, path)
     }
     fn restore_routine_search_path(&self, path: Vec<String>) {
         self.session.state.write().search_path = path;
+    }
+    fn routine_settings_scope(
+        &self,
+        settings: &[(String, String)],
+    ) -> Result<Box<dyn RoutineConfigurationGuard + '_>, SQLError> {
+        let scope = self.routine_invocation_state_guard(!settings.is_empty(), false);
+        for (name, value) in settings {
+            self.set_configured_parameter(name, value)?;
+        }
+        Ok(Box::new(scope))
     }
 }
 
@@ -196,6 +209,14 @@ impl RoutineConfigurationSession for Engine {
     fn show_routine_variable(&self, name: &str) -> Result<String, SQLError> {
         self.show_variable(name)
     }
+    fn routine_variable_name(&self, name: &str) -> Result<String, SQLError> {
+        self.session_execution_view()
+            .show_parameter(name)
+            .map(|(name, _)| name)
+    }
+    fn load_language_library(&self, language: &str) {
+        self.load_language(language);
+    }
 }
 impl Engine {
     pub(crate) fn routine_mutation_context(&self) -> RoutineMutationContext<'_> {
@@ -215,6 +236,8 @@ impl Engine {
             definition: self.routine_definition_context(),
             support: self,
             configuration: self,
+            overloads: uqa_sql::routines::resolution::RoutineOverloadContext { catalog: self },
+            session: self,
             bodies: self,
         }
     }

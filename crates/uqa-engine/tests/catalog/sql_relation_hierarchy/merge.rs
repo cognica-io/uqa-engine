@@ -59,7 +59,7 @@ fn merge_tracks_physical_partition_identity_and_routes_actions_under_spill() {
         &engine,
         "INSERT INTO merge_source VALUES (1, 1, 1, 1, 'low-updated'), (2, 1, 11, 11, 'high-updated'), (3, 2, 2, 12, 'moved'), (4, 4, 14, 14, 'inserted')",
     );
-    exec(&engine, "SET work_mem TO '1B'");
+    engine.set_query_memory_limit(Some(1));
 
     let returned = engine
         .sql(

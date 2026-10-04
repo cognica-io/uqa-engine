@@ -11,11 +11,10 @@ use crate::{
         assignment::{validate_view_checks, ViewCheckContext},
         conflict::update::{InsertConflictLocks, InsertConflictPreparation},
         constraints::{
-            lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
+            lock_document_key_dependencies, partition_insert_target,
             validate_document_non_key_constraints, validate_key_constraints,
-            validate_key_constraints_with_previous,
+            validate_key_constraints_with_previous, ConstraintStatement,
         },
-        events::ReferentialActionContext,
         identity::refresh_insert_identity_after_trigger,
         prepared::PreparedInsertConflict,
         returning::{build_returning_row, ReturningProjectionRow},
@@ -26,9 +25,7 @@ use crate::{
 };
 use std::sync::Arc;
 use uqa_core::DocId;
-use uqa_sql::{
-    plan::InsertPlan, semantics::partition::partition_insert_target, SQLError, SQLParam,
-};
+use uqa_sql::{plan::InsertPlan, SQLError, SQLParam};
 use uqa_storage::document_store::Document;
 pub struct StagedValuesInsertRow {
     pub target_table: String,
@@ -46,17 +43,16 @@ pub struct StagedValuesInsertRow {
 pub fn prepare_values_insert_row<S: Clone + 'static>(
     services: MutationPreparationContext<'_, S>,
     stmt: &InsertPlan,
+    statement: ConstraintStatement<'_>,
     params: &[SQLParam],
     snapshot_scope: &CteScope<S>,
     conflict_update_columns: &[String],
-    auto_id_column: Option<&str>,
     id_column: &str,
-    accepts_supplied_identity: bool,
+    identity_source: crate::mutation::identity::IdentitySource,
     target_table: String,
     mut document: Document,
     mut insert_identity: (DocId, bool),
     conflict_locks: &mut InsertConflictLocks,
-    referential_actions: &mut ReferentialActionContext,
 ) -> Result<Option<StagedValuesInsertRow>, SQLError> {
     let Some(triggered_document) = crate::mutation::triggers::fire_before_row_triggers(
         &services.referential.triggers,
@@ -83,13 +79,13 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
         },
         &target_table,
         id_column,
-        accepts_supplied_identity,
-        auto_id_column,
+        identity_source,
         &document,
         &mut insert_identity,
     )?;
     let trigger_target = partition_insert_target(
-        &services.referential.constraints.partitions,
+        services.referential.constraints,
+        statement,
         &stmt.table,
         &document,
         params,
@@ -101,24 +97,16 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
             message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
         });
     }
-    lock_existing_document_foreign_key_dependencies(
-        services.referential.constraints,
-        &target_table,
-        &document,
-    )?;
     let prepared = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
-        conflict_locks.prepare_document(
-            InsertConflictPreparation {
-                context: services.referential,
-                table: &target_table,
-                target_qualifier: &stmt.target_qualifier,
-                on_conflict,
-                document: &document,
-                params,
-                scope: snapshot_scope,
-            },
-            referential_actions,
-        )?
+        conflict_locks.prepare_document(InsertConflictPreparation {
+            context: services.referential,
+            table: &target_table,
+            target_qualifier: &stmt.target_qualifier,
+            on_conflict,
+            document: &document,
+            params,
+            scope: snapshot_scope,
+        })?
     } else {
         let _key_locks = lock_document_key_dependencies(
             services.referential.constraints,
@@ -135,6 +123,7 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
         PreparedInsertRowContext {
             services,
             stmt,
+            statement,
             storage_table: &target_table,
             document: document.as_ref(),
             shared_document: Some(&document),
@@ -178,6 +167,7 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
     let PreparedInsertRowContext {
         services,
         stmt,
+        statement,
         storage_table,
         document,
         shared_document,
@@ -187,6 +177,7 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
     } = context;
     validate_document_non_key_constraints(
         services.referential.constraints,
+        Some(statement),
         storage_table,
         document,
         params,
@@ -201,6 +192,8 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
             )?;
             validate_view_checks(ViewCheckContext {
                 services: services.referential.assignment,
+                constraints: services.referential.constraints,
+                statement,
                 table: &stmt.table,
                 storage_table,
                 target_qualifier: &stmt.target_qualifier,
@@ -234,10 +227,16 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
                     old_document: None,
                     new_document: Some(document),
                     updated_columns: &[],
-                    cascade_parent: None,
+                    foreign_key_checks: crate::mutation::referential::checks::referencing_checks(
+                        services.referential.constraints,
+                        storage_table,
+                        *doc_id,
+                        document,
+                        None,
+                    )?,
                 },
             )? {
-                crate::mutation::triggers::AfterRowTriggerEvent::push(&mut after_row_events, event);
+                after_row_events.push(event);
             }
             (
                 MutationRowImages {
@@ -261,11 +260,7 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
                 .as_ref()
                 .map_or_else(|| old_storage_table.clone(), |(table, _)| table.clone());
             let old_doc_id = prepared.doc_id;
-            let primary_key_doc_id = crate::mutation::identity::integer_primary_key_doc_id(
-                services.referential.constraints.catalog,
-                &stmt.table,
-                &prepared.new_document,
-            )?;
+            let primary_key_doc_id = prepared.relocation;
             let new_doc_id = prepared
                 .destination
                 .as_ref()
@@ -281,6 +276,8 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
             )?;
             validate_view_checks(ViewCheckContext {
                 services: services.referential.assignment,
+                constraints: services.referential.constraints,
+                statement,
                 table: &stmt.table,
                 storage_table: &new_storage_table,
                 target_qualifier: &stmt.target_qualifier,
@@ -302,6 +299,7 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
                 services.staging,
                 prepared,
                 params,
+                statement,
                 Some(conflict_update_columns),
                 &mut after_row_events,
             )?;
@@ -353,6 +351,8 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
 pub struct PreparedInsertRowContext<'a, S: Clone + 'static> {
     pub services: MutationPreparationContext<'a, S>,
     pub stmt: &'a InsertPlan,
+    /// The statement as the row's constraint violations describe it.
+    pub statement: ConstraintStatement<'a>,
     pub storage_table: &'a str,
     pub document: &'a Document,
     pub shared_document: Option<&'a Arc<Document>>,

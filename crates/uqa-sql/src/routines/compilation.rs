@@ -12,10 +12,10 @@ use super::{
         validate_routine_declaration, RoutineTypeCatalog,
     },
     merge_columns::StoredMergeColumnCatalog,
-    routine_local_name, CompiledFunctionBody, RoutineResolution,
+    CompiledFunctionBody, RoutineResolution,
 };
 use crate::{
-    ast::{ColumnType, CreateFunction, FunctionBody, FunctionParam, Statement},
+    ast::{ColumnType, CreateFunction, FunctionBody, FunctionReturns, Statement},
     binding::{
         snapshot::BindingSnapshot,
         stored_relations::{
@@ -23,9 +23,10 @@ use crate::{
             StoredRelationCatalog,
         },
     },
-    catalog::regrole_dependencies::StoredRegroleResolver,
+    catalog::regrole_dependencies::{StoredRegroleConstants, StoredRegroleResolver},
     plan::UnifiedPlan,
     plpgsql::PlpgsqlCatalog,
+    type_resolution::canonical_routine_type_name,
     SQLError, ScalarExpr,
 };
 
@@ -63,11 +64,23 @@ pub fn compile_persisted_function_body(
     compile_function_body_inner(context, def, true)
 }
 
-fn compile_function_body_inner(
+/// The body `CREATE FUNCTION` compiles under `check_function_bodies = off`: the declaration is checked as always, a SQL-standard body, which the statement itself analyzes, is compiled, and a body given as a string is left unexamined, `None`, for each session to compile when it first calls the routine.
+pub fn defer_function_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
-    persisted_definition: bool,
-) -> Result<CompiledFunctionBody, SQLError> {
+) -> Result<Option<CompiledFunctionBody>, SQLError> {
+    if matches!(def.body, FunctionBody::Statements(_)) {
+        return compile_function_body(context, def).map(Some);
+    }
+    validate_routine_signature(context, def)?.reject_with(context.regroles)?;
+    Ok(None)
+}
+
+/// The checks `CREATE FUNCTION` makes whatever `check_function_bodies` says: the language and the body form it accepts, the declared types, and the role constants of parameter defaults, which are returned for the body's own checks.
+fn validate_routine_signature(
+    context: &RoutineCompilationContext<'_>,
+    def: &CreateFunction,
+) -> Result<StoredRegroleConstants, SQLError> {
     if !matches!(def.language.as_str(), "plpgsql" | "sql") {
         return Err(SQLError::Routine {
             sqlstate: "42704".into(),
@@ -79,12 +92,42 @@ fn compile_function_body_inner(
             "inline SQL function body only valid for language SQL",
         ));
     }
-    let mut stored_regrole_constants = routine_parameter_regrole_constants(context.types, def);
+    let stored_regrole_constants = routine_parameter_regrole_constants(context.types, def);
     stored_regrole_constants.validate_inputs_with(context.regroles)?;
     validate_routine_declaration(context.types, def)?;
+    Ok(stored_regrole_constants)
+}
+
+/// PL/pgSQL's compiler rejects declared arguments of a trigger function, which reads its arguments from `TG_ARGV`.
+fn reject_trigger_function_arguments(def: &CreateFunction) -> Result<(), SQLError> {
+    let returns_trigger = matches!(
+        &def.returns,
+        FunctionReturns::Scalar { type_name } if canonical_routine_type_name(type_name) == "trigger"
+    );
+    if returns_trigger && def.identity_arity() != 0 {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42P13".into(),
+            message: "trigger functions cannot have declared arguments".into(),
+            detail: None,
+            hint: Some(
+                "The arguments of the trigger can be accessed through TG_NARGS and TG_ARGV instead."
+                    .into(),
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn compile_function_body_inner(
+    context: &RoutineCompilationContext<'_>,
+    def: &CreateFunction,
+    persisted_definition: bool,
+) -> Result<CompiledFunctionBody, SQLError> {
+    let mut stored_regrole_constants = validate_routine_signature(context, def)?;
     match def.language.as_str() {
         "plpgsql" => {
             stored_regrole_constants.reject_with(context.regroles)?;
+            reject_trigger_function_arguments(def)?;
             let catalog = context.parsers.plpgsql_catalog()?;
             let mut function = crate::plpgsql::parse_function_with_catalog(def, &catalog)?;
             resolve_plpgsql_datum_types(context.types, &mut function)?;
@@ -117,91 +160,55 @@ fn compile_function_body_inner(
     }
 }
 
-/// The parameters of a SQL routine body: their names, typed positional values for binding, and the row scope that resolves them by name.
-pub struct SQLRoutineParameters {
-    local_name: String,
-    names: Vec<String>,
-    /// The 1-based call argument each parameter reads.
-    call_positions: Vec<usize>,
-    pub positional: Vec<crate::SQLParam>,
-    pub scope: crate::RowSchema,
-}
-
-pub fn sql_routine_parameters(
+fn compile_sql_routine_plans(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
-) -> Result<SQLRoutineParameters, SQLError> {
-    let local_name = routine_local_name(&def.name)?;
-    // A SQL-standard body was parsed with PostgreSQL's positional parameter names; a source body names each call parameter by its own name.
-    let parameters: Vec<(&str, &FunctionParam, usize)> =
-        if matches!(def.body, FunctionBody::Statements(_)) {
-            def.sql_body_parameters()
-                .into_iter()
-                .map(|parameter| (parameter.name, parameter.parameter, parameter.call_position))
-                .collect()
-        } else {
-            def.signature_params()
-                .into_iter()
-                .enumerate()
-                .map(|(index, parameter)| (parameter.name.as_str(), parameter, index + 1))
-                .collect()
-        };
-    let names: Vec<String> = parameters
-        .iter()
-        .map(|(name, ..)| (*name).to_string())
-        .collect();
-    let types = parameters
-        .iter()
-        .map(|(_, parameter, _)| {
-            context
-                .types
-                .resolve_catalog_column_type(&parameter.type_name)
-                .or_else(|| ColumnType::from_sql_name(&parameter.type_name).ok())
-        })
-        .collect::<Vec<_>>();
-    let positional = types
-        .iter()
-        .map(|parameter_type| match parameter_type {
-            Some(parameter_type) => {
-                crate::SQLParam::typed_scalar(uqa_core::Value::Null, parameter_type.clone())
+    statements: Vec<Statement>,
+    bind_catalog_dependencies: bool,
+    persisted_definition: bool,
+) -> Result<Vec<UnifiedPlan>, SQLError> {
+    let positional_parameters =
+        super::body_validation::routine_parameter_values(context.types, def);
+    let parameters = super::body_parameters::sql_body_parameter_scope(def, &positional_parameters)?;
+    statements
+        .into_iter()
+        .map(|statement| {
+            let mut plan = lower_sql_routine_statement(
+                context,
+                statement,
+                SQLRoutineLowering {
+                    bind_catalog_dependencies,
+                    persisted_definition,
+                    preserve_target_expressions: false,
+                },
+            )?;
+            // A SQL-standard body is analyzed when the routine is defined, so its names resolve against the catalog of that moment, as `PostgreSQL` stores the analyzed statements. A body given as a string keeps its names until each statement is analyzed before it runs, and keeps the types the session resolved when it compiled the body.
+            if bind_catalog_dependencies {
+                let binding = context.catalog.binding_snapshot()?;
+                crate::binding::bind_routine_parameter_references(
+                    context.routines,
+                    &mut plan,
+                    &positional_parameters,
+                    &binding.context(),
+                    &parameters,
+                )?;
+                if let UnifiedPlan::Query(query) = &mut plan {
+                    crate::binding::bind_query_plan_routines_for_storage(
+                        context.routines,
+                        query,
+                        &positional_parameters,
+                        &binding.context(),
+                        None,
+                    )?;
+                }
+            } else {
+                bind_session_plan_types(context, &mut plan)?;
             }
-            None => crate::SQLParam::scalar(uqa_core::Value::Null),
+            // Stored definitions retain their analyzed logical expressions;
+            // immutable evaluation belongs to invocation planning.
+            Ok(plan)
         })
-        .collect::<Vec<_>>();
-    let scope = crate::RowSchema::with_qualified_types(&local_name, names.clone(), types);
-    Ok(SQLRoutineParameters {
-        local_name,
-        names,
-        call_positions: parameters.iter().map(|(.., position)| *position).collect(),
-        positional,
-        scope,
-    })
-}
-
-impl SQLRoutineParameters {
-    /// Replace references to the routine's parameters by positional parameters, as the body is invoked. A body's `$n` numbers its own parameters, whose call arguments a procedure's output parameters can move.
-    pub fn bind_references(&self, plan: &mut UnifiedPlan) {
-        let named = |name: &str| {
-            self.names
-                .iter()
-                .position(|parameter| !parameter.is_empty() && parameter == name)
-        };
-        plan.rewrite_scalar_expressions(&mut |expression| {
-            let parameter = match expression {
-                ScalarExpr::Column(name) => named(name),
-                ScalarExpr::QualifiedColumn {
-                    qualifier, column, ..
-                } if qualifier == &self.local_name => named(column),
-                ScalarExpr::Param(number) => number
-                    .checked_sub(1)
-                    .filter(|index| *index < self.call_positions.len()),
-                _ => None,
-            };
-            if let Some(index) = parameter {
-                *expression = ScalarExpr::Param(self.call_positions[index]);
-            }
-        });
-    }
+        .collect()
 }
 
 /// How a SQL routine statement is lowered from its stored syntax.
@@ -274,41 +281,4 @@ fn bind_session_plan_types(
         let domain = matches!(element, Some(ColumnType::Domain { .. }));
         Ok(resolved.filter(|_| !domain))
     })
-}
-
-fn compile_sql_routine_plans(
-    context: &RoutineCompilationContext<'_>,
-    def: &CreateFunction,
-    statements: Vec<Statement>,
-    bind_catalog_dependencies: bool,
-    persisted_definition: bool,
-) -> Result<Vec<UnifiedPlan>, SQLError> {
-    let parameters = sql_routine_parameters(context, def)?;
-    let lowering = SQLRoutineLowering {
-        bind_catalog_dependencies,
-        persisted_definition,
-        preserve_target_expressions: false,
-    };
-    statements
-        .into_iter()
-        .map(|statement| {
-            let mut plan = lower_sql_routine_statement(context, statement, lowering)?;
-            if let (true, UnifiedPlan::Query(query)) = (bind_catalog_dependencies, &mut plan) {
-                let binding = context.catalog.binding_snapshot()?;
-                crate::binding::bind_query_plan_routines_for_storage(
-                    context.routines,
-                    query,
-                    &parameters.positional,
-                    &binding.context(),
-                    Some(&parameters.scope),
-                )?;
-            } else if !bind_catalog_dependencies {
-                bind_session_plan_types(context, &mut plan)?;
-            }
-            parameters.bind_references(&mut plan);
-            // Stored definitions retain their analyzed logical expressions;
-            // immutable evaluation belongs to invocation planning.
-            Ok(plan)
-        })
-        .collect()
 }

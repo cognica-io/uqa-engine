@@ -85,6 +85,7 @@ impl<W: Write> Write for TrackedWriter<W> {
     }
 }
 mod completion;
+mod diagnostics;
 mod display;
 mod meta;
 mod migration_io;
@@ -103,7 +104,7 @@ use migration_io::{
 };
 use output::{
     history_path, print_result, print_result_copy_text_with_engine,
-    print_result_expanded_with_engine, print_result_with_engine, sql_error_text, value_to_display,
+    print_result_expanded_with_engine, print_result_with_engine, value_to_display,
 };
 use repl::{PromptLineOutcome, Session};
 #[cfg(test)]

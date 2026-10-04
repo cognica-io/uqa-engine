@@ -11,12 +11,15 @@ use crate::mvcc::native::NativeRecordFamily as Family;
 use crate::vector_index::native::{publication::VectorPublication, NativeVectorRead};
 use crate::{Result, SQLiteError};
 use rusqlite::types::ValueRef;
-use uqa_storage::{ivf_index::IVFMutation, KeyValueBatch};
+use uqa_storage::{
+    ivf_index::{IVFMutation, IVFPreparedMetadata},
+    KeyValueBatch,
+};
 
 pub(super) fn write_input(
     read: &NativeVectorRead<'_>,
     batch: &mut dyn KeyValueBatch,
-    metadata: &EncodedIVFMetadata,
+    metadata: &IVFPreparedMetadata,
     mutation: IVFMutation<'_>,
 ) -> Result<()> {
     let preview = super::load_metadata(read)?.is_some();
@@ -28,7 +31,72 @@ pub(super) fn write_input(
         )?;
         batch.ivf_mutation(&key, mutation)?;
     }
-    write_metadata(read, batch, metadata, preview)
+    write_prepared(read, batch, metadata, preview)
+}
+
+pub(in crate::vector_index::ivf) fn write_prepared(
+    read: &NativeVectorRead<'_>,
+    batch: &mut dyn KeyValueBatch,
+    metadata: &IVFPreparedMetadata,
+    preview: bool,
+) -> Result<()> {
+    use super::super::metadata::usize_to_i64;
+    let header = metadata.header();
+    let encoded = EncodedIVFMetadata {
+        nlist: usize_to_i64("nlist", metadata.params().nlist)?,
+        nprobe: usize_to_i64("nprobe", metadata.params().nprobe)?,
+        train_threshold: usize_to_i64("train_threshold", metadata.params().train_threshold)?,
+        state: header.state,
+        trained_size: usize_to_i64("trained_size", header.trained_size)?,
+        deletes_since_train: usize_to_i64("deletes_since_train", header.deletes_since_train)?,
+        vector_count: usize_to_i64("vector_count", header.vector_count)?,
+        centroids: Vec::new(),
+        assignments: Vec::new(),
+    };
+    write_metadata(read, batch, &encoded, preview)?;
+    let publication = if preview {
+        VectorPublication::IVFPreview
+    } else {
+        VectorPublication::Canonical
+    };
+    let table = ValueRef::Text(read.index.table.as_bytes());
+    for (id, vector) in header.centroids.iter().enumerate() {
+        read.snapshot.control.check()?;
+        let _memory = read.snapshot.control.memory().reserve(
+            vector
+                .len()
+                .checked_mul(4)
+                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?,
+        )?;
+        let bytes = crate::vector_index::vector_to_blob(vector)?;
+        publication.put_row(
+            read,
+            batch,
+            Family::IVFCentroids,
+            &[
+                table,
+                read.field(),
+                ValueRef::Integer(usize_to_i64("centroid_id", id)?),
+                ValueRef::Blob(&bytes),
+            ],
+        )?;
+    }
+    for entry in metadata.assignments() {
+        let (doc, ordinal, centroid) = entry?;
+        publication.put_row(
+            read,
+            batch,
+            Family::IVFAssignments,
+            &[
+                table,
+                read.field(),
+                ValueRef::Integer(crate::vector_index::encode_doc_id(doc)?),
+                ValueRef::Integer(i64::from(ordinal)),
+                ValueRef::Integer(usize_to_i64("centroid_id", centroid)?),
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 pub(in crate::vector_index::ivf) fn write_metadata(

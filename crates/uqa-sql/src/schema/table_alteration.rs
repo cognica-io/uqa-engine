@@ -13,7 +13,16 @@ use crate::{
 use uqa_core::RelationIdentity;
 
 pub fn normalize_inherited_action(action: &mut AlterTableAction, is_partition: bool) {
-    if let AlterTableAction::AddColumn { column, .. } = action {
+    if let AlterTableAction::AddColumn {
+        column,
+        key_constraints,
+        ..
+    } = action
+    {
+        // A child does not inherit the indexes of its parent's keys; a partition receives copies from the parent's partitioned indexes.
+        key_constraints.clear();
+        column.primary_key = false;
+        column.unique = false;
         column.not_null_is_local = !column.not_null;
         column.not_null_identity = None;
         column.default_catalog_oid = None;

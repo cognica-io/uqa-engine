@@ -13,7 +13,7 @@ mod tests;
 mod tree;
 
 pub use owned::{OwnedMap, OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter, OwnedSetIter};
-pub use shared::{BudgetedSharedMap, BudgetedSharedMapIter};
+pub use shared::{BudgetedSharedMap, BudgetedSharedMapIter, BudgetedSharedMapSnapshot};
 
 use std::borrow::Borrow;
 

@@ -128,11 +128,13 @@ pub(super) struct StoredSequence {
     pub(super) definition_generation: [u8; 16],
     pub(super) start: i64,
     pub(super) increment: i64,
-    pub(super) current: i64,
-    #[serde(default = "legacy_sequence_called")]
-    pub(super) called: bool,
-    #[serde(default)]
-    pub(super) log_count: i64,
+    /// Value state that earlier releases kept in the definition. A current definition keeps it in the value record of its generation and omits these fields, which earlier releases require, so that they cannot allocate from a definition whose value state has moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) current: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) called: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) log_count: Option<i64>,
     #[serde(default = "legacy_sequence_persistence")]
     pub(super) persistence: String,
     #[serde(default)]
@@ -141,8 +143,40 @@ pub(super) struct StoredSequence {
     pub(super) options: crate::catalog::SequenceOptions,
 }
 
-pub(super) const fn legacy_sequence_called() -> bool {
-    true
+impl StoredSequence {
+    /// The value state of a definition written by an earlier release, which kept it there.
+    pub(super) fn legacy_value(&self) -> Option<crate::catalog::SequenceValuePosition> {
+        self.current
+            .map(|current| crate::catalog::SequenceValuePosition {
+                current,
+                // Definitions older than the called flag were always called.
+                called: self.called.unwrap_or(true),
+                log_count: self.log_count.unwrap_or(0),
+            })
+    }
+}
+
+/// The value state of one definition generation of a sequence, with the allocation options the generation was created with, which never change. Its key names the sequence's object identity and the generation, not the sequence's name, so that a value operation outside the transaction that renames the sequence finds it.
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct StoredSequenceValue {
+    pub(super) current: i64,
+    pub(super) called: bool,
+    pub(super) log_count: i64,
+    pub(super) increment: i64,
+    pub(super) min_value: i64,
+    pub(super) max_value: i64,
+    pub(super) cycle: bool,
+    pub(super) cache_size: i64,
+}
+
+impl StoredSequenceValue {
+    pub(super) const fn position(&self) -> crate::catalog::SequenceValuePosition {
+        crate::catalog::SequenceValuePosition {
+            current: self.current,
+            called: self.called,
+            log_count: self.log_count,
+        }
+    }
 }
 
 pub(super) fn legacy_sequence_persistence() -> String {

@@ -292,6 +292,7 @@ pub(super) fn rewrite_command_scalars(
                         condition,
                         columns,
                         values,
+                        ..
                     } => {
                         rewrite_optional_scalar(condition, rewrite);
                         for expression in columns

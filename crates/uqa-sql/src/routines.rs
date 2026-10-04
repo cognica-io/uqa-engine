@@ -6,6 +6,8 @@
 
 //! SQL routine definitions and static signature lookup contracts.
 
+pub mod body_parameters;
+pub mod body_validation;
 pub mod compilation;
 pub mod configuration;
 pub mod declaration;
@@ -16,7 +18,7 @@ pub mod privilege_inquiry;
 pub mod regclass;
 pub mod registration;
 pub mod resolution;
-mod result_shape;
+pub mod result_check;
 pub mod security;
 
 use crate::ast::{
@@ -70,9 +72,12 @@ impl SQLUserFunction {
 }
 
 /// A routine body as the catalog keeps it. A SQL-standard body is bound when the routine is defined, as `PostgreSQL` stores `prosqlbody` as parse trees that name objects by OID. A body given as a string is compiled by each session that uses the routine, as the backend function cache compiles `prosrc`, so its names resolve when that session first needs them.
+/// A routine body as the catalog keeps it.
 #[derive(Clone)]
 pub enum RoutineBody {
+    /// A SQL-standard body, which the statement that defines the routine analyzes and binds.
     Bound(Arc<CompiledFunctionBody>),
+    /// A body given as a string, which the catalog keeps as text, as `PostgreSQL` keeps `prosrc`: `CREATE FUNCTION` validates it only under `check_function_bodies`, and each session compiles it when it first calls the routine, so a body that no longer compiles reports its error then.
     Source,
 }
 

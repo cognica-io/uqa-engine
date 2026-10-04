@@ -108,10 +108,10 @@ impl CatalogSession for Services {
     fn temporary_schema_name(&self) -> String {
         panic!("unexpected session read")
     }
-    fn show_variable(&self, _: &str) -> Result<String, SQLError> {
+    fn show_parameter(&self, _: &str) -> Result<(String, String), SQLError> {
         panic!("unexpected session read")
     }
-    fn runtime_parameter_source(&self, _: &str) -> &'static str {
+    fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
         panic!("unexpected session read")
     }
     fn cursors(&self) -> Vec<uqa_sql::catalog::session::CursorMetadata> {

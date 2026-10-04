@@ -154,6 +154,53 @@ fn insert_default_values_preserves_one_input_row() {
 }
 
 #[test]
+fn overriding_clauses_compile_and_render_for_inserts_and_merge_inserts() {
+    use crate::ast::{MergeWhen, OverridingKind};
+    for (sql, expected) in [
+        ("INSERT INTO t (id, v) VALUES (1, 2)", None),
+        (
+            "INSERT INTO t (id, v) OVERRIDING SYSTEM VALUE VALUES (1, 2)",
+            Some(OverridingKind::SystemValue),
+        ),
+        (
+            "INSERT INTO t (id, v) OVERRIDING USER VALUE SELECT 1, 2",
+            Some(OverridingKind::UserValue),
+        ),
+    ] {
+        let statement = first(sql);
+        let Statement::Insert(insert) = &statement else {
+            panic!("not INSERT: {sql}");
+        };
+        assert_eq!(insert.overriding, expected, "{sql}");
+        let rendered = crate::render::statement_sql(&statement).unwrap();
+        let Statement::Insert(reparsed) = first(&rendered) else {
+            panic!("not INSERT: {rendered}");
+        };
+        assert_eq!(reparsed.overriding, expected, "{rendered}");
+    }
+    let statement = first(
+        "MERGE INTO t USING s ON t.id = s.id
+         WHEN NOT MATCHED THEN INSERT (id, v) OVERRIDING SYSTEM VALUE VALUES (s.id, s.v)",
+    );
+    let rendered = crate::render::statement_sql(&statement).unwrap();
+    for merge in [statement, first(&rendered)] {
+        let Statement::Merge(merge) = merge else {
+            panic!("not MERGE: {rendered}");
+        };
+        assert!(
+            matches!(
+                merge.when_clauses.as_slice(),
+                [MergeWhen::InsertNotMatched {
+                    overriding: Some(OverridingKind::SystemValue),
+                    ..
+                }]
+            ),
+            "{rendered}"
+        );
+    }
+}
+
+#[test]
 fn insert_set_operation_is_compiled_as_one_select_source() {
     let Statement::Insert(insert) =
         first("INSERT INTO dst SELECT id FROM lhs UNION ALL SELECT id FROM rhs LIMIT 2 OFFSET 1")

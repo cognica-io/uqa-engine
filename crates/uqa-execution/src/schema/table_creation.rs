@@ -59,7 +59,7 @@ pub struct CreateTableContext<'a> {
     pub ownership: ImplicitOwnershipContext<'a>,
     pub schema_transactions: &'a dyn SchemaWriteTransaction,
     pub publication: &'a dyn TableCreationPublication,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }
 fn storage_error(action: &str, error: StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
@@ -82,6 +82,7 @@ pub fn run_create_table(
     };
     table.name = name;
     table.persistence = persistence;
+    declaration::transform_create_table(&context.analysis, &mut table)?;
     create_after_preflight(context, table, &owner)
 }
 pub fn run_create_table_if_not_exists(
@@ -102,10 +103,11 @@ pub fn run_create_table_if_not_exists(
     let mut table = uqa_sql::resolve_deferred_create_table(&deferred)?;
     table.name = name;
     table.persistence = persistence;
+    declaration::transform_create_table(&context.analysis, &mut table)?;
     create_after_preflight(context, table, &owner)
 }
 
-/// When a relation that already has the name is an error. `transformCreateStmt` skips `IF NOT EXISTS` before the columns are described, but `heap_create_with_catalog` reports the collision only after `BuildDescForRelation` and `CheckAttributeNamesTypes` accepted them.
+/// When a relation that already has the name is an error. `transformCreateStmt` skips `IF NOT EXISTS` before it analyzes the declaration, but `heap_create_with_catalog` reports the collision only after `MergeAttributes`, `BuildDescForRelation` and `CheckAttributeNamesTypes` accepted the row type.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ExistingRelation {
     Deferred,
@@ -131,7 +133,7 @@ fn preflight(
             .map_err(SQLError::Internal)?
             .name;
         if if_not_exists {
-            context.notices.lock().push(
+            context.notices.push(
                 uqa_sql::SQLNotice::notice(format!(
                     "relation \"{local}\" already exists, skipping"
                 ))
@@ -153,7 +155,8 @@ fn create_after_preflight(
     mut table: CreateTable,
     owner: &crate::catalog::security::roles::locking::RoleBinding,
 ) -> Result<SQLResult, SQLError> {
-    declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
+    let inherited_keys =
+        declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
     context.creation.retain_owner(owner)?;
     if preflight(
         context,
@@ -166,15 +169,7 @@ fn create_after_preflight(
     {
         return Ok(SQLResult::empty());
     }
-    declaration::bind_create_table_relation(&context.analysis, &mut table)?;
-    if let (Some(parent), Some(bound)) = (
-        table.hierarchy.parents.first(),
-        table.hierarchy.partition_bound.as_ref(),
-    ) {
-        context
-            .publication
-            .validate_default_partition_rows(parent, bound)?;
-    }
+    bind_partitioning(context, &mut table)?;
     implicit::materialize_implicit_sequences(
         &context.sequences,
         "CREATE TABLE",
@@ -183,6 +178,7 @@ fn create_after_preflight(
         table.persistence,
     )?;
     declaration::validate_create_table_expressions(&context.analysis, &mut table)?;
+    declaration::define_create_table_constraints(&context.analysis, &mut table, &inherited_keys)?;
     let mut vector_fields = Vec::new();
     for column in &table.columns {
         match &column.ty {
@@ -236,6 +232,7 @@ fn create_after_preflight(
         .publication
         .install_hierarchy(&table.name, table.hierarchy.clone())
         .map_err(|error| storage_error("CREATE TABLE hierarchy", error))?;
+    republish_ancestor_references(context, &table)?;
     context
         .publication
         .persist_schema(&table.name)
@@ -245,4 +242,50 @@ fn create_after_preflight(
         .refresh_value_indexes(&table.name)
         .map_err(|error| storage_error("CREATE TABLE btree indexes", error))?;
     Ok(SQLResult::empty())
+}
+
+/// `DefineRelation` binds a new partition's bound and the table's partition key once the relation exists, and `check_default_partition_contents` rejects a bound that accepts a row the parent's default partition holds.
+fn bind_partitioning(
+    context: &CreateTableContext<'_>,
+    table: &mut CreateTable,
+) -> Result<(), SQLError> {
+    declaration::bind_create_table_partitioning(&context.analysis, table)?;
+    if let (Some(parent), Some(bound)) = (
+        table.hierarchy.parents.first(),
+        table.hierarchy.partition_bound.as_ref(),
+    ) {
+        context
+            .publication
+            .validate_default_partition_rows(parent, bound)?;
+    }
+    Ok(())
+}
+
+/// The foreign keys referencing a new partition's ancestors derive constraints on it.
+fn republish_ancestor_references(
+    context: &CreateTableContext<'_>,
+    table: &CreateTable,
+) -> Result<(), SQLError> {
+    let Some(parent) = table
+        .hierarchy
+        .parents
+        .first()
+        .filter(|_| table.hierarchy.is_partition())
+    else {
+        return Ok(());
+    };
+    let parent = parent.clone();
+    context
+        .schema_transactions
+        .with_schema_write(Box::new(move |schema| {
+            publication::referenced_partitions::republish_referencing_tables(
+                schema,
+                &parent,
+                crate::row_locks::RelationLockMode::ShareRowExclusive,
+            )
+            .map_err(|error| {
+                StorageBackendError::backend("CREATE TABLE derived constraints", error)
+            })
+        }))
+        .map_err(|error| storage_error("CREATE TABLE derived constraints", error))
 }

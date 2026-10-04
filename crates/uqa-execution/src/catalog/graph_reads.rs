@@ -157,7 +157,9 @@ mod tests {
             .unwrap_err();
         for (error, state) in [
             (
-                GraphStoreError::from(StorageBackendError::Cancelled(uqa_core::QueryCancelled)),
+                GraphStoreError::from(StorageBackendError::Cancelled(
+                    uqa_core::QueryCancelled::USER_REQUEST,
+                )),
                 "57014",
             ),
             (

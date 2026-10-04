@@ -25,7 +25,6 @@ pub mod triggers;
 
 pub mod constraints;
 pub mod errors;
-pub mod supplied_columns;
 
 pub mod conflict;
 
@@ -54,6 +53,7 @@ pub mod command_scope;
 pub mod point_update;
 
 pub mod statement;
+pub mod statement_end;
 
 pub mod delete;
 

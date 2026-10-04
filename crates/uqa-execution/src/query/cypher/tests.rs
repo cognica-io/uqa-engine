@@ -17,7 +17,7 @@ struct FailingGraph {
 impl FailingGraph {
     fn error(&self) -> StorageBackendError {
         match self.state {
-            "57014" => uqa_core::QueryCancelled.into(),
+            "57014" => uqa_core::QueryCancelled::USER_REQUEST.into(),
             "53200" => uqa_core::memory::MemoryError::SizeOverflow.into(),
             "40001" => VersionError::WriteConflict {
                 mutation: 0,

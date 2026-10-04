@@ -13,6 +13,21 @@ use uqa_storage_sqlite::SQLiteKeyValueStore;
 use super::{open, MODES};
 
 #[test]
+fn key_value_hnsw_spill_publishes_and_reopens_beyond_the_session_allowance() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bounded-hnsw.db");
+    let options = uqa_storage::mvcc::VersionedSessionOptions {
+        retained_bytes: 256 * 1024,
+    };
+    {
+        let store = SQLiteKeyValueStore::with_options(open(MODES[0], &path), options).unwrap();
+        verify_hnsw_spill_lifecycle(Arc::new(store)).unwrap();
+    }
+    let store = SQLiteKeyValueStore::with_options(open(MODES[0], &path), options).unwrap();
+    verify_hnsw_spill_reopen(Arc::new(store)).unwrap();
+}
+
+#[test]
 fn compound_key_value_reads_and_mutations_in_every_sqlite_mode() {
     for mode in MODES {
         let directory = tempfile::tempdir().unwrap();

@@ -111,6 +111,8 @@ fn rollback_to_savepoint_keeps_frame_open() {
     assert_eq!(eng.transaction_depth(), 0);
 }
 
+#[path = "transaction_lifecycle/fixed_snapshot_changes.rs"]
+mod fixed_snapshot_changes;
 #[path = "transaction_lifecycle/pg18_cursors.rs"]
 mod pg18_cursors;
 #[path = "transaction_lifecycle/pg18_isolation.rs"]
@@ -177,6 +179,83 @@ fn sql_commit_and_rollback_without_begin_warn_instead_of_erroring() {
                 .with_sqlstate("25P01"),
         ]
     );
+}
+
+#[test]
+fn sql_begin_inside_a_transaction_block_warns_and_the_first_commit_commits() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE nested_begin (a integer)", &[])
+        .unwrap();
+    for sql in [
+        "BEGIN",
+        "INSERT INTO nested_begin VALUES (1)",
+        "BEGIN",
+        "SAVEPOINT s",
+        "BEGIN",
+        "ROLLBACK TO SAVEPOINT s",
+        "COMMIT",
+        "ROLLBACK",
+    ] {
+        eng.sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    let in_progress = uqa_engine::SQLNotice::warning("there is already a transaction in progress")
+        .with_sqlstate("25001");
+    assert_eq!(
+        eng.take_sql_notices(),
+        vec![
+            in_progress.clone(),
+            in_progress,
+            uqa_engine::SQLNotice::warning("there is no transaction in progress")
+                .with_sqlstate("25P01"),
+        ]
+    );
+    assert_eq!(eng.transaction_depth(), 0);
+    assert_integer_query(
+        &eng,
+        "SELECT count(*) AS count FROM nested_begin",
+        "count",
+        [1],
+    );
+}
+
+#[test]
+fn set_local_and_set_transaction_outside_a_transaction_block_warn_and_last_one_statement() {
+    let eng = Engine::new();
+    let search_path = shown(&eng, "search_path");
+    let not_in_block = |command: &str| {
+        uqa_engine::SQLNotice::warning(format!("{command} can only be used in transaction blocks"))
+            .with_sqlstate("25P01")
+    };
+    eng.sql("SET LOCAL search_path = pg_catalog", &[]).unwrap();
+    assert_eq!(eng.take_sql_notices(), vec![not_in_block("SET LOCAL")]);
+    assert_eq!(shown(&eng, "search_path"), search_path);
+    eng.sql("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
+        .unwrap();
+    assert_eq!(
+        eng.take_sql_notices(),
+        vec![not_in_block("SET TRANSACTION")]
+    );
+    assert_eq!(shown(&eng, "transaction_isolation"), "read committed");
+    // A multi-statement query runs in an implicit transaction block, and a function in its caller's transaction.
+    let batch = eng
+        .sql("SET LOCAL search_path = pg_catalog; SHOW search_path", &[])
+        .unwrap();
+    assert_eq!(
+        batch.rows[0]["search_path"],
+        uqa_core::Value::Str("pg_catalog".into())
+    );
+    eng.sql(
+        "DO $$ BEGIN SET LOCAL search_path = pg_catalog; END $$",
+        &[],
+    )
+    .unwrap();
+    eng.sql("BEGIN; SET LOCAL search_path = pg_catalog", &[])
+        .unwrap();
+    assert_eq!(shown(&eng, "search_path"), "pg_catalog");
+    eng.sql("COMMIT", &[]).unwrap();
+    assert!(eng.take_sql_notices().is_empty());
+    assert_eq!(shown(&eng, "search_path"), search_path);
 }
 
 #[test]
@@ -413,7 +492,7 @@ fn explicit_memory_rollback_restores_every_sql_owned_registry() {
         work_mem.rows[0]["work_mem"],
         uqa_core::Value::Str("8MB".into())
     );
-    assert_eq!(eng.search_path(), vec!["public"]);
+    assert_eq!(eng.search_path(), vec!["$user", "public"]);
 }
 
 #[test]

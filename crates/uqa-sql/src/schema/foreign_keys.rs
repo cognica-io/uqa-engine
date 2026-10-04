@@ -241,6 +241,7 @@ pub fn column_foreign_key(
         deferrable: reference.deferrable,
         initially_deferred: reference.initially_deferred,
         period: reference.period,
+        referenced_partitions: reference.referenced_partitions.clone(),
     }
 }
 
@@ -262,4 +263,27 @@ pub fn resolve_foreign_key_parent(
         .referenceable_keys(&canonical)
         .map_err(|error| SQLError::Internal(format!("read FOREIGN KEY target keys: {error}")))?;
     Ok((canonical, columns, keys))
+}
+
+/// A foreign key using `PERIOD` supports no referential action but `NO ACTION`; `PostgreSQL` checks the update action before the delete action and names the one it rejects.
+pub fn validate_period_foreign_key_actions(
+    foreign_key: &crate::ast::ForeignKey,
+) -> Result<(), SQLError> {
+    if !foreign_key.period {
+        return Ok(());
+    }
+    for (action, clause) in [
+        (foreign_key.on_update, "ON UPDATE"),
+        (foreign_key.on_delete, "ON DELETE"),
+    ] {
+        if action != crate::ast::ForeignKeyAction::NoAction {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: format!(
+                    "unsupported {clause} action for foreign key constraint using PERIOD"
+                ),
+            });
+        }
+    }
+    Ok(())
 }

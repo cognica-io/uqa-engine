@@ -44,6 +44,8 @@ pub(super) struct ConnectionPool {
     source: Option<DatabaseSource>,
     // Keep restoration excluded until every physical connection has closed.
     pub(super) owner: Option<Arc<DatabaseOwner>>,
+    /// Decoded document columns shared by every session of this database.
+    pub(super) decoded_columns: crate::document_store::decoded_columns::DecodedColumns,
 }
 
 impl ConnectionPool {
@@ -78,6 +80,9 @@ impl ConnectionPool {
             data_version_monitor: Mutex::new(monitor),
             source,
             owner,
+            decoded_columns: crate::document_store::decoded_columns::DecodedColumns::new(
+                crate::document_store::decoded_columns::DEFAULT_LIMIT,
+            ),
         }))
     }
 
@@ -163,6 +168,12 @@ impl PooledConnection {
         self.connection
             .as_ref()
             .map(|physical| &physical.connection)
+            .ok_or(SQLiteError::MissingCheckedOutConnection)
+    }
+
+    pub(super) fn physical(&self) -> Result<&PhysicalConnection> {
+        self.connection
+            .as_ref()
             .ok_or(SQLiteError::MissingCheckedOutConnection)
     }
 

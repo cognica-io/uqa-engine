@@ -7,11 +7,12 @@
 //! SQL window function evaluation. Window calls that partition and order their rows the same way share one sort, as the functions of one `WindowAgg` do, and each sorted partition is evaluated row by row with the frame semantics of `nodeWindowAgg.c`.
 
 use crate::scalar::plan::{PlanSubqueryArena, QueryExpressionContext};
+use crate::spill::BufferedIndexedSpill;
 use crate::RowSchemaExecution;
 use crate::{
-    eval_scalar, Batch, ExternalSort, IndexedSpill, PhysicalOperator, PhysicalRow, RowSchema,
-    ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner,
-    ScalarWindowSpec, SortKey, SpillBuffer, SpillScan, WindowExecutor,
+    eval_scalar, Batch, ExternalSort, PhysicalOperator, PhysicalRow, RowSchema, ScalarEvalContext,
+    ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner, ScalarWindowSpec, SortKey,
+    SpillBuffer, SpillScan, WindowExecutor,
 };
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, FrameExclusion, FrameMode, NullsOrder};
@@ -257,8 +258,7 @@ fn execute_window_pass(
     let mut offsets_evaluated = false;
 
     let execution = (|| -> Result<(), SQLError> {
-        let mut partition =
-            IndexedSpill::new(partition_schema.clone()).map_err(exec_to_sql_error)?;
+        let mut partition = BufferedIndexedSpill::new(partition_schema.clone(), phase_budget);
         let mut partition_key: Option<Vec<Value>> = None;
         while let Some(batch) = sorted.next().map_err(exec_to_sql_error)? {
             for row in batch.rows {
@@ -282,8 +282,7 @@ fn execute_window_pass(
                         (params, hook, &subquery_arena),
                         &mut offsets_evaluated,
                     )?;
-                    partition =
-                        IndexedSpill::new(partition_schema.clone()).map_err(exec_to_sql_error)?;
+                    partition = BufferedIndexedSpill::new(partition_schema.clone(), phase_budget);
                 }
                 partition_key = Some(key);
                 partition.push(&row).map_err(exec_to_sql_error)?;
@@ -541,7 +540,7 @@ fn frame_offset_value(
 fn emit_partition(
     pass: &WindowPass,
     slots: &mut [PreparedSlot],
-    partition: &mut IndexedSpill,
+    partition: &mut BufferedIndexedSpill,
     (schema, output): (&RowSchema, &mut SpillBuffer),
     (params, hook, subqueries): (
         &[SQLParam],

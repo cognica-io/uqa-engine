@@ -93,7 +93,10 @@ fn occurrence_namespace_rejects_legacy_payloads_and_unknown_or_missing_format_ma
     assert!(index.remove_document(1).is_err());
     assert_eq!(store.scan_prefix(b"").unwrap(), before);
     index
-        .try_rebuild_documents(vec![(1, fields("value"))])
+        .try_rebuild_documents(&mut crate::inverted_index::TextIndexDocuments::new(vec![(
+            1,
+            fields("value"),
+        )]))
         .unwrap();
     assert_eq!(index.get_term_freq(1, "body", "value").unwrap(), 1);
     assert!(!index.source_rebuild_required().unwrap());
@@ -124,7 +127,10 @@ fn legacy_conversion_joins_the_owning_transaction_and_source_rebuild_retires_all
     let mut index = KeyValueInvertedIndex::new(Arc::clone(&store), "docs", whitespace_analyzer());
     assert!(index.source_rebuild_required().unwrap());
     index
-        .try_rebuild_documents(vec![(1, fields("actual source"))])
+        .try_rebuild_documents(&mut crate::inverted_index::TextIndexDocuments::new(vec![(
+            1,
+            fields("actual source"),
+        )]))
         .unwrap();
     assert_eq!(index.get_term_freq(1, "body", "actual").unwrap(), 1);
     assert_eq!(index.get_term_freq(1, "body", "old").unwrap(), 0);
@@ -141,7 +147,10 @@ fn legacy_conversion_joins_the_owning_transaction_and_source_rebuild_retires_all
     assert_eq!(store.scan_prefix(b"").unwrap(), before);
     assert!(index.source_rebuild_required().unwrap());
     index
-        .try_rebuild_documents(vec![(1, fields("actual source"))])
+        .try_rebuild_documents(&mut crate::inverted_index::TextIndexDocuments::new(vec![(
+            1,
+            fields("actual source"),
+        )]))
         .unwrap();
     for tag in [b'p', b'r', b'k', b'o', b'x', b'l', b'f'] {
         assert!(store.scan_prefix(&[tag]).unwrap().is_empty());

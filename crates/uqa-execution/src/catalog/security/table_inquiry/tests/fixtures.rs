@@ -242,10 +242,10 @@ impl CatalogSession for Services {
             lookup_mode: RelationLookupMode::Dynamic,
         }
     }
-    fn show_variable(&self, _: &str) -> Result<String, SQLError> {
+    fn show_parameter(&self, _: &str) -> Result<(String, String), SQLError> {
         unreachable!()
     }
-    fn runtime_parameter_source(&self, _: &str) -> &'static str {
+    fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
         unreachable!()
     }
     fn cursors(&self) -> Vec<uqa_sql::catalog::session::CursorMetadata> {

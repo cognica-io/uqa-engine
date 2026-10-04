@@ -86,7 +86,11 @@ fn registered_defaults_and_read_only_parameters_are_explicit() {
     assert!(err.to_string().contains("cannot be changed"));
 
     let err = eng.sql("SET work_mem TO 'unbounded'", &[]).unwrap_err();
-    assert!(err.to_string().contains("positive byte size"));
+    assert_eq!(err.sqlstate(), Some("22023"));
+    assert_eq!(
+        err.to_string(),
+        "invalid value for parameter \"work_mem\": \"unbounded\""
+    );
 }
 
 #[test]
@@ -113,10 +117,11 @@ fn session_replication_role_validates_values_privileges_and_transaction_scope() 
         .sql("SET session_replication_role = rep", &[])
         .unwrap_err();
     assert_eq!(invalid.sqlstate(), Some("22023"));
-    assert_eq!(
-        invalid.hint(),
-        Some("Available values: origin, replica, local.")
-    );
+    assert!(matches!(
+        &invalid,
+        uqa_sql::SQLError::Diagnostic { hint: Some(hint), .. }
+            if hint == "Available values: origin, replica, local."
+    ));
 
     eng.sql(
         "BEGIN; SET session_replication_role = replica; ROLLBACK",
@@ -137,6 +142,61 @@ fn session_replication_role_validates_values_privileges_and_transaction_scope() 
     let denied = eng.sql("RESET session_replication_role", &[]).unwrap_err();
     assert_eq!(denied.sqlstate(), Some("42501"));
     eng.sql("RESET ROLE", &[]).unwrap();
+}
+
+#[test]
+fn enable_indexonlyscan_matches_the_postgresql_boolean_setting() {
+    let eng = Engine::new();
+    assert_eq!(eng.show_variable("enable_indexonlyscan").unwrap(), "on");
+    let settings = eng
+        .sql(
+            "SELECT setting, unit, category, short_desc, extra_desc, context, vartype, source,
+                    min_val, max_val, enumvals, boot_val, reset_val
+             FROM pg_catalog.pg_settings WHERE name = 'enable_indexonlyscan'",
+            &[],
+        )
+        .unwrap();
+    let row = &settings.rows[0];
+    for (column, expected) in [
+        ("setting", "on"),
+        ("category", "Query Tuning / Planner Method Configuration"),
+        (
+            "short_desc",
+            "Enables the planner's use of index-only-scan plans.",
+        ),
+        ("context", "user"),
+        ("vartype", "bool"),
+        ("source", "default"),
+        ("boot_val", "on"),
+        ("reset_val", "on"),
+    ] {
+        assert_eq!(row[column], Value::Str(expected.into()), "{column}");
+    }
+    for column in ["unit", "extra_desc", "min_val", "max_val", "enumvals"] {
+        assert_eq!(row[column], Value::Null, "{column}");
+    }
+
+    eng.sql("SET enable_indexonlyscan = 'of'", &[]).unwrap();
+    assert_eq!(eng.show_variable("enable_indexonlyscan").unwrap(), "off");
+    let invalid = eng
+        .sql("SET enable_indexonlyscan = maybe", &[])
+        .unwrap_err();
+    assert_eq!(invalid.sqlstate(), Some("22023"));
+    assert_eq!(
+        invalid.to_string(),
+        "parameter \"enable_indexonlyscan\" requires a Boolean value"
+    );
+    assert_eq!(eng.show_variable("enable_indexonlyscan").unwrap(), "off");
+    eng.sql("RESET enable_indexonlyscan", &[]).unwrap();
+    assert_eq!(eng.show_variable("enable_indexonlyscan").unwrap(), "on");
+    eng.sql("BEGIN; SET enable_indexonlyscan = off; ROLLBACK", &[])
+        .unwrap();
+    assert_eq!(eng.show_variable("enable_indexonlyscan").unwrap(), "on");
+    eng.sql("BEGIN; SET LOCAL enable_indexonlyscan = off", &[])
+        .unwrap();
+    assert_eq!(eng.show_variable("enable_indexonlyscan").unwrap(), "off");
+    eng.sql("COMMIT", &[]).unwrap();
+    assert_eq!(eng.show_variable("enable_indexonlyscan").unwrap(), "on");
 }
 
 #[test]
@@ -229,7 +289,7 @@ fn discard_all_clears_session_state() {
     let search_path = eng.sql("SHOW search_path", &[]).unwrap();
     assert_eq!(
         search_path.rows[0].get("search_path"),
-        Some(&Value::Str("public".into()))
+        Some(&Value::Str("\"$user\", public".into()))
     );
 }
 

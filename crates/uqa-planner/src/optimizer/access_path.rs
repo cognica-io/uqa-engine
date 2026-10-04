@@ -103,15 +103,17 @@ fn operator_compatible(expression: &ScalarExpr) -> bool {
     }
 }
 
+/// An operand a posting-list predicate can compare. A pseudo column the engine attaches to each row, such as `_doc_id`, and the `_meta` namespace filter a stored field only where the relation declares a column of that name, which the plan does not know, so a predicate on one stays a row filter.
 fn scalar_operand(expression: &ScalarExpr) -> bool {
-    matches!(
-        expression,
-        ScalarExpr::Column(_)
-            | ScalarExpr::QualifiedColumn { .. }
-            | ScalarExpr::Literal(_)
-            | ScalarExpr::TypedLiteral { .. }
-            | ScalarExpr::Param(_)
-    )
+    match expression {
+        ScalarExpr::Column(column) => !uqa_sql::semantics::is_engine_pseudo_column(column),
+        ScalarExpr::QualifiedColumn { qualifier, column } => {
+            qualifier != uqa_sql::semantics::META_QUALIFIER
+                && !uqa_sql::semantics::is_engine_pseudo_column(column)
+        }
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => true,
+        _ => false,
+    }
 }
 
 pub use uqa_sql::semantics::retrieval_function;

@@ -48,7 +48,6 @@ pub(in crate::compiler) fn compile_create_table(
     let mut key_constraints: Vec<TableKeyConstraint> = Vec::new();
     let mut table_not_nulls = Vec::new();
     let mut named_constraints = BTreeSet::new();
-    let mut primary_key_seen = false;
     for elt in &stmt.table_elts {
         let inner = elt
             .node
@@ -65,18 +64,12 @@ pub(in crate::compiler) fn compile_create_table(
                             "unexpected column constraint node {inner:?}"
                         )));
                     };
-                    register_constraint_name(
-                        &mut named_constraints,
-                        &cstr.conname,
-                        &relation.relname,
-                    )?;
-                    if cstr.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
-                        if primary_key_seen {
-                            return Err(SQLError::TypeMismatch(
-                                "multiple PRIMARY KEY constraints are not allowed".into(),
-                            ));
-                        }
-                        primary_key_seen = true;
+                    if !is_key_constraint(cstr) {
+                        register_constraint_name(
+                            &mut named_constraints,
+                            &cstr.conname,
+                            &relation.relname,
+                        )?;
                     }
                 }
                 key_constraints.extend(compile_column_key_constraints(col)?);
@@ -85,7 +78,13 @@ pub(in crate::compiler) fn compile_create_table(
                 checks.extend(column_checks);
             }
             NodeEnum::Constraint(cstr) => {
-                register_constraint_name(&mut named_constraints, &cstr.conname, &relation.relname)?;
+                if !is_key_constraint(cstr) {
+                    register_constraint_name(
+                        &mut named_constraints,
+                        &cstr.conname,
+                        &relation.relname,
+                    )?;
+                }
                 match cstr.contype() {
                     pg_query::protobuf::ConstrType::ConstrCheck => {
                         let raw = cstr
@@ -164,18 +163,13 @@ pub(in crate::compiler) fn compile_create_table(
                             deferrable: cstr.deferrable,
                             initially_deferred: cstr.initdeferred,
                             period: cstr.fk_with_period,
+                            referenced_partitions: Vec::new(),
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrPrimary
                     | pg_query::protobuf::ConstrType::ConstrUnique => {
                         let kind =
                             if cstr.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
-                                if primary_key_seen {
-                                    return Err(SQLError::TypeMismatch(
-                                        "multiple PRIMARY KEY constraints are not allowed".into(),
-                                    ));
-                                }
-                                primary_key_seen = true;
                                 TableKeyConstraintKind::PrimaryKey
                             } else {
                                 TableKeyConstraintKind::Unique
@@ -187,6 +181,7 @@ pub(in crate::compiler) fn compile_create_table(
                             name: constraint_name(&cstr.conname),
                             kind,
                             columns: key_columns,
+                            included_columns: extract_strings(&cstr.including)?,
                             nulls_not_distinct: cstr.nulls_not_distinct,
                             without_overlaps: cstr.without_overlaps,
                         });
@@ -244,54 +239,6 @@ pub(in crate::compiler) fn compile_create_table(
         column.not_null_validated = constraint.validated;
         column.not_null_no_inherit = constraint.no_inherit;
     }
-    let column_names: BTreeSet<&str> = columns.iter().map(|column| column.name.as_str()).collect();
-    for constraint in &key_constraints {
-        if constraint.columns.is_empty() {
-            return Err(SQLError::TypeMismatch(format!(
-                "{} constraint must name at least one column",
-                key_constraint_label(constraint.kind)
-            )));
-        }
-        let mut seen = BTreeSet::new();
-        for column in &constraint.columns {
-            if !column_names.contains(column.as_str()) {
-                return Err(SQLError::TypeMismatch(format!(
-                    "{} constraint references unknown column `{column}`",
-                    key_constraint_label(constraint.kind)
-                )));
-            }
-            if !seen.insert(column.as_str()) {
-                return Err(SQLError::TypeMismatch(format!(
-                    "{} constraint names column `{column}` more than once",
-                    key_constraint_label(constraint.kind)
-                )));
-            }
-        }
-        if constraint.without_overlaps {
-            let period_column = constraint
-                .columns
-                .last()
-                .expect("validated non-empty key constraint");
-            let period_type = columns
-                .iter()
-                .find(|column| column.name == *period_column)
-                .map(|column| &column.ty)
-                .ok_or_else(|| SQLError::Internal("WITHOUT OVERLAPS column disappeared".into()))?;
-            if !matches!(
-                period_type,
-                ColumnType::Range(_) | ColumnType::Multirange(_)
-            ) {
-                return Err(SQLError::TypeMismatch(format!(
-                    "column \"{period_column}\" in WITHOUT OVERLAPS is not a range or multirange type"
-                )));
-            }
-            if constraint.columns.len() < 2 {
-                return Err(SQLError::TypeMismatch(
-                    "constraint using WITHOUT OVERLAPS needs at least two columns".into(),
-                ));
-            }
-        }
-    }
     for foreign_key in &foreign_keys {
         if !foreign_key.period {
             continue;
@@ -301,17 +248,7 @@ pub(in crate::compiler) fn compile_create_table(
                 "FOREIGN KEY using PERIOD needs at least two columns".into(),
             ));
         }
-        if !matches!(
-            (foreign_key.on_update, foreign_key.on_delete),
-            (
-                crate::ast::ForeignKeyAction::NoAction,
-                crate::ast::ForeignKeyAction::NoAction
-            )
-        ) {
-            return Err(SQLError::Unsupported(
-                "unsupported referential action for foreign key constraint using PERIOD".into(),
-            ));
-        }
+        crate::schema::foreign_keys::validate_period_foreign_key_actions(foreign_key)?;
         let period_column = foreign_key
             .local_columns
             .last()
@@ -327,29 +264,6 @@ pub(in crate::compiler) fn compile_create_table(
             )));
         }
     }
-    // Keep legacy scalar-key consumers correct while retaining the full typed
-    // tuple above. A composite primary key makes every member NOT NULL, but no
-    // individual member is itself a primary/unique key.
-    for constraint in &key_constraints {
-        for column_name in &constraint.columns {
-            let column = columns
-                .iter_mut()
-                .find(|column| column.name == *column_name)
-                .ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "validated key column `{column_name}` disappeared during lowering"
-                    ))
-                })?;
-            if constraint.kind == TableKeyConstraintKind::PrimaryKey {
-                column.not_null = true;
-                if constraint.columns.len() == 1 {
-                    column.primary_key = true;
-                }
-            } else if constraint.columns.len() == 1 {
-                column.unique = true;
-            }
-        }
-    }
     Ok(CreateTable {
         name,
         qualifier: relation.relname.clone(),
@@ -362,6 +276,15 @@ pub(in crate::compiler) fn compile_create_table(
         on_commit,
         hierarchy,
     })
+}
+
+/// Key constraint names belong to their indexes and are checked when the indexes are named, as `index_create` does.
+fn is_key_constraint(constraint: &pg_query::protobuf::Constraint) -> bool {
+    matches!(
+        constraint.contype(),
+        pg_query::protobuf::ConstrType::ConstrPrimary
+            | pg_query::protobuf::ConstrType::ConstrUnique
+    )
 }
 
 pub(in crate::compiler) fn constraint_name(name: &str) -> Option<String> {
@@ -380,13 +303,6 @@ pub(in crate::compiler) fn register_constraint_name(
         });
     }
     Ok(())
-}
-
-pub(in crate::compiler) fn key_constraint_label(kind: TableKeyConstraintKind) -> &'static str {
-    match kind {
-        TableKeyConstraintKind::PrimaryKey => "PRIMARY KEY",
-        TableKeyConstraintKind::Unique => "UNIQUE",
-    }
 }
 
 pub(in crate::compiler) fn compile_column_key_constraints(
@@ -410,6 +326,7 @@ pub(in crate::compiler) fn compile_column_key_constraints(
             name: constraint_name(&constraint.conname),
             kind,
             columns: vec![column.colname.clone()],
+            included_columns: Vec::new(),
             nulls_not_distinct: constraint.nulls_not_distinct,
             without_overlaps: constraint.without_overlaps,
         });
@@ -481,7 +398,7 @@ pub(in crate::compiler) fn compile_column_def(
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrIdentity => {
-                    auto_increment = Some(match cstr.generated_when.as_str() {
+                    let mut identity = match cstr.generated_when.as_str() {
                         "a" => AutoIncrement::identity_always(),
                         "d" => AutoIncrement::identity_by_default(),
                         other => {
@@ -489,7 +406,10 @@ pub(in crate::compiler) fn compile_column_def(
                                 "identity constraint has unknown generation {other:?}"
                             )));
                         }
-                    });
+                    };
+                    identity.declaration =
+                        super::super::sequences::compile_identity_declaration(&cstr.options)?;
+                    auto_increment = Some(identity);
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrDefault => {
@@ -577,6 +497,7 @@ pub(in crate::compiler) fn compile_column_def(
                         deferrable: cstr.deferrable,
                         initially_deferred: cstr.initdeferred,
                         period: false,
+                        referenced_partitions: Vec::new(),
                     });
                     last_enforceable = Some(EnforceableConstraint::ForeignKey);
                     saw_deferrability = false;

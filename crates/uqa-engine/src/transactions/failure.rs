@@ -9,7 +9,7 @@
 use super::{
     ConstraintModeState, Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot,
     StorageBackendError, StorageBackendResult, StorageSavepointId, TransactionCharacteristicsState,
-    TransactionDirtyState, TransactionFrame, TransactionRowChange, TransactionStatus,
+    TransactionDirtyState, TransactionFrame, TransactionStatus,
 };
 
 pub(super) fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
@@ -26,7 +26,8 @@ struct StatementAbortSnapshot {
     data: Option<EngineDataSnapshot>,
     dirty: TransactionDirtyState,
     keep_mark: Option<u32>,
-    row_changes: Vec<TransactionRowChange>,
+    /// The length the frame's row changes return to.
+    row_changes: usize,
     statistics_changes: crate::statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<crate::DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events:
@@ -46,7 +47,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             data: savepoint.data_snapshot.clone(),
             dirty: savepoint.dirty,
             keep_mark: Some(savepoint.lock_mark),
-            row_changes: savepoint.row_changes.clone(),
+            row_changes: savepoint.row_changes,
             statistics_changes: savepoint.statistics_changes.clone(),
             deferred_foreign_key_checks: savepoint.deferred_foreign_key_checks.clone(),
             deferred_constraint_trigger_events: savepoint
@@ -69,7 +70,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             .storage_savepoint
             .as_ref()
             .map(|_| frame.begin_lock_mark.saturating_sub(1)),
-        row_changes: Vec::new(),
+        row_changes: 0,
         statistics_changes: crate::statistics::StatisticsChanges::new(),
         deferred_foreign_key_checks: Vec::new(),
         deferred_constraint_trigger_events: Vec::new(),
@@ -163,7 +164,7 @@ impl Engine {
     }
 
     fn abort_transaction_after_failure(&self) -> Vec<String> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         let Some(frame) = stack.last() else {
             return Vec::new();
@@ -210,16 +211,9 @@ impl Engine {
             }
         }
         self.restore_transaction_dirty_state(rollback_state.dirty);
-        if let Err(restore_error) = self.reload_persistent_value_indexes() {
-            cleanup_errors.push(format!("btree restore: {restore_error}"));
-        }
+        self.drop_persistent_value_indexes();
         if self.storage.backend.is_some() {
-            if let Err(restore_error) = self.reload_table_catalog_after_rollback() {
-                cleanup_errors.push(format!("table catalog restore: {restore_error}"));
-            }
-            if let Err(restore_error) = self.reload_catalog_registries_after_rollback() {
-                cleanup_errors.push(format!("registry restore: {restore_error}"));
-            }
+            self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         self.restore_session_state_preserving_sequences(
             &rollback_state.session,
@@ -228,13 +222,17 @@ impl Engine {
             &mut cleanup_errors,
         );
         self.release_aborted_statement_locks(rollback_state.keep_mark);
+        // The index of changed rows is built again from the row changes when a read needs it.
+        if let Some(outer) = stack.first_mut() {
+            outer.fixed_identities = None;
+        }
         if let Some(frame) = stack.last_mut() {
             frame.status = if backend_aborted {
                 TransactionStatus::FailedBackendAborted
             } else {
                 TransactionStatus::Failed
             };
-            frame.row_changes = rollback_state.row_changes;
+            frame.row_changes.truncate(rollback_state.row_changes);
             frame.statistics_changes = rollback_state.statistics_changes;
             frame.deferred_foreign_key_checks = rollback_state.deferred_foreign_key_checks;
             frame.deferred_constraint_trigger_events =

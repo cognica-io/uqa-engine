@@ -49,10 +49,12 @@ impl<'a> Walker<'a> {
         self.optional_text(check_name.as_ref())?;
         self.optional_expr(default.as_ref())?;
         self.optional_expr(check.as_ref())?;
+        // Creating an identity column's sequence consumes its declaration, so a catalog generation holds none.
         if let Some(AutoIncrement {
             kind: _,
             sequence,
             owner,
+            declaration: _,
         }) = auto_increment
         {
             self.optional_text(sequence.as_ref())?;
@@ -86,12 +88,19 @@ impl<'a> Walker<'a> {
             deferrable: _,
             initially_deferred: _,
             period: _,
+            referenced_partitions,
         }) = references
         {
             self.optional_text(referenced_key.as_ref())?;
             self.optional_text(name.as_ref())?;
             self.text(table)?;
             self.optional_text(column.as_ref())?;
+            self.buffer::<crate::ast::ReferencedPartitionConstraint>(
+                referenced_partitions.capacity(),
+            )?;
+            for constraint in referenced_partitions {
+                self.text(&constraint.name)?;
+            }
         }
         Ok(())
     }

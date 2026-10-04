@@ -272,7 +272,7 @@ fn stored_revision_guards_survive_reopen_and_include_tokenless_fields() {
             "body",
             next.clone(),
             AnalyzerPhase::Index,
-            vec![(1, fields("gap gap"))],
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![(1, fields("gap gap"))]),
         )
         .unwrap();
     assert_eq!(index.get_term_freq(1, "body", "gap").unwrap(), 2);
@@ -314,7 +314,10 @@ fn failed_analysis_and_storage_publication_preserve_graph_bytes_and_revision_han
             "body",
             whitespace_analyzer().compile().unwrap(),
             AnalyzerPhase::Both,
-            vec![(1, fields("new")), (2, invalid_fields)]
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![
+                (1, fields("new")),
+                (2, invalid_fields)
+            ])
         )
         .is_err());
     assert_eq!(store.scan_prefix(b"").unwrap(), before);
@@ -330,7 +333,7 @@ fn failed_analysis_and_storage_publication_preserve_graph_bytes_and_revision_han
             "body",
             whitespace_analyzer().compile().unwrap(),
             AnalyzerPhase::Both,
-            vec![(2, fields("new"))]
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![(2, fields("new"))])
         )
         .is_err());
     assert!(!store.transaction_has_written().unwrap());
@@ -673,7 +676,7 @@ fn cancelled_rebuild_discards_buffered_writes_and_preserves_both_revisions() {
                 "body",
                 next.clone(),
                 AnalyzerPhase::Both,
-                documents(),
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(documents()),
                 &cancellation,
             )
             .unwrap_err();
@@ -700,12 +703,16 @@ fn cancelled_rebuild_discards_buffered_writes_and_preserves_both_revisions() {
             "body",
             next,
             AnalyzerPhase::Both,
-            documents(),
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(documents()),
             &cancellation,
         )
         .unwrap();
     let mut recovered = MemoryInvertedIndex::new(uqa_analysis::keyword_analyzer());
-    recovered.try_rebuild_documents(documents()).unwrap();
+    recovered
+        .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+            documents(),
+        ))
+        .unwrap();
     assert_same(&recovered, &index, &[1, 2, 3, 4, 5]);
 }
 
@@ -715,8 +722,16 @@ fn cancelled_memory_rebuild_retains_graphs_metadata_and_revisions_until_recovery
         let documents = vec![(1, fields("gap a b")), (2, fields("a gap"))];
         let mut index = MemoryInvertedIndex::new(config());
         let mut expected = MemoryInvertedIndex::new(config());
-        index.try_rebuild_documents(documents.clone()).unwrap();
-        expected.try_rebuild_documents(documents).unwrap();
+        index
+            .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+                documents.clone(),
+            ))
+            .unwrap();
+        expected
+            .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+                documents,
+            ))
+            .unwrap();
         let before_index = index.index_analyzer_revision("body").unwrap();
         let before_search = index.search_analyzer_revision("body").unwrap();
         let next = uqa_analysis::keyword_analyzer().compile().unwrap();
@@ -728,11 +743,14 @@ fn cancelled_memory_rebuild_retains_graphs_metadata_and_revisions_until_recovery
                 "body",
                 next.clone(),
                 AnalyzerPhase::Both,
-                replacement.clone(),
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(replacement.clone()),
                 &cancellation,
             )
         } else {
-            index.try_rebuild_documents_cancellable(replacement.clone(), &cancellation)
+            index.try_rebuild_documents_cancellable(
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(replacement.clone()),
+                &cancellation,
+            )
         }
         .unwrap_err();
         assert!(matches!(
@@ -754,12 +772,16 @@ fn cancelled_memory_rebuild_retains_graphs_metadata_and_revisions_until_recovery
                 "body",
                 next,
                 AnalyzerPhase::Both,
-                replacement.clone(),
+                &mut uqa_storage::inverted_index::TextIndexDocuments::new(replacement.clone()),
                 &cancellation,
             )
             .unwrap();
         let mut recovered = MemoryInvertedIndex::new(uqa_analysis::keyword_analyzer());
-        recovered.try_rebuild_documents(replacement).unwrap();
+        recovered
+            .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+                replacement,
+            ))
+            .unwrap();
         assert_same(&recovered, &index, &[1, 2, 3, 4]);
     }
 }

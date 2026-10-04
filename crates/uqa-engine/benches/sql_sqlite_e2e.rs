@@ -4,22 +4,27 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! End-to-end SQL benchmarks against the persistent `SQLite` backend.
+//! End-to-end SQL benchmarks against native `SQLite`, `SQLite` Key/Value and redb.
 //!
 //! The in-memory benches (`sql_e2e`, `sql_workloads`) miss the costs
 //! that dominate persistent deployments: storage round trips, JSON
 //! field extraction, statement caching, and value-index acceleration.
-//! Every workload here runs through `Engine::open` on a temp file.
+//! `UQA_STORAGE_BENCH_PROVIDER` selects `sqlite` (default), `sqlite_kv` or `redb`.
+//! Every workload opens a temporary database through the selected public provider.
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use uqa_engine::Engine;
 
+#[path = "sql_sqlite_e2e/providers.rs"]
+mod providers;
+use providers::Provider;
+
 const ROWS: usize = 10_000;
 const BATCH: usize = 500;
 
-fn seeded_engine(dir: &tempfile::TempDir, with_indexes: bool) -> Engine {
+fn seeded_engine(provider: Provider, dir: &tempfile::TempDir, with_indexes: bool) -> Engine {
     let path = dir.path().join("bench.db");
-    let engine = Engine::open(&path).expect("open persistent engine");
+    let engine = provider.open(&path);
     engine
         .sql(
             "CREATE TABLE items (id INTEGER PRIMARY KEY, owner TEXT, qty INTEGER, price REAL, note TEXT)",
@@ -74,7 +79,7 @@ fn seeded_engine(dir: &tempfile::TempDir, with_indexes: bool) -> Engine {
             )
             .unwrap();
     }
-    engine
+    provider.verify_and_reopen(engine, &path, ROWS)
 }
 
 fn warm_indexes(engine: &Engine) {
@@ -90,11 +95,12 @@ fn warm_indexes(engine: &Engine) {
 }
 
 fn bench_sqlite_reads(c: &mut Criterion) {
+    let provider = Provider::selected();
     let dir = tempfile::tempdir().unwrap();
-    let engine = seeded_engine(&dir, true);
+    let engine = seeded_engine(provider, &dir, true);
     warm_indexes(&engine);
 
-    let mut group = c.benchmark_group("sqlite_e2e");
+    let mut group = c.benchmark_group(format!("{}_e2e", provider.name()));
     group.sample_size(30);
 
     let mut k: i64 = 0;
@@ -168,12 +174,13 @@ fn bench_sqlite_reads(c: &mut Criterion) {
 }
 
 fn bench_sqlite_writes(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sqlite_e2e_write");
+    let provider = Provider::selected();
+    let mut group = c.benchmark_group(format!("{}_e2e_write", provider.name()));
     group.sample_size(20);
 
     group.bench_function("insert_batch_500", |b| {
         let dir = tempfile::tempdir().unwrap();
-        let engine = seeded_engine(&dir, false);
+        let engine = seeded_engine(provider, &dir, false);
         let mut n = ROWS as i64;
         b.iter(|| {
             let mut values = Vec::with_capacity(BATCH);
@@ -200,7 +207,7 @@ fn bench_sqlite_writes(c: &mut Criterion) {
 
     group.bench_function("point_update_indexed", |b| {
         let dir = tempfile::tempdir().unwrap();
-        let engine = seeded_engine(&dir, true);
+        let engine = seeded_engine(provider, &dir, true);
         warm_indexes(&engine);
         let mut k: i64 = 0;
         b.iter(|| {
@@ -218,16 +225,11 @@ fn bench_sqlite_writes(c: &mut Criterion) {
 }
 
 fn bench_sqlite_sessions(c: &mut Criterion) {
+    let provider = Provider::selected();
     let plain_dir = tempfile::tempdir().unwrap();
-    let plain_engine = seeded_engine(&plain_dir, true);
-    let encrypted_dir = tempfile::tempdir().unwrap();
-    let encrypted_engine = Engine::open_encrypted(
-        &encrypted_dir.path().join("encrypted-bench.db"),
-        "benchmark-database-key",
-    )
-    .unwrap();
+    let plain_engine = seeded_engine(provider, &plain_dir, true);
 
-    let mut group = c.benchmark_group("sqlite_e2e_session");
+    let mut group = c.benchmark_group(format!("{}_e2e_session", provider.name()));
     group.sample_size(20);
     group.bench_function("new_session_select_one_10k", |b| {
         b.iter(|| {
@@ -235,13 +237,21 @@ fn bench_sqlite_sessions(c: &mut Criterion) {
             session.sql("SELECT 1", &[]).unwrap()
         });
     });
-    group.sample_size(10);
-    group.bench_function("new_encrypted_session_select_one", |b| {
-        b.iter(|| {
-            let session = encrypted_engine.new_session().unwrap();
-            session.sql("SELECT 1", &[]).unwrap()
+    if matches!(provider, Provider::SQLite) {
+        let encrypted_dir = tempfile::tempdir().unwrap();
+        let encrypted_engine = Engine::open_encrypted(
+            &encrypted_dir.path().join("encrypted-bench.db"),
+            "benchmark-database-key",
+        )
+        .unwrap();
+        group.sample_size(10);
+        group.bench_function("new_encrypted_session_select_one", |b| {
+            b.iter(|| {
+                let session = encrypted_engine.new_session().unwrap();
+                session.sql("SELECT 1", &[]).unwrap()
+            });
         });
-    });
+    }
     group.finish();
 }
 

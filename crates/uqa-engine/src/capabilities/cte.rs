@@ -68,6 +68,12 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
             ctes,
         )
     }
+    fn fire_after_triggers(
+        &self,
+        queue: &uqa_execution::mutation::triggers::queue::AfterTriggerQueue,
+    ) -> Result<(), SQLError> {
+        queue.fire(&self.trigger_execution_context())
+    }
 }
 impl QueryOutputRewriter for Engine {
     fn push_output_filter(

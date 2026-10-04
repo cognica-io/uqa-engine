@@ -57,26 +57,16 @@ impl Engine {
             self.prepare_transaction_publication(stack, storage_savepoint.is_none())?;
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
         if let Some(statistics_changes) = statistics_changes {
-            // Maintenance counters are derived at publication, after any earlier publisher. A savepoint can restore an older command base, and concurrent commands must not overwrite each other's accumulated maintenance state.
-            let refresh = if statistics_changes.is_empty() {
-                Ok(())
-            } else {
-                self.storage
-                    .backend
-                    .as_ref()
-                    .filter(|backend| backend.transaction_model().is_versioned())
-                    .map_or(Ok(()), |backend| {
-                        backend.refresh_transaction_snapshot(&self.runtime.cancellation)
-                    })
-            };
-            if let Err(error) =
-                refresh.and_then(|()| self.persist_statistics_changes(&statistics_changes))
-            {
+            if let Err(error) = self.prepare_statistics_changes(stack, &statistics_changes) {
                 drop(publication);
                 return Err(self.rollback_failed_statistics_preparation(stack, &error));
             }
         }
+        // Only a commit that wrote records advances the committed sequence, which lets the session recognize its own commit afterward.
+        let mut wrote_records = false;
         if let Some(backend) = self.storage.backend.as_ref() {
+            wrote_records = storage_savepoint.is_none()
+                && matches!(backend.transaction_has_written(), Ok(true));
             let commit_result = if let Some(savepoint) = storage_savepoint {
                 if savepoints_deferred {
                     Ok(())
@@ -126,7 +116,31 @@ impl Engine {
             committed,
             publication.changes,
             publication.notifications,
+            wrote_records,
         )
+    }
+
+    /// Maintenance counters are derived at publication, after any earlier publisher. A savepoint can restore an older command base, and concurrent commands must not overwrite each other's accumulated maintenance state. The committing frame keeps what the session takes over once the commit has succeeded.
+    fn prepare_statistics_changes(
+        &self,
+        stack: &mut [TransactionFrame],
+        statistics_changes: &crate::statistics::StatisticsChanges,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        if !statistics_changes.is_empty() {
+            if let Some(backend) = self
+                .storage
+                .backend
+                .as_ref()
+                .filter(|backend| backend.transaction_model().is_versioned())
+            {
+                backend.refresh_transaction_snapshot(&self.runtime.cancellation)?;
+            }
+        }
+        let settlement = self.persist_statistics_changes(statistics_changes)?;
+        if let Some(frame) = stack.last_mut() {
+            frame.statistics_settlement = settlement;
+        }
+        Ok(())
     }
 
     fn prepare_transaction_publication<'a>(
@@ -317,15 +331,8 @@ impl Engine {
             }
         }
         if self.storage.backend.is_some() {
-            if let Err(error) = self.reload_persistent_value_indexes() {
-                cleanup_errors.push(format!("btree restore: {error}"));
-            }
-            if let Err(error) = self.reload_table_catalog_after_rollback() {
-                cleanup_errors.push(format!("table catalog restore: {error}"));
-            }
-            if let Err(error) = self.reload_catalog_registries_after_rollback() {
-                cleanup_errors.push(format!("registry restore: {error}"));
-            }
+            self.drop_persistent_value_indexes();
+            self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         if session_snapshot.is_some() {
             if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
@@ -515,16 +522,9 @@ impl Engine {
             .last()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
         self.restore_transaction_dirty_state(dirty_at_begin);
-        if let Err(error) = self.reload_persistent_value_indexes() {
-            cleanup_errors.push(format!("btree restore: {error}"));
-        }
+        self.drop_persistent_value_indexes();
         if self.storage.backend.is_some() {
-            if let Err(error) = self.reload_table_catalog_after_rollback() {
-                cleanup_errors.push(format!("table catalog restore: {error}"));
-            }
-            if let Err(error) = self.reload_catalog_registries_after_rollback() {
-                cleanup_errors.push(format!("registry restore: {error}"));
-            }
+            self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
             &nontransactional_sequence_values,
@@ -548,6 +548,9 @@ impl Engine {
                 .release_mark_above(self.session_id, begin_lock_mark.saturating_sub(1));
             if let Some(parent) = stack.last_mut() {
                 parent.first_snapshot_set |= first_snapshot_set;
+            }
+            if let Some(savepoint) = storage_savepoint {
+                super::fixed_identities::rollback_identities(stack, savepoint);
             }
         }
         if cleanup_errors.is_empty() {

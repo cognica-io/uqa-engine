@@ -13,6 +13,7 @@
 
 mod analysis;
 pub mod catalog_sources;
+mod command_scopes;
 mod commands;
 mod cte_controls;
 mod ctes;
@@ -20,10 +21,13 @@ mod merge_scopes;
 mod preparation;
 mod projection;
 mod routine_binding;
+mod routine_parameters;
 mod scope;
+mod source_schemas;
 mod sources;
 pub mod statements;
 mod type_resolution;
+mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
 pub use preparation::infer_prepared_parameter_types;
@@ -40,6 +44,7 @@ pub use routine_binding::{
     bind_expression_plan_routines_for_storage, bind_query_plan_routines_for_storage,
     bind_syntax_query_plan_routines,
 };
+pub use routine_parameters::{bind_routine_parameter_references, RoutineParameterScope};
 pub use scope::{
     analyze_expression_plan_type, analyze_query_plan_schema,
     analyze_query_plan_schema_with_catalog, bind_expression_plan_type, bind_query_plan_schema,
@@ -49,12 +54,12 @@ pub use sources::{
     analyze_source_plan_schema, bind_source_plan_schema, bind_source_plan_schema_for_execution,
     with_query_table_pseudo_columns,
 };
+pub use variable_sites::{resolve_variable_sites, VariableSiteResolution};
 
 use catalog_sources::operator_join_relation_schemas;
 use cte_controls::extend_recursive_cte_binding_schema;
 pub use cte_controls::hide_recursive_generated_schema;
 use projection::{projection_star_columns, rename_schema};
-use scope::merge_types;
 use sources::{alias_table_schema, table_function_member_source, JoinSchemaBinding};
 use type_resolution::{set_operation_output_schema, QueryFunctionTypeResolver};
 
@@ -71,9 +76,9 @@ use crate::catalog::analysis::CatalogReadView;
 use crate::catalog::resolution::RelationNameResolution;
 use crate::routines::RoutineResolution;
 use crate::semantics::{
-    alias_join_schema, apply_table_function_aliases, join_using_output_schema, resolve_join_using,
-    table_function_column_types, table_function_empty_schema, validate_table_function_alias_count,
-    validate_table_function_column_definition, TableFunctionTypeRequest,
+    apply_table_function_aliases, table_function_column_types, table_function_empty_schema,
+    validate_table_function_alias_count, validate_table_function_column_definition,
+    TableFunctionTypeRequest,
 };
 use crate::RowSchema;
 use std::collections::{BTreeMap, BTreeSet};
@@ -87,6 +92,12 @@ struct SchemaScope {
     visiting_views: BTreeSet<String>,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
+    /// The parameters of the SQL routine whose body is bound, as the outermost scope: a reference that resolves into them, because no column of any query level takes its name, becomes the positional parameter it names.
+    routine_parameters: Option<RoutineParameterScope>,
+    /// Whether binding a stored expression also fixes the routines it calls; a pass that only resolves routine parameters leaves calls to analysis.
+    binds_routine_identities: bool,
+    /// The names of a `PL/pgSQL` statement that the function's variables take, checked against what the statement can see.
+    variable_sites: Option<variable_sites::VariableSites>,
     /// Keep `*` projections and `GROUP BY` output-name references as written, so a bound copy of stored syntax still corresponds to that syntax node for node.
     preserve_syntax_shape: bool,
 }
@@ -108,6 +119,9 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: false,
             stored_expression_outer: None,
+            routine_parameters: None,
+            binds_routine_identities: true,
+            variable_sites: None,
             preserve_syntax_shape: false,
         })
     }
@@ -128,6 +142,9 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: true,
             stored_expression_outer: None,
+            routine_parameters: None,
+            binds_routine_identities: true,
+            variable_sites: None,
             preserve_syntax_shape: false,
         }
     }
@@ -248,6 +265,7 @@ impl SchemaScope {
                             offset: offset.as_deref(),
                             subqueries,
                             output: &output,
+                            outer,
                         },
                         params,
                     )?;
@@ -328,6 +346,7 @@ impl SchemaScope {
                 &expression_schema,
                 &output,
                 params,
+                outer,
             )?;
         }
         Ok(output)
@@ -362,79 +381,6 @@ impl SchemaScope {
         }
         crate::type_resolution::validate_catalog_literals(expression, schema, params, &resolver)?;
         crate::scalar_type_with_resolver(expression, schema, params, &resolver)
-    }
-
-    fn bind_values_types(
-        &mut self,
-        routines: &dyn RoutineResolution,
-        rows: &[Vec<ScalarExpr>],
-        subqueries: &[QueryPlan],
-        schema: Option<&RowSchema>,
-        params: &[SQLParam],
-        outer: Option<&RowSchema>,
-    ) -> Result<Vec<Option<ColumnType>>, SQLError> {
-        let width = rows.first().map_or(0, Vec::len);
-        let empty = RowSchema::default();
-        let schema = schema.unwrap_or(&empty);
-        let mut types = vec![None; width];
-        for row in rows {
-            if row.len() != width {
-                return Err(SQLError::TypeMismatch(
-                    "VALUES lists must all be the same length".into(),
-                ));
-            }
-            for (position, expression) in row.iter().enumerate() {
-                let candidate =
-                    if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
-                        None
-                    } else {
-                        self.bind_expression_type(
-                            routines, expression, schema, subqueries, params, outer,
-                        )?
-                    };
-                types[position] = merge_types(types[position].as_ref(), candidate.as_ref())?;
-            }
-        }
-        Ok(types
-            .into_iter()
-            .map(|ty| ty.or(Some(ColumnType::Text)))
-            .collect())
-    }
-
-    fn bind_join_output_schema(
-        &mut self,
-        binding: JoinSchemaBinding<'_>,
-    ) -> Result<RowSchema, SQLError> {
-        let JoinSchemaBinding {
-            routines,
-            kind,
-            on,
-            using,
-            natural,
-            alias,
-            column_aliases,
-            left,
-            right,
-            subqueries,
-            params,
-            outer,
-        } = binding;
-        if let Some(on) = on {
-            let input = RowSchema::join(left, right, std::iter::empty::<String>());
-            let input = overlay_outer_schema(&input, outer);
-            if self.validate_references {
-                self.bind_expression_type(routines, on, &input, subqueries, params, outer)?;
-                self.validate_condition(routines, on, "JOIN/ON", &input, subqueries, params)?;
-            } else {
-                crate::scalar_type_with_resolver(on, &input, params, routines)?;
-            }
-        }
-        let resolved = resolve_join_using(using, natural, left, right)?;
-        let schema = resolved.map_or_else(
-            || Ok(RowSchema::join(left, right, std::iter::empty())),
-            |using| join_using_output_schema(kind, left, right, &using),
-        )?;
-        alias_join_schema(&schema, alias, column_aliases)
     }
 
     #[expect(

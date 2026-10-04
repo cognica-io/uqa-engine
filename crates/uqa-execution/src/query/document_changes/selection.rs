@@ -33,17 +33,20 @@ impl Selection {
 impl DocumentChanges {
     pub(super) fn retention_control(&self, control: &StorageReadControl) -> StorageReadControl {
         let memory = self
-            .0
+            .selection
             .as_ref()
             .map_or(control.memory(), |selection| selection.rows.budget());
         StorageReadControl::new(memory, control.cancellation())
     }
 
     pub(super) fn rows(&self) -> &[(DocId, Change)] {
-        self.0.as_ref().map_or(&[], |selection| &selection.rows)
+        self.selection
+            .as_ref()
+            .map_or(&[], |selection| &selection.rows)
     }
 
-    pub(super) fn get(&self, id: DocId) -> Option<&Change> {
+    /// The selected change of `id`, below any rows that commands staged.
+    pub(super) fn selected(&self, id: DocId) -> Option<&Change> {
         let rows = self.rows();
         rows.binary_search_by_key(&id, |(id, _)| *id)
             .ok()
@@ -56,13 +59,16 @@ impl DocumentChanges {
         control: &StorageReadControl,
     ) -> StorageBackendResult<&mut Selection> {
         control.check()?;
+        if self.staged.is_some() || self.identities.is_some() {
+            return Err(staged_below());
+        }
         if self
-            .0
+            .selection
             .as_ref()
             .is_none_or(|rows| Arc::strong_count(rows) != 1)
         {
             let memory = self
-                .0
+                .selection
                 .as_ref()
                 .map_or(control.memory(), |selection| selection.rows.budget());
             let capacity = self
@@ -76,9 +82,9 @@ impl DocumentChanges {
                 selection.rows.push(row.clone())?;
             }
             control.check()?;
-            self.0 = Some(Arc::new(selection));
+            self.selection = Some(Arc::new(selection));
         }
-        let selection = Arc::get_mut(self.0.as_mut().expect("selection initialized"))
+        let selection = Arc::get_mut(self.selection.as_mut().expect("selection initialized"))
             .expect("selection uniquely owned");
         selection.rows.reserve(additional)?;
         Ok(selection)
@@ -109,17 +115,24 @@ impl DocumentChanges {
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
         control.check()?;
+        if self.staged.is_some()
+            || newer.staged.is_some()
+            || self.identities.is_some()
+            || newer.identities.is_some()
+        {
+            return Err(staged_below());
+        }
         if !newer.has_changes() {
             return Ok(());
         }
-        let Some(original) = &self.0 else {
+        let Some(original) = &self.selection else {
             *self = newer;
             return Ok(());
         };
         let mut count = original.rows.len();
         for (id, _) in newer.rows() {
             control.check()?;
-            if self.get(*id).is_none() {
+            if self.selected(*id).is_none() {
                 count = count
                     .checked_add(1)
                     .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
@@ -145,7 +158,15 @@ impl DocumentChanges {
             selection.rows.push(row.clone())?;
         }
         control.check()?;
-        self.0 = Some(Arc::new(selection));
+        self.selection = Some(Arc::new(selection));
         Ok(())
     }
+}
+
+/// Selected changes are older than the lazy layers, the rows a transaction changed and the rows running commands staged, so they cannot be added above those rows.
+pub(super) fn staged_below() -> uqa_storage::StorageBackendError {
+    uqa_storage::StorageBackendError::Other(
+        "selected changes cannot be added above the rows a transaction changed or commands staged"
+            .into(),
+    )
 }

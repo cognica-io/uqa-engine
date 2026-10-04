@@ -139,3 +139,24 @@ fn cyclic_loaded_metadata_terminates_at_a_sorted_fixed_point() {
     assert_eq!(catalog.reads.get(), 2);
     assert!(!catalog.held.get());
 }
+#[test]
+fn surviving_partition_ancestors_follow_partitions_past_dropped_parents_only() {
+    let catalog = catalog(&[
+        ("leaf", &["middle"], true),
+        ("middle", &["root"], true),
+        ("root", &[], false),
+        ("child", &["plain"], false),
+        ("plain", &[], false),
+    ]);
+    assert_eq!(
+        surviving_partition_ancestors(&catalog, &["public.leaf".into()]),
+        ["public.middle", "public.root"]
+    );
+    // A dropped parent is no survivor, and an inheritance parent no partitioned table.
+    assert_eq!(
+        surviving_partition_ancestors(&catalog, &["public.middle".into(), "public.leaf".into()]),
+        ["public.root"]
+    );
+    assert!(surviving_partition_ancestors(&catalog, &["public.child".into()]).is_empty());
+    assert!(!catalog.held.get());
+}

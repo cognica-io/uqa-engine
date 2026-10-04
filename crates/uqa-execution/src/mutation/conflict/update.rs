@@ -11,7 +11,6 @@ use crate::mutation::{
     candidate::{MutationLockTarget, PhysicalDocumentIdentity},
     constraints::lock_document_key_dependencies,
     errors::{dml_storage_error, missing_document_error},
-    events::ReferentialActionContext,
     expressions::eval_mutation_expr,
     locking::{lock_mutation_target, MutationLockCleanup},
     prepared::PreparedInsertConflict,
@@ -44,7 +43,10 @@ fn on_conflict_cardinality_violation() -> SQLError {
         sqlstate: "21000".into(),
         message: "ON CONFLICT DO UPDATE command cannot affect row a second time".into(),
         detail: None,
-        hint: Some("Ensure that no rows proposed for insertion within the same command have duplicate constrained values.".into()),
+        hint: Some(
+            "Ensure that no rows proposed for insertion within the same command have duplicate constrained values."
+                .into(),
+        ),
     }
 }
 
@@ -152,6 +154,7 @@ fn build_conflict_update<S: Clone + 'static>(
                     .iter()
                     .any(|next| next.target.column == assignment.target.column),
                 action: "INSERT ON CONFLICT DO UPDATE",
+                new_row: false,
             },
             &assignment.value,
             Some(&conflict_row),
@@ -261,7 +264,6 @@ impl InsertConflictLocks {
     pub fn prepare_document<S: Clone + 'static>(
         &mut self,
         preparation: InsertConflictPreparation<'_, S>,
-        referential_actions: &mut ReferentialActionContext,
     ) -> Result<PreparedInsertConflict, SQLError> {
         let InsertConflictPreparation {
             context,
@@ -334,6 +336,10 @@ impl InsertConflictLocks {
         else {
             return Ok(PreparedInsertConflict::Skip);
         };
+        // Another command of the statement, or a statement its triggers or functions started, inserted or rewrote the conflicting row, whose version `PostgreSQL`'s `ExecOnConflictUpdate` finds invisible to the statement's command id.
+        if scope.statement_wrote(&existing) || scope.statement_triggered_write(&existing) {
+            return Err(on_conflict_cardinality_violation());
+        }
         match build_conflict_update(
             &context,
             &existing.table,
@@ -370,23 +376,12 @@ impl InsertConflictLocks {
                 let prepared = prepare_document_rewrite(
                     &context,
                     &existing.table,
+                    &existing.table,
                     existing.doc_id,
                     old_document,
                     new_document,
-                    params,
-                    referential_actions,
-                )?
-                .ok_or_else(|| {
-                    SQLError::Internal(
-                        "INSERT ON CONFLICT rewrite dependency tree was cyclic at its root".into(),
-                    )
-                })?;
-                if let Some(root) = uqa_sql::semantics::partition::partition_hierarchy_root(
-                    context.constraints.partitions.catalog,
-                    &prepared.table,
-                )? {
-                    reject_partition_rewrite(&context, &prepared, &root, params, true)?;
-                }
+                )?;
+                reject_partition_rewrite(&context, &prepared, params)?;
                 self.overlay
                     .as_mut()
                     .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?

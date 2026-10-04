@@ -28,7 +28,7 @@ pub(super) fn drop_column<S: Clone + 'static>(
         &mut |localized| declare_local_column(context, localized),
     )?;
     if let ColumnDrop::Missing(relation) = outcome {
-        deletion.notices.lock().push(SQLNotice::notice(format!(
+        deletion.notices.push(SQLNotice::notice(format!(
             "column \"{column}\" of relation \"{relation}\" does not exist, skipping"
         )));
     }

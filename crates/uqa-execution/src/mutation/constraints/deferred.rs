@@ -14,6 +14,8 @@ use super::{
 
 struct DeferredForeignKeyValidation {
     foreign_key: ForeignKey,
+    /// The current name of the deferred constraint: the foreign key's, or the derived constraint's whose partition fired the check.
+    constraint_name: String,
     comparison: Option<ForeignKeyComparison>,
     cross_type_parent_keys: Option<std::collections::BTreeSet<Vec<Value>>>,
 }
@@ -83,7 +85,8 @@ pub fn validate_deferred_foreign_key_checks(
             let comparison = validation.comparison.as_ref().ok_or_else(|| {
                 SQLError::Internal("deferred foreign-key comparison was not prepared".into())
             })?;
-            let Some(values) = foreign_key_values(&validation.foreign_key, &document, comparison)?
+            let Some(values) =
+                foreign_key_values(&table, &validation.foreign_key, &document, comparison)?
             else {
                 continue;
             };
@@ -99,20 +102,72 @@ pub fn validate_deferred_foreign_key_checks(
                 continue;
             }
         }
-        return Err(SQLError::Routine {
-            sqlstate: "23503".into(),
-            message: format!(
-                "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
-                foreign_key_relation_name(&table),
-                validation
-                    .foreign_key
-                    .name
-                    .as_deref()
-                    .unwrap_or("<unnamed>")
-            ),
-        });
+        return Err(deferred_violation(
+            context, check, validation, &table, &document,
+        )?);
     }
     Ok(())
+}
+
+/// `ri_ReportViolation` for a deferred check: a check that a change to a referenced row fired reports the referenced side with the key it still references, as `PostgreSQL`'s deferred `NO ACTION` triggers do, and a referencing row's check the key missing from the referenced table.
+fn deferred_violation(
+    context: ConstraintContext<'_>,
+    check: &crate::mutation::deferred::DeferredForeignKeyCheck,
+    validation: &DeferredForeignKeyValidation,
+    table: &str,
+    document: &uqa_storage::document_store::Document,
+) -> Result<SQLError, SQLError> {
+    let foreign_key = &validation.foreign_key;
+    let values = foreign_key
+        .local_columns
+        .iter()
+        .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+        .collect::<Vec<_>>();
+    if check.referenced {
+        let referencing = &check.constraint.relation.name;
+        let key = super::foreign_key_key(
+            context,
+            &check.firing_relation.qualified_name(),
+            &foreign_key.ref_columns,
+            table,
+            &foreign_key.local_columns,
+            &values,
+        )?;
+        return Ok(SQLError::Diagnostic {
+            sqlstate: "23503".into(),
+            message: format!(
+                "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{referencing}\"",
+                check.firing_relation.name, validation.constraint_name
+            ),
+            detail: Some(match key {
+                Some(key) => format!("{key} is still referenced from table \"{referencing}\"."),
+                None => format!("Key is still referenced from table \"{referencing}\"."),
+            }),
+            hint: None,
+        });
+    }
+    let referenced = foreign_key_relation_name(&foreign_key.ref_table);
+    let key = super::foreign_key_key(
+        context,
+        table,
+        &foreign_key.local_columns,
+        table,
+        &foreign_key.local_columns,
+        &values,
+    )?;
+    Ok(SQLError::Diagnostic {
+        sqlstate: "23503".into(),
+        message: format!(
+            "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
+            foreign_key_relation_name(table),
+            validation.constraint_name
+        ),
+        detail: Some(match key {
+            Some(key) => format!("{key} is not present in table \"{referenced}\"."),
+            None => format!("Key is not present in table \"{referenced}\"."),
+        }),
+        hint: None,
+    })
 }
 
 fn prepare_deferred_foreign_key(
@@ -121,43 +176,65 @@ fn prepare_deferred_foreign_key(
     constraint: &uqa_sql::catalog::constraints::ConstraintIdentity,
 ) -> Result<Option<DeferredForeignKeyValidation>, SQLError> {
     let constraint_table = constraint.relation.qualified_name();
-    let foreign_key = context
+    let foreign_keys = context
         .catalog
         .try_foreign_keys(&constraint_table)
-        .map_err(|error| dml_storage_error("deferred constraint validation", error))?
-        .into_iter()
+        .map_err(|error| dml_storage_error("deferred constraint validation", error))?;
+    // The constraint is the foreign key, or one it derives on a referenced partition.
+    let found = foreign_keys
+        .iter()
         .find(|foreign_key| {
             foreign_key.name.as_deref() == Some(&constraint.name)
                 && foreign_key.object_id == constraint.object_id
+        })
+        .map(|foreign_key| {
+            (
+                foreign_key.clone(),
+                foreign_key.name.clone().unwrap_or_default(),
+            )
+        })
+        .or_else(|| {
+            foreign_keys.iter().find_map(|foreign_key| {
+                foreign_key
+                    .referenced_partitions
+                    .iter()
+                    .find(|derived| {
+                        Some(derived.catalog_identity.object_id) == constraint.object_id
+                    })
+                    .map(|derived| (foreign_key.clone(), derived.name.clone()))
+            })
         });
-    let validation =
-        if let Some(foreign_key) = foreign_key.filter(|foreign_key| foreign_key.enforced) {
-            if foreign_key.period {
-                Some(DeferredForeignKeyValidation {
-                    foreign_key,
-                    comparison: None,
-                    cross_type_parent_keys: None,
-                })
-            } else {
-                let comparison =
-                    foreign_key_comparison_types(context.partitions.catalog, table, &foreign_key)?;
-                let cross_type_parent_keys = if comparison.exact_reference_lookup {
-                    None
-                } else {
-                    Some(foreign_key_parent_index(
-                        context,
-                        &foreign_key,
-                        &comparison,
-                    )?)
-                };
-                Some(DeferredForeignKeyValidation {
-                    foreign_key,
-                    comparison: Some(comparison),
-                    cross_type_parent_keys,
-                })
-            }
+    let validation = if let Some((foreign_key, constraint_name)) =
+        found.filter(|(foreign_key, _)| foreign_key.enforced)
+    {
+        if foreign_key.period {
+            Some(DeferredForeignKeyValidation {
+                foreign_key,
+                constraint_name,
+                comparison: None,
+                cross_type_parent_keys: None,
+            })
         } else {
-            None
-        };
+            let comparison =
+                foreign_key_comparison_types(context.partitions.catalog, table, &foreign_key)?;
+            let cross_type_parent_keys = if comparison.exact_reference_lookup {
+                None
+            } else {
+                Some(foreign_key_parent_index(
+                    context,
+                    &foreign_key,
+                    &comparison,
+                )?)
+            };
+            Some(DeferredForeignKeyValidation {
+                foreign_key,
+                constraint_name,
+                comparison: Some(comparison),
+                cross_type_parent_keys,
+            })
+        }
+    } else {
+        None
+    };
     Ok(validation)
 }

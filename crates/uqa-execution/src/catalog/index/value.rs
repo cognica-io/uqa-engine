@@ -5,6 +5,8 @@
 //
 
 //! Predicate eligibility, NULL handling and evaluated-key retention for column and expression accelerators.
+//!
+//! An accelerator holds the stored value of its field for every row. A search key also orders its non-null values in a B-tree for predicates. A column that an index only carries beside its key holds the values alone: it answers the projection of an index-only read and no predicate, and a write maintains no value bucket for it.
 
 use std::collections::BTreeMap;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Predicate, Value};
@@ -12,13 +14,15 @@ use uqa_storage::BTreeIndex;
 
 mod comparison;
 
-/// Per-column index: non-null scalar keys in a B-tree plus the doc ids
-/// whose field is missing or SQL NULL.
+/// Per-column index: the stored value of every row, and for a search key
+/// the non-null scalar keys in a B-tree plus the doc ids whose field is
+/// missing or SQL NULL.
 #[derive(Clone)]
 pub struct ColumnValueIndex {
-    index: BTreeIndex,
+    /// `None` for a column that an index only carries.
+    index: Option<BTreeIndex>,
     values: BTreeMap<DocId, Value>,
-    /// Sorted doc ids with a missing or `Value::Null` field.
+    /// Sorted doc ids with a missing or `Value::Null` field, kept for a search key.
     nulls: Vec<DocId>,
     /// Set when any indexed key is temporal; disables acceleration
     /// because string-vs-temporal comparisons need parsing.
@@ -61,39 +65,78 @@ impl ColumnValueIndex {
         self.values.get(&doc_id)
     }
 
+    /// Whether a row is indexed, which every row of the table is while the accelerator is current.
+    pub fn contains(&self, doc_id: DocId) -> bool {
+        self.values.contains_key(&doc_id)
+    }
+
+    /// Whether this accelerator only carries its column's values and answers no predicate.
+    pub fn is_carried(&self) -> bool {
+        self.index.is_none()
+    }
+
+    /// Build a search key.
     pub fn build(field: &str, values: impl Iterator<Item = (DocId, Value)>) -> Self {
-        let mut index = BTreeIndex::new(field);
-        let mut stored = BTreeMap::new();
-        let mut nulls = Vec::new();
-        let mut has_temporal = false;
-        let mut has_fallible_comparison = false;
-        let mut has_row_values = false;
+        let mut built = Self {
+            index: Some(BTreeIndex::new(field)),
+            values: BTreeMap::new(),
+            nulls: Vec::new(),
+            has_temporal: false,
+            has_fallible_comparison: false,
+            has_row_values: false,
+        };
         for (doc_id, value) in values {
-            stored.insert(doc_id, value.clone());
-            match value {
-                Value::Null => nulls.push(doc_id),
-                value => {
-                    has_temporal |= value_is_temporal(&value);
-                    has_row_values |= value_is_row(&value);
-                    has_fallible_comparison |= uqa_sql::expr::value_comparison_can_fail(&value);
-                    index.insert(doc_id, value);
-                }
-            }
+            built.index_value(doc_id, &value);
+            built.values.insert(doc_id, value);
         }
-        nulls.sort_unstable();
-        nulls.dedup();
+        built.nulls.sort_unstable();
+        built.nulls.dedup();
+        built
+    }
+
+    /// Build the values of a column that an index only carries.
+    pub fn build_carried(values: impl Iterator<Item = (DocId, Value)>) -> Self {
         Self {
-            index,
-            values: stored,
-            nulls,
-            has_temporal,
-            has_fallible_comparison,
-            has_row_values,
+            index: None,
+            values: values.collect(),
+            nulls: Vec::new(),
+            has_temporal: false,
+            has_fallible_comparison: false,
+            has_row_values: false,
+        }
+    }
+
+    /// The same stored values, carried or as a search key of `field`, when the indexes of the table give the column the other use.
+    #[must_use]
+    pub fn with_use(self, field: &str, carried: bool) -> Self {
+        match (carried, self.is_carried()) {
+            (false, true) => Self::build(field, self.values.into_iter()),
+            (true, false) => Self::build_carried(self.values.into_iter()),
+            _ => self,
+        }
+    }
+
+    /// Order one stored value for predicates. `nulls` is appended to and sorted by the caller.
+    fn index_value(&mut self, doc_id: DocId, value: &Value) {
+        let Some(index) = self.index.as_mut() else {
+            return;
+        };
+        match value {
+            Value::Null => self.nulls.push(doc_id),
+            value => {
+                self.has_temporal |= value_is_temporal(value);
+                self.has_row_values |= value_is_row(value);
+                self.has_fallible_comparison |= uqa_sql::expr::value_comparison_can_fail(value);
+                index.insert(doc_id, value.clone());
+            }
         }
     }
 
     pub fn insert(&mut self, doc_id: DocId, value: &Value) {
         self.values.insert(doc_id, value.clone());
+        let Some(index) = self.index.as_mut() else {
+            return;
+        };
         match value {
             Value::Null => {
                 if let Err(pos) = self.nulls.binary_search(&doc_id) {
@@ -104,13 +147,16 @@ impl ColumnValueIndex {
                 self.has_temporal |= value_is_temporal(value);
                 self.has_row_values |= value_is_row(value);
                 self.has_fallible_comparison |= uqa_sql::expr::value_comparison_can_fail(value);
-                self.index.insert(doc_id, value.clone());
+                index.insert(doc_id, value.clone());
             }
         }
     }
 
     pub fn remove(&mut self, doc_id: DocId, value: &Value) {
         let stored = self.values.remove(&doc_id);
+        let Some(index) = self.index.as_mut() else {
+            return;
+        };
         let value = stored.as_ref().unwrap_or(value);
         match value {
             Value::Null => {
@@ -118,12 +164,14 @@ impl ColumnValueIndex {
                     self.nulls.remove(pos);
                 }
             }
-            value => self.index.remove(doc_id, value),
+            value => index.remove(doc_id, value),
         }
     }
 
     pub fn clear(&mut self) {
-        self.index.clear();
+        if let Some(index) = self.index.as_mut() {
+            index.clear();
+        }
         self.values.clear();
         self.nulls.clear();
         self.has_temporal = false;
@@ -134,28 +182,30 @@ impl ColumnValueIndex {
     /// Resolve `predicate` to a posting list, or `None` when this
     /// index cannot reproduce evaluated-scan semantics for it.
     pub fn scan(&self, predicate: &Predicate) -> Option<PostingList> {
+        let index = self.index.as_ref()?;
         if !self.supports(predicate) {
             return None;
         }
         match predicate {
             Predicate::IsNull => Some(posting_list_from_sorted_ids(self.nulls.iter().copied())),
-            Predicate::IsNotNull => Some(self.index.scan(&Predicate::IsNotNull)),
+            Predicate::IsNotNull => Some(index.scan(&Predicate::IsNotNull)),
             // `NotEquals` needs "all non-null minus matches"; the
             // complement is rarely selective, so leave it to the scan.
             Predicate::NotEquals(_) => unreachable!("unsupported predicates return above"),
-            predicate => Some(self.index.scan(predicate)),
+            predicate => Some(index.scan(predicate)),
         }
     }
 
     pub fn estimate_cardinality(&self, predicate: &Predicate) -> Option<usize> {
+        let index = self.index.as_ref()?;
         if !self.supports(predicate) {
             return None;
         }
         Some(match predicate {
             Predicate::IsNull => self.nulls.len(),
-            Predicate::IsNotNull => self.index.estimate_cardinality(predicate),
+            Predicate::IsNotNull => index.estimate_cardinality(predicate),
             Predicate::NotEquals(_) => unreachable!("unsupported predicates return above"),
-            predicate => self.index.estimate_cardinality(predicate),
+            predicate => index.estimate_cardinality(predicate),
         })
     }
 
@@ -165,6 +215,9 @@ impl ColumnValueIndex {
         predicate: &Predicate,
         observe: impl FnOnce() -> Result<(), uqa_sql::SQLError>,
     ) -> Result<Option<PostingList>, uqa_sql::SQLError> {
+        if self.is_carried() {
+            return Ok(None);
+        }
         if comparison::needs_sql_comparison(predicate, self.has_fallible_comparison) {
             observe()?;
             let mut ids = Vec::new();
@@ -183,7 +236,8 @@ impl ColumnValueIndex {
     }
 
     pub fn supports(&self, predicate: &Predicate) -> bool {
-        predicate_targets_are_index_safe(predicate)
+        !self.is_carried()
+            && predicate_targets_are_index_safe(predicate)
             && !comparison::needs_sql_comparison(predicate, self.has_fallible_comparison)
             && !matches!(predicate, Predicate::NotEquals(_))
             && if matches!(predicate, Predicate::IsNull | Predicate::IsNotNull) {

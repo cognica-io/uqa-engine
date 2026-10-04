@@ -120,6 +120,32 @@ fn opaque_bindings_follow_registry_replacement_and_rollback_without_name_lookup(
 }
 
 #[test]
+fn publication_barriers_follow_expression_predicate_and_catalog_replacement() {
+    let source = rows(2, true);
+    let cache = PhysicalIndexCache::default();
+    let expressions = cache.bind(source.clone()).unwrap();
+    assert!(expressions.row_publication_uses_expressions("public.t"));
+    assert!(!expressions.row_publication_uses_expressions("public.other"));
+    let mut columns = source.as_ref().clone();
+    for row in columns.values_mut() {
+        row.columns_json = serde_json::to_string(&[IndexKey::Column("id".into())]).unwrap();
+    }
+    let predicates = cache.bind(Arc::new(columns.clone())).unwrap();
+    assert!(predicates.row_publication_uses_expressions("public.t"));
+    for row in columns.values_mut() {
+        let mut definition = super::super::index_definition(row).unwrap();
+        definition.predicate = None;
+        row.definition_json = Some(serde_json::to_string(&definition).unwrap());
+    }
+    let plain = cache.bind(Arc::new(columns)).unwrap();
+    assert!(!plain.row_publication_uses_expressions("public.t"));
+    assert!(cache
+        .bind(source)
+        .unwrap()
+        .row_publication_uses_expressions("public.t"));
+}
+
+#[test]
 fn legacy_partition_namespaces_are_scoped_to_their_physical_tables() {
     let mut source = rows(2, true).as_ref().clone();
     let mut second = source.values().next().unwrap().clone();
@@ -153,4 +179,93 @@ fn legacy_partition_namespaces_are_scoped_to_their_physical_tables() {
         )
         .unwrap();
     assert_eq!(child[&key], Value::Row(vec![Value::Int(9)]));
+}
+
+fn btree(name: &str, key: u8, keys: Vec<IndexKey>, included: &[&str]) -> CatalogIndexRow {
+    CatalogIndexRow {
+        relation: RelationIdentity::new("public", name),
+        table_name: "public.t".into(),
+        index_type: "btree".into(),
+        columns_json: serde_json::to_string(&keys).unwrap(),
+        parameters_json: "{}".into(),
+        definition_json: Some(
+            serde_json::to_string(&IndexDefinition {
+                catalog: Some(IndexCatalogIdentity {
+                    identity: uqa_core::catalog_identity::CatalogObjectIdentity {
+                        object_id: [key; 16],
+                        oid: 18000 + i64::from(key),
+                    },
+                    table_object_id: [1; 16],
+                    physical_key: format!("opaque:{key}"),
+                }),
+                included_columns: included.iter().map(|name| (*name).to_owned()).collect(),
+                ..IndexDefinition::default()
+            })
+            .unwrap(),
+        ),
+    }
+}
+
+fn column(name: &str) -> ValueIndexKey {
+    ValueIndexKey::Column(name.into())
+}
+
+#[test]
+fn every_plain_key_column_is_searched_and_included_columns_are_carried() {
+    let rows = [
+        btree(
+            "composite",
+            1,
+            vec![IndexKey::Column("a".into()), IndexKey::Column("b".into())],
+            &["c", "d"],
+        ),
+        btree(
+            "expression",
+            2,
+            vec![
+                IndexKey::Expression(Box::new(Expr::Literal(Value::Int(7)))),
+                IndexKey::Column("e".into()),
+            ],
+            &["a"],
+        ),
+        btree("leading", 3, vec![IndexKey::Column("d".into())], &[]),
+    ]
+    .into_iter()
+    .map(|row| (row.relation.clone(), row))
+    .collect::<IndexRows>();
+    let definitions = PhysicalIndexDefinitions::prepare(&rows).unwrap();
+    let search = definitions.search_fields("public.t", &[], &[]);
+    assert_eq!(
+        search.into_iter().collect::<Vec<_>>(),
+        [
+            column("a"),
+            column("b"),
+            column("d"),
+            column("e"),
+            ValueIndexKey::Index("opaque:2".into()),
+        ]
+    );
+    // `a` and `d` are search keys of other indexes, so only `c` is carried.
+    assert_eq!(
+        definitions
+            .carried_fields("public.t", &[], &[])
+            .into_iter()
+            .collect::<Vec<_>>(),
+        [column("c")]
+    );
+    assert_eq!(
+        definitions.indexable_fields("public.t", &[], &[]).unwrap(),
+        [
+            column("a"),
+            column("b"),
+            column("c"),
+            column("d"),
+            column("e"),
+            ValueIndexKey::Index("opaque:2".into()),
+        ]
+    );
+    assert!(definitions
+        .indexable_fields("public.other", &[], &[])
+        .unwrap()
+        .is_empty());
 }

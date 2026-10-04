@@ -7,35 +7,24 @@
 use super::{
     Engine, SQLError, TransactionCharacteristicsState, TransactionFrame, TransactionIntent,
 };
-use crate::capabilities::parse_boolean_runtime_parameter;
 use uqa_sql::ast::{TransactionCharacteristics, TransactionIsolationLevel};
+use uqa_sql::semantics::parameters::{catalog::find_parameter, value::parse_setting};
 
-fn session_value(
-    values: &std::collections::BTreeMap<String, String>,
-    name: &str,
-) -> Option<String> {
-    values.get(name).cloned().or_else(|| {
-        values
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.clone())
-    })
+fn isolation_level(setting: &str) -> TransactionIsolationLevel {
+    match setting {
+        "read uncommitted" => TransactionIsolationLevel::ReadUncommitted,
+        "repeatable read" => TransactionIsolationLevel::RepeatableRead,
+        "serializable" => TransactionIsolationLevel::Serializable,
+        _ => TransactionIsolationLevel::ReadCommitted,
+    }
 }
 
-fn parse_isolation_parameter(
-    name: &str,
-    value: &str,
-) -> Result<TransactionIsolationLevel, SQLError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "read uncommitted" => Ok(TransactionIsolationLevel::ReadUncommitted),
-        "read committed" => Ok(TransactionIsolationLevel::ReadCommitted),
-        "repeatable read" => Ok(TransactionIsolationLevel::RepeatableRead),
-        "serializable" => Ok(TransactionIsolationLevel::Serializable),
-        _ => Err(SQLError::Routine {
-            sqlstate: "22023".into(),
-            message: format!("invalid value for parameter \"{name}\": \"{value}\""),
-        }),
-    }
+/// Read `value` as a setting of the transaction characteristic `name`.
+fn characteristic_setting(name: &str, value: &str) -> Result<String, SQLError> {
+    let definition = find_parameter(name).ok_or_else(|| {
+        SQLError::Internal(format!("{name:?} is not a transaction characteristic"))
+    })?;
+    parse_setting(definition, value)
 }
 
 fn transaction_error(message: impl Into<String>) -> SQLError {
@@ -56,32 +45,31 @@ impl TransactionCharacteristicsState {
         if let Some(deferrable) = options.deferrable {
             self.deferrable = deferrable;
         }
+        self.assign(options);
         self
+    }
+
+    /// Note the characteristics that `options` assigns.
+    fn assign(&mut self, options: TransactionCharacteristics) {
+        if options.isolation.is_some() {
+            self.assigned |= Self::ISOLATION_ASSIGNED;
+        }
+        if options.read_only.is_some() {
+            self.assigned |= Self::READ_ONLY_ASSIGNED;
+        }
+        if options.deferrable.is_some() {
+            self.assigned |= Self::DEFERRABLE_ASSIGNED;
+        }
     }
 }
 
 impl Engine {
     pub(super) fn default_transaction_characteristics(&self) -> TransactionCharacteristicsState {
-        let session = self.session.state.read();
-        let isolation = session_value(&session.session_vars, "default_transaction_isolation")
-            .and_then(|value| {
-                parse_isolation_parameter("default_transaction_isolation", &value).ok()
-            })
-            .unwrap_or(TransactionIsolationLevel::ReadCommitted);
-        let read_only = session_value(&session.session_vars, "default_transaction_read_only")
-            .and_then(|value| {
-                parse_boolean_runtime_parameter("default_transaction_read_only", &value).ok()
-            })
-            .unwrap_or(false);
-        let deferrable = session_value(&session.session_vars, "default_transaction_deferrable")
-            .and_then(|value| {
-                parse_boolean_runtime_parameter("default_transaction_deferrable", &value).ok()
-            })
-            .unwrap_or(false);
         TransactionCharacteristicsState {
-            isolation,
-            read_only,
-            deferrable,
+            isolation: isolation_level(&self.session.setting("default_transaction_isolation")),
+            read_only: self.session.setting("default_transaction_read_only") == "on",
+            deferrable: self.session.setting("default_transaction_deferrable") == "on",
+            assigned: 0,
         }
     }
 
@@ -165,6 +153,7 @@ impl Engine {
             }
             frame.characteristics.deferrable = deferrable;
         }
+        frame.characteristics.assign(options);
         Ok(())
     }
 
@@ -207,45 +196,29 @@ impl Engine {
         name: &str,
         value: &str,
     ) -> Result<(), SQLError> {
-        let options = if name.eq_ignore_ascii_case("transaction_isolation") {
-            TransactionCharacteristics {
-                isolation: Some(parse_isolation_parameter(name, value)?),
+        let setting = characteristic_setting(name, value)?;
+        let options = match name {
+            "transaction_isolation" => TransactionCharacteristics {
+                isolation: Some(isolation_level(&setting)),
                 ..TransactionCharacteristics::default()
-            }
-        } else if name.eq_ignore_ascii_case("transaction_read_only") {
-            TransactionCharacteristics {
-                read_only: Some(parse_boolean_runtime_parameter(name, value)?),
+            },
+            "transaction_read_only" => TransactionCharacteristics {
+                read_only: Some(setting == "on"),
                 ..TransactionCharacteristics::default()
-            }
-        } else if name.eq_ignore_ascii_case("transaction_deferrable") {
-            TransactionCharacteristics {
-                deferrable: Some(parse_boolean_runtime_parameter(name, value)?),
+            },
+            "transaction_deferrable" => TransactionCharacteristics {
+                deferrable: Some(setting == "on"),
                 ..TransactionCharacteristics::default()
+            },
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "set_transaction_parameter called for {name:?}"
+                )))
             }
-        } else {
-            return Err(SQLError::Internal(format!(
-                "set_transaction_parameter called for {name:?}"
-            )));
         };
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         Self::apply_transaction_characteristics(&mut stack, options)
-    }
-
-    pub(crate) fn validate_default_transaction_parameter(
-        name: &str,
-        value: &str,
-    ) -> Result<String, SQLError> {
-        if name.eq_ignore_ascii_case("default_transaction_isolation") {
-            return parse_isolation_parameter(name, value).map(|value| value.as_str().into());
-        }
-        if name.eq_ignore_ascii_case("default_transaction_read_only")
-            || name.eq_ignore_ascii_case("default_transaction_deferrable")
-        {
-            return parse_boolean_runtime_parameter(name, value)
-                .map(|value| if value { "on" } else { "off" }.into());
-        }
-        Ok(value.to_string())
     }
 
     pub(crate) fn current_transaction_is_read_only(&self) -> bool {

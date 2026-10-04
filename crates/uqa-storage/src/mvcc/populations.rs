@@ -9,6 +9,7 @@
 mod effects;
 mod reconcile;
 mod resolve;
+mod structural;
 
 pub(super) use effects::{OwnedPopulationMutation, PopulationEffects};
 pub(super) use resolve::{resolve, stage};

@@ -6,6 +6,7 @@
 
 //! Streaming scored-document input adapters.
 
+mod borrowed;
 mod deferred;
 mod hierarchy;
 mod materialize;
@@ -84,6 +85,19 @@ impl HiddenColumn {
             Self::TableOid => TABLE_OID_COLUMN,
         }
     }
+}
+
+/// Whether a column of a scan's schema is one the scan attaches from row metadata instead of reading it from the stored fields: `_doc_id`, `_score` or `tableoid` where the table declares no column of that name. A predicate pushed into the scan sees only the stored fields.
+pub(crate) fn is_attached_metadata_column(
+    column: &str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> bool {
+    HiddenColumn::ALL
+        .iter()
+        .any(|hidden| hidden.name() == column)
+        && !definitions
+            .iter()
+            .any(|definition| definition.name == column)
 }
 
 #[derive(Clone, Copy)]
@@ -216,6 +230,8 @@ pub struct ScoredDocumentSource {
     table_oid: Option<i64>,
     ordering: Vec<crate::PhysicalOrder>,
     input_guarantees_presence: bool,
+    /// The table's indexes hold every projected field, so rows are projected from index entries without reading a document.
+    index_only: bool,
     lock_origin: Option<(Arc<str>, Arc<str>)>,
     recheck_pinned: bool,
     recheck_documents: std::collections::BTreeMap<DocId, Arc<uqa_storage::StoredDocument>>,
@@ -424,11 +440,7 @@ impl ScoredDocumentSource {
         }
         let projected_fields = schema
             .iter()
-            .filter(|column| {
-                !HiddenColumn::ALL.iter().any(|hidden| {
-                    hidden_columns.contains(*hidden) && column.as_str() == hidden.name()
-                })
-            })
+            .filter(|column| !is_attached_metadata_column(column, &column_definitions))
             .cloned()
             .collect::<Vec<_>>();
         let extra_columns = HiddenColumn::ALL.map(HiddenColumn::name);
@@ -520,6 +532,7 @@ impl ScoredDocumentSource {
             table_oid: None,
             ordering,
             input_guarantees_presence,
+            index_only: false,
             lock_origin: None,
             recheck_pinned: false,
             recheck_documents: std::collections::BTreeMap::new(),
@@ -540,6 +553,12 @@ impl ScoredDocumentSource {
         read: Option<crate::serializable::SerializableRelationRead>,
     ) -> Self {
         self.serializable = crate::serializable::SerializableScan::new(read);
+        self
+    }
+
+    /// Project rows from the index entries the table holds for every projected field. A row-locking read and a pinned recheck still read their documents.
+    pub fn with_index_only(mut self, index_only: bool) -> Self {
+        self.index_only = index_only;
         self
     }
 
@@ -707,6 +726,9 @@ impl crate::RowSource for ScoredDocumentSource {
 
     fn next_physical_batch(&mut self, max_rows: usize) -> ExecResult<Vec<crate::PhysicalRow>> {
         if let Some(rows) = self.next_shared_physical_batch(max_rows)? {
+            return Ok(rows);
+        }
+        if let Some(rows) = self.next_borrowed_physical_batch(max_rows)? {
             return Ok(rows);
         }
         loop {

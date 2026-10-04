@@ -72,7 +72,7 @@ pub fn rename_inherited_constraint(
     Ok(())
 }
 
-/// Foreign-key rename is local even for a partition parent or a partition clone. Enforcement and deferred-event identities remain unchanged.
+/// Foreign-key rename is local even for a partition parent or a partition clone. Enforcement and deferred-event identities remain unchanged. A constraint a foreign key derives on a referenced partition renames alone, as `PostgreSQL` renames its row.
 pub fn rename_foreign_key(
     table: &str,
     columns: &mut [ColumnDef],
@@ -83,12 +83,22 @@ pub fn rename_foreign_key(
     let Some(location) = find_constraint(columns, constraints, from).filter(|location| {
         matches!(
             location,
-            ConstraintLocation::ColumnForeignKey(_) | ConstraintLocation::TableForeignKey(_)
+            ConstraintLocation::ColumnForeignKey(_)
+                | ConstraintLocation::TableForeignKey(_)
+                | ConstraintLocation::ReferencedPartition(..)
         )
     }) else {
         return Ok(false);
     };
     ensure_constraint_name_available(columns, constraints, Some(to), table)?;
+    if let ConstraintLocation::ReferencedPartition(foreign_key, index) = location {
+        let derived = foreign_key
+            .derived_mut(columns, constraints)
+            .and_then(|derived| derived.get_mut(index))
+            .ok_or_else(|| SQLError::Internal("derived constraint disappeared".into()))?;
+        derived.name = to.to_string();
+        return Ok(true);
+    }
     let (name, identity) = match location {
         ConstraintLocation::ColumnForeignKey(index) => {
             let reference = columns[index]

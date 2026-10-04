@@ -525,7 +525,7 @@ fn update_from_spill_distinguishes_equal_leaf_doc_ids_and_is_atomic() {
         &engine,
         "INSERT INTO movement_source VALUES (1, 1, 1, 2, 'low-updated'), (2, 2, 11, 3, 'high-moved')",
     );
-    exec(&engine, "SET work_mem TO '1B'");
+    engine.set_query_memory_limit(Some(1));
 
     let returned = engine
         .sql(
@@ -718,7 +718,7 @@ fn waiting_parent_update_follows_a_row_moved_to_another_partition() {
     exec(&holder, "COMMIT");
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -752,7 +752,7 @@ fn waiting_update_from_spill_follows_a_row_moved_to_another_partition() {
         &root,
         "CREATE TABLE movement_source (item_key INTEGER, new_value TEXT); INSERT INTO movement_source VALUES (1, 'from-waiter')",
     );
-    exec(&root, "SET work_mem TO '1B'");
+    root.set_query_memory_limit(Some(1));
     let holder = root.new_session().unwrap();
     let waiter = root.new_session().unwrap();
     exec(&holder, "BEGIN");
@@ -777,7 +777,7 @@ fn waiting_update_from_spill_follows_a_row_moved_to_another_partition() {
     exec(&holder, "COMMIT");
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -834,7 +834,7 @@ fn waiting_parent_delete_follows_a_row_moved_to_another_partition() {
     exec(&holder, "COMMIT");
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -880,7 +880,7 @@ fn waiting_merge_follows_a_row_moved_to_another_partition() {
     exec(&holder, "COMMIT");
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();

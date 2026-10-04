@@ -27,6 +27,37 @@ pub trait IdentifierAllocator: Send + Sync {
         namespace: &[u8],
         request: IdentifierRequest,
     ) -> StorageBackendResult<IdentifierAllocation>;
+
+    /// Raise the watermark to at least `value` without reporting it. A session that has already read a watermark at or above `value` answers without a physical allocation, which an `Observe` allocation cannot do because it reports the current watermark. Forwarding wrappers forward this as well, or every such observation stays physical.
+    fn observe_identifier(
+        &self,
+        namespace: &[u8],
+        value: u64,
+    ) -> StorageBackendResult<ObservedIdentifier> {
+        self.allocate_identifiers(namespace, IdentifierRequest::Observe(value))
+            .map(|allocation| ObservedIdentifier::Observed {
+                previous: allocation.previous(),
+            })
+    }
+}
+
+/// What a session learned when it raised a watermark to an identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObservedIdentifier {
+    /// A watermark the session had read already covers the identity. Where the watermark stood before is not known.
+    Covered,
+    /// The watermark was read and raised under the provider's write admission. `previous` is where it stood, `None` for a namespace that had none.
+    Observed { previous: Option<u64> },
+}
+
+impl ObservedIdentifier {
+    /// Whether `identity` was never used in its namespace before this observation. Every use of an identity raises the watermark to it, so an identity above the earlier watermark was not used.
+    pub fn unused_before(self, identity: u64) -> bool {
+        match self {
+            Self::Covered => false,
+            Self::Observed { previous } => previous.is_none_or(|previous| identity > previous),
+        }
+    }
 }
 
 /// Observe an externally supplied identity or reserve a contiguous range. Namespace keys must include the allocation domain and the owning object's non-reused generation, rather than its reusable name.
@@ -45,11 +76,17 @@ pub enum IdentifierRequest {
 pub struct IdentifierAllocation {
     watermark: u64,
     first: Option<u64>,
+    previous: Option<u64>,
 }
 
 impl IdentifierAllocation {
     pub const fn watermark(self) -> u64 {
         self.watermark
+    }
+
+    /// The watermark before this allocation, or `None` when the namespace had none.
+    pub const fn previous(self) -> Option<u64> {
+        self.previous
     }
 
     pub fn range(self) -> Option<RangeInclusive<u64>> {
@@ -84,7 +121,11 @@ impl IdentifierRequest {
                 (last, Some(first))
             }
         };
-        Ok(IdentifierAllocation { watermark, first })
+        Ok(IdentifierAllocation {
+            watermark,
+            first,
+            previous: current,
+        })
     }
 
     /// Validate a request before physical admission and charge the provider's key binding/copy workspace. No identifier is consumed if this fails.

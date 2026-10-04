@@ -222,3 +222,60 @@ fn overlay_projection_materializes_only_requested_virtual_columns() {
         .is_err());
     engine.mutation_coordinator().end_command_mutation_overlay();
 }
+
+/// Whether a read of `table` would merge changes from the command overlay, and whether the predicate the single-table path asks agrees.
+fn overlay_merges(engine: &Engine, table: &str) -> bool {
+    let merged = engine
+        .command_overlay_changes(table)
+        .unwrap()
+        .is_some_and(|changes| changes.has_changes());
+    assert_eq!(
+        engine.command_overlay_holds(table).unwrap(),
+        merged,
+        "{table}"
+    );
+    merged
+}
+
+#[test]
+fn the_command_overlay_holds_exactly_the_tables_a_read_merges() {
+    let directory = tempfile::tempdir().unwrap();
+    for engine in [
+        Engine::new(),
+        Engine::open(&directory.path().join("overlay-tables.db")).unwrap(),
+    ] {
+        engine
+            .sql(
+                "CREATE TABLE items (id INTEGER PRIMARY KEY, value INTEGER); CREATE TABLE log (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO items VALUES (1, 1)",
+                &[],
+            )
+            .unwrap();
+        // A table the transaction has not written is read as stored at every isolation level.
+        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
+            engine
+                .sql(
+                    &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT count(*) FROM items; INSERT INTO log VALUES (1, 1)"),
+                    &[],
+                )
+                .unwrap();
+            assert!(!overlay_merges(&engine, "items"), "{isolation}");
+            let own_writes = overlay_merges(&engine, "log");
+            if isolation == "READ COMMITTED" {
+                // Its reads see its own changes in storage.
+                assert!(!own_writes);
+            }
+            engine.sql("ROLLBACK", &[]).unwrap();
+        }
+        // Documents a running command staged are merged for their table alone.
+        engine
+            .mutation_coordinator()
+            .begin_command_mutation_overlay();
+        engine
+            .stage_command_document("log", 7, Some(document(7, 70)))
+            .unwrap();
+        assert!(overlay_merges(&engine, "log"));
+        assert!(!overlay_merges(&engine, "items"));
+        engine.mutation_coordinator().end_command_mutation_overlay();
+        assert!(!overlay_merges(&engine, "log"));
+    }
+}

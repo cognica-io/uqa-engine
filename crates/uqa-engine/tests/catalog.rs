@@ -16,6 +16,12 @@ mod capability_boundaries;
 mod catalog_dependencies;
 #[path = "catalog/catalog_oid_order.rs"]
 mod catalog_oid_order;
+#[path = "catalog/configuration_parameters.rs"]
+mod configuration_parameters;
+#[path = "catalog/constraint_violation_reports.rs"]
+mod constraint_violation_reports;
+#[path = "catalog/diagnostic_fields.rs"]
+mod diagnostic_fields;
 #[path = "catalog/drop_dependencies.rs"]
 mod drop_dependencies;
 #[path = "catalog/event_definitions.rs"]

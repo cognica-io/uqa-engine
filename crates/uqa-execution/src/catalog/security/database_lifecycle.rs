@@ -18,9 +18,10 @@ use uqa_sql::{
     catalog::{
         roles::{guards::RoleCatalogGuards, RoleReferenceNames},
         security::{
+            acl_warning::acl_warning,
             database::{
-                apply_database_acl, database_acl_warning, requested_acl_privileges,
-                resolve_database_grant_targets, validate_database_acl_roles, BoundDatabaseSecurity,
+                apply_database_acl, requested_acl_privileges, resolve_database_grant_targets,
+                validate_database_acl_roles, BoundDatabaseSecurity,
             },
             database_inquiry::DatabaseSecurityRead,
             dependencies::added_acl_roles,
@@ -143,7 +144,7 @@ fn prepare_privileges<'a>(
         &resolved,
     )?;
     let notice = (grantable != privileges.len())
-        .then(|| database_acl_warning(statement.is_grant, grantable != 0, DATABASE_NAME));
+        .then(|| acl_warning(statement.is_grant, grantable != 0, DATABASE_NAME));
     let mut dependencies = BTreeSet::new();
     added_acl_roles(
         resolved.acl.as_deref().unwrap_or_default(),

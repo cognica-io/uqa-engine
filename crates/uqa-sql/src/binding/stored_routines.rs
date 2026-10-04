@@ -248,6 +248,7 @@ fn merge_statement_routine_inputs(plan: &MergePlan) -> CommandRoutineInputs {
                 condition,
                 columns,
                 values,
+                ..
             } => {
                 expressions.extend(condition.iter().cloned());
                 expressions.extend(

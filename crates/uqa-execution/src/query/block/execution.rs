@@ -73,6 +73,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
             &expression_schema,
             params,
             ctes,
+            outer.as_ref(),
         )?;
         return run_select_without_from_output(context, block, stmt, params, ctes, output_mode);
     };
@@ -114,6 +115,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                     &expression_schema,
                     params,
                     ctes,
+                    outer.as_ref(),
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_foreign_select_output(
@@ -137,8 +139,13 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                 && catalog
                     .table_resolved(&resolution, name)?
                     .is_some_and(|table| table.columns.is_empty());
-            let command_overlay =
-                ctes.reads_command_overlay() && context.documents.command_overlay_active();
+            // Only the overlay of this block's own table changes what it reads; changes of other tables leave its storage view as the single-table path reads it.
+            let command_overlay = match local_table.as_deref() {
+                Some(table) if ctes.reads_command_overlay() => {
+                    context.documents.command_overlay_holds(table)?
+                }
+                _ => false,
+            };
             let has_hierarchy_descendants = local_table.is_some()
                 && catalog
                     .hierarchy_scan_tables(&resolution, name, *include_descendants)?
@@ -173,6 +180,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                     &reference_schema,
                     params,
                     ctes,
+                    outer.as_ref(),
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_table_select_output(
@@ -215,6 +223,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
             &expression_schema,
             params,
             ctes,
+            outer.as_ref(),
         )?;
     }
     let column_prune = context.planning.column_prune(stmt, from, ctes)?;
@@ -248,6 +257,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
         &projection_schema,
         params,
         ctes,
+        outer.as_ref(),
     )?;
     let physical_filter =
         context

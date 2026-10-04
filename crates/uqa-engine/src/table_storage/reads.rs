@@ -175,7 +175,10 @@ impl Engine {
         let mut visible = doc_ids
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
-        for (doc_id, present) in changes.changes() {
+        for change in changes.changes() {
+            let (doc_id, present) = change.map_err(|error| {
+                SQLError::Internal(format!("read command-visible ids: {error}"))
+            })?;
             if present {
                 visible.insert(doc_id);
             } else {
@@ -185,56 +188,54 @@ impl Engine {
         Ok(visible.into_iter().collect())
     }
 
-    pub(crate) fn table_doc_count(&self, table: &str) -> Result<u64, SQLError> {
-        use std::sync::atomic::Ordering;
+    /// An estimate of the rows a read of `table` sees: the rows of the table the read selects, and each row the running commands staged for it as if it added one. Unlike [`Self::table_doc_count`] it reads no changed row, so its cost does not grow with the changes a read merges.
+    pub(crate) fn table_row_estimate(&self, table: &str) -> Result<u64, SQLError> {
         let Some(t) = self
             .try_query_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        if let Some(changes) = self
+        let stored = t.stored_document_count()?;
+        Ok(stored.saturating_add(self.command_overlay_row_bound(table)?))
+    }
+
+    pub(crate) fn table_doc_count(&self, table: &str) -> Result<u64, SQLError> {
+        let Some(t) = self
+            .try_query_table(table)
+            .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        let mut count = t.stored_document_count()?;
+        let Some(changes) = self
             .command_overlay_changes(table)?
             .filter(DocumentChanges::has_changes)
-        {
-            let store = t.document_store.read();
-            let mut count =
-                u64::try_from(store.len().map_err(|error| {
-                    SQLError::Internal(format!("read document count: {error}"))
-                })?)
-                .map_err(|_| SQLError::Internal("document count exceeds u64".into()))?;
-            for (doc_id, present) in changes.changes() {
-                let persisted = store.contains_doc_id(doc_id).map_err(|error| {
-                    SQLError::Internal(format!("read command-visible document count: {error}"))
-                })?;
-                match (persisted, present) {
-                    (false, true) => {
-                        count = count.checked_add(1).ok_or_else(|| {
-                            SQLError::Internal("document count exceeds u64".into())
-                        })?;
-                    }
-                    (true, false) => {
-                        count = count
-                            .checked_sub(1)
-                            .ok_or_else(|| SQLError::Internal("document count underflow".into()))?;
-                    }
-                    _ => {}
-                }
-            }
+        else {
             return Ok(count);
+        };
+        let store = t.document_store.read();
+        for change in changes.changes() {
+            let (doc_id, present) = change.map_err(|error| {
+                SQLError::Internal(format!("read command-visible document count: {error}"))
+            })?;
+            let persisted = store.contains_doc_id(doc_id).map_err(|error| {
+                SQLError::Internal(format!("read command-visible document count: {error}"))
+            })?;
+            match (persisted, present) {
+                (false, true) => {
+                    count = count
+                        .checked_add(1)
+                        .ok_or_else(|| SQLError::Internal("document count exceeds u64".into()))?;
+                }
+                (true, false) => {
+                    count = count
+                        .checked_sub(1)
+                        .ok_or_else(|| SQLError::Internal("document count underflow".into()))?;
+                }
+                _ => {}
+            }
         }
-        if !t.doc_count_dirty.load(Ordering::Acquire) {
-            return Ok(t.doc_count_cache.load(Ordering::Acquire));
-        }
-        let count = t
-            .document_store
-            .read()
-            .len()
-            .map_err(|error| SQLError::Internal(format!("read document count: {error}")))?;
-        let count = u64::try_from(count)
-            .map_err(|_| SQLError::Internal("document count exceeds u64".into()))?;
-        t.doc_count_cache.store(count, Ordering::Release);
-        t.doc_count_dirty.store(false, Ordering::Release);
         Ok(count)
     }
 }

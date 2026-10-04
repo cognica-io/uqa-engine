@@ -224,10 +224,12 @@ fn redb_migrates_legacy_postings_and_rebuilds_lossless_occurrences() {
     assert!(index.source_rebuild_required().unwrap());
     assert!(index.get_posting_list("title", "rust").is_err());
     index
-        .try_rebuild_documents(vec![(
-            7,
-            std::collections::BTreeMap::from([("title".into(), "rust language rust".into())]),
-        )])
+        .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+            vec![(
+                7,
+                std::collections::BTreeMap::from([("title".into(), "rust language rust".into())]),
+            )],
+        ))
         .unwrap();
     assert!(!index.source_rebuild_required().unwrap());
     assert_eq!(index.doc_freq("title", "rust").unwrap(), 1);

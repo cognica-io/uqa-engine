@@ -97,6 +97,13 @@ impl<'a> ScalarEvalContext<'a> {
         self.row_schema
     }
 
+    pub(super) fn with_type_schema<R>(&self, operation: impl FnOnce(&RowSchema) -> R) -> R {
+        match self.row_schema {
+            Some(schema) => operation(schema),
+            None => operation(&RowSchema::default()),
+        }
+    }
+
     pub(super) fn params(&self) -> &'a [SQLParam] {
         self.params
     }

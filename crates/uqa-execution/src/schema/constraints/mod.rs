@@ -48,7 +48,7 @@ pub struct ConstraintAlterContext<'a> {
     pub foreign_keys: ForeignKeyDefinitionContext<'a>,
     pub publication: SchemaPublicationContext<'a>,
     pub writes: &'a dyn SchemaWriteTransaction,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }
 fn ddl_storage_error(action: &str, error: StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
@@ -58,6 +58,7 @@ pub mod drop;
 mod inheritance;
 mod lifecycle;
 pub mod names;
+pub mod partition_foreign_keys;
 pub mod renaming;
 pub mod restoration;
 mod validation;

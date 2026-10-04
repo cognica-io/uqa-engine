@@ -7,11 +7,14 @@
 //! Interpreter activation state, expression binding, and routine lifecycle.
 
 use super::{
-    bind_expr, bind_statement, cast_value_from, coercion_type_name, BTreeSet, ColumnType,
-    CreateFunction, DatumResolver, Expr, Flow, FunctionReturns, HashMap, Interpreter, PLpgSQLBlock,
-    PLpgSQLDatum, PLpgSQLFunction, RoutineContext, RoutineOutcome, SQLError, SQLResult, Statement,
-    Value,
+    bind_expression_variables, bind_statement_variables, cast_value_from, coercion_type_name,
+    BTreeSet, ColumnType, CreateFunction, DatumResolver, Expr, Flow, FunctionReturns, HashMap,
+    Interpreter, PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction, RoutineContext, RoutineOutcome,
+    SQLError, SQLParam, SQLResult, Statement, Value,
 };
+use uqa_sql::binding::{resolve_variable_sites, VariableSiteResolution};
+use uqa_sql::plan::UnifiedPlan;
+use uqa_sql::ScalarExpr;
 
 impl<'a> Interpreter<'a> {
     #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
@@ -21,6 +24,7 @@ impl<'a> Interpreter<'a> {
         parsed: &'a PLpgSQLFunction,
         bound: Vec<Value>,
     ) -> Result<Self, SQLError> {
+        services.statements.load_language_library("plpgsql");
         let datums = &parsed.datums;
         if datums.len() < def.params.len() {
             return Err(SQLError::Internal(
@@ -74,6 +78,7 @@ impl<'a> Interpreter<'a> {
             found: parsed.found_datum,
             last_row_count: 0,
             is_set: def.returns_set(),
+            variable_conflict: parsed.variable_conflict,
         };
         // Bind call arguments onto the leading parameter datums.
         // Procedure OUT arguments start NULL (the placeholder value a
@@ -257,7 +262,7 @@ impl<'a> Interpreter<'a> {
     }
 
     pub(super) fn eval_expr(&self, expr: &Expr) -> Result<Value, SQLError> {
-        let bound = bind_expr(expr, &mut self.resolver())?;
+        let bound = self.bind_expression(expr)?;
         self.services.expressions.evaluate(&bound)
     }
 
@@ -265,8 +270,55 @@ impl<'a> Interpreter<'a> {
         &self,
         expr: &Expr,
     ) -> Result<(Value, Option<ColumnType>), SQLError> {
-        let bound = bind_expr(expr, &mut self.resolver())?;
+        let bound = self.bind_expression(expr)?;
         self.services.expressions.evaluate_with_type(&bound)
+    }
+
+    /// Bind the variables an embedded expression names, each checked against the columns its subqueries can see.
+    pub(super) fn bind_expression(&self, expr: &Expr) -> Result<Expr, SQLError> {
+        bind_expression_variables(
+            expr,
+            &mut self.resolver(),
+            self.variable_conflict,
+            &mut |statement, params, names| self.resolve_variable_sites(statement, &params, names),
+        )
+    }
+
+    /// Bind the variables an embedded statement names, each checked against the columns and relations the statement can see.
+    pub(super) fn bind_query(&self, statement: &Statement) -> Result<Statement, SQLError> {
+        bind_statement_variables(
+            statement,
+            &mut self.resolver(),
+            self.variable_conflict,
+            &mut |statement, params, names| self.resolve_variable_sites(statement, &params, names),
+        )
+    }
+
+    /// How each variable site of `statement` resolves in the scope the statement runs in.
+    fn resolve_variable_sites(
+        &self,
+        statement: Statement,
+        params: &[SQLParam],
+        names: Vec<ScalarExpr>,
+    ) -> Result<Vec<VariableSiteResolution>, SQLError> {
+        let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
+            self.services.runtime.has_aggregate_function(name)
+        });
+        let mut names = Some(names);
+        let mut resolutions = Vec::new();
+        self.services
+            .statements
+            .with_statement_scope(&mut |routines, ctes| {
+                resolutions = resolve_variable_sites(
+                    routines,
+                    &mut plan,
+                    params,
+                    ctes,
+                    names.take().unwrap_or_default(),
+                )?;
+                Ok(())
+            })?;
+        Ok(resolutions)
     }
 
     pub(super) fn eval_boolean(&self, expr: &Expr) -> Result<Option<bool>, SQLError> {
@@ -282,7 +334,7 @@ impl<'a> Interpreter<'a> {
     }
 
     pub(super) fn exec_query(&self, statement: &Statement) -> Result<SQLResult, SQLError> {
-        let bound = bind_statement(statement, &mut self.resolver())?;
+        let bound = self.bind_query(statement)?;
         self.services.statements.execute_bound(bound, &[])
     }
 

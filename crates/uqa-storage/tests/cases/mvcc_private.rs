@@ -40,6 +40,48 @@ fn value(snapshot: &PrivateRecordSnapshot, key: &[u8]) -> Option<Vec<u8>> {
 }
 
 #[test]
+fn complete_private_revision_tracks_atomic_batches_and_allocation_free_undo() {
+    let control = control();
+    let changes = PrivateRecordChanges::new(control.memory());
+    let empty = changes.snapshot().unwrap();
+    let before_write = StorageSavepointId::allocate();
+    changes.savepoint(before_write).unwrap();
+    assert_eq!(empty.revision(), None);
+    changes.apply(&[write(b"a", b"first")], &control).unwrap();
+    let first = changes.snapshot().unwrap();
+    let savepoint = StorageSavepointId::allocate();
+    changes.savepoint(savepoint).unwrap();
+    changes
+        .apply(&[write(b"b", b"second"), write(b"c", b"third")], &control)
+        .unwrap();
+    let second = changes.snapshot().unwrap();
+    assert_ne!(first.revision(), second.revision());
+    let full = control
+        .memory()
+        .reserve(control.memory().limit() - control.memory().used())
+        .unwrap();
+    assert!(changes
+        .apply(&[write(b"d", b"rejected")], &control)
+        .is_err());
+    let undo = allocation_counter::measure(|| changes.rollback_to_savepoint(savepoint).unwrap());
+    assert_eq!(undo.count_total, 0);
+    drop(full);
+    assert_eq!(changes.snapshot().unwrap().revision(), first.revision());
+    changes
+        .apply(&[write(b"b", b"new branch")], &control)
+        .unwrap();
+    assert_ne!(changes.snapshot().unwrap().revision(), second.revision());
+    changes.rollback_to_savepoint(before_write).unwrap();
+    assert_eq!(changes.snapshot().unwrap().revision(), empty.revision());
+    changes.apply(&[write(b"a", b"first")], &control).unwrap();
+    assert_ne!(changes.snapshot().unwrap().revision(), first.revision());
+    changes.rollback().unwrap();
+    assert_eq!(changes.snapshot().unwrap().revision(), None);
+    assert_eq!(value(&first, b"a"), Some(b"first".to_vec()));
+    assert_eq!(value(&second, b"b"), Some(b"second".to_vec()));
+}
+
+#[test]
 fn private_key_revisions_survive_undo_without_reuse_or_payload_hydration() {
     let storage = StorageReadControl::with_limit(4 << 20);
     let read = StorageReadControl::with_limit(4096);
@@ -146,7 +188,12 @@ fn command_views_keep_values_across_later_changes_and_rollback() {
     assert_eq!(value(&changes.snapshot().unwrap(), b"a").unwrap(), b"third");
     changes.rollback().unwrap();
     assert!(!changes.has_written());
-    assert!(changes.prepare(&control).unwrap().records().is_empty());
+    assert!(changes
+        .prepare(&control)
+        .unwrap()
+        .resident()
+        .unwrap()
+        .is_empty());
     drop(changes);
     assert_eq!(value(&second, b"b").unwrap(), b"inserted");
 }
@@ -258,7 +305,7 @@ fn final_replacements_preserve_original_revisions_and_tombstones() {
         .apply(&[write(b"z", b"last"), write(b"b", b"middle")], &control)
         .unwrap();
     let final_changes = changes.prepare(&control).unwrap();
-    let records = final_changes.records();
+    let records = final_changes.resident().unwrap();
     assert_eq!(
         records
             .iter()

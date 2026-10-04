@@ -65,7 +65,7 @@ pub fn create_sequence(
     persistence: RelationPersistence,
     ownership: &SequenceOwnership,
 ) -> Result<bool, SQLError> {
-    validate_sequence_definition(&state.definition(), None)?;
+    validate_sequence_definition(&state.definition(), Some(state.current))?;
     let role_owner = context.creation.bind_owner()?;
     let temporary = context
         .creation
@@ -81,7 +81,7 @@ pub fn create_sequence(
         .relation_exists(&name)
         .map_err(|error| SQLError::Internal(format!("resolve relation `{name}`: {error}")))?
     {
-        return sequence_create_collision(&name, if_not_exists);
+        return sequence_create_collision(&relation.name, if_not_exists);
     }
     state.owner = bind_sequence_owner(context.owners, &name, ownership)?;
     context.creation.retain_owner(&role_owner)?;
@@ -95,7 +95,7 @@ pub fn create_sequence(
         .relation_exists(&name)
         .map_err(|error| SQLError::Internal(format!("resolve relation `{name}`: {error}")))?
     {
-        return sequence_create_collision(&name, if_not_exists);
+        return sequence_create_collision(&relation.name, if_not_exists);
     }
     context.creation.reserve_name(&name)?;
     let catalog_oid = context
@@ -114,7 +114,7 @@ pub fn create_sequence(
         role_owner.identity(),
         catalog_oid,
     )? {
-        return sequence_create_collision(&name, if_not_exists);
+        return sequence_create_collision(&relation.name, if_not_exists);
     }
     Ok(true)
 }

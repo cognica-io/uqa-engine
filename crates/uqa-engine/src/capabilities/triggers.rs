@@ -34,7 +34,21 @@ impl Engine {
             expressions: self,
             projection: self.catalog_execution(),
             runtime: self.query_runtime_view(),
+            foreign_keys: self,
         }
+    }
+}
+impl uqa_execution::mutation::triggers::context::ForeignKeyCheckRunner for Engine {
+    fn run_foreign_key_check(
+        &self,
+        check: &uqa_execution::mutation::referential::checks::ForeignKeyCheck,
+        queue: &uqa_execution::mutation::triggers::queue::AfterTriggerQueue,
+    ) -> Result<(), SQLError> {
+        uqa_execution::mutation::referential::checks::run_foreign_key_check(
+            &self.mutation_statement_context().mutation,
+            check,
+            queue,
+        )
     }
 }
 impl TriggerCatalog for Engine {
@@ -58,6 +72,21 @@ impl TriggerCatalog for Engine {
     ) -> Result<Vec<StoredTrigger>, SQLError> {
         self.event_lookup_context()
             .triggers_for(table, timing, event, row, updated_columns)
+    }
+    fn row_trigger_definitions(
+        &self,
+        table: &str,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+        updated_columns: &[String],
+    ) -> Result<Vec<StoredTrigger>, SQLError> {
+        self.event_lookup_context().trigger_definitions_for(
+            table,
+            timing,
+            event,
+            true,
+            updated_columns,
+        )
     }
     fn has_trigger_definition(
         &self,
@@ -88,7 +117,7 @@ impl TriggerRoutineInvoker for Engine {
     }
     fn execute_trigger_routine(
         &self,
-        function: &SQLUserFunction,
+        function: &Arc<SQLUserFunction>,
         context: &TriggerRoutineContext,
     ) -> Result<Value, SQLError> {
         crate::capabilities::routine_invocation::execute_trigger_routine(self, function, context)
@@ -109,13 +138,10 @@ impl ReferentialCatalog for Engine {
     fn session_replication_role_is_replica(&self) -> bool {
         Engine::session_replication_role_is_replica(self)
     }
-    fn hierarchy_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
-        Engine::hierarchy_ancestor_tables(self, table)
+    fn partition_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
+        uqa_sql::semantics::partition::partition_ancestor_tables(self, table)
     }
     fn try_referrers_to(&self, table: &str) -> Result<Vec<(String, ForeignKey)>, String> {
         Engine::referrers_in_execution(self, table).map_err(|error| error.to_string())
-    }
-    fn partition_hierarchy_root(&self, table: &str) -> Result<Option<String>, SQLError> {
-        Engine::partition_hierarchy_root(self, table)
     }
 }

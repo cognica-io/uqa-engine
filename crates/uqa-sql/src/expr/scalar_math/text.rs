@@ -13,10 +13,10 @@ use crate::expr::{
     allocation_error,
     conversion::{to_i64_with_control, value_to_string_with_control},
     encoding::{
-        base64_decode_with_control, base64_encode_with_control, hex_encode_with_control,
+        base64_decode_with_control, base64_encode_with_control, escape_decode_with_control,
+        escape_encode_with_control, hex_decode_with_control, hex_encode_with_control,
         md5_hex_with_control,
     },
-    json::utf8_lossy_with_control,
     nonnegative_usize,
 };
 
@@ -206,24 +206,21 @@ fn encode(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
         return string(md5_hex_with_control(input, control)?, control);
     }
     let encoding = value_to_string_with_control(&args[1], control)?;
-    let output = match encoding.as_str() {
+    let output = match encoding.to_ascii_lowercase().as_str() {
         "hex" => hex_encode_with_control(input, control)?,
         "base64" => base64_encode_with_control(input, control)?,
-        "escape" => {
-            let input = utf8_lossy_with_control(input, control)?;
-            let mut out = ProductionString::new(*control);
-            for character in input.escape_default() {
-                out.push(character)?;
-            }
-            out.finish()?
-        }
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "unknown encoding {other:?}"
-            )))
-        }
+        "escape" => escape_encode_with_control(input, control)?,
+        _ => return Err(unrecognized_encoding(&encoding)),
     };
     string(output, control)
+}
+
+/// An encoding `encode` and `decode` do not know, whose name `PostgreSQL` compares without regard to case.
+fn unrecognized_encoding(name: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22023".into(),
+        message: format!("unrecognized encoding: \"{name}\""),
+    }
 }
 
 fn decode(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
@@ -232,52 +229,13 @@ fn decode(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
     }
     let s = value_to_string_with_control(&args[0], control)?;
     let encoding = value_to_string_with_control(&args[1], control)?;
-    match encoding.as_str() {
-        "hex" => {
-            let mut cleaned = ProductionString::new(*control);
-            for character in s.chars() {
-                control.check()?;
-                if !character.is_whitespace() {
-                    cleaned.push(character)?;
-                }
-            }
-            if !cleaned.len().is_multiple_of(2) {
-                return Err(SQLError::TypeMismatch(
-                    "invalid hexadecimal data: odd number of digits".into(),
-                ));
-            }
-            let mut out = ProductionVec::new(*control);
-            out.reserve(cleaned.len() / 2)?;
-            for pair in cleaned.as_bytes().chunks_exact(2) {
-                let hi = (pair[0] as char)
-                    .to_digit(16)
-                    .ok_or_else(|| SQLError::TypeMismatch("invalid hexadecimal digit".into()))?
-                    as u8;
-                let lo = (pair[1] as char)
-                    .to_digit(16)
-                    .ok_or_else(|| SQLError::TypeMismatch("invalid hexadecimal digit".into()))?
-                    as u8;
-                out.push_copy(hi * 16 + lo)?;
-            }
-            bytes(out.finish()?, control)
-        }
-        "base64" => {
-            let output = base64_decode_with_control(&s, control).map_err(|error| match error {
-                SQLError::TypeMismatch(_) => {
-                    SQLError::TypeMismatch(format!("base64 decode: {error}"))
-                }
-                error => error,
-            })?;
-            bytes(output, control)
-        }
-        "escape" => {
-            let (value, memory) = s.into_parts();
-            Ok(control.finish(Value::Bytes(value.into_bytes()), memory)?)
-        }
-        other => Err(SQLError::TypeMismatch(format!(
-            "unknown encoding {other:?}"
-        ))),
-    }
+    let output = match encoding.to_ascii_lowercase().as_str() {
+        "hex" => hex_decode_with_control(&s, control)?,
+        "base64" => base64_decode_with_control(&s, control)?,
+        "escape" => escape_decode_with_control(&s, control)?,
+        _ => return Err(unrecognized_encoding(&encoding)),
+    };
+    bytes(output, control)
 }
 
 fn split_part(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {

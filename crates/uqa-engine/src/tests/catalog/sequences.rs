@@ -8,6 +8,7 @@ mod alteration_authority;
 mod dependencies;
 mod lifecycle;
 mod ownership;
+mod positions;
 mod privileges;
 mod removal;
 mod restoration;

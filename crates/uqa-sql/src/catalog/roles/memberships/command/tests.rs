@@ -195,13 +195,15 @@ fn unchanged_grants_and_absent_revokes_return_distinct_notices_without_an_oid_re
     );
     statement.is_grant = false;
     let bound = bind(&roles, &statement);
-    let message = MembershipRevocation::new(&bound, &BTreeMap::new())
+    let notice = MembershipRevocation::new(&bound, &BTreeMap::new())
         .member(&roles, &bound.members[0])
         .unwrap()
         .unwrap();
     assert_eq!(
-        message,
-        "role \"member\" has not been granted membership in role \"target\" by role \"uqa\""
+        notice,
+        crate::SQLNotice::warning(
+            "role \"member\" has not been granted membership in role \"target\" by role \"uqa\""
+        )
     );
 }
 

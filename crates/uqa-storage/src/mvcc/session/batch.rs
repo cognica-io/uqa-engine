@@ -19,6 +19,8 @@ use crate::{KeyValueBatch, StorageBackendResult};
 use super::transaction::Transaction;
 use super::VersionedKeyValueStore;
 
+mod records;
+
 enum Operation {
     Requirement(BudgetedVec<u8>),
     ObservedRequirement(RecordKey, crate::mvcc::CommitSequence),
@@ -30,7 +32,7 @@ enum Operation {
     ),
     IdentifierObservation(BudgetedVec<u8>, u64),
     IdentifierInheritance(BudgetedVec<u8>, BudgetedVec<u8>),
-    DeletePrefix(BudgetedVec<u8>, RecordWriteKind),
+    Records(records::Records),
     OccurrenceReset(BudgetedVec<u8>),
     Fence(BudgetedVec<u8>),
     Graph(OwnedGraphMutation),
@@ -42,6 +44,8 @@ enum Operation {
         value: Option<SharedRecordValue>,
         kind: RecordWriteKind,
     },
+    /// A canonical record at a key that never had one.
+    UnusedRecord(RecordKey, SharedRecordValue),
 }
 
 pub(super) struct Batch<'a> {
@@ -84,6 +88,9 @@ impl<'a> Batch<'a> {
         value: Option<&[u8]>,
         kind: RecordWriteKind,
     ) -> StorageBackendResult<()> {
+        if kind != RecordWriteKind::DiskANNOrigin {
+            return self.record_edit(key, value, kind, false);
+        }
         self.operations.push(Operation::TypedRecord {
             key: RecordKey::new(key, self.store.control.memory())
                 .map_err(VersionError::into_storage_error)?,
@@ -93,6 +100,40 @@ impl<'a> Batch<'a> {
             kind,
         })?;
         Ok(())
+    }
+
+    fn record_edit(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+        kind: RecordWriteKind,
+        prefix: bool,
+    ) -> StorageBackendResult<()> {
+        if !matches!(self.operations.last(), Some(Operation::Records(_))) {
+            // All record groups retain their prefixes against the first group's allowance.
+            let memory = self
+                .operations
+                .iter()
+                .rev()
+                .find_map(|operation| match operation {
+                    Operation::Records(records) => Some(records.budget().clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    self.store
+                        .control
+                        .memory()
+                        .child(self.store.control.memory().limit() / 32)
+                });
+            self.operations
+                .push(Operation::Records(records::Records::new(&memory)))?;
+        }
+        let Some(Operation::Records(records)) = self.operations.last_mut() else {
+            unreachable!()
+        };
+        records
+            .push(key, value, kind, prefix, &self.store.control)
+            .map_err(VersionError::into_storage_error)
     }
 
     pub(super) fn apply(&self, transaction: &mut Transaction) -> Result<(), VersionError> {
@@ -138,9 +179,19 @@ impl<'a> Batch<'a> {
                 }
                 Operation::IdentifierObservation(_, _) | Operation::IdentifierInheritance(_, _) => {
                 }
-                Operation::DeletePrefix(prefix, kind) => {
-                    transaction.delete_prefix_kind(prefix, *kind, control)?;
-                }
+                Operation::Records(records) => records.visit(control, |edit| {
+                    if edit.prefix {
+                        transaction.delete_prefix_kind(edit.key.bytes(), edit.kind, control)?;
+                    } else {
+                        transaction.write_shared_record(
+                            &edit.key,
+                            edit.value.as_ref(),
+                            edit.kind,
+                            control,
+                        )?;
+                    }
+                    Ok(())
+                })?,
                 Operation::OccurrenceReset(table) => {
                     let table = std::str::from_utf8(table)
                         .map_err(|_| VersionError::InvalidEncoding("invalid occurrence table"))?;
@@ -162,30 +213,13 @@ impl<'a> Batch<'a> {
                     transaction.vector_mutation(mutation)?;
                 }
                 Operation::VectorFence(kind, prefix) => {
-                    let view = transaction.view()?;
-                    let mut guards = BudgetedVec::new(self.store.control.memory());
-                    view.visit_keys(prefix, None, usize::MAX, control, &mut |key, record| {
-                        if record.live {
-                            let layout = kind.layout(&*self.store.persistence)?;
-                            let metadata = layout.metadata_key(key, control)?.ok_or(
-                                VersionError::InvalidEncoding("invalid vector metadata prefix"),
-                            )?;
-                            if &*metadata != key {
-                                return Err(VersionError::InvalidEncoding(
-                                    "vector fence selected derived rows",
-                                ));
-                            }
-                            let guard = layout.key(key, Key::Structure, control)?;
-                            guards.push(guard)?;
-                        }
-                        Ok(true)
-                    })?;
-                    for guard in guards.iter() {
-                        transaction.fence_record(guard, control)?;
-                    }
+                    self.fence_vector_structures(transaction, *kind, prefix)?;
                 }
                 Operation::TypedRecord { key, value, kind } => {
                     transaction.write_shared_record(key, value.as_ref(), *kind, control)?;
+                }
+                Operation::UnusedRecord(key, value) => {
+                    transaction.write_unused_record(key, value, control)?;
                 }
             }
         }
@@ -195,6 +229,41 @@ impl<'a> Batch<'a> {
         // Validate and stage every record first. Allocation uses persistence directly because the session's mutation boundary already holds its active-transaction lock.
         self.apply_identifiers()?;
         self.observe_writes(transaction)
+    }
+
+    /// Fence the structure guard of every live vector index whose metadata lies under `prefix`.
+    fn fence_vector_structures(
+        &self,
+        transaction: &mut Transaction,
+        kind: IndexKind,
+        prefix: &[u8],
+    ) -> Result<(), VersionError> {
+        let control = &self.store.control;
+        let view = transaction.view()?;
+        let mut guards = BudgetedVec::new(control.memory());
+        view.visit_keys(prefix, None, usize::MAX, control, &mut |key, record| {
+            if record.live {
+                let layout = kind.layout(&*self.store.persistence)?;
+                let metadata =
+                    layout
+                        .metadata_key(key, control)?
+                        .ok_or(VersionError::InvalidEncoding(
+                            "invalid vector metadata prefix",
+                        ))?;
+                if &*metadata != key {
+                    return Err(VersionError::InvalidEncoding(
+                        "vector fence selected derived rows",
+                    ));
+                }
+                let guard = layout.key(key, Key::Structure, control)?;
+                guards.push(guard)?;
+            }
+            Ok(true)
+        })?;
+        for guard in guards.iter() {
+            transaction.fence_record(guard, control)?;
+        }
+        Ok(())
     }
 
     fn apply_populations(
@@ -228,17 +297,18 @@ impl<'a> Batch<'a> {
                 _ => {}
             }
         }
-        let origins = origins.prepare(control)?;
+        let origins = origins.prepare(control)?.collect(control)?;
         let after = transaction.view()?;
         let generated = crate::mvcc::populations::stage(
-            origins.records(),
+            &origins,
             &lifecycle,
             before,
             &after,
             &*self.store.persistence,
             control,
         )?;
-        for write in generated.records() {
+        let mut generated_writes = generated.writes();
+        while let Some(write) = generated_writes.next(control)? {
             transaction.write_shared_record(
                 &write.shared_key(),
                 write.shared_value().as_ref(),
@@ -251,29 +321,52 @@ impl<'a> Batch<'a> {
 
     fn apply_identifiers(&self) -> Result<(), VersionError> {
         let write_control = self.store.write_control();
+        let observe = |namespace: &[u8], value: u64| {
+            let allocation = self.store.persistence.allocate_identifiers(
+                namespace,
+                crate::mvcc::IdentifierRequest::Observe(value),
+                &write_control,
+            )?;
+            self.store
+                .observed
+                .lock()
+                .record(namespace, allocation.watermark());
+            Ok::<_, VersionError>(allocation)
+        };
+        // An observation at or below a watermark this session has read raises nothing, so it needs no allocation.
+        let raise = |namespace: &[u8], value: u64| {
+            if self.store.observed.lock().covers(namespace, value) {
+                return Ok(());
+            }
+            observe(namespace, value).map(|_| ())
+        };
+        // An observation only raises its namespace's watermark to the maximum observed value, so a run of observations of one namespace needs a single physical allocation. An inheritance reads its source watermark and ends the run.
+        let mut run: Option<(&[u8], u64)> = None;
         for operation in self.operations.iter() {
             match operation {
-                Operation::IdentifierObservation(namespace, value) => {
-                    self.store.persistence.allocate_identifiers(
-                        namespace,
-                        crate::mvcc::IdentifierRequest::Observe(*value),
-                        &write_control,
-                    )?;
-                }
+                Operation::IdentifierObservation(namespace, value) => match &mut run {
+                    Some((current, maximum)) if *current == &namespace[..] => {
+                        *maximum = (*maximum).max(*value);
+                    }
+                    _ => {
+                        if let Some((namespace, value)) = run.replace((namespace, *value)) {
+                            raise(namespace, value)?;
+                        }
+                    }
+                },
                 Operation::IdentifierInheritance(from, to) => {
-                    let source = self.store.persistence.allocate_identifiers(
-                        from,
-                        crate::mvcc::IdentifierRequest::Observe(0),
-                        &write_control,
-                    )?;
-                    self.store.persistence.allocate_identifiers(
-                        to,
-                        crate::mvcc::IdentifierRequest::Observe(source.watermark()),
-                        &write_control,
-                    )?;
+                    if let Some((namespace, value)) = run.take() {
+                        raise(namespace, value)?;
+                    }
+                    // The source watermark must be the current one, which only an allocation reads.
+                    let source = observe(from, 0)?;
+                    raise(to, source.watermark())?;
                 }
                 _ => {}
             }
+        }
+        if let Some((namespace, value)) = run {
+            raise(namespace, value)?;
         }
         Ok(())
     }
@@ -402,11 +495,7 @@ impl KeyValueBatch for Batch<'_> {
         self.typed_record(key, value, RecordWriteKind::IVFPreview)
     }
     fn preview_ivf_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::IVFPreview,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::IVFPreview, true)
     }
     fn fence_ivf_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
         self.operations.push(Operation::VectorFence(
@@ -441,11 +530,7 @@ impl KeyValueBatch for Batch<'_> {
         self.typed_record(key, value, RecordWriteKind::HNSWPreview)
     }
     fn preview_hnsw_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::HNSWPreview,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::HNSWPreview, true)
     }
     fn fence_hnsw_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
         self.operations.push(Operation::VectorFence(
@@ -456,6 +541,15 @@ impl KeyValueBatch for Batch<'_> {
     }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.typed_record(key, Some(value), RecordWriteKind::Canonical)
+    }
+
+    fn put_unused(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
+        self.operations.push(Operation::UnusedRecord(
+            RecordKey::new(key, self.store.control.memory())
+                .map_err(VersionError::into_storage_error)?,
+            Arc::new(self.copy(value)?),
+        ))?;
+        Ok(())
     }
 
     fn replace_diskann_origin(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
@@ -544,18 +638,10 @@ impl KeyValueBatch for Batch<'_> {
         self.typed_record(key, None, RecordWriteKind::Canonical)
     }
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::Canonical,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::Canonical, true)
     }
     fn delete_prefix_allow_absent(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::IdempotentDelete,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::IdempotentDelete, true)
     }
     fn replace_occurrence_record(
         &mut self,
@@ -565,11 +651,7 @@ impl KeyValueBatch for Batch<'_> {
         self.typed_record(key, value, RecordWriteKind::Occurrence)
     }
     fn invalidate_occurrence_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::DeletePrefix(
-            self.copy(prefix)?,
-            RecordWriteKind::OccurrenceCache,
-        ))?;
-        Ok(())
+        self.record_edit(prefix, None, RecordWriteKind::OccurrenceCache, true)
     }
     fn occurrence_document(&mut self, table: &str, document: u64) -> StorageBackendResult<()> {
         let key =

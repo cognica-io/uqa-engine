@@ -1,0 +1,43 @@
+\set ON_ERROR_STOP on
+SET client_min_messages = warning;
+CREATE EXTENSION dblink;
+CREATE TABLE read_view_items (id integer);
+INSERT INTO read_view_items VALUES (1);
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SAVEPOINT empty;
+INSERT INTO read_view_items VALUES (2);
+SAVEPOINT keep;
+INSERT INTO read_view_items VALUES (3);
+SELECT 'rr_private:' || count(*) FROM read_view_items;
+DO $$ BEGIN PERFORM dblink_exec('host=/var/run/postgresql dbname=postgres user=postgres', 'INSERT INTO read_view_items VALUES (4)'); END $$;
+SELECT 'rr_external:' || count(*) FROM read_view_items;
+ROLLBACK TO keep;
+SELECT 'rr_keep:' || count(*) FROM read_view_items;
+ROLLBACK TO empty;
+SELECT 'rr_empty:' || count(*) FROM read_view_items;
+INSERT INTO read_view_items VALUES (5);
+SELECT 'rr_branch:' || count(*) FROM read_view_items;
+ROLLBACK;
+SELECT 'rr_final:' || array_agg(id ORDER BY id)::text FROM read_view_items;
+
+CREATE TABLE ddl_items (id integer);
+INSERT INTO ddl_items VALUES (1);
+BEGIN;
+SAVEPOINT original;
+ALTER TABLE ddl_items ADD COLUMN label text DEFAULT 'first';
+SELECT 'ddl_first:' || label FROM ddl_items;
+ROLLBACK TO original;
+SELECT 'ddl_undone:' || count(*) FROM information_schema.columns WHERE table_name = 'ddl_items' AND column_name = 'label';
+ALTER TABLE ddl_items ADD COLUMN label text DEFAULT 'replacement';
+SELECT 'ddl_branch:' || label FROM ddl_items;
+ROLLBACK;
+SELECT 'ddl_final:' || count(*) FROM information_schema.columns WHERE table_name = 'ddl_items' AND column_name = 'label';
+
+DO $$ BEGIN PERFORM dblink_connect('batch', 'host=/var/run/postgresql dbname=postgres user=postgres'); END $$;
+DO $$ BEGIN PERFORM dblink_exec('batch', $batch$CREATE TABLE batch_items (id integer); INSERT INTO batch_items VALUES (1); BEGIN; SAVEPOINT original; ALTER TABLE batch_items ADD COLUMN label text DEFAULT 'first'$batch$); END $$;
+SELECT 'batch_first:' || label FROM dblink('batch', 'SELECT label FROM batch_items') AS result(label text);
+DO $$ BEGIN PERFORM dblink_exec('batch', 'ROLLBACK TO original'); END $$;
+SELECT 'batch_kept:' || id FROM dblink('batch', 'SELECT id FROM batch_items') AS result(id integer);
+DO $$ BEGIN PERFORM dblink_exec('batch', 'ROLLBACK'); END $$;
+SELECT 'batch_final:' || coalesce(relation, 'absent') FROM dblink('batch', $$SELECT to_regclass('public.batch_items')::text$$) AS result(relation text);
+DO $$ BEGIN PERFORM dblink_disconnect('batch'); END $$;

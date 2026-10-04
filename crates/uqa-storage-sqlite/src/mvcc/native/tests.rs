@@ -17,6 +17,7 @@ mod accelerators;
 pub(super) mod diskann;
 mod generations;
 mod graph_lookup;
+mod key_matching;
 pub(super) mod materialization;
 mod migration;
 mod namespace;
@@ -44,13 +45,13 @@ fn native_layout_inventory_covers_every_current_catalog_table_and_primary_key() 
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<Result<BTreeSet<_>, _>>()?;
             let expected: BTreeSet<_> = NativeRecordFamily::all()
-                .filter(|family| !family.is_standalone_graph() && !matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::VectorGuards | NativeRecordFamily::DiskANNRecords | NativeRecordFamily::VectorOrigins | NativeRecordFamily::VectorChanges | NativeRecordFamily::VectorPopulations | NativeRecordFamily::VectorPopulationWitnesses))
+                .filter(|family| !family.is_standalone_graph() && !matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::VectorGuards | NativeRecordFamily::DiskANNRecords | NativeRecordFamily::VectorOrigins | NativeRecordFamily::VectorChanges | NativeRecordFamily::VectorPopulations | NativeRecordFamily::VectorPopulationWitnesses | NativeRecordFamily::SequenceValues))
                 .map(|family| family.layout().table.to_owned())
                 .collect();
             assert_eq!(actual, expected);
             for family in NativeRecordFamily::all() {
                 assert_eq!(NativeRecordFamily::from_id(family.id()), Some(family));
-                if family.is_standalone_graph() || matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::VectorGuards | NativeRecordFamily::DiskANNRecords | NativeRecordFamily::VectorOrigins | NativeRecordFamily::VectorChanges | NativeRecordFamily::VectorPopulations | NativeRecordFamily::VectorPopulationWitnesses) { continue; }
+                if family.is_standalone_graph() || matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::VectorGuards | NativeRecordFamily::DiskANNRecords | NativeRecordFamily::VectorOrigins | NativeRecordFamily::VectorChanges | NativeRecordFamily::VectorPopulations | NativeRecordFamily::VectorPopulationWitnesses | NativeRecordFamily::SequenceValues) { continue; }
                 let layout = family.layout();
                 let mut statement = connection.prepare(&format!("PRAGMA table_info({})", layout.table))?;
                 let columns = statement.query_map([], |row| {
@@ -315,6 +316,7 @@ fn native_definition_records_validate_the_persisted_object_identity_and_generati
     for (family, generation) in [
         (NativeRecordFamily::Tables, "storage_generation"),
         (NativeRecordFamily::Sequences, "definition_generation"),
+        (NativeRecordFamily::SequenceValues, "definition_generation"),
     ] {
         let layout = family.layout();
         let mut values: Vec<_> = layout
@@ -342,11 +344,14 @@ fn native_definition_records_validate_the_persisted_object_identity_and_generati
         values[identity_column] = ValueRef::Blob(&[3; 16]);
         values[generation_column] = ValueRef::Blob(&[7; 16]);
         let original = NativeRecord::encode(family, owner(), &values, &control).unwrap();
-        values[0] = ValueRef::Text(b"renamed_schema");
-        values[1] = ValueRef::Text(b"renamed_relation");
-        let renamed = NativeRecord::encode(family, owner(), &values, &control).unwrap();
-        assert_eq!(original.key(), renamed.key());
-        decode_record(renamed.key(), renamed.row(), &control).unwrap();
+        // A definition keeps its record key when it is renamed; a value record has no name.
+        if layout.columns[..2] == ["schema_name", "relation_name"] {
+            values[0] = ValueRef::Text(b"renamed_schema");
+            values[1] = ValueRef::Text(b"renamed_relation");
+            let renamed = NativeRecord::encode(family, owner(), &values, &control).unwrap();
+            assert_eq!(original.key(), renamed.key());
+            decode_record(renamed.key(), renamed.row(), &control).unwrap();
+        }
         for column in [identity_column, generation_column] {
             let expected = values[column];
             values[column] = ValueRef::Blob(&[8; 16]);

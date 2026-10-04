@@ -48,7 +48,7 @@ pub(super) fn restoration_header(
 ) -> PhysicalResult<(DatabaseId, Header, Option<DatabaseId>)> {
     // Decode the marker before touching fields absent from predecessor schemas, preserving their typed format rejection.
     let mut statement =
-        connection.prepare("SELECT * FROM _uqa_mvcc_metadata WHERE singleton = 1")?;
+        connection.prepare_cached("SELECT * FROM _uqa_mvcc_metadata WHERE singleton = 1")?;
     let mut rows = statement.query([])?;
     let row = rows
         .next()?
@@ -95,7 +95,7 @@ pub(super) fn status(
     connection: &Connection,
     transaction: StorageTransactionId,
 ) -> PhysicalResult<CommitStatus> {
-    let mut statement = connection.prepare(
+    let mut statement = connection.prepare_cached(
         "SELECT status, sequence, fingerprint FROM _uqa_mvcc_transactions WHERE allocation = ?1",
     )?;
     let id = transaction.allocation().to_be_bytes();
@@ -136,8 +136,8 @@ pub(super) fn head_state(
     connection: &Connection,
     key: &[u8],
 ) -> PhysicalResult<Option<(CommitSequence, bool)>> {
-    let mut statement =
-        connection.prepare("SELECT sequence, compacted FROM _uqa_mvcc_heads WHERE key = ?1")?;
+    let mut statement = connection
+        .prepare_cached("SELECT sequence, compacted FROM _uqa_mvcc_heads WHERE key = ?1")?;
     let mut rows = statement.query(params![key])?;
     let Some(row) = rows.next()? else {
         return Ok(None);

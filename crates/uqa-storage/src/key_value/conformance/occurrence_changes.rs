@@ -131,7 +131,7 @@ fn verify_capture_failure(index: &mut dyn InvertedIndex) -> StorageBackendResult
                 &mut |change| {
                     if matches!(change, InvertedIndexChange::Document { doc_id: 3, .. }) {
                         return Err(if cancelled {
-                            StorageBackendError::Cancelled(uqa_core::QueryCancelled)
+                            StorageBackendError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST)
                         } else {
                             uqa_core::memory::MemoryError::SizeOverflow.into()
                         });

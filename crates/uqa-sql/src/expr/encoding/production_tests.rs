@@ -112,3 +112,92 @@ fn encoding_quota_and_both_cancellation_scopes_release_every_buffer() {
         }
     }
 }
+
+#[test]
+fn bytea_text_formats_follow_postgresql_encode_c() {
+    let control = ProductionControl::uncontrolled();
+    let encode_base64 = |input: &[u8]| {
+        base64_encode_with_control(input, &control)
+            .unwrap()
+            .into_uncontrolled()
+            .unwrap()
+    };
+    // `pg_base64_encode` breaks lines after 76 characters, even when the output ends there.
+    let full_line = encode_base64(&[b'a'; 57]);
+    assert_eq!((full_line.len(), full_line.ends_with('\n')), (77, true));
+    let next_line = encode_base64(&[b'a'; 58]);
+    assert_eq!((next_line.len(), next_line.find('\n')), (81, Some(76)));
+    assert_eq!(base64_decode(&next_line).unwrap(), vec![b'a'; 58]);
+
+    // Whitespace is skipped, and padding that ends a sequence limits every later group.
+    assert_eq!(base64_decode(" Zm9v\nYmFy ").unwrap(), b"foobar");
+    assert_eq!(base64_decode("Zg==Zm9v").unwrap(), b"ff");
+    assert_eq!(base64_decode("Zg=x").unwrap(), b"f");
+    for (input, message, hint) in [
+        (
+            "A?==",
+            "invalid symbol \"?\" found while decoding base64 sequence",
+            None,
+        ),
+        (
+            "\u{e9}",
+            "invalid symbol \"\u{e9}\" found while decoding base64 sequence",
+            None,
+        ),
+        ("=", "unexpected \"=\" while decoding base64 sequence", None),
+        (
+            "AQ",
+            "invalid base64 end sequence",
+            Some("Input data is missing padding, is truncated, or is otherwise corrupted."),
+        ),
+    ] {
+        let error = base64_decode(input).unwrap_err();
+        let error_hint = match &error {
+            SQLError::Diagnostic { hint, .. } => hint.clone(),
+            _ => None,
+        };
+        assert_eq!(
+            (
+                error.sqlstate(),
+                error.to_string().as_str(),
+                error_hint.as_deref()
+            ),
+            (Some("22023"), message, hint),
+            "{input:?}"
+        );
+    }
+
+    let hex = |input: &str| {
+        hex_decode_with_control(input, &control)
+            .map(|bytes| bytes.into_uncontrolled().unwrap())
+            .map_err(|error| error.to_string())
+    };
+    assert_eq!(hex("01 02\t0A\r\n"), Ok(vec![1, 2, 10]));
+    assert_eq!(hex("0 1"), Err("invalid hexadecimal digit: \" \"".into()));
+    // Only spaces, tabs and line breaks separate digit pairs; other Unicode whitespace is a digit error.
+    assert_eq!(
+        hex("61\u{2003}62"),
+        Err("invalid hexadecimal digit: \"\u{2003}\"".into())
+    );
+    assert_eq!(
+        hex("012"),
+        Err("invalid hexadecimal data: odd number of digits".into())
+    );
+
+    // `esc_enc` escapes only NUL, high-bit bytes and the backslash.
+    let escaped = escape_encode_with_control(&[0x5c, 0, 1, 0xff, 0x7f, b'A'], &control)
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap();
+    assert_eq!(escaped, "\\\\\\000\u{1}\\377\u{7f}A");
+    let unescaped = escape_decode_with_control(&escaped, &control)
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap();
+    assert_eq!(unescaped, [0x5c, 0, 1, 0xff, 0x7f, b'A']);
+    let error = escape_decode_with_control("a\\8", &control).unwrap_err();
+    assert_eq!(
+        (error.sqlstate(), error.to_string().as_str()),
+        (Some("22P02"), "invalid input syntax for type bytea")
+    );
+}

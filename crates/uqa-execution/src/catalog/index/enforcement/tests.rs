@@ -80,6 +80,7 @@ fn selection_preserves_declared_identity_and_standalone_expression_predicate_and
         name: Some("declared".into()),
         kind: TableKeyConstraintKind::PrimaryKey,
         columns: vec!["value".into()],
+        included_columns: Vec::new(),
         nulls_not_distinct: false,
         without_overlaps: false,
     };

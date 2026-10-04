@@ -6,9 +6,9 @@
 
 //! ALTER inheritance and partition declaration rules over immutable column and constraint definitions.
 use crate::ast::{
-    AutoIncrement, BinaryOp, ColumnDef, DetachedPartitionConstraint, Expr, ForeignKey,
-    PartitionBound, PartitionIdentityOverride, PartitionRangeDatum, PartitionSpec,
-    RelationPersistence, TableCheck, TableHierarchy, TableKeyConstraint,
+    AutoIncrement, BinaryOp, ColumnDef, DetachedPartitionConstraint, Expr, PartitionBound,
+    PartitionIdentityOverride, PartitionRangeDatum, PartitionSpec, RelationPersistence, TableCheck,
+    TableHierarchy, TableKeyConstraint,
 };
 use crate::SQLError;
 use uqa_core::Value;
@@ -20,13 +20,45 @@ pub fn validate_row_type(
     exact_columns: bool,
     reject_child_identity: bool,
 ) -> Result<(), SQLError> {
-    if reject_child_identity {
-        if let Some(column) = child_columns.iter().find(|column| {
-            column
+    validate_attached_columns(
+        parent_columns,
+        child_columns,
+        parent,
+        child,
+        exact_columns,
+        reject_child_identity,
+    )?;
+    for parent_column in parent_columns {
+        let Some(child_column) = child_columns
+            .iter()
+            .find(|column| column.name == parent_column.name)
+        else {
+            return Err(routine(
+                "42804",
+                format!("child table is missing column \"{}\"", parent_column.name),
+            ));
+        };
+        validate_inherited_column(parent_column, child_column, child)?;
+    }
+    Ok(())
+}
+
+/// Check the columns of a table being attached as a partition in their order, as `ATExecAttachPartition` does before it merges the parent's columns: the partition may contain no identity column (`reject_child_identity`) and no column the parent lacks (`exact_columns`).
+fn validate_attached_columns(
+    parent_columns: &[ColumnDef],
+    child_columns: &[ColumnDef],
+    parent: &str,
+    child: &str,
+    exact_columns: bool,
+    reject_child_identity: bool,
+) -> Result<(), SQLError> {
+    for column in child_columns {
+        if reject_child_identity
+            && column
                 .auto_increment
                 .as_ref()
                 .is_some_and(AutoIncrement::is_identity)
-        }) {
+        {
             return Err(SQLError::Diagnostic {
                 sqlstate: "55000".into(),
                 message: format!(
@@ -38,22 +70,17 @@ pub fn validate_row_type(
                 hint: None,
             });
         }
-    }
-    for parent_column in parent_columns {
-        validate_inherited_column(parent_column, child_columns, child)?;
-    }
-    if exact_columns {
-        if let Some(extra) = child_columns.iter().find(|child_column| {
-            !parent_columns
+        if exact_columns
+            && !parent_columns
                 .iter()
-                .any(|parent_column| parent_column.name == child_column.name)
-        }) {
+                .any(|parent_column| parent_column.name == column.name)
+        {
             return Err(SQLError::Diagnostic {
                 sqlstate: "42804".into(),
                 message: format!(
                     "table \"{}\" contains column \"{}\" not found in parent \"{}\"",
                     local_relation_name(child),
-                    extra.name,
+                    column.name,
                     local_relation_name(parent)
                 ),
                 detail: Some(
@@ -66,21 +93,12 @@ pub fn validate_row_type(
     Ok(())
 }
 
-/// A child's copy of one parent column: present, of the same type and nullability, and generated the same way.
+/// Check that a child's column matches the parent column it inherits, as `MergeAttributesIntoExisting` does.
 fn validate_inherited_column(
     parent_column: &ColumnDef,
-    child_columns: &[ColumnDef],
+    child_column: &ColumnDef,
     child: &str,
 ) -> Result<(), SQLError> {
-    let Some(child_column) = child_columns
-        .iter()
-        .find(|column| column.name == parent_column.name)
-    else {
-        return Err(routine(
-            "42804",
-            format!("child table is missing column \"{}\"", parent_column.name),
-        ));
-    };
     if parent_column.ty != child_column.ty {
         return Err(routine(
             "42804",
@@ -102,40 +120,35 @@ fn validate_inherited_column(
         ));
     }
     match (&parent_column.generated, &child_column.generated) {
-        (None, None) | (Some(_), Some(_)) => {}
-        (Some(_), None) => {
-            return Err(routine(
-                "42804",
-                format!(
-                    "column \"{}\" in child table must be a generated column",
-                    parent_column.name
-                ),
-            ))
-        }
-        (None, Some(_)) => {
-            return Err(routine(
-                "42804",
-                format!(
-                    "column \"{}\" in child table must not be a generated column",
-                    parent_column.name
-                ),
-            ))
-        }
-    }
-    if let (Some(parent_generated), Some(child_generated)) =
-        (&parent_column.generated, &child_column.generated)
-    {
-        if parent_generated.kind != child_generated.kind {
-            return Err(routine(
-                "42804",
-                format!(
-                    "column \"{}\" inherits from generated column of different kind",
-                    parent_column.name
-                ),
-            ));
+        (None, None) => Ok(()),
+        (Some(_), None) => Err(routine(
+            "42804",
+            format!(
+                "column \"{}\" in child table must be a generated column",
+                parent_column.name
+            ),
+        )),
+        (None, Some(_)) => Err(routine(
+            "42804",
+            format!(
+                "column \"{}\" in child table must not be a generated column",
+                parent_column.name
+            ),
+        )),
+        (Some(parent_generated), Some(child_generated)) => {
+            if parent_generated.kind == child_generated.kind {
+                Ok(())
+            } else {
+                Err(routine(
+                    "42804",
+                    format!(
+                        "column \"{}\" inherits from generated column of different kind",
+                        parent_column.name
+                    ),
+                ))
+            }
         }
     }
-    Ok(())
 }
 
 pub fn validate_inherited_checks(
@@ -263,27 +276,9 @@ pub fn append_inherited_keys_matching(
 pub fn key_equivalent(left: &TableKeyConstraint, right: &TableKeyConstraint) -> bool {
     left.kind == right.kind
         && left.columns == right.columns
+        && left.included_columns == right.included_columns
         && left.nulls_not_distinct == right.nulls_not_distinct
         && left.without_overlaps == right.without_overlaps
-}
-
-pub fn append_inherited_foreign_keys(
-    target: &mut Vec<ForeignKey>,
-    inherited: &[ForeignKey],
-) -> Vec<ForeignKey> {
-    let mut appended = Vec::new();
-    for constraint in inherited {
-        if !target
-            .iter()
-            .any(|candidate| foreign_key_equivalent(candidate, constraint))
-        {
-            let mut clone = constraint.clone();
-            clone.catalog_identity = None;
-            target.push(clone.clone());
-            appended.push(clone);
-        }
-    }
-    appended
 }
 
 pub fn clear_partition_constraint_provenance(constraints: &mut crate::ast::TableConstraintSet) {
@@ -295,17 +290,6 @@ pub fn clear_partition_constraint_provenance(constraints: &mut crate::ast::Table
         .hierarchy
         .partition_inherited_foreign_keys
         .clear();
-}
-
-fn foreign_key_equivalent(left: &ForeignKey, right: &ForeignKey) -> bool {
-    left.local_columns == right.local_columns
-        && left.ref_table == right.ref_table
-        && left.ref_columns == right.ref_columns
-        && left.on_update == right.on_update
-        && left.on_delete == right.on_delete
-        && left.on_delete_set_columns == right.on_delete_set_columns
-        && left.match_type == right.match_type
-        && left.enforced == right.enforced
 }
 
 pub fn detached_bound_check(

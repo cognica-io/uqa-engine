@@ -26,6 +26,10 @@ pub(super) fn insert_sql(statement: &InsertStmt) -> Result<String, SQLError> {
         rendered.push_str(&assignment_targets_sql(&statement.columns)?);
         rendered.push(')');
     }
+    if let Some(overriding) = statement.overriding {
+        rendered.push(' ');
+        rendered.push_str(overriding.sql());
+    }
     if statement.rows.as_slice() == [Vec::new()] {
         rendered.push_str(" DEFAULT VALUES");
     } else if !statement.rows.is_empty() {
@@ -180,13 +184,20 @@ pub(super) fn merge_sql(statement: &MergeStmt) -> Result<String, SQLError> {
                 rendered.push_str("DELETE");
             }
             MergeWhen::InsertNotMatched {
-                columns, values, ..
+                columns,
+                overriding,
+                values,
+                ..
             } => {
                 rendered.push_str("INSERT");
                 if !columns.is_empty() {
                     rendered.push_str(" (");
                     rendered.push_str(&assignment_targets_sql(columns)?);
                     rendered.push(')');
+                }
+                if let Some(overriding) = overriding {
+                    rendered.push(' ');
+                    rendered.push_str(overriding.sql());
                 }
                 if values.is_empty() {
                     rendered.push_str(" DEFAULT VALUES");

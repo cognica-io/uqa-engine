@@ -78,10 +78,6 @@ pub fn bind_added_column(
             .check
             .clone_from(&column.check);
     }
-    let key_constraints = context
-        .keys
-        .try_key_constraints(table)
-        .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
     let foreign_keys = context
         .keys
         .try_foreign_keys(table)
@@ -94,7 +90,6 @@ pub fn bind_added_column(
         },
         qualifier,
         &mut candidate_columns,
-        &key_constraints,
         &foreign_keys,
     )?;
     column.generated = candidate_columns

@@ -7,7 +7,10 @@
 //! Validate B-tree key comparisons before publishing a candidate row.
 
 use super::{index_key_values, index_predicate_accepts, PhysicalIndexDefinitions};
-use crate::mutation::constraints::{index_keys::key_values_equal, ConstraintContext};
+use crate::mutation::constraints::{
+    index_keys::{changes_error, key_values_equal},
+    ConstraintContext,
+};
 use std::collections::BTreeSet;
 use uqa_core::{DocId, Predicate, Value};
 use uqa_sql::{ast::IndexKey, SQLError};
@@ -54,7 +57,7 @@ impl PhysicalIndexDefinitions {
                 (ValueIndexKey::Column(first.clone()), probe)
             };
             // Schema validation compares an existing row only with other rows. An index probe would compare the row with its own entry before that identity could be excluded.
-            let mut candidates: BTreeSet<DocId> = if ignored_doc_id.is_some() {
+            let candidates: BTreeSet<DocId> = if ignored_doc_id.is_some() {
                 context
                     .reads
                     .live_table_doc_ids(table)?
@@ -70,10 +73,42 @@ impl PhysicalIndexDefinitions {
                         .collect(),
                 }
             };
-            if let Some(changes) = context.reads.command_overlay_changed_ids(table)? {
-                candidates.extend(changes);
-            }
-            for id in candidates {
+            let changes = context
+                .reads
+                .command_overlay_changes(table)?
+                .unwrap_or_default();
+            let mut changed = changes.changes().peekable();
+            let mut candidates = candidates.into_iter().peekable();
+            // The candidates and the changed rows in identity order, each identity once.
+            loop {
+                let next_changed = match changed.peek() {
+                    Some(Ok((id, _))) => Some(*id),
+                    Some(Err(_)) => {
+                        let Some(Err(error)) = changed.next() else {
+                            unreachable!("a peeked failure");
+                        };
+                        return Err(changes_error(error));
+                    }
+                    None => None,
+                };
+                let id = match (candidates.peek().copied(), next_changed) {
+                    (None, None) => break,
+                    (Some(candidate), Some(changed_id)) if changed_id < candidate => {
+                        changed.next();
+                        changed_id
+                    }
+                    (Some(candidate), next_changed) => {
+                        candidates.next();
+                        if next_changed == Some(candidate) {
+                            changed.next();
+                        }
+                        candidate
+                    }
+                    (None, Some(changed_id)) => {
+                        changed.next();
+                        changed_id
+                    }
+                };
                 if ignored_doc_id == Some(id) {
                     continue;
                 }

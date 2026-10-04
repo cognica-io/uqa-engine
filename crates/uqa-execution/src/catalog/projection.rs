@@ -121,9 +121,9 @@ mod mutation;
 pub use index_definition::pg_get_indexdef_value;
 mod routine_definitions;
 pub use mutation::virtual_relation_mutation_error;
-pub use regtypes::format_type_value;
 pub use regtypes::resolve_regprocedure_input_oid;
 pub(crate) use regtypes::routine_oid_exists;
+pub use regtypes::{format_type_name, format_type_value};
 pub use routine_definitions::{
     pg_get_function_arguments_value, pg_get_function_identity_arguments_value,
     pg_get_function_result_value, pg_get_function_sqlbody_value,
@@ -165,6 +165,9 @@ mod schema;
 pub struct RuntimeConstraint {
     pub identity: ConstraintIdentity,
     pub deferrable: bool,
+    pub catalog_oid: Option<i64>,
+    /// The catalog row of the constraint this one derives from, whose `SET CONSTRAINTS` mode it follows.
+    pub parent_oid: Option<i64>,
 }
 
 pub fn runtime_constraints(
@@ -182,6 +185,8 @@ pub fn runtime_constraints(
                     object_id: constraint.object_id,
                 },
                 deferrable: constraint.state.deferrable(),
+                catalog_oid: constraint.catalog_oid,
+                parent_oid: constraint.parent_oid,
             })
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
@@ -206,6 +211,8 @@ pub fn runtime_constraints(
                 object_id: trigger.object_id,
             },
             deferrable: trigger.definition.deferrability.is_deferrable(),
+            catalog_oid: None,
+            parent_oid: None,
         });
     }
     Ok(constraints)
@@ -389,7 +396,9 @@ use relation_catalog::{build_pg_class, build_pg_inherits};
 use schema::{resolve_virtual_relation, VirtualRelation};
 pub use schema::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 
-pub use partitioning::partition_bound_node;
+pub use partitioning::{
+    partition_bound_node, partition_key_columns, partition_key_types_for_table,
+};
 
 pub use regtypes::relation_oid::lookup_regclass_oid;
 

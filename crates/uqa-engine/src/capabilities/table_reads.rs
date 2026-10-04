@@ -7,6 +7,7 @@
 //! Bind physical scans to the selected table generation.
 
 use crate::TableState;
+use std::sync::atomic::Ordering;
 use uqa_execution::query::table_read::TableRead;
 impl TableRead for TableState {
     fn column_definitions(&self) -> Vec<uqa_sql::ast::ColumnDef> {
@@ -16,6 +17,43 @@ impl TableRead for TableState {
         &self,
     ) -> parking_lot::RwLockReadGuard<'_, Box<dyn uqa_storage::DocumentStore>> {
         self.document_store.read()
+    }
+
+    fn maps_integer_keys(&self) -> bool {
+        self.maps_integer_keys.load(Ordering::Acquire)
+    }
+
+    fn for_each_indexed_fields(
+        &self,
+        ids: &[uqa_core::DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(uqa_core::DocId, bool, &[&uqa_core::Value]) -> bool,
+    ) -> Option<usize> {
+        let indexes = self.value_indexes.read();
+        let columns = fields
+            .iter()
+            .map(|field| indexes.get(&uqa_storage::ValueIndexKey::Column((*field).to_owned())))
+            .collect::<Option<Vec<_>>>()?;
+        // Every accelerator indexes every row, so without a field to project any of them tells whether a row exists.
+        let presence = match columns.first() {
+            Some(column) => *column,
+            None => indexes.values().next()?,
+        };
+        let mut values = Vec::with_capacity(columns.len());
+        let mut visited = 0;
+        for &id in ids {
+            values.clear();
+            values.extend(columns.iter().map_while(|column| column.stored_value(id)));
+            let exists = values.len() == columns.len() && presence.contains(id);
+            if !exists {
+                values.clear();
+            }
+            visited += 1;
+            if !visitor(id, exists, &values) {
+                break;
+            }
+        }
+        Some(visited)
     }
 }
 
@@ -54,14 +92,22 @@ impl QueryTableAccess for Engine {
         self.require_query_table(name)
             .map(|table| table as std::sync::Arc<dyn TableRead>)
     }
+    fn index_holds_fields(
+        &self,
+        name: &str,
+        table: &std::sync::Arc<dyn TableRead>,
+        fields: &[String],
+    ) -> Result<bool, SQLError> {
+        self.prepare_index_only_read(name, table, fields)
+    }
     fn command_overlay_changes(
         &self,
         name: &str,
     ) -> Result<Option<uqa_execution::query::document_changes::DocumentChanges>, SQLError> {
         self.command_overlay_changes(name)
     }
-    fn table_doc_count(&self, name: &str) -> Result<u64, SQLError> {
-        self.table_doc_count(name)
+    fn table_row_estimate(&self, name: &str) -> Result<u64, SQLError> {
+        self.table_row_estimate(name)
     }
 }
 impl RetrievalAccess for Engine {
@@ -134,8 +180,8 @@ impl uqa_execution::query::block::context::QueryDocumentRead for Engine {
         self.try_describe_query_table(table)
             .map_err(|error| error.to_string())
     }
-    fn command_overlay_active(&self) -> bool {
-        self.command_mutation_overlay_active()
+    fn command_overlay_holds(&self, table: &str) -> Result<bool, SQLError> {
+        self.command_overlay_holds(table)
     }
 }
 

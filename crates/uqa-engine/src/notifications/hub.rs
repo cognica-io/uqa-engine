@@ -16,12 +16,13 @@ use uqa_storage::notifications::{
 };
 
 use super::{
-    append_notification, notifications_fit_queue, projected_tail_position, queue_page, queue_usage,
-    Arc, Condvar, CrossNotificationCommit, CrossNotificationRequest, CrossProcessCoordinator,
-    CrossProcessListenerRow, CrossProcessQueueState, CrossProcessRegistryTransaction, Instant,
-    ListenerLease, Mutex, MutexGuard, NotificationHub, NotificationHubState, NotificationListener,
-    NotificationSessionCommit, PendingNotification, PreparedCrossSubscription, PreparedDelivery,
-    SQLError, SQLNotification, VecDeque, NOTIFICATION_QUEUE_WARNING_INTERVAL,
+    append_notification, notifications_fit_queue, projected_tail_position, queue_fill_warning,
+    queue_page, queue_usage, Arc, Condvar, CrossNotificationCommit, CrossNotificationRequest,
+    CrossProcessCoordinator, CrossProcessListenerRow, CrossProcessQueueState,
+    CrossProcessRegistryTransaction, Instant, ListenerLease, Mutex, MutexGuard, NotificationHub,
+    NotificationHubState, NotificationListener, NotificationSessionCommit, PendingNotification,
+    PreparedCrossSubscription, PreparedDelivery, SQLError, SQLNotice, SQLNotification, VecDeque,
+    NOTIFICATION_QUEUE_WARNING_INTERVAL,
 };
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 use super::{CrossProcessState, MAX_NOTIFICATION_QUEUE_PAGES};
@@ -53,7 +54,8 @@ impl NotificationHub {
                 coordinator: Mutex::new(None),
             }),
             cross_error: Mutex::new(None),
-            cross_failures: Mutex::new(super::CrossFailureLog::default()),
+            #[cfg(test)]
+            after_publication: Mutex::new(None),
         })
     }
 
@@ -192,6 +194,15 @@ impl NotificationHub {
         &self,
         transaction_state: Option<(u64, bool)>,
     ) -> Result<(), SQLError> {
+        self.synchronize_cross_process(transaction_state, None)
+    }
+
+    /// `published` is the delivery failure count when the calling session's publication committed, if it has one to deliver.
+    fn synchronize_cross_process(
+        &self,
+        transaction_state: Option<(u64, bool)>,
+        published: Option<u64>,
+    ) -> Result<(), SQLError> {
         let Some(cross_state) = self.cross.as_ref() else {
             return Ok(());
         };
@@ -204,8 +215,11 @@ impl NotificationHub {
         let control = cross.recovery_control()?;
         let cancellation = Some(control.cancellation());
         if transaction_state.is_none() {
-            let owners =
-                Self::local_owner_ids(&*super::registration::lock(&self.state, cancellation)?);
+            let owners = {
+                let state = super::registration::lock(&self.state, cancellation)?;
+                Self::concurrent_delivery_failure(&state, published)?;
+                Self::local_owner_ids(&state)
+            };
             if !cross.poll_needed(&owners)? {
                 *super::registration::lock(&self.cross_error, cancellation)? = None;
                 return Ok(());
@@ -214,6 +228,7 @@ impl NotificationHub {
         let transaction = cross.begin_registry_transaction()?;
         let _gate = super::registration::lock(&self.commit_gate, cancellation)?;
         let mut state = super::registration::lock(&self.state, cancellation)?;
+        Self::concurrent_delivery_failure(&state, published)?;
         let deliveries =
             Self::prepare_cross_sync(&cross, &transaction, &mut state, transaction_state)?;
         Self::complete_deliveries(
@@ -230,6 +245,19 @@ impl NotificationHub {
             *error = None;
         }
         Ok(())
+    }
+
+    /// A synchronization that failed after a session's publication committed failed every local subscription before the session could deliver to them, so its failure is the session's delivery failure. The background poll can run that synchronization at any time between the publication and the session's own synchronization.
+    fn concurrent_delivery_failure(
+        state: &NotificationHubState,
+        published: Option<u64>,
+    ) -> Result<(), SQLError> {
+        match (published, &state.last_delivery_failure) {
+            (Some(failures), Some(error)) if failures != state.delivery_failures => {
+                Err(error.clone())
+            }
+            _ => Ok(()),
+        }
     }
 
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -254,7 +282,6 @@ impl NotificationHub {
         };
         *recorded = Some(error.to_string());
         drop(recorded);
-        self.cross_failures.lock().record(error.to_string());
         let failure = super::subscription::NotificationSubscriptionError::with_source(
             uqa_core::notifications::NotificationFailureKind::SourceUnavailable,
             error,
@@ -460,7 +487,7 @@ impl NotificationHub {
         state: &NotificationHubState,
         listeners: &NotificationListenerSummary,
         queue_state: CrossProcessQueueState,
-    ) -> Option<uqa_sql::SQLNotice> {
+    ) -> Option<SQLNotice> {
         let tail = listeners
             .oldest
             .map_or(queue_state.head_position, |listener| listener.position);
@@ -562,7 +589,7 @@ impl NotificationHub {
         Self::deliver_idle_listeners(&mut state);
         Self::remove_consumed_entries(&mut state);
         if let Some(warning) = self.queue_warning(&mut state) {
-            notices.lock().push(warning);
+            notices.push(warning);
         }
     }
 
@@ -604,7 +631,7 @@ impl NotificationHub {
         channels: Vec<String>,
         queue: &Arc<Mutex<VecDeque<SQLNotification>>>,
         wake: &Arc<Condvar>,
-        notices: &Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
+        notices: &Arc<uqa_execution::query::NoticeQueue>,
     ) -> Result<(), SQLError> {
         if channels.is_empty() && !self.state.lock().listeners.contains_key(&session_id) {
             return Ok(());
@@ -654,7 +681,7 @@ impl NotificationHub {
         channels: Vec<String>,
         queue: &Arc<Mutex<VecDeque<SQLNotification>>>,
         wake: &Arc<Condvar>,
-        notices: &Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
+        notices: &Arc<uqa_execution::query::NoticeQueue>,
     ) -> Result<(), SQLError> {
         let cross_state = self.cross.as_ref().ok_or_else(|| {
             SQLError::Internal("cross-process notification coordinator is missing".into())
@@ -706,8 +733,6 @@ impl NotificationHub {
             notices,
             pending: _,
         } = session;
-        // The commit gate keeps other synchronizations out until the publication commits, so a failure counted after this belongs to a delivery that followed it.
-        let failures_before = self.cross_failures.lock().count;
         let publication_result = prepared
             .registry
             .take()
@@ -720,6 +745,8 @@ impl NotificationHub {
         }
         let wake_ports = std::mem::take(&mut prepared.wake_ports);
         let mut state = self.state.lock();
+        // The commit gate still excludes every other synchronization, so later failures follow this publication.
+        let published = state.delivery_failures;
         if channels.is_empty() {
             state.listeners.remove(&session_id);
         } else if let Some(listener) = state.listeners.get_mut(&session_id) {
@@ -746,22 +773,21 @@ impl NotificationHub {
         }
         if let Some(warning) = prepared.warning {
             state.last_queue_warning = Some(Instant::now());
-            notices.lock().push(warning);
+            notices.push(warning);
         }
         drop(state);
         drop(gate);
         CrossProcessCoordinator::wake(wake_ports.iter());
+        #[cfg(test)]
+        if let Some(after_publication) = self.after_publication.lock().take() {
+            after_publication(self);
+        }
         publication_result.map_err(|error| {
             SQLError::Internal(format!(
                 "transaction committed; notification publication awaits recovery: {error}"
             ))
         })?;
-        let delivered = self.try_synchronize_cross_process_session(None);
-        // The wake thread's periodic synchronization may deliver the publication first; its failure is this statement's too.
-        let concurrent = self.cross_failures.lock().since(failures_before);
-        delivered
-            .map_err(|error| error.to_string())
-            .and_then(|()| concurrent.map_or(Ok(()), Err))
+        self.synchronize_cross_process(None, Some(published))
             .map_err(|error| {
                 SQLError::Internal(format!(
                     "transaction committed; notification delivery awaits recovery: {error}"
@@ -795,10 +821,7 @@ impl NotificationHub {
         }
     }
 
-    pub(super) fn queue_warning(
-        &self,
-        state: &mut NotificationHubState,
-    ) -> Option<uqa_sql::SQLNotice> {
+    pub(super) fn queue_warning(&self, state: &mut NotificationHubState) -> Option<SQLNotice> {
         if queue_usage(state, self.max_queue_pages) < 0.5 {
             return None;
         }
@@ -877,16 +900,4 @@ impl NotificationHub {
         state.listeners.remove(&session_id);
         Self::remove_consumed_entries(&mut state);
     }
-}
-
-/// `asyncQueueFillWarning`: how full the queue is, and the listener whose position holds it.
-fn queue_fill_warning(usage: f64, blocker: i32) -> uqa_sql::SQLNotice {
-    uqa_sql::SQLNotice::warning(format!("NOTIFY queue is {:.0}% full", usage * 100.0))
-        .with_detail(Some(format!(
-            "The server process with PID {blocker} is among those with the oldest transactions."
-        )))
-        .with_hint(Some(
-            "The NOTIFY queue cannot be emptied until that process ends its current transaction."
-                .into(),
-        ))
 }

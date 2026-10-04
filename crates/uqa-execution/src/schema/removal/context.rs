@@ -39,6 +39,6 @@ pub struct RelationRemovalContext<'a> {
     pub identities: &'a dyn RelationLockCatalog,
     pub locks: &'a dyn RelationDefinitionSession,
     pub transactions: &'a dyn RelationRemovalTransactions,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
     pub indexes: IndexRemovalContext<'a>,
 }

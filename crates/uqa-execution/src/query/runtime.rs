@@ -10,7 +10,7 @@ use crate::functions::{
     RegisteredSQLFunction, SQLAggregateFunction, SQLFunctionOptions, SQLScalarFunction,
     SQLTableFunction,
 };
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::collections::BTreeMap;
 use uqa_core::CancellationToken;
 use uqa_sql::SQLError;
@@ -31,7 +31,7 @@ pub struct QueryRuntimeView<'a> {
     pub table_functions: &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLTableFunction>>>,
     pub aggregate_functions:
         &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFunction>>>,
-    pub notices: &'a Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a super::NoticeQueue,
 }
 
 impl QueryRuntimeView<'_> {
@@ -117,7 +117,8 @@ impl QueryRuntimeView<'_> {
         ]
     }
 
+    /// Queue a notice for the client, after the notices queued before it.
     pub fn push_notice(&self, notice: uqa_sql::SQLNotice) {
-        self.notices.lock().push(notice);
+        self.notices.push(notice);
     }
 }

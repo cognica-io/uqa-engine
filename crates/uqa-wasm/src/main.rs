@@ -574,13 +574,18 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                 .take_sql_notices()
                 .into_iter()
                 .map(|notice| {
-                    json!({
-                        "level": notice.severity.as_str(),
+                    let mut object = json!({
+                        "level": notice.level.as_str(),
                         "sqlstate": notice.sqlstate,
                         "message": notice.message,
-                        "detail": notice.detail,
-                        "hint": notice.hint,
-                    })
+                    });
+                    if let Some(detail) = notice.detail {
+                        object["detail"] = JSON::String(detail);
+                    }
+                    if let Some(hint) = notice.hint {
+                        object["hint"] = JSON::String(hint);
+                    }
+                    object
                 })
                 .collect(),
         )),

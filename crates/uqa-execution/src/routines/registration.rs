@@ -8,8 +8,13 @@
 
 use super::{
     catalog::RoutineMutationContext,
+    compilation::{apply_session_compile_options, with_routine_settings},
     configuration::{self, RoutineConfigurationSession},
-    definition::{compile_catalog_bound_routine, RoutineDefinitionContext},
+    definition::{
+        compile_catalog_bound_routine, BoundRoutine, RoutineBodyCompilation,
+        RoutineDefinitionContext,
+    },
+    invocation::context::RoutineInvocationSession,
 };
 use crate::catalog::security::roles::{
     dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
@@ -21,14 +26,15 @@ use std::{
 };
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
-    ast::{AlterRoutineStmt, CreateFunction, RoleAttribute},
+    ast::{AlterRoutineStmt, CreateFunction, FunctionBody, RoleAttribute},
     catalog::roles::role_inherits,
     routines::{
+        body_validation::{validate_sql_function_body, SQLBodyValidationContext},
         declaration::{resolve_alter_routine_identity_types, resolve_routine_type_references},
-        dependencies::RoutineCompilationMode,
         lifecycle::{binding::resolve_sql_routine_alter_target, ensure_routine_owner_as},
         registration::{self as analysis, RoutineSupportAuthority},
-        routine_signature_types, CompiledFunctionBody, SQLUserFunction,
+        resolution::RoutineOverloadContext,
+        routine_signature_types, CompiledFunctionBody, RoutineBody, SQLUserFunction,
     },
     SQLError,
 };
@@ -39,7 +45,50 @@ pub struct RoutineRegistrationContext<'a> {
     pub definition: RoutineDefinitionContext<'a>,
     pub support: &'a dyn RoutineSupportAuthority,
     pub configuration: &'a dyn RoutineConfigurationSession,
+    pub overloads: RoutineOverloadContext<'a>,
+    /// The session whose settings complete a `PL/pgSQL` body `CREATE FUNCTION` compiled.
+    pub session: &'a dyn RoutineInvocationSession,
+    /// The session that keeps the compilation validating a new body for its later calls.
     pub bodies: &'a dyn super::invocation::bodies::RoutineBodySession,
+}
+
+/// Whether `CREATE FUNCTION` examines the body, as `check_function_bodies` says.
+fn checks_function_bodies(session: &dyn RoutineConfigurationSession) -> Result<bool, SQLError> {
+    Ok(session.show_routine_variable("check_function_bodies")? == "on")
+}
+
+const fn body_compilation(checks_bodies: bool) -> RoutineBodyCompilation {
+    if checks_bodies {
+        RoutineBodyCompilation::Checked
+    } else {
+        RoutineBodyCompilation::Unchecked
+    }
+}
+
+/// Validate a SQL body once the routine is visible, so that the body can call it, as `PostgreSQL` validates a body after it stores the routine: a SQL-standard body is analyzed whatever `check_function_bodies` says, and a body given as a string is analyzed under the routine's own settings only when it is on; the final statement is checked against the declared result only when it is on.
+fn validate_registered_sql_body(
+    context: &RoutineRegistrationContext<'_>,
+    def: &CreateFunction,
+    compiled: &CompiledFunctionBody,
+    checks_bodies: bool,
+) -> Result<(), SQLError> {
+    let validation = SQLBodyValidationContext {
+        compilation: context.definition.compilation.analysis,
+        overloads: RoutineOverloadContext {
+            catalog: context.overloads.catalog,
+        },
+    };
+    match &def.body {
+        FunctionBody::Statements(_) => {
+            validate_sql_function_body(&validation, def, compiled, checks_bodies)
+        }
+        FunctionBody::Source(_) if checks_bodies => {
+            with_routine_settings(&context.definition.compilation, def, || {
+                validate_sql_function_body(&validation, def, compiled, true)
+            })
+        }
+        FunctionBody::Source(_) => Ok(()),
+    }
 }
 
 fn allocate_routine_object_id(
@@ -113,6 +162,19 @@ fn validate_routine_creation_privileges(
     analysis::validate_routine_security_attributes(def, current_user_is_superuser)
 }
 
+/// Resolve the routine's type references and validate its configuration, and load its language's library, as `CreateFunction` does before it calls the language's validator.
+fn validate_routine_definition(
+    context: &RoutineRegistrationContext<'_>,
+    def: &mut CreateFunction,
+) -> Result<(), SQLError> {
+    resolve_routine_type_references(context.definition.compilation.analysis.types, def)?;
+    configuration::apply_routine_config_actions(context.configuration, def)?;
+    if def.language == "plpgsql" {
+        context.configuration.load_language_library(&def.language);
+    }
+    Ok(())
+}
+
 pub fn register_sql_function(
     context: &RoutineRegistrationContext<'_>,
     mut def: CreateFunction,
@@ -134,12 +196,12 @@ pub fn register_sql_function(
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
     validate_routine_creation_privileges(context, &def, &current_user)?;
-    resolve_routine_type_references(context.definition.compilation.analysis.types, &mut def)?;
-    configuration::apply_routine_config_actions(context.configuration, &mut def)?;
+    validate_routine_definition(context, &mut def)?;
+    let checks_bodies = checks_function_bodies(context.configuration)?;
     let bound = compile_catalog_bound_routine(
         &context.definition,
         &mut def,
-        RoutineCompilationMode::Definition,
+        body_compilation(checks_bodies),
     )?;
     let name = def.name.clone();
     let signature = routine_signature_types(&def);
@@ -213,23 +275,45 @@ pub fn register_sql_function(
     drop(registry);
     drop(memberships);
     drop(roles);
-    retain_validated_body(context, &published, bound.validated)?;
-    context.catalog.changes.catalog_registry_changed();
-    Ok(())
+    finish_registration(context, &def, &published, &bound, checks_bodies)
 }
 
-/// The PL/pgSQL validator leaves its compilation in the defining session's function cache; the SQL validator does not, so a SQL body compiles when a session first runs it.
+/// Complete a published definition: the compilation that validated a `PL/pgSQL` body stays with the defining session, and a SQL body is validated now that the routine is visible, so that the body can call it. A failure aborts the statement, whose rollback withdraws the routine.
+fn finish_registration(
+    context: &RoutineRegistrationContext<'_>,
+    def: &CreateFunction,
+    published: &SQLUserFunction,
+    bound: &BoundRoutine,
+    checks_bodies: bool,
+) -> Result<(), SQLError> {
+    retain_validated_body(context, published, bound.validated.as_ref())?;
+    context.catalog.changes.catalog_registry_changed();
+    let compiled = match &bound.body {
+        RoutineBody::Bound(body) => Some(body.as_ref()),
+        RoutineBody::Source => bound.validated.as_ref(),
+    };
+    compiled.map_or(Ok(()), |compiled| {
+        validate_registered_sql_body(context, def, compiled, checks_bodies)
+    })
+}
+
+/// The PL/pgSQL validator leaves its compilation in the defining session's function cache, completed with the session's settings of the moment under the routine's own; the SQL validator does not, so a SQL body compiles when a session first runs it.
 fn retain_validated_body(
     context: &RoutineRegistrationContext<'_>,
     published: &SQLUserFunction,
-    validated: Option<CompiledFunctionBody>,
+    validated: Option<&CompiledFunctionBody>,
 ) -> Result<(), SQLError> {
-    match validated {
-        Some(validated) if published.def.language == "plpgsql" => {
-            context.bodies.retain_routine_body(published, validated)
-        }
-        _ => Ok(()),
-    }
+    let Some(CompiledFunctionBody::PLpgSQL(parsed)) = validated else {
+        return Ok(());
+    };
+    let mut parsed = parsed.clone();
+    with_routine_settings(&context.definition.compilation, &published.def, || {
+        apply_session_compile_options(context.session, &mut parsed);
+        Ok(())
+    })?;
+    context
+        .bodies
+        .retain_routine_body(published, CompiledFunctionBody::PLpgSQL(parsed))
 }
 
 /// Change mutable routine attributes without replacing its identity or compiled body.

@@ -87,12 +87,35 @@ fn select_sequence_value_rows(
     committed: Vec<SequenceRow>,
     mut private: impl FnMut(&SequenceRow) -> StorageBackendResult<bool>,
 ) -> StorageBackendResult<Vec<SequenceRow>> {
+    // Value operations move the value record of a committed generation outside every transaction, so its committed state is newer than what the caller's transaction may have read, also for a definition the transaction changed.
+    let committed_values = committed
+        .iter()
+        .map(|row| {
+            (
+                (row.object_id, row.definition_generation),
+                (row.current, row.called, row.log_count),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
     select_sequence_records(
         bound.into_iter().map(|row| (row.relation.clone(), row)),
         committed.into_iter().map(|row| (row.relation.clone(), row)),
         |_, row| private(row),
     )
-    .map(|rows| rows.into_values().collect())
+    .map(|rows| {
+        rows.into_values()
+            .map(|mut row| {
+                if let Some(&(current, called, log_count)) =
+                    committed_values.get(&(row.object_id, row.definition_generation))
+                {
+                    row.current = current;
+                    row.called = called;
+                    row.log_count = log_count;
+                }
+                row
+            })
+            .collect()
+    })
 }
 
 /// Select complete records from the committed catalog or the caller's private view, including renamed and deleted records.

@@ -694,6 +694,7 @@ impl MergeWhen {
                 condition,
                 columns,
                 values,
+                ..
             } => upgrade_optional(condition) | upgrade_targets(columns) | upgrade_exprs(values),
             Self::DeleteMatched { condition }
             | Self::DeleteNotMatchedBySource { condition }

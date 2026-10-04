@@ -16,7 +16,10 @@ use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 impl VectorIndex for HNSWIndex {
     fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
-        Ok(self.active.contains_key(&(doc_id, 0)))
+        Ok(self
+            .active
+            .get(super::types::active_key(doc_id, 0))?
+            .is_some())
     }
 
     fn dimensions(&self) -> u32 {
@@ -32,12 +35,22 @@ impl VectorIndex for HNSWIndex {
     }
 
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
-        self.replace_document_vectors(doc_id, vectors, None)
+        let control = StorageReadControl::new(&self.memory, &uqa_core::CancellationToken::new());
+        let _workspace = super::prepare::workspace::operation(self, &control)?;
+        let mut candidate = self.clone();
+        candidate.replace_document_vectors(doc_id, &vectors, Some(&control))?;
+        *self = candidate;
+        Ok(())
     }
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.mark_document_deleted(doc_id, None)?;
-        self.maybe_rebuild(None)
+        let control = StorageReadControl::new(&self.memory, &uqa_core::CancellationToken::new());
+        let _workspace = super::prepare::workspace::operation(self, &control)?;
+        let mut candidate = self.clone();
+        candidate.mark_document_deleted(doc_id, Some(&control))?;
+        candidate.maybe_rebuild(Some(&control))?;
+        *self = candidate;
+        Ok(())
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
@@ -53,11 +66,13 @@ impl VectorIndex for HNSWIndex {
     }
 
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
-        self.search_top_k(query, k, None)
+        let control = StorageReadControl::new(&self.memory, &uqa_core::CancellationToken::new());
+        self.search_top_k(query, k, Some(&control))
     }
 
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
-        self.search_above_threshold(query, threshold, None)
+        let control = StorageReadControl::new(&self.memory, &uqa_core::CancellationToken::new());
+        self.search_above_threshold(query, threshold, Some(&control))
     }
 
     fn search_knn_with_control(

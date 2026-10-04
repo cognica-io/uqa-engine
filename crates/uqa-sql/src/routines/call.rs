@@ -104,9 +104,14 @@ impl<'a> ProcedureCallAnalysis<'a> {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(SQLError::Routine {
+            return Err(SQLError::Diagnostic {
                 sqlstate: "42883".into(),
                 message: format!("procedure {name}({signature}) does not exist"),
+                detail: None,
+                hint: Some(
+                    "No procedure matches the given name and argument types. You might need to add explicit type casts."
+                        .into(),
+                ),
             });
         };
         super::invocation::call_output_schema(

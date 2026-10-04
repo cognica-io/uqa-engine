@@ -39,6 +39,18 @@ pub fn row_identities<'a>(
                 .filter_map(|column| column.references.as_ref()?.catalog_identity),
         )
         .chain(foreign_keys.iter().filter_map(|key| key.catalog_identity))
+        .chain(
+            columns
+                .iter()
+                .filter_map(|column| column.references.as_ref())
+                .flat_map(|reference| &reference.referenced_partitions)
+                .chain(
+                    foreign_keys
+                        .iter()
+                        .flat_map(|key| &key.referenced_partitions),
+                )
+                .map(|derived| derived.catalog_identity),
+        )
         .chain(keys.iter().filter_map(|key| key.catalog_identity))
         .chain(columns.iter().filter_map(|column| {
             column
@@ -212,4 +224,14 @@ pub fn has_constraint_oid(
                 None,
             )
         })
+        || columns
+            .iter()
+            .filter_map(|column| column.references.as_ref())
+            .flat_map(|reference| &reference.referenced_partitions)
+            .chain(
+                foreign_keys
+                    .iter()
+                    .flat_map(|key| &key.referenced_partitions),
+            )
+            .any(|derived| derived.catalog_identity.oid == oid)
 }

@@ -7,7 +7,7 @@
 //! Evaluated document, BLOB and dependent B-tree mutations form one atomic private batch.
 
 use rusqlite::types::ValueRef;
-use uqa_storage::KeyValueBatch;
+use uqa_storage::{document_store::identifiers::DocumentIdNamespace, KeyValueBatch};
 
 use super::NativeDocumentRead;
 use crate::document_store::{
@@ -17,15 +17,18 @@ use crate::document_store::{
 use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordOwner};
 
 impl NativeDocumentRead<'_> {
+    /// Stage a document. `unused` names the namespace in which no document ever had `doc_id`. While the table's rows are stored under that namespace, the document has no body and no BLOB rows to replace, so its rows are written without reading what was there.
     pub(crate) fn put(
         &self,
         batch: &mut dyn KeyValueBatch,
         doc_id: DocId,
         fields: &Document,
         metadata: DocumentMetadata,
+        unused: Option<DocumentIdNamespace>,
     ) -> SQLiteResult<()> {
         let id = sqlite_doc_id(doc_id)?;
         let owner = self.snapshot.ensure_table_owner(self.table, batch)?;
+        let unused = unused.is_some_and(|namespace| owner.stores(namespace));
         let (fields, blobs) = encode_document_blobs(
             fields
                 .iter()
@@ -33,15 +36,17 @@ impl NativeDocumentRead<'_> {
                 .map(|(field, value)| (field.clone(), value.clone()))
                 .collect(),
         )?;
-        self.snapshot.delete_prefix(
-            batch,
-            Family::DocumentBlobs,
-            owner,
-            &[ValueRef::Integer(id)],
-        )?;
-        self.stage_body(batch, owner, id, &fields, metadata)?;
+        if !unused {
+            self.snapshot.delete_prefix(
+                batch,
+                Family::DocumentBlobs,
+                owner,
+                &[ValueRef::Integer(id)],
+            )?;
+        }
+        self.stage_body(batch, owner, id, &fields, metadata, unused)?;
         for (field, bytes) in blobs {
-            self.stage_blob(batch, owner, id, &field, &bytes)?;
+            self.stage_blob(batch, owner, id, &field, &bytes, unused)?;
         }
         Ok(())
     }
@@ -78,9 +83,9 @@ impl NativeDocumentRead<'_> {
             )?;
         }
         fields.extend(encoded);
-        self.stage_body(batch, owner, id, &fields, metadata)?;
+        self.stage_body(batch, owner, id, &fields, metadata, false)?;
         for (field, bytes) in blobs {
-            self.stage_blob(batch, owner, id, &field, &bytes)?;
+            self.stage_blob(batch, owner, id, &field, &bytes, false)?;
         }
         Ok(true)
     }
@@ -92,6 +97,7 @@ impl NativeDocumentRead<'_> {
         id: i64,
         fields: &Document,
         metadata: DocumentMetadata,
+        unused: bool,
     ) -> SQLiteResult<()> {
         let body = serde_json::to_string(fields)?;
         let NativeRecordOwner::Object {
@@ -109,19 +115,20 @@ impl NativeDocumentRead<'_> {
             generation,
             super::super::document_id_from_sqlite(id)?,
         )?;
-        self.snapshot.put_row(
-            batch,
-            Family::Documents,
-            owner,
-            &[
-                ValueRef::Text(self.table.as_bytes()),
-                ValueRef::Integer(id),
-                ValueRef::Text(body.as_bytes()),
-                metadata
-                    .tuple_xmin()
-                    .map_or(ValueRef::Null, |xmin| ValueRef::Integer(i64::from(xmin))),
-            ],
-        )
+        let row = [
+            ValueRef::Text(self.table.as_bytes()),
+            ValueRef::Integer(id),
+            ValueRef::Text(body.as_bytes()),
+            metadata
+                .tuple_xmin()
+                .map_or(ValueRef::Null, |xmin| ValueRef::Integer(i64::from(xmin))),
+        ];
+        if unused {
+            self.snapshot
+                .put_unused_row(batch, Family::Documents, owner, &row)
+        } else {
+            self.snapshot.put_row(batch, Family::Documents, owner, &row)
+        }
     }
 
     fn stage_blob(
@@ -131,18 +138,21 @@ impl NativeDocumentRead<'_> {
         id: i64,
         field: &str,
         bytes: &[u8],
+        unused: bool,
     ) -> SQLiteResult<()> {
-        self.snapshot.put_row(
-            batch,
-            Family::DocumentBlobs,
-            owner,
-            &[
-                ValueRef::Text(self.table.as_bytes()),
-                ValueRef::Integer(id),
-                ValueRef::Text(field.as_bytes()),
-                ValueRef::Blob(bytes),
-            ],
-        )
+        let row = [
+            ValueRef::Text(self.table.as_bytes()),
+            ValueRef::Integer(id),
+            ValueRef::Text(field.as_bytes()),
+            ValueRef::Blob(bytes),
+        ];
+        if unused {
+            self.snapshot
+                .put_unused_row(batch, Family::DocumentBlobs, owner, &row)
+        } else {
+            self.snapshot
+                .put_row(batch, Family::DocumentBlobs, owner, &row)
+        }
     }
 
     pub(crate) fn delete(&self, batch: &mut dyn KeyValueBatch, doc_id: DocId) -> SQLiteResult<()> {

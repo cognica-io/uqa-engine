@@ -24,7 +24,9 @@ pub fn index_references_column(
     .map_err(StorageBackendError::from)
 }
 
+mod enforced_key_cache;
 mod enforcement;
+pub use enforced_key_cache::EnforcedKeyCache;
 pub use enforcement::enforced_keys;
 pub mod diskann;
 pub mod physical;

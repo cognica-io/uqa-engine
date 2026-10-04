@@ -12,7 +12,7 @@ UQA Engine separates the query API from the persistence provider. Choose a backe
 | Compressed SQLite | `Engine::open_compressed(...)` | Compressed container | Optional | Storage-constrained deployment |
 | redb | `Engine::from_persistent_provider(...)` | Pure-Rust single file | No | Pure-Rust persistence and Key/Value integration |
 
-SQLite is the default persistent provider. The redb provider supports the durable catalog, documents, text indexes, graphs, B-tree indexes, exact vector search, IVF and HNSW indexes, transactions, and savepoints.
+SQLite is the default persistent provider. The redb provider supports the durable catalog, documents, text indexes, graphs, B-tree indexes, exact vector search, IVF, HNSW and DiskANN indexes, transactions, and savepoints.
 
 ## Open and reopen
 
@@ -52,7 +52,7 @@ All sessions created from this engine share the provider and durable data while 
 
 Sessions created with `Engine::new_session()` share immutable committed definitions and statistics while retaining independent statement gates, transactions, and physical storage handles. Persistent graph handles bind directly to each session's storage; they do not contain a complete in-memory graph. Reuse these sessions for independent database operations; cloning an `Arc<Engine>` still shares one SQL session and its statement gate.
 
-SQLite catalogs expose `CatalogFacade::cache_revisions()` as lightweight generations for table definitions, registries, table data, column statistics, and statistics-maintenance records. Callers compare generations for equality; they are opaque tokens, not timestamps or mutation counts. Development bound-native sessions also distinguish retained private changes from durable generations. The counters are read from the same pinned transaction snapshot as the data and advance atomically with storage mutations, including direct catalog writes. Rollback and savepoint rollback restore both the mutation and its counters. A data-only commit refreshes only the affected table's physical caches; unchanged schemas and statistics remain shared. Statistics-only commits replace the affected statistics snapshot and reuse its decoded contents across readers. Unchanged snapshots do not reread the counter map.
+SQLite catalogs expose `CatalogFacade::cache_revisions()` as lightweight generations for table definitions, registries, table data, column statistics, and statistics-maintenance records. Callers compare generations for equality; they are opaque tokens, not timestamps or mutation counts. Bound-native sessions also distinguish retained private changes from durable generations. The counters are read from the same pinned transaction snapshot as the data and advance atomically with storage mutations, including direct catalog writes. Rollback and savepoint rollback restore both the mutation and its counters. A data-only commit by another session refreshes only the affected table's physical caches, and a session keeps the caches its own data-only commit already maintained; unchanged schemas and statistics remain shared. Statistics-only commits replace the affected statistics snapshot and reuse its decoded contents across readers. Unchanged snapshots do not reread the counter map.
 
 Graph generations are tracked separately from other registries. Graph refresh binds names and small label metadata without loading vertex, edge, membership, adjacency, or path-index replicas. `CatalogFacade` provides indexed point reads, bounded ID pages, filtered counts, and membership lookups. Mutations use physical transactions and savepoints. Fixed transaction views and cursors retain storage-backed snapshots, with changed-ID overlays for their own writes; see [Graph runtime internals](../internals/06-graph-runtime.md) for native-reader and encrypted temporary snapshot ownership.
 
@@ -60,7 +60,7 @@ Custom providers can implement this optional method with the same transaction-vi
 
 ## Automatic column statistics
 
-Persistent query planning consumes saved estimates instead of synchronously scanning tables. A database-level background worker gathers a projected sample of at most 4,096 rows per relation hierarchy, releases its read snapshot, and publishes only if the table identity and committed change generation still match. First collection, committed-change thresholds, and a maximum dirty age of 60 seconds schedule refreshes automatically. Existing estimates remain available while maintenance is pending; explicit `ANALYZE` scans the full requested relation hierarchy.
+Persistent query planning consumes saved estimates instead of synchronously scanning tables. A database-level background worker gathers a projected sample of at most 4,096 rows per relation hierarchy, releases its read snapshot, and publishes only if the table identity, its maintenance record and the data generation of every sampled table still match, so a row write committed during sampling leaves the sample unpublished. First collection, committed-change thresholds, and a maximum dirty age of 60 seconds schedule refreshes automatically. Existing estimates remain available while maintenance is pending; explicit `ANALYZE` scans the full requested relation hierarchy.
 
 Both collection paths omit text and binary values above 1,024 bytes from stored range, histogram, and most-common-value (MCV) samples. Other encoded values have an 8,192-byte budget. Values are omitted rather than truncated, so no invented prefix becomes an equality or ordering key; stored table data is unchanged. Row and NULL counts include these observations, and each omitted non-null observation contributes one conservatively distinct value to the estimate. The bounded-value policy follows the approach used by [PostgreSQL scalar analysis](https://github.com/postgres/postgres/blob/REL_18_STABLE/src/backend/commands/analyze.c).
 
@@ -105,6 +105,8 @@ sequenceDiagram
 
 Use explicit transactions for multi-statement invariants. Use savepoints when part of a larger transaction may be retried or abandoned independently.
 
+A SQLite database writes a transaction when it commits. While the commit is written, its connection may keep the pages the commit changes in SQLite's page cache: up to eight times the size of the transaction's records and never more than 256 MiB, in addition to the session's allowance for the uncommitted changes themselves. The memory is released when the commit ends. A transaction of a few hundred rows stays within the 2 MiB a connection ordinarily keeps.
+
 ## Schema and index migrations
 
 Opening an older supported database can run provider migrations. Clustered full-text postings, for example, replace older per-document posting storage atomically and idempotently. A failed migration leaves the old representation unchanged.
@@ -116,13 +118,13 @@ Before upgrading an application:
 3. Run representative SQL, text, vector, and graph checks.
 4. Verify that the older binary is not expected to open a newly migrated file.
 
-Storage formats may evolve before a stable release, so application and database rollouts should be coordinated. The [0.4.7 upgrade guide](10-upgrading.md) covers vector-index storage formats, shared MVCC writers, backup restoration and the provider, analyzer and index migration requirements for earlier releases.
+Storage formats may evolve before a stable release, so application and database rollouts should be coordinated. The [0.4.9 upgrade guide](10-upgrading.md) covers vector-index storage formats, shared MVCC writers, backup restoration and the provider, analyzer and index migration requirements for earlier releases.
 
 ## Backups and copies
 
 Do not copy a live database file with a generic file copy and assume the result is transactionally consistent. Stop writers and close the engine and all retained provider, session, snapshot and participant owners, or use a provider-specific consistent backup method. Copy external rollback anchors and key metadata according to their own recovery procedures, without placing keys inside the database backup.
 
-Development redb MVCC backups have an explicit restore entry point: `RedbStorage::open_restored(path, request, options, control)`. It opens an existing, closed, consistent backup at `path`; copying the backup into place is the caller's responsibility. `options` is the ordinary `VersionedSessionOptions`, and `control` supplies the restore validation's memory allowance and cancellation signal. Close every provider, session, retained snapshot and serializable participant for the destination before copying or calling; any remaining redb owner prevents the restore open. Missing, uninitialized or unrelated database files are rejected.
+redb MVCC backups have an explicit restore entry point: `RedbStorage::open_restored(path, request, options, control)`. It opens an existing, closed, consistent backup at `path`; copying the backup into place is the caller's responsibility. `options` is the ordinary `VersionedSessionOptions`, and `control` supplies the restore validation's memory allowance and cancellation signal. Close every provider, session, retained snapshot and serializable participant for the destination before copying or calling; any remaining redb owner prevents the restore open. Missing, uninitialized or unrelated database files are rejected.
 
 Before closing the backup source, obtain its identity through `record_store()?.database_id()`. Allocate `uqa_storage::mvcc::DatabaseRestore::new(source)` and persist its `source()` and `target()` identities outside the database before invoking restoration. `DatabaseRestore::from_identities(source, target)` reconstitutes that request and rejects equal identities with `VersionError::InvalidRestoreIdentity`. The target identifies exactly one restoration. Reuse the request after an error because the durable transition may already have completed; a completed retry preserves subsequent writes and receipts. A separate restoration, including copying the same backup again, requires a newly allocated request. Ordinary `open` and `open_with_options` preserve the current history and are the entry points for normal restarts.
 

@@ -6,7 +6,9 @@
 
 //! Expression traversal shared by stored statement dependency binding.
 
-use super::{BTreeSet, Expr, ExpressionCallback, SQLError, Statement, StoredAstVisitor};
+use super::{
+    BTreeSet, Expr, ExpressionCallback, ProjectionCallback, SQLError, Statement, StoredAstVisitor,
+};
 
 pub fn visit_stored_expression(
     expression: &mut Expr,
@@ -16,6 +18,7 @@ pub fn visit_stored_expression(
         source: None,
         merge: None,
         expression: Some(visit),
+        projection: None,
         ty: None,
         relation: &mut |_: &mut String| Ok(()),
         routine: &mut |_: &mut String, _: Option<&mut Option<crate::ast::FunctionBinding>>| Ok(()),
@@ -31,6 +34,25 @@ pub fn visit_stored_statement_expressions(
         source: None,
         merge: None,
         expression: Some(visit),
+        projection: None,
+        ty: None,
+        relation: &mut |_: &mut String| Ok(()),
+        routine: &mut |_: &mut String, _: Option<&mut Option<crate::ast::FunctionBinding>>| Ok(()),
+    }
+    .bind_statement(statement)
+}
+
+/// Visit each select list or `RETURNING` item of a stored statement before its expression, and each expression in the order of the other visits.
+pub fn visit_stored_statement_projections(
+    statement: &mut Statement,
+    projection: ProjectionCallback<'_>,
+    expression: ExpressionCallback<'_>,
+) -> Result<(), SQLError> {
+    StoredAstVisitor {
+        source: None,
+        merge: None,
+        expression: Some(expression),
+        projection: Some(projection),
         ty: None,
         relation: &mut |_: &mut String| Ok(()),
         routine: &mut |_: &mut String, _: Option<&mut Option<crate::ast::FunctionBinding>>| Ok(()),

@@ -111,7 +111,7 @@ fn cancellation_during_each_tensor_conversion_step_releases_partial_buffers() {
             index_vectors_for_type_budgeted(&value, &ColumnType::Tensor(32), &memory, &mut || {
                 polls += 1;
                 if polls == cancel_at {
-                    Err(QueryCancelled)
+                    Err(QueryCancelled::USER_REQUEST)
                 } else {
                     Ok(())
                 }

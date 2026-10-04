@@ -22,8 +22,12 @@ mod privileges;
 mod review_regressions;
 #[path = "sql_triggers/row_images.rs"]
 mod row_images;
+#[path = "sql_triggers/statement_scope.rs"]
+mod statement_scope;
 #[path = "sql_triggers/transition.rs"]
 mod transition;
+#[path = "sql_triggers/triggered_modifications.rs"]
+mod triggered_modifications;
 
 fn exec(engine: &Engine, sql: &str) -> uqa_engine::SQLResult {
     engine

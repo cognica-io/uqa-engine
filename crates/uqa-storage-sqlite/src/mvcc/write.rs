@@ -13,27 +13,27 @@ use uqa_storage::mvcc::{
 };
 use uqa_storage::read_control::StorageReadControl;
 
-use super::{admission, codec, native, schema, Error, PhysicalResult};
+use super::{admission, codec, native, Error, PhysicalResult};
 
 pub(super) fn reserve_bindings(
     prepared: &PreparedRecordCommit,
     control: &StorageReadControl,
 ) -> VersionResult<MemoryReservation> {
-    let mut peak = 96;
-    for (key, value) in prepared
-        .records()
-        .iter()
-        .map(|record| (record.key(), record.value()))
-        .chain(prepared.required_keys().map(|key| (key, None)))
-    {
-        control.cancellation().check()?;
-        let bytes = key
-            .len()
-            .checked_mul(2)
-            .and_then(|key| key.checked_add(value.map_or(0, <[u8]>::len)))
+    let binding = |key: usize, value: u64| {
+        usize::try_from(value)
+            .ok()
+            .and_then(|value| key.checked_mul(2)?.checked_add(value))
             .and_then(|length| length.checked_add(96))
-            .ok_or(MemoryError::SizeOverflow)?;
-        peak = peak.max(bytes);
+            .ok_or(MemoryError::SizeOverflow)
+    };
+    let mut peak = 96;
+    let mut writes = prepared.writes();
+    while let Some(write) = writes.next_metadata(control)? {
+        peak = peak.max(binding(write.key().len(), write.value_len().unwrap_or(0))?);
+    }
+    for key in prepared.required_keys() {
+        control.cancellation().check()?;
+        peak = peak.max(binding(key.len(), 0)?);
     }
     Ok(control.memory().reserve(peak)?)
 }
@@ -59,13 +59,7 @@ pub(super) fn allocate_with_owner(
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     let current = codec::header(&transaction, identity)?;
-    let retained: i64 =
-        transaction.query_row("SELECT count(*) FROM _uqa_mvcc_transactions", [], |row| {
-            row.get(0)
-        })?;
-    let retained = u64::try_from(retained)
-        .map_err(|_| VersionError::InvalidEncoding("negative transaction receipt count"))?;
-    if retained >= current.receipt_limit {
+    if receipts_reach_limit(&transaction, &current)? {
         return Err(VersionError::ReceiptRetentionExhausted {
             limit: current.receipt_limit,
         }
@@ -80,17 +74,40 @@ pub(super) fn allocate_with_owner(
     )?;
     let bytes = id.allocation().to_be_bytes();
     retain(id)?;
-    transaction.execute(
-        "UPDATE _uqa_mvcc_metadata SET allocated = ?1 WHERE singleton = 1",
-        params![bytes.as_slice()],
-    )?;
-    transaction.execute(
-        "INSERT INTO _uqa_mvcc_transactions (allocation, status, sequence, fingerprint, managed) VALUES (?1, 0, NULL, NULL, ?2)",
-        params![bytes.as_slice(), i64::from(managed)],
-    )?;
+    transaction
+        .prepare_cached("UPDATE _uqa_mvcc_metadata SET allocated = ?1 WHERE singleton = 1")?
+        .execute(params![bytes.as_slice()])?;
+    transaction.prepare_cached("INSERT INTO _uqa_mvcc_transactions (allocation, status, sequence, fingerprint, managed) VALUES (?1, 0, NULL, NULL, ?2)")?.execute(params![bytes.as_slice(), i64::from(managed)])?;
     control.cancellation().check().map_err(VersionError::from)?;
     admission::commit(transaction, control)?;
     Ok(id)
+}
+
+/// Whether the retained receipts have reached the retention limit. Every retained receipt lies between the oldest one and the last allocation, so their distance bounds the count without visiting a row. Counting is linear in the receipts kept, which are deleted only when the limit is reached, so they are counted only when the bound does not settle the answer.
+fn receipts_reach_limit(connection: &Connection, current: &codec::Header) -> PhysicalResult<bool> {
+    let oldest = {
+        let mut statement = connection.prepare_cached(
+            "SELECT allocation FROM _uqa_mvcc_transactions ORDER BY allocation LIMIT 1",
+        )?;
+        let mut rows = statement.query([])?;
+        let Some(row) = rows.next()? else {
+            return Ok(current.receipt_limit == 0);
+        };
+        codec::integer(codec::bytes(row, 0)?)?
+    };
+    if current
+        .allocated
+        .checked_sub(oldest)
+        .is_some_and(|span| span.saturating_add(1) < current.receipt_limit)
+    {
+        return Ok(false);
+    }
+    let retained: i64 = connection
+        .prepare_cached("SELECT count(*) FROM _uqa_mvcc_transactions")?
+        .query_row([], |row| row.get(0))?;
+    let retained = u64::try_from(retained)
+        .map_err(|_| VersionError::InvalidEncoding("negative transaction receipt count"))?;
+    Ok(retained >= current.receipt_limit)
 }
 
 pub(super) fn commit(
@@ -111,10 +128,10 @@ pub(super) fn commit(
     }
     prepared.validate_snapshot(current.sequence)?;
     super::tombstones::validate(&transaction, prepared, control).map_err(rejected)?;
-    prepared.validate(control.cancellation(), |key| {
+    prepared.validate(control, |key| {
         codec::head(&transaction, key).map_err(Error::into_version)
     })?;
-    let sequence = if prepared.records().is_empty() {
+    let sequence = if prepared.is_empty() {
         current.sequence
     } else {
         current.sequence.successor()?
@@ -146,33 +163,40 @@ fn stage(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     let sequence = receipt.sequence.as_u64().to_be_bytes();
-    let has_runs: bool =
-        connection.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)", [], |row| {
-            row.get(0)
-        })?;
+    let has_runs: bool = connection
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)")?
+        .query_row([], |row| row.get(0))?;
     {
-        let mut versions = connection
-            .prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)")?;
-        let mut previous = connection.prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?;
-        let mut heads = connection.prepare("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
-        for write in prepared.records() {
-            control.cancellation().check().map_err(VersionError::from)?;
-            if has_runs {
-                super::runs::extract(connection, write.key(), control)?;
+        let mut versions = connection.prepare_cached(
+            "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)",
+        )?;
+        let mut previous = connection.prepare_cached("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?;
+        let mut heads = connection.prepare_cached("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
+        let mut writes = prepared.writes();
+        while let Some(write) = writes.next(control)? {
+            // Validation found the head each write expects. A key that expects none has no head, so it is in no run and has no compacted tombstone to restore before its first version.
+            if write.expected().is_some() {
+                if has_runs {
+                    super::runs::extract(connection, write.key(), control)?;
+                }
+                previous.execute([write.key()])?;
+                previous.clear_bindings();
+            } else {
+                debug_assert!(
+                    codec::head(connection, write.key())?.is_none(),
+                    "a write that expects no revision was staged over a head"
+                );
             }
-            previous.execute([write.key()])?;
-            previous.clear_bindings();
             versions.execute(params![write.key(), sequence.as_slice(), write.value()])?;
             versions.clear_bindings();
             heads.execute(params![write.key(), sequence.as_slice()])?;
             heads.clear_bindings();
         }
     }
-    connection.execute(
-        "UPDATE _uqa_mvcc_metadata SET sequence = ?1 WHERE singleton = 1",
-        params![sequence.as_slice()],
-    )?;
-    connection.execute("UPDATE _uqa_mvcc_transactions SET status = 2, sequence = ?1, fingerprint = ?2 WHERE allocation = ?3", params![sequence.as_slice(), receipt.fingerprint.as_slice(), receipt.transaction.allocation().to_be_bytes().as_slice()])?;
+    connection
+        .prepare_cached("UPDATE _uqa_mvcc_metadata SET sequence = ?1 WHERE singleton = 1")?
+        .execute(params![sequence.as_slice()])?;
+    connection.prepare_cached("UPDATE _uqa_mvcc_transactions SET status = 2, sequence = ?1, fingerprint = ?2 WHERE allocation = ?3")?.execute(params![sequence.as_slice(), receipt.fingerprint.as_slice(), receipt.transaction.allocation().to_be_bytes().as_slice()])?;
     control.cancellation().check().map_err(VersionError::from)?;
     Ok(())
 }
@@ -189,12 +213,11 @@ pub(super) fn stage_record(
         crate::read_control::reserve_bindings(control, &[key, value.unwrap_or_default()])?;
     let sequence = sequence.as_u64().to_be_bytes();
     super::runs::extract(connection, key, control)?;
-    connection.execute("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1", [key])?;
-    connection.execute(
-        "INSERT INTO _uqa_mvcc_versions(key, sequence, value) VALUES (?1, ?2, ?3)",
-        params![key, sequence.as_slice(), value],
-    )?;
-    connection.execute("INSERT INTO _uqa_mvcc_heads(key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0", params![key, sequence.as_slice()])?;
+    connection.prepare_cached("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?.execute([key])?;
+    connection
+        .prepare_cached("INSERT INTO _uqa_mvcc_versions(key, sequence, value) VALUES (?1, ?2, ?3)")?
+        .execute(params![key, sequence.as_slice(), value])?;
+    connection.prepare_cached("INSERT INTO _uqa_mvcc_heads(key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?.execute(params![key, sequence.as_slice()])?;
     Ok(())
 }
 
@@ -204,19 +227,19 @@ pub(super) fn abort(
     native: Option<native::NativeRecordNamespace>,
     control: &StorageReadControl,
 ) -> PhysicalResult<CommitStatus> {
-    let _permit = schema::WritePermit::acquire(connection)?;
-    let transaction = schema::begin(connection)?;
+    // Recording an abort waits for writer admission like any other write instead of failing once SQLite's busy timeout expires, which would leave the rollback to surface later as a cleanup failure.
+    let _permit = admission::permit(connection, control)?;
+    let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     codec::header(&transaction, id.database())?;
     let status = codec::status(&transaction, id)?;
     if status != CommitStatus::Pending {
         return Ok(status);
     }
-    transaction.execute(
-        "UPDATE _uqa_mvcc_transactions SET status = 1 WHERE allocation = ?1",
-        params![id.allocation().to_be_bytes().as_slice()],
-    )?;
+    transaction
+        .prepare_cached("UPDATE _uqa_mvcc_transactions SET status = 1 WHERE allocation = ?1")?
+        .execute(params![id.allocation().to_be_bytes().as_slice()])?;
     control.cancellation().check().map_err(VersionError::from)?;
-    transaction.commit()?;
+    admission::commit(transaction, control)?;
     Ok(CommitStatus::Aborted)
 }

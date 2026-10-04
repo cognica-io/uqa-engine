@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{plan::source_projection::RelationMetadataProjection, ResultRow, SQLError};
 
+mod borrowed;
 mod command_scan;
 mod row_source;
 
@@ -33,8 +34,14 @@ pub struct LocalTableRowSource {
     lock_origin: Option<SharedLockOrigin>,
     recheck_pins: Option<Arc<Vec<crate::row_locks::recheck::RecheckDoc>>>,
     recheck_cursor: usize,
+    /// The only identities the scan's filter admits, in ascending order, and the position of the next of them.
+    candidates: Option<Arc<[uqa_core::DocId]>>,
+    candidate_cursor: usize,
     command_changes: Option<super::document_changes::DocumentChanges>,
     command_change_after: Option<uqa_core::DocId>,
+    /// The next changes of the command scan after `command_change_after`, read a page at a time.
+    command_change_page: std::collections::VecDeque<(uqa_core::DocId, bool)>,
+    command_changes_exhausted: bool,
     command_base_after: Option<uqa_core::DocId>,
     command_base_ids: std::collections::VecDeque<uqa_core::DocId>,
     command_base_exhausted: bool,
@@ -130,6 +137,8 @@ pub struct LocalTableScanConfig {
     pub estimated_cardinality: u64,
     pub lock_origin: Option<SharedLockOrigin>,
     pub recheck_pins: Option<Arc<Vec<crate::row_locks::recheck::RecheckDoc>>>,
+    /// The only identities the scan's filter admits, in ascending order.
+    pub candidates: Option<Arc<[uqa_core::DocId]>>,
     pub command_changes: Option<super::document_changes::DocumentChanges>,
 }
 
@@ -150,10 +159,14 @@ impl LocalTableRowSource {
             estimated_cardinality: config.estimated_cardinality,
             lock_origin: config.lock_origin,
             recheck_pins: config.recheck_pins,
+            candidates: config.candidates,
             command_changes: config.command_changes,
             after: None,
             recheck_cursor: 0,
+            candidate_cursor: 0,
             command_change_after: None,
+            command_change_page: std::collections::VecDeque::new(),
+            command_changes_exhausted: false,
             command_base_after: None,
             command_base_ids: std::collections::VecDeque::new(),
             command_base_exhausted: false,

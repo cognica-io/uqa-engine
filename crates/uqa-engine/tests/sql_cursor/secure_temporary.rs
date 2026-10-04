@@ -79,12 +79,12 @@ fn command() -> String {
 
 fn setup(engine: &Engine) {
     engine.sql(&format!("CREATE TABLE retained_temp_rows (id INTEGER PRIMARY KEY, secret TEXT UNIQUE, body TEXT); CREATE TABLE retained_temp_source (id INTEGER PRIMARY KEY, secret TEXT, body TEXT); INSERT INTO retained_temp_rows VALUES (1, '{SECRET}-1', 'before'), (2, '{SECRET}-2', 'before'), (3, '{SECRET}-3', 'before'); INSERT INTO retained_temp_source VALUES (1, '{SECRET}-1', 'new1'), (2, '{SECRET}-2', 'new2')"), &[]).unwrap();
-    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
+    engine.set_query_memory_limit(Some(1));
 }
 
 fn retained_cursors(engine: &Engine, records: &dyn VersionedPersistence) -> u64 {
     let reader = engine.new_session().unwrap();
-    reader.sql("SET work_mem TO '1B'", &[]).unwrap();
+    reader.set_query_memory_limit(Some(1));
     let cursor = reader
         .sql_cursor("SELECT id, secret FROM retained_temp_rows ORDER BY id", &[])
         .unwrap();

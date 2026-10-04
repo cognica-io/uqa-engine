@@ -12,6 +12,8 @@ mod aggregate_monoid;
 mod correlated_outer_qualifier;
 #[path = "join_correctness.rs"]
 mod join_correctness;
+#[path = "queries/key_identity_reads.rs"]
+mod key_identity_reads;
 #[path = "manual_sql_examples.rs"]
 mod manual_sql_examples;
 #[path = "operator_tree_full_surface.rs"]
@@ -20,6 +22,8 @@ mod operator_tree_full_surface;
 mod operator_tree_pipeline;
 #[path = "optimizer_passes.rs"]
 mod optimizer_passes;
+#[path = "queries/row_metadata_filters.rs"]
+mod row_metadata_filters;
 #[path = "queries/sql_aggregate_nulls.rs"]
 mod sql_aggregate_nulls;
 #[path = "sql_aggregates.rs"]
@@ -36,6 +40,8 @@ mod sql_composites_reopen;
 mod sql_correlated_subqueries;
 #[path = "sql_cte.rs"]
 mod sql_cte;
+#[path = "queries/sql_cte_command_order.rs"]
+mod sql_cte_command_order;
 #[path = "queries/sql_cte_commands.rs"]
 mod sql_cte_commands;
 #[path = "queries/sql_cte_pg18_controls.rs"]

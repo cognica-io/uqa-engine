@@ -412,7 +412,7 @@ fn graph_batch_and_rebuild_failures_restore_every_persisted_value() {
             "body",
             whitespace_analyzer().compile().unwrap(),
             AnalyzerPhase::Both,
-            update
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(update)
         )
         .unwrap_err()
         .to_string()
@@ -507,7 +507,9 @@ fn legacy_length_only_rows_require_an_explicit_source_rebuild() {
     assert!(index.add_document(2, fields("a")).is_err());
     assert!(index.remove_document(1).is_err());
     index
-        .try_rebuild_documents(vec![(1, fields("gap gap"))])
+        .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+            vec![(1, fields("gap gap"))],
+        ))
         .unwrap();
     assert!(!index.source_rebuild_required().unwrap());
     assert_eq!(index.get_doc_length(1, "body").unwrap(), 0);

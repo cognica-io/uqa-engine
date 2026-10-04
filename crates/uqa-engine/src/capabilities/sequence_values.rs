@@ -18,7 +18,7 @@ use uqa_execution::catalog::sequence::values::context::{
 use uqa_sql::{catalog::sequence_functions::value_error::SequenceValueError, SQLError};
 use uqa_storage::{PersistentStorageSession, StorageBackendResult};
 struct SessionRead<'a>(parking_lot::RwLockReadGuard<'a, SessionStateSnapshot>);
-struct SessionWrite<'a>(parking_lot::RwLockWriteGuard<'a, SessionStateSnapshot>);
+struct SessionWrite<'a>(crate::state::SessionStateWriteGuard<'a>);
 impl SequenceSessionRead for SessionRead<'_> {
     fn currvals(&self) -> &BTreeMap<RelationIdentity, SessionSequenceValue> {
         &self.0.sequence_currvals
@@ -62,6 +62,10 @@ impl SequenceValueRuntime for Engine {
     fn prepare_explicit_transaction_writer(&self) -> Result<(), SQLError> {
         self.prepare_transaction_writer().map(|_| ())
     }
+    fn sequence_positions(&self) -> Option<&crate::row_locks::RowLockManager> {
+        self.shared_sequence_positions()
+            .map(|positions| &**positions)
+    }
     fn record_nontransactional_sequence_value(
         &self,
         definition_generation: [u8; 16],
@@ -101,6 +105,14 @@ impl SequenceValueTransactions for Engine {
 }
 
 impl Engine {
+    /// The store of exact sequence positions. Independent sessions allocate the values of persistent sequences only over a versioned backend, whose durable sequence records then run ahead of the values handed out.
+    pub(crate) fn shared_sequence_positions(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::row_locks::RowLockManager>> {
+        (self.versioned_backend_transactions() && self.storage.provider.is_some())
+            .then_some(&self.row_locks)
+    }
+
     pub(crate) fn sequence_value_context(&self) -> SequenceValueContext<'_> {
         SequenceValueContext {
             locks: self,
@@ -116,7 +128,7 @@ impl Engine {
         &self,
         operation: impl FnOnce(SequenceValueContext<'_>) -> Result<i64, SequenceValueError>,
     ) -> Result<i64, String> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let outside_statement = self
             .runtime
             .sql_execution_depth

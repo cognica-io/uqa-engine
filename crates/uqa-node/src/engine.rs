@@ -735,7 +735,7 @@ impl Engine {
             .take_sql_notices()
             .into_iter()
             .map(|notice| SQLNotice {
-                level: notice.severity.as_str().into(),
+                level: notice.level.as_str().to_string(),
                 sqlstate: notice.sqlstate,
                 message: notice.message,
                 detail: notice.detail,

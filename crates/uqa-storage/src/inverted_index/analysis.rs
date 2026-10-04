@@ -85,7 +85,7 @@ pub fn analyze_index_field_cancellable(
     })
     .map_err(|error| match error {
         StorageBackendError::Analysis(AnalysisError::Cancelled) => {
-            StorageBackendError::Cancelled(uqa_core::QueryCancelled)
+            StorageBackendError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST)
         }
         other => other,
     })

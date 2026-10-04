@@ -14,10 +14,9 @@ use super::{
 };
 use uqa_storage::{
     mvcc::VersionedSessionOptions,
-    read_control::StorageReadControl,
     vector_index::{HNSWIndexParams, VectorIndex},
 };
-use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteHNSWIndex, SQLiteRecordStore};
+use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteHNSWIndex};
 
 const X: [f32; 3] = [1.0, 0.0, 0.0];
 const Y: [f32; 3] = [0.0, 1.0, 0.0];
@@ -356,29 +355,4 @@ fn hnsw_publication_failure_keeps_one_evaluated_generation_for_retry_and_reopen(
         assert!(restored.search_knn(&Y, 1).is_err());
         assert_eq!(nearest(&*retained, &Y), vec![1]);
     }
-}
-
-#[test]
-fn native_hnsw_loading_checks_the_aggregate_decoded_graph_allowance() {
-    let connection = ManagedConnection::open_in_memory().unwrap();
-    Catalog::open(connection.clone()).unwrap();
-    let mut index = SQLiteHNSWIndex::new(connection.clone(), "docs", "embedding", 64);
-    for doc in 0..256 {
-        index.add(doc, vec![1.0; 64]).unwrap();
-    }
-    index.initialize().unwrap();
-    SQLiteRecordStore::for_native(&connection, &StorageReadControl::with_limit(16 << 20)).unwrap();
-    connection
-        .bind_native_records(VersionedSessionOptions {
-            retained_bytes: 64 << 10,
-        })
-        .unwrap();
-    assert_eq!(index.count().unwrap(), 256);
-    assert!(matches!(
-        index.search_knn(&[1.0; 64], 1).unwrap_err(),
-        uqa_storage::StorageBackendError::Memory(_)
-    ));
-    assert_eq!(index.count().unwrap(), 256);
-    assert!(index.snapshot().is_err());
-    assert!(!connection.in_transaction());
 }

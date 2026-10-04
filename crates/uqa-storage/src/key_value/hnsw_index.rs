@@ -14,7 +14,7 @@ use super::codec::{other_error, vector_field_prefix};
 use super::hnsw_persistence::{self, metadata_from_graph, PersistedHNSWNode};
 use super::index_keys::{hnsw_metadata_key, hnsw_node_key, hnsw_node_prefix};
 use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
-use crate::hnsw_index::{HNSWIndex, HNSWMutation, HNSWPersistenceDelta};
+use crate::hnsw_index::{HNSWCanonicalBuilder, HNSWGraphDelta, HNSWIndex, HNSWMutation};
 use crate::vector_index::{HNSWIndexParams, VectorIndex};
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -115,14 +115,15 @@ impl KeyValueHNSWIndex {
     ) -> StorageBackendResult<()> {
         self.view.evaluate(self.store.as_ref(), |read, batch| {
             let cached = self.graph_at(read)?;
-            let delta = cached.value.prepare_delta(mutation, read.control())?;
-            canonical(batch)?;
             let preview = !cached.definition_candidate
                 && cached.revision.is_some()
                 && !matches!(mutation, HNSWMutation::Clear);
             if preview {
+                // Admit the retained input before constructing its derived graph.
                 batch.hnsw_mutation(&hnsw_metadata_key(&self.table, &self.field)?, mutation)?;
             }
+            let delta = cached.value.prepare_delta(mutation, read.control())?;
+            canonical(batch)?;
             // Only a later reader publishes the graph with its actual committed/private identity.
             self.stage_delta(batch, &delta, next_revision(cached.revision)?, preview)
         })
@@ -137,13 +138,7 @@ impl KeyValueHNSWIndex {
                     self.table, self.field
                 )));
             }
-            let vectors = self.raw.load_all_from(read)?;
-            let delta = HNSWIndex::prepare_canonical(
-                self.dimensions,
-                self.params,
-                &vectors,
-                read.control(),
-            )?;
+            let delta = self.canonical_builder(read)?.finish_delta()?;
             self.stage_delta(batch, &delta, next_revision(revision)?, false)
         })
     }
@@ -152,14 +147,25 @@ impl KeyValueHNSWIndex {
         &self,
         read: &dyn KeyValueRead,
     ) -> StorageBackendResult<Budgeted<HNSWIndex>> {
-        let entries = self.raw.load_all_from(read)?;
-        HNSWIndex::from_canonical_controlled(self.dimensions, self.params, &entries, read.control())
+        self.canonical_builder(read)?.finish()
+    }
+
+    fn canonical_builder(
+        &self,
+        read: &dyn KeyValueRead,
+    ) -> StorageBackendResult<HNSWCanonicalBuilder> {
+        let mut builder = HNSWCanonicalBuilder::new(self.dimensions, self.params, read.control())?;
+        self.raw
+            .visit_canonical_from(read, |document, ordinal, vector| {
+                builder.push(document, ordinal, vector)
+            })?;
+        Ok(builder)
     }
 
     fn stage_delta(
         &self,
         batch: &mut dyn KeyValueBatch,
-        delta: &HNSWPersistenceDelta,
+        delta: &HNSWGraphDelta,
         revision: u64,
         preview: bool,
     ) -> StorageBackendResult<()> {
@@ -184,9 +190,10 @@ impl KeyValueHNSWIndex {
                 batch.delete_prefix(&prefix)?;
             }
         }
-        for node in &delta.nodes {
+        for node in delta.nodes() {
+            let node = node?;
             let key = hnsw_node_key(&self.table, &self.field, node.node_id)?;
-            let value = encode_value(&PersistedHNSWNode::try_from(node)?)?;
+            let value = encode_value(&PersistedHNSWNode::try_from(&*node)?)?;
             if preview {
                 batch.preview_hnsw_record(&key, Some(&value))?;
             } else {

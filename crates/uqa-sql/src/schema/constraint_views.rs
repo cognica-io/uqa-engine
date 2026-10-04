@@ -66,6 +66,7 @@ pub fn append_column_keys(columns: &[ColumnDef], constraints: &mut Vec<TableKeyC
             name: None,
             kind,
             columns: vec![column.name.clone()],
+            included_columns: Vec::new(),
             nulls_not_distinct: false,
             without_overlaps: false,
         });

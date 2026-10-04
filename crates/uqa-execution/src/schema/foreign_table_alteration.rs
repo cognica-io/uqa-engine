@@ -80,7 +80,7 @@ pub struct ForeignTableAlterContext<'a> {
     pub sequence_publication: &'a dyn SequenceSecurityPublication,
     pub publication: &'a dyn ForeignTableAlterPublication,
     pub changes: &'a dyn CatalogPublicationChanges,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }
 pub type ForeignTableAlterWrite<'a> =
     Box<dyn FnOnce(&ForeignTableAlterContext<'_>) -> Result<(), SQLError> + 'a>;
@@ -121,10 +121,7 @@ pub fn alter_foreign_table(
                     context.names.resolve_relation_kind(&statement.name)?,
                     statement,
                     &mut |message| {
-                        context
-                            .notices
-                            .lock()
-                            .push(uqa_sql::SQLNotice::notice(message));
+                        context.notices.push(uqa_sql::SQLNotice::notice(message));
                     },
                 )?
                 else {

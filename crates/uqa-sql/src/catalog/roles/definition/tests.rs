@@ -19,7 +19,7 @@ use std::collections::BTreeSet;
 struct Inputs {
     roles: BTreeMap<String, RoleDefinition>,
     memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
-    notices: RefCell<Vec<(String, String)>>,
+    notices: RefCell<Vec<crate::SQLNotice>>,
     current_reads: Cell<usize>,
 }
 impl Inputs {
@@ -62,9 +62,7 @@ impl RoleCatalogGuards for Inputs {
 }
 impl RoleNotices for Inputs {
     fn notice(&self, notice: crate::SQLNotice) {
-        self.notices
-            .borrow_mut()
-            .push((notice.severity.as_str().into(), notice.message));
+        self.notices.borrow_mut().push(notice);
     }
 }
 
@@ -211,9 +209,8 @@ fn drop_missing_role_notice_precedes_a_later_current_user_error() {
     );
     assert_eq!(
         *inputs.notices.borrow(),
-        [(
-            "NOTICE".into(),
-            "role \"absent\" does not exist, skipping".into()
+        [crate::SQLNotice::notice(
+            "role \"absent\" does not exist, skipping"
         )]
     );
 }
@@ -310,9 +307,8 @@ fn drop_special_role_targets_preserve_prior_missing_name_errors_and_notices() {
         );
         assert_eq!(inputs.current_reads.get(), 0);
         let expected = if if_exists {
-            vec![(
-                "NOTICE".into(),
-                "role \"absent\" does not exist, skipping".into(),
+            vec![crate::SQLNotice::notice(
+                "role \"absent\" does not exist, skipping",
             )]
         } else {
             Vec::new()

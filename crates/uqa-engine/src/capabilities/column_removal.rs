@@ -18,6 +18,7 @@ use uqa_sql::{
     catalog::events::PreparedRuleColumnDrop,
     schema::columns::removal_metadata::{
         ColumnDependencyEntries, ColumnDependencyState, ColumnsRead, ForeignKeysRead,
+        KeyConstraintsRead,
     },
     SQLError,
 };
@@ -48,6 +49,9 @@ impl ColumnDependencyState for ColumnDependencyBinding {
     fn foreign_keys(&self) -> ForeignKeysRead<'_> {
         Box::new(self.0.foreign_keys.read())
     }
+    fn key_constraints(&self) -> KeyConstraintsRead<'_> {
+        Box::new(self.0.key_constraints.read())
+    }
 }
 impl ColumnDependencyState for ColumnDropBinding<'_> {
     fn columns(&self) -> ColumnsRead<'_> {
@@ -55,6 +59,9 @@ impl ColumnDependencyState for ColumnDropBinding<'_> {
     }
     fn foreign_keys(&self) -> ForeignKeysRead<'_> {
         Box::new(self.state.foreign_keys.read())
+    }
+    fn key_constraints(&self) -> KeyConstraintsRead<'_> {
+        Box::new(self.state.key_constraints.read())
     }
 }
 impl ColumnDropCatalog for Engine {

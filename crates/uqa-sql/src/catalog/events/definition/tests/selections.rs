@@ -528,3 +528,88 @@ fn invalid_ancestry_fails_before_live_trigger_catalog_reads() {
         ["replica", "loaded:public.child", "hierarchy:public.child"]
     );
 }
+
+#[test]
+fn trigger_definitions_hold_every_enable_mode_and_do_not_read_the_replication_role() {
+    let catalog = Catalog::default();
+    let mut partitions = fixture();
+    let local = [
+        ("always", EventEnableMode::Always),
+        ("disabled", EventEnableMode::Disabled),
+        ("origin", EventEnableMode::Origin),
+    ]
+    .into_iter()
+    .map(|(name, enabled)| {
+        let mut stored = trigger("public.child", name);
+        stored.enabled = enabled;
+        (name.to_owned(), stored)
+    })
+    .collect();
+    partitions
+        .triggers
+        .insert(RelationIdentity::new("public", "child"), local);
+    let mut inherited = trigger("public.parent", "replica");
+    inherited.enabled = EventEnableMode::Replica;
+    partitions.triggers.insert(
+        RelationIdentity::new("public", "parent"),
+        BTreeMap::from([("replica".into(), inherited)]),
+    );
+    for (replica, fired) in [(false, ["always", "origin"]), (true, ["always", "replica"])] {
+        let state = Visibility {
+            replica,
+            ..visibility(&partitions)
+        };
+        let lookup = context(&catalog, &partitions, &state);
+        // A statement keeps these for all of its rows, so they hold the triggers of every role and the read of the role is left to each firing.
+        let definitions = lookup
+            .trigger_definitions_for(
+                "public.child",
+                TriggerTiming::Before,
+                TriggerEvent::Insert,
+                true,
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            trigger_names(&definitions),
+            ["always", "disabled", "origin", "replica"]
+        );
+        // An inherited definition is fired for the partition it reaches.
+        assert!(definitions
+            .iter()
+            .all(|trigger| trigger.definition.table == "public.child"));
+        assert_eq!(
+            *partitions.reads.borrow(),
+            [
+                "loaded:public.child",
+                "hierarchy:public.child",
+                "hierarchy:public.parent",
+                "triggers"
+            ]
+        );
+        partitions.reads.borrow_mut().clear();
+        // Another timing or level has none of them.
+        for (timing, row) in [(TriggerTiming::After, true), (TriggerTiming::Before, false)] {
+            assert!(lookup
+                .trigger_definitions_for("public.child", timing, TriggerEvent::Insert, row, &[])
+                .unwrap()
+                .is_empty());
+        }
+        partitions.reads.borrow_mut().clear();
+        assert_eq!(
+            trigger_names(
+                &lookup
+                    .triggers_for(
+                        "public.child",
+                        TriggerTiming::Before,
+                        TriggerEvent::Insert,
+                        true,
+                        &[]
+                    )
+                    .unwrap()
+            ),
+            fired
+        );
+        partitions.reads.borrow_mut().clear();
+    }
+}

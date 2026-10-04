@@ -78,8 +78,10 @@ pub(super) struct BusyTimeout<'a> {
 
 impl<'a> BusyTimeout<'a> {
     pub(super) fn new(connection: &'a Connection) -> rusqlite::Result<Self> {
-        let milliseconds: u32 =
-            connection.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
+        // Through the statement cache: every record write begins here.
+        let milliseconds: u32 = connection
+            .prepare_cached("PRAGMA busy_timeout")?
+            .query_row([], |row| row.get(0))?;
         connection.busy_timeout(Duration::ZERO)?;
         Ok(Self {
             connection,

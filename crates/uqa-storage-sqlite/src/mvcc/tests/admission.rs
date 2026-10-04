@@ -34,22 +34,32 @@ fn reject_first_busy(_attempt: i32) -> bool {
     false
 }
 
+/// What another connection holds while the operation first asks for the database.
+#[derive(Clone, Copy)]
+enum Holder {
+    /// A read transaction, which a commit under a rollback journal waits for.
+    Reader,
+    /// A write transaction, which another writer waits for.
+    Writer,
+    /// The whole database, which under a rollback journal a reader waits for as well.
+    Exclusive,
+}
+
 fn after_physical_contention<T: Send>(
     path: &std::path::Path,
     store: &SQLiteRecordStore,
     control: &StorageReadControl,
-    read_only_holder: bool,
+    holder: Holder,
     cancel: bool,
     operation: impl FnOnce(&Connection) -> T + Send,
 ) -> T {
+    let begin = match holder {
+        Holder::Reader => "BEGIN; SELECT allocated FROM _uqa_mvcc_metadata",
+        Holder::Writer => "BEGIN IMMEDIATE",
+        Holder::Exclusive => "BEGIN EXCLUSIVE",
+    };
     let holder = Connection::open(path).unwrap();
-    holder
-        .execute_batch(if read_only_holder {
-            "BEGIN; SELECT allocated FROM _uqa_mvcc_metadata"
-        } else {
-            "BEGIN IMMEDIATE"
-        })
-        .unwrap();
+    holder.execute_batch(begin).unwrap();
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     thread::scope(|scope| {
@@ -84,17 +94,27 @@ fn transaction_and_identifier_admission_survive_a_rejected_busy_attempt() {
     let connection = ManagedConnection::open(&path).unwrap();
     let store = SQLiteRecordStore::new(&connection).unwrap();
     let control = control();
-    let id = after_physical_contention(&path, &store, &control, false, false, |connection| {
-        write::allocate(connection, store.identity, None, &control)
-    })
+    let id = after_physical_contention(
+        &path,
+        &store,
+        &control,
+        Holder::Writer,
+        false,
+        |connection| write::allocate(connection, store.identity, None, &control),
+    )
     .unwrap();
     assert_eq!(id.allocation(), 1);
     assert_eq!(
         store.commit_status(id, &control).unwrap(),
         CommitStatus::Pending
     );
-    let allocation =
-        after_physical_contention(&path, &store, &control, false, false, |connection| {
+    let allocation = after_physical_contention(
+        &path,
+        &store,
+        &control,
+        Holder::Writer,
+        false,
+        |connection| {
             super::super::identifiers::allocate(
                 connection,
                 store.identity,
@@ -103,21 +123,43 @@ fn transaction_and_identifier_admission_survive_a_rejected_busy_attempt() {
                 uqa_storage::mvcc::IdentifierRequest::Observe(41),
                 &control,
             )
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     assert_eq!(allocation.watermark(), 41);
     assert_eq!(
         store.identifier_watermark(b"identities", &control).unwrap(),
         Some(41)
     );
     let prepared = prepared(b"item", b"published", &control);
-    let receipt = after_physical_contention(&path, &store, &control, false, false, |connection| {
-        write::commit(connection, id, &prepared, None, &control)
-    })
+    let receipt = after_physical_contention(
+        &path,
+        &store,
+        &control,
+        Holder::Writer,
+        false,
+        |connection| write::commit(connection, id, &prepared, None, &control),
+    )
     .unwrap();
     assert_eq!(
         store.commit_status(id, &control).unwrap(),
         CommitStatus::Committed(receipt)
+    );
+    // Recording an abort is admitted the same way, so a conflicting writer cannot turn rollback into a deferred cleanup failure.
+    let aborted = store.allocate_transaction(&control).unwrap();
+    let status = after_physical_contention(
+        &path,
+        &store,
+        &control,
+        Holder::Writer,
+        false,
+        |connection| write::abort(connection, aborted, None, &control),
+    )
+    .unwrap();
+    assert_eq!(status, CommitStatus::Aborted);
+    assert_eq!(
+        store.commit_status(aborted, &control).unwrap(),
+        CommitStatus::Aborted
     );
 }
 
@@ -128,9 +170,14 @@ fn cancelling_writer_admission_does_not_consume_a_transaction_or_identifier() {
     let connection = ManagedConnection::open(&path).unwrap();
     let store = SQLiteRecordStore::new(&connection).unwrap();
     let control = control();
-    let result = after_physical_contention(&path, &store, &control, false, true, |connection| {
-        write::allocate(connection, store.identity, None, &control)
-    });
+    let result = after_physical_contention(
+        &path,
+        &store,
+        &control,
+        Holder::Writer,
+        true,
+        |connection| write::allocate(connection, store.identity, None, &control),
+    );
     assert!(matches!(
         result,
         Err(Error::Version(VersionError::Cancelled(_)))
@@ -140,16 +187,23 @@ fn cancelling_writer_admission_does_not_consume_a_transaction_or_identifier() {
         store.allocate_transaction(&control).unwrap().allocation(),
         1
     );
-    let result = after_physical_contention(&path, &store, &control, false, true, |connection| {
-        super::super::identifiers::allocate(
-            connection,
-            store.identity,
-            None,
-            b"identities",
-            uqa_storage::mvcc::IdentifierRequest::Observe(41),
-            &control,
-        )
-    });
+    let result = after_physical_contention(
+        &path,
+        &store,
+        &control,
+        Holder::Writer,
+        true,
+        |connection| {
+            super::super::identifiers::allocate(
+                connection,
+                store.identity,
+                None,
+                b"identities",
+                uqa_storage::mvcc::IdentifierRequest::Observe(41),
+                &control,
+            )
+        },
+    );
     assert!(matches!(
         result,
         Err(Error::Version(VersionError::Cancelled(_)))
@@ -179,21 +233,28 @@ fn commit_behind_reader(cancel: bool) {
     let id = store.allocate_transaction(&control).unwrap();
     let prepared = prepared(b"item", b"published", &control);
     let staged = Arc::new(AtomicUsize::new(0));
-    let result = after_physical_contention(&path, &store, &control, true, cancel, |connection| {
-        let staged = Arc::clone(&staged);
-        connection
-            .create_scalar_function(
-                "observe_version",
-                0,
-                rusqlite::functions::FunctionFlags::SQLITE_UTF8,
-                move |_| {
-                    staged.fetch_add(1, Ordering::SeqCst);
-                    Ok(0)
-                },
-            )
-            .unwrap();
-        write::commit(connection, id, &prepared, None, &control)
-    });
+    let result = after_physical_contention(
+        &path,
+        &store,
+        &control,
+        Holder::Reader,
+        cancel,
+        |connection| {
+            let staged = Arc::clone(&staged);
+            connection
+                .create_scalar_function(
+                    "observe_version",
+                    0,
+                    rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+                    move |_| {
+                        staged.fetch_add(1, Ordering::SeqCst);
+                        Ok(0)
+                    },
+                )
+                .unwrap();
+            write::commit(connection, id, &prepared, None, &control)
+        },
+    );
     assert_eq!(staged.load(Ordering::SeqCst), 1, "publication was restaged");
     control.cancellation().reset();
     let snapshot = store.snapshot(&control).unwrap();
@@ -230,6 +291,42 @@ fn commit_behind_reader(cancel: bool) {
             Ok(())
         })
         .unwrap();
+}
+
+#[test]
+fn an_acknowledgement_waits_for_a_writer_that_holds_a_rollback_journal_database() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("acknowledged.db");
+    // Under a rollback journal a reader waits for a writer that holds the database, as the readers of a compressed database and of the notification state file do.
+    let connection = ManagedConnection::open_auxiliary(&path, None).unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    let id = store.allocate_transaction(&control).unwrap();
+    let receipt = store
+        .commit(id, &prepared(b"item", b"published", &control), &control)
+        .unwrap();
+    // The acknowledgement reads its owner kind before its transaction begins. That read meets the busy database first and is waited for like the transaction, instead of failing a commit that has already been written.
+    after_physical_contention(
+        &path,
+        &store,
+        &control,
+        Holder::Exclusive,
+        false,
+        |connection| {
+            super::super::receipts::acknowledge(
+                connection,
+                None,
+                uqa_storage::mvcc::ReceiptAcknowledgement::Committed(receipt),
+                &control,
+            )
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        store.commit_status(id, &control).unwrap(),
+        CommitStatus::Committed(receipt)
+    );
+    assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 1);
 }
 
 #[test]

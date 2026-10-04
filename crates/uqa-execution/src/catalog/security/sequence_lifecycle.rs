@@ -24,11 +24,12 @@ use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles}
 use uqa_sql::{
     ast::{GrantSequenceStmt, GrantSequenceTarget},
     catalog::security::{
+        acl_warning::acl_warning,
         dependencies::added_acl_roles,
         sequence::requested_acl_privileges,
         sequence_grants::{
             apply_sequence_acl, bind_named_sequence_grants, bind_sequence_grant_schemas,
-            sequence_acl_warning, sequence_grants_in_schemas, validate_sequence_acl_roles,
+            sequence_grants_in_schemas, validate_sequence_acl_roles,
             validate_sequence_grant_target_kinds, ResolvedSequenceGrantTarget,
             SequenceGrantNamespace,
         },
@@ -163,7 +164,7 @@ impl SequencePrivilegeContext<'_> {
                 &current,
             )?;
             if grantable != privileges.len() {
-                notices.push(sequence_acl_warning(
+                notices.push(acl_warning(
                     statement.is_grant,
                     grantable != 0,
                     &target.relation.name,

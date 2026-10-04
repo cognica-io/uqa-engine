@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Dependencies of relation constraints as `CreateConstraintEntry` records them: automatically on the constrained columns, or the relation when none is named; normally on a foreign key's referenced columns and unique index, and on what a check expression uses; and a partition's key constraint on its parent's.
+//! Dependencies of relation constraints as `CreateConstraintEntry` records them: automatically on the constrained columns, a key constraint's INCLUDE columns among them, or the relation when none is named; normally on a foreign key's referenced columns and unique index, and on what a check expression uses; a partition's key constraint on its parent's, and a foreign key's constraint on a referenced partition internally on the foreign key.
 
 use super::{ColumnScope, DependencyBuilder, MemberObject, References};
 use crate::catalog::projection::helpers::constraints::{
@@ -47,6 +47,18 @@ impl DependencyBuilder<'_> {
                     constrained.add_column(relation_oid, number);
                 }
             }
+            // A key constraint covers every attribute of its index, its INCLUDE columns too, so dropping one of them drops the constraint.
+            if matches!(
+                constraint.kind,
+                ConstraintCatalogKind::PrimaryKey | ConstraintCatalogKind::Unique { .. }
+            ) {
+                let table = self.relation_object(relation_oid)?.clone();
+                for name in included_key_columns(self.catalog, &relation, constraint.object_id) {
+                    if let Some(number) = table.column_number(&name) {
+                        constrained.add_column(relation_oid, number);
+                    }
+                }
+            }
             self.recorder
                 .record_references(address, constrained, DependencyKind::Auto);
             if let Some(foreign_key) = &constraint.foreign_key {
@@ -84,10 +96,19 @@ impl DependencyBuilder<'_> {
                     false,
                 );
             }
-            // `index_constraint_create`: a partition's key constraint belongs to its parent's and to the partition.
-            if let Ok(parent @ 1..) =
+            if let Some(parent) = constraint.parent_oid {
+                // `addFkRecurseReferenced`: a foreign key's constraint on a referenced partition is part of the foreign key, which goes with it and which deleting it deletes.
+                if let Ok(parent @ 1..) = u32::try_from(parent) {
+                    self.recorder.record(
+                        address,
+                        ObjectAddress::whole(CONSTRAINT_CLASS, parent),
+                        DependencyKind::Internal,
+                    );
+                }
+            } else if let Ok(parent @ 1..) =
                 u32::try_from(constraint_parent_oid(self.catalog, &constraint, &indexes))
             {
+                // `index_constraint_create`: a partition's key constraint belongs to its parent's and to the partition.
                 self.recorder.record(
                     address,
                     ObjectAddress::whole(CONSTRAINT_CLASS, parent),
@@ -102,4 +123,27 @@ impl DependencyBuilder<'_> {
         }
         Ok(())
     }
+}
+
+/// The INCLUDE columns of the key constraint `object_id` of `relation`.
+fn included_key_columns(
+    catalog: &crate::catalog::CatalogReadView,
+    relation: &RelationIdentity,
+    object_id: Option<[u8; 16]>,
+) -> Vec<String> {
+    let Some(object_id) = object_id else {
+        return Vec::new();
+    };
+    catalog
+        .snapshot()
+        .tables
+        .get(relation)
+        .and_then(|table| {
+            table.keys.iter().find(|key| {
+                key.catalog_identity
+                    .is_some_and(|identity| identity.object_id == object_id)
+            })
+        })
+        .map(|key| key.included_columns.clone())
+        .unwrap_or_default()
 }

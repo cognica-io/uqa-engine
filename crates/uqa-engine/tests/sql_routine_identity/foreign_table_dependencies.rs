@@ -145,7 +145,7 @@ fn foreign_table_defaults_and_checks_keep_exact_routine_dependencies() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![uqa_engine::SQLNotice::notice("drop cascades to 3 other objects").with_detail(Some("drop cascades to default value for column id of foreign table foreign_dependency_items\ndrop cascades to constraint foreign_dependency_items_id_check on foreign table foreign_dependency_items\ndrop cascades to constraint foreign_dependency_qty_check on foreign table foreign_dependency_items".into()))]);
+        vec![uqa_engine::SQLNotice::notice("drop cascades to 3 other objects").with_detail("drop cascades to default value for column id of foreign table foreign_dependency_items\ndrop cascades to constraint foreign_dependency_items_id_check on foreign table foreign_dependency_items\ndrop cascades to constraint foreign_dependency_qty_check on foreign table foreign_dependency_items")]);
     assert_eq!(
         scalar(
             &engine,
@@ -413,7 +413,7 @@ fn foreign_table_sequence_dependencies_follow_rename_drop_and_reopen() {
             .unwrap();
         assert_eq!(
             engine.take_sql_notices(),
-            vec![uqa_engine::SQLNotice::notice("drop cascades to 3 other objects").with_detail(Some("drop cascades to default value for column id of foreign table foreign_sequence_items\ndrop cascades to constraint foreign_sequence_items_qty_check on foreign table foreign_sequence_items\ndrop cascades to constraint foreign_sequence_table_check on foreign table foreign_sequence_items".into()))]);
+            vec![uqa_engine::SQLNotice::notice("drop cascades to 3 other objects").with_detail("drop cascades to default value for column id of foreign table foreign_sequence_items\ndrop cascades to constraint foreign_sequence_items_qty_check on foreign table foreign_sequence_items\ndrop cascades to constraint foreign_sequence_table_check on foreign table foreign_sequence_items")]);
     }
 
     assert_foreign_sequence_dependencies_removed(&Engine::open(&database).unwrap());

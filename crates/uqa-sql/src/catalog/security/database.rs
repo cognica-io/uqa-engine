@@ -506,10 +506,6 @@ pub fn validate_database_acl_roles(
     Ok(())
 }
 
-pub fn database_acl_warning(is_grant: bool, partial: bool, name: &str) -> crate::SQLNotice {
-    super::object_acl::privilege_warning(is_grant, partial, name)
-}
-
 pub fn validate_stored_database_security(
     security: &DatabaseSecurity,
     roles: &BTreeMap<String, RoleDefinition>,

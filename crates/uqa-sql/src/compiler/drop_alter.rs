@@ -8,6 +8,7 @@
 
 mod columns;
 mod domains;
+mod identity;
 
 use super::relations::{
     collect_def_elem_options, validate_materialized_view_options, validate_view_options,
@@ -529,13 +530,14 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                                     .into(),
                             ));
                         }
-                        let mut seen = std::collections::BTreeSet::new();
-                        for column in &columns {
-                            if !seen.insert(column.as_str()) {
-                                return Err(SQLError::TypeMismatch(format!(
-                                "PRIMARY KEY / UNIQUE constraint names column `{column}` more than once"
-                            )));
-                            }
+                        if let Some(column) =
+                            columns.iter().enumerate().find_map(|(position, column)| {
+                                columns[..position].contains(column).then_some(column)
+                            })
+                        {
+                            return Err(crate::schema::keys::definition::repeated_key_column(
+                                kind, column,
+                            ));
                         }
                         AlterTableAction::AddKeyConstraint {
                             constraint: TableKeyConstraint {
@@ -544,6 +546,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                                 name,
                                 kind,
                                 columns,
+                                included_columns: extract_strings(&constraint.including)?,
                                 nulls_not_distinct: constraint.nulls_not_distinct,
                                 without_overlaps: constraint.without_overlaps,
                             },
@@ -614,21 +617,11 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                             deferrable: constraint.deferrable,
                             initially_deferred: constraint.initdeferred,
                             period: constraint.fk_with_period,
+                            referenced_partitions: Vec::new(),
                         };
-                        if foreign_key.period
-                            && (!matches!(
-                                foreign_key.on_update,
-                                crate::ast::ForeignKeyAction::NoAction
-                            ) || !matches!(
-                                foreign_key.on_delete,
-                                crate::ast::ForeignKeyAction::NoAction
-                            ))
-                        {
-                            return Err(SQLError::Unsupported(
-                                "unsupported referential action for foreign key constraint using PERIOD"
-                                    .into(),
-                            ));
-                        }
+                        crate::schema::foreign_keys::validate_period_foreign_key_actions(
+                            &foreign_key,
+                        )?;
                         AlterTableAction::AddForeignKeyConstraint {
                             constraint: foreign_key,
                         }
@@ -754,6 +747,9 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     using,
                 }
             }
+            AlterTableType::AtAddIdentity => identity::add_identity(cmd)?,
+            AlterTableType::AtSetIdentity => identity::set_identity(cmd)?,
+            AlterTableType::AtDropIdentity => identity::drop_identity(cmd),
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE action {other:?}"

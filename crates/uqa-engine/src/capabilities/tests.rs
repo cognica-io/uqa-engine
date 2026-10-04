@@ -89,7 +89,10 @@ fn capability_views_expose_only_their_owned_state() {
     let session = engine.session_execution_view();
     let runtime = engine.query_runtime_view();
     assert!(catalog.has_schema("public"));
-    assert_eq!(session.search_path(), vec!["public"]);
+    assert_eq!(
+        session.show_variable("search_path").unwrap(),
+        "\"$user\", public"
+    );
     assert_eq!(
         session
             .current_role()

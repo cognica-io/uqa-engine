@@ -8,6 +8,8 @@
 
 use super::{ReferentialContext, ReferentialReadSnapshot, ReferentialSnapshots};
 use crate::mutation::constraints::context::MutationRead;
+use crate::mutation::constraints::index_keys::changes_error;
+use crate::query::document_changes::DocumentChanges;
 use uqa_core::DocId;
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
@@ -45,7 +47,7 @@ impl<'a> ReferenceSnapshot<'a> {
             table: table.to_string(),
             changes: self
                 .current
-                .command_overlay_changed_ids(table)?
+                .command_overlay_changes(table)?
                 .unwrap_or_default(),
         })
     }
@@ -56,7 +58,7 @@ pub(super) struct ReferenceTableSnapshot<'a> {
     snapshots: &'a dyn ReferentialSnapshots,
     latest: Option<&'a dyn ReferentialReadSnapshot>,
     table: String,
-    changes: std::collections::BTreeSet<DocId>,
+    changes: DocumentChanges,
 }
 
 impl ReferenceTableSnapshot<'_> {
@@ -68,7 +70,8 @@ impl ReferenceTableSnapshot<'_> {
             .doc_ids(&self.table)?
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
-        for &doc_id in &self.changes {
+        for change in self.changes.changes() {
+            let (doc_id, _) = change.map_err(changes_error)?;
             if self.current.get_document(&self.table, doc_id)?.is_some() {
                 ids.insert(doc_id);
             } else {
@@ -80,7 +83,11 @@ impl ReferenceTableSnapshot<'_> {
 
     pub fn document(&self, doc_id: DocId) -> Result<Option<Document>, SQLError> {
         if let Some(latest) = self.latest {
-            if !self.changes.contains(&doc_id) {
+            if !self
+                .changes
+                .contains_change(doc_id)
+                .map_err(changes_error)?
+            {
                 return latest.document(&self.table, doc_id);
             }
         }
@@ -92,7 +99,11 @@ impl ReferenceTableSnapshot<'_> {
         let Some(latest) = self.latest else {
             return Ok(());
         };
-        if self.changes.contains(&doc_id) {
+        if self
+            .changes
+            .contains_change(doc_id)
+            .map_err(changes_error)?
+        {
             return Ok(());
         }
         if latest.metadata(&self.table, doc_id)?

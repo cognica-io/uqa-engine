@@ -131,7 +131,11 @@ pub fn drop_column(
     state.clear_value_indexes();
     removal_metadata::remove_column_declarations(&mut state.write_columns(), column);
     removal_metadata::remove_column_checks(&mut state.write_checks(), column);
-    removal_metadata::remove_column_keys(&mut state.write_keys(), column);
+    removal_metadata::remove_column_keys(
+        &mut state.write_columns(),
+        &mut state.write_keys(),
+        column,
+    );
     removal_metadata::remove_column_foreign_keys(&mut state.write_foreign_keys(), column);
     state.remove_column_acl(column);
     state.remove_text_field(column);

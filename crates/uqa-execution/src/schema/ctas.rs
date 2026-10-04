@@ -59,7 +59,7 @@ pub struct CreateTableAsContext<'a, S: Clone> {
     pub namespace: &'a dyn TableAsNamespace,
     pub publication: &'a dyn TableAsPublication,
     pub vectors: &'a dyn ConstraintCatalog,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }
 pub struct CreateTableAsExecution<'a> {
     pub name: &'a str,
@@ -202,7 +202,7 @@ fn should_skip_existing_create_table_as<S: Clone>(
     let (_, relation) = uqa_core::RelationIdentity::parse_reference(execution.name)
         .map_err(SQLError::Unsupported)?;
     if execution.if_not_exists {
-        context.notices.lock().push(
+        context.notices.push(
             uqa_sql::SQLNotice::notice(format!("relation \"{relation}\" already exists, skipping"))
                 .with_sqlstate("42P07"),
         );
