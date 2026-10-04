@@ -207,48 +207,16 @@ fn compile_sql_routine_plans(
     let parameters = super::body_parameters::sql_body_parameter_scope(def, &positional_parameters)?;
     statements
         .into_iter()
-        .map(|mut statement| {
-            if bind_catalog_dependencies && !preserve_target_expressions {
-                super::merge_columns::normalize_stored_merge_target_columns(
-                    context.merge,
-                    &mut statement,
-                )?;
-            }
-            let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
-                context.catalog.has_registered_aggregate_function(name)
-            });
-            if persisted_definition {
-                plan.rewrite_scalar_expressions(&mut |expression| {
-                    let ScalarExpr::Func { name, binding, .. } = expression else {
-                        return;
-                    };
-                    crate::ast::FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
-                });
-            }
+        .map(|statement| {
+            let mut plan = lower_sql_body_statement(
+                context,
+                statement,
+                bind_catalog_dependencies,
+                persisted_definition,
+                preserve_target_expressions,
+            )?;
             // A SQL-standard body is analyzed when the routine is defined, so its names resolve against the catalog of that moment, as `PostgreSQL` stores the analyzed statements. A body given as a string keeps its names until each statement is analyzed before it runs.
             if bind_catalog_dependencies {
-                match &mut plan {
-                    UnifiedPlan::Query(query) => {
-                        let namespace = context.catalog.stored_query_namespace();
-                        stored_relations::bind_stored_query_relations(
-                            &StoredQueryBindingContext {
-                                relations: context.relations,
-                                sequences: context.sequences,
-                                temporary_schema: &namespace.temporary_schema,
-                                transition_relations: &namespace.transition_relations,
-                            },
-                            query,
-                            "SQL routine body",
-                            false,
-                            persisted_definition,
-                        )?;
-                    }
-                    UnifiedPlan::Command(_) => {
-                        crate::binding::stored_routines::mark_catalog_statement_relations_bound(
-                            &mut plan,
-                        )?;
-                    }
-                }
                 let binding = context.catalog.binding_snapshot()?;
                 crate::binding::bind_routine_parameter_references(
                     context.routines,
@@ -272,4 +240,51 @@ fn compile_sql_routine_plans(
             Ok(plan)
         })
         .collect()
+}
+
+/// Lower one statement of a SQL body. The statement of a SQL-standard body also binds the relations it reads, as the routine's definition stores them.
+pub(super) fn lower_sql_body_statement(
+    context: &RoutineCompilationContext<'_>,
+    mut statement: Statement,
+    bind_catalog_dependencies: bool,
+    persisted_definition: bool,
+    preserve_target_expressions: bool,
+) -> Result<UnifiedPlan, SQLError> {
+    if bind_catalog_dependencies && !preserve_target_expressions {
+        super::merge_columns::normalize_stored_merge_target_columns(context.merge, &mut statement)?;
+    }
+    let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
+        context.catalog.has_registered_aggregate_function(name)
+    });
+    if persisted_definition {
+        plan.rewrite_scalar_expressions(&mut |expression| {
+            let ScalarExpr::Func { name, binding, .. } = expression else {
+                return;
+            };
+            crate::ast::FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
+        });
+    }
+    if bind_catalog_dependencies {
+        match &mut plan {
+            UnifiedPlan::Query(query) => {
+                let namespace = context.catalog.stored_query_namespace();
+                stored_relations::bind_stored_query_relations(
+                    &StoredQueryBindingContext {
+                        relations: context.relations,
+                        sequences: context.sequences,
+                        temporary_schema: &namespace.temporary_schema,
+                        transition_relations: &namespace.transition_relations,
+                    },
+                    query,
+                    "SQL routine body",
+                    false,
+                    persisted_definition,
+                )?;
+            }
+            UnifiedPlan::Command(_) => {
+                crate::binding::stored_routines::mark_catalog_statement_relations_bound(&mut plan)?;
+            }
+        }
+    }
+    Ok(plan)
 }

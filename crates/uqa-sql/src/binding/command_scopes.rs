@@ -53,9 +53,29 @@ impl SchemaScope {
             self.bind_source_routines_for_storage(routines, source, &subqueries, params, outer)?;
         }
         let (target, expression) = self.command_expression_schema(routines, command, params)?;
+        let labels = command
+            .returning()
+            .map(super::routine_parameters::column_labels)
+            .unwrap_or_default();
+        self.bind_command_clause_scopes(routines, command, &target, &expression, params, outer)?;
+        if let Some(returning) = command.returning_mut() {
+            super::routine_parameters::keep_column_labels(returning, labels);
+        }
+        Ok(())
+    }
+
+    fn bind_command_clause_scopes(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        command: &mut CommandPlan,
+        target: &RowSchema,
+        expression: &RowSchema,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<(), SQLError> {
         match command {
             CommandPlan::Insert(insert) => {
-                self.bind_insert_clauses(routines, insert, &target, &expression, params, outer)
+                self.bind_insert_clauses(routines, insert, target, expression, params, outer)
             }
             CommandPlan::Update(update) => {
                 let UpdatePlan {
@@ -65,7 +85,7 @@ impl SchemaScope {
                     subqueries,
                     ..
                 } = update.as_mut();
-                let schema = overlay_outer_schema(&expression, outer);
+                let schema = overlay_outer_schema(expression, outer);
                 let expressions = assignments
                     .iter_mut()
                     .flat_map(AssignmentPlan::expressions_mut)
@@ -85,7 +105,7 @@ impl SchemaScope {
                     subqueries,
                     ..
                 } = delete.as_mut();
-                let schema = overlay_outer_schema(&expression, outer);
+                let schema = overlay_outer_schema(expression, outer);
                 let expressions = predicate
                     .as_mut()
                     .into_iter()
@@ -98,7 +118,7 @@ impl SchemaScope {
                 self.bind_clause_scopes(routines, clauses, subqueries, &schema, params, outer)
             }
             CommandPlan::Merge(merge) => {
-                self.bind_merge_clauses(routines, merge, &target, &expression, params, outer)
+                self.bind_merge_clauses(routines, merge, target, expression, params, outer)
             }
             _ => Ok(()),
         }

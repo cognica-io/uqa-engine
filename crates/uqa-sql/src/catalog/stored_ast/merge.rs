@@ -16,6 +16,7 @@ pub fn visit_stored_statement_merges(
         source: None,
         merge: Some(visit),
         expression: None,
+        projection: None,
         ty: None,
         relation: &mut |_: &mut String| Ok(()),
         routine: &mut |_: &mut String, _: Option<&mut Option<crate::ast::FunctionBinding>>| Ok(()),
@@ -88,7 +89,7 @@ where
             }
         }
         for projection in &mut merge.returning {
-            self.bind_expr(&mut projection.expr, &ctes)?;
+            self.bind_projection(projection, &ctes)?;
         }
         Ok(())
     }

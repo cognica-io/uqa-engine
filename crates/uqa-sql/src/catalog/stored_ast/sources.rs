@@ -16,6 +16,7 @@ pub fn visit_stored_statement_sources(
         source: Some(visit),
         merge: None,
         expression: None,
+        projection: None,
         ty: None,
         relation: &mut |_: &mut String| Ok(()),
         routine: &mut |_: &mut String, _: Option<&mut Option<crate::ast::FunctionBinding>>| Ok(()),

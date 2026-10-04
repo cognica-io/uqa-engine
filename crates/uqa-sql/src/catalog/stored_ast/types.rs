@@ -14,6 +14,7 @@ pub fn stored_statement_relation_names(statement: &Statement) -> Result<Vec<Stri
         source: None,
         merge: None,
         expression: None,
+        projection: None,
         ty: None,
         relation: &mut |name: &mut String| {
             names.push(name.clone());
@@ -53,6 +54,7 @@ fn collect_type_names(
         source: None,
         merge: None,
         expression: None,
+        projection: None,
         ty: Some(&mut collect),
         relation: &mut relation,
         routine: &mut routine,

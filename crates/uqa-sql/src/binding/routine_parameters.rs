@@ -9,7 +9,7 @@
 use super::{BindingContext, QueryPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope};
 use crate::ast::{ColumnType, InternalRelationId};
 use crate::catalog::resolution::RelationLookupMode;
-use crate::plan::{CommandPlan, ExpressionPlan, UnifiedPlan};
+use crate::plan::{CommandPlan, ExpressionPlan, ProjectionPlan, UnifiedPlan};
 use crate::routines::RoutineResolution;
 use std::sync::LazyLock;
 
@@ -92,6 +92,32 @@ impl RoutineParameterScope {
                         .and_then(|slot| Self::position_at(schema, slot))
                         .is_some()
                 }))
+    }
+}
+
+/// The output name each select list item takes from the column it names, which the item keeps when the name turns out to be a parameter: `PostgreSQL` names the output column of a parameter reference after the reference as written.
+pub(super) fn column_labels(projections: &[ProjectionPlan]) -> Vec<Option<String>> {
+    projections
+        .iter()
+        .map(|projection| match &projection.expr {
+            ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. }
+                if projection.alias.is_none() =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Name each select list item that `labels` took from a column name and that now refers to a parameter after that column name.
+pub(super) fn keep_column_labels(projections: &mut [ProjectionPlan], labels: Vec<Option<String>>) {
+    for (projection, label) in projections.iter_mut().zip(labels) {
+        if let Some(label) = label {
+            if matches!(projection.expr, ScalarExpr::Param(_)) {
+                projection.alias = Some(label);
+            }
+        }
     }
 }
 

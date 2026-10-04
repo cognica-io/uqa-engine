@@ -11,6 +11,7 @@ use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
     binding::stored_columns::StoredSourceCatalog,
     routines::{
+        body_parameters::record_sql_standard_body_parameters,
         compilation::{compile_function_body, defer_function_body},
         dependencies::{self, RoutineCompilationMode},
         regclass::{self, RoutineRegclassCatalog},
@@ -64,6 +65,9 @@ pub fn compile_catalog_bound_routine(
         }
     }
     let mut changed = bind_routine_definition_dependencies(context, def, mode)?;
+    if matches!(mode, RoutineCompilationMode::Definition) {
+        changed |= record_sql_standard_body_parameters(&context.compilation.analysis, def)?;
+    }
     let mut compiled = compile_routine_body(&context.compilation, def, bodies)?;
     let body_changed = {
         let dependency_body = compilation::stored_merge_dependency_body(&context.compilation, def)?;

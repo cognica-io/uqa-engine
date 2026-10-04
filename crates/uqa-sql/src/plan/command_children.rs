@@ -106,6 +106,16 @@ impl CommandPlan {
             _ => None,
         }
     }
+
+    pub fn returning_mut(&mut self) -> Option<&mut [ProjectionPlan]> {
+        match self {
+            Self::Insert(plan) => Some(&mut plan.returning),
+            Self::Update(plan) => Some(&mut plan.returning),
+            Self::Delete(plan) => Some(&mut plan.returning),
+            Self::Merge(plan) => Some(&mut plan.returning),
+            _ => None,
+        }
+    }
 }
 
 impl CommandPlan {

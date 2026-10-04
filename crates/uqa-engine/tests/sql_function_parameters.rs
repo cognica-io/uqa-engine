@@ -160,6 +160,17 @@ fn the_routine_name_qualifies_a_parameter_that_no_relation_takes() {
                 "SELECT f(4)",
                 Value::Int(4),
             ),
+            // A parameter reference names its output column as written.
+            (
+                "CREATE FUNCTION lb(n int) RETURNS int LANGUAGE sql AS 'SELECT s.n FROM (SELECT n) s'",
+                "SELECT lb(7)",
+                Value::Int(7),
+            ),
+            (
+                "CREATE FUNCTION lr(n int) RETURNS int LANGUAGE sql AS 'WITH x AS (INSERT INTO tv VALUES (n, 1) RETURNING n) SELECT x.n FROM x'",
+                "SELECT lr(61)",
+                Value::Int(61),
+            ),
         ],
     );
 }
@@ -353,4 +364,41 @@ fn output_parameters_are_not_parameters_of_a_sql_body() {
             Value::Int(3),
         )],
     );
+}
+
+#[test]
+fn a_sql_standard_body_keeps_its_parameters_when_a_relation_takes_their_names() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("recorded.db");
+    let calls = "SELECT sbr(15) AS sbr, sbv(15) AS sbv, (SELECT m FROM sbp(7)) AS sbp";
+    let expected = |engine: &Engine| {
+        let result = sql(engine, calls);
+        let row = &result.rows[0];
+        assert_eq!(
+            (row["sbr"].clone(), row["sbv"].clone(), row["sbp"].clone()),
+            (Value::Int(1), Value::Int(1), Value::Int(7))
+        );
+    };
+    {
+        let engine = Engine::open(&path).unwrap();
+        for statement in [
+            "CREATE TABLE t (id int, v int)",
+            "INSERT INTO t VALUES (10, 1), (20, 2)",
+            "CREATE FUNCTION sbr(n int) RETURNS bigint LANGUAGE sql BEGIN ATOMIC SELECT count(*) FROM t WHERE id > n; END",
+            // The derived table keeps the output name the parameter gave its column.
+            "CREATE FUNCTION sbp(n int) RETURNS TABLE (m int) LANGUAGE sql BEGIN ATOMIC SELECT s.n FROM (SELECT n) s; END",
+            "CREATE VIEW w AS SELECT id FROM t",
+            "CREATE FUNCTION sbv(x int) RETURNS bigint LANGUAGE sql BEGIN ATOMIC SELECT count(*) FROM w WHERE id > x; END",
+        ] {
+            sql(&engine, statement);
+        }
+        expected(&engine);
+        sql(&engine, "ALTER TABLE t RENAME COLUMN v TO n");
+        sql(
+            &engine,
+            "CREATE OR REPLACE VIEW w AS SELECT id, id AS x FROM t",
+        );
+        expected(&engine);
+    }
+    expected(&Engine::open(&path).unwrap());
 }

@@ -300,6 +300,7 @@ impl SchemaScope {
                         outer,
                     )?;
                 }
+                let labels = super::routine_parameters::column_labels(&block.projections);
                 for projection in &mut block.projections {
                     self.bind_scalar_routines_for_storage(
                         routines,
@@ -310,6 +311,7 @@ impl SchemaScope {
                         outer,
                     )?;
                 }
+                super::routine_parameters::keep_column_labels(&mut block.projections, labels);
                 block.projections = crate::semantics::expand_bound_projection_stars(
                     &block.projections,
                     &source_schema,
