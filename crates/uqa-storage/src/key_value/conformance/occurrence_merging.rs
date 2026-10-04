@@ -167,7 +167,9 @@ fn verify_conflicts(
             }
             _ => {
                 left.add_document(2, fields("alpha"))?;
-                right.try_rebuild_documents(vec![(1, fields("alpha"))])?;
+                right.try_rebuild_documents(
+                    &mut crate::inverted_index::TextIndexDocuments::new(vec![(1, fields("alpha"))]),
+                )?;
             }
         }
         expect(

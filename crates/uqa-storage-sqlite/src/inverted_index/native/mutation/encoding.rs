@@ -22,17 +22,32 @@ pub(super) fn write(
     owner: NativeRecordOwner,
     draft: &Draft,
 ) -> StorageBackendResult<()> {
-    let address = Address::decode(&draft.address)?;
+    write_values(
+        batch,
+        read,
+        owner,
+        &draft.address,
+        [draft.values[0].as_deref(), draft.values[1].as_deref()],
+        draft.merge,
+    )
+}
+
+/// Stage the native row at the encoded `address` holding `values`, its family's projections in order.
+pub(super) fn write_values(
+    batch: &mut dyn KeyValueBatch,
+    read: &NativeRead,
+    owner: NativeRecordOwner,
+    address: &[u8],
+    values: [Option<&[u8]>; 2],
+    merge: bool,
+) -> StorageBackendResult<()> {
+    let address = Address::decode(address)?;
     let family =
         records::family(address.projection.expect("complete address")).expect("current family");
-    let first = draft.values[0]
-        .as_deref()
-        .ok_or_else(|| invalid("native occurrence row has an incomplete projection"))?;
-    let second = || {
-        draft.values[1]
-            .as_deref()
-            .ok_or_else(|| invalid("native occurrence row has an incomplete projection"))
-    };
+    let first =
+        values[0].ok_or_else(|| invalid("native occurrence row has an incomplete projection"))?;
+    let second =
+        || values[1].ok_or_else(|| invalid("native occurrence row has an incomplete projection"));
     let table = ValueRef::Text(read.table.as_bytes());
     let field = ValueRef::Text(address.field.unwrap_or_default().as_bytes());
     let doc_id = || {
@@ -111,7 +126,7 @@ pub(super) fn write(
     };
     let record = NativeRecord::encode(family, owner, row, &read.snapshot.control)
         .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
-    if draft.merge {
+    if merge {
         batch.replace_occurrence_record(record.key(), Some(record.row()))?;
     } else {
         batch.put(record.key(), record.row())?;

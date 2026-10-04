@@ -198,6 +198,37 @@ pub fn returning_expression_schema(
     supplemental: Option<&RowSchema>,
 ) -> RowSchema {
     let composite_width = target.len();
+    let (columns, types) = target_with_system_columns(target);
+    let target =
+        returning_context_schema(&columns, &types, composite_width, target_qualifier, aliases);
+    supplemental.map_or(target.clone(), |source| {
+        RowSchema::join(&target, source, std::iter::empty())
+    })
+}
+
+/// The row scope of the clauses of a data-modifying statement other than `RETURNING`: the target, named by its name or alias, with its system columns, and the statement's other sources. The `old` and `new` aliases of the target belong to `RETURNING` alone.
+#[must_use]
+pub fn mutation_clause_schema(
+    target: &RowSchema,
+    target_qualifier: &str,
+    supplemental: Option<&RowSchema>,
+) -> RowSchema {
+    let composite_width = target.len();
+    let (columns, types) = target_with_system_columns(target);
+    let width = columns.len();
+    let target = RowSchema::with_wildcard_hidden_positions(
+        &RowSchema::with_qualified_types(target_qualifier, columns, types),
+        composite_width..width,
+    );
+    supplemental.map_or(target.clone(), |source| {
+        RowSchema::join(&target, source, std::iter::empty())
+    })
+}
+
+/// The target's columns followed by the system columns a statement can name on it.
+fn target_with_system_columns(
+    target: &RowSchema,
+) -> (Vec<String>, Vec<Option<crate::ast::ColumnType>>) {
     let mut columns = target.columns().to_vec();
     let mut types = target.column_types().to_vec();
     if !columns.iter().any(|column| column == DOC_ID_COLUMN) {
@@ -208,11 +239,7 @@ pub fn returning_expression_schema(
     types.push(Some(crate::ast::ColumnType::Oid));
     columns.push(crate::semantics::XMIN_COLUMN.into());
     types.push(Some(crate::ast::ColumnType::Xid));
-    let target =
-        returning_context_schema(&columns, &types, composite_width, target_qualifier, aliases);
-    supplemental.map_or(target.clone(), |source| {
-        RowSchema::join(&target, source, std::iter::empty())
-    })
+    (columns, types)
 }
 
 pub fn query_plan_output_columns(plan: &crate::plan::QueryPlan) -> Option<Vec<String>> {

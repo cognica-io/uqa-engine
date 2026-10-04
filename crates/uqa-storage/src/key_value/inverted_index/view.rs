@@ -117,17 +117,21 @@ impl KeyValueInvertedIndex {
 
     pub(super) fn rebuild_documents(
         &self,
-        documents: Vec<(DocId, std::collections::BTreeMap<FieldName, String>)>,
+        source: &mut dyn crate::inverted_index::TextIndexSource,
     ) -> StorageBackendResult<()> {
-        self.rebuild_documents_inner(documents, None)
+        self.rebuild_documents_inner(source, None)
     }
 
+    /// Replace the index with the documents `source` reads, staged before the mutation opens: a source may read the provider's session, which the mutation holds.
     pub(super) fn rebuild_documents_inner(
         &self,
-        documents: Vec<(DocId, std::collections::BTreeMap<FieldName, String>)>,
+        source: &mut dyn crate::inverted_index::TextIndexSource,
         cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<()> {
-        self.mutate(|view, batch| view.rebuild_documents_inner(batch, documents, cancellation))
+        self.ensure_writable()?;
+        let control = self.read(|view| Ok(view.store.control().clone()))?;
+        let staged = super::rebuild::stage_source(&self.bindings, &control, source, cancellation)?;
+        self.mutate(|view, batch| view.write_rebuild(batch, &staged, cancellation))
     }
 
     /// Capture a provider's selected occurrence view without first cloning its analyzer bindings or table metadata into an intermediate live index.

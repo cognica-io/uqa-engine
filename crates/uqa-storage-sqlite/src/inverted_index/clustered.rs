@@ -67,19 +67,45 @@ pub(super) fn write_cluster(
     control: &StorageReadControl,
 ) -> SQLiteResult<()> {
     control.cancellation().check()?;
-    let stored_cluster = encode_index_u64("posting cluster", cluster_id)?;
     if entries.is_empty() {
         conn.execute(
             "DELETE FROM _occurrence_clusters
               WHERE table_name = ?1 AND field = ?2 AND term = ?3
                 AND cluster_id = ?4",
-            params![table, field, term.as_bytes(), stored_cluster],
+            params![
+                table,
+                field,
+                term.as_bytes(),
+                encode_index_u64("posting cluster", cluster_id)?
+            ],
         )?;
         return Ok(());
     }
-    let (score_blob, positions_blob) =
+    let (score, positions) =
         encode_occurrence_cluster_controlled(entries.iter(), control).map_err(SQLiteError::from)?;
-    let posting_count = encode_index_counter("posting count", entries.len() as u64)?;
+    write_encoded_cluster(
+        conn,
+        table,
+        &uqa_storage::inverted_index::StagedCluster {
+            field,
+            term,
+            cluster: cluster_id,
+            score: &score,
+            positions: &positions,
+        },
+    )
+}
+
+/// Write a cluster whose score and positions values are already encoded.
+pub(super) fn write_encoded_cluster(
+    conn: &rusqlite::Connection,
+    table: &str,
+    cluster: &uqa_storage::inverted_index::StagedCluster<'_>,
+) -> SQLiteResult<()> {
+    let posting_count = encode_index_counter(
+        "posting count",
+        clustered_result(score_count(cluster.score))?,
+    )?;
     conn.execute(
         "INSERT INTO _occurrence_clusters
             (table_name, field, term, cluster_id, posting_count,
@@ -91,12 +117,12 @@ pub(super) fn write_cluster(
             positions_blob = excluded.positions_blob",
         params![
             table,
-            field,
-            term.as_bytes(),
-            stored_cluster,
+            cluster.field,
+            cluster.term.as_bytes(),
+            encode_index_u64("posting cluster", cluster.cluster)?,
             posting_count,
-            score_blob.as_ref(),
-            positions_blob.as_ref()
+            cluster.score,
+            cluster.positions
         ],
     )?;
     Ok(())

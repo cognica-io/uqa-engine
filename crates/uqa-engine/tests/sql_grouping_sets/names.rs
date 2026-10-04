@@ -115,3 +115,30 @@ fn grouping_names_in_stored_views_survive_column_rename_and_reopen() {
         [vec![11, 2], vec![21, 1]]
     );
 }
+
+#[test]
+fn grouping_names_prefer_output_columns_to_enclosing_columns() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE TABLE enclosing (p int)",
+        "INSERT INTO enclosing VALUES (5)",
+        "CREATE TABLE grouped (v int)",
+        "INSERT INTO grouped VALUES (1), (2), (3)",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+    assert_eq!(
+        integer_rows(
+            &engine,
+            "SELECT (SELECT count(*) FROM (SELECT v AS p FROM grouped GROUP BY p) s) AS c FROM enclosing",
+        ),
+        vec![vec![3]]
+    );
+    assert_eq!(
+        integer_rows(
+            &engine,
+            "SELECT x.p, x.n FROM enclosing, LATERAL (SELECT v % 2 AS p, count(*) AS n FROM grouped GROUP BY p ORDER BY p) x",
+        ),
+        vec![vec![0, 1], vec![1, 2]]
+    );
+}

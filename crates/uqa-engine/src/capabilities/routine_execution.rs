@@ -125,6 +125,16 @@ impl RoutineStatements for Engine {
     fn load_language_library(&self, language: &str) {
         self.load_language(language);
     }
+    fn with_statement_scope(
+        &self,
+        analyze: uqa_execution::routines::context::StatementScopeOperation<'_>,
+    ) -> Result<(), SQLError> {
+        let scope = super::query_scope::new_for_current_routine(self);
+        analyze(
+            self,
+            &uqa_execution::query::binding::binding_context(&scope)?,
+        )
+    }
 }
 impl RoutineTransactions for Engine {
     fn depth(&self) -> usize {

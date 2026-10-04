@@ -126,6 +126,7 @@ pub fn validate_query_block_references<S: Clone>(
     schema: &RowSchema,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     uqa_sql::binding::validate_query_block_references(
         routines,
@@ -133,6 +134,7 @@ pub fn validate_query_block_references<S: Clone>(
         schema,
         params,
         &binding_context(ctes)?,
+        outer,
     )
 }
 

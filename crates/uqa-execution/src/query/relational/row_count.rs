@@ -57,8 +57,13 @@ fn evaluate_limit_offset_with_ctes<S: Clone + 'static>(
     ctes: &CteScope<S>,
 ) -> Result<Value, SQLError> {
     let hook = context.expression_scope(ctes.clone());
-    let ctx = PhysicalEvalContext::new(None, params)
-        .with_function_hook(hook.as_ref())
-        .with_subquery_runner(hook.as_ref());
+    // A count can name the columns of the enclosing queries, which the outer row of a correlated block carries, but none of its own query.
+    let ctx = match ctes.row_lock_outer_row() {
+        Some(outer) => PhysicalEvalContext::from_row_lookup(outer, params)
+            .with_physical_outer_row(&outer.schema, &outer.row),
+        None => PhysicalEvalContext::new(None, params),
+    }
+    .with_function_hook(hook.as_ref())
+    .with_subquery_runner(hook.as_ref());
     eval_physical_scalar(expr, &ctes.scalar_subqueries, &ctx)
 }

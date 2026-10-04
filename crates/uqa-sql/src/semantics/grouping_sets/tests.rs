@@ -86,7 +86,7 @@ fn grouped_literal_validation_matches_postgresql_before_evaluation() {
         if sql.starts_with("PREPARE ") {
             continue;
         }
-        let result = validate_grouped_expressions(&Catalog, &block(sql), &schema, &[]);
+        let result = validate_grouped_expressions(&Catalog, &block(sql), &schema, None, &[]);
         match (case["sqlstate"].as_str(), result) {
             (None, Ok(())) => {}
             (Some(expected), Err(error))
@@ -127,8 +127,8 @@ fn grouping_aliases_resolve_before_distinct_sets_and_storage() {
         [original.projections[0].expr.clone()]
     );
     let mut stored = original;
-    assert!(bind_grouping_names(&Catalog, &mut stored, &input(), &[]).unwrap());
-    assert!(!bind_grouping_names(&Catalog, &mut stored, &input(), &[]).unwrap());
+    assert!(bind_grouping_names(&Catalog, &mut stored, &input(), None, &[]).unwrap());
+    assert!(!bind_grouping_names(&Catalog, &mut stored, &input(), None, &[]).unwrap());
     assert_eq!(stored.grouping_sets[0], stored.grouping_sets[1]);
 }
 

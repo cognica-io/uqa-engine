@@ -132,7 +132,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
 
     fn try_rebuild_documents(
         &mut self,
-        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        _source: &mut dyn crate::inverted_index::TextIndexSource,
     ) -> StorageBackendResult<()> {
         Err(read_only_error())
     }
@@ -579,14 +579,14 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         _field: &str,
         _revision: Arc<uqa_analysis::CompiledAnalyzer>,
         _phase: AnalyzerPhase,
-        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        _source: &mut dyn crate::inverted_index::TextIndexSource,
     ) -> StorageBackendResult<()> {
         Err(read_only_error())
     }
 
     fn try_rebuild_documents_cancellable(
         &mut self,
-        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        _source: &mut dyn crate::inverted_index::TextIndexSource,
         _cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         Err(read_only_error())
@@ -597,7 +597,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         _field: &str,
         _revision: Arc<uqa_analysis::CompiledAnalyzer>,
         _phase: AnalyzerPhase,
-        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        _source: &mut dyn crate::inverted_index::TextIndexSource,
         _cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         Err(read_only_error())

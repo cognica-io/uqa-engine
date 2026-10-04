@@ -17,6 +17,17 @@ use uqa_sql::{
     SQLError,
 };
 
+/// Complete a `PL/pgSQL` compilation with the session's settings for what the body does not declare, as a backend compiles a function under the settings in effect.
+pub fn apply_session_compile_options(
+    session: &dyn super::invocation::context::RoutineInvocationSession,
+    parsed: &mut uqa_sql::plpgsql::PLpgSQLFunction,
+) {
+    parsed.variable_conflict = parsed
+        .options
+        .variable_conflict
+        .unwrap_or_else(|| session.plpgsql_variable_conflict());
+}
+
 /// Examine a body given as a string under the routine's own settings, as `PostgreSQL` validates it under them at creation and compiles it under them when the routine is called.
 pub fn with_routine_settings<T>(
     context: &StoredRoutineCompilationContext<'_>,

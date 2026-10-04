@@ -98,7 +98,11 @@ fn filter_table_rows<S: Clone + Send + Sync + 'static>(
         .column_definitions(table)
         .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let candidates = super::document_ids::document_id_candidates(filter, params, &definitions);
+    let candidates = crate::query::key_candidates::key_candidates(
+        filter,
+        params,
+        crate::query::key_candidates::IdentityColumns::new(&definitions, false, |name| name),
+    );
     // When the predicate reads a known column set, evaluate it against
     // a per-row field projection fetched in one storage scan instead
     // of materialising every document. `_doc_id` names the row's identity, which the filter schema carries, unless the table stores a column of that name.

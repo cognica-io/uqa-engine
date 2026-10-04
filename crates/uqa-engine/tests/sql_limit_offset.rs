@@ -596,3 +596,35 @@ fn limit_with_join() {
         .collect();
     assert_eq!(collected, vec![2, 3]);
 }
+
+#[test]
+fn a_count_names_enclosing_columns_but_no_column_of_its_own_query() {
+    let eng = engine();
+    for (sql, construct) in [
+        ("SELECT id FROM notes LIMIT qty", "LIMIT"),
+        ("SELECT id FROM notes OFFSET qty", "OFFSET"),
+        (
+            "SELECT id FROM notes LIMIT (SELECT count(*) FROM notes AS n WHERE n.qty < notes.qty)",
+            "LIMIT",
+        ),
+    ] {
+        let error = eng.sql(sql, &[]).expect_err(sql);
+        assert_eq!(
+            (error.sqlstate().unwrap_or_default(), error.to_string()),
+            (
+                "42P10",
+                format!("argument of {construct} must not contain variables")
+            ),
+            "{sql}"
+        );
+    }
+    assert_eq!(
+        integers(
+            &eng,
+            "SELECT id FROM notes AS o WHERE (SELECT count(*) FROM (SELECT 1 FROM notes LIMIT o.id) s) = 2 ORDER BY id",
+            "id",
+            &[],
+        ),
+        vec![2]
+    );
+}

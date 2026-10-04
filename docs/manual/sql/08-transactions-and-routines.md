@@ -202,6 +202,7 @@ A name of two or more identifiers separated by dots that no parameter defines be
 | `idle_in_transaction_session_timeout`, `idle_session_timeout`, `transaction_timeout` | `0`, no limit |
 | `client_min_messages` | `notice` |
 | `check_function_bodies` | `on`; `off` stores routine bodies given as strings without examining them, as described in [Body validation](#body-validation) |
+| `plpgsql.variable_conflict` | Superuser setting, `error`, `use_variable` or `use_column`, defined once the session loads PL/pgSQL, as described in [Variable names in statements](#variable-names-in-statements) |
 | `plan_cache_mode` | `auto`, `force_generic_plan`, or `force_custom_plan` |
 | `enable_indexonlyscan` | `on`; `off` makes every query read its rows instead of [index entries](02-ddl.md#relational-b-tree-indexes) |
 | `default_transaction_isolation`, `default_transaction_read_only`, `default_transaction_deferrable` | Transaction defaults `read committed`, `off`, `off` |
@@ -270,7 +271,11 @@ IMMUTABLE;
 SELECT add_tax(100.00, 0.10);
 ```
 
-SQL functions can return scalar, `SETOF`, or `TABLE` results according to their declaration. Positional parameters and named parameters are resolved by the routine compiler. SQL-standard `RETURN expression` and `BEGIN ATOMIC ... END` bodies are also implemented for supported statement shapes.
+SQL functions can return scalar, `SETOF`, or `TABLE` results according to their declaration. SQL-standard `RETURN expression` and `BEGIN ATOMIC ... END` bodies are also implemented for supported statement shapes.
+
+### Parameter names
+
+A SQL body refers to the routine's input parameters by name or by position (`$1`), and resolves a name as PostgreSQL's parser does: the name is a parameter only when nothing the statement can see takes it. A column of a relation visible at that point, in the statement's own query or in an enclosing one, takes the name first, so `CREATE FUNCTION f(id int) RETURNS int LANGUAGE sql AS 'SELECT id FROM t'` returns the column; so does an output column that a bare name in `ORDER BY`, `DISTINCT ON` or `GROUP BY` names, and a relation of that name used as a whole-row value. The routine's own name qualifies a parameter that a column hides, as `f.id` does inside `f`, unless a relation in the statement takes that name and has the column. Each clause of a data-modifying statement sees what PostgreSQL's parser lets it see: the rows and the source query of an `INSERT` see no relation, its `ON CONFLICT` clauses and `RETURNING` list see the target, and `DO UPDATE` also sees `excluded`, so a name that both carry is ambiguous (`42702`); the clauses of `UPDATE` and `DELETE` see the target and their `FROM` or `USING` relations, which themselves do not see the target; and a `MERGE` action sees the target, the source or both as its `WHEN` clause allows. A body given as a string resolves the names of each statement when that statement is analyzed, just before it runs, so a column added after `CREATE FUNCTION` can take a name from a parameter; a SQL-standard body resolves its names when the routine is defined and stores each parameter reference as the positional parameter it names, so a column that a later `ALTER TABLE ... RENAME COLUMN` or `CREATE OR REPLACE VIEW` gives a parameter's name does not take the reference, also after a restart. A procedure's output parameter takes a placeholder in `CALL` but is not a parameter of its body: its name reports `42703`, and a position beyond the input parameters reports `42P02`.
 
 ### Body validation
 
@@ -297,6 +302,10 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
 The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer, static-query, dynamic-query, and bound-cursor `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, assertions, procedural transaction control, and cursors covered by the routine tests.
+
+### Variable names in statements
+
+A PL/pgSQL variable, including a parameter, that a statement or an expression names stands for its current value, but a name that a column or relation the statement can see at that point also takes is resolved as `plpgsql.variable_conflict` directs. Under `error`, its default, the statement fails when it first runs with `42702`, `column reference "id" is ambiguous`, and the detail `It could refer to either a PL/pgSQL variable or a table column.`; `use_variable` takes the variable and `use_column` the column. A bare name in `ORDER BY`, `GROUP BY` or `DISTINCT ON` that matches an output column of its query names that column whatever the setting says, the rows of an `INSERT` see no relation, and the text of a dynamic `EXECUTE` names no variables. A body can choose for itself with `#variable_conflict error`, `#variable_conflict use_variable` or `#variable_conflict use_column` before its first block, which takes precedence over the setting. The setting is a superuser setting, defined when the session loads PL/pgSQL, and applies when a session compiles a body: `CREATE FUNCTION` compiles it in the creating session while `check_function_bodies` is on, every other session at its first call, each under the routine's own `SET` clauses, and the session keeps that compilation until the definition changes; an anonymous block is compiled when it runs.
 
 Scalar domain declarations retain their type identity in routine parameters, local variables, and return values. A local variable without an initializer starts with NULL; a domain default does not supply its initial value, and a NOT NULL domain rejects that initialization. Converting a base value checks domain constraints, while passing, assigning, or returning an already typed value preserves it without repeating those checks. Constraint functions that change stored state participate in the statement transaction, including implicit parameter, local-variable, and return coercions.
 

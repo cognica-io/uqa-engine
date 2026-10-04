@@ -13,6 +13,7 @@
 
 mod analysis;
 pub mod catalog_sources;
+mod command_scopes;
 mod commands;
 mod cte_controls;
 mod ctes;
@@ -20,10 +21,12 @@ mod merge_scopes;
 mod preparation;
 mod projection;
 mod routine_binding;
+mod routine_parameters;
 mod scope;
 mod sources;
 pub mod statements;
 mod type_resolution;
+mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
 pub use preparation::infer_prepared_parameter_types;
@@ -39,6 +42,7 @@ pub use projection::{
 pub use routine_binding::{
     bind_expression_plan_routines_for_storage, bind_query_plan_routines_for_storage,
 };
+pub use routine_parameters::{bind_routine_parameter_references, RoutineParameterScope};
 pub use scope::{
     analyze_expression_plan_type, analyze_query_plan_schema,
     analyze_query_plan_schema_with_catalog, bind_expression_plan_type, bind_query_plan_schema,
@@ -48,6 +52,7 @@ pub use sources::{
     analyze_source_plan_schema, bind_source_plan_schema, bind_source_plan_schema_for_execution,
     with_query_table_pseudo_columns,
 };
+pub use variable_sites::{resolve_variable_sites, VariableSiteResolution};
 
 use catalog_sources::operator_join_relation_schemas;
 use cte_controls::extend_recursive_cte_binding_schema;
@@ -86,6 +91,12 @@ struct SchemaScope {
     visiting_views: BTreeSet<String>,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
+    /// The parameters of the SQL routine whose body is bound, as the outermost scope: a reference that resolves into them, because no column of any query level takes its name, becomes the positional parameter it names.
+    routine_parameters: Option<RoutineParameterScope>,
+    /// Whether binding a stored expression also fixes the routines it calls; a pass that only resolves routine parameters leaves calls to analysis.
+    binds_routine_identities: bool,
+    /// The names of a `PL/pgSQL` statement that the function's variables take, checked against what the statement can see.
+    variable_sites: Option<variable_sites::VariableSites>,
 }
 
 fn non_returning_cte_error(name: &str) -> SQLError {
@@ -105,6 +116,9 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: false,
             stored_expression_outer: None,
+            routine_parameters: None,
+            binds_routine_identities: true,
+            variable_sites: None,
         })
     }
 
@@ -124,6 +138,9 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: true,
             stored_expression_outer: None,
+            routine_parameters: None,
+            binds_routine_identities: true,
+            variable_sites: None,
         }
     }
 
@@ -243,6 +260,7 @@ impl SchemaScope {
                             offset: offset.as_deref(),
                             subqueries,
                             output: &output,
+                            outer,
                         },
                         params,
                     )?;
@@ -323,6 +341,7 @@ impl SchemaScope {
                 &expression_schema,
                 &output,
                 params,
+                outer,
             )?;
         }
         Ok(output)

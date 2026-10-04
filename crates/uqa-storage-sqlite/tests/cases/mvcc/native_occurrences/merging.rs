@@ -261,11 +261,13 @@ fn native_occurrence_clear_and_rebuild_fence_both_commit_orders() {
                 a.add_document(2, fields("alpha alpha")).unwrap();
                 other.begin_transaction().unwrap();
                 if rebuild {
-                    b.try_rebuild_documents(if seeded {
-                        vec![(1, fields("alpha"))]
-                    } else {
-                        vec![]
-                    })
+                    b.try_rebuild_documents(
+                        &mut uqa_storage::inverted_index::TextIndexDocuments::new(if seeded {
+                            vec![(1, fields("alpha"))]
+                        } else {
+                            vec![]
+                        }),
+                    )
                     .unwrap();
                 } else {
                     b.clear().unwrap();

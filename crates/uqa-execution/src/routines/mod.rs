@@ -20,9 +20,10 @@ use uqa_sql::ast::{
 use uqa_sql::expr::{cast_value_from, coercion_type_name, value_type_name};
 use uqa_sql::plpgsql::runtime_diagnostics as diagnostics;
 use uqa_sql::plpgsql::{
-    bind_expr, bind_statement, condition_sqlstate, IntoTarget, PLpgSQLBlock, PLpgSQLCursorArgument,
-    PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLFunction, PLpgSQLReturnValue,
-    PLpgSQLRowField, PLpgSQLStmt, RaiseLevel, ResolvedVariable, VariableResolver,
+    bind_expression_variables, bind_statement_variables, condition_sqlstate, IntoTarget,
+    PLpgSQLBlock, PLpgSQLCursorArgument, PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum,
+    PLpgSQLFunction, PLpgSQLReturnValue, PLpgSQLRowField, PLpgSQLStmt, RaiseLevel,
+    ResolvedVariable, VariableConflict, VariableResolver,
 };
 use uqa_sql::type_resolution::canonical_routine_type_name;
 use uqa_sql::{compile, SQLError, SQLParam, SQLResult};
@@ -103,6 +104,8 @@ pub struct Interpreter<'a> {
     found: Option<usize>,
     last_row_count: i64,
     is_set: bool,
+    /// How a name that is both a variable and a column of an embedded statement resolves in this compilation of the body.
+    variable_conflict: VariableConflict,
 }
 
 /// Preserve the original typed cause for bare RAISE while exposing SQLSTATE/SQLERRM to the handler.

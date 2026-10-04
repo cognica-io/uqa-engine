@@ -48,6 +48,8 @@ FETCH FIRST 10 ROWS WITH TIES;
 
 `WITH TIES` requires `ORDER BY`; otherwise UQA Engine raises SQLSTATE `42601`. A NULL count raises SQLSTATE `2201W` instead of behaving like an unlimited `LIMIT`.
 
+A `LIMIT`, `OFFSET` or `FETCH` count can refer to parameters and to the columns of enclosing queries, but not to a column of its own query, even inside a subquery, which reports SQLSTATE `42P10`, `argument of LIMIT must not contain variables` (or `OFFSET`). The count of a set operation sees no output column of the operation.
+
 ## DISTINCT and DISTINCT ON
 
 ```sql
@@ -231,7 +233,7 @@ GROUP BY CUBE(region, product)
 ORDER BY region, product;
 ```
 
-An unqualified `GROUP BY` name first resolves to an input column, then to an output name if no input column matches. Output aliases are available as whole grouping items, not inside larger expressions. Repeated output names must resolve to the same analyzed expression; otherwise the name is ambiguous. These rules also apply to grouping sets and stored views.
+An unqualified `GROUP BY` name first resolves to an input column of the query's own sources, then to an output name if no such column matches, and only then to a column of an enclosing query or a routine parameter. Output aliases are available as whole grouping items, not inside larger expressions. Repeated output names must resolve to the same analyzed expression; otherwise the name is ambiguous. These rules also apply to grouping sets and stored views.
 
 Grouping expressions preserve their analyzed types and literal representations. Repeating `n + 1.0` selects the same group key, while `n + 1.00` remains a different expression even though the numeric values compare equal. No-op casts and unknown-literal input conversions use the same analyzed identity; numeric precision/scale coercions and distinct parameter slots remain significant. An ungrouped input column reports SQLSTATE `42803` during analysis, including empty input and PREPARE.
 

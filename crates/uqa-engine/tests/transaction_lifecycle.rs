@@ -111,6 +111,8 @@ fn rollback_to_savepoint_keeps_frame_open() {
     assert_eq!(eng.transaction_depth(), 0);
 }
 
+#[path = "transaction_lifecycle/fixed_snapshot_changes.rs"]
+mod fixed_snapshot_changes;
 #[path = "transaction_lifecycle/pg18_cursors.rs"]
 mod pg18_cursors;
 #[path = "transaction_lifecycle/pg18_isolation.rs"]

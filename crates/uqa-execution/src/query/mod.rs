@@ -49,6 +49,7 @@ pub mod document_changes;
 pub mod document_projection;
 pub mod exact_lookup;
 pub mod generated;
+pub(crate) mod key_candidates;
 pub mod local_table;
 pub mod scored_input;
 pub mod table_read;

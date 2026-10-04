@@ -146,17 +146,17 @@ impl InvertedIndex for KeyValueInvertedIndex {
 
     fn try_rebuild_documents(
         &mut self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn crate::inverted_index::TextIndexSource,
     ) -> StorageBackendResult<()> {
-        self.rebuild_documents(documents)
+        self.rebuild_documents(source)
     }
 
     fn try_rebuild_documents_cancellable(
         &mut self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn crate::inverted_index::TextIndexSource,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
-        self.rebuild_documents_inner(documents, Some(cancellation))
+        self.rebuild_documents_inner(source, Some(cancellation))
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
@@ -402,12 +402,12 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         revision: Arc<uqa_analysis::CompiledAnalyzer>,
         phase: AnalyzerPhase,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn crate::inverted_index::TextIndexSource,
     ) -> StorageBackendResult<()> {
         self.ensure_writable()?;
         let mut replacement = self.clone();
         replacement.bindings.bind_revision(field, revision, phase)?;
-        replacement.rebuild_documents(documents)?;
+        replacement.rebuild_documents(source)?;
         *self = replacement;
         Ok(())
     }
@@ -417,14 +417,14 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         revision: Arc<uqa_analysis::CompiledAnalyzer>,
         phase: AnalyzerPhase,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn crate::inverted_index::TextIndexSource,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         cancellation.check()?;
         self.ensure_writable()?;
         let mut replacement = self.clone();
         replacement.bindings.bind_revision(field, revision, phase)?;
-        replacement.rebuild_documents_inner(documents, Some(cancellation))?;
+        replacement.rebuild_documents_inner(source, Some(cancellation))?;
         *self = replacement;
         Ok(())
     }

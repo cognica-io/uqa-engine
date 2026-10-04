@@ -70,5 +70,6 @@ pub trait QueryTableAccess: Sync {
         &self,
         name: &str,
     ) -> Result<Option<super::document_changes::DocumentChanges>, uqa_sql::SQLError>;
-    fn table_doc_count(&self, name: &str) -> Result<u64, uqa_sql::SQLError>;
+    /// An estimate of the rows a read of the table sees, which costs no work in the number of changes it merges; scans size their output by it.
+    fn table_row_estimate(&self, name: &str) -> Result<u64, uqa_sql::SQLError>;
 }

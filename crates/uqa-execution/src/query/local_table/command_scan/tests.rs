@@ -90,6 +90,7 @@ fn scan(projection: &[&str]) -> LocalTableRowSource {
         estimated_cardinality: 4,
         lock_origin: Some(("t".into(), "public.t".into())),
         recheck_pins: None,
+        candidates: None,
         command_changes: Some(changes),
     })
 }

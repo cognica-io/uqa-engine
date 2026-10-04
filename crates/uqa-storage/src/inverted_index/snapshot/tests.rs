@@ -130,11 +130,11 @@ fn retention_matches_live_capacities_through_each_mutation_and_copy_boundary() {
     assert_accounted(&index);
     assert_eq!(held.get_term_freq(7, "body", "shared").unwrap(), 2);
     index
-        .try_rebuild_documents(vec![
+        .try_rebuild_documents(&mut crate::inverted_index::TextIndexDocuments::new(vec![
             (1, fields("rebuilt")),
             (1, fields("last")),
             (2, fields("last")),
-        ])
+        ]))
         .unwrap();
     assert_accounted(&index);
     index.clear().unwrap();

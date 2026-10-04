@@ -58,6 +58,12 @@ const PLAN_CACHE_MODES: &[EnumOption] = &[
     EnumOption::listed("force_custom_plan", 2),
 ];
 
+/// The values of `plpgsql.variable_conflict`, as `plpgsql_variable_conflict` lists them.
+const VARIABLE_CONFLICTS: &[EnumOption] = &[
+    EnumOption::listed("error", 0),
+    EnumOption::listed("use_variable", 1),
+    EnumOption::listed("use_column", 2),
+];
 const REPLICATION_ROLES: &[EnumOption] = &[
     EnumOption::listed("origin", 0),
     EnumOption::listed("replica", 1),
@@ -303,6 +309,18 @@ static PARAMETERS: &[ParameterDefinition] = &[
             ParameterContext::User,
             "Customized Options",
             "Perform checks given in ASSERT statements.",
+            None,
+            ParameterFlags::NONE,
+        )
+    },
+    ParameterDefinition {
+        library: Some("plpgsql"),
+        ..define(
+            "plpgsql.variable_conflict",
+            enumerated(0, VARIABLE_CONFLICTS),
+            ParameterContext::Superuser,
+            "Customized Options",
+            "Sets handling of conflicts between PL/pgSQL variable names and table column names.",
             None,
             ParameterFlags::NONE,
         )

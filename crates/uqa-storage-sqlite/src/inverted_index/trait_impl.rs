@@ -15,6 +15,7 @@ use super::{
 };
 use super::{IndexedFieldMetadata, TokenTermKey};
 use uqa_storage::clustered_postings::{cluster_id, decode_all_scores, OccurrencePosting};
+use uqa_storage::inverted_index::TextIndexSource;
 
 impl InvertedIndex for SQLiteInvertedIndex {
     fn posting_read_cursor_key_budgeted<'a>(
@@ -146,23 +147,23 @@ impl InvertedIndex for SQLiteInvertedIndex {
 
     fn try_rebuild_documents(
         &mut self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn TextIndexSource,
     ) -> StorageBackendResult<()> {
         if let Some(mut index) = self.native_index() {
-            return index.try_rebuild_documents(documents);
+            return index.try_rebuild_documents(source);
         }
-        Ok(self.rebuild_documents_inner(documents)?)
+        Ok(self.rebuild_documents_inner(source)?)
     }
 
     fn try_rebuild_documents_cancellable(
         &mut self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn TextIndexSource,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         if let Some(mut index) = self.native_index() {
-            return index.try_rebuild_documents_cancellable(documents, cancellation);
+            return index.try_rebuild_documents_cancellable(source, cancellation);
         }
-        Ok(self.rebuild_documents_with_cancellation(documents, Some(cancellation))?)
+        Ok(self.rebuild_documents_with_cancellation(source, Some(cancellation))?)
     }
 
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList> {
@@ -839,16 +840,16 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         revision: Arc<uqa_analysis::CompiledAnalyzer>,
         phase: AnalyzerPhase,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn TextIndexSource,
     ) -> StorageBackendResult<()> {
         if let Some(mut index) = self.native_index() {
-            index.rebuild_with_analyzer_revision(field, revision, phase, documents)?;
+            index.rebuild_with_analyzer_revision(field, revision, phase, source)?;
             self.bindings = index.analyzer_bindings().clone();
             return Ok(());
         }
         let mut replacement = self.clone();
         replacement.bindings.bind_revision(field, revision, phase)?;
-        replacement.rebuild_documents_inner(documents)?;
+        replacement.rebuild_documents_inner(source)?;
         *self = replacement;
         Ok(())
     }
@@ -858,7 +859,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         revision: Arc<uqa_analysis::CompiledAnalyzer>,
         phase: AnalyzerPhase,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn TextIndexSource,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         if let Some(mut index) = self.native_index() {
@@ -866,7 +867,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 field,
                 revision,
                 phase,
-                documents,
+                source,
                 cancellation,
             )?;
             self.bindings = index.analyzer_bindings().clone();
@@ -875,7 +876,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
         cancellation.check()?;
         let mut replacement = self.clone();
         replacement.bindings.bind_revision(field, revision, phase)?;
-        replacement.rebuild_documents_with_cancellation(documents, Some(cancellation))?;
+        replacement.rebuild_documents_with_cancellation(source, Some(cancellation))?;
         *self = replacement;
         Ok(())
     }

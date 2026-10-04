@@ -81,7 +81,7 @@ Runtime extension registrations are outside SQL catalog rollback by design. In-m
 
 ## Savepoints
 
-A savepoint captures provider and transaction-owned in-memory state at an inner boundary. `ROLLBACK TO` restores that state while preserving the outer transaction. `RELEASE` discards the marker. Every new mutable subsystem participating in SQL must define how it snapshots or stages across savepoints.
+A savepoint captures provider and transaction-owned in-memory state at an inner boundary. `ROLLBACK TO` restores that state while preserving the outer transaction. `RELEASE` discards the marker. Every new mutable subsystem participating in SQL must define how it snapshots or stages across savepoints. The row changes of a frame only grow between a savepoint and its release, so a savepoint records their length and `ROLLBACK TO` truncates them instead of copying them; the frame's index of changed rows for fixed-snapshot reads follows the same boundaries through the savepoints of its own record set, as [storage](03-storage.md) describes.
 
 ## Epoch coordination
 

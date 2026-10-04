@@ -196,7 +196,10 @@ pub fn materialize(
         let mut selected = uqa_core::memory::BudgetedVec::new(control.memory());
         for id in ids.iter().copied() {
             cancellation.check()?;
-            if !changes.contains_change(id) {
+            if !changes
+                .contains_change(id)
+                .map_err(|error| snapshot_error("document selection", &error))?
+            {
                 selected
                     .push(id)
                     .map_err(|error| snapshot_error("document selection", &error.into()))?;

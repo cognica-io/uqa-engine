@@ -244,6 +244,7 @@ impl Engine {
             support: self,
             configuration: self,
             overloads: uqa_sql::routines::resolution::RoutineOverloadContext { catalog: self },
+            session: self,
         }
     }
     #[cfg(test)]

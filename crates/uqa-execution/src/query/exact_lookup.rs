@@ -111,13 +111,35 @@ impl ExactLookupOverlay for BTreeMap<DocId, Option<StoredDocument>> {
     }
 }
 
+impl super::document_changes::DocumentChanges {
+    /// Whether the changed row of `id` holds `values` in `columns`.
+    pub fn row_matches(
+        &self,
+        id: DocId,
+        columns: &[String],
+        values: &[Value],
+        presence: FieldPresence,
+    ) -> Result<bool, SQLError> {
+        for (column, expected) in columns.iter().zip(values) {
+            let actual = self
+                .get_field(id, column)
+                .map_err(|error| storage_error("read private exact key", &error))?;
+            if !matches_value(actual.as_ref(), expected, presence)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
 impl ExactLookupOverlay for super::document_changes::DocumentChanges {
     fn is_empty(&self) -> Result<bool, SQLError> {
         Ok(!self.has_changes())
     }
 
     fn masks(&self, id: DocId) -> Result<bool, SQLError> {
-        Ok(self.contains_change(id))
+        self.contains_change(id)
+            .map_err(|error| storage_error("read private exact key", &error))
     }
 
     fn find_match(
@@ -126,21 +148,10 @@ impl ExactLookupOverlay for super::document_changes::DocumentChanges {
         values: &[Value],
         presence: FieldPresence,
     ) -> Result<Option<DocId>, SQLError> {
-        for (id, present) in self.changes() {
-            if !present {
-                continue;
-            }
-            let mut matches = true;
-            for (column, expected) in columns.iter().zip(values) {
-                let actual = self
-                    .get_field(id, column)
-                    .map_err(|error| storage_error("read private exact key", &error))?;
-                if !matches_value(actual.as_ref(), expected, presence)? {
-                    matches = false;
-                    break;
-                }
-            }
-            if matches {
+        for change in self.changes() {
+            let (id, present) =
+                change.map_err(|error| storage_error("read private exact key", &error))?;
+            if present && self.row_matches(id, columns, values, presence)? {
                 return Ok(Some(id));
             }
         }

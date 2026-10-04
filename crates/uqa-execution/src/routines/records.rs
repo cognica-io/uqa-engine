@@ -13,7 +13,7 @@ use super::{
 
 impl Interpreter<'_> {
     pub(super) fn expression_type(&self, expr: &Expr) -> Result<Option<ColumnType>, SQLError> {
-        let bound = super::bind_expr(expr, &mut self.resolver())?;
+        let bound = self.bind_expression(expr)?;
         let plan = uqa_sql::plan::ExpressionPlan::lower(bound);
         self.services.expressions.expression_type(&plan, &[])
     }

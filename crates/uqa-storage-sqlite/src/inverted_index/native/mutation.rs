@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Projected changes coalesce into complete native rows before the provider stages any result.
+//! Projected changes coalesce into complete native rows before the provider stages any result. After a whole-index replacement, rows arrive one at a time in ascending key order within each family, so each row is staged once the next row of its family arrives instead of every row being held until the batch ends.
 
 mod encoding;
 
@@ -12,7 +12,7 @@ use super::{
     read::NativeRead,
     records::{self, invalid},
 };
-use crate::mvcc::native::NativeRecordOwner;
+use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordOwner};
 use std::collections::BTreeMap;
 use uqa_core::memory::{BudgetedVec, MemoryReservation};
 use uqa_storage::key_value::occurrence_format::{
@@ -34,6 +34,49 @@ pub(super) struct ProjectionBatch<'a> {
     owner: Option<NativeRecordOwner>,
     rows: BTreeMap<Vec<u8>, Draft>,
     cleared: bool,
+    /// After a whole-index replacement, the last row of each family.
+    replacing: Vec<ReplacedRow>,
+    /// Whether a whole-index replacement staged a row.
+    replaced: bool,
+}
+
+/// The last row of a family a whole-index replacement changed, with the projections it still collects, or none once it is staged.
+struct ReplacedRow {
+    family: Family,
+    key: BudgetedVec<u8>,
+    draft: Option<Draft>,
+}
+
+/// Stage the native change `draft` makes to the row at `key`.
+fn write_row(
+    native: &mut dyn KeyValueBatch,
+    read: &NativeRead,
+    owner: NativeRecordOwner,
+    key: &[u8],
+    draft: &Draft,
+) -> StorageBackendResult<()> {
+    if draft.values.iter().all(Option::is_none) {
+        if draft.merge {
+            native.replace_occurrence_record(key, None)
+        } else {
+            native.delete(key)
+        }
+    } else {
+        encoding::write(native, read, owner, draft)
+    }
+}
+
+fn owned_value(
+    value: Option<&[u8]>,
+    control: &uqa_storage::read_control::StorageReadControl,
+) -> StorageBackendResult<Option<BudgetedVec<u8>>> {
+    value
+        .map(|bytes| {
+            let mut value = BudgetedVec::new(control.memory());
+            value.extend_from_slice(bytes)?;
+            Ok::<_, uqa_storage::StorageBackendError>(value)
+        })
+        .transpose()
 }
 
 impl<'a> ProjectionBatch<'a> {
@@ -44,6 +87,8 @@ impl<'a> ProjectionBatch<'a> {
             owner: read.owner,
             rows: BTreeMap::new(),
             cleared: false,
+            replacing: Vec::new(),
+            replaced: false,
         }
     }
 
@@ -80,7 +125,11 @@ impl<'a> ProjectionBatch<'a> {
             .iter()
             .position(|&candidate| candidate == projection)
             .expect("current occurrence projection");
-        let (key, key_memory) = records::key(address, owner, control)?.into_parts();
+        let key = records::key(address, owner, control)?;
+        if self.cleared {
+            return self.replace_row(key, address, slot, value, merge);
+        }
+        let (key, key_memory) = key.into_parts();
         let entry = self.rows.entry(key);
         let draft = match entry {
             std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -114,13 +163,93 @@ impl<'a> ProjectionBatch<'a> {
             }
         };
         draft.merge &= merge;
-        draft.values[slot] = value
-            .map(|bytes| {
-                let mut value = BudgetedVec::new(control.memory());
-                value.extend_from_slice(bytes)?;
-                Ok::<_, uqa_storage::StorageBackendError>(value)
+        draft.values[slot] = owned_value(value, control)?;
+        Ok(())
+    }
+
+    /// Change a row after a whole-index replacement, which writes each record once and the rows of a family in ascending key order. A row is staged as soon as its last projection arrives, from that value instead of a copy, and a row of a later key stages the row its family left incomplete; an earlier key, or a record of a staged row, could change a row already staged, so it is rejected.
+    fn replace_row(
+        &mut self,
+        key: BudgetedVec<u8>,
+        address: Address<'_>,
+        slot: usize,
+        value: Option<&[u8]>,
+        merge: bool,
+    ) -> StorageBackendResult<()> {
+        let owner = self.ensure_owner()?;
+        let family = records::family(address.projection.expect("complete address"))
+            .expect("complete address has a family");
+        let width = records::projections(family).len();
+        let control = &self.read.snapshot.control;
+        let position = self.replacing.iter().position(|row| row.family == family);
+        if let Some(index) = position {
+            let row = &mut self.replacing[index];
+            match (*key).cmp(&*row.key) {
+                std::cmp::Ordering::Equal => {
+                    let Some(draft) = row.draft.as_mut() else {
+                        return Err(invalid(
+                            "a whole-index replacement writes each occurrence record once",
+                        ));
+                    };
+                    draft.merge &= merge;
+                    let mut values = [draft.values[0].as_deref(), draft.values[1].as_deref()];
+                    values[slot] = value;
+                    if values[..width].iter().all(Option::is_some) {
+                        encoding::write_values(
+                            self.native,
+                            self.read,
+                            owner,
+                            &draft.address,
+                            values,
+                            draft.merge,
+                        )?;
+                        row.draft = None;
+                        self.replaced = true;
+                    } else {
+                        draft.values[slot] = owned_value(value, control)?;
+                    }
+                    return Ok(());
+                }
+                std::cmp::Ordering::Less => {
+                    return Err(invalid(
+                        "rows a whole-index replacement writes must arrive in key order",
+                    ));
+                }
+                std::cmp::Ordering::Greater => {
+                    let finished = self.replacing.swap_remove(index);
+                    if let Some(draft) = finished.draft {
+                        write_row(self.native, self.read, owner, &finished.key, &draft)?;
+                        self.replaced = true;
+                    }
+                }
+            }
+        }
+        let encoded = address.encode(control)?;
+        let draft = if width == 1 && value.is_some() {
+            encoding::write_values(
+                self.native,
+                self.read,
+                owner,
+                &encoded,
+                [value, None],
+                merge,
+            )?;
+            self.replaced = true;
+            None
+        } else {
+            let mut values = [None, None];
+            values[slot] = owned_value(value, control)?;
+            Some(Draft {
+                address: encoded,
+                values,
+                _key: control.memory().empty_reservation(),
+                _entry: control
+                    .memory()
+                    .reserve(std::mem::size_of::<ReplacedRow>())?,
+                merge,
             })
-            .transpose()?;
+        };
+        self.replacing.push(ReplacedRow { family, key, draft });
         Ok(())
     }
 
@@ -128,17 +257,18 @@ impl<'a> ProjectionBatch<'a> {
         let Some(owner) = self.owner else {
             return Ok(());
         };
-        for (key, draft) in self.rows {
+        let replacing = self
+            .replacing
+            .iter()
+            .filter_map(|row| row.draft.as_ref().map(|draft| (&*row.key, draft)));
+        for (key, draft) in self
+            .rows
+            .iter()
+            .map(|(key, draft)| (key.as_slice(), draft))
+            .chain(replacing)
+        {
             self.read.snapshot.control.check()?;
-            if draft.values.iter().all(Option::is_none) {
-                if draft.merge {
-                    self.native.replace_occurrence_record(&key, None)?;
-                } else {
-                    self.native.delete(&key)?;
-                }
-            } else {
-                encoding::write(self.native, self.read, owner, &draft)?;
-            }
+            write_row(self.native, self.read, owner, key, draft)?;
         }
         Ok(())
     }
@@ -239,6 +369,7 @@ impl KeyValueBatch for ProjectionBatch<'_> {
                     }
                 }
                 self.rows.clear();
+                self.replacing.clear();
                 self.cleared = true;
                 return Ok(());
             }
@@ -251,13 +382,22 @@ impl KeyValueBatch for ProjectionBatch<'_> {
             }
             _ => {}
         }
+        if self.replaced {
+            return Err(invalid(
+                "a whole-index replacement cannot delete part of the rows it staged",
+            ));
+        }
         if !self.cleared {
             for key in self.read.keys(prefix, None, usize::MAX, control)?.iter() {
                 self.delete(key)?;
             }
         }
         // Include rows introduced earlier in this same callback, preserving delete-after-put order.
-        for draft in self.rows.values_mut() {
+        for draft in self.rows.values_mut().chain(
+            self.replacing
+                .iter_mut()
+                .filter_map(|row| row.draft.as_mut()),
+        ) {
             control.check()?;
             let address = Address::decode(&draft.address)?;
             let family = records::family(address.projection.expect("complete address"))

@@ -71,24 +71,27 @@ impl RetainedDocuments {
             for id in page.iter().copied() {
                 control.check()?;
                 self.0.control.check()?;
-                if !self.0.changes.contains_change(id) {
+                if !self.0.changes.contains_change(id)? {
                     base.push(id)?;
                 }
             }
         }
-        let private = self
-            .0
-            .changes
-            .changes_after(after)
-            .take_while(|_| {
-                !control.cancellation().is_cancelled()
-                    && !self.0.control.cancellation().is_cancelled()
-            })
-            .filter_map(|(id, present)| present.then_some(id))
-            .take(limit);
+        let mut private = BudgetedVec::new(control.memory());
+        for change in self.0.changes.changes_after(after) {
+            control.check()?;
+            self.0.control.check()?;
+            if private.len() == limit {
+                break;
+            }
+            let (id, present) = change?;
+            if present {
+                private.push(id)?;
+            }
+        }
         let (base, _base_memory) = base.into_parts();
         let mut base = base.into_iter().peekable();
-        let mut private = private.peekable();
+        let (private, _private_memory) = private.into_parts();
+        let mut private = private.into_iter().peekable();
         while ids.len() < limit {
             control.check()?;
             self.0.control.check()?;
@@ -131,7 +134,7 @@ impl RetainedDocuments {
                 }
                 count += 1;
                 last = Some(id);
-                if !self.0.changes.contains_change(id) {
+                if !self.0.changes.contains_change(id)? {
                     ids.push(id)?;
                 }
                 Ok(())

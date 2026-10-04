@@ -79,7 +79,7 @@ impl PlannerStatisticsCatalog for Engine {
         self.query_hierarchy_scan_tables(table, true)
     }
     fn table_row_count(&self, table: &str) -> Result<u64, SQLError> {
-        self.table_doc_count(table)
+        self.table_row_estimate(table)
     }
     fn column_statistics(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
         self.try_query_column_stats(table)

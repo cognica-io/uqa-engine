@@ -168,7 +168,7 @@ fn private_selection_retains_sources_and_normalizes_missing_rows_without_copying
     assert!(probe.copies.lock().is_empty());
     assert!(probe.projections.lock().is_empty());
     assert_eq!(
-        changes.changes().collect::<Vec<_>>(),
+        changes.changes().collect::<Result<Vec<_>, _>>().unwrap(),
         vec![
             (1, true),
             (4, true),
@@ -181,8 +181,8 @@ fn private_selection_retains_sources_and_normalizes_missing_rows_without_copying
     assert_eq!(changes.doc_ids().unwrap(), vec![1, 4, u64::MAX]);
     assert_eq!(changes.next_doc_ids(Some(1), 1).unwrap(), vec![4]);
     assert!(changes.next_doc_ids(Some(u64::MAX), 1).unwrap().is_empty());
-    assert_eq!(changes.change_presence(8), Some(false));
-    assert_eq!(changes.change_presence(7), None);
+    assert_eq!(changes.change_presence(8).unwrap(), Some(false));
+    assert_eq!(changes.change_presence(7).unwrap(), None);
     assert_eq!(
         changes.get_metadata(1).unwrap().unwrap().tuple_xmin(),
         Some(41)

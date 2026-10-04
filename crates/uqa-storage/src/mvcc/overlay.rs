@@ -608,6 +608,38 @@ impl PrivateRecordSnapshot {
             .transpose()
     }
 
+    /// Visit the private replacements whose keys start with `prefix` and follow `after`, including deletions, in key order until `visit` returns false. Each replacement's value is loaded only when it is visited, so a caller can bound what it keeps by bytes.
+    pub fn visit(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        control: &StorageReadControl,
+        visit: &mut dyn FnMut(&PreparedRecordWrite) -> VersionResult<bool>,
+    ) -> VersionResult<()> {
+        control.cancellation().check()?;
+        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
+        let mut changes = TieredCursor::new(
+            Some(&self.records),
+            &self.runs,
+            std::ops::Bound::Included(start),
+            control,
+        )?;
+        while let Some(change) = changes.next(control)? {
+            control.cancellation().check()?;
+            let key = change.key();
+            if !key.starts_with(prefix) {
+                break;
+            }
+            if after.is_some_and(|after| key <= after) {
+                continue;
+            }
+            if !visit(&change.write(control)?)? {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     /// Return a bounded ordered page of private replacements, including deletions.
     pub fn scan(
         &self,

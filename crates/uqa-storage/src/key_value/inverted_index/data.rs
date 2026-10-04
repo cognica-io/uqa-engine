@@ -16,6 +16,60 @@ use super::{
 #[cfg(test)]
 mod tests;
 
+/// The index revision of each field a staging read, kept from its first use.
+pub(super) type Revisions = BTreeMap<FieldName, std::sync::Arc<uqa_analysis::CompiledAnalyzer>>;
+
+/// Analyze the fields of one document with the index revision `bindings` select for each field, under `control`.
+pub(super) fn analyze_document(
+    bindings: &AnalyzerBindings,
+    control: &crate::read_control::StorageReadControl,
+    fields: BTreeMap<FieldName, String>,
+    revisions: &mut Revisions,
+    cancellation: Option<&uqa_core::CancellationToken>,
+) -> StorageBackendResult<DocumentFields> {
+    control.check()?;
+    if let Some(cancellation) = cancellation {
+        cancellation.check()?;
+    }
+    let mut snapshot = DocumentFields::new();
+    for (field, text) in fields {
+        if !revisions.contains_key(&field) {
+            revisions.insert(field.clone(), bindings.index_revision(&field)?);
+        }
+        let revision = &revisions[&field];
+        let analyzed = crate::inverted_index::analyze_index_field_with_scratch(
+            revision,
+            &text,
+            control.memory(),
+            || {
+                control
+                    .cancellation()
+                    .check()
+                    .and_then(|()| cancellation.map_or(Ok(()), uqa_core::CancellationToken::check))
+                    .map_err(|_| uqa_analysis::AnalysisError::Cancelled)
+            },
+        )
+        .map_err(|error| match error {
+            crate::StorageBackendError::Analysis(uqa_analysis::AnalysisError::Memory(memory)) => {
+                crate::StorageBackendError::Memory(memory)
+            }
+            crate::StorageBackendError::Analysis(uqa_analysis::AnalysisError::Cancelled) => {
+                crate::StorageBackendError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST)
+            }
+            other => other,
+        })?;
+        let metadata = IndexedFieldMetadata::new(revision, &analyzed);
+        snapshot.insert(
+            field,
+            FieldSnapshot {
+                metadata,
+                terms: analyzed.terms,
+            },
+        );
+    }
+    Ok(snapshot)
+}
+
 impl FieldStats {
     pub(in crate::key_value) fn to_bytes(self) -> StorageBackendResult<[u8; 56]> {
         if self.doc_count == 0 {
@@ -97,57 +151,34 @@ impl OccurrenceRead<'_> {
         let mut staged = BTreeMap::new();
         let mut revisions = BTreeMap::new();
         for (doc_id, fields) in documents {
-            self.store.control().check()?;
-            if let Some(cancellation) = cancellation {
-                cancellation.check()?;
-            }
-            let mut snapshot = DocumentFields::new();
-            for (field, text) in fields {
-                if !revisions.contains_key(&field) {
-                    if !rebuilding {
-                        self.validate_index_revision_change(&field, self.bindings)?;
-                    }
-                    revisions.insert(field.clone(), self.bindings.index_revision(&field)?);
-                }
-                let revision = &revisions[&field];
-                let analyzed = crate::inverted_index::analyze_index_field_with_scratch(
-                    revision,
-                    &text,
-                    self.store.control().memory(),
-                    || {
-                        self.store
-                            .control()
-                            .cancellation()
-                            .check()
-                            .and_then(|()| {
-                                cancellation.map_or(Ok(()), uqa_core::CancellationToken::check)
-                            })
-                            .map_err(|_| uqa_analysis::AnalysisError::Cancelled)
-                    },
-                )
-                .map_err(|error| match error {
-                    crate::StorageBackendError::Analysis(uqa_analysis::AnalysisError::Memory(
-                        memory,
-                    )) => crate::StorageBackendError::Memory(memory),
-                    crate::StorageBackendError::Analysis(
-                        uqa_analysis::AnalysisError::Cancelled,
-                    ) => crate::StorageBackendError::Cancelled(
-                        uqa_core::QueryCancelled::USER_REQUEST,
-                    ),
-                    other => other,
-                })?;
-                let metadata = IndexedFieldMetadata::new(revision, &analyzed);
-                snapshot.insert(
-                    field,
-                    FieldSnapshot {
-                        metadata,
-                        terms: analyzed.terms,
-                    },
-                );
-            }
+            let snapshot = self.stage_document(fields, &mut revisions, rebuilding, cancellation)?;
             staged.insert(doc_id, snapshot);
         }
         Ok(staged)
+    }
+
+    /// Analyze the fields of one document, each with its field's index revision, which `revisions` keeps from its first use. A rebuild replaces every field, so it does not validate a change of revision.
+    pub(super) fn stage_document(
+        &self,
+        fields: BTreeMap<FieldName, String>,
+        revisions: &mut Revisions,
+        rebuilding: bool,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> StorageBackendResult<DocumentFields> {
+        if !rebuilding {
+            for field in fields.keys() {
+                if !revisions.contains_key(field) {
+                    self.validate_index_revision_change(field, self.bindings)?;
+                }
+            }
+        }
+        analyze_document(
+            self.bindings,
+            self.store.control(),
+            fields,
+            revisions,
+            cancellation,
+        )
     }
 
     pub(super) fn old_document(&self, doc_id: DocId) -> StorageBackendResult<DocumentFields> {

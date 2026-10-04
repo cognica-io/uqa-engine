@@ -163,6 +163,17 @@ pub(crate) fn decode_physical_row_record(
     Ok(row)
 }
 
+/// The document `encode_document` wrote at the start of `bytes`, and the bytes after it.
+pub(crate) fn decode_document(
+    bytes: &[u8],
+) -> ExecResult<(uqa_storage::document_store::Document, &[u8])> {
+    let mut reader = BinaryReader::new(bytes);
+    let Value::Map(fields) = reader.read_value(0)? else {
+        return Err(spill_error("spilled document is not a map"));
+    };
+    Ok((fields, &bytes[reader.position..]))
+}
+
 struct BinaryReader<'a> {
     bytes: &'a [u8],
     position: usize,

@@ -6,7 +6,6 @@
 
 //! Services for row validation, key reservations, and referenced-row checks.
 use crate::row_locks::{session::RowLockSession, LockAcquire};
-use std::collections::BTreeSet;
 use uqa_core::{DocId, PostingList, Predicate, Value};
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
@@ -22,8 +21,11 @@ pub trait MutationRead {
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError>;
-    fn command_overlay_changed_ids(&self, table: &str)
-        -> Result<Option<BTreeSet<DocId>>, SQLError>;
+    /// The changes of `table` that the active command overlays and this transaction's fixed-snapshot reads hold above its storage view, without copying them.
+    fn command_overlay_changes(
+        &self,
+        table: &str,
+    ) -> Result<Option<crate::query::document_changes::DocumentChanges>, SQLError>;
 }
 pub trait MutationIndexRead {
     fn index_definitions(
@@ -35,6 +37,13 @@ pub trait MutationIndexRead {
         columns: &[String],
         values: &[Value],
     ) -> Result<Option<DocId>, SQLError>;
+    /// The visible rows the active commands staged for `table` whose `columns` hold `values`, a missing column holding null.
+    fn staged_matches(
+        &self,
+        table: &str,
+        columns: &[String],
+        values: &[Value],
+    ) -> Result<Vec<DocId>, SQLError>;
     fn value_index_scan_key(
         &self,
         table: &str,
