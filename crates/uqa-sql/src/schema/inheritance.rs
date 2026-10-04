@@ -91,6 +91,9 @@ pub fn merge_create_table_hierarchy(
                 "partition bound has no parent relation".into(),
             ));
         }
+        if let Some(column) = table.untyped_columns.first() {
+            return Err(SQLError::Internal(format!("column `{column}` has no type")));
+        }
         column_merge::check_column_count(table.columns.len())?;
         return column_merge::reject_repeated_columns(&table.columns);
     }
@@ -235,8 +238,13 @@ pub fn merge_create_table_hierarchy(
         }
     }
     for (position, column) in std::mem::take(&mut table.columns).into_iter().enumerate() {
-        inherited.merge_declared_column(position, column, notices)?;
+        if is_partition {
+            inherited.merge_partition_option(column)?;
+        } else {
+            inherited.merge_declared_column(position, column, notices)?;
+        }
     }
+    table.untyped_columns.clear();
     column_merge::check_column_count(inherited.columns.len())?;
     inherited.reject_conflicting_defaults()?;
     table.columns = inherited.columns;

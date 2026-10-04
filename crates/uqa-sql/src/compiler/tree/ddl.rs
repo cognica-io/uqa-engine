@@ -48,6 +48,7 @@ pub(in crate::compiler) fn compile_create_table(
     let mut checks: Vec<TableCheck> = Vec::new();
     let mut check_order = Vec::new();
     let mut element_order = Vec::new();
+    let mut untyped_columns = Vec::new();
     let mut foreign_keys: Vec<ForeignKey> = Vec::new();
     let mut key_constraints: Vec<TableKeyConstraint> = Vec::new();
     let mut table_not_nulls = Vec::new();
@@ -61,6 +62,9 @@ pub(in crate::compiler) fn compile_create_table(
                 element_order.push(DeclaredElement::Column(super::compile_column_declaration(
                     col,
                 )?));
+                if col.type_name.is_none() {
+                    untyped_columns.push(col.colname.clone());
+                }
                 key_constraints.extend(compile_column_key_constraints(col)?);
                 let (column, column_checks) = compile_column_def(col)?;
                 if column_checks.is_empty() {
@@ -271,6 +275,7 @@ pub(in crate::compiler) fn compile_create_table(
         hierarchy,
         check_order,
         element_order,
+        untyped_columns,
     })
 }
 
@@ -316,7 +321,12 @@ pub(in crate::compiler) fn compile_column_def(
 ) -> Result<(ColumnDef, Vec<TableCheck>)> {
     let name = col.colname.clone();
     let raw_type = raw_type_name(col)?;
-    let ty = compile_type_name(col)?;
+    // A column option of `PARTITION OF` has no type; it takes the parent column's when the columns merge.
+    let ty = if col.type_name.is_some() {
+        compile_type_name(col)?
+    } else {
+        ColumnType::Named(String::new())
+    };
     let mut auto_increment = matches!(
         raw_type.as_deref(),
         Some("smallserial" | "serial2" | "serial" | "serial4" | "bigserial" | "serial8")

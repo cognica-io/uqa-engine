@@ -959,5 +959,7 @@ mod catalog_lifecycle;
 mod column_declarations;
 #[path = "pg18_constraint_lifecycle/merge_attributes.rs"]
 mod merge_attributes;
+#[path = "pg18_constraint_lifecycle/partition_column_options.rs"]
+mod partition_column_options;
 #[path = "pg18_constraint_lifecycle/table_creation_order.rs"]
 mod table_creation_order;

@@ -216,6 +216,9 @@ pub struct CreateTable {
     /// The columns and NOT NULL table constraints the statement declares, in written order, as `transformCreateStmt` examines them. Only the statement carries it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub element_order: Vec<DeclaredElement>,
+    /// The columns a `PARTITION OF` statement declares without a type, which are options on the parent's columns and take their types when the columns merge. Only the statement carries it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub untyped_columns: Vec<String>,
 }
 
 /// An element of a CREATE TABLE statement that `transformCreateStmt` examines in written order.

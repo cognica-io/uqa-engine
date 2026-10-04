@@ -1,0 +1,1493 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r (a int, b int, c text) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r1 PARTITION OF ptc_r (b DEFAULT 5) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r2 PARTITION OF ptc_r (b NOT NULL, c CHECK (c <> 'x')) FOR VALUES IN (2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r3 PARTITION OF ptc_r (nocol DEFAULT 1) FOR VALUES IN (3);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r4 PARTITION OF ptc_r (b GENERATED ALWAYS AS (a * 2) STORED) FOR VALUES IN (4);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "child column \"b\" specifies generation expression",
+        "detail": null,
+        "hint": "A child table column cannot be generated unless its parent column is."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r5 PARTITION OF ptc_r (b DEFAULT 1, b DEFAULT 2) FOR VALUES IN (5);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"b\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r6 PARTITION OF ptc_r (b WITH OPTIONS DEFAULT 6) FOR VALUES IN (6);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r7 PARTITION OF ptc_r (PRIMARY KEY (a), b UNIQUE) FOR VALUES IN (7);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_r (a) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_r1 (a) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_r (a, c) VALUES (2, 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "null value in column \"b\" of relation \"ptc_r2\" violates not-null constraint",
+        "detail": "Failing row contains (2, null, x).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_r (a, b) VALUES (2, NULL);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "null value in column \"b\" of relation \"ptc_r2\" violates not-null constraint",
+        "detail": "Failing row contains (2, null, null).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_r (a, b, c) VALUES (2, 3, 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"ptc_r2\" violates check constraint \"ptc_r2_c_check\"",
+        "detail": "Failing row contains (2, 3, x).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_r (a, b) VALUES (6, DEFAULT);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, b, c FROM ptc_r ORDER BY a, b;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            23,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "5",
+              null
+            ],
+            [
+              "1",
+              null,
+              null
+            ],
+            [
+              "6",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnotnull, atthasdef FROM pg_attribute WHERE attrelid = 'ptc_r2'::regclass AND attnum > 0 ORDER BY attnum;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnotnull",
+            "atthasdef"
+          ],
+          "type_oids": [
+            19,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "a",
+              "f",
+              "f"
+            ],
+            [
+              "b",
+              "t",
+              "f"
+            ],
+            [
+              "c",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'ptc_r1'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ptc_r7'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ptc_r7_a_not_null",
+              "n"
+            ],
+            [
+              "ptc_r7_b_key",
+              "u"
+            ],
+            [
+              "ptc_r7_pkey",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r8 PARTITION OF ptc_r (b NOT NULL NO INHERIT) FOR VALUES IN (8);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, connoinherit, conislocal FROM pg_constraint WHERE conrelid = 'ptc_r8'::regclass ORDER BY conname;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "connoinherit",
+            "conislocal"
+          ],
+          "type_oids": [
+            19,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "ptc_r8_b_not_null",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r9 PARTITION OF ptc_r (b DEFAULT nofunc()) FOR VALUES IN (9);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r10 PARTITION OF ptc_r (b PRIMARY KEY) FOR VALUES IN (10);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ptc_r10'::regclass ORDER BY conname;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ptc_r10_b_not_null",
+              "n"
+            ],
+            [
+              "ptc_r10_pkey",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r12 PARTITION OF ptc_r (b GENERATED ALWAYS AS IDENTITY) FOR VALUES IN (12);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "identity columns are not supported on partitions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r13 PARTITION OF ptc_r (b NULL) FOR VALUES IN (13);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r14 PARTITION OF ptc_r (c COLLATE \"C\") FOR VALUES IN (14);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r15 PARTITION OF ptc_r (nocol NOT NULL) FOR VALUES IN (15);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r16 PARTITION OF ptc_r (nocol CHECK (a > 0)) FOR VALUES IN (16);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r17 PARTITION OF ptc_r (b NOT NULL, b NOT NULL) FOR VALUES IN (17);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"b\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r18 PARTITION OF ptc_r (b DEFAULT 1 DEFAULT 2) FOR VALUES IN (18);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "multiple default values specified for column \"b\" of table \"ptc_r18\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r19 PARTITION OF ptc_r (b NULL NOT NULL) FOR VALUES IN (19);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting NULL/NOT NULL declarations for column \"b\" of table \"ptc_r19\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r20 PARTITION OF ptc_r (b CONSTRAINT ptc_bpos CHECK (b > 0)) FOR VALUES IN (20);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_r (a, b) VALUES (20, 0);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"ptc_r20\" violates check constraint \"ptc_bpos\"",
+        "detail": "Failing row contains (20, 0, null).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r22 PARTITION OF ptc_r (nocol DEFAULT nofunc()) FOR VALUES IN (22);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r23 PARTITION OF ptc_r (b DEFAULT nofunc(), nocol DEFAULT 1) FOR VALUES IN (23);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r24 PARTITION OF ptc_r (b DEFAULT 1, b NOT NULL) FOR VALUES IN (24);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"b\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r25 PARTITION OF ptc_r (b REFERENCES ptc_r10 (b)) FOR VALUES IN (25);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'ptc_r25'::regclass ORDER BY conname;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            18,
+            25
+          ],
+          "rows": [
+            [
+              "ptc_r25_b_fkey",
+              "f",
+              "FOREIGN KEY (b) REFERENCES ptc_r10(b)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r30 PARTITION OF ptc_r (b CHECK (b > 0), CHECK (b < 100), c CONSTRAINT ptc_cnn NOT NULL) FOR VALUES IN (30);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'ptc_r30'::regclass ORDER BY conname;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            18,
+            25
+          ],
+          "rows": [
+            [
+              "ptc_cnn",
+              "n",
+              "NOT NULL c"
+            ],
+            [
+              "ptc_r30_b_check",
+              "c",
+              "CHECK ((b > 0))"
+            ],
+            [
+              "ptc_r30_b_check1",
+              "c",
+              "CHECK ((b < 100))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r32 PARTITION OF ptc_r (b DEFAULT 3) FOR VALUES IN (32) PARTITION BY LIST (b);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r32a PARTITION OF ptc_r32 FOR VALUES IN (3);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'ptc_r32a'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_r32 (a) VALUES (32);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text, a, b FROM ptc_r32;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "tableoid",
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            25,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "ptc_r32a",
+              "32",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r33 PARTITION OF ptc_r (b NOT NULL NO INHERIT) FOR VALUES IN (33) PARTITION BY LIST (b);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "not-null constraints on partitioned tables cannot be NO INHERIT",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_r34 PARTITION OF ptc_r (b DEFAULT 1 NOT NULL CHECK (b > 0) UNIQUE) FOR VALUES IN (34);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'ptc_r34'::regclass ORDER BY conname;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            18,
+            25
+          ],
+          "rows": [
+            [
+              "ptc_r34_b_check",
+              "c",
+              "CHECK ((b > 0))"
+            ],
+            [
+              "ptc_r34_b_key",
+              "u",
+              "UNIQUE (b)"
+            ],
+            [
+              "ptc_r34_b_not_null",
+              "n",
+              "NOT NULL b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_d (a int, b int DEFAULT 7) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_d1 PARTITION OF ptc_d (b DEFAULT 8) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_d2 PARTITION OF ptc_d FOR VALUES IN (2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_d (a) VALUES (1), (2);",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_d1 (a) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text, a, b FROM ptc_d ORDER BY a, b;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "tableoid",
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            25,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "ptc_d1",
+              "1",
+              "7"
+            ],
+            [
+              "ptc_d1",
+              "1",
+              "8"
+            ],
+            [
+              "ptc_d2",
+              "2",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gp (a int, g int GENERATED ALWAYS AS (a * 2) STORED) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gp1 PARTITION OF ptc_gp (g DEFAULT 5) FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "column \"g\" inherits from generated column but specifies default",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gp2 PARTITION OF ptc_gp (g GENERATED ALWAYS AS (a * 3) STORED) FOR VALUES IN (2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gp3 PARTITION OF ptc_gp (g GENERATED ALWAYS AS (a * 3) VIRTUAL) FOR VALUES IN (3);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "column \"g\" inherits from generated column of different kind",
+        "detail": "Parent column is STORED, child column is VIRTUAL.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gp4 PARTITION OF ptc_gp (g GENERATED ALWAYS AS IDENTITY) FOR VALUES IN (4);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "identity columns are not supported on partitions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gp5 PARTITION OF ptc_gp (g GENERATED ALWAYS AS (nofunc()) STORED) FOR VALUES IN (5);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gp6 PARTITION OF ptc_gp FOR VALUES IN (6);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_gp (a) VALUES (2), (6);",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text, a, g FROM ptc_gp ORDER BY a;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "tableoid",
+            "a",
+            "g"
+          ],
+          "type_oids": [
+            25,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "ptc_gp2",
+              "2",
+              "6"
+            ],
+            [
+              "ptc_gp6",
+              "6",
+              "12"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'ptc_gp2'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(a * 3)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gs (a int, g int GENERATED ALWAYS AS (a * 2) STORED) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gs1 PARTITION OF ptc_gs (g GENERATED ALWAYS AS (a * 3)) FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "column \"g\" inherits from generated column of different kind",
+        "detail": "Parent column is STORED, child column is VIRTUAL.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_gs3 PARTITION OF ptc_gs (g GENERATED ALWAYS AS (nofunc()) STORED, b DEFAULT 1) FOR VALUES IN (3);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"b\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_ide (a int, b int GENERATED ALWAYS AS IDENTITY) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_ide1 PARTITION OF ptc_ide (b DEFAULT 1) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_ide2 PARTITION OF ptc_ide (b GENERATED ALWAYS AS (a) STORED) FOR VALUES IN (2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "child column \"b\" specifies generation expression",
+        "detail": null,
+        "hint": "A child table column cannot be generated unless its parent column is."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_ide3 PARTITION OF ptc_ide FOR VALUES IN (3);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_ide (a) VALUES (3);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, b FROM ptc_ide;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_ser (a int, b serial) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_ser1 PARTITION OF ptc_ser (b DEFAULT 100) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_ser1 (a) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ptc_ser (a) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, b FROM ptc_ser ORDER BY b;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "100"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_np (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_npq PARTITION OF ptc_np (a DEFAULT nofunc()) FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_npr PARTITION OF ptc_np (a DEFAULT nofunc(), a DEFAULT 1) FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"a\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_nps PARTITION OF ptc_np (a DEFAULT 1) FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "\"ptc_np\" is not partitioned",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_q (a int, b int) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_q1 PARTITION OF ptc_q FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_q2 PARTITION OF ptc_q (b GENERATED ALWAYS AS (nofunc()) STORED) FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "child column \"b\" specifies generation expression",
+        "detail": null,
+        "hint": "A child table column cannot be generated unless its parent column is."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ptc_q3 PARTITION OF ptc_q (b DEFAULT nofunc()) FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    }
+  ]
+}

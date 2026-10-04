@@ -43,14 +43,14 @@ fn check_added_column_declaration<S: Clone + 'static>(
     else {
         return Ok(());
     };
-    let partitioned = context
+    let hierarchy = context
         .hierarchy
         .partitions
         .catalog
         .try_table_hierarchy(table)
-        .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?
-        .partition_spec
-        .is_some();
+        .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+    let partitioned = hierarchy.partition_spec.is_some();
+    let partition = hierarchy.is_partition();
     check_serial_array(declaration)?;
     column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
         context.hierarchy.partitions.types,
@@ -59,6 +59,7 @@ fn check_added_column_declaration<S: Clone + 'static>(
     let target = ColumnDeclarationTarget {
         table: qualifier,
         partitioned,
+        partition,
     };
     if check_column_declaration(declaration, &column.name, target)? {
         return Err(SQLError::Unsupported(

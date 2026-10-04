@@ -151,6 +151,30 @@ impl InheritedColumns {
         Ok(())
     }
 
+    /// `MergeAttributes` for a partition's column options: each names a column of the parent, which keeps its type and generation under the rules of `MergeChildAttribute`, and takes the option's default or generation expression, NOT NULL and constraints; no notice reports the merge.
+    pub(super) fn merge_partition_option(&mut self, mut column: ColumnDef) -> Result<(), SQLError> {
+        let Some(index) = self
+            .columns
+            .iter()
+            .position(|existing| existing.name == column.name)
+        else {
+            return Err(routine(
+                "42703",
+                format!("column \"{}\" does not exist", column.name),
+            ));
+        };
+        let inherited = &mut self.columns[index];
+        check_generation_merge(inherited, &column)?;
+        merge_local_not_null(inherited, &column);
+        if column.generated.is_some() {
+            inherited.generated = column.generated.take();
+        } else if column.default.is_some() {
+            inherited.default = column.default.take();
+        }
+        adopt_declared_constraints(inherited, column);
+        Ok(())
+    }
+
     /// The columns whose parents gave different defaults that the new table does not replace, as `MergeAttributes` reports them last.
     pub(super) fn reject_conflicting_defaults(&self) -> Result<(), SQLError> {
         for column in &self.columns {

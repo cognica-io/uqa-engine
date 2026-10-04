@@ -35,6 +35,7 @@ pub fn transform_create_table(
     let target = super::column_declarations::ColumnDeclarationTarget {
         table: &c.qualifier,
         partitioned: c.hierarchy.partition_spec.is_some(),
+        partition: c.hierarchy.partition_bound.is_some(),
     };
     let lost =
         || SQLError::Internal("the written order of CREATE TABLE elements lost a column".into());
@@ -45,10 +46,12 @@ pub fn transform_create_table(
             DeclaredElement::Column(declaration) => {
                 let column = columns.next().ok_or_else(lost)?;
                 super::column_declarations::check_serial_array(declaration)?;
-                column.ty = crate::type_resolution::resolve_declared_column_type(
-                    context.types,
-                    &column.ty,
-                )?;
+                if !c.untyped_columns.contains(&column.name) {
+                    column.ty = crate::type_resolution::resolve_declared_column_type(
+                        context.types,
+                        &column.ty,
+                    )?;
+                }
                 deferrable_key |= super::column_declarations::check_column_declaration(
                     declaration,
                     &column.name,

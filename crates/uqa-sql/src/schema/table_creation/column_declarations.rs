@@ -16,6 +16,8 @@ pub struct ColumnDeclarationTarget<'a> {
     pub table: &'a str,
     /// The relation is partitioned.
     pub partitioned: bool,
+    /// The relation is a partition.
+    pub partition: bool,
 }
 
 /// `array of serial is not implemented`, which `transformColumnDefinition` reports before it looks up the column's type.
@@ -210,6 +212,12 @@ impl<'a> ClauseConflicts<'a> {
                 self.seen.default = true;
             }
             ColumnClauseKind::Identity => {
+                if self.target.partition {
+                    return Err(error(
+                        "0A000",
+                        "identity columns are not supported on partitions".into(),
+                    ));
+                }
                 if self.seen.identity {
                     return Err(self.column_error("multiple identity specifications"));
                 }
