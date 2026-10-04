@@ -164,8 +164,14 @@ fn create_after_preflight(
         &mut table.columns,
         table.persistence,
     )?;
+    let mut notices = Vec::new();
     let inherited_keys =
-        declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
+        declaration::prepare_create_table_declaration(&context.analysis, &mut table, &mut notices);
+    // A notice reaches the client before the error that ends the statement.
+    for notice in notices {
+        context.notices.push(notice);
+    }
+    let inherited_keys = inherited_keys?;
     context.creation.retain_owner(owner)?;
     if preflight(
         context,

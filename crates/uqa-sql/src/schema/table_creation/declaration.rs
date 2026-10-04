@@ -42,10 +42,11 @@ pub fn transform_create_table(
 pub fn prepare_create_table_declaration(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
+    notices: &mut Vec<crate::SQLNotice>,
 ) -> Result<InheritedKeys, SQLError> {
     let declared = c.key_constraints.len();
     let declared_foreign_keys = c.foreign_keys.len();
-    super::super::inheritance::merge_create_table_hierarchy(&context.inheritance, c)?;
+    super::super::inheritance::merge_create_table_hierarchy(&context.inheritance, c, notices)?;
     let keys = c.key_constraints.len() - declared;
     let foreign_keys = c.foreign_keys.len() - declared_foreign_keys;
     super::keys::declare_primary_key_not_null(&mut c.columns, &c.key_constraints[keys..]);

@@ -70,7 +70,7 @@ fn local_relation_name(canonical: &str) -> String {
         .map_or_else(|_| canonical.to_string(), |relation| relation.name)
 }
 
-/// `MergeAttributes`: the columns, CHECK constraints and partition keys a new table inherits from its parents, ahead of its own. The table's partition key and bound are bound by [`bind_create_table_partitioning`] once its row type is described, as `DefineRelation` computes them after creating the relation.
+/// `MergeAttributes`: the columns, CHECK constraints and partition keys a new table inherits from its parents, ahead of its own, with the notices that report each merged column. `DefineRelation` first looks up every parent, rejecting one named twice; the table's own columns cannot repeat a name. The table's partition key and bound are bound by [`bind_create_table_partitioning`] once its row type is described, as `DefineRelation` computes them after creating the relation.
 #[expect(
     clippy::too_many_lines,
     reason = "preserves DDL dependency and action order"
@@ -78,6 +78,7 @@ fn local_relation_name(canonical: &str) -> String {
 pub fn merge_create_table_hierarchy(
     context: &InheritanceContext<'_>,
     table: &mut CreateTable,
+    notices: &mut Vec<crate::SQLNotice>,
 ) -> Result<(), SQLError> {
     table.hierarchy.local_columns = table
         .columns
@@ -90,7 +91,8 @@ pub fn merge_create_table_hierarchy(
                 "partition bound has no parent relation".into(),
             ));
         }
-        return Ok(());
+        column_merge::check_column_count(table.columns.len())?;
+        return column_merge::reject_repeated_columns(&table.columns);
     }
     let is_partition = table.hierarchy.partition_bound.is_some();
     if is_partition && table.hierarchy.parents.len() != 1 {
@@ -99,35 +101,62 @@ pub fn merge_create_table_hierarchy(
         ));
     }
     let mut canonical_parents = Vec::with_capacity(table.hierarchy.parents.len());
-    let mut inherited_columns = Vec::new();
-    let mut inherited_checks = Vec::new();
-    let mut inherited_foreign_keys = Vec::new();
-    let mut inherited_keys = Vec::new();
     for requested_parent in &table.hierarchy.parents {
         // A parent with the new table's own name is the relation that already has the name, which `heap_create_with_catalog` reports once the columns are described.
         let parent = context.catalog.resolve_parent(requested_parent)?;
+        if canonical_parents.contains(&parent) {
+            return Err(SQLError::Routine {
+                sqlstate: "42P07".into(),
+                message: format!(
+                    "relation \"{}\" would be inherited from more than once",
+                    local_relation_name(&parent)
+                ),
+            });
+        }
+        canonical_parents.push(parent);
+    }
+    column_merge::check_column_count(table.columns.len())?;
+    column_merge::reject_repeated_columns(&table.columns)?;
+    let mut inherited = column_merge::InheritedColumns::default();
+    let mut inherited_checks = Vec::new();
+    let mut inherited_foreign_keys = Vec::new();
+    let mut inherited_keys = Vec::new();
+    for parent in &canonical_parents {
+        let parent_name = local_relation_name(parent);
         let parent_hierarchy = context
             .partitions
             .catalog
-            .try_table_hierarchy(&parent)
+            .try_table_hierarchy(parent)
             .map_err(|error| SQLError::Internal(format!("read parent hierarchy: {error}")))?;
-        if is_partition {
-            if parent_hierarchy.partition_spec.is_none() {
+        // A partition's parent that is not partitioned is reported with its bound.
+        if !is_partition {
+            if parent_hierarchy.partition_spec.is_some() {
                 return Err(SQLError::Routine {
                     sqlstate: "42809".into(),
-                    message: format!("relation \"{requested_parent}\" is not partitioned"),
+                    message: format!("cannot inherit from partitioned table \"{parent_name}\""),
                 });
             }
-        } else if parent_hierarchy.partition_spec.is_some() {
-            return Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!("cannot inherit from partitioned table \"{requested_parent}\""),
-            });
+            if parent_hierarchy.is_partition() {
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!("cannot inherit from partition \"{parent_name}\""),
+                });
+            }
         }
+        let constraints = context
+            .catalog
+            .declared_constraints(parent)
+            .map_err(|error| SQLError::Internal(format!("read inherited constraints: {error}")))?;
+        check_parent_persistence(
+            &parent_name,
+            constraints.persistence,
+            table.persistence,
+            is_partition,
+        )?;
         let mut columns = context
             .partitions
             .catalog
-            .try_describe_table(&parent)
+            .try_describe_table(parent)
             .map_err(|error| SQLError::Internal(format!("read inherited row type: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
         for column in &mut columns {
@@ -171,19 +200,17 @@ pub fn merge_create_table_hierarchy(
                 }
             }
         }
-        merge_columns(&mut inherited_columns, columns)?;
-        let constraints = context
-            .catalog
-            .declared_constraints(&parent)
-            .map_err(|error| SQLError::Internal(format!("read inherited constraints: {error}")))?;
+        for column in columns {
+            inherited.merge_parent_column(column, notices)?;
+        }
         for mut check in context
             .catalog
-            .check_definitions(&parent)
+            .check_definitions(parent)
             .map_err(|error| SQLError::Internal(format!("read inherited CHECKs: {error}")))?
             .into_iter()
             .filter(|check| !check.no_inherit)
         {
-            super::check_inheritance::bind_parent_check_columns(&parent, &mut check.expr)?;
+            super::check_inheritance::bind_parent_check_columns(parent, &mut check.expr)?;
             check.is_local = false;
             check.object_id = None;
             check.catalog_oid = None;
@@ -191,7 +218,7 @@ pub fn merge_create_table_hierarchy(
             super::check_inheritance::merge_inherited_check(
                 &mut inherited_checks,
                 check,
-                &inherited_columns,
+                &inherited.columns,
             )?;
         }
         if is_partition {
@@ -206,10 +233,13 @@ pub fn merge_create_table_hierarchy(
                 key
             }));
         }
-        canonical_parents.push(parent);
     }
-    merge_columns(&mut inherited_columns, std::mem::take(&mut table.columns))?;
-    table.columns = inherited_columns;
+    for (position, column) in std::mem::take(&mut table.columns).into_iter().enumerate() {
+        inherited.merge_declared_column(position, column, notices)?;
+    }
+    column_merge::check_column_count(inherited.columns.len())?;
+    inherited.reject_conflicting_defaults()?;
+    table.columns = inherited.columns;
     inherited_checks.append(&mut table.checks);
     table.checks = inherited_checks;
     if is_partition {
@@ -222,6 +252,33 @@ pub fn merge_create_table_hierarchy(
     Ok(())
 }
 
+/// `MergeAttributes` keeps a temporary relation out of a permanent hierarchy: a temporary partition of a permanent table, and a permanent child or partition of a temporary one.
+fn check_parent_persistence(
+    parent: &str,
+    parent_persistence: crate::ast::RelationPersistence,
+    persistence: crate::ast::RelationPersistence,
+    is_partition: bool,
+) -> Result<(), SQLError> {
+    use crate::ast::RelationPersistence::Temporary;
+    let message = if is_partition && parent_persistence != Temporary && persistence == Temporary {
+        format!(
+            "cannot create a temporary relation as partition of permanent relation \"{parent}\""
+        )
+    } else if persistence != Temporary && parent_persistence == Temporary {
+        if is_partition {
+            format!("cannot create a permanent relation as partition of temporary relation \"{parent}\"")
+        } else {
+            format!("cannot inherit from temporary relation \"{parent}\"")
+        }
+    } else {
+        return Ok(());
+    };
+    Err(SQLError::Routine {
+        sqlstate: "42809".into(),
+        message,
+    })
+}
+
 /// The bound of a new partition and the partition key of a new partitioned table, in `DefineRelation` order: `transformPartitionBound` and `check_new_partition_bound` before `ComputePartitionAttrs`.
 pub fn bind_create_table_partitioning(
     context: &InheritanceContext<'_>,
@@ -231,26 +288,26 @@ pub fn bind_create_table_partitioning(
         table.hierarchy.parents.first(),
         table.hierarchy.partition_bound.as_ref(),
     ) {
+        // `DefineRelation` requires a partitioned parent once it stores the defaults.
+        let partitioned = context
+            .partitions
+            .catalog
+            .try_table_hierarchy(parent)
+            .map_err(|error| SQLError::Internal(format!("read parent hierarchy: {error}")))?
+            .partition_spec
+            .is_some();
+        if !partitioned {
+            return Err(SQLError::Routine {
+                sqlstate: "42P17".into(),
+                message: format!("\"{}\" is not partitioned", local_relation_name(parent)),
+            });
+        }
         // The stored bound holds the values coerced to the parent's key types, as PostgreSQL stores Const nodes.
         let bound = transform_partition_bound(&context.partitions, parent, bound)?;
         validate_new_partition_bound(&context.partitions, parent, &table.name, &bound)?;
         table.hierarchy.partition_bound = Some(bound);
     }
     validate_partition_keys(context, table)
-}
-
-fn merge_columns(
-    merged: &mut Vec<crate::ast::ColumnDef>,
-    incoming: Vec<crate::ast::ColumnDef>,
-) -> Result<(), SQLError> {
-    for column in incoming {
-        if let Some(existing) = merged.iter_mut().find(|item| item.name == column.name) {
-            merge_same_column(existing, column)?;
-        } else {
-            merged.push(column);
-        }
-    }
-    Ok(())
 }
 
 pub fn merge_same_column(
@@ -312,6 +369,7 @@ pub fn merge_same_column(
     Ok(())
 }
 
+mod column_merge;
 mod partition_keys;
 use partition_keys::validate_partition_keys;
 
