@@ -85,12 +85,17 @@ pub(super) fn assert_base_triggers_replace_view_statement_triggers() {
         catalog.rows[0]["is_trigger_insertable_into"],
         Value::Str("YES".into())
     );
+    // With every INSTEAD OF trigger suppressed, PostgreSQL counts and returns the proposed row, although nothing stores it.
     let suppressed = exec(
         &engine,
         "INSERT INTO automatic_items (item_id, label) VALUES (99, 'suppressed') RETURNING *",
     );
-    assert_eq!(suppressed.affected_rows, 0);
-    assert!(suppressed.rows.is_empty());
+    assert_eq!(suppressed.affected_rows, 1);
+    assert_eq!(suppressed.rows.len(), 1);
+    assert_eq!(suppressed.rows[0]["item_id"], Value::Int(99));
+    assert_eq!(suppressed.rows[0]["label"], Value::Str("suppressed".into()));
+    assert_eq!(suppressed.rows[0]["visible"], Value::Null);
+    assert_eq!(suppressed.rows[0]["doubled"], Value::Null);
     exec(&engine, "RESET session_replication_role");
     assert!(exec(&engine, "SELECT * FROM automatic_base WHERE id = 99")
         .rows

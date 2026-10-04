@@ -431,15 +431,19 @@ fn view_merge_trigger_definitions_route_even_when_replica_mode_suppresses_them()
          DELETE FROM view_trigger_log;
          SET session_replication_role = replica",
     );
+    // With every trigger suppressed, PostgreSQL counts the action and returns its row, although nothing stores it.
     let result = exec(
         &engine,
         "MERGE INTO item_view AS target USING merge_source AS source
          ON target.id = source.id
          WHEN MATCHED THEN UPDATE SET value = source.value
-         RETURNING merge_action(), old.value, new.value",
+         RETURNING merge_action() AS action, old.value AS old_value, new.value AS new_value",
     );
-    assert_eq!(result.affected_rows, 0);
-    assert!(result.rows.is_empty());
+    assert_eq!(result.affected_rows, 1);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["action"], Value::Str("UPDATE".into()));
+    assert_eq!(result.rows[0]["old_value"], Value::Str("one".into()));
+    assert_eq!(result.rows[0]["new_value"], Value::Str("changed".into()));
     assert_eq!(
         strings(
             &engine,
@@ -660,6 +664,29 @@ fn a_view_over_a_trigger_view_needs_only_its_own_query_to_be_updatable() {
     let state = exec(&engine, "SELECT id, value FROM joined_base ORDER BY id");
     assert_eq!(state.rows.len(), 1);
     assert_eq!(state.rows[0]["value"], Value::Int(1));
+}
+
+/// Live `PostgreSQL` 18.4 evidence that a row whose `INSTEAD OF` triggers `session_replication_role` suppresses still counts, returns its row from `RETURNING` and meets the outer check options, although nothing performs the command.
+fn verify_replication_suppressed_view_triggers(engine: &Engine) {
+    crate::pg18_oracle::verify(
+        engine,
+        include_str!(
+            "../../../../../tests/parity/pg18/view_trigger_suppression_oracle.expected.json"
+        ),
+    );
+}
+
+#[test]
+fn replication_suppressed_view_triggers_match_postgresql_memory() {
+    verify_replication_suppressed_view_triggers(&Engine::new());
+}
+
+#[test]
+fn replication_suppressed_view_triggers_match_postgresql_sqlite() {
+    let directory = TempDir::new().unwrap();
+    verify_replication_suppressed_view_triggers(
+        &Engine::open(&directory.path().join("view-trigger-suppression.db")).unwrap(),
+    );
 }
 
 #[test]
