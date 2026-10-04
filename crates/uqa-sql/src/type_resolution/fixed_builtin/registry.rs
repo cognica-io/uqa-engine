@@ -177,6 +177,14 @@ declarations! { fn lookup_local(local);
         "pg_get_partkeydef" => &[Signature::new(&[ColumnType::Oid], ColumnType::Text)],
         "pg_get_userbyid" => &[Signature::new(&[ColumnType::Oid], ColumnType::Name)],
         "pg_backend_pid" => &[Signature::new(&[], ColumnType::Integer)],
+        "pg_trigger_depth" => &[Signature::new(&[], ColumnType::Integer)],
+        "pg_sleep" => &[Signature::new(&[ColumnType::DoublePrecision], ColumnType::Void)],
+        "pg_sleep_for" => &[Signature::new(&[ColumnType::Interval], ColumnType::Void)],
+        "pg_sleep_until" => &[Signature::new(&[ColumnType::TimestampTz], ColumnType::Void)],
+        "set_config" => &[Signature::new(
+            &[ColumnType::Text, ColumnType::Text, ColumnType::Boolean],
+            ColumnType::Text,
+        )],
         "current_setting" => &[
             Signature::new(&[ColumnType::Text], ColumnType::Text),
             Signature::new(&[ColumnType::Text, ColumnType::Boolean],

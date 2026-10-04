@@ -128,7 +128,7 @@ fn phrase_sql_error(error: PhraseError) -> SQLError {
     match error {
         PhraseError::Storage(uqa_storage::StorageBackendError::Analysis(
             uqa_analysis::AnalysisError::Cancelled,
-        )) => SQLError::Cancelled(uqa_core::QueryCancelled),
+        )) => SQLError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST),
         PhraseError::Storage(uqa_storage::StorageBackendError::Analysis(
             uqa_analysis::AnalysisError::Memory(error),
         )) => phrase_sql_error(error.into()),

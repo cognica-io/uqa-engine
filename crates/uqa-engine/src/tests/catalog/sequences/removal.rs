@@ -87,7 +87,7 @@ impl SequenceRemovalPublication for FailedPublication<'_> {
             1
         );
         assert!(
-            self.engine.runtime.notices.lock().is_empty(),
+            self.engine.runtime.notices.is_empty(),
             "final cascade notices must follow successful sequence publication"
         );
         self.reached.set(true);

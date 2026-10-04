@@ -170,6 +170,7 @@ pub mod names;
 pub mod unique;
 
 pub mod options;
+pub mod system_columns;
 pub mod vectors;
 
 pub mod removal;

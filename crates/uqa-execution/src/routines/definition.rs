@@ -11,7 +11,7 @@ use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
     binding::stored_columns::StoredSourceCatalog,
     routines::{
-        compilation::compile_function_body,
+        compilation::{compile_function_body, defer_function_body},
         dependencies::{self, RoutineCompilationMode},
         regclass::{self, RoutineRegclassCatalog},
         CompiledFunctionBody,
@@ -25,11 +25,32 @@ pub struct RoutineDefinitionContext<'a> {
     pub regclasses: &'a dyn RoutineRegclassCatalog,
 }
 
+/// How a routine's body is compiled with its definition. A SQL-standard body belongs to the statement that creates the routine, so it is always compiled and bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoutineBodyCompilation {
+    /// `CREATE FUNCTION` under `check_function_bodies`: a body given as a string is compiled under the routine's own settings, and its errors are reported.
+    Checked,
+    /// `CREATE FUNCTION` with `check_function_bodies` off: a body given as a string is stored unexamined.
+    Unchecked,
+    /// A stored definition: a body given as a string is left for each session to compile when it first calls the routine, as each `PostgreSQL` backend compiles a function at its first call, so that a body that no longer compiles reports its error then.
+    Stored,
+}
+
+impl RoutineBodyCompilation {
+    const fn mode(self) -> RoutineCompilationMode {
+        match self {
+            Self::Checked | Self::Unchecked => RoutineCompilationMode::Definition,
+            Self::Stored => RoutineCompilationMode::Persisted,
+        }
+    }
+}
+
 pub fn compile_catalog_bound_routine(
     context: &RoutineDefinitionContext<'_>,
     def: &mut CreateFunction,
-    mode: RoutineCompilationMode,
+    bodies: RoutineBodyCompilation,
 ) -> Result<(CompiledFunctionBody, bool), SQLError> {
+    let mode = bodies.mode();
     if matches!(mode, RoutineCompilationMode::Definition) {
         if matches!(def.body, FunctionBody::Statements(_))
             || def
@@ -43,7 +64,7 @@ pub fn compile_catalog_bound_routine(
         }
     }
     let mut changed = bind_routine_definition_dependencies(context, def, mode)?;
-    let mut compiled = compile_routine_for_mode(&context.compilation, def, mode)?;
+    let mut compiled = compile_routine_body(&context.compilation, def, bodies)?;
     let body_changed = {
         let dependency_body = compilation::stored_merge_dependency_body(&context.compilation, def)?;
         dependencies::bind_sql_standard_body_routines(
@@ -54,20 +75,34 @@ pub fn compile_catalog_bound_routine(
     }? | bind_routine_regclass_constants(context, def)?;
     changed |= body_changed;
     if body_changed {
-        compiled = compile_routine_for_mode(&context.compilation, def, mode)?;
+        compiled = compile_routine_body(&context.compilation, def, bodies)?;
     }
     Ok((compiled, changed))
 }
 
-fn compile_routine_for_mode(
+fn compile_routine_body(
     context: &StoredRoutineCompilationContext<'_>,
     def: &CreateFunction,
-    mode: RoutineCompilationMode,
+    bodies: RoutineBodyCompilation,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    match mode {
-        RoutineCompilationMode::Definition => compile_function_body(&context.analysis, def),
-        RoutineCompilationMode::Persisted => {
+    match (bodies, &def.body) {
+        (
+            RoutineBodyCompilation::Checked | RoutineBodyCompilation::Unchecked,
+            FunctionBody::Statements(_),
+        ) => compile_function_body(&context.analysis, def),
+        (RoutineBodyCompilation::Stored, FunctionBody::Statements(_)) => {
             compilation::compile_persisted_sql_function(context, def)
+        }
+        (RoutineBodyCompilation::Checked, FunctionBody::Source(_)) => {
+            compilation::with_routine_settings(context, def, || {
+                compile_function_body(&context.analysis, def)
+            })
+        }
+        (RoutineBodyCompilation::Unchecked, FunctionBody::Source(_)) => {
+            defer_function_body(&context.analysis, def)
+        }
+        (RoutineBodyCompilation::Stored, FunctionBody::Source(_)) => {
+            Ok(CompiledFunctionBody::Deferred)
         }
     }
 }

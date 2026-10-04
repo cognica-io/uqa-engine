@@ -188,9 +188,9 @@ fn direct_table_drops_share_routine_preflight_read_only_rules_and_missing_result
             }
             sql(engine, "ROLLBACK");
             assert!(kind.drop(engine).unwrap());
-            engine.query_runtime_view().notices.lock().clear();
+            engine.query_runtime_view().notices.take();
             assert!(!kind.drop(engine).unwrap());
-            assert!(engine.query_runtime_view().notices.lock().is_empty());
+            assert!(engine.query_runtime_view().notices.is_empty());
             sql(engine, "CREATE VIEW v AS SELECT 1 AS value");
             let error = kind.drop(engine).unwrap_err();
             assert!(error.to_string().contains("not a"), "{error}");

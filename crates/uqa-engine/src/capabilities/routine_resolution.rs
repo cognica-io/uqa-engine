@@ -22,7 +22,7 @@ impl RoutineOverloadCatalog for Engine {
         self.catalog_read_view().domain_snapshot()
     }
     fn routine_search_path(&self) -> Vec<String> {
-        self.session.state.read().search_path.clone()
+        crate::session::effective_search_path(&self.session.state.read())
     }
     fn has_registered_scalar_function(&self, name: &str) -> bool {
         Engine::has_registered_scalar_function(self, name)

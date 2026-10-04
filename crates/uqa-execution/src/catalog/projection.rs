@@ -105,7 +105,7 @@ mod index_definition;
 mod mutation;
 pub use index_definition::pg_get_indexdef_value;
 pub use mutation::virtual_relation_mutation_error;
-pub use regtypes::format_type_value;
+pub use regtypes::{format_type_name, format_type_value};
 pub(crate) use regtypes::{resolve_regprocedure_input_oid, routine_oid_exists};
 mod view_definition;
 pub use view_definition::pg_get_viewdef_value;

@@ -12,6 +12,7 @@ use crate::{Engine, SQLCursor, SQLCursorSummary};
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 
 struct SQLExecutionScope<'a> {
+    engine: &'a Engine,
     depth: &'a std::sync::atomic::AtomicUsize,
     statement_clock: &'a std::sync::atomic::AtomicI64,
     previous_clock: Option<i64>,
@@ -30,6 +31,7 @@ impl<'a> SQLExecutionScope<'a> {
         });
         (
             Self {
+                engine,
                 depth,
                 statement_clock,
                 previous_clock,
@@ -49,6 +51,10 @@ impl Drop for SQLExecutionScope<'_> {
             .depth
             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         debug_assert!(previous != 0, "SQL execution depth underflow");
+        // A statement outside a transaction block runs in a transaction of its own, so the LOCAL assignments it made (`set_config(..., true)`) end with it.
+        if previous == 1 && self.engine.transaction_depth() == 0 {
+            self.engine.restore_local_runtime_parameters();
+        }
     }
 }
 
@@ -76,7 +82,7 @@ impl Engine {
         query: impl FnOnce(&Self) -> Result<R, E>,
         map_transaction_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
         self.with_query_transaction_snapshot(!nested, read_only, query, map_transaction_error)
     }
@@ -88,7 +94,7 @@ impl Engine {
         params: &[SQLParam],
         mut consume: impl FnMut(&SQLResult) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
         self.synchronize_table_catalog()
             .map_err(|error| SQLError::Internal(format!("refresh table catalog: {error}")))?;
@@ -109,7 +115,7 @@ impl Engine {
 
     /// Run a single SQL statement against the engine.
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
@@ -134,7 +140,7 @@ impl Engine {
     /// result as `Vec<ResultRow>` in memory. The statement finishes and its
     /// snapshot is committed before the cursor is returned.
     pub fn sql_cursor(&self, query: &str, params: &[SQLParam]) -> Result<SQLCursor, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let (_execution, _) = SQLExecutionScope::enter(self);
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;

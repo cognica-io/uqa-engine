@@ -21,6 +21,7 @@ impl<'a> Interpreter<'a> {
         parsed: &'a PLpgSQLFunction,
         bound: Vec<Value>,
     ) -> Result<Self, SQLError> {
+        services.statements.load_language_library("plpgsql");
         let datums = &parsed.datums;
         if datums.len() < def.params.len() {
             return Err(SQLError::Internal(

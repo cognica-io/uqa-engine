@@ -6,9 +6,7 @@
 
 //! Block execution and subtransaction-backed exception handling.
 
-use super::{
-    arm_matches, catchable, routine_message, Flow, Interpreter, PLpgSQLBlock, PLpgSQLStmt, SQLError,
-};
+use super::{arm_matches, routine_message, Flow, Interpreter, PLpgSQLBlock, PLpgSQLStmt, SQLError};
 
 impl Interpreter<'_> {
     /// Run one block, routing failures through its EXCEPTION arms.
@@ -49,7 +47,9 @@ impl Interpreter<'_> {
                         "PL/pgSQL exception-block rollback failed: {rollback_error}; original error: {error}"
                     )));
                 }
-                if !catchable(&error) {
+                // A termination of the session is reported at FATAL, which no handler catches.
+                if matches!(&error, SQLError::Cancelled(cancelled) if cancelled.reason.terminates_session())
+                {
                     return Err(error);
                 }
                 let state = error
@@ -70,6 +70,10 @@ impl Interpreter<'_> {
                 }
                 match arm {
                     Some(arm) => {
+                        // A handler that catches a cancellation consumes it, as PostgreSQL reports a cancel or timeout interrupt once.
+                        if let SQLError::Cancelled(cancelled) = &error {
+                            self.services.runtime.cancellation.clear(cancelled.reason);
+                        }
                         self.err_stack.push(super::CaughtError {
                             diagnostics: (state, message),
                             cause: error,

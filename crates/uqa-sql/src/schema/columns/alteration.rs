@@ -98,10 +98,6 @@ pub fn analyze_generated_expression(
         expression: Box::new(expression),
         function_dependencies: Vec::new(),
     });
-    let key_constraints = context
-        .keys
-        .try_key_constraints(table)
-        .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?;
     let foreign_keys = context
         .keys
         .try_foreign_keys(table)
@@ -110,7 +106,6 @@ pub fn analyze_generated_expression(
         context.bindings.schema,
         qualifier,
         &mut columns,
-        &key_constraints,
         &foreign_keys,
     )?;
     let generated = columns
@@ -207,7 +202,6 @@ pub fn analyze_column_type(
         context.bindings.schema,
         qualifier,
         &mut candidate_columns,
-        &key_constraints,
         &foreign_keys,
     )?;
     Ok(target_generated_kind)

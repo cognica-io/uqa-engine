@@ -279,7 +279,7 @@ fn insert_select_dependencies_precede_the_data_writer() {
     .unwrap();
     let holder = root.new_session().unwrap();
     let inserter = root.new_session().unwrap();
-    inserter.sql("SET work_mem TO '1B'", &[]).unwrap();
+    inserter.set_query_memory_limit(Some(1));
     holder.sql("BEGIN", &[]).unwrap();
     holder
         .sql(
@@ -372,7 +372,7 @@ fn merge_insert_dependencies_precede_the_data_writer() {
     .unwrap();
     let holder = root.new_session().unwrap();
     let merger = root.new_session().unwrap();
-    merger.sql("SET work_mem TO '1B'", &[]).unwrap();
+    merger.set_query_memory_limit(Some(1));
     holder.sql("BEGIN", &[]).unwrap();
     holder
         .sql(

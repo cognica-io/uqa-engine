@@ -210,7 +210,9 @@ fn assert_attached_namespace_visibility(engine: &Engine, visible: bool) {
             .contains(&"later_namespace".into()),
         visible
     );
-    engine.set_search_path(vec!["later_namespace".into(), "public".into()]);
+    engine
+        .set_search_path(&["later_namespace".into(), "public".into()])
+        .unwrap();
     assert_eq!(
         engine.current_schema_name().unwrap().as_deref(),
         Some(if visible { "later_namespace" } else { "public" })

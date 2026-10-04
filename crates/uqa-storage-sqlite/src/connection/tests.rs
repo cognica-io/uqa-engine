@@ -26,7 +26,7 @@ fn resource_failures_keep_their_types_across_provider_and_transaction_boundaries
             limit: 256,
         }),
         StorageBackendError::Memory(MemoryError::SizeOverflow),
-        StorageBackendError::Cancelled(QueryCancelled),
+        StorageBackendError::Cancelled(QueryCancelled::USER_REQUEST),
     ] {
         let expected = error.to_string();
         let provider = SQLiteError::from(error);

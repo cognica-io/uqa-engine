@@ -15,7 +15,7 @@ mod secure_temporary;
 #[test]
 fn cursor_spills_under_tiny_work_mem_and_yields_bounded_column_batches() {
     let engine = Engine::new();
-    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
+    engine.set_query_memory_limit(Some(1));
 
     let mut cursor = engine
         .sql_cursor(

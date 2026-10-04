@@ -65,6 +65,12 @@ fn eval_function_call_inner(
     if lower == "current_setting" {
         return super::session_settings::current_setting(&evaluated, ctx);
     }
+    if lower == "set_config" {
+        return super::session_settings::set_config(&evaluated, ctx);
+    }
+    if let Some(result) = super::session_sleep::eval_session_sleep(lower, &evaluated, ctx) {
+        return result;
+    }
 
     if let Some(result) = random::eval_random_function(lower, &call_args, ctx) {
         return result;
@@ -100,14 +106,11 @@ fn eval_function_call_inner(
                 "current_schema takes no arguments".into(),
             ));
         }
-        let schema = ctx
-            .engine
-            .map(|engine| engine.current_schema())
-            .transpose()
-            .map_err(SQLError::Internal)?
-            .flatten()
-            .unwrap_or_else(|| "public".to_string());
-        return Ok(Value::Str(schema));
+        let schema = match ctx.engine {
+            Some(engine) => engine.current_schema().map_err(SQLError::Internal)?,
+            None => Some("public".to_string()),
+        };
+        return Ok(schema.map_or(Value::Null, Value::Str));
     }
     if lower == "current_schemas" {
         let [Value::Bool(include_implicit)] = evaluated.as_slice() else {

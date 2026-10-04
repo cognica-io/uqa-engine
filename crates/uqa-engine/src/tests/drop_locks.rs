@@ -87,7 +87,7 @@ fn drop_rebinds_a_renamed_missing_or_reused_view_name() {
                 result.unwrap();
             }
             if drop.contains("IF EXISTS") && expected.is_none() {
-                let notices = second.query_runtime_view().notices.lock().clone();
+                let notices = second.query_runtime_view().notices.snapshot();
                 assert_eq!(
                     notices
                         .iter()
@@ -238,7 +238,7 @@ fn drop_handles_duplicate_targets_and_reports_missing_schema_notices() {
         assert!(engine
             .query_runtime_view()
             .notices
-            .lock()
+            .snapshot()
             .iter()
             .any(|notice| notice.message == "schema \"absent\" does not exist, skipping"));
     }

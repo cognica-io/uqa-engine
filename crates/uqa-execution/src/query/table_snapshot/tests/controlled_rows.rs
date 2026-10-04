@@ -62,7 +62,7 @@ impl DocumentStore for Source {
     ) -> StorageBackendResult<RetainedDocumentPage> {
         let call = self.reads.fetch_add(1, Ordering::Relaxed) + 1;
         if self.fail_on_read == Some(call) {
-            return Err(uqa_core::QueryCancelled.into());
+            return Err(uqa_core::QueryCancelled::USER_REQUEST.into());
         }
         let mut page = self.rows.get_stored_many_controlled(ids, control)?;
         if let Some(Some(row)) = page.first() {

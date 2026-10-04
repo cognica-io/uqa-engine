@@ -26,6 +26,12 @@ impl IndexBuildCatalog for DeclarationCatalog {
     fn scan_tables(&self, _: &str) -> Result<Vec<String>, SQLError> {
         panic!("declaration validation must not enumerate build inputs")
     }
+    fn partition_tree(
+        &self,
+        _: &str,
+    ) -> Result<Vec<uqa_sql::semantics::partition::PartitionTreeNode>, SQLError> {
+        panic!("declaration validation must not enumerate build inputs")
+    }
 }
 
 #[test]

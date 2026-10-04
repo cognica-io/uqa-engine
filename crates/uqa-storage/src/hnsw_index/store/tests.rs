@@ -28,7 +28,7 @@ fn resident_and_spilled_roots_preserve_ordered_lookup_and_independent_mutations(
         u128::MAX,
         1 << 127,
         1,
-        u64::MAX as u128,
+        u128::from(u64::MAX),
         (1 << 96) + 8,
         99,
         8,

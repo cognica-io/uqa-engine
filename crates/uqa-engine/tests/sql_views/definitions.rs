@@ -384,7 +384,7 @@ fn column_renames_preserve_all_view_fixture_rows_and_types() {
 #[test]
 fn string_agg_delimiters_survive_bounded_spill_execution() {
     let engine = Engine::new();
-    exec(&engine, "SET work_mem='1B'");
+    engine.set_query_memory_limit(Some(1));
     let expected: serde_json::Value = serde_json::from_str(EXPECTED).unwrap();
     for (case, expected) in FIXTURE
         .split("-- @case ")

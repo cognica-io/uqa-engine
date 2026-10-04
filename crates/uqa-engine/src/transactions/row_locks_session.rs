@@ -39,7 +39,7 @@ impl Engine {
         table: &str,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         self.ensure_row_mutation_allowed(table)?;
         self.with_implicit_transaction_mutation(f)
     }
@@ -84,7 +84,7 @@ impl Engine {
         refresh: bool,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         self.ensure_row_mutation_allowed(table)?;
         if self.storage.backend.is_none() && self.transaction_depth() == 0 {
             return f(self);

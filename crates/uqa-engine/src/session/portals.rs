@@ -590,12 +590,16 @@ impl Engine {
     ) -> Engine {
         let mut epochs = EpochCoordinator::new();
         epochs.share_published_from(&self.epochs);
-        let mut runtime = QueryRuntime::new(self.sql_function_depth_limit());
+        let mut runtime = QueryRuntime::new(
+            self.sql_function_depth_limit(),
+            self.session.state.client_level(),
+        );
         runtime.diagnostics = self.runtime.diagnostics.fork();
         runtime.statement_gate = std::sync::Arc::clone(&self.runtime.statement_gate);
         runtime.cancellation = self.runtime.cancellation.clone();
         runtime.notices = std::sync::Arc::clone(&self.runtime.notices);
         runtime.notifications = std::sync::Arc::clone(&self.runtime.notifications);
+        runtime.terminations = crate::session::SessionTerminations::new(false);
         Engine {
             storage: StorageContext::shared_from(&self.storage),
             durable: std::sync::Arc::clone(&self.durable),

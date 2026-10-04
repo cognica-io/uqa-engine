@@ -163,7 +163,7 @@ impl Engine {
     }
 
     fn abort_transaction_after_failure(&self) -> Vec<String> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         let Some(frame) = stack.last() else {
             return Vec::new();

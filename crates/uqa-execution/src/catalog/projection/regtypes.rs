@@ -8,7 +8,7 @@
 
 mod format_type;
 pub mod relation_oid;
-pub use format_type::format_type_value;
+pub use format_type::{format_type_name, format_type_value};
 use relation_oid::lookup_regclass_oid;
 pub use relation_oid::resolve_bound_regclass_oid;
 

@@ -21,7 +21,7 @@ fn cancel_before_execute_aborts_query() {
     eng.cancel();
     let err = eng.sql("SELECT body FROM t", &[]).unwrap_err();
     assert!(
-        matches!(err, SQLError::Cancelled(QueryCancelled)),
+        matches!(err, SQLError::Cancelled(QueryCancelled::USER_REQUEST)),
         "expected SQLError::Cancelled, got {err:?}"
     );
     assert_eq!(err.sqlstate(), Some("57014"));

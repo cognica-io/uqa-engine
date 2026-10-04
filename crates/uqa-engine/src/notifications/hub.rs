@@ -589,7 +589,7 @@ impl NotificationHub {
         Self::deliver_idle_listeners(&mut state);
         Self::remove_consumed_entries(&mut state);
         if let Some(warning) = self.queue_warning(&mut state) {
-            notices.lock().push(warning);
+            notices.push(warning);
         }
     }
 
@@ -631,7 +631,7 @@ impl NotificationHub {
         channels: Vec<String>,
         queue: &Arc<Mutex<VecDeque<SQLNotification>>>,
         wake: &Arc<Condvar>,
-        notices: &Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
+        notices: &Arc<uqa_execution::query::NoticeQueue>,
     ) -> Result<(), SQLError> {
         if channels.is_empty() && !self.state.lock().listeners.contains_key(&session_id) {
             return Ok(());
@@ -681,7 +681,7 @@ impl NotificationHub {
         channels: Vec<String>,
         queue: &Arc<Mutex<VecDeque<SQLNotification>>>,
         wake: &Arc<Condvar>,
-        notices: &Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
+        notices: &Arc<uqa_execution::query::NoticeQueue>,
     ) -> Result<(), SQLError> {
         let cross_state = self.cross.as_ref().ok_or_else(|| {
             SQLError::Internal("cross-process notification coordinator is missing".into())
@@ -773,7 +773,7 @@ impl NotificationHub {
         }
         if let Some(warning) = prepared.warning {
             state.last_queue_warning = Some(Instant::now());
-            notices.lock().push(warning);
+            notices.push(warning);
         }
         drop(state);
         drop(gate);

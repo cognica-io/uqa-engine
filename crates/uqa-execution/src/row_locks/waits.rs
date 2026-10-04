@@ -54,9 +54,14 @@ impl RowLockManager {
         let cross_wait = CrossWaitGuard::new(self, coordinator, request.session_id);
         let mut waited = false;
         let mut foreign_waited = false;
+        let mut wait_started = None;
         loop {
             let mut state = self.state.lock();
-            if let Err(error) = request.cancel.check() {
+            let checked = wait_started.map_or_else(
+                || request.cancel.check(),
+                |started| request.cancel.check_lock_wait(started),
+            );
+            if let Err(error) = checked {
                 self.finish_row_wait(state, request.session_id);
                 return Err(error.into());
             }
@@ -132,7 +137,9 @@ impl RowLockManager {
                         .or_default()
                         .insert(request.key, request.strength);
                     waited = true;
-                    self.wake.wait_for(&mut state, WAIT_SLICE);
+                    let started = *wait_started.get_or_insert_with(std::time::Instant::now);
+                    let slice = request.cancel.lock_wait_slice(started, WAIT_SLICE);
+                    self.wake.wait_for(&mut state, slice);
                 }
             }
         }

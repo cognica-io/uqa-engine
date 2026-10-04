@@ -10,6 +10,8 @@
 mod analyzer_revisions;
 #[path = "catalog/capability_boundaries.rs"]
 mod capability_boundaries;
+#[path = "catalog/configuration_parameters.rs"]
+mod configuration_parameters;
 #[path = "catalog/constraint_violation_reports.rs"]
 mod constraint_violation_reports;
 #[path = "catalog/diagnostic_fields.rs"]

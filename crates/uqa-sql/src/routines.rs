@@ -6,6 +6,7 @@
 
 //! SQL routine definitions and static signature lookup contracts.
 
+pub mod body_validation;
 pub mod compilation;
 pub mod configuration;
 pub mod declaration;
@@ -16,6 +17,7 @@ pub mod privilege_inquiry;
 pub mod regclass;
 pub mod registration;
 pub mod resolution;
+pub mod result_check;
 pub mod security;
 
 use crate::ast::{
@@ -44,6 +46,8 @@ pub struct SQLUserFunction {
 pub enum CompiledFunctionBody {
     PLpgSQL(crate::plpgsql::PLpgSQLFunction),
     SQL(Vec<UnifiedPlan>),
+    /// A body given as a string that nothing has compiled: `CREATE FUNCTION` stores it unexamined under `check_function_bodies = off`, and a restored definition keeps only its text, as `PostgreSQL` keeps `prosrc`. Each session compiles it when it first calls the routine.
+    Deferred,
 }
 pub fn is_routine_namespace_lookup_error(error: &SQLError) -> bool {
     matches!(

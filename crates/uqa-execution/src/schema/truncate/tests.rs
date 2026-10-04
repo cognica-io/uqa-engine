@@ -17,7 +17,7 @@ struct Inputs {
     references: RefCell<BTreeMap<String, Vec<String>>>,
     fail: Option<&'static str>,
     change_references_before: bool,
-    notices: parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    notices: crate::query::NoticeQueue,
 }
 impl Inputs {
     fn context(&self) -> TruncateContext<'_> {

@@ -528,3 +528,9 @@ mod expressions;
 
 #[path = "sql_unique_constraint/included.rs"]
 mod included;
+
+#[path = "sql_unique_constraint/declarations.rs"]
+mod declarations;
+
+#[path = "sql_unique_constraint/partitioned.rs"]
+mod partitioned;

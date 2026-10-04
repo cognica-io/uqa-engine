@@ -52,7 +52,7 @@ impl Engine {
         {
             return Ok(());
         }
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         let versioned = stack
             .first()
@@ -424,14 +424,14 @@ impl Engine {
     }
 
     pub(crate) fn prepare_explicit_transaction_writer(&self) -> Result<bool, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         self.prepare_serializable_transaction_snapshot()?;
         self.prepare_transaction_writer()
     }
 
     /// Prepare storage for a write that waited for no lock and whose records no other transaction can have written, as the write of a row at an identity that was never used. The storage target then needs no refresh; a deferred frame is promoted to a writer as for any other write.
     pub(crate) fn prepare_unrefreshed_transaction_writer(&self) -> Result<bool, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         self.prepare_serializable_transaction_snapshot()?;
         self.promote_transaction_writer(false)
     }

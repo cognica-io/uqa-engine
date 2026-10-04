@@ -15,7 +15,7 @@ impl Interpreter<'_> {
     pub(super) fn expression_type(&self, expr: &Expr) -> Result<Option<ColumnType>, SQLError> {
         let bound = super::bind_expr(expr, &mut self.resolver())?;
         let plan = uqa_sql::plan::ExpressionPlan::lower(bound);
-        self.services.expressions.expression_type(&plan)
+        self.services.expressions.expression_type(&plan, &[])
     }
 
     pub(super) fn datum_type(&self, index: usize) -> Option<ColumnType> {

@@ -171,7 +171,7 @@ fn decimal_cancellation_releases_every_completed_and_partial_workspace() {
             parse_with(&input, Some(&memory), &mut || {
                 current += 1;
                 if current == cancel_at {
-                    Err(ValueRetentionError::Cancelled(QueryCancelled))
+                    Err(ValueRetentionError::Cancelled(QueryCancelled::USER_REQUEST))
                 } else {
                     Ok(())
                 }

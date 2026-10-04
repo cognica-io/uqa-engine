@@ -54,6 +54,10 @@ impl RoutineTypeCatalog for Catalog {
     fn resolve_catalog_domain_type_by_oid(&self, _: u32) -> Option<ColumnType> {
         None
     }
+
+    fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        Ok(ty.regtype_name())
+    }
 }
 
 impl RoutineOverloadCatalog for Catalog {

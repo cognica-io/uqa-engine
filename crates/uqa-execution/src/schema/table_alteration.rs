@@ -51,7 +51,7 @@ pub fn run_alter_table<S: Clone + 'static>(
                 .has_column(&table, &column.name)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
             {
-                context.constraints.notices.lock().push(
+                context.constraints.notices.push(
                     uqa_sql::SQLNotice::notice(format!(
                         "column \"{}\" of relation \"{qualifier}\" already exists, skipping",
                         column.name
@@ -242,7 +242,6 @@ fn run_alter_table_action<S: Clone + 'static>(
             crate::schema::constraints::add_key_constraint(
                 &context.constraints,
                 &stmt.table,
-                &stmt.qualifier,
                 constraint,
             )?;
         }

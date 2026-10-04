@@ -44,7 +44,7 @@ pub struct TruncateContext<'a> {
     pub triggers: &'a dyn TruncateTriggers,
     pub storage: &'a dyn TruncateStorage,
     pub transactions: &'a dyn TruncateTransactions,
-    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
+    pub notices: &'a crate::query::NoticeQueue,
 }
 
 #[cfg(test)]
@@ -59,13 +59,10 @@ pub fn execute(
     let targets = resolve_truncate_targets(context.catalog, tables, cascade)?;
     // PostgreSQL's ExecuteTruncateGuts reports each table CASCADE adds before checking it.
     for table in &targets.cascaded {
-        context
-            .notices
-            .lock()
-            .push(uqa_sql::SQLNotice::notice(format!(
-                "truncate cascades to table \"{}\"",
-                uqa_sql::semantics::foreign_keys::foreign_key_relation_name(table)
-            )));
+        context.notices.push(uqa_sql::SQLNotice::notice(format!(
+            "truncate cascades to table \"{}\"",
+            uqa_sql::semantics::foreign_keys::foreign_key_relation_name(table)
+        )));
     }
     for table in &targets.privilege_targets {
         context.access.ensure_truncate_privilege(table)?;

@@ -136,7 +136,7 @@ fn run_volatile_lock_wait(
     let holder = root.new_session().unwrap();
     let waiter = root.new_session().unwrap();
     if tiny_work_mem {
-        waiter.sql("SET work_mem TO '1B'", &[]).unwrap();
+        waiter.set_query_memory_limit(Some(1));
     }
     holder.sql("BEGIN", &[]).unwrap();
     holder.sql(holder_sql, &[]).unwrap();

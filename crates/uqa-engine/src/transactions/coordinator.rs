@@ -53,7 +53,7 @@ impl Engine {
     }
 
     pub fn begin(&self) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         if let Some(error) = stack
             .last()
@@ -190,6 +190,7 @@ impl Engine {
         // sibling sessions. Closing one session must not erase them from the
         // sessions that remain alive.
         self.release_automatic_statistics_client();
+        self.runtime.terminations.disarm();
         Ok(())
     }
 
@@ -210,7 +211,7 @@ impl Engine {
         &self,
         read_only: bool,
     ) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         if !stack.is_empty() {
             return Err(SQLError::Internal(
@@ -229,7 +230,7 @@ impl Engine {
 
     /// Start the implicit transaction segment owned by a multi-statement simple-query message.
     pub fn begin_simple_query_transaction(&self) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let mut stack = self.session.transactions.lock();
         if !stack.is_empty() {
             return Err(SQLError::Internal(

@@ -67,6 +67,7 @@ impl FileLockCoordinator {
         result
     }
 
+    /// Admit a relation mode against the holders in other processes. The lock manager has already granted the mode against every session of this process by the relation's exact identity, while relations share these bytes by hash, so a session of this process that holds a byte holds it for a relation of its own and never conflicts here.
     fn try_admitted_relation(
         &self,
         state: &mut CoordinatorState,
@@ -79,14 +80,7 @@ impl FileLockCoordinator {
                 continue;
             }
             let claim = relation_mode_claim(relation, held, true);
-            if state
-                .holders
-                .get(&claim.offset)
-                .is_some_and(|holders| holders.iter().any(|holder| *holder != session))
-            {
-                return Ok(Err(RelationClaimWait::Conflict(claim)));
-            }
-            // POSIX locks belong to the process. An exclusive probe must preserve this session's own shared holder while still detecting foreign holders of the same byte.
+            // POSIX locks belong to the process. An exclusive probe must preserve this process's own shared holders while still detecting foreign holders of the same byte.
             let previous = state
                 .claims
                 .get(&claim.offset)

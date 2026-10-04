@@ -85,7 +85,8 @@ pub fn validate_deferred_foreign_key_checks(
             let comparison = validation.comparison.as_ref().ok_or_else(|| {
                 SQLError::Internal("deferred foreign-key comparison was not prepared".into())
             })?;
-            let Some(values) = foreign_key_values(&validation.foreign_key, &document, comparison)?
+            let Some(values) =
+                foreign_key_values(&table, &validation.foreign_key, &document, comparison)?
             else {
                 continue;
             };
@@ -101,27 +102,72 @@ pub fn validate_deferred_foreign_key_checks(
                 continue;
             }
         }
-        // A check that a change to a referenced row fired reports the referenced side, as `PostgreSQL`'s deferred `NO ACTION` triggers do.
-        let message = if check.referenced {
-            format!(
-                "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{}\"",
-                check.firing_relation.name,
-                validation.constraint_name,
-                check.constraint.relation.name
-            )
-        } else {
-            format!(
-                "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
-                foreign_key_relation_name(&table),
-                validation.constraint_name
-            )
-        };
-        return Err(SQLError::Routine {
-            sqlstate: "23503".into(),
-            message,
-        });
+        return Err(deferred_violation(
+            context, check, validation, &table, &document,
+        )?);
     }
     Ok(())
+}
+
+/// `ri_ReportViolation` for a deferred check: a check that a change to a referenced row fired reports the referenced side with the key it still references, as `PostgreSQL`'s deferred `NO ACTION` triggers do, and a referencing row's check the key missing from the referenced table.
+fn deferred_violation(
+    context: ConstraintContext<'_>,
+    check: &crate::mutation::deferred::DeferredForeignKeyCheck,
+    validation: &DeferredForeignKeyValidation,
+    table: &str,
+    document: &uqa_storage::document_store::Document,
+) -> Result<SQLError, SQLError> {
+    let foreign_key = &validation.foreign_key;
+    let values = foreign_key
+        .local_columns
+        .iter()
+        .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+        .collect::<Vec<_>>();
+    if check.referenced {
+        let referencing = &check.constraint.relation.name;
+        let key = super::foreign_key_key(
+            context,
+            &check.firing_relation.qualified_name(),
+            &foreign_key.ref_columns,
+            table,
+            &foreign_key.local_columns,
+            &values,
+        )?;
+        return Ok(SQLError::Diagnostic {
+            sqlstate: "23503".into(),
+            message: format!(
+                "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{referencing}\"",
+                check.firing_relation.name, validation.constraint_name
+            ),
+            detail: Some(match key {
+                Some(key) => format!("{key} is still referenced from table \"{referencing}\"."),
+                None => format!("Key is still referenced from table \"{referencing}\"."),
+            }),
+            hint: None,
+        });
+    }
+    let referenced = foreign_key_relation_name(&foreign_key.ref_table);
+    let key = super::foreign_key_key(
+        context,
+        table,
+        &foreign_key.local_columns,
+        table,
+        &foreign_key.local_columns,
+        &values,
+    )?;
+    Ok(SQLError::Diagnostic {
+        sqlstate: "23503".into(),
+        message: format!(
+            "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
+            foreign_key_relation_name(table),
+            validation.constraint_name
+        ),
+        detail: Some(match key {
+            Some(key) => format!("{key} is not present in table \"{referenced}\"."),
+            None => format!("Key is not present in table \"{referenced}\"."),
+        }),
+        hint: None,
+    })
 }
 
 fn prepare_deferred_foreign_key(

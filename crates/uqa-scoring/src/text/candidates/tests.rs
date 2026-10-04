@@ -148,7 +148,7 @@ fn candidate_preparation_and_scoring_failures_keep_independent_memory_and_allow_
                 || {
                     count += 1;
                     if count == stop {
-                        Err(QueryCancelled.into())
+                        Err(QueryCancelled::USER_REQUEST.into())
                     } else {
                         Ok(())
                     }
@@ -171,7 +171,7 @@ fn candidate_preparation_and_scoring_failures_keep_independent_memory_and_allow_
             candidate.score_document_with_control(37, &frequencies, || {
                 count += 1;
                 if count == stop {
-                    Err(QueryCancelled.into())
+                    Err(QueryCancelled::USER_REQUEST.into())
                 } else {
                     Ok(())
                 }

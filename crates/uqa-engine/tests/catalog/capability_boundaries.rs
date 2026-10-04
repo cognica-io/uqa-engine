@@ -52,10 +52,10 @@ fn catalog_and_session_views_drive_virtual_catalog_rows() {
     assert_eq!(settings.rows[0]["name"], Value::Str("search_path".into()));
     assert_eq!(
         settings.rows[0]["setting"],
-        Value::Str("capability_read,public".into())
+        Value::Str("capability_read, public".into())
     );
     assert_eq!(settings.rows[1]["name"], Value::Str("work_mem".into()));
-    assert_eq!(settings.rows[1]["setting"], Value::Str("8MB".into()));
+    assert_eq!(settings.rows[1]["setting"], Value::Str("8192".into()));
 }
 
 #[test]

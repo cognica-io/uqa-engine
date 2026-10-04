@@ -299,6 +299,14 @@ struct TransactionCharacteristicsState {
     isolation: uqa_sql::ast::TransactionIsolationLevel,
     read_only: bool,
     deferrable: bool,
+    /// The characteristics the transaction assigned itself with `BEGIN`, `SET TRANSACTION` or `SET transaction_*`, which `pg_settings` reports with the source `session` rather than `override`.
+    assigned: u8,
+}
+
+impl TransactionCharacteristicsState {
+    const ISOLATION_ASSIGNED: u8 = 1;
+    const READ_ONLY_ASSIGNED: u8 = 2;
+    const DEFERRABLE_ASSIGNED: u8 = 4;
 }
 
 impl Default for TransactionCharacteristicsState {
@@ -307,6 +315,7 @@ impl Default for TransactionCharacteristicsState {
             isolation: uqa_sql::ast::TransactionIsolationLevel::ReadCommitted,
             read_only: false,
             deferrable: false,
+            assigned: 0,
         }
     }
 }

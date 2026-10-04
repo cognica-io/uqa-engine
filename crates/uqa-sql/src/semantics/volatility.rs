@@ -105,6 +105,7 @@ pub fn function_volatility_with_binding(
                 | "current_schemas"
                 | "current_setting"
                 | "pg_backend_pid"
+                | "pg_trigger_depth"
                 | "version"
                 | "pg_listening_channels"
                 | "to_regclass"
@@ -149,6 +150,10 @@ fn builtin_is_volatile(name: &str) -> bool {
         name,
         "random"
             | "setseed"
+            | "set_config"
+            | "pg_sleep"
+            | "pg_sleep_for"
+            | "pg_sleep_until"
             | "pg_notify"
             | "pg_notification_queue_usage"
             | "array_sample"

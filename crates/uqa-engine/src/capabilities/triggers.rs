@@ -34,7 +34,21 @@ impl Engine {
             expressions: self,
             projection: self.catalog_execution(),
             runtime: self.query_runtime_view(),
+            foreign_keys: self,
         }
+    }
+}
+impl uqa_execution::mutation::triggers::context::ForeignKeyCheckRunner for Engine {
+    fn run_foreign_key_check(
+        &self,
+        check: &uqa_execution::mutation::referential::checks::ForeignKeyCheck,
+        queue: &uqa_execution::mutation::triggers::queue::AfterTriggerQueue,
+    ) -> Result<(), SQLError> {
+        uqa_execution::mutation::referential::checks::run_foreign_key_check(
+            &self.mutation_statement_context().mutation,
+            check,
+            queue,
+        )
     }
 }
 impl TriggerCatalog for Engine {
@@ -103,7 +117,7 @@ impl TriggerRoutineInvoker for Engine {
     }
     fn execute_trigger_routine(
         &self,
-        function: &SQLUserFunction,
+        function: &Arc<SQLUserFunction>,
         context: &TriggerRoutineContext,
     ) -> Result<Value, SQLError> {
         crate::capabilities::routine_invocation::execute_trigger_routine(self, function, context)

@@ -40,6 +40,8 @@ pub(crate) use uqa_execution::catalog::{
 #[derive(Clone, Copy)]
 pub(crate) struct SessionExecutionView<'a> {
     session: &'a SessionContext,
+    /// The roles, which decide whether the session's role is a superuser (`is_superuser`).
+    durable: &'a DurableCatalogState,
     session_id: u64,
     query_transaction_origin: Option<u64>,
 }
@@ -59,10 +61,6 @@ impl SessionExecutionView<'_> {
             .filter(|(name, _)| !name.is_empty())
             .map(|(name, entry)| entry.metadata(name))
             .collect()
-    }
-
-    pub(crate) fn search_path(&self) -> Vec<String> {
-        self.session.state.read().search_path.clone()
     }
 
     pub(crate) fn current_role(&self) -> RoleReference {
@@ -88,7 +86,7 @@ impl SessionExecutionView<'_> {
     pub(crate) fn relation_name_resolution(&self) -> RelationNameResolution {
         let state = self.session.state.read();
         RelationNameResolution {
-            search_path: state.search_path.clone(),
+            search_path: crate::session::effective_search_path(&state),
             temporary_schema: self.temporary_schema_name(),
             temporary_namespace_allocated: state.temporary_namespace_allocated,
             current_user: RoleReference::Bound(state.authorization.current().clone()),
@@ -96,64 +94,28 @@ impl SessionExecutionView<'_> {
         }
     }
 
-    pub(crate) fn show_variable(&self, name: &str) -> Result<String, SQLError> {
-        self.runtime_parameter(name)
-            .ok_or_else(|| SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("unrecognized configuration parameter \"{name}\""),
-            })
-    }
-
-    pub(crate) fn runtime_parameter(&self, name: &str) -> Option<String> {
-        if name.eq_ignore_ascii_case("search_path") {
-            return Some(self.search_path().join(","));
-        }
-        if let Some(value) = self.transaction_parameter_value(name) {
-            return Some(value);
-        }
-        let session = self.session.state.read();
-        if name.eq_ignore_ascii_case("role") {
-            return Some(session.authorization.show_role().to_owned());
-        }
-        if name.eq_ignore_ascii_case("session_authorization") {
-            return Some(session.authorization.session().name.clone());
-        }
-        if let Some(value) = session_value(&session.session_vars, name) {
-            return Some(value);
-        }
-        default_runtime_parameter(name).map(str::to_string)
-    }
-
-    pub(crate) fn runtime_parameter_source(&self, name: &str) -> &'static str {
-        if self
-            .session
-            .state
-            .read()
-            .session_vars
-            .keys()
-            .any(|key| key.eq_ignore_ascii_case(name))
-        {
-            "session"
-        } else {
-            "default"
-        }
-    }
-
-    fn transaction_parameter_value(&self, name: &str) -> Option<String> {
+    /// The setting of a transaction characteristic `name`, and whether the transaction assigned it itself.
+    pub(crate) fn transaction_parameter_setting(&self, name: &str) -> Option<(String, bool)> {
         let current = self.session.transactions.lock().last().map_or_else(
             || default_transaction_characteristics(self.session),
             |frame| frame.characteristics,
         );
-        if name.eq_ignore_ascii_case("transaction_isolation") {
-            return Some(current.isolation.as_str().into());
-        }
-        if name.eq_ignore_ascii_case("transaction_read_only") {
-            return Some(if current.read_only { "on" } else { "off" }.into());
-        }
-        if name.eq_ignore_ascii_case("transaction_deferrable") {
-            return Some(if current.deferrable { "on" } else { "off" }.into());
-        }
-        None
+        let (setting, flag) = match name {
+            "transaction_isolation" => (
+                current.isolation.as_str().to_string(),
+                super::TransactionCharacteristicsState::ISOLATION_ASSIGNED,
+            ),
+            "transaction_read_only" => (
+                if current.read_only { "on" } else { "off" }.to_string(),
+                super::TransactionCharacteristicsState::READ_ONLY_ASSIGNED,
+            ),
+            "transaction_deferrable" => (
+                if current.deferrable { "on" } else { "off" }.to_string(),
+                super::TransactionCharacteristicsState::DEFERRABLE_ASSIGNED,
+            ),
+            _ => return None,
+        };
+        Some((setting, current.assigned & flag != 0))
     }
 }
 
@@ -161,10 +123,17 @@ pub(crate) use uqa_execution::query::runtime::QueryRuntimeView;
 
 impl uqa_execution::query::runtime::QueryMemorySettings for SessionContext {
     fn work_mem_bytes(&self) -> Result<usize, SQLError> {
-        let session = self.state.read();
-        let setting = session_value_ref(&session.session_vars, "work_mem")
-            .unwrap_or_else(|| default_runtime_parameter("work_mem").unwrap());
-        parse_work_mem_bytes(setting)
+        let limit = self.query_memory_limit.load(Ordering::Acquire);
+        if limit != 0 {
+            return Ok(limit);
+        }
+        let setting = self.setting("work_mem");
+        let kilobytes = setting.parse::<usize>().map_err(|_| {
+            SQLError::Internal(format!(
+                "work_mem holds a setting that is not an integer: {setting:?}"
+            ))
+        })?;
+        Ok(kilobytes.saturating_mul(1024))
     }
 }
 
@@ -335,6 +304,7 @@ impl Engine {
     pub(crate) fn session_execution_view(&self) -> SessionExecutionView<'_> {
         SessionExecutionView {
             session: self.session.as_ref(),
+            durable: self.durable.as_ref(),
             session_id: self.session_id,
             query_transaction_origin: self.query_transaction_origin,
         }
@@ -363,190 +333,23 @@ impl Engine {
     }
 }
 
-pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
-    if name.eq_ignore_ascii_case("role") {
-        return Some("none");
-    }
-    if name.eq_ignore_ascii_case("session_authorization") {
-        return Some("uqa");
-    }
-    if name.eq_ignore_ascii_case("application_name") {
-        return Some("");
-    }
-    if name.eq_ignore_ascii_case("standard_conforming_strings")
-        || name.eq_ignore_ascii_case("integer_datetimes")
-    {
-        return Some("on");
-    }
-    if name.eq_ignore_ascii_case("server_version_num") {
-        return Some("180000");
-    }
-    if name.eq_ignore_ascii_case("server_version") {
-        return Some("18.0-uqa");
-    }
-    if name.eq_ignore_ascii_case("server_encoding") || name.eq_ignore_ascii_case("client_encoding")
-    {
-        return Some("UTF8");
-    }
-    if name.eq_ignore_ascii_case("datestyle") {
-        return Some("ISO, MDY");
-    }
-    if name.eq_ignore_ascii_case("timezone") {
-        return Some("UTC");
-    }
-    if name.eq_ignore_ascii_case("work_mem") {
-        return Some("64MB");
-    }
-    if name.eq_ignore_ascii_case("plan_cache_mode") {
-        return Some("auto");
-    }
-    if name.eq_ignore_ascii_case("session_replication_role") {
-        return Some("origin");
-    }
-    if name.eq_ignore_ascii_case("plpgsql.check_asserts")
-        || name.eq_ignore_ascii_case("enable_indexonlyscan")
-    {
-        return Some("on");
-    }
-    if name.eq_ignore_ascii_case("default_transaction_isolation")
-        || name.eq_ignore_ascii_case("transaction_isolation")
-    {
-        return Some("read committed");
-    }
-    if name.eq_ignore_ascii_case("default_transaction_read_only")
-        || name.eq_ignore_ascii_case("default_transaction_deferrable")
-        || name.eq_ignore_ascii_case("transaction_read_only")
-        || name.eq_ignore_ascii_case("transaction_deferrable")
-    {
-        return Some("off");
-    }
-    None
-}
-
-pub(super) fn is_known_runtime_parameter(name: &str) -> bool {
-    name.eq_ignore_ascii_case("search_path") || default_runtime_parameter(name).is_some()
-}
-
-pub(super) fn is_mutable_runtime_parameter(name: &str) -> bool {
-    name.eq_ignore_ascii_case("application_name")
-        || name.eq_ignore_ascii_case("role")
-        || name.eq_ignore_ascii_case("session_authorization")
-        || name.eq_ignore_ascii_case("search_path")
-        || name.eq_ignore_ascii_case("client_encoding")
-        || name.eq_ignore_ascii_case("datestyle")
-        || name.eq_ignore_ascii_case("timezone")
-        || name.eq_ignore_ascii_case("work_mem")
-        || name.eq_ignore_ascii_case("plan_cache_mode")
-        || name.eq_ignore_ascii_case("session_replication_role")
-        || name.eq_ignore_ascii_case("plpgsql.check_asserts")
-        || name.eq_ignore_ascii_case("enable_indexonlyscan")
-        || name.eq_ignore_ascii_case("default_transaction_isolation")
-        || name.eq_ignore_ascii_case("default_transaction_read_only")
-        || name.eq_ignore_ascii_case("default_transaction_deferrable")
-        || name.eq_ignore_ascii_case("transaction_isolation")
-        || name.eq_ignore_ascii_case("transaction_read_only")
-        || name.eq_ignore_ascii_case("transaction_deferrable")
-}
-
-pub(super) fn parse_boolean_runtime_parameter(name: &str, value: &str) -> Result<bool, SQLError> {
-    let text = value.trim().to_ascii_lowercase();
-    let matches_prefix = |word: &str| !text.is_empty() && word.starts_with(&text);
-    if matches_prefix("true") || matches_prefix("yes") || text == "on" || text == "1" {
-        return Ok(true);
-    }
-    if matches_prefix("false")
-        || matches_prefix("no")
-        || (matches_prefix("off") && text.len() >= 2)
-        || text == "0"
-    {
-        return Ok(false);
-    }
-    Err(SQLError::Routine {
-        sqlstate: "22023".into(),
-        message: format!("parameter \"{name}\" requires a Boolean value"),
-    })
-}
-
-fn session_value(
-    values: &std::collections::BTreeMap<String, String>,
-    name: &str,
-) -> Option<String> {
-    session_value_ref(values, name).map(str::to_string)
-}
-
-fn session_value_ref<'a>(
-    values: &'a std::collections::BTreeMap<String, String>,
-    name: &str,
-) -> Option<&'a str> {
-    values.get(name).map(String::as_str).or_else(|| {
-        values
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.as_str())
-    })
-}
-
 fn default_transaction_characteristics(
     session: &SessionContext,
 ) -> super::TransactionCharacteristicsState {
-    let state = session.state.read();
-    let isolation =
-        match session_value(&state.session_vars, "default_transaction_isolation").as_deref() {
-            Some("read uncommitted") => TransactionIsolationLevel::ReadUncommitted,
-            Some("repeatable read") => TransactionIsolationLevel::RepeatableRead,
-            Some("serializable") => TransactionIsolationLevel::Serializable,
-            _ => TransactionIsolationLevel::ReadCommitted,
-        };
-    let read_only = session_value(&state.session_vars, "default_transaction_read_only")
-        .is_some_and(|value| value == "on");
-    let deferrable = session_value(&state.session_vars, "default_transaction_deferrable")
-        .is_some_and(|value| value == "on");
+    let isolation = match session.setting("default_transaction_isolation").as_str() {
+        "read uncommitted" => TransactionIsolationLevel::ReadUncommitted,
+        "repeatable read" => TransactionIsolationLevel::RepeatableRead,
+        "serializable" => TransactionIsolationLevel::Serializable,
+        _ => TransactionIsolationLevel::ReadCommitted,
+    };
+    let read_only = session.setting("default_transaction_read_only") == "on";
+    let deferrable = session.setting("default_transaction_deferrable") == "on";
     super::TransactionCharacteristicsState {
         isolation,
         read_only,
         deferrable,
+        assigned: 0,
     }
-}
-
-pub(super) fn parse_work_mem_bytes(raw: &str) -> Result<usize, SQLError> {
-    let compact = raw
-        .trim()
-        .chars()
-        .filter(|character| !character.is_ascii_whitespace())
-        .collect::<String>();
-    let digits = compact.bytes().take_while(u8::is_ascii_digit).count();
-    if digits == 0 {
-        return Err(SQLError::TypeMismatch(format!(
-            "work_mem must be a positive byte size, got {raw:?}"
-        )));
-    }
-    let amount = compact[..digits].parse::<usize>().map_err(|_| {
-        SQLError::TypeMismatch(format!("work_mem is outside the supported range: {raw:?}"))
-    })?;
-    if amount == 0 {
-        return Err(SQLError::TypeMismatch(
-            "work_mem must be greater than zero".into(),
-        ));
-    }
-    let unit = compact[digits..].to_ascii_lowercase();
-    let exponent = match unit.as_str() {
-        "b" => 0,
-        "" | "k" | "kb" | "kib" => 1,
-        "m" | "mb" | "mib" => 2,
-        "g" | "gb" | "gib" => 3,
-        "t" | "tb" | "tib" => 4,
-        _ => {
-            return Err(SQLError::TypeMismatch(format!(
-                "unsupported work_mem unit in {raw:?}"
-            )))
-        }
-    };
-    let multiplier = 1024_usize.checked_pow(exponent).ok_or_else(|| {
-        SQLError::TypeMismatch(format!("work_mem is outside the supported range: {raw:?}"))
-    })?;
-    amount.checked_mul(multiplier).ok_or_else(|| {
-        SQLError::TypeMismatch(format!("work_mem is outside the supported range: {raw:?}"))
-    })
 }
 
 pub(crate) fn validate_stored_schema_name(name: &str) -> StorageBackendResult<()> {
@@ -558,6 +361,8 @@ pub(crate) fn validate_stored_schema_name(name: &str) -> StorageBackendResult<()
 mod tests;
 
 mod catalog_execution;
+
+pub(crate) mod session_parameters;
 
 pub(crate) mod query_scope;
 

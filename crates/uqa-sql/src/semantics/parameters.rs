@@ -4,9 +4,18 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SET, SET LOCAL and temporary function configuration over retained parameter values.
+//! Configuration parameters: their definitions and values, and the lifetimes of SET, SET LOCAL and temporary function configuration over values the host retains.
 
 use std::collections::BTreeMap;
+
+pub mod arguments;
+pub mod catalog;
+pub mod custom;
+pub mod definition;
+pub mod identifier_list;
+pub mod setting;
+pub mod units;
+pub mod value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParameterAssignment {

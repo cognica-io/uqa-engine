@@ -237,16 +237,18 @@ fn direct_search_path_assignment_survives_function_and_transaction_local_restora
     engine
         .set_configured_parameter("search_path", "public")
         .unwrap();
-    engine.set_search_path(vec!["pg_catalog".into(), "public".into()]);
+    engine
+        .set_search_path(&["pg_catalog".into(), "public".into()])
+        .unwrap();
     guard.finish();
     assert_eq!(
         engine.show_variable("search_path").unwrap(),
-        "pg_catalog,public"
+        "pg_catalog, public"
     );
     sql(&engine, "COMMIT");
     assert_eq!(
         engine.show_variable("search_path").unwrap(),
-        "pg_catalog,public"
+        "pg_catalog, public"
     );
 }
 

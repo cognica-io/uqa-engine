@@ -7,14 +7,13 @@
 //! Exhaustive physical executor for the unified SQL plan.
 
 use crate::schema::ctas::CreateTableAsExecution;
-use uqa_core::Value;
 use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::plan::{
     CommandPlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan, QueryPlan, UnifiedPlan,
     UpdatePlan,
 };
-use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
+use uqa_sql::{SQLError, SQLParam, SQLResult};
 
 use super::context::StatementExecutionContext;
 use crate::schema::view_creation::{self, MaterializedViewRegistration, ViewRegistration};
@@ -68,7 +67,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
     /// Warn that `command`, whose effect lasts until its transaction ends, runs outside a transaction block, as `PostgreSQL`'s `WarnNoTransactionBlock` does. A statement nested in a function or in a multi-statement query has a transaction to last for and is not warned about.
     fn warn_outside_transaction_block(&self, command: &str) {
         if !self.nested_statement && !self.context.portals.state.in_transaction_block() {
-            self.context.runtime.notices.lock().push(
+            self.context.runtime.notices.push(
                 uqa_sql::semantics::effects::transaction_blocks::no_transaction_block_warning(
                     command,
                 ),
@@ -229,20 +228,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
     }
 
     fn execute_show_variable(&self, name: &str) -> Result<SQLResult, SQLError> {
-        let mut row = ResultRow::new();
-        row.insert(
-            name.to_string(),
-            Value::Str(self.context.validation.session.show_variable(name)?),
-        );
-        Ok(SQLResult {
-            kind: uqa_sql::SQLResultKind::Rows,
-            command_tag: None,
-            columns: vec![name.to_string()],
-            column_types: vec![Some(uqa_sql::ColumnType::Text)],
-            rows: vec![row],
-            positional_rows: None,
-            affected_rows: 0,
-        })
+        super::show::show(self.context.validation.session, name)
     }
 
     fn execute_explain(

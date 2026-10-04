@@ -40,7 +40,7 @@ fn immutable_leafs_share_ordinary_null_arity_and_value_semantics() {
         (
             "quote_ident",
             vec![Value::Str("a_1$".into())],
-            Value::Str("a_1$".into()),
+            Value::Str("\"a_1$\"".into()),
         ),
         (
             "quote_ident",

@@ -22,7 +22,7 @@ use crate::mutation::{
 };
 pub use context::ConstraintContext;
 pub use deferred::validate_deferred_foreign_key_checks;
-pub(crate) use diagnostics::duplicate_index_key_detail;
+pub(crate) use diagnostics::enforced_key_description;
 use index_keys::EnforcedKeyExecution;
 pub use keys::{
     lock_document_key_dependencies, validate_key_constraints,
@@ -113,13 +113,11 @@ fn validate_document_non_key_constraints_with_old(
         params,
         old_document.is_none(),
     )?;
-    lock_document_foreign_key_dependencies(
-        context,
-        table,
-        document,
-        ForeignKeyCheck::new_row(statement.is_none()),
-        old_document,
-    )
+    // A statement's rows are checked against their foreign keys when the statement has written them (`referential::checks`); a table alteration validates an existing row here.
+    match statement {
+        Some(_) => Ok(()),
+        None => validate_existing_row_foreign_keys(context, table, document),
+    }
 }
 
 /// Check a row that a table rewrite produced against the table's validated NOT NULL and CHECK constraints before it replaces the existing row, as `ATRewriteTable` does; the rewrite validates foreign keys once every row is written.
@@ -238,119 +236,96 @@ fn validate_row_checks(
     Ok(())
 }
 
-pub fn lock_existing_document_foreign_key_dependencies(
+/// Check an existing row that a table alteration validates against the table's validated foreign keys, as `PostgreSQL` validates a foreign key whatever the replication role.
+fn validate_existing_row_foreign_keys(
     context: ConstraintContext<'_>,
     table: &str,
     document: &Document,
 ) -> Result<(), SQLError> {
-    lock_document_foreign_key_dependencies(context, table, document, ForeignKeyCheck::Lock, None)
-}
-
-pub fn lock_existing_document_rewrite_foreign_key_dependencies(
-    context: ConstraintContext<'_>,
-    table: &str,
-    old_document: &Document,
-    new_document: &Document,
-) -> Result<(), SQLError> {
-    lock_document_foreign_key_dependencies(
-        context,
-        table,
-        new_document,
-        ForeignKeyCheck::Lock,
-        Some(old_document),
-    )
-}
-
-/// How a row's foreign keys are checked.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ForeignKeyCheck {
-    /// Lock the referenced rows that exist, before the row's other checks.
-    Lock,
-    /// Require the referenced rows of a row a statement writes, unless the key is deferred or the session replays replicated changes.
-    Statement,
-    /// Require the referenced rows of an existing row that a table alteration validates, for every validated key, as `PostgreSQL` validates a foreign key whatever the replication role.
-    Existing,
-}
-
-impl ForeignKeyCheck {
-    const fn new_row(existing: bool) -> Self {
-        if existing {
-            Self::Existing
-        } else {
-            Self::Statement
-        }
-    }
-}
-
-fn lock_document_foreign_key_dependencies(
-    context: ConstraintContext<'_>,
-    table: &str,
-    document: &Document,
-    check: ForeignKeyCheck,
-    old_document: Option<&Document>,
-) -> Result<(), SQLError> {
-    let allow_missing = check == ForeignKeyCheck::Lock;
-    if check != ForeignKeyCheck::Existing && context.referrers.session_replication_role_is_replica()
-    {
-        return Ok(());
-    }
     for fk in context
         .catalog
         .try_foreign_keys(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?
     {
-        if !fk.enforced || (check == ForeignKeyCheck::Existing && !fk.validated) {
+        if !fk.enforced || !fk.validated {
             continue;
         }
-        if check == ForeignKeyCheck::Statement
-            && context.transactions.foreign_key_is_deferred(table, &fk)?
-        {
-            continue;
-        }
-        if old_document.is_some_and(|old_document| {
-            fk.local_columns.iter().all(|column| {
-                old_document.get(column).cloned().unwrap_or(Value::Null)
-                    == document.get(column).cloned().unwrap_or(Value::Null)
-            })
-        }) {
-            continue;
-        }
-        let Some(local_values) =
+        let Some(lookup) =
             foreign_key_lookup_values(context.partitions.catalog, table, &fk, document)?
         else {
             continue;
         };
-        let violation = || SQLError::Routine {
-            sqlstate: "23503".into(),
-            message: format!(
-                "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
-                foreign_key_relation_name(table),
-                fk.name.as_deref().unwrap_or("<unnamed>")
-            ),
-        };
-        if fk.period {
-            let (covered, parent_ids) =
-                period_foreign_key_coverage(context, &fk, &local_values.values, &[], None)?;
-            if !covered {
-                if allow_missing {
-                    continue;
-                }
-                return Err(violation());
-            }
-            for parent in parent_ids {
-                let _target = lock_mutation_target(
-                    context.locks,
-                    &parent.table,
-                    &fk.ref_table,
-                    parent.doc_id,
-                    uqa_sql::ast::LockStrength::ForKeyShare,
-                )?;
-            }
-            continue;
-        }
-        lock_foreign_key_parent(context, table, &fk, &local_values, allow_missing)?;
+        require_foreign_key_parent(context, table, &fk, &lookup, document)?;
     }
     Ok(())
+}
+
+/// `insert or update on table "fk" violates foreign key constraint "c"` with the key that is missing from the referenced table, unless the current role may not read its columns.
+fn referencing_row_violation(
+    context: ConstraintContext<'_>,
+    table: &str,
+    fk: &ForeignKey,
+    document: &Document,
+) -> Result<SQLError, SQLError> {
+    let values = fk
+        .local_columns
+        .iter()
+        .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+        .collect::<Vec<_>>();
+    let referenced = foreign_key_relation_name(&fk.ref_table);
+    let key = foreign_key_key(
+        context,
+        table,
+        &fk.local_columns,
+        table,
+        &fk.local_columns,
+        &values,
+    )?;
+    Ok(SQLError::Diagnostic {
+        sqlstate: "23503".into(),
+        message: format!(
+            "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
+            foreign_key_relation_name(table),
+            fk.name.as_deref().unwrap_or("<unnamed>")
+        ),
+        detail: Some(match key {
+            Some(key) => format!("{key} is not present in table \"{referenced}\"."),
+            None => format!("Key is not present in table \"{referenced}\"."),
+        }),
+        hint: None,
+    })
+}
+
+/// Require the row that the referencing row `document` of `table` references through `fk` and lock it `FOR KEY SHARE`, as `RI_FKey_check` does; a temporal key requires referenced rows that cover its period.
+pub(crate) fn require_foreign_key_parent(
+    context: ConstraintContext<'_>,
+    table: &str,
+    fk: &ForeignKey,
+    lookup: &ForeignKeyLookup,
+    document: &Document,
+) -> Result<(), SQLError> {
+    if fk.period {
+        let (covered, parent_ids) =
+            period_foreign_key_coverage(context, fk, &lookup.values, &[], None)?;
+        if !covered {
+            return Err(referencing_row_violation(context, table, fk, document)?);
+        }
+        for parent in parent_ids {
+            let _target = lock_mutation_target(
+                context.locks,
+                &parent.table,
+                &fk.ref_table,
+                parent.doc_id,
+                uqa_sql::ast::LockStrength::ForKeyShare,
+            )?;
+        }
+        return Ok(());
+    }
+    if lock_foreign_key_parent(context, table, fk, lookup)? {
+        Ok(())
+    } else {
+        Err(referencing_row_violation(context, table, fk, document)?)
+    }
 }
 
 pub fn find_foreign_key_parent(
@@ -396,7 +371,7 @@ pub fn authorize_foreign_key_parent_namespace(
     )
 }
 
-fn find_exact_foreign_key_parent(
+pub(crate) fn find_exact_foreign_key_parent(
     context: ConstraintContext<'_>,
     fk: &ForeignKey,
     values: &[Value],
@@ -472,30 +447,18 @@ fn validate_not_null_columns(
     Ok(())
 }
 
+/// Lock the referenced row that `local_values` names `FOR KEY SHARE`, following a delete and reinsert or a key change that a wait reveals, and report whether the row exists. `PostgreSQL` 18 holds the lock until the referencing transaction ends; after a wait the READ COMMITTED snapshot is refreshed until the row carrying the key is locked.
 fn lock_foreign_key_parent(
     context: ConstraintContext<'_>,
     table: &str,
     fk: &ForeignKey,
     local_values: &ForeignKeyLookup,
-    allow_missing: bool,
-) -> Result<(), SQLError> {
-    let violation = || SQLError::Routine {
-        sqlstate: "23503".into(),
-        message: format!(
-            "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
-            foreign_key_relation_name(table),
-            fk.name.as_deref().unwrap_or("<unnamed>")
-        ),
-    };
+) -> Result<bool, SQLError> {
     let mut hops = 0usize;
     loop {
         let Some(parent) = find_foreign_key_parent(context, fk, local_values)? else {
-            if allow_missing {
-                break;
-            }
-            return Err(violation());
+            return Ok(false);
         };
-        // PostgreSQL 18 holds FOR KEY SHARE on the referenced row until the referencing transaction ends. If the lookup waits, refresh the READ COMMITTED snapshot and follow a delete/reinsert or key rewrite until the tuple carrying the requested key is locked.
         let target = lock_mutation_target(
             context.locks,
             &parent.table,
@@ -525,9 +488,8 @@ fn lock_foreign_key_parent(
             doc_id: locked_parent,
         };
         match find_foreign_key_parent(context, fk, local_values)? {
-            Some(current_parent) if current_parent == locked_parent => break,
-            None if allow_missing => break,
-            None => return Err(violation()),
+            Some(current_parent) if current_parent == locked_parent => return Ok(true),
+            None => return Ok(false),
             Some(_) => {
                 hops += 1;
                 if hops > 64 {
@@ -538,5 +500,4 @@ fn lock_foreign_key_parent(
             }
         }
     }
-    Ok(())
 }

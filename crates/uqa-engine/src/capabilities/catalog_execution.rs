@@ -52,11 +52,11 @@ impl CatalogSession for Engine {
         self.session_execution_view().relation_name_resolution()
     }
 
-    fn show_variable(&self, name: &str) -> Result<String, SQLError> {
-        self.session_execution_view().show_variable(name)
+    fn show_parameter(&self, name: &str) -> Result<(String, String), SQLError> {
+        self.session_execution_view().show_parameter(name)
     }
-    fn runtime_parameter_source(&self, name: &str) -> &'static str {
-        self.session_execution_view().runtime_parameter_source(name)
+    fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
+        self.session_execution_view().parameter_settings()
     }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         self.session_execution_view().prepared_statements()
@@ -76,11 +76,11 @@ impl CatalogSession for SessionExecutionView<'_> {
         SessionExecutionView::relation_name_resolution(self)
     }
 
-    fn show_variable(&self, name: &str) -> Result<String, SQLError> {
-        SessionExecutionView::show_variable(self, name)
+    fn show_parameter(&self, name: &str) -> Result<(String, String), SQLError> {
+        SessionExecutionView::show_parameter(self, name)
     }
-    fn runtime_parameter_source(&self, name: &str) -> &'static str {
-        SessionExecutionView::runtime_parameter_source(self, name)
+    fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
+        SessionExecutionView::parameter_settings(self)
     }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         SessionExecutionView::prepared_statements(self)

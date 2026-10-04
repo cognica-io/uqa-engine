@@ -31,6 +31,24 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
             params,
         )
     }
+
+    fn plan_with_result(
+        &self,
+        plan: uqa_sql::plan::UnifiedPlan,
+        params: &[uqa_sql::SQLParam],
+    ) -> Result<
+        (
+            uqa_sql::plan::UnifiedPlan,
+            uqa_sql::binding::statements::AnalyzedResult,
+        ),
+        SQLError,
+    > {
+        uqa_sql::plan::ExecutablePlanOptimizer::plan_with_result(
+            &self.statement_planning_context(),
+            plan,
+            params,
+        )
+    }
 }
 
 impl Engine {

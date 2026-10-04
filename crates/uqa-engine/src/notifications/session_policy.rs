@@ -16,7 +16,7 @@ impl Engine {
     ///
     /// This is irreversible for the session and survives rollback, DISCARD and nested execution. Enabling it fails with SQLSTATE 55000 during SQL execution, inside a transaction or while SQL channels are registered. Repeated calls after successful configuration are harmless. Independently owned subscription handles are unaffected.
     pub fn require_notification_subscriptions(&self) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if self.notification_subscriptions_required() {
             return Ok(());
         }

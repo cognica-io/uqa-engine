@@ -18,6 +18,10 @@ pub trait RoutineConfigurationSession {
     fn routine_configuration_guard(&self) -> Box<dyn RoutineConfigurationGuard + '_>;
     fn set_routine_variable(&self, name: &str, value: &str) -> Result<(), SQLError>;
     fn show_routine_variable(&self, name: &str) -> Result<String, SQLError>;
+    /// The canonical spelling of the parameter `name` refers to, which a routine's configuration stores.
+    fn routine_variable_name(&self, name: &str) -> Result<String, SQLError>;
+    /// Load the library of the routine's language into the session, as calling its validator does.
+    fn load_language_library(&self, language: &str);
 }
 
 pub fn apply_routine_config_actions(
@@ -33,11 +37,11 @@ pub fn apply_routine_config_actions(
         let applied = validate_routine_config_action(&action).and_then(|()| match action {
             RoutineConfigAction::Set { name, value } => session
                 .set_routine_variable(&name, &value)
-                .and_then(|()| session.show_routine_variable(&name))
-                .map(|value| Some((name, value))),
+                .and_then(|()| session.routine_variable_name(&name))
+                .map(|name| Some((name, value))),
             RoutineConfigAction::FromCurrent { name } => session
                 .show_routine_variable(&name)
-                .map(|value| Some((name, value))),
+                .and_then(|value| Ok(Some((session.routine_variable_name(&name)?, value)))),
             RoutineConfigAction::Reset { name } => {
                 definition
                     .config

@@ -509,6 +509,6 @@ fn new_trigger_object_id() -> Result<[u8; 16], SQLError> {
 
 impl EventLifecycleContext<'_> {
     pub(super) fn notice(&self, notice: uqa_sql::SQLNotice) {
-        self.notices.lock().push(notice);
+        self.notices.push(notice);
     }
 }

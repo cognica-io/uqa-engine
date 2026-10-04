@@ -90,7 +90,7 @@ fn stored_relation_drop_matches_postgresql_sqlite() {
 #[test]
 fn stored_relation_drop_matches_postgresql_with_spilled_state() {
     let engine = Engine::new();
-    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
+    engine.set_query_memory_limit(Some(1));
     verify_stored_relation_drop(&engine);
 }
 

@@ -167,6 +167,7 @@ impl ValueRestorationSession for Rebuild<'_> {
                 expressions: self.fixture,
             },
             memory: self.fixture,
+            description: self.fixture,
         }
     }
 

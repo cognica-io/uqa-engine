@@ -9,7 +9,7 @@
 use super::{rule_inputs::RuleInputPlanningContext, StatementStatisticsContext};
 use crate::{AggregateClassifier, ConstantEvaluator, QueryPlan, UnifiedPlan};
 use uqa_sql::{
-    binding::statements::{analyze_executable_plan, StatementAnalysisContext},
+    binding::statements::{analyze_executable_plan, AnalyzedResult, StatementAnalysisContext},
     SQLError, SQLParam,
 };
 
@@ -32,6 +32,15 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
         params: &[SQLParam],
     ) -> Result<UnifiedPlan, SQLError> {
         plan_for_execution(self, plan, params)
+    }
+
+    fn plan_with_result(
+        &self,
+        plan: UnifiedPlan,
+        params: &[SQLParam],
+    ) -> Result<(UnifiedPlan, AnalyzedResult), SQLError> {
+        let result = analyze_executable_plan(&self.analysis, &plan, params)?;
+        Ok((optimize_plan(self, plan)?, result))
     }
 }
 

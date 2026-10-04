@@ -11,7 +11,6 @@ use crate::mutation::{
     candidate::{MutationLockTarget, PhysicalDocumentIdentity},
     constraints::lock_document_key_dependencies,
     errors::{dml_storage_error, missing_document_error},
-    events::ReferentialActionContext,
     expressions::eval_mutation_expr,
     locking::{lock_mutation_target, MutationLockCleanup},
     prepared::PreparedInsertConflict,
@@ -265,7 +264,6 @@ impl InsertConflictLocks {
     pub fn prepare_document<S: Clone + 'static>(
         &mut self,
         preparation: InsertConflictPreparation<'_, S>,
-        referential_actions: &mut ReferentialActionContext,
     ) -> Result<PreparedInsertConflict, SQLError> {
         let InsertConflictPreparation {
             context,
@@ -338,6 +336,10 @@ impl InsertConflictLocks {
         else {
             return Ok(PreparedInsertConflict::Skip);
         };
+        // Another command of the statement, or a statement its triggers or functions started, inserted or rewrote the conflicting row, whose version `PostgreSQL`'s `ExecOnConflictUpdate` finds invisible to the statement's command id.
+        if scope.statement_wrote(&existing) || scope.statement_triggered_write(&existing) {
+            return Err(on_conflict_cardinality_violation());
+        }
         match build_conflict_update(
             &context,
             &existing.table,
@@ -378,14 +380,7 @@ impl InsertConflictLocks {
                     existing.doc_id,
                     old_document,
                     new_document,
-                    params,
-                    referential_actions,
-                )?
-                .ok_or_else(|| {
-                    SQLError::Internal(
-                        "INSERT ON CONFLICT rewrite dependency tree was cyclic at its root".into(),
-                    )
-                })?;
+                )?;
                 reject_partition_rewrite(&context, &prepared, params)?;
                 self.overlay
                     .as_mut()

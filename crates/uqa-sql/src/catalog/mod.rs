@@ -8,6 +8,7 @@
 
 use crate::ast::ColumnType;
 
+pub mod access_methods;
 pub mod expression_text;
 pub mod node_tree;
 pub mod oids;

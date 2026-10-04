@@ -154,7 +154,7 @@ fn fixed_snapshot_foreign_key_delete_detects_new_commits() {
     for isolation in ["REPEATABLE READ", "SERIALIZABLE"] {
         for (action, expected) in [
             ("", "23503"),
-            ("ON DELETE RESTRICT", "23503"),
+            ("ON DELETE RESTRICT", "23001"),
             ("ON DELETE CASCADE", "40001"),
             ("ON DELETE SET NULL", "40001"),
             ("ON DELETE SET DEFAULT", "40001"),
@@ -185,7 +185,7 @@ fn fixed_snapshot_foreign_key_update_detects_new_commits() {
     for isolation in ["REPEATABLE READ", "SERIALIZABLE"] {
         for (action, expected) in [
             ("", "23503"),
-            ("ON UPDATE RESTRICT", "23503"),
+            ("ON UPDATE RESTRICT", "23001"),
             ("ON UPDATE CASCADE", "40001"),
             ("ON UPDATE SET NULL", "40001"),
             ("ON UPDATE SET DEFAULT", "40001"),

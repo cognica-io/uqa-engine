@@ -19,7 +19,7 @@ use uqa_sql::SQLError;
 
 use crate::results::{send_notices, send_result, sql_error};
 use crate::server::{Client, ServerConfig, Shared};
-use crate::startup::{self, REPORTED_PARAMETERS};
+use crate::startup::{self, reported_parameters};
 use crate::transport::Transport;
 use crate::ServerError;
 
@@ -71,6 +71,9 @@ fn run_connection(
             Ok(Some(message)) => message,
             Ok(None) => return Ok(()),
             Err(error) if is_read_timeout(&error) => {
+                if let Some(termination) = session.engine.session_termination() {
+                    return terminate(transport, &termination);
+                }
                 send_notifications(transport, &session.engine)?;
                 continue;
             }
@@ -79,11 +82,19 @@ fn run_connection(
         if matches!(message, FrontendMessage::Terminate) {
             return Ok(());
         }
+        if let Some(termination) = session.engine.session_termination() {
+            return terminate(transport, &termination);
+        }
         if discard_until_sync && !matches!(message, FrontendMessage::Sync) {
             continue;
         }
         match message {
-            FrontendMessage::Query(query) => execute_query(transport, &mut session, &query)?,
+            FrontendMessage::Query(query) => {
+                execute_query(transport, &mut session, &query)?;
+                if let Some(termination) = session.engine.session_termination() {
+                    return terminate(transport, &termination);
+                }
+            }
             FrontendMessage::Sync => {
                 discard_until_sync = false;
                 ready(transport, &session.engine)?;
@@ -206,6 +217,14 @@ fn startup<'a>(
     }
 }
 
+/// Report a session timeout's termination at `FATAL`, after which the connection closes, as a terminated backend does.
+fn terminate(transport: &mut Transport, termination: &SQLError) -> Result<(), ServerError> {
+    let mut error = sql_error(termination);
+    error.severity = NoticeSeverity::Fatal;
+    transport.send(&BackendMessage::ErrorResponse(error))?;
+    Ok(())
+}
+
 fn fatal<T>(transport: &mut Transport, mut error: ErrorOrNotice) -> Result<Option<T>, ServerError> {
     error.severity = NoticeSeverity::Fatal;
     transport.send(&BackendMessage::ErrorResponse(error))?;
@@ -256,6 +275,9 @@ fn execute_query(
         None => result,
     };
     send_notices(transport, &session.engine)?;
+    if session.engine.session_termination().is_some() {
+        return Ok(());
+    }
     if let Err(error) = result {
         transport.send(&BackendMessage::ErrorResponse(sql_error(&error)))?;
     }
@@ -268,14 +290,14 @@ fn send_parameters(
     transport: &mut Transport,
     session: &mut Session<'_>,
 ) -> Result<(), ServerError> {
-    for name in REPORTED_PARAMETERS {
+    for name in reported_parameters() {
         let value = session.engine.show_variable(name)?;
-        if session.reported.get(*name) != Some(&value) {
+        if session.reported.get(name) != Some(&value) {
             transport.send(&BackendMessage::ParameterStatus {
-                name: (*name).into(),
+                name: name.into(),
                 value: value.clone(),
             })?;
-            session.reported.insert((*name).into(), value);
+            session.reported.insert(name.into(), value);
         }
     }
     Ok(())

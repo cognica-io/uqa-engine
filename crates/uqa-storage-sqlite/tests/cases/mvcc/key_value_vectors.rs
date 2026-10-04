@@ -18,7 +18,6 @@ fn key_value_hnsw_spill_publishes_and_reopens_beyond_the_session_allowance() {
     let path = directory.path().join("bounded-hnsw.db");
     let options = uqa_storage::mvcc::VersionedSessionOptions {
         retained_bytes: 256 * 1024,
-        ..Default::default()
     };
     {
         let store = SQLiteKeyValueStore::with_options(open(MODES[0], &path), options).unwrap();

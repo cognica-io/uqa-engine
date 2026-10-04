@@ -6,7 +6,7 @@
 
 //! Logical-session search path, PRNG, runtime variables, and DISCARD.
 
-use super::{parse_search_path_list, Engine, SQLError, StorageBackendResult};
+use super::{Engine, SQLError, StorageBackendResult};
 
 impl Engine {
     /// Return the current `search_path`.
@@ -19,6 +19,7 @@ impl Engine {
         let requested = library.strip_prefix("$libdir/").unwrap_or(library);
         let base = requested.strip_suffix(".so").unwrap_or(requested);
         if matches!(base, "age" | "plpgsql") && !requested.contains('/') {
+            self.load_language(base);
             return Ok(());
         }
         let path = if library.contains('/') {
@@ -30,6 +31,13 @@ impl Engine {
             sqlstate: "58P01".into(),
             message: format!("could not access file \"{path}\": No such file or directory"),
         })
+    }
+
+    /// Load the library of `language` into the session, which defines its parameters: `PL/pgSQL` is the only embedded language whose library defines any.
+    pub(crate) fn load_language(&self, language: &str) {
+        if language == "plpgsql" {
+            self.load_parameter_library("plpgsql");
+        }
     }
 
     /// First usable namespace on this logical session's explicit search path: a durable, virtual system or graph namespace.
@@ -92,187 +100,44 @@ impl Engine {
         Ok(())
     }
 
-    /// Replace the `search_path`. Empty input falls back to `["public"]`.
-    pub fn set_search_path(&self, path: Vec<String>) {
-        let mut value = path;
-        if value.is_empty() {
-            value.push("public".to_string());
-        }
-        let mut session = self.session.state.write();
-        session.search_path = value;
-        session.session_vars.remove("search_path");
-        session.parameter_scopes.session_assignment("search_path");
-        session.sql_statement_cache.clear();
+    /// Set the session's `search_path` to `path`, each schema quoted as an identifier needs, as `SET search_path TO` with those names does. An empty path finds unqualified names only in the system schemas.
+    pub fn set_search_path(&self, path: &[String]) -> Result<(), SQLError> {
+        let setting = path
+            .iter()
+            .map(|schema| uqa_sql::expr::quote_ident(schema))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.set_runtime_parameter("search_path", Some(&setting), false)
     }
 
-    /// Apply `SET <name> [TO|=] <value>`. Honours `search_path`
-    /// directly; every other parameter is stored in the session-vars
-    /// map so a subsequent `SHOW <name>` can echo it back.
+    /// Bound the memory each query workspace of this session may hold before it spills, in place of `work_mem`; `None` returns to `work_mem`. Unlike `work_mem`, whose minimum is `PostgreSQL`'s 64 kB, the bound may be as small as one byte, so that a host can make queries over little data spill.
+    pub fn set_query_memory_limit(&self, bytes: Option<usize>) {
+        self.session.query_memory_limit.store(
+            bytes.map_or(0, |bytes| bytes.max(1)),
+            std::sync::atomic::Ordering::Release,
+        );
+    }
+
+    /// Apply `SET <name> [TO|=] <value>` for the session.
     pub fn set_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
         self.set_runtime_parameter(name, Some(value), false)
-    }
-
-    fn assign_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
-        if !crate::capabilities::is_known_runtime_parameter(name) {
-            return Err(SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("unrecognized configuration parameter \"{name}\""),
-            });
-        }
-        if !crate::capabilities::is_mutable_runtime_parameter(name) {
-            return Err(SQLError::Routine {
-                sqlstate: "55P02".into(),
-                message: format!("parameter \"{name}\" cannot be changed"),
-            });
-        }
-        if name.eq_ignore_ascii_case("transaction_isolation")
-            || name.eq_ignore_ascii_case("transaction_read_only")
-            || name.eq_ignore_ascii_case("transaction_deferrable")
-        {
-            return self.set_transaction_parameter(name, value);
-        }
-        if name.eq_ignore_ascii_case("session_replication_role") {
-            if !self.current_user_is_superuser() {
-                return Err(SQLError::Routine {
-                    sqlstate: "42501".into(),
-                    message: "permission denied to set parameter \"session_replication_role\""
-                        .into(),
-                });
-            }
-            let value = match value.trim().to_ascii_lowercase().as_str() {
-                "origin" => "origin",
-                "replica" => "replica",
-                "local" => "local",
-                _ => {
-                    return Err(SQLError::Diagnostic {
-                        sqlstate: "22023".into(),
-                        message: format!(
-                            "invalid value for parameter \"session_replication_role\": \"{value}\""
-                        ),
-                        detail: None,
-                        hint: Some("Available values: origin, replica, local.".into()),
-                    })
-                }
-            };
-            let mut session = self.session.state.write();
-            session
-                .session_vars
-                .insert("session_replication_role".into(), value.into());
-            session.sql_statement_cache.clear();
-            return Ok(());
-        }
-        let mut value = Self::validate_default_transaction_parameter(name, value)?;
-        if name.eq_ignore_ascii_case("plan_cache_mode") {
-            let normalized = value.to_ascii_lowercase();
-            if !matches!(
-                normalized.as_str(),
-                "auto" | "force_generic_plan" | "force_custom_plan"
-            ) {
-                return Err(SQLError::Diagnostic {
-                    sqlstate: "22023".into(),
-                    message: format!(
-                        "invalid value for parameter \"plan_cache_mode\": \"{value}\""
-                    ),
-                    detail: None,
-                    hint: Some(
-                        "Available values: auto, force_generic_plan, force_custom_plan.".into(),
-                    ),
-                });
-            }
-            value = normalized;
-        }
-        if name.eq_ignore_ascii_case("plpgsql.check_asserts")
-            || name.eq_ignore_ascii_case("enable_indexonlyscan")
-        {
-            value = if crate::capabilities::parse_boolean_runtime_parameter(name, &value)? {
-                "on".into()
-            } else {
-                "off".into()
-            };
-        }
-        if name.eq_ignore_ascii_case("work_mem") {
-            crate::capabilities::parse_work_mem_bytes(&value)?;
-        }
-        if name.eq_ignore_ascii_case("search_path") {
-            let parts = parse_search_path_list(&value)?;
-            let mut session = self.session.state.write();
-            session.search_path = if parts.is_empty() {
-                vec!["public".to_string()]
-            } else {
-                parts
-            };
-            session.session_vars.insert(name.to_string(), value);
-            session.sql_statement_cache.clear();
-            return Ok(());
-        }
-        let mut session = self.session.state.write();
-        session
-            .session_vars
-            .retain(|key, _| !key.eq_ignore_ascii_case(name));
-        session
-            .session_vars
-            .insert(name.to_ascii_lowercase(), value);
-        Ok(())
     }
 
     pub fn reset_variable(&self, name: &str) -> Result<(), SQLError> {
         self.set_runtime_parameter(name, None, false)
     }
 
-    fn assign_reset_variable(&self, name: &str) -> Result<(), SQLError> {
-        if !crate::capabilities::is_known_runtime_parameter(name) {
-            return Err(SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("unrecognized configuration parameter \"{name}\""),
-            });
-        }
-        if name.eq_ignore_ascii_case("transaction_isolation")
-            || name.eq_ignore_ascii_case("transaction_read_only")
-            || name.eq_ignore_ascii_case("transaction_deferrable")
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: format!("parameter \"{name}\" cannot be reset"),
-            });
-        }
-        if name.eq_ignore_ascii_case("session_replication_role")
-            && !self.current_user_is_superuser()
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "42501".into(),
-                message: "permission denied to set parameter \"session_replication_role\"".into(),
-            });
-        }
-        if !crate::capabilities::is_mutable_runtime_parameter(name) {
-            return Err(SQLError::Routine {
-                sqlstate: "55P02".into(),
-                message: format!("parameter \"{name}\" cannot be changed"),
-            });
-        }
-        let mut session = self.session.state.write();
-        session
-            .session_vars
-            .retain(|key, _| !key.eq_ignore_ascii_case(name));
-        if name.eq_ignore_ascii_case("search_path") {
-            session.search_path = vec!["public".into()];
-        }
-        session.sql_statement_cache.clear();
-        Ok(())
-    }
-
+    /// `RESET ALL`: every parameter except those `RESET ALL` leaves alone returns to the setting `RESET` restores.
     pub fn reset_all_variables(&self) {
+        let search_path = self.reset_search_path();
         let mut session = self.session.state.write();
         session.session_vars.clear();
         session.parameter_scopes.reset_all();
-        session.search_path = vec!["public".into()];
+        session.search_path = search_path;
         session.sql_statement_cache.clear();
     }
 
-    /// Read back a session variable. `search_path` always resolves to
-    /// the current resolution order; every other key looks up the
-    /// session-vars map, then PostgreSQL-compatible runtime defaults,
-    /// and finally the registered runtime default. Unknown parameters are
-    /// errors rather than successful empty strings.
+    /// The value of the parameter `name` as `SHOW` reports it; a name nothing defines is an error.
     pub fn show_variable(&self, name: &str) -> Result<String, SQLError> {
         self.session_execution_view().show_variable(name)
     }
@@ -310,15 +175,11 @@ impl Engine {
         action: uqa_sql::semantics::parameters::ParameterAssignment,
     ) -> Result<(), SQLError> {
         use crate::state::RuntimeParameterValue;
-        let name = name.to_ascii_lowercase();
+        let key = crate::capabilities::session_parameters::parameter_key(name);
         let before = {
             let state = self.session.state.read();
-            let setting = state
-                .session_vars
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(&name))
-                .map(|(_, value)| value.clone());
-            match name.as_str() {
+            let setting = state.session_vars.get(&key).cloned();
+            match key.as_str() {
                 "search_path" => RuntimeParameterValue::SearchPath {
                     setting,
                     path: state.search_path.clone(),
@@ -330,25 +191,31 @@ impl Engine {
                 _ => RuntimeParameterValue::Setting(setting),
             }
         };
-        let prior_role = (name == "session_authorization").then(|| {
+        let prior_role = (key == "session_authorization").then(|| {
             RuntimeParameterValue::Role(self.session.state.read().authorization.selected().cloned())
         });
-        if name == "session_authorization" {
+        if key == "session_authorization" {
             uqa_execution::catalog::security::role_lifecycle::set_session_authorization(
                 &self.role_execution_context(),
                 value,
             )?;
-        } else if name == "role" {
+        } else if key == "role" {
             uqa_execution::catalog::security::role_lifecycle::set_role(
                 &self.role_execution_context(),
                 value,
             )?;
         } else if let Some(value) = value {
-            self.assign_variable(&name, value)?;
+            self.assign_parameter(name, value)?;
         } else {
-            self.assign_reset_variable(&name)?;
+            self.reset_parameter(name)?;
         }
-        let in_transaction = self.transaction_depth() != 0;
+        // Every SQL statement runs in a transaction, its own when no block is open, which ends the statement's LOCAL assignments.
+        let in_transaction = self.transaction_depth() != 0
+            || self
+                .runtime
+                .sql_execution_depth
+                .load(std::sync::atomic::Ordering::Relaxed)
+                != 0;
         let mut state = self.session.state.write();
         if let Some(prior_role) = prior_role {
             if let Some(previous) =
@@ -362,10 +229,10 @@ impl Engine {
         if let Some(previous) =
             state
                 .parameter_scopes
-                .assigned(name.clone(), before, action, in_transaction)
+                .assigned(key.clone(), before, action, in_transaction)
         {
             // A LOCAL assignment outside any transaction lasts only for its own statement; the statement executor reports the warning.
-            restore_runtime_parameter(&mut state, &name, previous);
+            restore_runtime_parameter(&mut state, &key, previous);
         }
         Ok(())
     }
@@ -383,34 +250,17 @@ impl Engine {
     }
 
     pub(crate) fn session_replication_role_is_replica(&self) -> bool {
-        self.session
-            .state
-            .read()
-            .session_vars
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("session_replication_role"))
-            .is_some_and(|(_, value)| value == "replica")
+        self.session.setting("session_replication_role") == "replica"
     }
 
     /// Whether a query may project the values that indexes hold instead of reading documents, as `PostgreSQL`'s `enable_indexonlyscan` does.
     pub(crate) fn index_only_scans_enabled(&self) -> bool {
-        self.session
-            .state
-            .read()
-            .session_vars
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("enable_indexonlyscan"))
-            .is_none_or(|(_, value)| value == "on")
+        self.session.setting("enable_indexonlyscan") == "on"
     }
 
+    /// Whether `ASSERT` checks its condition (`plpgsql.check_asserts`), which applies once the session has loaded `PL/pgSQL`, as running an `ASSERT` has.
     pub(crate) fn plpgsql_asserts_enabled(&self) -> bool {
-        self.session
-            .state
-            .read()
-            .session_vars
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("plpgsql.check_asserts"))
-            .is_none_or(|(_, value)| value == "on")
+        self.session.setting("plpgsql.check_asserts") == "on"
     }
 
     /// Apply `DISCARD <target>`. `ALL` resets every kind of session state;
@@ -418,7 +268,7 @@ impl Engine {
     /// variants are scoped accordingly.
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) -> Result<(), SQLError> {
         use uqa_sql::ast::DiscardTarget;
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         if target == DiscardTarget::All && self.in_explicit_transaction_block() {
             return Err(SQLError::Routine {
                 sqlstate: "25001".into(),
@@ -441,13 +291,14 @@ impl Engine {
                 self.unlisten(None)?;
             }
         }
+        let search_path = self.reset_search_path();
         let mut session = self.session.state.write();
         match target {
             DiscardTarget::All => {
                 session.session_vars.clear();
+                session.search_path = search_path;
                 self.session.prepared.write().clear();
                 session.sql_statement_cache.clear();
-                session.search_path = vec!["public".to_string()];
                 session.authorization.discard();
                 drop(session);
                 self.session.portals.lock().clear();

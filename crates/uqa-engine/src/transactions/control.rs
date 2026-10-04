@@ -12,7 +12,7 @@ use uqa_sql::ast::TransactionStmt;
 
 impl Engine {
     pub fn run_transaction_statement(&self, tx: TransactionStmt) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let apply_on_commit = self.prepare_transaction_completion(&tx)?;
         let mut guard = self.session.transactions.lock();
         let failed = guard
@@ -40,7 +40,7 @@ impl Engine {
         commit: bool,
         chain: bool,
     ) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let chained_characteristics = {
             let stack = self.session.transactions.lock();
             let valid = stack.len() == 1

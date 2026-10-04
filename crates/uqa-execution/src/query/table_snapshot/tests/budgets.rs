@@ -212,7 +212,7 @@ fn reconstructed_index_reads_preserve_memory_cancellation_and_serialization_sqls
             || uqa_core::memory::MemoryError::SizeOverflow.into(),
             "53200",
         ),
-        (|| uqa_core::QueryCancelled.into(), "57014"),
+        (|| uqa_core::QueryCancelled::USER_REQUEST.into(), "57014"),
         (
             || {
                 uqa_storage::mvcc::VersionError::ReadConflict {

@@ -59,12 +59,20 @@ pub fn add_column<S: Clone + 'static>(
     if column_exists(context, table, &col_name, if_not_exists)? {
         return Ok(());
     }
+    let key_constraints = uqa_sql::schema::keys::transform_column_keys(qualifier, key_constraints)?;
+    column.primary_key = key_constraints
+        .iter()
+        .any(|key| key.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey);
+    column.unique = key_constraints
+        .iter()
+        .any(|key| key.kind == uqa_sql::ast::TableKeyConstraintKind::Unique);
     uqa_sql::schema::columns::addition::bind_added_column(
         &context.analysis,
         table,
         qualifier,
         &mut column,
     )?;
+    define_column_keys(context, table, &column, &key_constraints)?;
     if column.primary_key || column.unique {
         let persistence = context
             .generated
@@ -100,7 +108,7 @@ pub fn add_column<S: Clone + 'static>(
                 table,
                 column,
                 None,
-                key_constraints,
+                &key_constraints,
             )
         }))
         .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
@@ -132,26 +140,80 @@ pub fn add_column<S: Clone + 'static>(
         column_not_null,
     )?;
     if adds_keys {
-        for constraint in context
-            .generated
-            .keys
-            .catalog
-            .try_key_constraints(table)
-            .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN keys", error))?
-        {
-            if constraint.columns.contains(&col_name) {
-                super::super::keys::validate_key_constraint_data(
-                    &context.generated.keys,
-                    table,
-                    &constraint,
-                )?;
-            }
-        }
+        validate_column_key_rows(context, table, &col_name)?;
     }
     context
         .state
         .persist_schema(table)
         .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
+    Ok(())
+}
+
+/// Check the filled rows against the keys of a new column: each key's index is built before the NOT NULL constraints of a primary key are verified.
+fn validate_column_key_rows<S: Clone + 'static>(
+    context: &ColumnAdditionContext<'_, S>,
+    table: &str,
+    column: &str,
+) -> Result<(), SQLError> {
+    let keys = context
+        .generated
+        .keys
+        .catalog
+        .try_key_constraints(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN keys", error))?
+        .into_iter()
+        .filter(|constraint| constraint.columns.iter().any(|name| name == column))
+        .collect::<Vec<_>>();
+    for constraint in &keys {
+        super::super::keys::validate_key_index_rows(&context.generated.keys, table, constraint)?;
+    }
+    for constraint in &keys {
+        super::super::keys::validate_primary_key_rows(&context.generated.keys, table, constraint)?;
+    }
+    Ok(())
+}
+
+/// Check the keys of a new column as `DefineIndex` checks the indexes that ALTER TABLE builds for them, once the column exists.
+fn define_column_keys<S: Clone + 'static>(
+    context: &ColumnAdditionContext<'_, S>,
+    table: &str,
+    column: &ColumnDef,
+    keys: &[uqa_sql::ast::TableKeyConstraint],
+) -> Result<(), SQLError> {
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let catalog = context.generated.keys.catalog;
+    let mut columns = catalog
+        .try_describe_table(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    columns.push(column.clone());
+    let existing = catalog
+        .try_key_constraints(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
+    let partition = context
+        .generated
+        .keys
+        .constraints
+        .partitions
+        .catalog
+        .try_table_hierarchy(table)
+        .map_err(SQLError::Internal)?
+        .partition_spec;
+    for key in keys {
+        uqa_sql::schema::keys::definition::validate_key_definition(
+            &uqa_sql::schema::keys::definition::KeyRelation {
+                table,
+                columns: &columns,
+                partition: partition.as_ref(),
+                has_primary_key: existing
+                    .iter()
+                    .any(|key| key.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey),
+            },
+            key,
+        )?;
+    }
     Ok(())
 }
 

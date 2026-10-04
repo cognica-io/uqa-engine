@@ -473,7 +473,7 @@ fn spilled_derived_self_join_recheck_preserves_each_inner_scan_qualifier() {
     .unwrap();
     let holder = root.new_session().unwrap();
     let waiter = root.new_session().unwrap();
-    waiter.sql("SET work_mem TO '1B'", &[]).unwrap();
+    waiter.set_query_memory_limit(Some(1));
     holder.sql("BEGIN", &[]).unwrap();
     holder
         .sql("SELECT id FROM t WHERE id = 1 FOR UPDATE", &[])

@@ -135,7 +135,7 @@ impl Engine {
             return Ok(());
         }
 
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         let _refresh = self.epochs.external_commit_refresh.lock();
         if backend.in_transaction() {
             return Ok(());

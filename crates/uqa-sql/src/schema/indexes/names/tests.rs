@@ -148,3 +148,20 @@ fn automatic_key_names_skip_schema_constraints_without_rejecting_explicit_names(
     name_constraint_indexes(&catalog, "public.t", &mut keys).unwrap();
     assert_eq!(keys[0].name.as_deref(), Some("t_v_key"));
 }
+
+#[test]
+fn an_explicit_name_conflicts_with_a_relation_before_a_constraint() {
+    let catalog = Catalog {
+        names: ["t_v_key".into()].into(),
+        relations: ["public.t_v_key".into()].into(),
+        ..Default::default()
+    };
+    let mut keys = [key()];
+    keys[0].name = Some("t_v_key".into());
+    assert_eq!(
+        name_constraint_indexes(&catalog, "public.t", &mut keys)
+            .unwrap_err()
+            .sqlstate(),
+        Some("42P07")
+    );
+}

@@ -53,7 +53,7 @@ fn rejected_commit_error(fault: u8) -> Option<uqa_storage::mvcc::VersionError> {
     use uqa_storage::mvcc::{CommitSequence, VersionError};
     Some(match fault {
         REJECT_MEMORY => uqa_core::memory::MemoryError::SizeOverflow.into(),
-        REJECT_CANCELLED => uqa_core::QueryCancelled.into(),
+        REJECT_CANCELLED => uqa_core::QueryCancelled::USER_REQUEST.into(),
         REJECT_CONSTRAINT => StorageBackendError::backend(
             "fixture",
             SQLError::Routine {

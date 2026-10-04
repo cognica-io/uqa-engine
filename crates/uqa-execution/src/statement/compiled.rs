@@ -9,6 +9,7 @@
 use super::{context::StatementExecutionInputs, plan_executor::UnifiedPlanExecutor};
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
+    binding::statements::AnalyzedResult,
     binding::stored_routines::mark_catalog_statement_relations_bound,
     plan::{AggregateClassifier, CommandPlan, ExecutablePlanOptimizer, UnifiedPlan},
     SQLError, SQLParam, SQLResult, Statement,
@@ -35,6 +36,19 @@ pub fn execute_plan<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     let plan = context.planning.plan_for_execution(plan, params)?;
+    UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
+        .execute(&plan)
+}
+
+/// Run a statement once `check` accepts what its analysis derives about its result.
+pub fn execute_checked_plan<S: Clone + Send + Sync + 'static>(
+    context: &CompiledStatementContext<'_, S>,
+    plan: UnifiedPlan,
+    params: &[SQLParam],
+    check: &dyn Fn(&AnalyzedResult) -> Result<(), SQLError>,
+) -> Result<SQLResult, SQLError> {
+    let (plan, result) = context.planning.plan_with_result(plan, params)?;
+    check(&result)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .execute(&plan)
 }

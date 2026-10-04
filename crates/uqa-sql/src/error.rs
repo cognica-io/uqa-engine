@@ -76,7 +76,7 @@ impl SQLError {
     /// errors that do not carry a defined `SQLSTATE`.
     pub fn sqlstate(&self) -> Option<&str> {
         match self {
-            SQLError::Cancelled(_) => Some(uqa_core::SQLSTATE_QUERY_CANCELED),
+            SQLError::Cancelled(cancelled) => Some(cancelled.sqlstate()),
             SQLError::Parse(_) => Some("42601"), // syntax_error
             SQLError::Unsupported(_) | SQLError::NotificationRequiresSubscription => Some("0A000"), // feature_not_supported
             SQLError::UnknownTable(_) => Some("42P01"), // undefined_table

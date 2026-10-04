@@ -8,23 +8,25 @@
 
 use std::collections::BTreeMap;
 
+use super::candidate::PhysicalDocumentIdentity;
 use uqa_core::{DocId, Value};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
-const PREPARED_MUTATION_CODEC_VERSION: i64 = 2;
+const PREPARED_MUTATION_CODEC_VERSION: i64 = 4;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedDocumentRewrite {
     pub table: String,
     pub doc_id: DocId,
     pub destination: Option<(String, DocId)>,
+    /// The table the `UPDATE` named for a row it moves to another partition, whose triggers fire for the referenced keys the row held.
+    pub moved_through: Option<String>,
     /// The identity within its own table the row moves to because its integer primary key changed, decided once when the rewrite is prepared so that every later stage moves it to the same one.
     pub relocation: Option<DocId>,
     pub partition_move_delete: Option<Box<PreparedDocumentDelete>>,
     pub old_document: Document,
     pub new_document: Document,
-    pub actions: Vec<PreparedDocumentRewrite>,
     pub capture_partition_move_update_transition: bool,
     /// The referential action that prepared the rewrite, if one did.
     pub referential_action: Option<Box<ReferentialRewrite>>,
@@ -53,17 +55,10 @@ pub struct ReferentialRewrite {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum PreparedDeleteAction {
-    Delete(Box<PreparedDocumentDelete>),
-    Rewrite(Box<PreparedDocumentRewrite>),
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct PreparedDocumentDelete {
     pub table: String,
     pub doc_id: DocId,
     pub document: Document,
-    pub actions: Vec<PreparedDeleteAction>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -78,6 +73,33 @@ pub enum PreparedMutationAction {
     Insert(PreparedDocumentInsert),
     Rewrite(PreparedDocumentRewrite),
     Delete(PreparedDocumentDelete),
+}
+
+impl PreparedMutationAction {
+    /// The rows the action writes: the row it inserts or deletes, or the row it rewrites with the identity a moved row takes.
+    pub fn written_rows(&self) -> Vec<PhysicalDocumentIdentity> {
+        let identity = |table: &str, doc_id: DocId| PhysicalDocumentIdentity {
+            table: table.to_string(),
+            doc_id,
+        };
+        match self {
+            Self::Insert(insert) => vec![identity(&insert.table, insert.doc_id)],
+            Self::Delete(delete) => vec![identity(&delete.table, delete.doc_id)],
+            Self::Rewrite(rewrite) => std::iter::once(identity(&rewrite.table, rewrite.doc_id))
+                .chain(
+                    rewrite
+                        .destination
+                        .as_ref()
+                        .map(|(table, doc_id)| identity(table, *doc_id)),
+                )
+                .chain(
+                    rewrite
+                        .relocation
+                        .map(|doc_id| identity(&rewrite.table, doc_id)),
+                )
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -144,6 +166,10 @@ pub fn encode_prepared_document_rewrite(prepared: PreparedDocumentRewrite) -> Va
             }),
         ),
         (
+            "moved_through".into(),
+            prepared.moved_through.map_or(Value::Null, Value::Str),
+        ),
+        (
             "relocation".into(),
             prepared
                 .relocation
@@ -159,16 +185,6 @@ pub fn encode_prepared_document_rewrite(prepared: PreparedDocumentRewrite) -> Va
         ),
         ("old".into(), Value::Map(prepared.old_document)),
         ("new".into(), Value::Map(prepared.new_document)),
-        (
-            "actions".into(),
-            Value::List(
-                prepared
-                    .actions
-                    .into_iter()
-                    .map(encode_prepared_document_rewrite)
-                    .collect(),
-            ),
-        ),
         (
             "capture_partition_move_update_transition".into(),
             Value::Bool(prepared.capture_partition_move_update_transition),
@@ -236,6 +252,15 @@ pub fn decode_prepared_document_rewrite(value: Value) -> Result<PreparedDocument
             ))
         }
     };
+    let moved_through = match fields.remove("moved_through") {
+        Some(Value::Null) => None,
+        Some(Value::Str(table)) => Some(table),
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared rewrite spill payload has no moved-through relation".into(),
+            ))
+        }
+    };
     let relocation = match fields.remove("relocation") {
         Some(Value::Null) => None,
         Some(doc_id) => Some(decode_prepared_doc_id(
@@ -268,17 +293,6 @@ pub fn decode_prepared_document_rewrite(value: Value) -> Result<PreparedDocument
             ))
         }
     };
-    let actions = match fields.remove("actions") {
-        Some(Value::List(actions)) => actions
-            .into_iter()
-            .map(decode_prepared_document_rewrite)
-            .collect::<Result<Vec<_>, _>>()?,
-        _ => {
-            return Err(SQLError::Internal(
-                "prepared rewrite spill payload has no action list".into(),
-            ))
-        }
-    };
     let capture_partition_move_update_transition = match fields
         .remove("capture_partition_move_update_transition")
     {
@@ -303,11 +317,11 @@ pub fn decode_prepared_document_rewrite(value: Value) -> Result<PreparedDocument
         table,
         doc_id,
         destination,
+        moved_through,
         relocation,
         partition_move_delete,
         old_document,
         new_document,
-        actions,
         capture_partition_move_update_transition,
         referential_action,
     })
@@ -348,20 +362,6 @@ fn decode_referential_rewrite(value: Value) -> Result<ReferentialRewrite, SQLErr
 }
 
 pub fn encode_prepared_document_delete(prepared: PreparedDocumentDelete) -> Value {
-    let actions = prepared
-        .actions
-        .into_iter()
-        .map(|action| match action {
-            PreparedDeleteAction::Delete(delete) => Value::Map(BTreeMap::from([
-                ("kind".into(), Value::Str("delete".into())),
-                ("plan".into(), encode_prepared_document_delete(*delete)),
-            ])),
-            PreparedDeleteAction::Rewrite(rewrite) => Value::Map(BTreeMap::from([
-                ("kind".into(), Value::Str("rewrite".into())),
-                ("plan".into(), encode_prepared_document_rewrite(*rewrite)),
-            ])),
-        })
-        .collect();
     Value::Map(BTreeMap::from([
         (
             "version".into(),
@@ -370,7 +370,6 @@ pub fn encode_prepared_document_delete(prepared: PreparedDocumentDelete) -> Valu
         ("table".into(), Value::Str(prepared.table)),
         ("doc_id".into(), encode_prepared_doc_id(prepared.doc_id)),
         ("document".into(), Value::Map(prepared.document)),
-        ("actions".into(), Value::List(actions)),
     ]))
 }
 
@@ -403,53 +402,11 @@ pub fn decode_prepared_document_delete(value: Value) -> Result<PreparedDocumentD
             ))
         }
     };
-    let action_values = match fields.remove("actions") {
-        Some(Value::List(actions)) => actions,
-        _ => {
-            return Err(SQLError::Internal(
-                "prepared delete spill payload has no action list".into(),
-            ))
-        }
-    };
     reject_unknown_fields(&fields, "prepared delete spill payload")?;
-    let mut actions = Vec::with_capacity(action_values.len());
-    for action in action_values {
-        let Value::Map(mut action) = action else {
-            return Err(SQLError::Internal(
-                "prepared delete action spill payload is not a map".into(),
-            ));
-        };
-        let kind = match action.remove("kind") {
-            Some(Value::Str(kind)) => kind,
-            _ => {
-                return Err(SQLError::Internal(
-                    "prepared delete action spill payload has no kind".into(),
-                ))
-            }
-        };
-        let plan = action.remove("plan").ok_or_else(|| {
-            SQLError::Internal("prepared delete action spill payload has no plan".into())
-        })?;
-        reject_unknown_fields(&action, "prepared delete action spill payload")?;
-        actions.push(match kind.as_str() {
-            "delete" => {
-                PreparedDeleteAction::Delete(Box::new(decode_prepared_document_delete(plan)?))
-            }
-            "rewrite" => {
-                PreparedDeleteAction::Rewrite(Box::new(decode_prepared_document_rewrite(plan)?))
-            }
-            _ => {
-                return Err(SQLError::Internal(format!(
-                    "prepared delete action spill payload has unknown kind `{kind}`"
-                )))
-            }
-        });
-    }
     Ok(PreparedDocumentDelete {
         table,
         doc_id,
         document,
-        actions,
     })
 }
 
@@ -634,57 +591,51 @@ mod tests {
             table: "public.source".into(),
             doc_id: 7,
             destination: Some(("public.destination".into(), 9)),
+            moved_through: Some("public.root".into()),
             relocation: None,
             partition_move_delete: Some(Box::new(PreparedDocumentDelete {
                 table: "public.source".into(),
                 doc_id: 7,
                 document: document("id", 7),
-                actions: Vec::new(),
             })),
             old_document: document("value", 1),
             new_document: document("value", 2),
-            actions: vec![PreparedDocumentRewrite {
-                table: "public.child".into(),
-                doc_id: 11,
-                destination: None,
-                relocation: Some(1 << 62),
-                partition_move_delete: None,
-                old_document: document("parent", 7),
-                new_document: document("parent", 9),
-                actions: Vec::new(),
-                capture_partition_move_update_transition: false,
-                referential_action: Some(Box::new(ReferentialRewrite {
-                    relation: "public.child".into(),
-                    columns: vec!["parent".into(), "status".into()],
-                })),
-            }],
             capture_partition_move_update_transition: true,
             referential_action: None,
         }
     }
 
-    #[test]
-    fn prepared_rewrite_and_delete_codec_round_trip_nested_actions() {
-        let expected_rewrite = rewrite();
-        let actual_rewrite = decode_prepared_document_rewrite(encode_prepared_document_rewrite(
-            expected_rewrite.clone(),
-        ))
-        .unwrap();
-        assert_eq!(actual_rewrite, expected_rewrite);
+    fn referential_rewrite() -> PreparedDocumentRewrite {
+        PreparedDocumentRewrite {
+            table: "public.child".into(),
+            doc_id: 11,
+            destination: None,
+            moved_through: None,
+            relocation: Some(1 << 62),
+            partition_move_delete: None,
+            old_document: document("parent", 7),
+            new_document: document("parent", 9),
+            capture_partition_move_update_transition: false,
+            referential_action: Some(Box::new(ReferentialRewrite {
+                relation: "public.child".into(),
+                columns: vec!["parent".into(), "status".into()],
+            })),
+        }
+    }
 
+    #[test]
+    fn prepared_rewrite_and_delete_codec_round_trip() {
+        for expected in [rewrite(), referential_rewrite()] {
+            let actual = decode_prepared_document_rewrite(encode_prepared_document_rewrite(
+                expected.clone(),
+            ))
+            .unwrap();
+            assert_eq!(actual, expected);
+        }
         let expected_delete = PreparedDocumentDelete {
             table: "public.parent".into(),
             doc_id: 3,
             document: document("id", 3),
-            actions: vec![
-                PreparedDeleteAction::Rewrite(Box::new(rewrite())),
-                PreparedDeleteAction::Delete(Box::new(PreparedDocumentDelete {
-                    table: "public.child".into(),
-                    doc_id: 4,
-                    document: document("id", 4),
-                    actions: Vec::new(),
-                })),
-            ],
         };
         let actual_delete = decode_prepared_document_delete(encode_prepared_document_delete(
             expected_delete.clone(),
@@ -713,7 +664,6 @@ mod tests {
             table: "public.items".into(),
             doc_id: 1,
             document: document("id", 1),
-            actions: Vec::new(),
         }) {
             Value::Map(fields) => fields,
             _ => unreachable!(),
@@ -732,7 +682,7 @@ mod tests {
                 ("columns".into(), Value::List(vec![Value::Int(1)])),
             ])),
         ] {
-            let mut invalid_action = match encode_prepared_document_rewrite(rewrite()) {
+            let mut invalid_action = match encode_prepared_document_rewrite(referential_rewrite()) {
                 Value::Map(fields) => fields,
                 _ => unreachable!(),
             };
@@ -796,7 +746,6 @@ mod tests {
                 table: "public.items".into(),
                 doc_id: 31,
                 document: document("id", 31),
-                actions: Vec::new(),
             }),
         ] {
             let actual =

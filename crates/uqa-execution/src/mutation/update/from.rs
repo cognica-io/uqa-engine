@@ -11,12 +11,13 @@ use crate::mutation::{
     candidate::{MutationRewriteCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     command_scope::MutationOverlayScope,
     prepared::PreparedMutationAction,
-    publication::MutationPublicationBatch,
     returning::{DmlReturningShape, ReturningProjectionRow},
     row_images::{MutationRowImage, MutationRowImages},
     rows::join_rows as dml_join_rows,
+    statement_end,
+    triggers::queue::StatementEvent,
 };
-use crate::query::CteScope;
+use crate::query::{scope::StatementCommands, CteScope};
 use uqa_sql::{
     plan::{SourcePlan, UpdatePlan},
     semantics::returning::validate_returning_alias_relations,
@@ -31,6 +32,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     from_clause: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
+    statement_commands: &StatementCommands,
 ) -> Result<SQLResult, SQLError> {
     let from_rows = crate::query::sources::build_join_spill_with_ctes(
         &read_context.query.source,
@@ -201,6 +203,16 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         else {
             continue;
         };
+        // Another command of the statement already wrote the row, which `PostgreSQL`'s `ExecUpdate` skips as `TM_SelfModified`.
+        if ctes.statement_wrote(&identity) {
+            continue;
+        }
+        // A statement that the command's triggers or functions started wrote the row under a later command id.
+        if ctes.statement_triggered_write(&identity) {
+            return Err(crate::mutation::errors::triggered_modification_error(
+                "updated",
+            ));
+        }
         let storage_table = identity.table;
         let doc_id = identity.doc_id;
         if !locked_ids.insert((storage_table.clone(), doc_id)) {
@@ -391,13 +403,15 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             message: "cannot have RETURNING lists in multiple rules".into(),
         });
     }
+    let update_statement = StatementEvent::new(
+        &target,
+        uqa_sql::ast::TriggerEvent::Update,
+        &assigned_columns,
+    );
     if (!update_rules.is_empty() || !stmt.view_rule_relations.is_empty()) && update_original_query {
-        crate::mutation::triggers::fire_statement_triggers(
+        statement_commands.after_triggers().fire_before_statement(
             &context.mutation.preparation.referential.triggers,
-            &target,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Update,
-            &assigned_columns,
+            &update_statement,
         )?;
     }
     let overlay = MutationOverlayScope::new(context.mutation.state);
@@ -433,98 +447,95 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         else {
             continue;
         };
-        if let Some(mut prepared) = crate::mutation::referential::prepare_routed_document_rewrite(
+        let mut prepared = crate::mutation::referential::prepare_routed_document_rewrite(
             &context.mutation.preparation.referential,
             &candidate.identity.table,
             candidate.identity.doc_id,
             candidate.old_document,
             route,
+        )?;
+        let row_affected = !prepared.is_partition_move_delete();
+        let primary_key_doc_id = prepared.relocation;
+        let rewritten_doc_id = prepared
+            .destination
+            .as_ref()
+            .map(|(_, doc_id)| *doc_id)
+            .or(primary_key_doc_id)
+            .unwrap_or(prepared.doc_id);
+        let rewritten_storage_table = prepared
+            .destination
+            .as_ref()
+            .map_or_else(|| prepared.table.clone(), |(table, _)| table.clone());
+        crate::mutation::constraints::validate_key_constraints_with_previous(
+            context.mutation.preparation.referential.constraints,
+            &rewritten_storage_table,
+            &prepared.new_document,
+            (rewritten_storage_table == prepared.table).then_some(prepared.doc_id),
+            (rewritten_storage_table == prepared.table).then_some(&prepared.old_document),
+        )?;
+        validate_view_checks(ViewCheckContext {
+            services: context.mutation.preparation.referential.assignment,
+            table: &stmt.table,
+            storage_table: &rewritten_storage_table,
+            target_qualifier: &stmt.target_qualifier,
+            doc_id: rewritten_doc_id,
+            document: &prepared.new_document,
+            checks: &stmt.view_checks,
             params,
-            events.referential_actions_mut(),
-        )? {
-            let row_affected = !prepared.is_partition_move_delete();
-            let primary_key_doc_id = prepared.relocation;
-            let rewritten_doc_id = prepared
-                .destination
-                .as_ref()
-                .map(|(_, doc_id)| *doc_id)
-                .or(primary_key_doc_id)
-                .unwrap_or(prepared.doc_id);
-            let rewritten_storage_table = prepared
-                .destination
-                .as_ref()
-                .map_or_else(|| prepared.table.clone(), |(table, _)| table.clone());
-            crate::mutation::constraints::validate_key_constraints_with_previous(
-                context.mutation.preparation.referential.constraints,
-                &rewritten_storage_table,
-                &prepared.new_document,
-                (rewritten_storage_table == prepared.table).then_some(prepared.doc_id),
-                (rewritten_storage_table == prepared.table).then_some(&prepared.old_document),
-            )?;
-            validate_view_checks(ViewCheckContext {
-                services: context.mutation.preparation.referential.assignment,
-                table: &stmt.table,
-                storage_table: &rewritten_storage_table,
-                target_qualifier: &stmt.target_qualifier,
-                doc_id: rewritten_doc_id,
-                document: &prepared.new_document,
-                checks: &stmt.view_checks,
-                params,
-                scope: &snapshot_ctes,
-            })?;
-            let old_metadata = crate::mutation::rows::existing_tuple_metadata(
-                context.mutation.preparation.referential.assignment.rows,
-                &prepared.table,
-                prepared.doc_id,
-            )?;
-            let new_metadata = crate::mutation::rows::new_tuple_metadata(
-                context.mutation.preparation.referential.assignment.rows,
-            )?;
-            let mut after_row_events = Vec::new();
-            let rewritten_doc_id = crate::mutation::staging::stage_prepared_document_rewrite(
-                context.mutation.preparation.staging,
-                &mut prepared,
-                params,
-                statement,
-                Some(&assigned_columns),
-                &mut after_row_events,
-            )?;
-            if row_affected && !stmt.returning.is_empty() {
-                returning_rows.push(crate::mutation::returning::build_returning_row(
-                    context.mutation.preparation.returning,
-                    ReturningProjectionRow {
-                        table: &target,
-                        target_qualifier: &stmt.target_qualifier,
-                        images: MutationRowImages {
-                            old: Some(MutationRowImage {
-                                storage_table: prepared.table.clone(),
-                                doc_id: prepared.doc_id,
-                                document: &prepared.old_document,
-                                metadata: old_metadata,
-                            }),
-                            new: Some(MutationRowImage {
-                                storage_table: rewritten_storage_table,
-                                doc_id: rewritten_doc_id,
-                                document: &prepared.new_document,
-                                metadata: new_metadata,
-                            }),
-                        },
-                        aliases: &stmt.returning_aliases,
-                        context: Some(&candidate.context),
+            scope: &snapshot_ctes,
+        })?;
+        let old_metadata = crate::mutation::rows::existing_tuple_metadata(
+            context.mutation.preparation.referential.assignment.rows,
+            &prepared.table,
+            prepared.doc_id,
+        )?;
+        let new_metadata = crate::mutation::rows::new_tuple_metadata(
+            context.mutation.preparation.referential.assignment.rows,
+        )?;
+        let mut after_row_events = Vec::new();
+        let rewritten_doc_id = crate::mutation::staging::stage_prepared_document_rewrite(
+            context.mutation.preparation.staging,
+            &mut prepared,
+            params,
+            statement,
+            Some(&assigned_columns),
+            &mut after_row_events,
+        )?;
+        if row_affected && !stmt.returning.is_empty() {
+            returning_rows.push(crate::mutation::returning::build_returning_row(
+                context.mutation.preparation.returning,
+                ReturningProjectionRow {
+                    table: &target,
+                    target_qualifier: &stmt.target_qualifier,
+                    images: MutationRowImages {
+                        old: Some(MutationRowImage {
+                            storage_table: prepared.table.clone(),
+                            doc_id: prepared.doc_id,
+                            document: &prepared.old_document,
+                            metadata: old_metadata,
+                        }),
+                        new: Some(MutationRowImage {
+                            storage_table: rewritten_storage_table,
+                            doc_id: rewritten_doc_id,
+                            document: &prepared.new_document,
+                            metadata: new_metadata,
+                        }),
                     },
-                    &stmt.returning,
-                    params,
-                    &snapshot_ctes,
-                )?);
-            }
-            affected += u64::from(row_affected);
-            prepared_updates.push((PreparedMutationAction::Rewrite(prepared), after_row_events));
+                    aliases: &stmt.returning_aliases,
+                    context: Some(&candidate.context),
+                },
+                &stmt.returning,
+                params,
+                &snapshot_ctes,
+            )?);
         }
+        affected += u64::from(row_affected);
+        prepared_updates.push((PreparedMutationAction::Rewrite(prepared), after_row_events));
     }
     drop(overlay);
     if !prepared_updates.is_empty() {
         context.mutation.state.prepare_writer()?;
-        let mut publication = MutationPublicationBatch::default();
+        let mut publication = statement_end::publication_batch(statement_commands);
         for (action, after_rows) in prepared_updates {
             crate::mutation::publication::publish_prepared_mutation_action(
                 context.mutation.publication,
@@ -538,51 +549,14 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             context.mutation.publication,
             &mut publication,
         )?;
+        statement_end::note_written_rows(statement_commands, &mut publication);
     }
-    let transition_tables = if update_original_query {
-        crate::mutation::triggers::build_transition_tables(
-            &context.mutation.preparation.referential.triggers,
-            &target,
-            uqa_sql::ast::TriggerEvent::Update,
-            &assigned_columns,
-            events.after_rows(),
-        )?
-    } else {
-        Vec::new()
-    };
-    let referential_transition =
-        events.referential_transition_tables(&context.mutation.preparation.referential.triggers)?;
-    let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
-    transition_refs.extend(referential_transition.iter());
-    let root_events = update_original_query
-        .then_some(uqa_sql::ast::TriggerEvent::Update)
-        .into_iter()
-        .collect::<Vec<_>>();
-    for generation in crate::mutation::triggers::after_trigger_generations(&transition_refs) {
-        crate::mutation::triggers::fire_after_row_trigger_events_for_generation(
-            &context.mutation.preparation.referential.triggers,
-            events.after_rows(),
-            &transition_refs,
-            generation,
-        )?;
-        events.fire_referential_after_statement_triggers(
-            &context.mutation.preparation.referential.triggers,
-            &referential_transition,
-            &target,
-            &root_events,
-            generation,
-        )?;
-        if update_original_query {
-            crate::mutation::triggers::fire_after_statement_trigger_generation_for_root(
-                &context.mutation.preparation.referential.triggers,
-                &target,
-                uqa_sql::ast::TriggerEvent::Update,
-                &assigned_columns,
-                &transition_tables,
-                generation,
-            )?;
-        }
-    }
+    statement_end::end_command(
+        statement_commands,
+        &context.mutation.preparation.referential.triggers,
+        &super::table::update_statement_events(update_original_query, &update_statement),
+        events.into_after_rows(),
+    )?;
     if !stmt.returning.is_empty() {
         if let Some(view_rule_returning) = view_rule_returning {
             return view_rule_returning.project(

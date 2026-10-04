@@ -18,6 +18,8 @@ pub trait InheritanceCatalog {
     fn resolve_parent(&self, name: &str) -> Result<String, SQLError>;
     fn declared_constraints(&self, table: &str) -> Result<TableConstraintSet, String>;
     fn check_definitions(&self, table: &str) -> Result<Vec<TableCheck>, String>;
+    /// The key attributes of each unique index of `table` that no key constraint owns; a partition builds an index for each.
+    fn unique_index_keys(&self, table: &str) -> Result<Vec<Vec<crate::ast::IndexKey>>, String>;
 }
 pub struct InheritanceContext<'a> {
     pub catalog: &'a dyn InheritanceCatalog,
@@ -298,6 +300,13 @@ fn validate_partition_keys(
     let Some(spec) = table.hierarchy.partition_spec.as_ref() else {
         return Ok(());
     };
+    // `transformPartitionSpec` counts the key columns before it resolves any of them.
+    if spec.strategy == crate::ast::PartitionStrategy::List && spec.keys.len() != 1 {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "cannot use \"list\" partition strategy with more than one column".into(),
+        });
+    }
     let column_names = table
         .columns
         .iter()

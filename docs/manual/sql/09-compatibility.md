@@ -132,11 +132,11 @@ The virtual catalogs expose engine metadata needed by supported clients and test
 
 The `pg_proc` and `information_schema.routines` surfaces expose the PostgreSQL 18 identities and exact `reg*` return aliases for `to_regprocedure(text)` (3479), `to_regtype(text)` (3493), `to_regproc(text)` (3494), `to_regclass(text)` (3495), `to_regnamespace(text)` (4086), and `to_regrole(text)` (4093), including strictness, stable volatility, parallel safety, leakproofness, and internal source names. `pg_type` and `pg_proc` additionally expose the exact PostgreSQL 18 `regrole` (4096), `_regrole` (4097), `regroleout` (4092), `regrolerecv` (4094), `regrolesend` (4095), and `regrolein` (4098) identities and type I/O metadata.
 
-Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timezone`, and `work_mem`. Unknown or unsupported settings return an error rather than becoming ignored server configuration.
+[Configuration parameters](08-transactions-and-routines.md#set-and-show) follow PostgreSQL 18's definitions, contexts, units and errors, with custom placeholders, `set_config`, `SHOW ALL` and `pg_settings`. A PostgreSQL parameter the engine does not define reports `42704`, as an unknown single-part name does.
 
 `DISCARD TEMP` removes the current session's temporary tables, views, sequences, and sequence state. It is rejected after an explicit `BEGIN` and permitted inside a multi-statement simple query's implicit transaction segment, as PostgreSQL requires.
 
-`LOAD` accepts the Apache AGE library names (`age`, `age.so`, `$libdir/age`, `$libdir/age.so`) as no-ops because the AGE surface is embedded; every other library fails as a missing `$libdir` file because the engine loads no shared objects.
+`LOAD` accepts the Apache AGE and PL/pgSQL library names (`age`, `age.so`, `$libdir/age`, `$libdir/age.so`, and the same forms of `plpgsql`) because both are embedded; loading PL/pgSQL defines its parameters for the session. Every other library fails as a missing `$libdir` file because the engine loads no shared objects.
 
 ## Open PostgreSQL 18 routine bugs
 

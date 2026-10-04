@@ -13,5 +13,6 @@ mod actions;
 pub mod analysis;
 mod model;
 pub mod table;
+mod targets;
 
 pub mod views;

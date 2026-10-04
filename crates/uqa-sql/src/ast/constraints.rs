@@ -188,6 +188,17 @@ pub enum TableKeyConstraintKind {
     Unique,
 }
 
+impl TableKeyConstraintKind {
+    /// The constraint type as SQL spells it, which `PostgreSQL` diagnostics name.
+    #[must_use]
+    pub const fn sql_label(self) -> &'static str {
+        match self {
+            Self::PrimaryKey => "PRIMARY KEY",
+            Self::Unique => "UNIQUE",
+        }
+    }
+}
+
 /// A table key whose columns are compared as one tuple.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableKeyConstraint {

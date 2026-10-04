@@ -52,13 +52,17 @@ impl Engine {
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
+        let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
+        let client_level = session.state.client_level();
+        let runtime = super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT, client_level);
+        session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::memory(),
             durable: Arc::new(super::DurableCatalogState::new()),
-            session: Arc::new(super::SessionContext::new(super::initial_random_state())),
+            session,
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
-            runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
+            runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
             notification_hub,
@@ -218,7 +222,7 @@ impl Engine {
     /// must return catalog and data handles bound to one session transaction
     /// so every durable mutation commits atomically.
     pub fn new_session(&self) -> StorageBackendResult<Self> {
-        let _statement = self.runtime.statement_gate.lock();
+        let _statement = self.lock_statement_gate();
         self.new_sibling_session(false, None)
     }
 
@@ -413,16 +417,21 @@ impl Engine {
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
+        let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
+        let client_level = session.state.client_level();
+        let runtime = super::QueryRuntime::with_cancellation(
+            super::SQL_FUNCTION_DEPTH_LIMIT,
+            cancellation,
+            client_level,
+        );
+        session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
             durable: Arc::new(super::DurableCatalogState::new()),
-            session: Arc::new(super::SessionContext::new(super::initial_random_state())),
+            session,
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
-            runtime: super::QueryRuntime::with_cancellation(
-                super::SQL_FUNCTION_DEPTH_LIMIT,
-                cancellation,
-            ),
+            runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
             notification_hub,

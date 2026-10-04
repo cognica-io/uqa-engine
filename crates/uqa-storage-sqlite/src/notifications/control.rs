@@ -72,7 +72,7 @@ pub(super) fn operation_with<'a>(
     }
     let identity = std::ptr::from_ref(connection) as usize;
     if ACTIVE.with(|active| cancellation_requested(&active.borrow(), identity)) {
-        return Err(uqa_core::QueryCancelled.into());
+        return Err(uqa_core::QueryCancelled::USER_REQUEST.into());
     }
     let milliseconds: u32 = connection
         .pragma_query_value(None, "busy_timeout", |row| row.get(0))
@@ -169,7 +169,7 @@ fn busy(_attempt: i32) -> bool {
 
 pub(super) fn schema_error(error: String) -> StorageBackendError {
     if interrupted() {
-        uqa_core::QueryCancelled.into()
+        uqa_core::QueryCancelled::USER_REQUEST.into()
     } else {
         StorageBackendError::Other(error)
     }

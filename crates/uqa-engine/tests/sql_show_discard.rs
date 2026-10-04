@@ -86,7 +86,11 @@ fn registered_defaults_and_read_only_parameters_are_explicit() {
     assert!(err.to_string().contains("cannot be changed"));
 
     let err = eng.sql("SET work_mem TO 'unbounded'", &[]).unwrap_err();
-    assert!(err.to_string().contains("positive byte size"));
+    assert_eq!(err.sqlstate(), Some("22023"));
+    assert_eq!(
+        err.to_string(),
+        "invalid value for parameter \"work_mem\": \"unbounded\""
+    );
 }
 
 #[test]
@@ -285,7 +289,7 @@ fn discard_all_clears_session_state() {
     let search_path = eng.sql("SHOW search_path", &[]).unwrap();
     assert_eq!(
         search_path.rows[0].get("search_path"),
-        Some(&Value::Str("public".into()))
+        Some(&Value::Str("\"$user\", public".into()))
     );
 }
 
