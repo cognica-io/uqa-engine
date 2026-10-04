@@ -462,7 +462,7 @@ The lower-crate work follows dependency order and is grouped by semantic owner r
 | Former hotspot | Implemented ownership |
 | --- | --- |
 | `uqa-execution/src/scalar.rs` | [`scalar/`](../../crates/uqa-execution/src/scalar) owns the IR facade, traversal, subquery protocol, context, call validation, evaluator, and tests. |
-| `uqa-execution/src/type_resolution/routine_signature.rs` | [`routine_signature/`](../../crates/uqa-execution/src/type_resolution/routine_signature) owns mapping, polymorphic substitution, matching and ranking, and tests; the dependency proof keeps the complete policy bundle in execution. |
+| `uqa-execution/src/type_resolution/routine_signature.rs` | [`routine_signature/`](../../crates/uqa-sql/src/type_resolution/routine_signature) now owns mapping, polymorphic substitution, matching and ranking, and tests in `uqa-sql`; subsequent shared SQL type-resolution ownership moved this complete policy bundle out of execution. |
 | `uqa-execution/src/join.rs` | [`join/`](../../crates/uqa-execution/src/join) owns row storage, direct indexing, canonical disk-capable indexing, nested loops, driver, and tests. |
 | `uqa-execution/src/distinct.rs` | [`distinct/`](../../crates/uqa-execution/src/distinct) owns canonical encoding, memory state, spill state, wrapper, and tests. |
 | `uqa-sql/src/expr.rs` | [`expr/`](../../crates/uqa-sql/src/expr) owns context and lookup, dispatch, argument normalization, builtin execution, diagnostics, and evaluator operations. |

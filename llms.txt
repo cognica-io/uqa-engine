@@ -4,6 +4,8 @@
 
 The manual is the canonical product contract. Parser acceptance alone does not prove execution support; follow the documented argument shape, result schema, state effects, and errors, then verify executable claims against tests or the engine.
 
+The manual on `main` also describes unreleased changes after 0.4.9: configuration parameters and timeouts, routine-body validation, and key, foreign-key, trigger and data-modifying CTE corrections. Follow [Unreleased](HISTORY.md#unreleased) and the [unreleased upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-changes-after-049); use the version-tagged manual for published-package behavior.
+
 UQA Engine 0.4.9 provides native DiskANN through memory, native SQLite, SQLite Key/Value and redb. Use the [DDL options](docs/manual/sql/02-ddl.md#diskann-vector-indexes), [retrieval/scoring contract](docs/manual/sql/06-retrieval.md#diskann-plan-diagnostics) and [binding examples](examples/README.md). PQ guides candidate selection; returned scores remain canonical cosine, and existing probability conversion stays at its original fusion boundary. The [implementation ledger](docs/plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger) records artifact, fixed-fixture quality and provider/resource evidence; do not infer a general recall floor or measured speedup.
 
 Version 0.4.9 also provides owned [Rust notifications](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language subscriptions](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [authenticated HTTP/SSE clients](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions). The [implementation ledger](docs/plans/0015-sql-notifications-and-sse.md) records actual artifacts, the merged Cloud server and transport qualification. HTTP subscriptions require a compatible installed server; source acceptance does not qualify a deployed ingress.
@@ -65,7 +67,7 @@ Implementation tests follow their owning crates. Engine catalog, session, guard,
 ## Guides and APIs
 
 - [Tutorials](docs/manual/tutorials/README.md): Ordered, working database exercises.
-- [Rust engine API](docs/manual/reference/02-rust-engine-api.md): Engine lifecycle, parameters, results, Simple Query messages and command completion, cursors, and direct APIs.
+- [Rust engine API](docs/manual/reference/02-rust-engine-api.md): Engine lifecycle, parameters, results, Simple Query messages and command completion, cursors, session settings and memory limits, cancellation and permanent session termination, and direct APIs.
 - [HTTP Engine API](docs/manual/reference/09-http-engine.md): Direct authenticated local and Cloud SQL from Rust, Python, Node.js, and browsers, including native CLI project lookup, explicit deployment configuration, atomic batches, NDJSON streaming, CORS, and connection security.
 - [PostgreSQL TCP server](docs/manual/reference/11-postgresql-server.md): Development Simple Query listener, protocol negotiation, explicit trust authentication, per-connection sessions, cancellation, notifications, and text result metadata.
 - [CLI](docs/manual/reference/03-cli.md): `usql` commands and persistent database usage.

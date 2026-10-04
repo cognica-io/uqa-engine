@@ -71,7 +71,7 @@ The estimator correction was driven by ten retained Linux CI artifacts. Their Q6
 
 `cargo bench --workspace --no-run` validates that every benchmark target builds, but it is not a measurement command. Workspace feature unification can produce a different LTO or code-layout binary from the package-scoped runner. Published comparisons must use `run-analytical-comparison.sh` end to end and must not mix measurements from different executable hashes.
 
-These are same-process developer-machine measurements, not independent OLAP validation. The ratio ceilings are regression alarms rather than proof of parity. `work_mem = 1B` integration tests force backing spill and verify that the cursor yields at most 1,024 rows per batch.
+These are same-process developer-machine measurements, not independent OLAP validation. The ratio ceilings are regression alarms rather than proof of parity. `Engine::set_query_memory_limit(Some(1))` integration tests force backing spill and verify that the cursor yields at most 1,024 rows per batch.
 
 Reproduce and emit a fresh provenance artifact with:
 
@@ -266,7 +266,7 @@ The matrix exposed three execution-boundary costs rather than isolated operator 
 
 1. An uncorrelated scalar subquery was executed once per outer row. A conservative physical-plan correlation analysis now distinguishes true outer references, and statement-scoped scalar/`EXISTS` caches initialize independent subqueries once while preserving per-row execution for correlated plans. The pre-fix Criterion pilot estimated about 10.6 s per invocation for the 2k-row case; the configured post-fix estimate is 4.479 ms (about 2,375x faster). The pre-fix full sample run was aborted because Criterion projected more than five minutes.
 2. Exact single-statement calls reparsed, lowered, and optimized SQL on every execution. The cache now retains the parsed statement and logical plan, plus the optimized plan for in-memory read-only execution. Persistent sessions still lower and optimize after pinning each storage snapshot, and explicit transactions optimize against their current state. Against the saved pre-cache baseline, `SELECT 1` moved from 4.987 us to 1.132 us (-77.3%) and standalone `VALUES` moved from 14.850 us to 1.709 us (-88.5%). Scan-dominated cases remained statistically unchanged.
-3. Every repeatable CTE/intermediate result was forced to a temporary file, including a one-row recursive working set. Shared materializations now retain encoded batches while they fit `work_mem` and retain the existing disk format after that budget is crossed. The 500-step recursive CTE moved from 163.03 ms to 2.772 ms (-98.3%, 58.8x), while the non-recursive CTE improved by about 46%. Forced-spill tests at `work_mem = 1B` continue to cover accumulated rows, recursive working sets, and duplicate state.
+3. Every repeatable CTE/intermediate result was forced to a temporary file, including a one-row recursive working set. Shared materializations now retain encoded batches while they fit `work_mem` and retain the existing disk format after that budget is crossed. The 500-step recursive CTE moved from 163.03 ms to 2.772 ms (-98.3%, 58.8x), while the non-recursive CTE improved by about 46%. Forced-spill tests now using `Engine::set_query_memory_limit(Some(1))` continue to cover accumulated rows, recursive working sets, and duplicate state.
 
 ## Algebra carrier separation (2026-07-31)
 

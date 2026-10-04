@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Support PostgreSQL 18 configuration definitions, custom parameter placeholders, `set_config`, `SHOW ALL`, `client_min_messages` and startup values restored by `RESET`.
+- Implement `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `idle_session_timeout`, `transaction_timeout`, and the `pg_sleep` functions. Report the cancellation reason and preserve permanent session termination through `Engine::session_termination`.
+- Expose `Engine::set_query_memory_limit` for host-controlled query workspace limits below SQL `work_mem`'s 64 kB minimum.
+
+### Changed
+
+- Default `search_path` to `"$user", public`, preserve its assigned text and empty paths, and make `Engine::set_search_path` return a `Result`. `QueryCancelled` now carries a `CancellationReason` instead of being a unit struct; see the [unreleased upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-changes-after-049).
+
+### Fixed
+
+- Validate PRIMARY KEY, UNIQUE and partitioned unique-index declarations with PostgreSQL's column requirements, duplicate-declaration handling, creation order and index-build diagnostics.
+- Check immediate foreign keys after the statement writes its rows, and order referential actions with AFTER triggers in one statement queue. Preserve statement-trigger sharing and reject rows already modified by triggered commands with SQLSTATE `27000`; expose `pg_trigger_depth()`.
+- Finish unreferenced data-modifying CTEs after the main query in reverse definition order, defer their AFTER events to the complete statement, and preserve command-level repeated-row handling.
+- Validate SQL and PL/pgSQL routine bodies under `check_function_bodies`, check declared result types, and defer string-body analysis when validation is disabled. Preserve SQL-standard body validation and reopen of deferred bodies.
+- Avoid waiting on unrelated relation locks whose cross-process lock-byte hashes collide within one process.
+
 ## [0.4.9] - 2026-10-03
 
 This release bounds HNSW and transaction retention with encrypted temporary storage and corrects PostgreSQL 18 sequence, foreign-key, transaction and diagnostic behavior. Native SQLite mapping advances from 13 to 14, and persistent sequence definitions and values are stored separately. Stop every database owner, retain a closed pre-upgrade backup and update all owners together. Rust persistence and HNSW adapters and consumers of Rust/Python notices need API updates; see the [0.4.9 upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/reference/10-upgrading.md).

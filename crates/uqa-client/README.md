@@ -27,6 +27,8 @@ It is designed for applications that need more than a relational table but do no
 
 Version 0.4.9 keeps HNSW graphs, search workspaces and private transaction records bounded by their memory allowances using encrypted temporary storage. It also corrects PostgreSQL 18 sequence allocation, partition and inheritance foreign keys, table rewrites, transaction commands and diagnostic fields. See the [release history](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/HISTORY.md#049---2026-10-03).
 
+The current `main` branch additionally implements PostgreSQL configuration and timeout behavior, routine-body validation, and corrections to key declarations, foreign-key checks, trigger ordering and data-modifying CTEs. These changes follow 0.4.9 and are not included in its published packages; see [Unreleased](https://github.com/cognica-io/uqa-engine/blob/main/HISTORY.md#unreleased) and the [upgrade notes](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/10-upgrading.md#unreleased-changes-after-049).
+
 The engine provides native DiskANN vector indexes through memory, native SQLite, SQLite Key/Value and redb. Bounded graph navigation and product quantization select candidates; complete-tensor reranking preserves canonical cosine scores and the existing probability conversion. Indexes retain transaction, rollback and reopen behavior, and EXPLAIN distinguishes estimated work from actual query counters. See the [SQL configuration and score contract](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/sql/02-ddl.md#diskann-vector-indexes) and [matching Rust, Python, Node.js and browser examples](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/examples/README.md).
 
 Independent SQL notification subscriptions retain their original database and selected role, with bounded queues and explicit cleanup. Rust, Python, Node.js and Browser WASM also provide authenticated HTTP/SSE clients with visible loss and reconnection events for compatible servers. See the [direct Rust API](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
@@ -280,7 +282,7 @@ bash scripts/run-beir-benchmark.sh
 
 The combined report includes exact, IVF, and HNSW SQL query latency and throughput, SQL load and index-construction throughput, recall@10, top-1 accuracy, MRR@10, exact top-k set rate, and cosine-score error. Pass `smoke` or `large` to select the 10,000-row or 1,000,000-row profile; the deterministic workload, measured boundary, metric definitions, quality floors, output files, and limitations are documented in the [vector-search benchmark](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/benchmarks/vector-search/README.md).
 
-Integration tests are consolidated into a small set of domain harnesses so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
+Each crate has one integration-test executable with domain modules, so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
 
 ```sh
 cargo test -p uqa-engine --test integration queries::sql_joins::
@@ -326,7 +328,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Runnable examples](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/examples/README.md) | Comparing the same search, vector, graph, storage, and extension scenarios across Rust, Python, Node.js, and Browser WASM |
 | [Design documentation index](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/design/README.md) | Finding the right technical contract or architecture document |
 | [System architecture](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
-| [Vector indexes](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/vector-indexes.md) | Brute-force, IVF, HNSW and development DiskANN behavior, parameters, persistence and correctness contracts |
+| [Vector indexes](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/vector-indexes.md) | Brute-force, IVF, HNSW and DiskANN behavior, parameters, persistence and correctness contracts |
 | [Vector-search benchmark](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/benchmarks/vector-search/README.md) | Reproducing vector latency, throughput, construction cost, recall, and accuracy reports |
 | [Engine state ownership](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/design/engine-state-ownership.md) | Session isolation, locks, epochs, and publication rules |
 | [Concurrent storage transactions](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/concurrent-storage-transactions.md) | Overlapping logical writes, snapshots, conflicts, atomic publication, and provider ownership |

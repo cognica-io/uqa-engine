@@ -111,6 +111,22 @@ PR #152 review found that value-only string conversion replaced catalog-dependen
 
 Product head `d148dd90` passes [JavaScript/WASM](https://github.com/cognica-io/uqa-engine/actions/runs/36052925918), [Python](https://github.com/cognica-io/uqa-engine/actions/runs/36052937032), all eight macOS test shards and every other Rust job in [run 36052914020](https://github.com/cognica-io/uqa-engine/actions/runs/36052914020), except Linux shard 6 and its aggregate gate. That shard exposes an existing automatic-statistics fixture race: creating rows before disabling both background clients lets the real worker consume the sample before a deterministic test collects it. The fixture now stops both clients before creating any analyzable data, including serialized and compressed variants; no product behavior, wait or assertion changes. All ten automatic-statistics tests pass in Linux Docker. Final source `7f06cf73` passes every job and all sixteen Linux/macOS test shards in [Rust run 36057996218](https://github.com/cognica-io/uqa-engine/actions/runs/36057996218), including the unchanged native Nori gate. The binding product code is identical to `d148dd90` and retains its successful acceptance above. All review findings are resolved. This final acceptance update changes documentation only; product, tests and workflows remain identical to `7f06cf73`.
 
+## Unreleased configuration and statement semantics
+
+[PR #273](https://github.com/cognica-io/uqa-engine/pull/273), merged after 0.4.9, implements the following corrections. Their focused implementation tests are linked below; this inventory records merged behavior without promoting a partial compatibility item to complete or treating implementation-derived assertions as a new independent PostgreSQL oracle.
+
+| Implemented surface | Owning regression evidence |
+| --- | --- |
+| Parameter definitions, units, `search_path`, startup/reset values, notices and `set_config` | [Configuration parameters](../../crates/uqa-engine/tests/catalog/configuration_parameters.rs) |
+| Statement, lock and session timeouts, plus cancellable sleep functions | [Statement and lock timeouts](../../crates/uqa-engine/tests/sql_statement_timeouts.rs), [session termination](../../crates/uqa-engine/tests/sql_session_timeouts.rs) |
+| Routine-body creation and call-time validation | [SQL and PL/pgSQL bodies](../../crates/uqa-engine/tests/sql_function_bodies.rs) |
+| Key declarations and partitioned unique indexes | [Declarations](../../crates/uqa-engine/tests/sql_unique_constraint/declarations.rs), [partitioned keys](../../crates/uqa-engine/tests/sql_unique_constraint/partitioned.rs) |
+| End-of-statement foreign-key checks and referential/AFTER event order | [Statement checks](../../crates/uqa-engine/tests/sql_referential_actions/statement_checks.rs), [cascade ordering](../../crates/uqa-engine/tests/sql_referential_actions/cascade_order.rs) |
+| Data-modifying CTE completion and repeated-row command behavior | [CTE command ordering](../../crates/uqa-engine/tests/queries/sql_cte_command_order.rs) |
+| Triggered modifications and same-process relation-lock hash collisions | [Triggered modifications](../../crates/uqa-engine/tests/catalog/sql_triggers/triggered_modifications.rs), [relation locks](../../crates/uqa-execution/src/row_locks/relation/tests.rs) |
+
+The [unreleased upgrade notes](../manual/reference/10-upgrading.md#unreleased-changes-after-049) describe changed diagnostics and Rust APIs. Complete PostgreSQL settings, routine, constraint, trigger, concurrency and upstream/client coverage remain governed by the existing manifest gates.
+
 ## Current implementation status and open PostgreSQL 18 bugs
 
 The historical starting point used `pg_query` 6.1.1 with PostgreSQL 17 grammar, reported `server_version` as `17.0-uqa`, stored the active TPC-H-derived oracle in `expected/pg17.json`, and accepted only frontend/backend protocol 3.0 primitives. Active assets now use `pg18`, session metadata reports `18.0-uqa`, and the checked-in 22-query oracle records PostgreSQL 18.4 server and platform provenance.
@@ -402,7 +418,7 @@ The extended protocol slice now resolves Bind and FunctionCall format vectors th
 
 ### 7. Complete SQL, catalog, and transaction compatibility
 
-The [concurrent storage transaction design](../design/concurrent-storage-transactions.md) and [implementation plan](0008-concurrent-storage-transactions.md) specify shared MVCC for native SQLite, SQLite Key/Value and redb, including SQL isolation, locking, publication and recovery acceptance. Three [PostgreSQL reference schedules](../../tests/parity/pg18/concurrent_writes.expected.json) now establish independent writer progress across commit, rollback and savepoint endings; UQA 0.3.6 SQLite still blocks the independent writer while the earlier transaction remains open. SQL `lock_timeout` is also unrecognized in that release. These bugs remain under `query.row-locking-complete-matrix`; no new UQA SQL compatibility gate is verified.
+Shared MVCC for native SQLite, SQLite Key/Value and redb was released in 0.4.0; the [completed implementation plan](0008-concurrent-storage-transactions.md) records SQL isolation, locking, publication and recovery acceptance. The three [PostgreSQL reference schedules](../../tests/parity/pg18/concurrent_writes.expected.json) verify independent writer progress across commit, rollback and savepoint endings. The historical 0.3.6 writer blockage is fixed, and [PR #273](https://github.com/cognica-io/uqa-engine/pull/273) adds `lock_timeout` with typed `55P03` diagnostics. The full PostgreSQL row-lock, isolation and process-boundary corpus remains under `query.row-locking-complete-matrix`; these implemented slices do not close that broader gate.
 
 Drive remaining work from the PostgreSQL 18 official regression schedules rather than an ad hoc feature list. Import queries and expected behavior in license-compatible differential harnesses, categorize failures by parser, binder, type system, planner, executor, catalog, transaction, protocol, or administration, and maintain a burn-down manifest with owners and evidence.
 
