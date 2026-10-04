@@ -255,12 +255,17 @@ pub fn merge_target_columns(
     stmt: &MergePlan,
 ) -> Result<Vec<String>, SQLError> {
     let table_columns = catalog.bound_table_column_names(&stmt.target)?;
+    Ok(merge_supplied_columns(stmt, &table_columns))
+}
+
+/// The columns the actions of a `MERGE` supply, as [`merge_target_columns`] finds them, for a target whose columns `target_columns` lists in order.
+pub fn merge_supplied_columns(stmt: &MergePlan, target_columns: &[String]) -> Vec<String> {
     let mut supplied = Vec::new();
     for clause in &stmt.when_clauses {
         match clause {
             MergeWhenPlan::InsertNotMatched {
                 columns, values, ..
-            } => supplied.extend(merge_insert_columns(&table_columns, columns, values)),
+            } => supplied.extend(merge_insert_columns(target_columns, columns, values)),
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => supplied.extend(
                 assignments
@@ -270,7 +275,7 @@ pub fn merge_target_columns(
             _ => {}
         }
     }
-    Ok(supplied)
+    supplied
 }
 
 /// The columns an `INSERT` action fills: those it names, or else the leading columns of the table, one for each value; `DEFAULT VALUES` fills none.

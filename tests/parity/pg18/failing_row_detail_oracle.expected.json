@@ -550,6 +550,470 @@
       ]
     },
     {
+      "sql": "CREATE TABLE fr_stored (id integer PRIMARY KEY, v integer, note text DEFAULT 'n')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW fr_trigger_view AS SELECT id, v, note FROM fr_stored",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION fr_trigger_store() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN IF TG_OP = 'INSERT' THEN IF NEW.id >= 50 THEN NEW.v := abs(NEW.v); END IF; INSERT INTO fr_stored VALUES (NEW.id, NEW.v, coalesce(NEW.note, 'trig')); RETURN NEW; END IF; UPDATE fr_stored SET v = NEW.v WHERE id = OLD.id; RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER fr_trigger_store INSTEAD OF INSERT OR UPDATE ON fr_trigger_view FOR EACH ROW EXECUTE FUNCTION fr_trigger_store()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW fr_over_trigger (key, val) AS SELECT id, v FROM fr_trigger_view WHERE v > 0 WITH LOCAL CHECK OPTION",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_over_trigger VALUES (1, -1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (1, -1, null).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_over_trigger VALUES (51, -8) RETURNING key, val",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "key",
+            "val"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "51",
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_over_trigger (key) VALUES (2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (2, null, null).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_stored VALUES (3, 3)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE fr_over_trigger SET val = -val WHERE key = 3",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (3, -3, n).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE fr_over_trigger SET val = val + 1 WHERE key = 3 RETURNING *",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "key",
+            "val"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO fr_over_trigger t USING (VALUES (4, -4)) s(k, v) ON t.key = s.k WHEN NOT MATCHED THEN INSERT VALUES (s.k, s.v)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (4, -4, null).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO fr_over_trigger t USING (VALUES (3, -5)) s(k, v) ON t.key = s.k WHEN MATCHED THEN UPDATE SET val = s.v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (3, -5, n).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE VIEW fr_top_trigger AS SELECT key, val FROM fr_over_trigger WHERE key < 1000 WITH CASCADED CHECK OPTION",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_top_trigger VALUES (1001, -3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_top_trigger\"",
+        "detail": "Failing row contains (1001, 3, null).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_top_trigger VALUES (5, -3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (5, -3, null).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "GRANT INSERT, UPDATE ON fr_over_trigger TO fr_limited",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT SELECT (key) ON fr_over_trigger TO fr_limited",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE fr_limited",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_over_trigger VALUES (6, -6)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (id, v) = (6, -6).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_over_trigger (key) VALUES (7)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (id) = (7).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE fr_over_trigger SET val = -1 WHERE key = 3",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (v) = (-1).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO fr_over_trigger t USING (VALUES (8, -8)) s(k, v) ON t.key = s.k WHEN NOT MATCHED THEN INSERT (key, val) VALUES (s.k, s.v)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (id, v) = (8, -8).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT SELECT (note) ON fr_trigger_view TO fr_limited",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE fr_limited",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_over_trigger (key) VALUES (9)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (id, note) = (9, null).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT SELECT ON fr_trigger_view TO fr_limited",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE fr_limited",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_over_trigger (key) VALUES (10)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_over_trigger\"",
+        "detail": "Failing row contains (10, null, null).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, v, note FROM fr_stored ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "v",
+            "note"
+          ],
+          "type_oids": [
+            23,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "3",
+              "4",
+              "n"
+            ],
+            [
+              "51",
+              "8",
+              "trig"
+            ]
+          ]
+        }
+      ]
+    },
+    {
       "sql": "DROP TABLE fr_checked, fr_generated, fr_parts, fr_private CASCADE",
       "command_tags": [
         "DROP TABLE"
@@ -567,6 +1031,48 @@
       "sql": "DROP VIEW fr_cascaded, fr_view",
       "command_tags": [
         "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP VIEW fr_top_trigger, fr_over_trigger, fr_trigger_view",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE fr_stored",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION fr_trigger_store()",
+      "command_tags": [
+        "DROP FUNCTION"
       ],
       "error": null,
       "results": [

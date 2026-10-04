@@ -12,8 +12,8 @@ use super::{
     rewrite_existing_view_checks, rewrite_returning, rewrite_target_expression,
     validate_direct_view_rule_path, validate_insert_expressions, validate_insert_targets,
     validate_mapped_columns, validate_public_insert_contract, validate_public_view_targets,
-    view_updatability, writable_column, BTreeSet, ConflictActionPlan, CorrelatedDmlContext,
-    ExpressionScope, InsertPlan, SQLError, TriggerEvent, ViewRewriteContext, ViewRuleInsertPlan,
+    writable_column, BTreeSet, ConflictActionPlan, CorrelatedDmlContext, ExpressionScope,
+    InsertPlan, SQLError, TriggerEvent, ViewRewriteContext, ViewRuleInsertPlan,
 };
 
 #[expect(
@@ -45,10 +45,7 @@ pub fn rewrite_insert_to_base(
         crate::ast::RuleEvent::Insert,
         "INSERT",
     )?;
-    if !view_updatability(services, &statement.table)?
-        .automatic
-        .insertable
-    {
+    if !initial_layer.capabilities().insertable {
         return Err(not_automatically_updatable(&statement.table, "INSERT"));
     }
     let mut plan = statement.clone();
@@ -69,6 +66,13 @@ pub fn rewrite_insert_to_base(
     let mut visited = BTreeSet::new();
     let mut rewrite_suppressed = false;
     loop {
+        // An underlying view with an INSTEAD OF trigger ends the rewrite, since `RewriteQuery` rewrites only a view without one: the trigger performs the INSERT on that view.
+        if !visited.is_empty()
+            && !rewrite_suppressed
+            && instead_of_trigger_definition(services, &plan.table, TriggerEvent::Insert)?
+        {
+            break;
+        }
         let Some(layer) = automatic_view_layer(services, &plan.table)? else {
             if active_unconditional_instead_rule(
                 services,
@@ -93,12 +97,6 @@ pub fn rewrite_insert_to_base(
                 "INSERT",
             )?;
         }
-        if !rewrite_suppressed
-            && visited.len() > 1
-            && instead_of_trigger_definition(services, &layer.canonical_name, TriggerEvent::Insert)?
-        {
-            return Err(not_automatically_updatable(&layer.canonical_name, "INSERT"));
-        }
         let has_view_rules = if rewrite_suppressed {
             false
         } else {
@@ -116,6 +114,9 @@ pub fn rewrite_insert_to_base(
                 crate::ast::RuleEvent::Insert,
             )?;
         if visited.len() > 1 && !rewrite_suppressed && !layer_suppresses {
+            if !layer.capabilities().insertable {
+                return Err(not_automatically_updatable(&layer.canonical_name, "INSERT"));
+            }
             let next_privilege_subject =
                 crate::semantics::view_privileges::ensure_insert(services.authorization, &plan)?;
             plan.target_privilege_subject = Some(next_privilege_subject);

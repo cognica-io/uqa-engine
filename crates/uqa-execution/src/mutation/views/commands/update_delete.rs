@@ -11,8 +11,8 @@ use super::{
     validate_dml_expression_qualifiers, validate_returning_alias_relations, view_document,
     view_qualification_references_target, with_mutation_snapshot, BTreeSet, CteScope, DeletePlan,
     DmlReturningShape, MutationStatementContext, OwnedPhysicalRow, ReturningValueProjectionRow,
-    SQLError, SQLParam, SQLResult, ScalarExpr, SourceOutputPruning, UpdatePlan, Value,
-    ViewDmlTarget,
+    SQLError, SQLParam, SQLResult, ScalarExpr, SourceOutputPruning, TriggerViewChecks, UpdatePlan,
+    Value, ViewDmlTarget,
 };
 use crate::mutation::{
     assignment::MutationAssignmentContext, rows::context::MutationExpressionContext,
@@ -634,6 +634,21 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                     &stmt.subqueries,
                 ),
             )?;
+            let checks = TriggerViewChecks {
+                expressions: read_context
+                    .mutation
+                    .preparation
+                    .referential
+                    .assignment
+                    .expressions,
+                constraints: read_context.mutation.preparation.referential.constraints,
+                target: &target,
+                target_qualifier: &stmt.target_qualifier,
+                checks: &stmt.view_checks,
+                supplied: &assigned_columns,
+                params,
+                scope: ctes,
+            };
             let mut affected = 0_u64;
             let mut returning_rows = Vec::new();
             for (index, row) in pending.into_iter().enumerate() {
@@ -651,6 +666,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 else {
                     continue;
                 };
+                checks.validate(&final_new)?;
                 affected += 1;
                 if !stmt.returning.is_empty() {
                     returning_rows.push(build_returning_value_row(

@@ -7,11 +7,10 @@
 //! Public-view and mapped-target validation for automatic DML rewriting.
 
 use super::{
-    display_relation, instead_of_trigger_definition, non_writable_column,
-    not_automatically_updatable, view_updatability, AutomaticViewLayer, BTreeSet,
-    ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan, MergePlan, MergeWhenPlan,
-    ReturningAliases, RowSchema, SQLError, ScalarExpr, TriggerEvent, UpdatePlan, ViewColumn,
-    ViewMutationCapabilities, ViewRewriteContext,
+    automatic_view_layer, display_relation, instead_of_trigger_definition, non_writable_column,
+    not_automatically_updatable, AutomaticViewLayer, BTreeSet, ConflictActionPlan, ConflictPlan,
+    DeletePlan, InsertPlan, MergePlan, MergeWhenPlan, ReturningAliases, RowSchema, SQLError,
+    ScalarExpr, TriggerEvent, UpdatePlan, ViewColumn, ViewMutationCapabilities, ViewRewriteContext,
 };
 
 pub(super) fn layer_column<'a>(
@@ -587,7 +586,10 @@ pub fn merge_view_target_path(
         });
     }
     validate_merge_rule_free(services, &canonical)?;
-    let automatic = view_updatability(services, &canonical)?.automatic;
+    let automatic = automatic_view_layer(services, &canonical)?
+        .map_or_else(ViewMutationCapabilities::default, |layer| {
+            layer.capabilities()
+        });
     let insert_trigger = instead_of_trigger_definition(services, &canonical, TriggerEvent::Insert)?;
     let update_trigger = instead_of_trigger_definition(services, &canonical, TriggerEvent::Update)?;
     let delete_trigger = instead_of_trigger_definition(services, &canonical, TriggerEvent::Delete)?;

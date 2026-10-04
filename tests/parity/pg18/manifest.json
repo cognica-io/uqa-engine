@@ -1087,10 +1087,10 @@
     {
       "id": "dml.failing-row-details",
       "postgresql_reference": "PostgreSQL 18.4 live SQLSTATEs, messages, DETAIL and HINT in tests/parity/pg18/failing_row_detail_oracle.expected.json; PostgreSQL REL_18_STABLE execMain.c ExecBuildSlotValueDescription and ExecWithCheckOptions",
-      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_failing_row_details; cargo test -p uqa-sql --lib semantics::row_description; cargo test -p uqa-execution --lib mutation::supplied_columns",
-      "supported_version": "NOT NULL, CHECK, partition constraint and auto-updatable view WITH [CASCADED] CHECK OPTION violations report the failing row in DETAIL on memory and native SQLite: every column with output-function text for a role with table SELECT, otherwise the columns the role may select or the INSERT, UPDATE or MERGE supplied, listed by name, and no DETAIL when none qualifies; virtual generated columns print virtual, NULL prints null, and values longer than 64 bytes are clipped",
-      "status": "partial",
-      "open_issue": "A WITH CHECK OPTION violation through MERGE into a trigger-updatable view must describe the view row with the view's privileges."
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_failing_row_details; cargo test -p uqa-engine --test integration catalog::constraint_violation_reports; cargo test -p uqa-engine --test integration catalog::sql_triggers::instead_of; cargo test -p uqa-execution --lib mutation::constraints::violations",
+      "supported_version": "NOT NULL, CHECK, partition constraint and auto-updatable view WITH [CASCADED] CHECK OPTION violations report the failing row in DETAIL on memory and native SQLite: every column with output-function text for a role with table SELECT, otherwise the columns the role may select or the INSERT, UPDATE or MERGE supplied, listed by name, and no DETAIL when none qualifies; virtual generated columns print virtual, NULL prints null, and values longer than 64 bytes are clipped; a row that an INSTEAD OF trigger returns through the automatically updatable views over its view is described in that view's columns with that view's privileges",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "query.window-frames",

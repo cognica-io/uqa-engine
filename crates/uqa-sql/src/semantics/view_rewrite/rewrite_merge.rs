@@ -12,7 +12,7 @@ use super::{
     rewrite_correlated_dml_context, rewrite_existing_view_checks, rewrite_merge_returning,
     rewrite_target_expression, validate_mapped_columns, validate_merge_expressions,
     validate_merge_targets, validate_public_merge_contract, validate_public_merge_targets,
-    view_updatability, writable_column, BTreeSet, CorrelatedDmlContext, ExpressionScope, MergePlan,
+    writable_column, BTreeSet, CorrelatedDmlContext, ExpressionScope, MergePlan,
     MergeViewTargetPath, MergeWhenPlan, SQLError, StoredViewKind, ViewMutationCapabilities,
     ViewRewriteContext,
 };
@@ -76,7 +76,7 @@ pub fn rewrite_merge_to_base(
     if let Some(error) = merge_action_capability_error(
         &statement.target,
         &statement.when_clauses,
-        view_updatability(services, &statement.target)?.automatic,
+        initial_layer.capabilities(),
     ) {
         return Err(error);
     }

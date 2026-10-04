@@ -118,6 +118,19 @@ impl AutomaticViewLayer {
             .get(column)
             .map_or(column, String::as_str)
     }
+
+    /// The commands the view's own query can be rewritten for onto its base relation, as `view_query_is_auto_updatable` decides: INSERT and UPDATE need an updatable column, DELETE does not. What the base relation supports is decided when the rewrite reaches it.
+    pub fn capabilities(&self) -> ViewMutationCapabilities {
+        let writable = self
+            .columns
+            .iter()
+            .any(|column| column.writable_source_column.is_some());
+        ViewMutationCapabilities {
+            insertable: writable,
+            updatable: writable,
+            deletable: true,
+        }
+    }
 }
 
 pub use crate::catalog::view::ViewMutationCapabilities;

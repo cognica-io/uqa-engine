@@ -16,7 +16,9 @@ use uqa_sql::{
             columns::role_has_column_privilege as column_privilege_check,
             ownership::RelationOwnerSchemas,
             table::{role_has_privilege, TableAclPrivilege, TablePrivilegeCheck},
+            BoundTableSecurity,
         },
+        stored_view::StoredView,
     },
     SQLError,
 };
@@ -69,34 +71,60 @@ impl TableAuthorizationContext<'_> {
         as_owner: bool,
     ) -> Result<Option<Vec<String>>, SQLError> {
         let (_, table) = self.bound_table_for_security(name)?;
-        let roles = self.roles.role_definitions();
-        let memberships = self.roles.role_memberships();
-        let security = table
-            .security()
-            .resolve(&roles)
-            .map_err(SQLError::Internal)?;
         let subject: Box<dyn RoleSubject> = if as_owner {
             Box::new(table.role_owner())
         } else {
             Box::new(self.names.current_role())
         };
+        self.visible_row_columns(
+            &table.security(),
+            subject.as_ref(),
+            table.column_names(),
+            supplied,
+        )
+    }
+
+    /// The columns of a view that the description of a row its `INSTEAD OF` trigger stores shows, which `ExecBuildSlotValueDescription` decides for the view as it does for a table: `None` when the current role may read the view, otherwise, in view order, each column the role may read or the statement supplies.
+    pub fn view_row_description_columns(
+        &self,
+        view: &StoredView,
+        columns: &[String],
+        supplied: &[String],
+    ) -> Result<Option<Vec<String>>, SQLError> {
+        self.visible_row_columns(
+            &view.security(),
+            &self.names.current_role(),
+            columns.to_vec(),
+            supplied,
+        )
+    }
+
+    fn visible_row_columns(
+        &self,
+        security: &BoundTableSecurity,
+        subject: &dyn RoleSubject,
+        columns: Vec<String>,
+        supplied: &[String],
+    ) -> Result<Option<Vec<String>>, SQLError> {
+        let roles = self.roles.role_definitions();
+        let memberships = self.roles.role_memberships();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         let check = TablePrivilegeCheck {
             privilege: TableAclPrivilege::Select,
             grant_option: false,
         };
-        if role_has_privilege(&security, subject.as_ref(), check, &roles, &memberships) {
+        if role_has_privilege(&security, subject, check, &roles, &memberships) {
             return Ok(None);
         }
         Ok(Some(
-            table
-                .column_names()
+            columns
                 .into_iter()
                 .filter(|column| {
                     supplied.contains(column)
                         || column_privilege_check(
                             &security,
                             column,
-                            subject.as_ref(),
+                            subject,
                             check,
                             &roles,
                             &memberships,

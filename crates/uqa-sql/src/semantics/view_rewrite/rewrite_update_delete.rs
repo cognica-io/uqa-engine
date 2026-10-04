@@ -14,8 +14,8 @@ use super::{
     update_ordinary_subquery_ids, validate_delete_expressions, validate_direct_view_rule_path,
     validate_mapped_columns, validate_public_delete_contract, validate_public_update_contract,
     validate_public_view_targets, validate_update_expressions, validate_update_targets,
-    view_updatability, writable_column, AssignmentPlan, BTreeSet, CorrelatedDmlContext, DeletePlan,
-    ExpressionScope, SQLError, TriggerEvent, UpdatePlan, ViewRewriteContext, ViewRuleUpdatePlan,
+    writable_column, AssignmentPlan, BTreeSet, CorrelatedDmlContext, DeletePlan, ExpressionScope,
+    SQLError, TriggerEvent, UpdatePlan, ViewRewriteContext, ViewRuleUpdatePlan,
 };
 
 #[expect(
@@ -55,10 +55,7 @@ pub fn rewrite_update_to_base(
         crate::ast::RuleEvent::Update,
         "UPDATE",
     )?;
-    if !view_updatability(services, &statement.table)?
-        .automatic
-        .updatable
-    {
+    if !initial_layer.capabilities().updatable {
         return Err(not_automatically_updatable(&statement.table, "UPDATE"));
     }
     let mut plan = statement.clone();
@@ -70,6 +67,13 @@ pub fn rewrite_update_to_base(
     let mut source_star_boundaries = Vec::new();
     let mut rewrite_suppressed = false;
     loop {
+        // An underlying view with an INSTEAD OF trigger ends the rewrite, since `RewriteQuery` rewrites only a view without one: the trigger performs the UPDATE on that view.
+        if !visited.is_empty()
+            && !rewrite_suppressed
+            && instead_of_trigger_definition(services, &plan.table, TriggerEvent::Update)?
+        {
+            break;
+        }
         let Some(layer) = automatic_view_layer(services, &plan.table)? else {
             if active_unconditional_instead_rule(
                 services,
@@ -94,12 +98,6 @@ pub fn rewrite_update_to_base(
                 "UPDATE",
             )?;
         }
-        if !rewrite_suppressed
-            && visited.len() > 1
-            && instead_of_trigger_definition(services, &layer.canonical_name, TriggerEvent::Update)?
-        {
-            return Err(not_automatically_updatable(&layer.canonical_name, "UPDATE"));
-        }
         let has_view_rules = if rewrite_suppressed {
             false
         } else {
@@ -117,6 +115,9 @@ pub fn rewrite_update_to_base(
                 crate::ast::RuleEvent::Update,
             )?;
         if visited.len() > 1 && !rewrite_suppressed && !layer_suppresses {
+            if !layer.capabilities().updatable {
+                return Err(not_automatically_updatable(&layer.canonical_name, "UPDATE"));
+            }
             let next_privilege_subject =
                 crate::semantics::view_privileges::ensure_update(services.authorization, &plan)?;
             plan.target_privilege_subject = Some(next_privilege_subject);
@@ -340,6 +341,13 @@ pub fn rewrite_delete_to_base(
     let mut source_star_boundaries = Vec::new();
     let mut rewrite_suppressed = false;
     loop {
+        // An underlying view with an INSTEAD OF trigger ends the rewrite, since `RewriteQuery` rewrites only a view without one: the trigger performs the DELETE on that view.
+        if !visited.is_empty()
+            && !rewrite_suppressed
+            && instead_of_trigger_definition(services, &plan.table, TriggerEvent::Delete)?
+        {
+            break;
+        }
         let Some(layer) = automatic_view_layer(services, &plan.table)? else {
             if active_unconditional_instead_rule(
                 services,
@@ -363,12 +371,6 @@ pub fn rewrite_delete_to_base(
                 crate::ast::RuleEvent::Delete,
                 "DELETE",
             )?;
-        }
-        if !rewrite_suppressed
-            && visited.len() > 1
-            && instead_of_trigger_definition(services, &layer.canonical_name, TriggerEvent::Delete)?
-        {
-            return Err(not_automatically_updatable(&layer.canonical_name, "DELETE"));
         }
         let has_view_rules = if rewrite_suppressed {
             false
