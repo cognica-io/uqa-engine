@@ -94,7 +94,7 @@ fn validate_routine_signature(
     }
     let stored_regrole_constants = routine_parameter_regrole_constants(context.types, def);
     stored_regrole_constants.validate_inputs_with(context.regroles)?;
-    validate_routine_declaration(context.types, def)?;
+    validate_routine_declaration(def)?;
     Ok(stored_regrole_constants)
 }
 

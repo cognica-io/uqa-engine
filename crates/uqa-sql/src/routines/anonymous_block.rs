@@ -37,6 +37,7 @@ pub fn compile_do_block(
             type_name: "void".into(),
         },
         return_type_reference: None,
+        return_written_type: None,
         language: "plpgsql".into(),
         body: crate::ast::FunctionBody::Source(body.to_string()),
         sql_body_form: None,
@@ -47,8 +48,11 @@ pub fn compile_do_block(
         security: crate::ast::RoutineSecurityAttributes::default(),
         parallel: crate::ast::FunctionParallel::Unsafe,
         support: None,
+        cost: None,
+        rows: None,
         config: Vec::new(),
         config_actions: Vec::new(),
+        attribute_clauses: crate::ast::RoutineAttributeClauses::default(),
         execute_acl: None,
     };
     Ok((def, parsed))

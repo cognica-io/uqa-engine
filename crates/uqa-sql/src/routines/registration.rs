@@ -6,7 +6,10 @@
 
 //! Routine replacement compatibility, security attributes, and ALTER definition analysis.
 
-use super::{builtin_routine_support_oid, lifecycle::ensure_routine_owner_as, routine_kind};
+use super::{
+    builtin_routine_support_oid, lifecycle::require_routine_ownership, routine_kind,
+    routine_local_name,
+};
 use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::{AlterRoutineStmt, CreateFunction},
@@ -64,20 +67,25 @@ pub fn validate_routine_security_attributes(
 pub fn prepare_routine_replacement(
     existing: &CreateFunction,
     def: &mut CreateFunction,
-    requested_name: &str,
     current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Result<(), SQLError> {
     if !def.or_replace {
+        // `ProcedureCreate` names the existing routine by its unqualified name.
         let kind = routine_kind(def);
         return Err(SQLError::Routine {
             sqlstate: "42723".into(),
-            message: format!("{kind} \"{requested_name}\" already exists with same argument types"),
+            message: format!(
+                "{kind} \"{}\" already exists with same argument types",
+                routine_local_name(&existing.name)?
+            ),
         });
     }
-    ensure_routine_owner_as(
-        existing,
+    // `ProcedureCreate` names the routine it would replace as a function, by its unqualified name.
+    require_routine_ownership(
+        "function",
+        &routine_local_name(&existing.name)?,
         role_inherits(
             roles,
             memberships,
@@ -110,25 +118,14 @@ pub fn prepare_routine_replacement(
     Ok(())
 }
 
+/// Apply the actions of `ALTER FUNCTION` to the routine `AlterFunction` found and whose ownership it checked, in its order: the actions in written order, which a procedure may not use for its function-only attributes and none may repeat; LEAKPROOF, which needs a superuser; COST; ROWS, positive and only for a set-returning routine; the SUPPORT function; and PARALLEL. The SET actions are left for the caller to apply last.
 pub fn alter_routine_attributes(
     existing: &CreateFunction,
     stmt: &AlterRoutineStmt,
     current_user_is_superuser: bool,
     authority: &dyn RoutineSupportAuthority,
 ) -> Result<CreateFunction, SQLError> {
-    if existing.is_procedure
-        && (stmt.volatility.is_some()
-            || stmt.strict.is_some()
-            || stmt.leakproof.is_some()
-            || stmt.parallel.is_some()
-            || stmt.support.is_some())
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "42P13".into(),
-            message: "invalid attribute in procedure definition".into(),
-        });
-    }
-
+    super::attributes::check_attribute_clauses(&stmt.attribute_clauses, existing.is_procedure)?;
     let mut def = existing.clone();
     if let Some(volatility) = stmt.volatility {
         def.volatility = volatility;
@@ -148,12 +145,22 @@ pub fn alter_routine_attributes(
         }
         def.security.leakproof = leakproof;
     }
-    if let Some(parallel) = stmt.parallel {
-        def.parallel = parallel;
+    if let Some(cost) = stmt.cost {
+        super::attributes::validate_cost(Some(cost))?;
+        def.cost = Some(cost);
+    }
+    if let Some(rows) = stmt.rows {
+        super::attributes::validate_rows(Some(rows))?;
+        super::attributes::validate_rows_applicability(Some(rows), existing.returns_set())?;
+        def.rows = Some(rows);
     }
     if let Some(support) = &stmt.support {
         validate_routine_support(authority, support)?;
         def.support = Some(support.clone());
+    }
+    super::attributes::validate_parallel(&stmt.attribute_clauses)?;
+    if let Some(parallel) = stmt.parallel {
+        def.parallel = parallel;
     }
     def.config_actions.clone_from(&stmt.config_actions);
     Ok(def)

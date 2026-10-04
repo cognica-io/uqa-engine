@@ -1,0 +1,2784 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA IF EXISTS f3 CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE IF EXISTS f3_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA f3",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path = f3",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION f1(nosuchtype) RETURNS int LANGUAGE sql SET work_mem = 'abc' AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"work_mem\": \"abc\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f2(nosuchtype) RETURNS int LANGUAGE nosuchlang AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "language \"nosuchlang\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f3(nosuchtype) RETURNS int LANGUAGE sql COST -1 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "COST must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f4(int) RETURNS nosuchtype LANGUAGE sql SET nosuchparam = 1 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "unrecognized configuration parameter \"nosuchparam\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f5(nosuchtype) RETURNS int LANGUAGE sql SUPPORT nosuchsupport AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nosuchsupport(internal) does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f6(nosuchtype) RETURNS int LANGUAGE sql ROWS 10 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuchtype does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f7() RETURNS int LANGUAGE sql COST -1 SET work_mem = 'abc' AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"work_mem\": \"abc\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f8() RETURNS int LANGUAGE nosuchlang SET work_mem = 'abc' AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"work_mem\": \"abc\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f9() RETURNS int LANGUAGE nosuchlang SUPPORT nosuchsupport AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nosuchsupport(internal) does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f10() RETURNS int LANGUAGE sql SUPPORT nosuchsupport COST -1 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "COST must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f11(nosuchtype) RETURNS int LANGUAGE sql STRICT CALLED ON NULL INPUT AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f12(nosuchtype) RETURNS int LANGUAGE sql IMMUTABLE STABLE AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f13(nosuchtype) RETURNS int LANGUAGE sql COST 1 COST 2 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE pr1(nosuchtype) LANGUAGE sql SET work_mem = 'abc' AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"work_mem\": \"abc\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION g1() RETURNS int LANGUAGE sql COST 0 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "COST must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION g2() RETURNS SETOF int LANGUAGE sql ROWS 0 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "ROWS must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION g3() RETURNS int LANGUAGE sql ROWS 5 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "ROWS is not applicable when function does not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION g4() RETURNS SETOF int LANGUAGE sql COST 7 ROWS 42 AS 'select 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION g5() RETURNS int LANGUAGE sql COST 3.5 AS 'select 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION g6() RETURNS SETOF int LANGUAGE sql AS 'select 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION g7() RETURNS int LANGUAGE plpgsql AS $$ BEGIN RETURN 1; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE PROCEDURE p8() LANGUAGE sql COST 5 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE p9() LANGUAGE sql ROWS 5 AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT proname, procost, prorows FROM pg_proc WHERE pronamespace = 'f3'::regnamespace ORDER BY proname",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "proname",
+            "procost",
+            "prorows"
+          ],
+          "type_oids": [
+            19,
+            700,
+            700
+          ],
+          "rows": [
+            [
+              "g4",
+              "7",
+              "42"
+            ],
+            [
+              "g5",
+              "3.5",
+              "0"
+            ],
+            [
+              "g6",
+              "100",
+              "1000"
+            ],
+            [
+              "g7",
+              "100",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION g4() COST 9 ROWS 99",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION g5() ROWS 3",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "ROWS is not applicable when function does not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION g5() COST 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "COST must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION g5() COST 11",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION g6() ROWS 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "ROWS must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT proname, procost, prorows FROM pg_proc WHERE pronamespace = 'f3'::regnamespace ORDER BY proname",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "proname",
+            "procost",
+            "prorows"
+          ],
+          "type_oids": [
+            19,
+            700,
+            700
+          ],
+          "rows": [
+            [
+              "g4",
+              "9",
+              "99"
+            ],
+            [
+              "g5",
+              "11",
+              "0"
+            ],
+            [
+              "g6",
+              "100",
+              "1000"
+            ],
+            [
+              "g7",
+              "100",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE f3_user",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT CREATE, USAGE ON SCHEMA f3 TO f3_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE f3_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION u1(nosuchtype) RETURNS int LANGUAGE sql LEAKPROOF AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "only superuser can define a leakproof function",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION u2(nosuchtype) RETURNS int LANGUAGE sql SUPPORT pg_catalog.textlike_support AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be superuser to specify a support function",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION u6() RETURNS int LANGUAGE nosuchlang LEAKPROOF AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "language \"nosuchlang\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA f3 CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE f3_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA IF EXISTS f3c CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE IF EXISTS f3c_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA f3c",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path = f3c",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION a1() RETURNS int AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "no language specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a2(a int DEFAULT 1, b int) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "input parameters after one with a default value must also have defaults",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a3(a nosuchtype DEFAULT 1, b int) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuchtype does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a4(a int DEFAULT 1, b nosuchtype) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuchtype does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a5() RETURNS int LANGUAGE sql AS 'select 1', 'extra'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "only one AS item needed for language \"sql\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a7() RETURNS int LANGUAGE sql PARALLEL foo AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "parameter \"parallel\" must be SAFE, RESTRICTED, or UNSAFE",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a8() RETURNS int LANGUAGE sql SUPPORT nosuchsupport PARALLEL foo AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nosuchsupport(internal) does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a9() RETURNS int LANGUAGE sql PARALLEL foo SET work_mem = 'abc' AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"work_mem\": \"abc\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a10() RETURNS int LANGUAGE sql AS 'select 1' RETURN 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "duplicate function body specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a11() RETURNS int LANGUAGE sql LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a12() RETURNS int LANGUAGE sql AS 'select 1' AS 'select 2'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a13() RETURNS int LANGUAGE plpgsql AS 'begin return 1; end', 'x'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "only one AS item needed for language \"plpgsql\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a14(int, nosuchtype) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuchtype does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a15(int) RETURNS nosuchtype LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION a16(nosuchtype) RETURNS nosuchtype2 LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuchtype does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE b1() LANGUAGE sql STRICT AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE b2() LANGUAGE sql IMMUTABLE AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE b3() LANGUAGE sql LEAKPROOF AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE b4() LANGUAGE sql PARALLEL SAFE AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE b5() LANGUAGE sql SUPPORT nosuchsupport AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE b6() LANGUAGE sql WINDOW AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE b7() LANGUAGE sql SECURITY DEFINER SECURITY INVOKER AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE b8(nosuchtype) LANGUAGE sql STRICT AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION c1() RETURNS int LANGUAGE sql STRICT AS 'select 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION c1() STRICT CALLED ON NULL INPUT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() COST 5 COST 6",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() ROWS 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "ROWS is not applicable when function does not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() ROWS 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "ROWS must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() COST 0 ROWS 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "COST must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() ROWS 5 COST 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "COST must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() PARALLEL foo",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "parameter \"parallel\" must be SAFE, RESTRICTED, or UNSAFE",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() SUPPORT nosuchsupport COST 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "COST must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() SET work_mem = 'abc' COST 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "COST must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION nosuchfn() COST 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nosuchfn() does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE c2() LANGUAGE sql AS 'select 1'",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER PROCEDURE c2() STRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER PROCEDURE c2() COST 3",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "invalid attribute in procedure definition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER PROCEDURE c2() SECURITY DEFINER",
+      "command_tags": [
+        "ALTER PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT proname, prosecdef, procost, prorows FROM pg_proc WHERE pronamespace = 'f3c'::regnamespace ORDER BY proname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "proname",
+            "prosecdef",
+            "procost",
+            "prorows"
+          ],
+          "type_oids": [
+            19,
+            16,
+            700,
+            700
+          ],
+          "rows": [
+            [
+              "c1",
+              "f",
+              "100",
+              "0"
+            ],
+            [
+              "c2",
+              "t",
+              "100",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE f3c_user",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT USAGE ON SCHEMA f3c TO f3c_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE f3c_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION c1() COST 5 COST 6",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() LEAKPROOF COST 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION c1() OWNER TO f3c_user",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE f3c_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION c1() LEAKPROOF COST 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "only superuser can define a leakproof function",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() COST 0 LEAKPROOF",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "only superuser can define a leakproof function",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA f3c CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE f3c_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA IF EXISTS f3d CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA f3d",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path = f3d",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION t1(a int, OUT b int DEFAULT 1) LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "only input parameters can have default values",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE t2(a int DEFAULT 1, OUT b int) LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "procedure OUT parameters cannot appear after one with a default value",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE PROCEDURE t2b(a int DEFAULT 1, b int) LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "input parameters after one with a default value must also have defaults",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t3() RETURNS int LANGUAGE sql TRANSFORM FOR TYPE int AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "transform for type integer language \"sql\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t4() RETURNS int LANGUAGE sql TRANSFORM FOR TYPE nosuch AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t5(nosuch) RETURNS int LANGUAGE sql TRANSFORM FOR TYPE int AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "transform for type integer language \"sql\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t6() RETURNS int LANGUAGE sql TRANSFORM FOR TYPE int TRANSFORM FOR TYPE text AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t6b() RETURNS int LANGUAGE sql TRANSFORM FOR TYPE int[] AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "transform for type integer language \"sql\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t7() RETURNS int LANGUAGE plpgsql RETURN 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "inline SQL function body only valid for language SQL",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t8() RETURNS int LANGUAGE nosuchlang RETURN 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "language \"nosuchlang\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t9(nosuch) RETURNS int LANGUAGE sql",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuch does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t10() RETURNS int LANGUAGE sql AS 'select 1' ROWS 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "ROWS is not applicable when function does not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t11() RETURNS int LANGUAGE sql AS 'select 1', 'x' ROWS 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "only one AS item needed for language \"sql\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t13(x int) RETURNS pg_catalog.nosuch LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"pg_catalog.nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t13b(x pg_catalog.nosuch) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type pg_catalog.nosuch does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t14(x nosuch[3][4]) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuch[] does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t15(x int) RETURNS nosuch[3] LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch[]\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t16(x int) RETURNS SETOF nosuch[] LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch[]\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t17(x \"No Such\") RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type No Such does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t18(x int) RETURNS \"No Such\" LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"No Such\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t19(x int, VARIADIC y nosuch[]) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuch[] does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t20(OUT a int, OUT b nosuch) LANGUAGE sql AS 'select 1, 2'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuch does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t21(a int DEFAULT 1, b nosuch DEFAULT 2) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuch does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t22(a int DEFAULT 1, OUT b int, c int) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "input parameters after one with a default value must also have defaults",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t23(a int DEFAULT 1, OUT b int) LANGUAGE sql AS 'select 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION t24() RETURNS int LANGUAGE sql AS 'select 1' COST 1e-50",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "COST must be positive",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION t25() RETURNS int LANGUAGE sql AS 'select 1' COST 1e50",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION t26() RETURNS SETOF int LANGUAGE sql AS 'select 1' ROWS 2.5 COST 0.25",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT proname, procost, prorows FROM pg_proc WHERE pronamespace = 'f3d'::regnamespace ORDER BY proname",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "proname",
+            "procost",
+            "prorows"
+          ],
+          "type_oids": [
+            19,
+            700,
+            700
+          ],
+          "rows": [
+            [
+              "t23",
+              "100",
+              "0"
+            ],
+            [
+              "t25",
+              "Infinity",
+              "0"
+            ],
+            [
+              "t26",
+              "0.25",
+              "2.5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA f3d CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA IF EXISTS f3e CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE IF EXISTS f3e_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA f3e",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path = f3e",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE f3e_user",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT CREATE, USAGE ON SCHEMA f3e TO f3e_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION e1() RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION e1() RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42723",
+        "message": "function \"e1\" already exists with same argument types",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION f3e.e1() RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42723",
+        "message": "function \"e1\" already exists with same argument types",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION v1(VARIADIC a int, b nosuch) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "VARIADIC parameter must be an array",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION v2(VARIADIC a int[], b int) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "VARIADIC parameter must be the last input parameter",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION v3(VARIADIC a int[], b nosuch) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuch does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION n1(a int, a text) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "parameter name \"a\" used more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION n2(a int, a nosuch) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuch does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION n3(a nosuch, a int) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type nosuch does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION o1(OUT a int, b int) RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION o2(a int) RETURNS nosuch LANGUAGE sql STRICT STRICT AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting or redundant options",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SET ROLE f3e_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION u3(nosuchtype) RETURNS int LANGUAGE sql SET session_replication_role = replica AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied to set parameter \"session_replication_role\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION u4() RETURNS int LANGUAGE sql LEAKPROOF SET session_replication_role = replica AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied to set parameter \"session_replication_role\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION u5() RETURNS int LANGUAGE sql SUPPORT pg_catalog.textlike_support SET session_replication_role = replica AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied to set parameter \"session_replication_role\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION u6() RETURNS int LANGUAGE sql COST 0 SET session_replication_role = replica AS 'select 1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied to set parameter \"session_replication_role\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA f3e CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE f3e_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA IF EXISTS own CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE IF EXISTS own_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE IF EXISTS own_other",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE own_user",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE own_other",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA own",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT USAGE, CREATE ON SCHEMA own TO own_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path = own",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION c1() RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE PROCEDURE p1() LANGUAGE sql AS 'select 1'",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE own_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION c1() COST 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION own.c1() COST 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function own.c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER ROUTINE c1() COST 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of routine c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER PROCEDURE p1() SECURITY DEFINER",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of procedure p1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER ROUTINE p1() SECURITY DEFINER",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of routine p1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() RENAME TO c9",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION own.c1() RENAME TO c9",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER ROUTINE p1() RENAME TO p9",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function p1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER FUNCTION c1() OWNER TO own_other",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER ROUTINE own.p1() OWNER TO own_other",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function p1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP FUNCTION c1()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP FUNCTION own.c1()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function own.c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP PROCEDURE p1()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of procedure p1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION c1() RETURNS int LANGUAGE sql AS 'select 2'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION own.c1() RETURNS int LANGUAGE sql AS 'select 2'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function c1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE OR REPLACE PROCEDURE p1() LANGUAGE sql AS 'select 2'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function p1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA own CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE own_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE own_other",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA IF EXISTS dso CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE IF EXISTS dso_owner",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE IF EXISTS dso_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE dso_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE dso_user",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA dso AUTHORIZATION dso_owner",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT USAGE, CREATE ON SCHEMA dso TO dso_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path = dso",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE dso_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION f1() RETURNS int LANGUAGE sql AS 'select 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION f2() RETURNS int LANGUAGE sql AS 'select 2'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION f3() RETURNS int LANGUAGE sql AS 'select 3'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE dso_owner",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION f1()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION f2() COST 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function f2",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE dso_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION f2(), nosuch()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nosuch() does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP FUNCTION f3(), nosuch()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function f3",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP FUNCTION nosuch(), f3()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nosuch() does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP FUNCTION f2(), f3()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of function f3",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT proname FROM pg_proc WHERE pronamespace = 'dso'::regnamespace ORDER BY proname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "proname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "f2"
+            ],
+            [
+              "f3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA dso CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE dso_owner",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE dso_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

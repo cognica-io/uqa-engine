@@ -307,10 +307,14 @@ pub fn build_pg_proc(
                 int_value(uqa_sql::routines::security::bound_routine_owner(def)?.oid),
             ),
             ("prolang", int_value(0)),
-            ("procost", Value::Float(100.0)),
+            // `CreateFunction`'s defaults for SQL and PL/pgSQL routines without COST or ROWS.
+            ("procost", Value::Float(def.cost.map_or(100.0, f64::from))),
             (
                 "prorows",
-                Value::Float(if def.returns_set() { 1000.0 } else { 0.0 }),
+                Value::Float(
+                    def.rows
+                        .map_or_else(|| if def.returns_set() { 1000.0 } else { 0.0 }, f64::from),
+                ),
             ),
             ("provariadic", int_value(variadic_type_oid)),
             (

@@ -5,8 +5,8 @@
 //
 
 use super::{
-    Deserialize, Expr, FunctionParallel, RoutineAclEntry, RoutineConfigAction,
-    RoutineSecurityAttributes, Serialize, Statement,
+    Deserialize, Expr, FunctionParallel, RoutineAclEntry, RoutineAttributeClauses,
+    RoutineConfigAction, RoutineSecurityAttributes, Serialize, Statement,
 };
 
 /// Parameter mode of a `CREATE FUNCTION` / `CREATE PROCEDURE`
@@ -49,6 +49,9 @@ pub struct FunctionParam {
     /// Parsed relation and column identity for `%TYPE`; ordinary types have no reference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub type_reference: Option<RoutineColumnTypeReference>,
+    /// The type as the statement wrote it, as `TypeNameToString` spells it, which names a missing type until registration resolves the type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_type: Option<String>,
     pub mode: FunctionParamMode,
     /// `DEFAULT <expr>` for trailing input parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -170,6 +173,9 @@ pub struct CreateFunction {
     /// Parsed `%TYPE` identity for a scalar or set return declaration until registration resolves it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub return_type_reference: Option<RoutineColumnTypeReference>,
+    /// The declared result type as the statement wrote it, without SETOF, until registration resolves it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_written_type: Option<String>,
     /// Lower-cased language name (`plpgsql`, `sql`).
     pub language: String,
     pub body: FunctionBody,
@@ -198,12 +204,29 @@ pub struct CreateFunction {
     /// Optional planner support routine identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub support: Option<String>,
+    /// `COST`, the estimated execution cost in units of `cpu_operator_cost` that `pg_proc.procost` reports, a `float4` as `PostgreSQL` stores it; without one the language's default applies.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "super::routine_estimate"
+    )]
+    pub cost: Option<f32>,
+    /// `ROWS`, the estimated number of rows a set-returning routine returns, which `pg_proc.prorows` reports; without one the default applies.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "super::routine_estimate"
+    )]
+    pub rows: Option<f32>,
     /// Effective per-routine configuration as `name=value` pairs in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config: Vec<(String, String)>,
     /// Creation-time configuration actions awaiting engine/session resolution. Registration consumes this list before persistence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config_actions: Vec<RoutineConfigAction>,
+    /// The statement's attribute clauses in written order, which registration checks and consumes before persistence.
+    #[serde(default, skip_serializing_if = "RoutineAttributeClauses::is_empty")]
+    pub attribute_clauses: RoutineAttributeClauses,
     /// Explicit execution privileges, including the owner's revocable EXECUTE. `None` means the `PostgreSQL` default (PUBLIC and owner EXECUTE); ownership always retains implicit grant options.
     #[serde(default)]
     pub execute_acl: Option<Vec<RoutineAclEntry>>,

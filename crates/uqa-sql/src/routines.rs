@@ -6,6 +6,7 @@
 
 //! SQL routine definitions and static signature lookup contracts.
 
+pub mod attributes;
 pub mod body_parameters;
 pub mod body_validation;
 pub mod compilation;

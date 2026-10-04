@@ -256,12 +256,13 @@ The following compact ledger is the readable projection of the machine-readable 
 | `types.enum-declarations-and-values` | `M3` | `verified` |
 | `types.unknown-literal-coercion` | `M3` | `partial` |
 | `ddl.partition-bound-transformation` | `M3` | `partial` |
-| `dml.failing-row-details` | `M4` | `partial` |
+| `dml.failing-row-details` | `M4` | `verified` |
 | `query.window-frames` | `M1` | `verified` |
 | `aggregates.null-and-enum-inputs` | `M1` | `verified` |
 | `expressions.boolean-conditions` | `M1` | `verified` |
 | `expressions.interval-arithmetic` | `M1` | `verified` |
 | `routines.sql-standard-body-deparse` | `M1` | `verified` |
+| `routines.attribute-checks` | `M3` | `partial` |
 | `types.type-object-lifecycle` | `M3` | `verified` |
 | `catalog.object-dependencies` | `M3` | `partial` |
 | `catalog.creation-ordered-oids` | `M3` | `partial` |

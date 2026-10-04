@@ -42,7 +42,10 @@ pub fn routine_owner_identity(stmt: &AlterRoutineOwnerStmt) -> AlterRoutineStmt 
         leakproof: None,
         parallel: None,
         support: None,
+        cost: None,
+        rows: None,
         config_actions: Vec::new(),
+        attribute_clauses: crate::ast::RoutineAttributeClauses::default(),
     }
 }
 

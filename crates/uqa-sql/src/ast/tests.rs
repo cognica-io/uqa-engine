@@ -330,6 +330,7 @@ fn routine_identity_and_call_parameters_are_distinct() {
         name: name.into(),
         type_name: "integer".into(),
         type_reference: None,
+        written_type: None,
         mode,
         default: None,
     };
@@ -348,6 +349,7 @@ fn routine_identity_and_call_parameters_are_distinct() {
         ],
         returns: FunctionReturns::None,
         return_type_reference: None,
+        return_written_type: None,
         language: "sql".into(),
         body: FunctionBody::Statements(Vec::new()),
         sql_body_form: Some(crate::ast::SQLBodyForm::Atomic),
@@ -358,8 +360,11 @@ fn routine_identity_and_call_parameters_are_distinct() {
         security: RoutineSecurityAttributes::default(),
         parallel: FunctionParallel::Unsafe,
         support: None,
+        cost: None,
+        rows: None,
         config: Vec::new(),
         config_actions: Vec::new(),
+        attribute_clauses: crate::ast::RoutineAttributeClauses::default(),
         execute_acl: None,
     };
 

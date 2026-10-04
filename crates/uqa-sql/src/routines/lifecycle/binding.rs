@@ -8,9 +8,9 @@
 
 use super::{
     alter_routine_kind_matches, alter_routine_kind_name, ambiguous_routine_error,
-    ensure_routine_owner_as,
     names::{routine_lookup_keys, RoutineNameCatalog},
-    routine_signature_display, wrong_routine_kind_error, RoutineDropResolution, RoutineDropTarget,
+    require_routine_ownership, routine_signature_display, wrong_routine_kind_error,
+    RoutineDropResolution, RoutineDropTarget,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::{
@@ -24,12 +24,14 @@ use std::{
     sync::Arc,
 };
 
+/// Find the routines a DROP names, item by item as `RemoveObjects` does: each item's routine is looked up and then passed to `ensure_owner`, before the next item is looked up.
 pub fn resolve_sql_function_drop_targets(
     catalog: &dyn RoutineNameCatalog,
     types: &dyn crate::routines::declaration::RoutineTypeCatalog,
     stmt: &DropFunctionStmt,
     registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     kind: &'static str,
+    mut ensure_owner: impl FnMut(&SQLUserFunction, &DropFunctionItem) -> Result<(), SQLError>,
 ) -> Result<RoutineDropResolution, SQLError> {
     let mut resolution = RoutineDropResolution {
         targets: Vec::new(),
@@ -63,6 +65,7 @@ pub fn resolve_sql_function_drop_targets(
         )?;
         if let Some((key, position)) = target {
             let function = &registry[&key][position];
+            ensure_owner(function, item)?;
             let target = RoutineDropTarget {
                 object_id: function.def.object_id,
                 name: key,
@@ -231,39 +234,32 @@ const fn missing_routine_kind(kind: AlterRoutineKind) -> &'static str {
     }
 }
 
-pub fn ensure_routine_drop_owners(
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
-    targets: &[RoutineDropTarget],
+/// `RemoveObjects`' ownership check of a routine a DROP names: the owner of the routine's schema may drop it, and otherwise only its owner, reported by the command's kind and the name as written.
+pub fn ensure_routine_drop_owner(
+    catalog: &dyn RoutineNameCatalog,
+    function: &SQLUserFunction,
+    written: &str,
+    kind: &str,
     current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Result<(), SQLError> {
-    for target in targets {
-        let definition = registry
-            .get(&target.name)
-            .and_then(|overloads| {
-                overloads.iter().find(|function| {
-                    function.def.is_procedure == target.is_procedure
-                        && routine_signature_types(&function.def) == target.argument_types
-                })
-            })
-            .map(|function| &function.def)
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved {} {} disappeared before ownership validation",
-                    target.kind(),
-                    target.label()
-                ))
-            })?;
-        ensure_routine_owner_as(
-            definition,
-            role_inherits(
-                roles,
-                memberships,
-                current_user,
-                &crate::routines::security::bound_routine_owner(definition)?,
-            ),
-        )?;
+    let schema = uqa_core::RelationIdentity::from_legacy_name(&function.def.name)
+        .map_err(|error| SQLError::Internal(format!("resolve dropped routine schema: {error}")))?
+        .schema;
+    if catalog.schema_security(&schema).is_some_and(|security| {
+        role_inherits(roles, memberships, current_user, &security.role_owner)
+    }) {
+        return Ok(());
     }
-    Ok(())
+    require_routine_ownership(
+        kind,
+        written,
+        role_inherits(
+            roles,
+            memberships,
+            current_user,
+            &crate::routines::security::bound_routine_owner(&function.def)?,
+        ),
+    )
 }

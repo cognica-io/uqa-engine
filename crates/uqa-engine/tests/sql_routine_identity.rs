@@ -18,6 +18,8 @@ mod alter_routine;
 mod foreign_table_dependencies;
 #[path = "sql_routine_identity/polymorphic_variadic.rs"]
 mod polymorphic_variadic;
+#[path = "sql_routine_identity/routine_attributes.rs"]
+mod routine_attributes;
 #[path = "sql_routine_identity/routine_cascade.rs"]
 mod routine_cascade;
 #[path = "sql_routine_identity/routine_rename.rs"]

@@ -29,9 +29,13 @@ use uqa_sql::{
     ast::{AlterRoutineStmt, CreateFunction, FunctionBody, RoleAttribute},
     catalog::roles::role_inherits,
     routines::{
+        attributes,
         body_validation::{validate_sql_function_body, SQLBodyValidationContext},
         declaration::{resolve_alter_routine_identity_types, resolve_routine_type_references},
-        lifecycle::{binding::resolve_sql_routine_alter_target, ensure_routine_owner_as},
+        lifecycle::{
+            alter_routine_kind_name, binding::resolve_sql_routine_alter_target,
+            require_routine_ownership,
+        },
         registration::{self as analysis, RoutineSupportAuthority},
         resolution::RoutineOverloadContext,
         routine_signature_types, CompiledFunctionBody, RoutineBody, SQLUserFunction,
@@ -146,29 +150,33 @@ fn new_routine_oid(
         .map_err(|_| SQLError::Internal(format!("invalid routine OID {oid}")))
 }
 
-/// `CreateFunction` checks CREATE on the schema, the SUPPORT function and the superuser-only attributes before `interpret_function_parameter_list` resolves the argument types. The locked registration checks them again.
-fn validate_routine_creation_privileges(
+/// Check the statement as `CreateFunction` does, stage by stage: CREATE on the routine's schema; then, as `compute_function_attributes` interprets them, the attribute clauses in written order, the SET values, COST, ROWS, the SUPPORT function and PARALLEL; the language; LEAKPROOF; the transforms; the argument types with their defaults and the result type; the body; and whether ROWS applies. The locked registration checks the superuser-only attributes again.
+fn validate_routine_creation(
     context: &RoutineRegistrationContext<'_>,
-    def: &CreateFunction,
+    def: &mut CreateFunction,
     current_user: &uqa_sql::catalog::roles::RoleReference,
 ) -> Result<(), SQLError> {
     context.namespace.ensure_create(&def.name)?;
+    let clauses = std::mem::take(&mut def.attribute_clauses);
+    attributes::check_attribute_clauses(&clauses, def.is_procedure)?;
+    configuration::apply_routine_config_actions(context.configuration, def)?;
+    attributes::validate_cost(def.cost)?;
+    attributes::validate_rows(def.rows)?;
     if let Some(support) = def.support.as_deref() {
         analysis::validate_routine_support(context.support, support)?;
     }
+    attributes::validate_parallel(&clauses)?;
+    attributes::validate_routine_language(def)?;
     let current_user_is_superuser = current_user
         .role_definition(&context.catalog.roles.role_definitions())
         .is_some_and(|role| role.has(RoleAttribute::Superuser));
-    analysis::validate_routine_security_attributes(def, current_user_is_superuser)
-}
-
-/// Resolve the routine's type references and validate its configuration, and load its language's library, as `CreateFunction` does before it calls the language's validator.
-fn validate_routine_definition(
-    context: &RoutineRegistrationContext<'_>,
-    def: &mut CreateFunction,
-) -> Result<(), SQLError> {
-    resolve_routine_type_references(context.definition.compilation.analysis.types, def)?;
-    configuration::apply_routine_config_actions(context.configuration, def)?;
+    analysis::validate_routine_security_attributes(def, current_user_is_superuser)?;
+    let types = context.definition.compilation.analysis.types;
+    attributes::validate_transforms(types, def, &clauses)?;
+    resolve_routine_type_references(types, def)?;
+    attributes::validate_body_form(def, &clauses)?;
+    attributes::validate_rows_applicability(def.rows, def.returns_set())?;
+    attributes::reject_window_function(def, &clauses)?;
     if def.language == "plpgsql" {
         context.configuration.load_language_library(&def.language);
     }
@@ -195,8 +203,7 @@ pub fn register_sql_function(
     def.owner = Some(owner.identity());
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
-    validate_routine_creation_privileges(context, &def, &current_user)?;
-    validate_routine_definition(context, &mut def)?;
+    validate_routine_creation(context, &mut def, &current_user)?;
     let checks_bodies = checks_function_bodies(context.configuration)?;
     let bound = compile_catalog_bound_routine(
         &context.definition,
@@ -237,7 +244,6 @@ pub fn register_sql_function(
                 analysis::prepare_routine_replacement(
                     existing,
                     &mut def,
-                    &requested_name,
                     &current_user,
                     &roles,
                     &memberships,
@@ -351,8 +357,10 @@ pub fn alter_sql_routine(
                 "resolved ALTER routine target `{name}` changed before mutation"
             ))
         })?;
-    ensure_routine_owner_as(
-        &existing.def,
+    // `AlterFunction` names the routine by the statement's object kind and the name as written.
+    require_routine_ownership(
+        alter_routine_kind_name(stmt.kind),
+        &stmt.name,
         role_inherits(
             &roles,
             &memberships,

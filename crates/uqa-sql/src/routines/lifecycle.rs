@@ -135,8 +135,10 @@ pub fn alter_routine_kind_matches(kind: AlterRoutineKind, def: &CreateFunction) 
     }
 }
 
-pub fn ensure_routine_owner_as(
-    definition: &CreateFunction,
+/// `must be owner of <kind> <name>`, which `aclcheck_error` reports for a routine whose owner the current user is not; each command names the routine its own way.
+pub fn require_routine_ownership(
+    kind: &str,
+    name: &str,
     current_user_has_owner_privileges: bool,
 ) -> Result<(), SQLError> {
     if current_user_has_owner_privileges {
@@ -144,15 +146,7 @@ pub fn ensure_routine_owner_as(
     } else {
         Err(SQLError::Routine {
             sqlstate: "42501".into(),
-            message: format!(
-                "must be owner of {} {}",
-                if definition.is_procedure {
-                    "procedure"
-                } else {
-                    "function"
-                },
-                definition.name
-            ),
+            message: format!("must be owner of {kind} {name}"),
         })
     }
 }

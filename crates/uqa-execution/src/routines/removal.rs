@@ -12,15 +12,7 @@ mod publication;
 pub use context::RoutineRemovalContext;
 pub use publication::commit_routine_registry_drop;
 
-use std::{collections::BTreeMap, sync::Arc};
-use uqa_sql::{
-    ast::DropFunctionStmt,
-    routines::{
-        lifecycle::{binding as analysis_binding, RoutineDropTarget},
-        SQLUserFunction,
-    },
-    SQLError,
-};
+use uqa_sql::{ast::DropFunctionStmt, routines::lifecycle::binding as analysis_binding, SQLError};
 
 pub fn drop_sql_functions(
     context: &RoutineRemovalContext<'_>,
@@ -32,14 +24,27 @@ pub fn drop_sql_functions(
         "function"
     };
     let registry = context.registry.routine_snapshot();
+    let current_user = context.catalog.current_role();
     let resolution = analysis_binding::resolve_sql_function_drop_targets(
         context.names,
         context.bodies.compilation.analysis.types,
         statement,
         &registry,
         kind,
+        |function, item| {
+            let roles = context.roles.role_definitions();
+            let memberships = context.roles.role_memberships();
+            analysis_binding::ensure_routine_drop_owner(
+                context.names,
+                function,
+                &item.name,
+                kind,
+                &current_user,
+                &roles,
+                &memberships,
+            )
+        },
     )?;
-    ensure_routine_drop_owners(context, &registry, &resolution.targets)?;
     drop(registry);
     for notice in resolution.notices {
         context.notices.routine_drop_notice(notice);
@@ -61,23 +66,5 @@ pub fn drop_sql_functions(
                 .collect()
         },
         statement.cascade,
-    )
-}
-
-/// Resolve every target and dependency before acquiring the registry write lock. Dependency scans take table and view locks, so keeping them out of the registry critical section preserves the catalog lock order.
-pub fn ensure_routine_drop_owners(
-    context: &RoutineRemovalContext<'_>,
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
-    targets: &[RoutineDropTarget],
-) -> Result<(), SQLError> {
-    let current_user = context.catalog.current_role();
-    let roles = context.roles.role_definitions();
-    let memberships = context.roles.role_memberships();
-    analysis_binding::ensure_routine_drop_owners(
-        registry,
-        targets,
-        &current_user,
-        &roles,
-        &memberships,
     )
 }

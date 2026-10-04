@@ -21,8 +21,8 @@ use uqa_sql::{
         declaration::resolve_routine_identity_types,
         lifecycle::{
             binding::resolve_sql_routine_alter_target,
-            ensure_routine_owner_as,
             rename::{self as analysis, RoutineRenameTarget},
+            require_routine_ownership,
         },
         SQLUserFunction,
     },
@@ -125,8 +125,10 @@ fn resolve_routine_rename_target(
     let current_user = context.mutation.names.current_role();
     let roles = context.mutation.roles.role_definitions();
     let memberships = context.mutation.roles.role_memberships();
-    ensure_routine_owner_as(
-        &function.def,
+    // `AlterObjectRename_internal` names the routine as a function, by its catalog name.
+    require_routine_ownership(
+        "function",
+        &uqa_sql::routines::routine_local_name(&function.def.name)?,
         role_inherits(
             &roles,
             &memberships,

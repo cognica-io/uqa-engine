@@ -65,7 +65,7 @@ pub enum AlterRoutineKind {
 }
 
 /// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)] ...` with an optional exact declared input identity.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AlterRoutineStmt {
     pub kind: AlterRoutineKind,
     pub name: String,
@@ -85,8 +85,26 @@ pub struct AlterRoutineStmt {
     pub parallel: Option<FunctionParallel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub support: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "super::routine_estimate"
+    )]
+    pub cost: Option<f32>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "super::routine_estimate"
+    )]
+    pub rows: Option<f32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config_actions: Vec<RoutineConfigAction>,
+    /// The actions in written order, which `AlterFunction` checks once it has found the routine.
+    #[serde(
+        default,
+        skip_serializing_if = "super::RoutineAttributeClauses::is_empty"
+    )]
+    pub attribute_clauses: super::RoutineAttributeClauses,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

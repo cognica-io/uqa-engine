@@ -22,7 +22,7 @@ use uqa_sql::{
     catalog::security::ownership::OwnerChangeAuthority,
     routines::{
         declaration::resolve_alter_routine_identity_types,
-        lifecycle::{binding::resolve_sql_routine_alter_target, ensure_routine_owner_as},
+        lifecycle::{binding::resolve_sql_routine_alter_target, require_routine_ownership},
         security as analysis, SQLUserFunction,
     },
     SQLError,
@@ -74,8 +74,10 @@ pub fn alter_sql_routine_owner(
             if previous_owner == owner.identity() {
                 return Ok(None);
             }
-            ensure_routine_owner_as(
-                &existing.def,
+            // `AlterObjectOwner_internal` names the routine as a function, by its catalog name.
+            require_routine_ownership(
+                "function",
+                &uqa_sql::routines::routine_local_name(&existing.def.name)?,
                 role_inherits(roles, memberships, &current_user, &previous_owner),
             )?;
             require_set_role(roles, memberships, &current_user, new_owner)?;
