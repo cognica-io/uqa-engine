@@ -172,7 +172,7 @@ fn document_keys(
     Ok(keys)
 }
 
-fn validate_vector_ordinal_count(count: u64) -> StorageBackendResult<()> {
+pub(super) fn validate_vector_ordinal_count(count: u64) -> StorageBackendResult<()> {
     if count > u64::from(u32::MAX) + 1 {
         return Err(StorageBackendError::Other(
             "IVF vector ordinal exceeds the u32 index format".into(),

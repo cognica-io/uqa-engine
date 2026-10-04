@@ -15,9 +15,7 @@ use uqa_core::{
 };
 use uqa_storage::{mvcc::VersionError, read_control::StorageReadControl, KeyValueBatch};
 
-use super::{
-    blob_to_vector, decode_doc_id, validate_persisted_ordinal_sequence, SQLiteVectorIndex,
-};
+use super::{blob_to_vector, decode_doc_id, SQLiteVectorIndex};
 use crate::mvcc::native::{
     NativeRecordFamily as Family, NativeRecordIdentity, NativeRecordOwner, NativeSnapshot,
 };
@@ -28,8 +26,6 @@ mod guards;
 pub(super) mod identity;
 pub(in crate::vector_index) mod publication;
 pub(in crate::vector_index) mod records;
-
-type VectorRows = Vec<(DocId, u32, Vec<f32>)>;
 
 // Payload allocations are destroyed before either of their reservations, including on failed reads.
 pub(super) struct VectorBuffer<T> {
@@ -142,28 +138,6 @@ impl<'a> NativeVectorRead<'a> {
             index: self.index,
             owner: Some(owner),
         })
-    }
-
-    pub(super) fn vectors(&self) -> Result<Budgeted<VectorRows>> {
-        let mut output = VectorBuffer::new(self)?;
-        let (rows, payload) = (&mut output.rows, &mut output.payload);
-        if let Some(owner) = self.owner {
-            self.snapshot
-                .visit_rows(Family::Vectors, Some(owner), &[self.field()], |row| {
-                    let blob = blob(row[4])?;
-                    payload.grow(blob.len())?;
-                    rows.reserve(1)?;
-                    let vector = blob_to_vector(blob)?;
-                    self.index.validate_dimensions_sqlite(&vector)?;
-                    let ordinal = u32::try_from(integer(row[3])?).map_err(|_| {
-                        SQLiteError::StorageBackend("invalid native vector ordinal".into())
-                    })?;
-                    rows.push((decode_doc_id(integer(row[2])?)?, ordinal, vector))?;
-                    Ok(())
-                })?;
-        }
-        validate_persisted_ordinal_sequence(rows)?;
-        Ok(output.finish())
     }
 
     pub(super) fn count(&self) -> Result<usize> {

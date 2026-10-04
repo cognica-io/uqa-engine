@@ -32,7 +32,7 @@ pub enum IVFMutation<'a> {
 }
 
 impl IVFIndex {
-    /// Restore one validated physical generation under the caller's allowance. The returned index retains its reconstruction allowance until it is dropped.
+    /// Restore one validated physical generation under the caller's allowance. Reconstruction scratch is released before returning; the index retains its payload capacity and any later training output under the same allowance.
     pub fn restore_controlled(
         dimensions: u32,
         params: IVFIndexParams,
@@ -70,7 +70,7 @@ impl IVFIndex {
                 checked_product(vector.capacity(), size_of::<f32>())?,
             )?;
         }
-        let memory = control.memory().reserve(bytes)?;
+        let mut memory = control.memory().reserve(bytes)?;
         let index = Self::restore(
             dimensions,
             params.nlist,
@@ -80,7 +80,63 @@ impl IVFIndex {
             snapshot,
             Some(control),
         )?;
-        Ok(Budgeted::new(index, memory))
+        let retained = index.retained_bytes(control)?;
+        // Reconstruction admission covers the final index and its temporary maps and decoded inputs. The generation keeps its resident capacity bound after those temporary allocations are destroyed.
+        Ok(Budgeted::new(index, memory.split(retained)))
+    }
+
+    fn retained_bytes(&self, control: &StorageReadControl) -> StorageBackendResult<usize> {
+        let vectors = self.vectors.lock();
+        let mut bytes = checked_product(vectors.len(), size_of::<(VectorKey, StoredVector)>())?;
+        for vector in vectors.values() {
+            control.check()?;
+            for values in [&vector.raw_vector, &vector.vector] {
+                add_bytes(
+                    &mut bytes,
+                    checked_product(values.capacity(), size_of::<f32>())?,
+                )?;
+            }
+        }
+        let centroids = self.centroids.lock();
+        let clusters = centroids.len().max(self.nlist.min(vectors.len()));
+        let mut centroid_bytes = checked_product(centroids.capacity(), size_of::<Vec<f32>>())?;
+        for centroid in centroids.iter() {
+            control.check()?;
+            add_bytes(
+                &mut centroid_bytes,
+                checked_product(centroid.capacity(), size_of::<f32>())?,
+            )?;
+        }
+        let lists = self.inverted_lists.lock();
+        let mut list_bytes = checked_product(lists.capacity(), size_of::<Vec<VectorKey>>())?;
+        for list in lists.iter() {
+            control.check()?;
+            add_bytes(
+                &mut list_bytes,
+                checked_product(list.capacity(), size_of::<VectorKey>())?,
+            )?;
+        }
+        // Stale-query training can replace centroids and lists in this immutable corpus. Its temporary workspace is separate; the generation must still cover the new resident capacities after that workspace is released.
+        let coordinates = checked_product(
+            usize::try_from(self.dimensions).map_err(|_| MemoryError::SizeOverflow)?,
+            size_of::<f32>(),
+        )?;
+        let mut trained_centroids = checked_product(clusters, coordinates)?;
+        add_bytes(
+            &mut trained_centroids,
+            checked_product(clusters, size_of::<Vec<f32>>())?,
+        )?;
+        let mut trained_lists = checked_product(vectors.len(), 2 * size_of::<VectorKey>())?;
+        add_bytes(
+            &mut trained_lists,
+            checked_product(
+                clusters,
+                size_of::<Vec<VectorKey>>() + 4 * size_of::<VectorKey>(),
+            )?,
+        )?;
+        add_bytes(&mut bytes, centroid_bytes.max(trained_centroids))?;
+        add_bytes(&mut bytes, list_bytes.max(trained_lists))?;
+        Ok(bytes)
     }
 
     /// Compute an immutable metadata candidate without changing the supplied index. All private state and numerical scratch are reserved before cloning; the published snapshot owns a separate allowance.

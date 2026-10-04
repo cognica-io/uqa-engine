@@ -21,10 +21,12 @@ mod prepare;
 mod restore;
 mod search;
 mod snapshot;
+mod spill;
 mod state;
 mod training;
 
 pub use prepare::IVFMutation;
+pub use spill::{IVFPreparedMetadata, IVFRestoreBuilder};
 pub use state::IVFMetadataSnapshot;
 pub use state::{IVFIndex, IVFState};
 

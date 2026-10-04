@@ -51,24 +51,55 @@ pub(super) fn kmeans(
     iterations: usize,
     control: Option<&StorageReadControl>,
 ) -> StorageBackendResult<Vec<Vec<f32>>> {
-    if vectors.is_empty() || cluster_count == 0 {
+    kmeans_source(
+        vectors.len(),
+        cluster_count,
+        dimensions,
+        iterations,
+        control,
+        &mut |visitor| {
+            for (position, vector) in vectors.iter().enumerate() {
+                visitor(position, vector)?;
+            }
+            Ok(())
+        },
+    )
+}
+
+type VectorVisitor<'a> = dyn FnMut(usize, &[f32]) -> StorageBackendResult<()> + 'a;
+type VectorSource<'a> = dyn FnMut(&mut VectorVisitor<'_>) -> StorageBackendResult<()> + 'a;
+
+pub(super) fn kmeans_source(
+    count: usize,
+    cluster_count: usize,
+    dimensions: usize,
+    iterations: usize,
+    control: Option<&StorageReadControl>,
+    source: &mut VectorSource<'_>,
+) -> StorageBackendResult<Vec<Vec<f32>>> {
+    if count == 0 || cluster_count == 0 {
         return Ok(Vec::new());
     }
-    let stride = (vectors.len() / cluster_count).max(1);
-    let mut centroids = (0..cluster_count)
-        .map(|index| vectors[(index * stride) % vectors.len()].clone())
-        .collect::<Vec<_>>();
+    let stride = (count / cluster_count).max(1);
+    let mut centroids = Vec::with_capacity(cluster_count);
+    source(&mut |position, vector| {
+        if centroids.len() < cluster_count && position == centroids.len() * stride {
+            centroids.push(vector.to_vec());
+        }
+        Ok(())
+    })?;
     for _ in 0..iterations {
         check(control)?;
         let mut sums = vec![vec![0.0; dimensions]; cluster_count];
         let mut counts = vec![0_usize; cluster_count];
-        for vector in vectors {
+        source(&mut |_, vector| {
             let cluster = nearest_centroid_controlled(vector, &centroids, control)?;
             for (sum, value) in sums[cluster].iter_mut().zip(vector) {
                 *sum += value;
             }
             counts[cluster] += 1;
-        }
+            Ok(())
+        })?;
         for (cluster, centroid) in centroids.iter_mut().enumerate() {
             check(control)?;
             if counts[cluster] == 0 {

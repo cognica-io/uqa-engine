@@ -217,3 +217,116 @@ fn decoded_run_cache_ends_with_active_readers_not_retained_roots() {
     drop(cursor);
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn pressured_run_reads_stream_entries_without_admitting_complete_blocks() {
+    let control = StorageReadControl::with_limit(256 * 1024);
+    let (run, identities) = run(600, &control);
+    assert!(run.blocks.len() > 1);
+    let path = run.entries.path().to_path_buf();
+    let run = Arc::new(run);
+    let used = control.memory().used();
+    let pressure = control
+        .memory()
+        .reserve(control.memory().limit() - used - 2048)
+        .unwrap();
+    let baseline = control.memory().used();
+    assert!(matches!(
+        super::reader::EntryReader::new(&run, 0, &control).unwrap(),
+        super::reader::EntryReader::Streaming(_)
+    ));
+    let entry = run.get(&key(700), &control).unwrap().unwrap();
+    assert_eq!(entry.expected, expected(700));
+    assert_eq!(entry.identity, identities[350]);
+    assert_eq!(entry.kind.code(), RecordWriteKind::Canonical.code());
+    assert!(entry.value.is_none());
+    drop(entry);
+    assert!(run.get(&key(701), &control).unwrap().is_none());
+    assert_eq!(
+        run.last_before(Bound::Excluded(&key(700)), &control)
+            .unwrap()
+            .unwrap()
+            .key
+            .bytes(),
+        key(698)
+    );
+
+    let start = key(601);
+    let mut cursor = run.cursor(Bound::Excluded(&start));
+    control.cancellation().cancel();
+    assert!(cursor.next(&control).is_err());
+    control.cancellation().reset();
+    for index in (602..1200).step_by(2) {
+        let entry = cursor.next(&control).unwrap().unwrap();
+        assert_eq!(entry.key.bytes(), key(index));
+        assert_eq!(entry.expected, expected(index));
+        assert_eq!(entry.identity, identities[index / 2]);
+        if let Some(location) = entry.value {
+            let bytes = run.load_value(location, &control).unwrap();
+            assert_eq!(&bytes[..], value(index).unwrap());
+        }
+    }
+    assert!(cursor.next(&control).unwrap().is_none());
+    assert_eq!(control.memory().used(), baseline);
+    drop(cursor);
+    assert!(control.memory().peak() <= control.memory().limit());
+    drop((pressure, run));
+    assert_eq!(control.memory().used(), 0);
+    assert!(!path.exists());
+}
+
+#[test]
+fn cached_and_streamed_entries_preserve_metadata_and_corruption_errors() {
+    use super::entry::{self, ValueLocation};
+    let control = StorageReadControl::with_limit(2048);
+    for code in 0..=11 {
+        for expected in [None, Some(CommitSequence::from_u64(u64::MAX))] {
+            for value in [
+                None,
+                Some(ValueLocation {
+                    offset: u64::MAX - 8,
+                    len: 8,
+                }),
+            ] {
+                let mut bytes = Vec::new();
+                entry::encode(
+                    &mut bytes,
+                    b"key",
+                    expected,
+                    RecordWriteKind::from_code(code).unwrap(),
+                    PrivateRecordRevision::for_tests(),
+                    value,
+                )
+                .unwrap();
+                let raw = entry::decode(&bytes, &mut 0).unwrap();
+                let read = |mut bytes: &[u8]| {
+                    let mut remaining = bytes.len() as u64;
+                    entry::read(&mut bytes, &mut remaining, &control)
+                };
+                let streamed = read(&bytes).unwrap();
+                assert_eq!(streamed.key.bytes(), raw.key);
+                assert_eq!(streamed.expected, raw.expected);
+                assert_eq!(streamed.kind.code(), raw.kind.code());
+                assert_eq!(streamed.identity, raw.identity);
+                assert_eq!(streamed.value, raw.value);
+                drop(streamed);
+                for length in 0..bytes.len() {
+                    assert_eq!(
+                        entry::decode(&bytes[..length], &mut 0)
+                            .err()
+                            .unwrap()
+                            .to_string(),
+                        read(&bytes[..length]).err().unwrap().to_string()
+                    );
+                }
+                let mut bad_flags = bytes.clone();
+                bad_flags[7] = 4;
+                assert_eq!(
+                    entry::decode(&bad_flags, &mut 0).err().unwrap().to_string(),
+                    read(&bad_flags).err().unwrap().to_string()
+                );
+            }
+        }
+    }
+    assert_eq!(control.memory().used(), 0);
+}
