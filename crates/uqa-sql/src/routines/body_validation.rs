@@ -7,13 +7,20 @@
 //! The body checks of `PostgreSQL`'s SQL-language validator, `fmgr_sql_validator`, which also hold when a body runs: each statement is analyzed against the catalog before it runs, a reference to a parameter the routine lacks is an error, a `CALL` of a procedure with output arguments is rejected, and the final statement is checked against the declared result.
 
 use super::{
-    call::ProcedureCallAnalysis, compilation::RoutineCompilationContext,
-    declaration::RoutineTypeCatalog, resolution::RoutineOverloadContext,
-    result_check::check_sql_function_result, CompiledFunctionBody,
+    body_parameters::{sql_body_parameter_scope, sql_body_parameters},
+    call::ProcedureCallAnalysis,
+    compilation::RoutineCompilationContext,
+    declaration::RoutineTypeCatalog,
+    resolution::RoutineOverloadContext,
+    result_check::check_sql_function_result,
+    CompiledFunctionBody,
 };
 use crate::{
-    ast::{ColumnType, CreateFunction},
-    binding::statements::{analyze_plan_result, AnalyzedResult, StatementBindingScope},
+    ast::{ColumnType, CreateFunction, FunctionBody},
+    binding::{
+        bind_routine_parameter_references,
+        statements::{analyze_plan_result, AnalyzedResult, StatementBindingScope},
+    },
     plan::{CommandPlan, ExpressionPlan, UnifiedPlan},
     type_resolution::routine_polymorphic_type,
     SQLError, SQLParam, ScalarExpr,
@@ -49,9 +56,22 @@ pub fn validate_sql_function_body(
     }
     let params = routine_parameter_values(context.compilation.types, def);
     let scope = context.compilation.catalog.binding_snapshot()?;
+    // A SQL-standard body resolved its parameter names when it was compiled.
+    let parameters = matches!(def.body, FunctionBody::Source(_))
+        .then(|| sql_body_parameter_scope(def, &params))
+        .transpose()?;
     let mut last = None;
     for plan in plans {
         let mut statement = plan.clone();
+        if let Some(parameters) = &parameters {
+            bind_routine_parameter_references(
+                context.compilation.routines,
+                &mut statement,
+                &params,
+                &scope.context(),
+                parameters,
+            )?;
+        }
         reject_undefined_parameters(&mut statement, params.len())?;
         last = Some(analyze_body_statement(
             context, &statement, &params, &scope,
@@ -135,13 +155,13 @@ pub fn reject_undefined_parameters(
     }
 }
 
-/// Typed placeholders for the routine's call parameters, against which analysis types references to them.
+/// Typed placeholders for the parameters the body names, against which analysis types references to them.
 #[must_use]
 pub fn routine_parameter_values(
     types: &dyn RoutineTypeCatalog,
     def: &CreateFunction,
 ) -> Vec<SQLParam> {
-    def.call_params()
+    sql_body_parameters(def)
         .iter()
         .map(|parameter| {
             match types

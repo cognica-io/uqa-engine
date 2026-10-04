@@ -16,6 +16,8 @@ mod sql_datetime_functions;
 mod sql_expr_evaluator;
 #[path = "sql_function_bodies.rs"]
 mod sql_function_bodies;
+#[path = "sql_function_parameters.rs"]
+mod sql_function_parameters;
 #[path = "sql_json.rs"]
 mod sql_json;
 #[path = "sql_plpgsql.rs"]

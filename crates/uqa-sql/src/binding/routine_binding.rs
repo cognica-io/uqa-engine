@@ -8,9 +8,9 @@
 
 use super::{
     cte_references_own_name, extend_cte_generated_schema, extend_recursive_cte_binding_schema,
-    operator_join_relation_schemas, overlay_outer_schema, rename_schema, BindingContext,
-    ColumnType, QueryPlan, RelationalPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope,
-    SourcePlan,
+    operator_join_relation_schemas, overlay_outer_schema, projection_columns, rename_schema,
+    BindingContext, ColumnType, QueryPlan, RelationalPlan, RowSchema, SQLError, SQLParam,
+    ScalarExpr, SchemaScope, SourcePlan,
 };
 use crate::ast::FunctionBinding;
 use crate::plan::ExpressionPlan;
@@ -96,37 +96,11 @@ impl SchemaScope {
                 outer,
             );
         };
-        let previous = match command.ctes_mut() {
-            Some(ctes) => self.bind_cte_routine_schemas(routines, ctes, params, None)?,
-            None => Vec::new(),
-        };
-        let result = (|| {
-            let (_, expression) = self.command_expression_schema(routines, command, params)?;
-            let subqueries = command.scalar_subqueries().to_vec();
-            if let Some(source) = command.source_input_mut() {
-                self.bind_source_routines_for_storage(routines, source, &subqueries, params, None)?;
-            }
-            for query in command.query_inputs_mut() {
-                self.bind_query_routines_for_storage(routines, query, params, Some(&expression))?;
-            }
-            let subqueries = command.scalar_subqueries().to_vec();
-            for scalar in command.expressions_mut() {
-                self.bind_scalar_routines_for_storage(
-                    routines,
-                    scalar,
-                    &expression,
-                    &subqueries,
-                    params,
-                    None,
-                )?;
-            }
-            self.bind_command_returning(routines, command, params)
-        })();
-        self.restore_cte_schemas(previous);
-        result
+        self.bind_command_routines_for_storage(routines, command, params, outer)?;
+        self.bind_command_returning(routines, command, params)
     }
 
-    fn bind_cte_routine_schemas(
+    pub(super) fn bind_cte_routine_schemas(
         &mut self,
         routines: &dyn RoutineResolution,
         ctes: &mut [crate::plan::CtePlan],
@@ -216,7 +190,7 @@ impl SchemaScope {
         Ok(previous)
     }
 
-    fn bind_query_routines_for_storage(
+    pub(super) fn bind_query_routines_for_storage(
         &mut self,
         routines: &dyn RoutineResolution,
         plan: &mut QueryPlan,
@@ -344,6 +318,7 @@ impl SchemaScope {
                     routines,
                     block,
                     &source_schema,
+                    None,
                     params,
                 )?;
                 for expression in &mut block.group_by {
@@ -378,7 +353,16 @@ impl SchemaScope {
                         outer,
                     )?;
                 }
+                // A bare name in ORDER BY or DISTINCT ON names an output column before any input column or parameter, as `findTargetlistEntrySQL92` resolves it.
+                let output_names = projection_columns(&block.projections);
+                let names_output = |expression: &ScalarExpr| match expression {
+                    ScalarExpr::Column(name) => output_names.contains(name),
+                    _ => false,
+                };
                 for order in &mut block.order_by {
+                    if names_output(&order.expr) {
+                        continue;
+                    }
                     self.bind_scalar_routines_for_storage(
                         routines,
                         &mut order.expr,
@@ -409,6 +393,9 @@ impl SchemaScope {
                     )?;
                 }
                 for expression in &mut block.distinct_on {
+                    if names_output(expression) {
+                        continue;
+                    }
                     self.bind_scalar_routines_for_storage(
                         routines,
                         expression,
@@ -426,9 +413,13 @@ impl SchemaScope {
                 subqueries,
                 ..
             } => {
-                let output = set_output
-                    .as_ref()
-                    .expect("set-operation output schema was bound before routine expressions");
+                let output = overlay_outer_schema(
+                    set_output
+                        .as_ref()
+                        .expect("set-operation output schema was bound before routine expressions"),
+                    outer,
+                );
+                let output = &output;
                 for order in order_by {
                     self.bind_scalar_routines_for_storage(
                         routines,
@@ -466,7 +457,7 @@ impl SchemaScope {
         clippy::too_many_lines,
         reason = "preserves SELECT schema and row identity"
     )]
-    fn bind_source_routines_for_storage(
+    pub(super) fn bind_source_routines_for_storage(
         &mut self,
         engine: &dyn RoutineResolution,
         source: &mut SourcePlan,
@@ -590,7 +581,7 @@ impl SchemaScope {
         }
     }
 
-    fn bind_scalar_routines_for_storage(
+    pub(super) fn bind_scalar_routines_for_storage(
         &mut self,
         engine: &dyn RoutineResolution,
         expression: &mut ScalarExpr,
@@ -602,6 +593,10 @@ impl SchemaScope {
         let schema = self.with_stored_outer_internal_aliases(schema);
         let schema = &schema;
         self.canonicalize_stored_outer_columns(expression, schema);
+        self.canonicalize_routine_parameters(expression, schema);
+        if !self.binds_routine_identities {
+            return Ok(());
+        }
         let mut failure = None;
         crate::plan::rewrite_scalar_expression(expression, &mut |expression| {
             if failure.is_some() {

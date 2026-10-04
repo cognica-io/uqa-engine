@@ -181,13 +181,24 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         !stmt.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
     scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
-    if let Some(from) = stmt.from.as_mut() {
-        crate::query::binding::bind_source_plan_schema_for_execution(
+    let own_schema = match stmt.from.as_mut() {
+        Some(from) => crate::query::binding::bind_source_plan_schema_for_execution(
             context.ctes.routines,
             from,
             params,
             &scoped_ctes,
             Some(&outer_row.schema),
+        )?,
+        None => crate::RowSchema::default(),
+    };
+    // The operator of a lateral block also holds its outer row, whose columns must not take a GROUP BY name before an output column, so the names are bound against the block's own columns first.
+    if matches!(stmt.compute, ComputePlan::Aggregate) {
+        uqa_sql::semantics::grouping_sets::bind_grouping_names(
+            context.ctes.routines,
+            &mut stmt,
+            &own_schema,
+            None,
+            params,
         )?;
     }
     let stmt = &stmt;
@@ -230,6 +241,7 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         operator.row_schema(),
         params,
         &scoped_ctes,
+        Some(&outer_row.schema),
     )?;
     uqa_sql::semantics::sets::validation::validate_query_set_contexts(
         context.relational.catalog,

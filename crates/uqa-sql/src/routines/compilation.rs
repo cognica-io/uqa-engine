@@ -12,10 +12,10 @@ use super::{
         validate_routine_declaration, RoutineTypeCatalog,
     },
     merge_columns::StoredMergeColumnCatalog,
-    routine_local_name, CompiledFunctionBody, RoutineResolution,
+    CompiledFunctionBody, RoutineResolution,
 };
 use crate::{
-    ast::{ColumnType, CreateFunction, FunctionBody, FunctionReturns, Statement},
+    ast::{CreateFunction, FunctionBody, FunctionReturns, Statement},
     binding::{
         snapshot::BindingSnapshot,
         stored_relations::{
@@ -202,35 +202,9 @@ fn compile_sql_routine_plans(
     persisted_definition: bool,
     preserve_target_expressions: bool,
 ) -> Result<Vec<UnifiedPlan>, SQLError> {
-    let local_name = routine_local_name(&def.name)?;
-    let signature_params = def.signature_params();
-    let parameter_names: Vec<String> = signature_params
-        .iter()
-        .map(|parameter| parameter.name.clone())
-        .collect();
-    let parameter_types = signature_params
-        .iter()
-        .map(|parameter| {
-            context
-                .types
-                .resolve_catalog_column_type(&parameter.type_name)
-                .or_else(|| ColumnType::from_sql_name(&parameter.type_name).ok())
-        })
-        .collect::<Vec<_>>();
-    let positional_parameters = parameter_types
-        .iter()
-        .map(|parameter_type| match parameter_type {
-            Some(parameter_type) => {
-                crate::SQLParam::typed_scalar(uqa_core::Value::Null, parameter_type.clone())
-            }
-            None => crate::SQLParam::scalar(uqa_core::Value::Null),
-        })
-        .collect::<Vec<_>>();
-    let parameter_scope = crate::RowSchema::with_qualified_types(
-        &local_name,
-        parameter_names.clone(),
-        parameter_types,
-    );
+    let positional_parameters =
+        super::body_validation::routine_parameter_values(context.types, def);
+    let parameters = super::body_parameters::sql_body_parameter_scope(def, &positional_parameters)?;
     statements
         .into_iter()
         .map(|mut statement| {
@@ -251,6 +225,7 @@ fn compile_sql_routine_plans(
                     crate::ast::FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
                 });
             }
+            // A SQL-standard body is analyzed when the routine is defined, so its names resolve against the catalog of that moment, as `PostgreSQL` stores the analyzed statements. A body given as a string keeps its names until each statement is analyzed before it runs.
             if bind_catalog_dependencies {
                 match &mut plan {
                     UnifiedPlan::Query(query) => {
@@ -267,14 +242,6 @@ fn compile_sql_routine_plans(
                             false,
                             persisted_definition,
                         )?;
-                        let binding = context.catalog.binding_snapshot()?;
-                        crate::binding::bind_query_plan_routines_for_storage(
-                            context.routines,
-                            query,
-                            &positional_parameters,
-                            &binding.context(),
-                            Some(&parameter_scope),
-                        )?;
                     }
                     UnifiedPlan::Command(_) => {
                         crate::binding::stored_routines::mark_catalog_statement_relations_bound(
@@ -282,23 +249,24 @@ fn compile_sql_routine_plans(
                         )?;
                     }
                 }
-            }
-            plan.rewrite_scalar_expressions(&mut |expression| {
-                let parameter = match expression {
-                    ScalarExpr::Column(name) => parameter_names
-                        .iter()
-                        .position(|parameter| !parameter.is_empty() && parameter == name),
-                    ScalarExpr::QualifiedColumn {
-                        qualifier, column, ..
-                    } if qualifier == &local_name => parameter_names
-                        .iter()
-                        .position(|parameter| !parameter.is_empty() && parameter == column),
-                    _ => None,
-                };
-                if let Some(position) = parameter {
-                    *expression = ScalarExpr::Param(position + 1);
+                let binding = context.catalog.binding_snapshot()?;
+                crate::binding::bind_routine_parameter_references(
+                    context.routines,
+                    &mut plan,
+                    &positional_parameters,
+                    &binding.context(),
+                    &parameters,
+                )?;
+                if let UnifiedPlan::Query(query) = &mut plan {
+                    crate::binding::bind_query_plan_routines_for_storage(
+                        context.routines,
+                        query,
+                        &positional_parameters,
+                        &binding.context(),
+                        None,
+                    )?;
                 }
-            });
+            }
             // Stored definitions retain their analyzed logical expressions;
             // immutable evaluation belongs to invocation planning.
             Ok(plan)

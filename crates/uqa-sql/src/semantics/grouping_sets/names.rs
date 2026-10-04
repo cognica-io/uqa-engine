@@ -12,17 +12,18 @@ use crate::plan::{ProjectionPlan, QueryBlockPlan};
 use crate::routines::RoutineResolution;
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 
-/// An unqualified input column wins even when its lookup is ambiguous. Output names are considered only for a whole bare name, never inside an expression.
+/// An unqualified input column wins even when its lookup is ambiguous. Output names are considered only for a whole bare name, never inside an expression. `schema` holds the query's own columns over `outer`, the scope of the queries that enclose it, whose columns do not take a name before an output column.
 pub fn resolve_grouping_expression<'a>(
     routines: &dyn RoutineResolution,
     expression: &'a ScalarExpr,
     projections: &'a [ProjectionPlan],
     schema: &RowSchema,
+    outer: Option<&RowSchema>,
     params: &[SQLParam],
 ) -> Result<Cow<'a, ScalarExpr>, SQLError> {
     let mut resolved = expression;
     if let ScalarExpr::Column(name) = expression {
-        if !schema.has_unqualified_column(name) {
+        if !is_input_column(schema, outer, name) {
             let mut matches = projections
                 .iter()
                 .filter(|projection| crate::semantics::projection_label_at(projection) == *name);
@@ -70,11 +71,26 @@ pub fn resolve_grouping_expression<'a>(
     })
 }
 
+/// Whether `name` is a column of the query's own sources, ambiguous or not, in `schema`, which holds those columns over `outer`: `findTargetlistEntrySQL92` looks for a GROUP BY name among the columns of the query's own level only.
+fn is_input_column(schema: &RowSchema, outer: Option<&RowSchema>, name: &str) -> bool {
+    if !schema.has_unqualified_column(name) {
+        return false;
+    }
+    let Some(outer) = outer else {
+        return true;
+    };
+    let own_width = schema
+        .physical_width()
+        .saturating_sub(outer.physical_width());
+    schema.column_slot(name).is_none_or(|slot| slot < own_width)
+}
+
 /// Bind grouping expressions before storing a query or executing its aggregation. Returns whether an output name was replaced.
 pub fn bind_grouping_names(
     routines: &dyn RoutineResolution,
     statement: &mut QueryBlockPlan,
     schema: &RowSchema,
+    outer: Option<&RowSchema>,
     params: &[SQLParam],
 ) -> Result<bool, SQLError> {
     let mut changed = false;
@@ -88,6 +104,7 @@ pub fn bind_grouping_names(
             expression,
             &statement.projections,
             schema,
+            outer,
             params,
         )? {
             *expression = resolved;

@@ -73,6 +73,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
             &expression_schema,
             params,
             ctes,
+            outer.as_ref(),
         )?;
         return run_select_without_from_output(context, block, stmt, params, ctes, output_mode);
     };
@@ -114,6 +115,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                     &expression_schema,
                     params,
                     ctes,
+                    outer.as_ref(),
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_foreign_select_output(
@@ -178,6 +180,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                     &reference_schema,
                     params,
                     ctes,
+                    outer.as_ref(),
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_table_select_output(
@@ -220,6 +223,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
             &expression_schema,
             params,
             ctes,
+            outer.as_ref(),
         )?;
     }
     let column_prune = context.planning.column_prune(stmt, from, ctes)?;
@@ -253,6 +257,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
         &projection_schema,
         params,
         ctes,
+        outer.as_ref(),
     )?;
     let physical_filter =
         context

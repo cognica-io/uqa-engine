@@ -270,7 +270,11 @@ IMMUTABLE;
 SELECT add_tax(100.00, 0.10);
 ```
 
-SQL functions can return scalar, `SETOF`, or `TABLE` results according to their declaration. Positional parameters and named parameters are resolved by the routine compiler. SQL-standard `RETURN expression` and `BEGIN ATOMIC ... END` bodies are also implemented for supported statement shapes.
+SQL functions can return scalar, `SETOF`, or `TABLE` results according to their declaration. SQL-standard `RETURN expression` and `BEGIN ATOMIC ... END` bodies are also implemented for supported statement shapes.
+
+### Parameter names
+
+A SQL body refers to the routine's input parameters by name or by position (`$1`), and resolves a name as PostgreSQL's parser does: the name is a parameter only when nothing the statement can see takes it. A column of a relation visible at that point, in the statement's own query or in an enclosing one, takes the name first, so `CREATE FUNCTION f(id int) RETURNS int LANGUAGE sql AS 'SELECT id FROM t'` returns the column; so does an output column that a bare name in `ORDER BY`, `DISTINCT ON` or `GROUP BY` names, and a relation of that name used as a whole-row value. The routine's own name qualifies a parameter that a column hides, as `f.id` does inside `f`, unless a relation in the statement takes that name and has the column. Each clause of a data-modifying statement sees what PostgreSQL's parser lets it see: the rows and the source query of an `INSERT` see no relation, its `ON CONFLICT` clauses and `RETURNING` list see the target, and `DO UPDATE` also sees `excluded`, so a name that both carry is ambiguous (`42702`); the clauses of `UPDATE` and `DELETE` see the target and their `FROM` or `USING` relations, which themselves do not see the target; and a `MERGE` action sees the target, the source or both as its `WHEN` clause allows. A body given as a string resolves the names of each statement when that statement is analyzed, just before it runs, so a column added after `CREATE FUNCTION` can take a name from a parameter; a SQL-standard body resolves its names when the routine is defined and keeps them across later changes to the tables it reads, including a restart. A procedure's output parameter takes a placeholder in `CALL` but is not a parameter of its body: its name reports `42703`, and a position beyond the input parameters reports `42P02`.
 
 ### Body validation
 

@@ -11,28 +11,33 @@ use super::{
 };
 use uqa_sql::{
     assignment::routines::coerce_routine_value_from,
+    ast::FunctionBody,
     binding::statements::AnalyzedResult,
     plan::{CommandPlan, UnifiedPlan},
     plpgsql::runtime_diagnostics::result_row_values,
     routines::{
+        body_parameters::{
+            is_sql_body_parameter, resolve_sql_body_parameters, sql_body_parameter_scope,
+        },
         body_validation::{reject_output_argument_call, reject_undefined_parameters},
-        declaration::RoutineTypeCatalog,
+        compilation::RoutineCompilationContext,
         resolution::RoutineOverloadContext,
         result_check::check_sql_function_result,
         routine_returns_anonymous_record,
     },
 };
 
-/// `LANGUAGE sql` body: run every statement, each analyzed just before it runs as `PostgreSQL` analyzes them, with the final statement checked against the declared result before it runs; the last statement's result shapes the routine output.
+/// `LANGUAGE sql` body: run every statement, each analyzed just before it runs as `PostgreSQL` analyzes them, with the final statement checked against the declared result before it runs; the last statement's result shapes the routine output. A body given as a string resolves the names of its parameters in each statement when that statement is analyzed.
 #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
 pub fn execute_sql_language(
     context: RoutineContext<'_>,
-    types: &dyn RoutineTypeCatalog,
+    compilation: &RoutineCompilationContext<'_>,
     overloads: &RoutineOverloadContext<'_>,
     def: &CreateFunction,
     plans: &[UnifiedPlan],
     bound: &[Value],
 ) -> Result<RoutineOutcome, SQLError> {
+    let types = compilation.types;
     let call_params = def.call_params();
     if call_params.len() != bound.len() {
         return Err(SQLError::Internal(format!(
@@ -46,6 +51,7 @@ pub fn execute_sql_language(
         .iter()
         .cloned()
         .zip(call_params)
+        .filter(|(_, parameter)| is_sql_body_parameter(parameter))
         .map(|(value, parameter)| {
             let ty = uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name)
                 .ok()
@@ -65,9 +71,15 @@ pub fn execute_sql_language(
     }
     let check_result =
         |result: &AnalyzedResult| check_sql_function_result(types, def, Some(result));
+    let parameters = matches!(def.body, FunctionBody::Source(_))
+        .then(|| sql_body_parameter_scope(def, &params))
+        .transpose()?;
     let mut last = SQLResult::empty();
     for (position, plan) in plans.iter().enumerate() {
         let mut statement = plan.clone();
+        if let Some(parameters) = &parameters {
+            resolve_sql_body_parameters(compilation, parameters, &mut statement, &params)?;
+        }
         reject_undefined_parameters(&mut statement, params.len())?;
         if let UnifiedPlan::Command(command) = &statement {
             if let CommandPlan::Call { name, args } = command.as_ref() {

@@ -34,7 +34,8 @@ pub fn prepare_grouping_sets(
     }
 
     let mut prepared = statement.clone();
-    let mut changed = bind_grouping_names(engine, &mut prepared, schema, params)?;
+    // A block's operator holds the block's own columns; a lateral block binds its output names against the scope of its outer row before it builds the operator.
+    let mut changed = bind_grouping_names(engine, &mut prepared, schema, None, params)?;
     changed |= expressions::bind_grouping_expressions(engine, &mut prepared, schema, params)?;
     if !prepared.group_distinct {
         return Ok(changed.then_some(prepared));

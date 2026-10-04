@@ -153,7 +153,7 @@ fn execute_sql_language(
 ) -> Result<RoutineOutcome, SQLError> {
     crate::routines::sql_body::execute_sql_language(
         context.runtime,
-        context.types,
+        &context.compilation,
         &context.overloads,
         definition,
         plans,
