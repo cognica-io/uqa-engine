@@ -31,7 +31,7 @@ Current milestone snapshot: complete — `M1` (Discovered semantic fixes), `M2` 
 
 ## Embedded runtime architecture
 
-UQA Engine does not yet implement PostgreSQL processes, the complete PostgreSQL network protocol, MVCC storage pages, the complete role-administration and non-routine object-privilege models, extensions, background workers, replication, WAL administration, or server configuration. The PostgreSQL wire, TCP server, and FDW crates are adapters around the engine. Every externally visible difference caused by this architecture remains an open compatibility bug rather than an accepted alternative behavior.
+UQA Engine does not yet implement PostgreSQL processes, the complete PostgreSQL network protocol, MVCC storage pages, the complete role-administration and non-routine object-privilege models, extensions, background workers, replication, WAL administration, or the complete server-configuration surface. The PostgreSQL wire, TCP server, and FDW crates are adapters around the engine. Every externally visible difference caused by this architecture remains an open compatibility bug rather than an accepted alternative behavior.
 
 Some declared SQL types share an internal runtime carrier, but scans and relational plans retain the declared `ColumnType`, integer writes and casts enforce `int2`/`int4`/`int8` ranges, source-sensitive OID/XID/bytea casts retain source width, and result schemas do not infer identity from values. Any remaining PostgreSQL 18 overflow, cast, storage, collation, binary-format, or display difference is an open compatibility bug.
 
