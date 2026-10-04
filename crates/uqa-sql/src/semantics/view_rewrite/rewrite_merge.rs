@@ -4,18 +4,62 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::updatability::merge_into_materialized_view;
 use super::{
-    add_check_option, automatic_view_layer, combine_view_predicate, display_relation,
-    dml_analysis_scope, duplicate_assignment, duplicate_insert_column, finalize_source_returning,
-    merge_action_capability_error, merge_matched_subquery_ids, merge_target_only_subquery_ids,
-    merge_view_target_path, not_automatically_updatable, returning_subquery_ids,
-    rewrite_correlated_dml_context, rewrite_existing_view_checks, rewrite_merge_returning,
-    rewrite_target_expression, validate_mapped_columns, validate_merge_expressions,
-    validate_merge_targets, validate_public_merge_contract, validate_public_merge_targets,
-    writable_column, BTreeSet, CorrelatedDmlContext, ExpressionScope, MergePlan,
-    MergeViewTargetPath, MergeWhenPlan, SQLError, StoredViewKind, ViewMutationCapabilities,
-    ViewRewriteContext,
+    add_check_option, automatic_view_layer, combine_view_predicate, dml_analysis_scope,
+    duplicate_assignment, duplicate_insert_column, finalize_source_returning,
+    merge_matched_subquery_ids, merge_target_only_subquery_ids, merge_view_target_path,
+    returning_subquery_ids, rewrite_correlated_dml_context, rewrite_existing_view_checks,
+    rewrite_merge_returning, rewrite_target_expression, validate_mapped_columns,
+    validate_merge_expressions, validate_merge_targets, validate_public_merge_contract,
+    validate_public_merge_targets, validate_writable_columns, writable_column, AutomaticViewLayer,
+    BTreeSet, ColumnWrite, CorrelatedDmlContext, ExpressionScope, LayerPrivileges, MergePlan,
+    MergeViewTargetPath, MergeWhenPlan, SQLError, StoredViewKind, ViewRewriteContext,
 };
+
+/// The layer of view `view` that a MERGE, for which `merge_view_target_path` chose the automatic rewrite, passes through.
+fn merge_layer(
+    services: ViewRewriteContext<'_>,
+    view: &str,
+) -> Result<AutomaticViewLayer, SQLError> {
+    automatic_view_layer(services, view)?.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "automatic MERGE rewrite selected for view `{view}`, which cannot be rewritten"
+        ))
+    })
+}
+
+/// The columns of `layer` that the actions of `plan` insert or update: those an `INSERT` names, or the leading columns, one for each value, and those an `UPDATE` sets.
+fn merge_modified_columns<'a>(layer: &'a AutomaticViewLayer, plan: &'a MergePlan) -> Vec<&'a str> {
+    let mut modified = Vec::new();
+    for clause in &plan.when_clauses {
+        match clause {
+            MergeWhenPlan::InsertNotMatched {
+                columns, values, ..
+            } => {
+                if columns.is_empty() {
+                    modified.extend(
+                        layer
+                            .columns
+                            .iter()
+                            .take(values.len())
+                            .map(|column| column.name.as_str()),
+                    );
+                } else {
+                    modified.extend(columns.iter().map(|target| target.column.as_str()));
+                }
+            }
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => modified.extend(
+                assignments
+                    .iter()
+                    .map(|assignment| assignment.target.column.as_str()),
+            ),
+            _ => {}
+        }
+    }
+    modified
+}
 
 #[expect(
     clippy::too_many_lines,
@@ -28,13 +72,7 @@ pub fn rewrite_merge_to_base(
     inherited_ctes: Option<&super::CteScope>,
 ) -> Result<MergePlan, SQLError> {
     if services.catalog.target_view_kind(&statement.target)? == Some(StoredViewKind::Materialized) {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: format!(
-                "cannot execute MERGE on relation \"{}\"",
-                display_relation(&statement.target)
-            ),
-        });
+        return Err(merge_into_materialized_view(&statement.target));
     }
     let analysis_scope = dml_analysis_scope(
         services,
@@ -56,14 +94,7 @@ pub fn rewrite_merge_to_base(
             "automatic MERGE rewrite selected for a view-trigger target".into(),
         ));
     }
-    let Some(initial_layer) = automatic_view_layer(services, &statement.target)? else {
-        return Err(merge_action_capability_error(
-            &statement.target,
-            &statement.when_clauses,
-            ViewMutationCapabilities::default(),
-        )
-        .unwrap_or_else(|| not_automatically_updatable(&statement.target, "MERGE")));
-    };
+    let initial_layer = merge_layer(services, &statement.target)?;
     validate_merge_targets(&initial_layer, statement)?;
     validate_merge_expressions(
         services,
@@ -73,18 +104,16 @@ pub fn rewrite_merge_to_base(
         params,
         inherited_ctes,
     )?;
-    if let Some(error) = merge_action_capability_error(
-        &statement.target,
-        &statement.when_clauses,
-        initial_layer.capabilities(),
-    ) {
-        return Err(error);
-    }
+    let mut initial_layer = Some(initial_layer);
 
     let mut plan = statement.clone();
-    let next_privilege_subject =
-        crate::semantics::view_privileges::ensure_merge(services.authorization, &plan)?;
-    plan.target_privilege_subject = Some(next_privilege_subject);
+    let mut privileges = LayerPrivileges::new();
+    plan.target_privilege_subject = Some(privileges.check(
+        services.authorization,
+        &plan.target,
+        plan.target_privilege_subject.as_ref(),
+        || crate::semantics::view_privileges::ensure_merge(services.authorization, &plan),
+    )?);
     let mut cascaded = false;
     let mut visited = BTreeSet::new();
     let mut source_star_boundaries = Vec::new();
@@ -94,13 +123,9 @@ pub fn rewrite_merge_to_base(
         {
             break;
         }
-        let Some(layer) = automatic_view_layer(services, &plan.target)? else {
-            return Err(merge_action_capability_error(
-                &plan.target,
-                &plan.when_clauses,
-                ViewMutationCapabilities::default(),
-            )
-            .unwrap_or_else(|| not_automatically_updatable(&plan.target, "MERGE")));
+        let layer = match initial_layer.take() {
+            Some(layer) => layer,
+            None => merge_layer(services, &plan.target)?,
         };
         if !visited.insert(layer.canonical_name.clone()) {
             return Err(SQLError::Internal(format!(
@@ -109,10 +134,18 @@ pub fn rewrite_merge_to_base(
             )));
         }
         validate_merge_targets(&layer, &plan)?;
+        validate_writable_columns(
+            &layer,
+            merge_modified_columns(&layer, &plan),
+            ColumnWrite::Merge,
+        )?;
         if visited.len() > 1 {
-            let next_privilege_subject =
-                crate::semantics::view_privileges::ensure_merge(services.authorization, &plan)?;
-            plan.target_privilege_subject = Some(next_privilege_subject);
+            plan.target_privilege_subject = Some(privileges.check(
+                services.authorization,
+                &plan.target,
+                plan.target_privilege_subject.as_ref(),
+                || crate::semantics::view_privileges::ensure_merge(services.authorization, &plan),
+            )?);
         }
 
         let matched_subqueries = merge_matched_subquery_ids(&plan);
@@ -215,7 +248,7 @@ pub fn rewrite_merge_to_base(
                             )?;
                         }
                         assignment.target.column =
-                            writable_column(&layer, &assignment.target.column, "MERGE INTO")?;
+                            writable_column(&layer, &assignment.target.column, ColumnWrite::Merge)?;
                     }
                     validate_mapped_columns(
                         &assignments
@@ -261,7 +294,7 @@ pub fn rewrite_merge_to_base(
                             )?;
                         }
                         assignment.target.column =
-                            writable_column(&layer, &assignment.target.column, "MERGE INTO")?;
+                            writable_column(&layer, &assignment.target.column, ColumnWrite::Merge)?;
                     }
                     validate_mapped_columns(
                         &assignments
@@ -299,7 +332,8 @@ pub fn rewrite_merge_to_base(
                     *columns = supplied_columns
                         .into_iter()
                         .map(|mut target| {
-                            target.column = writable_column(&layer, &target.column, "MERGE INTO")?;
+                            target.column =
+                                writable_column(&layer, &target.column, ColumnWrite::Merge)?;
                             Ok(target)
                         })
                         .collect::<Result<Vec<_>, SQLError>>()?;
@@ -356,5 +390,6 @@ pub fn rewrite_merge_to_base(
         Some(&source_schema),
         &source_star_boundaries,
     )?;
+    privileges.finish()?;
     Ok(plan)
 }

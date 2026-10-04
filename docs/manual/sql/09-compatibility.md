@@ -53,7 +53,7 @@ Regular and materialized views likewise persist their creating role as owner. `A
 - Table `USING` access methods
 - Cross-database relation or routine names
 - Temporary and unlogged materialized views, concurrent refresh, materialized-view indexes, access methods, and tablespaces
-- Complete optimizer effects for `security_barrier` and remaining automatic-updatability shapes involving CTE-backed definitions or other unverified query forms
+- Complete optimizer effects for `security_barrier`, and views with `TABLESAMPLE`, system columns other than `tableoid`, or whole-row columns
 - PostgreSQL's interruptible `DETACH PARTITION ... CONCURRENTLY` pending state, later `FINALIZE`, and complete multi-session lock-wait behavior
 - Remaining upstream inheritance and partition regression schedules, privilege behavior, dump/restore, and unsupported index-method interactions
 

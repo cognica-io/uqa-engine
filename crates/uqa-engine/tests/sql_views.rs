@@ -24,6 +24,8 @@ mod catalog_function_dispatch;
 mod column_aliases;
 #[path = "sql_views/definitions.rs"]
 mod definitions;
+#[path = "sql_views/updatability_diagnostics.rs"]
+mod updatability_diagnostics;
 
 struct CountCalls {
     calls: Arc<AtomicUsize>,

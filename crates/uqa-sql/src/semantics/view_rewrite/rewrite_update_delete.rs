@@ -5,17 +5,19 @@
 //
 
 use super::{
-    active_unconditional_instead_rule, add_check_option, automatic_view_layer,
-    bind_unqualified_source_positions, combine_view_predicate, delete_ordinary_subquery_ids,
-    dml_source_schema, dml_target_width, duplicate_assignment, finalize_source_returning,
-    instead_of_trigger_definition, not_automatically_updatable, preserve_view_rule_returning,
-    record_view_rule_relation, returning_subquery_ids, rewrite_correlated_dml_context,
+    add_check_option, bind_unqualified_source_positions, canonical_view_name,
+    combine_view_predicate, delete_ordinary_subquery_ids, dml_source_schema, dml_target_width,
+    duplicate_assignment, finalize_source_returning, instead_of_trigger_definition,
+    next_rewritten_layer, preserve_view_rule_returning, record_view_rule_relation,
+    returning_subquery_ids, rewritable_layer, rewrite_correlated_dml_context,
     rewrite_existing_view_checks, rewrite_returning, rewrite_target_expression,
     update_ordinary_subquery_ids, validate_delete_expressions, validate_direct_view_rule_path,
     validate_mapped_columns, validate_public_delete_contract, validate_public_update_contract,
     validate_public_view_targets, validate_update_expressions, validate_update_targets,
-    writable_column, AssignmentPlan, BTreeSet, CorrelatedDmlContext, DeletePlan, ExpressionScope,
-    SQLError, TriggerEvent, UpdatePlan, ViewRewriteContext, ViewRuleUpdatePlan,
+    validate_writable_columns, view_not_updatable, writable_column, AssignmentPlan, BTreeSet,
+    ColumnWrite, CorrelatedDmlContext, DeletePlan, ExpressionScope, LayerPrivileges,
+    NotUpdatableReason, SQLError, TriggerEvent, UpdatePlan, ViewCommand, ViewRewriteContext,
+    ViewRuleUpdatePlan,
 };
 
 #[expect(
@@ -45,23 +47,31 @@ pub fn rewrite_update_to_base(
         inherited_ctes,
     )?;
     validate_public_update_contract(services, statement, source_schema.as_ref())?;
-    let Some(initial_layer) = automatic_view_layer(services, &statement.table)? else {
-        return Err(not_automatically_updatable(&statement.table, "UPDATE"));
-    };
-    validate_update_targets(&initial_layer, statement)?;
+    let view = canonical_view_name(services, &statement.table)?;
     validate_direct_view_rule_path(
         services,
-        &initial_layer.canonical_name,
+        &view,
         crate::ast::RuleEvent::Update,
-        "UPDATE",
+        ViewCommand::Update,
     )?;
-    if !initial_layer.capabilities().updatable {
-        return Err(not_automatically_updatable(&statement.table, "UPDATE"));
+    let initial_layer = rewritable_layer(services, &view, ViewCommand::Update)?;
+    if !initial_layer.has_writable_column() {
+        return Err(view_not_updatable(
+            &view,
+            ViewCommand::Update,
+            NotUpdatableReason::NoUpdatableColumns,
+        ));
     }
+    validate_update_targets(&initial_layer, statement)?;
+    let mut initial_layer = Some(initial_layer);
     let mut plan = statement.clone();
-    let next_privilege_subject =
-        crate::semantics::view_privileges::ensure_update(services.authorization, &plan)?;
-    plan.target_privilege_subject = Some(next_privilege_subject);
+    let mut privileges = LayerPrivileges::new();
+    plan.target_privilege_subject = Some(privileges.check(
+        services.authorization,
+        &plan.table,
+        plan.target_privilege_subject.as_ref(),
+        || crate::semantics::view_privileges::ensure_update(services.authorization, &plan),
+    )?);
     let mut cascaded = false;
     let mut visited = BTreeSet::new();
     let mut source_star_boundaries = Vec::new();
@@ -74,29 +84,22 @@ pub fn rewrite_update_to_base(
         {
             break;
         }
-        let Some(layer) = automatic_view_layer(services, &plan.table)? else {
-            if active_unconditional_instead_rule(
-                services,
-                &plan.table,
-                crate::ast::RuleEvent::Update,
-            )? {
-                break;
-            }
-            return Err(not_automatically_updatable(&plan.table, "UPDATE"));
+        let Some(layer) = next_rewritten_layer(
+            services,
+            &plan.table,
+            &mut initial_layer,
+            rewrite_suppressed,
+            crate::ast::RuleEvent::Update,
+            ViewCommand::Update,
+        )?
+        else {
+            break;
         };
         if !visited.insert(layer.canonical_name.clone()) {
             return Err(SQLError::Internal(format!(
                 "cycle while rewriting automatically updatable view `{}`",
                 layer.canonical_name
             )));
-        }
-        if !rewrite_suppressed {
-            validate_direct_view_rule_path(
-                services,
-                &layer.canonical_name,
-                crate::ast::RuleEvent::Update,
-                "UPDATE",
-            )?;
         }
         let has_view_rules = if rewrite_suppressed {
             false
@@ -115,12 +118,19 @@ pub fn rewrite_update_to_base(
                 crate::ast::RuleEvent::Update,
             )?;
         if visited.len() > 1 && !rewrite_suppressed && !layer_suppresses {
-            if !layer.capabilities().updatable {
-                return Err(not_automatically_updatable(&layer.canonical_name, "UPDATE"));
+            if !layer.has_writable_column() {
+                return Err(view_not_updatable(
+                    &layer.canonical_name,
+                    ViewCommand::Update,
+                    NotUpdatableReason::NoUpdatableColumns,
+                ));
             }
-            let next_privilege_subject =
-                crate::semantics::view_privileges::ensure_update(services.authorization, &plan)?;
-            plan.target_privilege_subject = Some(next_privilege_subject);
+            plan.target_privilege_subject = Some(privileges.check(
+                services.authorization,
+                &plan.table,
+                plan.target_privilege_subject.as_ref(),
+                || crate::semantics::view_privileges::ensure_update(services.authorization, &plan),
+            )?);
         }
         if has_view_rules
             && super::context::relation_has_returning_provider(
@@ -198,6 +208,15 @@ pub fn rewrite_update_to_base(
             source: source_schema.as_ref(),
             include_excluded: false,
         };
+        if !layer_suppresses && !rewrite_suppressed {
+            validate_writable_columns(
+                &layer,
+                plan.assignments
+                    .iter()
+                    .map(|assignment| assignment.target.column.as_str()),
+                ColumnWrite::Update,
+            )?;
+        }
         for AssignmentPlan { target, value } in &mut plan.assignments {
             for expression in target.expressions_mut() {
                 rewrite_target_expression(
@@ -216,7 +235,7 @@ pub fn rewrite_update_to_base(
                 &mut plan.subqueries,
             )?;
             if !layer_suppresses && !rewrite_suppressed {
-                target.column = writable_column(&layer, &target.column, "UPDATE")?;
+                target.column = writable_column(&layer, &target.column, ColumnWrite::Update)?;
             }
         }
         let mapped = plan
@@ -305,6 +324,7 @@ pub fn rewrite_update_to_base(
         source_schema.as_ref(),
         &source_star_boundaries,
     )?;
+    privileges.finish()?;
     Ok(plan)
 }
 
@@ -327,16 +347,15 @@ pub fn rewrite_delete_to_base(
         inherited_ctes,
     )?;
     validate_public_delete_contract(services, statement, source_schema.as_ref())?;
-    validate_direct_view_rule_path(
-        services,
-        &statement.table,
-        crate::ast::RuleEvent::Delete,
-        "DELETE",
-    )?;
     let mut plan = statement.clone();
-    let next_privilege_subject =
-        crate::semantics::view_privileges::ensure_delete(services.authorization, &plan)?;
-    plan.target_privilege_subject = Some(next_privilege_subject);
+    let mut privileges = LayerPrivileges::new();
+    plan.target_privilege_subject = Some(privileges.check(
+        services.authorization,
+        &plan.table,
+        plan.target_privilege_subject.as_ref(),
+        || crate::semantics::view_privileges::ensure_delete(services.authorization, &plan),
+    )?);
+    let mut initial_layer = None;
     let mut visited = BTreeSet::new();
     let mut source_star_boundaries = Vec::new();
     let mut rewrite_suppressed = false;
@@ -348,29 +367,22 @@ pub fn rewrite_delete_to_base(
         {
             break;
         }
-        let Some(layer) = automatic_view_layer(services, &plan.table)? else {
-            if active_unconditional_instead_rule(
-                services,
-                &plan.table,
-                crate::ast::RuleEvent::Delete,
-            )? {
-                break;
-            }
-            return Err(not_automatically_updatable(&plan.table, "DELETE"));
+        let Some(layer) = next_rewritten_layer(
+            services,
+            &plan.table,
+            &mut initial_layer,
+            rewrite_suppressed,
+            crate::ast::RuleEvent::Delete,
+            ViewCommand::Delete,
+        )?
+        else {
+            break;
         };
         if !visited.insert(layer.canonical_name.clone()) {
             return Err(SQLError::Internal(format!(
                 "cycle while rewriting automatically updatable view `{}`",
                 layer.canonical_name
             )));
-        }
-        if !rewrite_suppressed {
-            validate_direct_view_rule_path(
-                services,
-                &layer.canonical_name,
-                crate::ast::RuleEvent::Delete,
-                "DELETE",
-            )?;
         }
         let has_view_rules = if rewrite_suppressed {
             false
@@ -389,9 +401,12 @@ pub fn rewrite_delete_to_base(
                 crate::ast::RuleEvent::Delete,
             )?;
         if visited.len() > 1 && !rewrite_suppressed && !layer_suppresses {
-            let next_privilege_subject =
-                crate::semantics::view_privileges::ensure_delete(services.authorization, &plan)?;
-            plan.target_privilege_subject = Some(next_privilege_subject);
+            plan.target_privilege_subject = Some(privileges.check(
+                services.authorization,
+                &plan.table,
+                plan.target_privilege_subject.as_ref(),
+                || crate::semantics::view_privileges::ensure_delete(services.authorization, &plan),
+            )?);
         }
         if has_view_rules
             && super::context::relation_has_returning_provider(
@@ -510,5 +525,6 @@ pub fn rewrite_delete_to_base(
         source_schema.as_ref(),
         &source_star_boundaries,
     )?;
+    privileges.finish()?;
     Ok(plan)
 }

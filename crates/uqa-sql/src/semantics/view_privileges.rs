@@ -52,6 +52,20 @@ fn next_privilege_subject(
     }
 }
 
+/// The role whose privileges the layer after view `name` is checked with: the view's owner, or for a `security_invoker` view the role `name` itself is checked as, `rewritten_subject` or else the current role.
+pub fn next_layer_privilege_subject(
+    services: &dyn ViewPrivilegeCatalog,
+    name: &str,
+    rewritten_subject: Option<&RoleReference>,
+) -> Result<RoleReference, SQLError> {
+    let (view, _) = view_target(services, name)?;
+    next_privilege_subject(
+        services,
+        &view,
+        privilege_subject(services, rewritten_subject),
+    )
+}
+
 fn validate_columns(
     name: &str,
     available: &[String],
