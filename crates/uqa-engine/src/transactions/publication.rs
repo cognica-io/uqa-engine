@@ -54,6 +54,7 @@ impl Engine {
             publication_result?;
             notification_result?;
         }
+        let nested_savepoint = committed.storage_savepoint;
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
             parent.constraint_modes = committed.constraint_modes;
@@ -68,6 +69,12 @@ impl Engine {
             parent.merge_pending_listen_actions(committed.pending_listen_actions);
             parent.merge_pending_notifications(committed.pending_notifications);
             parent.first_snapshot_set |= committed.first_snapshot_set;
+        }
+        if let Some(savepoint) = nested_savepoint {
+            // The parent keeps the nested frame's changes.
+            super::fixed_identities::follow_identities(stack, |identities| {
+                identities.release(savepoint)
+            });
         }
         Ok(())
     }

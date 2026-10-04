@@ -439,15 +439,16 @@ impl Engine {
         let mut stack = self.session.transactions.lock();
         let pending = crate::row_locks::PendingRowChange { key, kind };
         if let Some(frame) = stack.last_mut() {
-            frame.row_changes.push(TransactionRowChange {
+            let change = TransactionRowChange {
                 pending,
                 source_generation,
                 successor_generation: None,
                 query_origin: self
                     .session_execution_view()
                     .transaction_snapshot_identity(),
-            });
-            Ok(())
+            };
+            frame.row_changes.push(change);
+            self.follow_row_change(&mut stack, &change)
         } else {
             drop(stack);
             let publication = self
@@ -625,15 +626,16 @@ impl Engine {
                     check.row = Some(new);
                 }
             }
-            frame.row_changes.push(TransactionRowChange {
+            let change = TransactionRowChange {
                 pending,
                 source_generation,
                 successor_generation: Some(successor_generation),
                 query_origin: self
                     .session_execution_view()
                     .transaction_snapshot_identity(),
-            });
-            Ok(())
+            };
+            frame.row_changes.push(change);
+            self.follow_row_change(&mut stack, &change)
         } else {
             drop(stack);
             let publication = self

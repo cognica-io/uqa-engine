@@ -16,11 +16,15 @@ use uqa_storage::{
 };
 
 mod desired;
+mod identities;
 mod layers;
 mod projection;
 pub use desired::DocumentSelection;
+pub use identities::{
+    ChangedIdentities, ChangedIdentitiesView, ChangedRowCounts, RelationGeneration,
+};
 pub use layers::Changes;
-use layers::{ChangeRef, StagedLayers};
+use layers::{ChangeRef, IdentityLayer, StagedLayers};
 mod selection;
 use selection::Selection;
 mod vectors;
@@ -74,6 +78,9 @@ impl Change {
 #[derive(Clone, Default)]
 pub struct DocumentChanges {
     selection: Option<Arc<Selection>>,
+    /// The rows a transaction changed, above the selection.
+    identities: Option<Arc<IdentityLayer>>,
+    /// The rows running commands staged, above everything else.
     staged: Option<Arc<StagedLayers>>,
 }
 
@@ -124,11 +131,11 @@ impl DocumentChanges {
     }
 
     pub fn has_changes(&self) -> bool {
-        !self.rows().is_empty() || !self.staged_views().is_empty()
+        !self.rows().is_empty() || self.identities.is_some() || !self.staged_views().is_empty()
     }
 
     pub fn contains_change(&self, id: DocId) -> StorageBackendResult<bool> {
-        Ok(self.stages(id)? || self.selected(id).is_some())
+        Ok(self.layers_change(id)? || self.selected(id).is_some())
     }
 
     pub fn change_presence(&self, id: DocId) -> StorageBackendResult<Option<bool>> {
@@ -250,8 +257,8 @@ impl DocumentChanges {
     pub fn into_rows(
         self,
     ) -> impl Iterator<Item = StorageBackendResult<(DocId, Option<StoredDocument>)>> {
-        if self.staged.is_some() {
-            // Staged rows stream from the commands' tiers a bounded page at a time; the selection below them is shared.
+        if self.staged.is_some() || self.identities.is_some() {
+            // Lazy layers stream a bounded page at a time; the selection below them is shared.
             return Box::new(self.change_rows_after(None).map(|change| {
                 change.and_then(|(id, change)| change.into_stored(id).map(|row| (id, row)))
             }))
@@ -269,6 +276,7 @@ impl DocumentChanges {
                 None,
                 Self {
                     selection: Some(selection),
+                    identities: None,
                     staged: None,
                 },
             ),
@@ -285,28 +293,6 @@ impl DocumentChanges {
             };
             Some(change.into_stored(id).map(|row| (id, row)))
         }))
-    }
-
-    /// The end of the run of `ids` from `start` whose rows one retained source supplies, with that source.
-    fn source_run<'a>(
-        &'a self,
-        ids: &[DocId],
-        start: usize,
-    ) -> StorageBackendResult<Option<(usize, &'a Arc<dyn DocumentStore>)>> {
-        let retained = |id: DocId| -> StorageBackendResult<Option<&'a Arc<dyn DocumentStore>>> {
-            if self.stages(id)? {
-                return Ok(None);
-            }
-            Ok(self.selected(id).and_then(Change::retained_source))
-        };
-        let Some(source) = retained(ids[start])? else {
-            return Ok(None);
-        };
-        let mut end = start + 1;
-        while end < ids.len() && retained(ids[end])?.is_some_and(|next| Arc::ptr_eq(source, next)) {
-            end += 1;
-        }
-        Ok(Some((end, source)))
     }
 }
 
@@ -350,7 +336,7 @@ impl DocumentStore for DocumentChanges {
         ids: &[DocId],
     ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
         let mut rows = BTreeMap::new();
-        let mut staged = self.staged_reader(ids);
+        let mut staged = self.layer_reader(ids);
         let mut index = 0;
         while index < ids.len() {
             if let Some((end, source)) = self.batch_source_run(ids, index, &mut staged)? {
@@ -379,7 +365,7 @@ impl DocumentStore for DocumentChanges {
         control.check()?;
         let mut rows = uqa_core::memory::BudgetedVec::new(control.memory());
         rows.reserve(ids.len())?;
-        let mut staged = self.staged_reader(ids);
+        let mut staged = self.layer_reader(ids);
         let mut index = 0;
         while index < ids.len() {
             control.check()?;
@@ -455,7 +441,7 @@ impl DocumentStore for DocumentChanges {
         if fields.is_empty() {
             return Ok(present);
         }
-        let mut staged = self.staged_reader(ids);
+        let mut staged = self.layer_reader(ids);
         let mut index = 0;
         while index < ids.len() {
             control.check()?;
@@ -550,7 +536,7 @@ impl DocumentStore for DocumentChanges {
         if ids.is_empty() {
             return Ok(Some(Vec::new()));
         }
-        match self.source_run(ids, 0)? {
+        match self.batch_source_run(ids, 0, &mut self.layer_reader(ids))? {
             Some((end, source)) if end == ids.len() => source.get_shared_fields(ids, fields),
             _ => Ok(None),
         }

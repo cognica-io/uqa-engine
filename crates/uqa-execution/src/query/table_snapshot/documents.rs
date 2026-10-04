@@ -76,6 +76,45 @@ impl RetainedDocuments {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
+        let (count, all_rows_changed) = match changes.identity_counts() {
+            // The rows a transaction changed carry their counts relative to the snapshot it reads, so the rows need not be visited.
+            Some(counts) => {
+                let stored = u64::try_from(source.len()?).map_err(|_| {
+                    StorageBackendError::Other("query document count overflow".into())
+                })?;
+                let visible = counts.visible_rows(stored).ok_or_else(|| {
+                    StorageBackendError::Other("query base document count underflow".into())
+                })?;
+                (
+                    usize::try_from(visible).map_err(|_| {
+                        StorageBackendError::Other("query document count overflow".into())
+                    })?,
+                    counts.before == stored,
+                )
+            }
+            None => Self::count_changes(source.as_ref(), &changes, control)?,
+        };
+        control.check()?;
+        let state = State {
+            source,
+            layout,
+            private_layout,
+            changes,
+            count,
+            all_rows_changed,
+            control: control.clone(),
+        };
+        Ok(Self(
+            Budgeted::new(state, control.memory().empty_reservation()).into_shared()?,
+        ))
+    }
+
+    /// The rows `source` and `changes` hold together, and whether `changes` changes every row of `source`.
+    fn count_changes(
+        source: &dyn DocumentStore,
+        changes: &DocumentChanges,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<(usize, bool)> {
         let mut count = source.len()?;
         let mut unselected = count;
         for change in changes.changes() {
@@ -94,19 +133,7 @@ impl RetainedDocuments {
             }
             .ok_or_else(|| StorageBackendError::Other("query document count overflow".into()))?;
         }
-        control.check()?;
-        let state = State {
-            source,
-            layout,
-            private_layout,
-            changes,
-            count,
-            all_rows_changed: unselected == 0,
-            control: control.clone(),
-        };
-        Ok(Self(
-            Budgeted::new(state, control.memory().empty_reservation()).into_shared()?,
-        ))
+        Ok((count, unselected == 0))
     }
 
     pub(super) fn vector_sources<'a>(

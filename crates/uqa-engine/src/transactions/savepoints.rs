@@ -45,7 +45,7 @@ impl Engine {
         let keep_mark = frame.lock_mark;
         frame.lock_mark = frame.next_lock_mark;
         frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
-        let row_changes = frame.row_changes.clone();
+        let row_changes = frame.row_changes.len();
         let deferred_foreign_key_checks = frame.deferred_foreign_key_checks.clone();
         let deferred_constraint_trigger_events = frame.deferred_constraint_trigger_events.clone();
         let pending_listen_actions = frame.pending_listen_actions.clone();
@@ -68,6 +68,7 @@ impl Engine {
             constraint_modes,
         });
         frame.xid_levels.push(None);
+        super::fixed_identities::save_identities(stack, storage_savepoint);
         Ok(())
     }
 
@@ -99,6 +100,9 @@ impl Engine {
         frame.characteristics = characteristics;
         frame.savepoints.truncate(position);
         frame.xid_levels.truncate(position + 1);
+        super::fixed_identities::follow_identities(stack, |identities| {
+            identities.release(storage_savepoint)
+        });
         Ok(())
     }
 
@@ -165,6 +169,9 @@ impl Engine {
         frame.lock_mark = frame.next_lock_mark;
         frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
         frame.status = TransactionStatus::Active;
+        super::fixed_identities::follow_identities(stack, |identities| {
+            identities.rollback_to(storage_savepoint)
+        });
         if cleanup_errors.is_empty() {
             Ok(())
         } else {
@@ -179,7 +186,7 @@ impl Engine {
 impl TransactionFrame {
     fn restore_mutation_savepoint(&mut self, position: usize) {
         let savepoint = &self.savepoints[position];
-        self.row_changes.clone_from(&savepoint.row_changes);
+        self.row_changes.truncate(savepoint.row_changes);
         self.statistics_changes
             .clone_from(&savepoint.statistics_changes);
         self.deferred_foreign_key_checks

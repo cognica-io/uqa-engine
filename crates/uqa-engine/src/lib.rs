@@ -355,6 +355,8 @@ struct TransactionFrame {
     next_lock_mark: u32,
     snapshot_change_baseline: row_locks::RowChangeBaseline,
     row_changes: Vec<TransactionRowChange>,
+    /// The index of the rows the transaction changed, which reads at a fixed snapshot take views of; only the outer frame keeps one.
+    fixed_identities: Option<uqa_execution::query::document_changes::ChangedIdentities>,
     statistics_changes: statistics::StatisticsChanges,
     /// What this frame's commit did with its statistics changes, for the session to take over when the commit has succeeded.
     statistics_settlement: statistics::StatisticsSettlement,
@@ -420,7 +422,8 @@ struct TransactionSavepoint {
     data_snapshot: Option<EngineDataSnapshot>,
     dirty: TransactionDirtyState,
     lock_mark: u32,
-    row_changes: Vec<TransactionRowChange>,
+    /// The length of the frame's row changes at the savepoint. The changes only grow after it, so a rollback truncates them to this length.
+    row_changes: usize,
     statistics_changes: statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events:

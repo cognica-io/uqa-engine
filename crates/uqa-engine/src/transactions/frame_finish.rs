@@ -545,6 +545,9 @@ impl Engine {
             if let Some(parent) = stack.last_mut() {
                 parent.first_snapshot_set |= first_snapshot_set;
             }
+            if let Some(savepoint) = storage_savepoint {
+                super::fixed_identities::rollback_identities(stack, savepoint);
+            }
         }
         if cleanup_errors.is_empty() {
             Ok(())

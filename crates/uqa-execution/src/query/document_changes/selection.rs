@@ -59,7 +59,7 @@ impl DocumentChanges {
         control: &StorageReadControl,
     ) -> StorageBackendResult<&mut Selection> {
         control.check()?;
-        if self.staged.is_some() {
+        if self.staged.is_some() || self.identities.is_some() {
             return Err(staged_below());
         }
         if self
@@ -115,7 +115,11 @@ impl DocumentChanges {
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
         control.check()?;
-        if self.staged.is_some() || newer.staged.is_some() {
+        if self.staged.is_some()
+            || newer.staged.is_some()
+            || self.identities.is_some()
+            || newer.identities.is_some()
+        {
             return Err(staged_below());
         }
         if !newer.has_changes() {
@@ -159,9 +163,10 @@ impl DocumentChanges {
     }
 }
 
-/// Selected changes are older than any rows that running commands staged, so they cannot be added above those rows.
-fn staged_below() -> uqa_storage::StorageBackendError {
+/// Selected changes are older than the lazy layers, the rows a transaction changed and the rows running commands staged, so they cannot be added above those rows.
+pub(super) fn staged_below() -> uqa_storage::StorageBackendError {
     uqa_storage::StorageBackendError::Other(
-        "selected changes cannot be added above rows that commands staged".into(),
+        "selected changes cannot be added above the rows a transaction changed or commands staged"
+            .into(),
     )
 }

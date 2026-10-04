@@ -272,3 +272,62 @@ fn a_volatile_function_reads_the_rows_that_a_statement_larger_than_the_session_a
         );
     }
 }
+
+#[test]
+fn a_repeatable_read_transaction_larger_than_the_session_allowance_reads_its_own_rows() {
+    let directory = tempfile::tempdir().unwrap();
+    for (backend, engine) in engines(directory.path()) {
+        exec(
+            &engine,
+            "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
+        );
+        exec(&engine, "BEGIN ISOLATION LEVEL REPEATABLE READ");
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs"),
+            Value::Int(0),
+            "{backend}"
+        );
+        for chunk in 0..10 {
+            insert_rows(&engine, chunk * 2_000, 2_000, 2_000, "payload");
+            if chunk % 5 == 0 {
+                assert_eq!(
+                    scalar(&engine, "SELECT count(*) FROM docs"),
+                    Value::Int((chunk + 1) * 2_000),
+                    "{backend}"
+                );
+            }
+            assert_eq!(
+                scalar(
+                    &engine,
+                    &format!(
+                        "SELECT count(*) FROM docs AS d WHERE d.id = {}",
+                        (chunk + 1) * 2_000
+                    )
+                ),
+                Value::Int(1),
+                "{backend}"
+            );
+        }
+        exec(
+            &engine,
+            "UPDATE docs SET body = 'updated' WHERE id % 1000 = 0",
+        );
+        exec(&engine, "DELETE FROM docs WHERE id % 1000 = 1");
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs"),
+            Value::Int(19_980),
+            "{backend}"
+        );
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'updated'"),
+            Value::Int(20),
+            "{backend}"
+        );
+        exec(&engine, "COMMIT");
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs"),
+            Value::Int(19_980),
+            "{backend}"
+        );
+    }
+}

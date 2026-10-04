@@ -112,6 +112,23 @@ pub(in crate::query::table_snapshot) fn visit_source_projection(
     nulls: &[&Value],
     visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
 ) -> StorageBackendResult<bool> {
+    // A provider may hold a whole requested page while it projects it, so a long request reads one bounded page at a time.
+    for page in ids.chunks(crate::DEFAULT_BATCH_SIZE) {
+        if !visit_source_page(control, source, page, projection, nulls, visitor)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn visit_source_page(
+    control: &uqa_storage::read_control::StorageReadControl,
+    source: &dyn DocumentStore,
+    ids: &[DocId],
+    projection: &RowProjection<'_>,
+    nulls: &[&Value],
+    visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+) -> StorageBackendResult<bool> {
     let presence = if projection.needs_presence() {
         uqa_storage::document_store::read_field_presence(source, ids, &projection.sources, control)?
     } else {

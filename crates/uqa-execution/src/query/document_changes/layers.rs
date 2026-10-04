@@ -4,13 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Rows that running commands staged, above a selection of changes. Each command's rows shadow the selection and the rows of the commands before it. The rows stay in the commands' own tiers, so taking them into a read copies nothing.
+//! Lazy layers above a selection of changes: the rows a transaction changed, read at a fixed snapshot, and above them the rows running commands staged, each command's above the commands' before it. A read takes immutable views of the layers, so it copies none of their rows.
 
+use super::identities::{ChangedIdentitiesView, ChangedRowCounts, IdentityCursor};
+use super::vectors::CapturedRows;
 use super::{
     Arc, Change, DocId, DocumentChanges, DocumentStore, StorageBackendResult, StorageReadControl,
 };
 use crate::mutation::overlay::{StagedCursor, StagedRow, StagedRowsView};
-use uqa_core::memory::BudgetedVec;
+use uqa_core::memory::{Budgeted, BudgetedVec};
 
 pub(super) struct StagedLayers {
     /// The commands' rows, the oldest command first.
@@ -19,49 +21,132 @@ pub(super) struct StagedLayers {
     pub(super) control: StorageReadControl,
 }
 
-/// Reads the changes the commands staged for the identities of one batch, in the batch's order. Ascending identities advance each command's rows once over the batch, holding one bounded page of each; other batches look each identity up.
-pub(super) struct StagedReader<'a> {
+/// The rows a transaction changed in one relation, read from the transaction's view of it.
+pub(super) struct IdentityLayer {
+    view: ChangedIdentitiesView,
+    rows: IdentityRows,
+    control: StorageReadControl,
+}
+
+/// Where the present rows of an identity layer are read.
+pub(super) enum IdentityRows {
+    Retained(Arc<dyn DocumentStore>),
+    /// The rows with the vector sources the relation held when the layer was taken.
+    Captured(Arc<Budgeted<CapturedRows>>),
+}
+
+impl IdentityLayer {
+    /// The change of a changed row that is present now or not.
+    fn change(&self, present: bool) -> Change {
+        match (&self.rows, present) {
+            (IdentityRows::Retained(source), true) => Change::Retained(Arc::clone(source)),
+            (IdentityRows::Retained(_), false) => Change::Deleted,
+            (IdentityRows::Captured(rows), present) => Change::Captured(Arc::clone(rows), present),
+        }
+    }
+
+    /// The source of the present rows.
+    fn source(&self) -> &Arc<dyn DocumentStore> {
+        match &self.rows {
+            IdentityRows::Retained(source) => source,
+            IdentityRows::Captured(rows) => &rows.documents,
+        }
+    }
+}
+
+/// How a lazy layer changes one identity.
+#[derive(Clone)]
+enum LazyChange {
+    /// A command staged this change.
+    Staged(Change),
+    /// The transaction changed the row, which is present now or not.
+    Changed(bool),
+    Unchanged,
+}
+
+/// Reads the lazy layers' changes of the identities of one batch, in the batch's order. Ascending identities advance each layer once over the batch, holding one bounded page of each; other batches look each identity up.
+pub(super) struct LayerReader<'a> {
     changes: &'a DocumentChanges,
-    control: &'a StorageReadControl,
     ascending: bool,
     /// Each command's staged rows, the oldest first.
     heads: Vec<StagedHead<StagedRow>>,
-    /// The identity read last and its staged change, which a lookahead and the read that follows it share.
-    last: Option<(DocId, Option<Change>)>,
+    identity: Option<IdentityHead>,
+    /// The identity read last and its change, which a lookahead and the read that follows it share.
+    last: Option<(DocId, LazyChange)>,
 }
 
-impl StagedReader<'_> {
-    /// The newest change the commands staged for `id`.
-    fn staged(&mut self, id: DocId) -> StorageBackendResult<Option<Change>> {
+struct IdentityHead {
+    cursor: IdentityCursor,
+    next: Option<(DocId, bool)>,
+    done: bool,
+}
+
+impl IdentityHead {
+    /// Advance to `id` and take its entry when the cursor holds one.
+    fn take(
+        &mut self,
+        id: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<bool>> {
+        while !self.done && self.next.is_none_or(|(next, _)| next < id) {
+            self.next = self.cursor.next(control)?;
+            self.done = self.next.is_none();
+        }
+        match self.next {
+            Some((next, present)) if next == id => {
+                self.next = None;
+                Ok(Some(present))
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+impl LayerReader<'_> {
+    fn lazy(&mut self, id: DocId) -> StorageBackendResult<LazyChange> {
         if let Some((last, change)) = &self.last {
             if *last == id {
                 return Ok(change.clone());
             }
         }
-        let found = if self.ascending {
+        let change = if self.ascending {
             let mut found = None;
-            for head in self.heads.iter_mut().rev() {
-                while !head.done && head.next.as_ref().is_none_or(|(next, _)| *next < id) {
-                    head.next = head.cursor.next(self.control)?;
-                    head.done = head.next.is_none();
-                }
-                if head.next.as_ref().is_some_and(|(next, _)| *next == id) {
-                    let (_, row) = head.next.take().expect("a matched staged row");
-                    if found.is_none() {
-                        found = Some(staged_change(row));
+            if let Some(staged) = &self.changes.staged {
+                for head in self.heads.iter_mut().rev() {
+                    while !head.done && head.next.as_ref().is_none_or(|(next, _)| *next < id) {
+                        head.next = head.cursor.next(&staged.control)?;
+                        head.done = head.next.is_none();
+                    }
+                    if head.next.as_ref().is_some_and(|(next, _)| *next == id) {
+                        let (_, row) = head.next.take().expect("a matched staged row");
+                        if found.is_none() {
+                            found = Some(staged_change(row));
+                        }
                     }
                 }
             }
-            found
+            let changed = match (&mut self.identity, &self.changes.identities) {
+                (Some(head), Some(layer)) => head.take(id, &layer.control)?,
+                _ => None,
+            };
+            match (found, changed) {
+                (Some(change), _) => LazyChange::Staged(change),
+                (None, Some(present)) => LazyChange::Changed(present),
+                (None, None) => LazyChange::Unchanged,
+            }
+        } else if let Some(change) = self.changes.staged_change(id)? {
+            LazyChange::Staged(change)
         } else {
-            self.changes.staged_change(id)?
+            self.changes
+                .identity_presence(id)?
+                .map_or(LazyChange::Unchanged, LazyChange::Changed)
         };
-        self.last = Some((id, found.clone()));
-        Ok(found)
+        self.last = Some((id, change.clone()));
+        Ok(change)
     }
 }
 
-/// A change read from a selection, or decoded from a command's staged rows.
+/// A change read from a selection, or produced by a lazy layer.
 pub(super) enum ChangeRef<'a> {
     Borrowed(&'a Change),
     Owned(Change),
@@ -118,8 +203,38 @@ impl DocumentChanges {
         Ok(self)
     }
 
+    /// These changes with the rows a transaction changed above them, below any rows that commands staged.
+    pub(super) fn with_identity_layer(
+        mut self,
+        view: ChangedIdentitiesView,
+        rows: IdentityRows,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        if self.staged.is_some() || self.identities.is_some() {
+            return Err(super::selection::staged_below());
+        }
+        self.identities = Some(Arc::new(IdentityLayer {
+            view,
+            rows,
+            control: control.clone(),
+        }));
+        Ok(self)
+    }
+
     pub(super) fn staged_views(&self) -> &[StagedRowsView] {
         self.staged.as_ref().map_or(&[], |staged| &staged.views)
+    }
+
+    pub(super) fn has_identities(&self) -> bool {
+        self.identities.is_some()
+    }
+
+    /// The counted rows a transaction changed, when these changes are exactly those rows, which a read then counts without visiting them.
+    pub fn identity_counts(&self) -> Option<ChangedRowCounts> {
+        if !self.rows().is_empty() || self.staged.is_some() {
+            return None;
+        }
+        self.identities.as_ref().map(|layer| layer.view.counts())
     }
 
     /// The change the newest command staged for `id`.
@@ -148,28 +263,50 @@ impl DocumentChanges {
         Ok(false)
     }
 
-    /// A reader of the changes the commands staged for the identities of the batch `ids`, or `None` when no command staged rows.
-    pub(super) fn staged_reader(&self, ids: &[DocId]) -> Option<StagedReader<'_>> {
-        let staged = self.staged.as_ref()?;
+    /// Whether the transaction changed the row `id`, and whether it is present now.
+    pub(super) fn identity_presence(&self, id: DocId) -> StorageBackendResult<Option<bool>> {
+        match &self.identities {
+            Some(layer) => layer.view.presence(id, &layer.control),
+            None => Ok(None),
+        }
+    }
+
+    /// Whether a lazy layer changes `id`.
+    pub(super) fn layers_change(&self, id: DocId) -> StorageBackendResult<bool> {
+        Ok(self.stages(id)? || self.identity_presence(id)?.is_some())
+    }
+
+    /// A reader of the lazy layers' changes of the identities of the batch `ids`, or `None` when there is no lazy layer.
+    pub(super) fn layer_reader(&self, ids: &[DocId]) -> Option<LayerReader<'_>> {
+        if self.staged.is_none() && self.identities.is_none() {
+            return None;
+        }
         let ascending = ids.len() > 1 && ids.windows(2).all(|pair| pair[0] < pair[1]);
-        let heads = if ascending {
-            staged
-                .views
-                .iter()
-                .map(|view| StagedHead {
-                    cursor: view.rows(ids[0].checked_sub(1)),
+        let start = ids.first().and_then(|first| first.checked_sub(1));
+        Some(LayerReader {
+            changes: self,
+            ascending,
+            heads: if ascending {
+                self.staged_views()
+                    .iter()
+                    .map(|view| StagedHead {
+                        cursor: view.rows(start),
+                        next: None,
+                        done: false,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            identity: self
+                .identities
+                .as_ref()
+                .filter(|_| ascending)
+                .map(|layer| IdentityHead {
+                    cursor: layer.view.cursor(start),
                     next: None,
                     done: false,
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        Some(StagedReader {
-            changes: self,
-            control: &staged.control,
-            ascending,
-            heads,
+                }),
             last: None,
         })
     }
@@ -177,29 +314,38 @@ impl DocumentChanges {
     /// The newest change of `id`, an identity of the batch that `reader` reads.
     pub(super) fn batch_change<'a>(
         &'a self,
-        reader: &mut Option<StagedReader<'a>>,
+        reader: &mut Option<LayerReader<'a>>,
         id: DocId,
     ) -> StorageBackendResult<Option<ChangeRef<'a>>> {
         if let Some(reader) = reader {
-            if let Some(change) = reader.staged(id)? {
-                return Ok(Some(ChangeRef::Owned(change)));
+            match reader.lazy(id)? {
+                LazyChange::Staged(change) => return Ok(Some(ChangeRef::Owned(change))),
+                LazyChange::Changed(present) => {
+                    let layer = self.identities.as_ref().expect("an identity layer");
+                    return Ok(Some(ChangeRef::Owned(layer.change(present))));
+                }
+                LazyChange::Unchanged => {}
             }
         }
         Ok(self.selected(id).map(ChangeRef::Borrowed))
     }
 
-    /// The end of the run of `ids` from `start` whose rows one retained source supplies, with that source; `reader` reads the batch's staged changes.
+    /// The end of the run of `ids` from `start` whose rows one retained source supplies, with that source; `reader` reads the batch's lazy layers.
     pub(super) fn batch_source_run<'a>(
         &'a self,
         ids: &[DocId],
         start: usize,
-        reader: &mut Option<StagedReader<'a>>,
+        reader: &mut Option<LayerReader<'a>>,
     ) -> StorageBackendResult<Option<(usize, &'a Arc<dyn DocumentStore>)>> {
-        // A staged row is evaluated fields, which no retained source supplies.
         let mut retained = |id: DocId| -> StorageBackendResult<Option<&'a Arc<dyn DocumentStore>>> {
             if let Some(reader) = reader.as_mut() {
-                if reader.staged(id)?.is_some() {
-                    return Ok(None);
+                match reader.lazy(id)? {
+                    // A staged row is evaluated fields, which no retained source supplies.
+                    LazyChange::Staged(_) | LazyChange::Changed(false) => return Ok(None),
+                    LazyChange::Changed(true) => {
+                        return Ok(self.identities.as_ref().map(|layer| layer.source()));
+                    }
+                    LazyChange::Unchanged => {}
                 }
             }
             Ok(self.selected(id).and_then(Change::retained_source))
@@ -219,6 +365,9 @@ impl DocumentChanges {
         if let Some(change) = self.staged_change(id)? {
             return Ok(Some(ChangeRef::Owned(change)));
         }
+        if let (Some(present), Some(layer)) = (self.identity_presence(id)?, &self.identities) {
+            return Ok(Some(ChangeRef::Owned(layer.change(present))));
+        }
         Ok(self.selected(id).map(ChangeRef::Borrowed))
     }
 
@@ -227,9 +376,12 @@ impl DocumentChanges {
         Changes::new(
             self,
             after,
-            Change::present,
-            std::convert::identity,
-            StagedRowsView::presence,
+            ChangeKind {
+                from_selection: Change::present,
+                from_identity: |_, present| present,
+                from_staged: std::convert::identity,
+                cursor: StagedRowsView::presence,
+            },
         )
     }
 
@@ -238,20 +390,33 @@ impl DocumentChanges {
         Changes::new(
             self,
             after,
-            Change::clone,
-            staged_change,
-            StagedRowsView::rows,
+            ChangeKind {
+                from_selection: Change::clone,
+                from_identity: IdentityLayer::change,
+                from_staged: staged_change,
+                cursor: StagedRowsView::rows,
+            },
         )
     }
 }
 
-/// The changes of a selection and of the commands' staged rows above it, in identity order. The newest change of an identity shadows the older ones. The iterator shares the changes it reads, so it outlives the reader that created it.
+/// What a merged iteration yields from each layer.
+struct ChangeKind<S, T> {
+    from_selection: fn(&Change) -> T,
+    from_identity: fn(&IdentityLayer, bool) -> T,
+    from_staged: fn(S) -> T,
+    cursor: fn(&StagedRowsView, Option<DocId>) -> StagedCursor<S>,
+}
+
+/// The changes of a selection and of the lazy layers above it, in identity order. The newest change of an identity shadows the older ones. The iterator shares the changes it reads, so it outlives the reader that created it.
 pub struct Changes<S, T> {
     changes: DocumentChanges,
     /// The position of the next selected change.
     selected: usize,
     from_selection: fn(&Change) -> T,
+    from_identity: fn(&IdentityLayer, bool) -> T,
     from_staged: fn(S) -> T,
+    identity: Option<IdentityHead>,
     /// Each command's staged rows, the oldest first.
     staged: Vec<StagedHead<S>>,
     failed: bool,
@@ -265,26 +430,26 @@ struct StagedHead<S> {
 }
 
 impl<S: Default, T> Changes<S, T> {
-    fn new(
-        changes: &DocumentChanges,
-        after: Option<DocId>,
-        from_selection: fn(&Change) -> T,
-        from_staged: fn(S) -> T,
-        cursor: fn(&StagedRowsView, Option<DocId>) -> StagedCursor<S>,
-    ) -> Self {
+    fn new(changes: &DocumentChanges, after: Option<DocId>, kind: ChangeKind<S, T>) -> Self {
         let selected = changes
             .rows()
             .partition_point(|(id, _)| after.is_some_and(|after| *id <= after));
         Self {
             changes: changes.clone(),
             selected,
-            from_selection,
-            from_staged,
+            from_selection: kind.from_selection,
+            from_identity: kind.from_identity,
+            from_staged: kind.from_staged,
+            identity: changes.identities.as_ref().map(|layer| IdentityHead {
+                cursor: layer.view.cursor(after),
+                next: None,
+                done: false,
+            }),
             staged: changes
                 .staged_views()
                 .iter()
                 .map(|view| StagedHead {
-                    cursor: cursor(view, after),
+                    cursor: (kind.cursor)(view, after),
                     next: None,
                     done: false,
                 })
@@ -302,12 +467,23 @@ impl<S: Default, T> Changes<S, T> {
                 }
             }
         }
+        if let (Some(head), Some(layer)) = (&mut self.identity, &self.changes.identities) {
+            if head.next.is_none() && !head.done {
+                head.next = head.cursor.next(&layer.control)?;
+                head.done = head.next.is_none();
+            }
+        }
         let rows = self.changes.rows();
         let selected = rows.get(self.selected).map(|(id, _)| *id);
+        let changed = self
+            .identity
+            .as_ref()
+            .and_then(|head| head.next.map(|(id, _)| id));
         let Some(least) = self
             .staged
             .iter()
             .filter_map(|head| head.next.as_ref().map(|(id, _)| *id))
+            .chain(changed)
             .chain(selected)
             .min()
         else {
@@ -320,6 +496,14 @@ impl<S: Default, T> Changes<S, T> {
                 if found.is_none() {
                     found = Some((id, (self.from_staged)(row)));
                 }
+            }
+        }
+        if changed == Some(least) {
+            let head = self.identity.as_mut().expect("a peeked identity");
+            let (id, present) = head.next.take().expect("a peeked identity");
+            if found.is_none() {
+                let layer = self.changes.identities.as_ref().expect("an identity layer");
+                found = Some((id, (self.from_identity)(layer, present)));
             }
         }
         if selected == Some(least) {

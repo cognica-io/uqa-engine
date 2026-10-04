@@ -314,13 +314,7 @@ impl Engine {
             frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
             (lock_mark, frame.next_lock_mark)
         });
-        let backend_mode = if self.versioned_backend_transactions() {
-            BackendTransactionMode::Versioned
-        } else if stack.is_empty() && defer_write_lock && self.storage.backend.is_some() {
-            BackendTransactionMode::Deferred
-        } else {
-            BackendTransactionMode::Writer
-        };
+        let backend_mode = self.frame_backend_mode(outer, defer_write_lock);
         let (implicit_statement, explicit_transaction_block) = match kind {
             TransactionFrameKind::ExplicitBlock => (false, true),
             TransactionFrameKind::ImplicitStatement => (true, false),
@@ -352,6 +346,7 @@ impl Engine {
             next_lock_mark,
             snapshot_change_baseline,
             row_changes: Vec::new(),
+            fixed_identities: None,
             statistics_changes: crate::statistics::StatisticsChanges::new(),
             statistics_settlement: crate::statistics::StatisticsSettlement::default(),
             deferred_foreign_key_checks,
@@ -362,8 +357,22 @@ impl Engine {
             constraint_modes,
             nontransactional_sequence_values: NontransactionalSequenceValues::new(),
         });
+        if let Some(savepoint) = storage_savepoint {
+            super::fixed_identities::save_identities(stack, savepoint);
+        }
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
+    }
+
+    /// The backend transaction mode of a new frame: every frame of a versioned backend is versioned, and an outer frame that defers its write lock on a backend begins without it.
+    fn frame_backend_mode(&self, outer: bool, defer_write_lock: bool) -> BackendTransactionMode {
+        if self.versioned_backend_transactions() {
+            BackendTransactionMode::Versioned
+        } else if outer && defer_write_lock && self.storage.backend.is_some() {
+            BackendTransactionMode::Deferred
+        } else {
+            BackendTransactionMode::Writer
+        }
     }
 
     fn begin_outer_transaction_with_notifications(
