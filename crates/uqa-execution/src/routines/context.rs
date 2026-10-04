@@ -10,6 +10,7 @@ use uqa_core::Value;
 use uqa_sql::{
     assignment::routines::RoutineValueContext,
     ast::{ColumnType, Expr, FetchCursorStmt, Statement},
+    binding::statements::AnalyzedResult,
     plan::{ExpressionPlan, UnifiedPlan},
     SQLError, SQLParam, SQLResult,
 };
@@ -22,11 +23,23 @@ pub trait RoutineExpressions: RoutineValueContext {
         &self,
         expression: &Expr,
     ) -> Result<(Value, Option<ColumnType>), SQLError>;
-    fn expression_type(&self, plan: &ExpressionPlan) -> Result<Option<ColumnType>, SQLError>;
+    fn expression_type(
+        &self,
+        plan: &ExpressionPlan,
+        params: &[SQLParam],
+    ) -> Result<Option<ColumnType>, SQLError>;
 }
+/// A check of what a statement's analysis derives about its result, made before the statement runs.
+pub type StatementResultCheck<'a> = &'a dyn Fn(&AnalyzedResult) -> Result<(), SQLError>;
 /// Nested statement execution and planning retain the caller's active routine context.
 pub trait RoutineStatements {
-    fn execute_plan(&self, plan: &UnifiedPlan, params: &[SQLParam]) -> Result<SQLResult, SQLError>;
+    /// Run one statement of a SQL function body; `check` sees what the statement's analysis derives about its result before it runs, as `PostgreSQL` checks a body's final statement before running it.
+    fn execute_body_statement(
+        &self,
+        plan: UnifiedPlan,
+        params: &[SQLParam],
+        check: Option<StatementResultCheck<'_>>,
+    ) -> Result<SQLResult, SQLError>;
     fn execute_bound(
         &self,
         statement: Statement,

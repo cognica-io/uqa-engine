@@ -20,6 +20,8 @@ type AnalyzeNullCounts = BTreeMap<String, u64>;
 mod analyze;
 mod analyze_helpers;
 mod clocks;
+mod compiled_routine_bodies;
+pub(crate) use compiled_routine_bodies::CompiledRoutineBodies;
 mod portals;
 pub(crate) use portals::StatementReadSnapshot;
 mod parameter_registry;

@@ -117,7 +117,7 @@ impl TriggerRoutineInvoker for Engine {
     }
     fn execute_trigger_routine(
         &self,
-        function: &SQLUserFunction,
+        function: &Arc<SQLUserFunction>,
         context: &TriggerRoutineContext,
     ) -> Result<Value, SQLError> {
         crate::capabilities::routine_invocation::execute_trigger_routine(self, function, context)

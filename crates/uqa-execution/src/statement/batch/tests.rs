@@ -140,6 +140,14 @@ impl ExecutablePlanOptimizer for Inputs {
         self.record(format!("optimize.{}", self.snapshot.get()));
         Err(SQLError::Internal("injected planning failure".into()))
     }
+
+    fn plan_with_result(
+        &self,
+        _: UnifiedPlan,
+        _: &[SQLParam],
+    ) -> Result<(UnifiedPlan, uqa_sql::binding::statements::AnalyzedResult), SQLError> {
+        panic!("these statements run without a result check")
+    }
 }
 impl StatementCache for Inputs {
     fn cached_sql_statement(&self, _: &str) -> Option<CachedStatement> {

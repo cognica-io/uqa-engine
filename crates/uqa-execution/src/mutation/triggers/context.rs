@@ -63,7 +63,7 @@ pub trait TriggerRoutineInvoker {
     ) -> Result<Arc<SQLUserFunction>, SQLError>;
     fn execute_trigger_routine(
         &self,
-        function: &SQLUserFunction,
+        function: &Arc<SQLUserFunction>,
         context: &TriggerRoutineContext,
     ) -> Result<Value, SQLError>;
 }

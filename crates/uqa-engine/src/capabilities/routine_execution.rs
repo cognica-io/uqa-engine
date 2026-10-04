@@ -7,7 +7,10 @@
 use crate::Engine;
 use uqa_core::Value;
 use uqa_execution::routines::{
-    context::{RoutineExpressions, RoutinePortals, RoutineStatements, RoutineTransactions},
+    context::{
+        RoutineExpressions, RoutinePortals, RoutineStatements, RoutineTransactions,
+        StatementResultCheck,
+    },
     transaction::RoutineSessionId,
     RoutineContext,
 };
@@ -61,7 +64,11 @@ impl RoutineExpressions for Engine {
             &[],
         )
     }
-    fn expression_type(&self, plan: &ExpressionPlan) -> Result<Option<ColumnType>, SQLError> {
+    fn expression_type(
+        &self,
+        plan: &ExpressionPlan,
+        params: &[SQLParam],
+    ) -> Result<Option<ColumnType>, SQLError> {
         let mut scope = super::query_scope::new_for_current_routine(self);
         scope.scalar_subqueries.clone_from(&plan.subqueries);
         let hook = uqa_execution::query::relational::context::QueryExpressionFactory::bind_scope(
@@ -70,18 +77,25 @@ impl RoutineExpressions for Engine {
         uqa_execution::scalar_type_with_resolver(
             &plan.scalar,
             &uqa_execution::RowSchema::default(),
-            &[],
+            params,
             hook.as_ref(),
         )
     }
 }
 impl RoutineStatements for Engine {
-    fn execute_plan(&self, plan: &UnifiedPlan, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
-        uqa_execution::statement::compiled::execute_plan(
-            &self.compiled_statement_context(),
-            plan.clone(),
-            params,
-        )
+    fn execute_body_statement(
+        &self,
+        plan: UnifiedPlan,
+        params: &[SQLParam],
+        check: Option<StatementResultCheck<'_>>,
+    ) -> Result<SQLResult, SQLError> {
+        let context = self.compiled_statement_context();
+        match check {
+            Some(check) => uqa_execution::statement::compiled::execute_checked_plan(
+                &context, plan, params, check,
+            ),
+            None => uqa_execution::statement::compiled::execute_plan(&context, plan, params),
+        }
     }
 
     fn execute_bound(

@@ -20,7 +20,7 @@ use uqa_execution::routines::{
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::FunctionBinding,
-    routines::{resolution::RoutineOverloadContext, SQLUserFunction},
+    routines::{resolution::RoutineOverloadContext, CompiledFunctionBody, SQLUserFunction},
     SQLError,
 };
 impl RoutineInvocationState for crate::roles::RoutineSessionStateGuard<'_> {
@@ -51,6 +51,19 @@ impl RoutineInvocationSession for Engine {
     fn set_configured_parameter(&self, name: &str, value: &str) -> Result<(), SQLError> {
         Engine::set_configured_parameter(self, name, value)
     }
+    fn compiled_routine_body(
+        &self,
+        function: &std::sync::Arc<SQLUserFunction>,
+    ) -> Option<std::sync::Arc<CompiledFunctionBody>> {
+        self.session.compiled_routine_bodies.get(function)
+    }
+    fn retain_compiled_routine_body(
+        &self,
+        function: &std::sync::Arc<SQLUserFunction>,
+        body: std::sync::Arc<CompiledFunctionBody>,
+    ) {
+        self.session.compiled_routine_bodies.retain(function, body);
+    }
 }
 impl Engine {
     pub(crate) fn routine_invocation_context(&self) -> RoutineInvocationContext<'_> {
@@ -61,6 +74,7 @@ impl Engine {
             overloads: RoutineOverloadContext { catalog: self },
             types: self,
             authority: self,
+            compilation: self.routine_compilation_context(),
         }
     }
     pub(crate) fn anonymous_block_context(&self) -> AnonymousBlockContext<'_> {
@@ -133,7 +147,7 @@ pub(crate) fn call_bound_user_table_function(
 }
 pub(crate) fn execute_trigger_routine(
     engine: &Engine,
-    function: &SQLUserFunction,
+    function: &std::sync::Arc<SQLUserFunction>,
     context: &TriggerRoutineContext,
 ) -> Result<Value, SQLError> {
     invocation::execute_trigger_routine(&engine.routine_invocation_context(), function, context)

@@ -138,6 +138,15 @@ static PARAMETERS: &[ParameterDefinition] = &[
         ParameterFlags::IS_NAME.union(ParameterFlags::REPORT),
     ),
     define(
+        "check_function_bodies",
+        boolean(true),
+        ParameterContext::User,
+        STATEMENT_BEHAVIOR,
+        "Check routine bodies during CREATE FUNCTION and CREATE PROCEDURE.",
+        None,
+        ParameterFlags::NONE,
+    ),
+    define(
         "client_encoding",
         string("SQL_ASCII"),
         ParameterContext::User,

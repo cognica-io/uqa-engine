@@ -75,6 +75,7 @@ fn analyze(scopes: &Scopes, sql: &str) -> Result<(), SQLError> {
         &plan,
         &[],
     )
+    .map(|_| ())
 }
 
 #[test]

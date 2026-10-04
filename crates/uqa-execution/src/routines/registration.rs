@@ -8,8 +8,9 @@
 
 use super::{
     catalog::RoutineMutationContext,
+    compilation::with_routine_settings,
     configuration::{self, RoutineConfigurationSession},
-    definition::{compile_catalog_bound_routine, RoutineDefinitionContext},
+    definition::{compile_catalog_bound_routine, RoutineBodyCompilation, RoutineDefinitionContext},
 };
 use crate::catalog::security::roles::{
     dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
@@ -21,14 +22,15 @@ use std::{
 };
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
-    ast::{AlterRoutineStmt, CreateFunction, RoleAttribute},
+    ast::{AlterRoutineStmt, CreateFunction, FunctionBody, RoleAttribute},
     catalog::roles::role_inherits,
     routines::{
+        body_validation::{validate_sql_function_body, SQLBodyValidationContext},
         declaration::{resolve_alter_routine_identity_types, resolve_routine_type_references},
-        dependencies::RoutineCompilationMode,
         lifecycle::{binding::resolve_sql_routine_alter_target, ensure_routine_owner_as},
         registration::{self as analysis, RoutineSupportAuthority},
-        routine_signature_types, SQLUserFunction,
+        resolution::RoutineOverloadContext,
+        routine_signature_types, CompiledFunctionBody, SQLUserFunction,
     },
     SQLError,
 };
@@ -39,6 +41,46 @@ pub struct RoutineRegistrationContext<'a> {
     pub definition: RoutineDefinitionContext<'a>,
     pub support: &'a dyn RoutineSupportAuthority,
     pub configuration: &'a dyn RoutineConfigurationSession,
+    pub overloads: RoutineOverloadContext<'a>,
+}
+
+/// Whether `CREATE FUNCTION` examines the body, as `check_function_bodies` says.
+fn checks_function_bodies(session: &dyn RoutineConfigurationSession) -> Result<bool, SQLError> {
+    Ok(session.show_routine_variable("check_function_bodies")? == "on")
+}
+
+const fn body_compilation(checks_bodies: bool) -> RoutineBodyCompilation {
+    if checks_bodies {
+        RoutineBodyCompilation::Checked
+    } else {
+        RoutineBodyCompilation::Unchecked
+    }
+}
+
+/// Validate a SQL body once the routine is visible, so that the body can call it, as `PostgreSQL` validates a body after it stores the routine: a SQL-standard body is analyzed whatever `check_function_bodies` says, and a body given as a string is analyzed under the routine's own settings only when it is on; the final statement is checked against the declared result only when it is on.
+fn validate_registered_sql_body(
+    context: &RoutineRegistrationContext<'_>,
+    def: &CreateFunction,
+    compiled: &CompiledFunctionBody,
+    checks_bodies: bool,
+) -> Result<(), SQLError> {
+    let validation = SQLBodyValidationContext {
+        compilation: context.definition.compilation.analysis,
+        overloads: RoutineOverloadContext {
+            catalog: context.overloads.catalog,
+        },
+    };
+    match &def.body {
+        FunctionBody::Statements(_) => {
+            validate_sql_function_body(&validation, def, compiled, checks_bodies)
+        }
+        FunctionBody::Source(_) if checks_bodies => {
+            with_routine_settings(&context.definition.compilation, def, || {
+                validate_sql_function_body(&validation, def, compiled, true)
+            })
+        }
+        FunctionBody::Source(_) => Ok(()),
+    }
 }
 
 fn allocate_routine_object_id(
@@ -98,10 +140,11 @@ pub fn register_sql_function(
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
     validate_routine_definition(context, &mut def)?;
+    let checks_bodies = checks_function_bodies(context.configuration)?;
     let (compiled, _) = compile_catalog_bound_routine(
         &context.definition,
         &mut def,
-        RoutineCompilationMode::Definition,
+        body_compilation(checks_bodies),
     )?;
     let name = def.name.clone();
     let signature = routine_signature_types(&def);
@@ -176,7 +219,8 @@ pub fn register_sql_function(
     drop(memberships);
     drop(roles);
     context.catalog.changes.catalog_registry_changed();
-    Ok(())
+    // A failure aborts the statement, whose rollback withdraws the routine.
+    validate_registered_sql_body(context, &def, &compiled, checks_bodies)
 }
 
 /// Change mutable routine attributes without replacing its identity or compiled body.

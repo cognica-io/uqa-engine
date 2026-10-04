@@ -57,6 +57,9 @@ impl RoutineTypeCatalog for Engine {
             oid,
         )
     }
+    fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        uqa_execution::catalog::projection::format_type_name(&self.catalog_execution(), ty)
+    }
 }
 impl StoredMergeColumnCatalog for Engine {
     fn stored_merge_target_definitions(&self, table: &str) -> Option<Vec<ColumnDef>> {
@@ -178,6 +181,16 @@ impl RoutineCompilationSession for Engine {
     fn restore_routine_search_path(&self, path: Vec<String>) {
         self.session.state.write().search_path = path;
     }
+    fn routine_settings_scope(
+        &self,
+        settings: &[(String, String)],
+    ) -> Result<Box<dyn RoutineConfigurationGuard + '_>, SQLError> {
+        let scope = self.routine_invocation_state_guard(!settings.is_empty(), false);
+        for (name, value) in settings {
+            self.set_configured_parameter(name, value)?;
+        }
+        Ok(Box::new(scope))
+    }
 }
 
 use uqa_execution::routines::{
@@ -230,6 +243,7 @@ impl Engine {
             definition: self.routine_definition_context(),
             support: self,
             configuration: self,
+            overloads: uqa_sql::routines::resolution::RoutineOverloadContext { catalog: self },
         }
     }
     #[cfg(test)]

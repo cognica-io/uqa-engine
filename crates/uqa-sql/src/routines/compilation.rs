@@ -15,7 +15,7 @@ use super::{
     routine_local_name, CompiledFunctionBody, RoutineResolution,
 };
 use crate::{
-    ast::{ColumnType, CreateFunction, FunctionBody, Statement},
+    ast::{ColumnType, CreateFunction, FunctionBody, FunctionReturns, Statement},
     binding::{
         snapshot::BindingSnapshot,
         stored_relations::{
@@ -23,9 +23,10 @@ use crate::{
             StoredRelationCatalog,
         },
     },
-    catalog::regrole_dependencies::StoredRegroleResolver,
+    catalog::regrole_dependencies::{StoredRegroleConstants, StoredRegroleResolver},
     plan::UnifiedPlan,
     plpgsql::PlpgsqlCatalog,
+    type_resolution::canonical_routine_type_name,
     SQLError, ScalarExpr,
 };
 
@@ -70,12 +71,48 @@ pub fn compile_persisted_function_dependencies(
     compile_function_body_inner(context, def, true, true)
 }
 
-fn compile_function_body_inner(
+/// The body `CREATE FUNCTION` stores under `check_function_bodies = off`: the declaration is checked as always, a SQL-standard body, which the statement itself analyzes, is compiled, and a body given as a string is left unexamined until a call compiles it.
+pub fn defer_function_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
-    persisted_definition: bool,
-    preserve_target_expressions: bool,
 ) -> Result<CompiledFunctionBody, SQLError> {
+    if matches!(def.body, FunctionBody::Statements(_)) {
+        return compile_function_body(context, def);
+    }
+    validate_routine_signature(context, def)?.reject_with(context.regroles)?;
+    Ok(CompiledFunctionBody::Deferred)
+}
+
+/// The statements of a body nothing has compiled yet, read without the catalog, for analyses that must know what a routine runs before a call compiles it. `None` when the body does not parse, in which case a call fails before it runs anything.
+#[must_use]
+pub fn deferred_body_outline(
+    def: &CreateFunction,
+    aggregates: &dyn crate::plan::AggregateClassifier,
+) -> Option<CompiledFunctionBody> {
+    let FunctionBody::Source(source) = &def.body else {
+        return None;
+    };
+    match def.language.as_str() {
+        "plpgsql" => crate::plpgsql::parse_function(def)
+            .ok()
+            .map(CompiledFunctionBody::PLpgSQL),
+        "sql" => crate::compile(source).ok().map(|statements| {
+            CompiledFunctionBody::SQL(
+                statements
+                    .into_iter()
+                    .map(|statement| UnifiedPlan::lower_with(statement, aggregates))
+                    .collect(),
+            )
+        }),
+        _ => None,
+    }
+}
+
+/// The checks `CREATE FUNCTION` makes whatever `check_function_bodies` says: the language and the body form it accepts, the declared types, and the role constants of parameter defaults, which are returned for the body's own checks.
+fn validate_routine_signature(
+    context: &RoutineCompilationContext<'_>,
+    def: &CreateFunction,
+) -> Result<StoredRegroleConstants, SQLError> {
     if !matches!(def.language.as_str(), "plpgsql" | "sql") {
         return Err(SQLError::Routine {
             sqlstate: "42704".into(),
@@ -87,12 +124,43 @@ fn compile_function_body_inner(
             "inline SQL function body only valid for language SQL",
         ));
     }
-    let mut stored_regrole_constants = routine_parameter_regrole_constants(context.types, def);
+    let stored_regrole_constants = routine_parameter_regrole_constants(context.types, def);
     stored_regrole_constants.validate_inputs_with(context.regroles)?;
     validate_routine_declaration(context.types, def)?;
+    Ok(stored_regrole_constants)
+}
+
+/// PL/pgSQL's compiler rejects declared arguments of a trigger function, which reads its arguments from `TG_ARGV`.
+fn reject_trigger_function_arguments(def: &CreateFunction) -> Result<(), SQLError> {
+    let returns_trigger = matches!(
+        &def.returns,
+        FunctionReturns::Scalar { type_name } if canonical_routine_type_name(type_name) == "trigger"
+    );
+    if returns_trigger && def.identity_arity() != 0 {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42P13".into(),
+            message: "trigger functions cannot have declared arguments".into(),
+            detail: None,
+            hint: Some(
+                "The arguments of the trigger can be accessed through TG_NARGS and TG_ARGV instead."
+                    .into(),
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn compile_function_body_inner(
+    context: &RoutineCompilationContext<'_>,
+    def: &CreateFunction,
+    persisted_definition: bool,
+    preserve_target_expressions: bool,
+) -> Result<CompiledFunctionBody, SQLError> {
+    let mut stored_regrole_constants = validate_routine_signature(context, def)?;
     match def.language.as_str() {
         "plpgsql" => {
             stored_regrole_constants.reject_with(context.regroles)?;
+            reject_trigger_function_arguments(def)?;
             let catalog = context.parsers.plpgsql_catalog()?;
             let mut function = crate::plpgsql::parse_function_with_catalog(def, &catalog)?;
             resolve_plpgsql_datum_types(context.types, &mut function)?;

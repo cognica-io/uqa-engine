@@ -264,6 +264,8 @@ pub(super) struct SessionContext {
     pub(super) query_memory_limit: std::sync::atomic::AtomicUsize,
     /// Whether a terminated session has rolled back its transaction and dropped what it held.
     pub(super) termination_finished: AtomicBool,
+    /// Bodies `CREATE FUNCTION` left unexamined, as this session compiled them at their first call; like a backend's compiled functions, they survive rollback.
+    pub(super) compiled_routine_bodies: crate::session::CompiledRoutineBodies,
     /// Prepared definitions belong to the connection and survive transaction or
     /// savepoint rollback, including definitions created or removed after a boundary.
     pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
@@ -332,6 +334,7 @@ impl SessionContext {
             parameters: Mutex::new(crate::session::SessionParameterRegistry::default()),
             query_memory_limit: std::sync::atomic::AtomicUsize::new(0),
             termination_finished: AtomicBool::new(false),
+            compiled_routine_bodies: crate::session::CompiledRoutineBodies::default(),
             prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
             sequence_snapshot: Mutex::new(None),

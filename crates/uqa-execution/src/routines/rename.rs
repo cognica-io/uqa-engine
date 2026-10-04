@@ -15,7 +15,7 @@ use crate::schema::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::{
-    ast::{FunctionBinding, RenameRoutineStmt},
+    ast::{FunctionBinding, FunctionBody, RenameRoutineStmt},
     catalog::roles::role_inherits,
     routines::{
         declaration::resolve_routine_identity_types,
@@ -164,7 +164,13 @@ fn rewrite_routine_owned_dependency_identity(
             let changed =
                 analysis::rewrite_routine_owned_dependency_identity(&mut def, target, new_name)?;
             if changed {
-                let compiled = compile_persisted_sql_function(&context.compilation, &def)?;
+                // A rename rewrites parameter defaults and SQL-standard bodies; a body given as a string keeps its text and what it compiled to.
+                let compiled = match &def.body {
+                    FunctionBody::Statements(_) => {
+                        compile_persisted_sql_function(&context.compilation, &def)?
+                    }
+                    FunctionBody::Source(_) => function.compiled.clone(),
+                };
                 next_overloads.push(Arc::new(SQLUserFunction { def, compiled }));
             } else {
                 next_overloads.push(function);

@@ -716,9 +716,22 @@ fn static_routine_resolution_error(
     suffix: &str,
 ) -> SQLError {
     let arguments = static_routine_argument_types(&[], argument_types);
-    SQLError::Routine {
+    let hint = if sqlstate == "42725" {
+        format!(
+            "Could not choose a best candidate {}. You might need to add explicit type casts.",
+            kind.name()
+        )
+    } else {
+        format!(
+            "No {} matches the given name and argument types. You might need to add explicit type casts.",
+            kind.name()
+        )
+    };
+    SQLError::Diagnostic {
         sqlstate: sqlstate.into(),
         message: format!("{} {name}({arguments}) {suffix}", kind.name()),
+        detail: None,
+        hint: Some(hint),
     }
 }
 

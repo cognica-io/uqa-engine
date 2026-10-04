@@ -43,6 +43,14 @@ impl ExecutablePlanOptimizer for Inputs {
         self.planned.borrow_mut().push(plan);
         Err(SQLError::TypeMismatch("planning rejected the input".into()))
     }
+
+    fn plan_with_result(
+        &self,
+        _: UnifiedPlan,
+        _: &[SQLParam],
+    ) -> Result<(UnifiedPlan, uqa_sql::binding::statements::AnalyzedResult), SQLError> {
+        panic!("these statements run without a result check")
+    }
 }
 
 impl StatementExecutionInputs<()> for Inputs {

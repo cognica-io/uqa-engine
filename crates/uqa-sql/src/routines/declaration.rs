@@ -20,6 +20,8 @@ pub trait RoutineTypeCatalog {
     fn resolve_catalog_column_type(&self, name: &str) -> Option<ColumnType>;
     fn resolve_catalog_column_type_name(&self, name: &str) -> Result<ColumnType, SQLError>;
     fn resolve_catalog_domain_type_by_oid(&self, oid: u32) -> Option<ColumnType>;
+    /// The name `PostgreSQL`'s `format_type_be` gives a type in messages.
+    fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError>;
 }
 
 pub fn resolve_routine_type_references(
@@ -356,10 +358,11 @@ fn validate_routine_input_types(def: &CreateFunction) -> Result<PolymorphicInput
                 _ => false,
             };
             if !supported {
-                return Err(routine_definition_error(format!(
-                    "{} routines cannot have arguments of type {type_name}",
-                    def.language
-                )));
+                return Err(pseudo_type_error(
+                    def,
+                    format!("cannot have arguments of type {type_name}"),
+                    format!("cannot accept type {type_name}"),
+                ));
             }
         }
     }
@@ -398,18 +401,27 @@ fn validate_routine_output_types(
                 && !(type_name == "trigger"
                     && def.language == "plpgsql"
                     && !def.is_procedure
-                    && def.params.is_empty()
                     && matches!(def.returns, FunctionReturns::Scalar { .. })) =>
             {
-                return Err(routine_definition_error(format!(
-                    "{} routines cannot return type {type_name}",
-                    def.language
-                )));
+                let message = format!("cannot return type {type_name}");
+                return Err(pseudo_type_error(def, message.clone(), message));
             }
             Some(_) | None => {}
         }
     }
     Ok(())
+}
+
+/// A pseudo-type the routine's language rejects, reported as its validator reports it: `fmgr_sql_validator` as an invalid definition, and `plpgsql_validator` as an unsupported feature.
+fn pseudo_type_error(def: &CreateFunction, sql: String, plpgsql: String) -> SQLError {
+    if def.language == "plpgsql" {
+        SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: format!("PL/pgSQL functions {plpgsql}"),
+        }
+    } else {
+        routine_definition_error(format!("SQL functions {sql}"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
