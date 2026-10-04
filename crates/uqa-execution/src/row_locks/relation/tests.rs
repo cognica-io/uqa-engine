@@ -323,3 +323,44 @@ fn relation_deadlock_detection_includes_every_held_mode() {
         .insert(second, Share);
     assert!(relation_deadlock_exists(&state, 2, first, Share));
 }
+
+#[test]
+fn sessions_of_one_process_never_wait_for_a_relation_whose_lock_bytes_merely_collide() {
+    use RelationLockMode::{AccessExclusive, AccessShare};
+    // Relations share the cross-process lock bytes by hash; find two tables that hash to the same bytes.
+    let mut slots = std::collections::HashMap::new();
+    let (held_name, requested_name) = (0_u32..)
+        .map(|index| format!("public.collision_{index}"))
+        .find_map(|name| {
+            let slot =
+                super::super::cross_process::relation_byte_claims(name.as_bytes(), AccessShare)[0]
+                    .offset;
+            slots
+                .insert(slot, name.clone())
+                .map(|earlier| (earlier, name))
+        })
+        .expect("colliding relation names");
+    let directory = tempfile::tempdir().unwrap();
+    let manager = RowLockManager::for_database_file(&directory.path().join("collisions.db"));
+    assert!(manager.has_cross_process_coordination());
+    let held = manager.table_key(&held_name);
+    let requested = manager.table_key(&requested_name);
+    let cancel = uqa_core::CancellationToken::new();
+    // A session idle in its transaction holds one table; another session of the process locks the other table at once.
+    manager
+        .acquire_relation(1, held, AccessShare, 0, &cancel)
+        .unwrap();
+    assert!(manager
+        .try_acquire_relation(2, requested, AccessExclusive, 0, &cancel)
+        .unwrap());
+    // The table the first session holds still conflicts by its exact identity.
+    assert!(!manager
+        .try_acquire_relation(3, held, AccessExclusive, 0, &cancel)
+        .unwrap());
+    manager.release_session(2);
+    manager.release_session(1);
+    assert!(manager
+        .try_acquire_relation(3, held, AccessExclusive, 0, &cancel)
+        .unwrap());
+    manager.release_session(3);
+}

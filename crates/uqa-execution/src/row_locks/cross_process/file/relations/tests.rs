@@ -31,27 +31,18 @@ fn release(coordinator: &FileLockCoordinator, mode: RelationLockMode) {
 }
 
 #[test]
-fn relation_holder_accounting_matches_all_eight_modes_within_one_process() {
+fn sessions_of_one_process_are_admitted_and_their_holders_balance_in_all_eight_modes() {
+    // The lock manager arbitrates the sessions of one process by exact relation identity before it asks the coordinator, which admits a mode against other processes only.
     let directory = tempfile::tempdir().unwrap();
     let coordinator = FileLockCoordinator::open(&directory.path().join("relations.db")).unwrap();
-    for (left, expected) in RelationLockMode::ALL.into_iter().zip(CONFLICTS) {
+    for left in RelationLockMode::ALL {
         held(&coordinator, left);
-        for (right, expected) in RelationLockMode::ALL.into_iter().zip(expected.bytes()) {
-            let result = coordinator
+        for right in RelationLockMode::ALL {
+            coordinator
                 .try_relation_claim(PEER_SESSION, RELATION, right)
-                .unwrap();
-            if expected == b'X' {
-                assert_eq!(
-                    result,
-                    Err(RelationClaimWait::Conflict(relation_mode_claim(
-                        RELATION, left, true
-                    ))),
-                    "{left:?}, {right:?}"
-                );
-            } else {
-                result.unwrap();
-                coordinator.release(PEER_SESSION, &relation_byte_claims(RELATION, right));
-            }
+                .unwrap()
+                .unwrap_or_else(|wait| panic!("{left:?}, {right:?}: {wait:?}"));
+            coordinator.release(PEER_SESSION, &relation_byte_claims(RELATION, right));
         }
         release(&coordinator, left);
     }
