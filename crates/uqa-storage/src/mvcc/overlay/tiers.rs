@@ -45,7 +45,6 @@ struct RunHead {
 pub(super) struct TieredCursor<'a> {
     memtable: Option<Peekable<BudgetedSharedMapIter<'a, RecordKey, Change>>>,
     runs: Vec<RunHead>,
-    key: Vec<u8>,
 }
 
 impl<'a> TieredCursor<'a> {
@@ -66,7 +65,6 @@ impl<'a> TieredCursor<'a> {
         Ok(Self {
             memtable,
             runs: heads,
-            key: Vec::new(),
         })
     }
 
@@ -95,13 +93,11 @@ impl<'a> TieredCursor<'a> {
                     }
                 }
             }
-            let Some(least) = least else {
-                return Ok(None);
-            };
-            self.key.clear();
-            self.key.extend_from_slice(least);
         }
-        let change = match winner.expect("a least key has a source") {
+        let Some(winner) = winner else {
+            return Ok(None);
+        };
+        let change = match winner {
             0 => {
                 let (_, change) = self
                     .memtable
@@ -125,7 +121,7 @@ impl<'a> TieredCursor<'a> {
             if run
                 .head
                 .as_ref()
-                .is_some_and(|head| head.key.bytes() == self.key.as_slice())
+                .is_some_and(|head| head.key.bytes() == change.key())
             {
                 run.head = run.cursor.next(control)?;
             }

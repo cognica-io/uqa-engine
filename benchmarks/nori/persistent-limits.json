@@ -177,7 +177,7 @@
       "macos/aarch64/64": {
         "commit_batch_256/0": {
           "bytes_net": 1919112,
-          "bytes_peak": 8292246,
+          "bytes_peak": 8292278,
           "bytes_total": 469391264,
           "count_net": 352,
           "count_peak": 11463,
@@ -211,7 +211,7 @@
       "linux/x86_64/64": {
         "commit_batch_256/0": {
           "bytes_net": 1919864,
-          "bytes_peak": 8292246,
+          "bytes_peak": 8292278,
           "bytes_total": 469390665,
           "count_net": 352,
           "count_peak": 11463,
@@ -267,7 +267,7 @@
     },
     "timing_max_ratio": 1.21,
     "calibration": {
-      "allocation_policy": "One allocation-only observation per workload and target after ownership corrections. Exact observed limits for all metrics except commit bytes_total, which adds the independently derived nine-byte redb 4.1.0 table-update-order bound. No timing or percentage margin; unknown targets require review.",
+      "allocation_policy": "One allocation-only observation per workload and target after ownership corrections. Exact observed limits except commit bytes_total, which includes the independently derived nine-byte redb 4.1.0 table-update-order bound, and the bounded private-overlay peak adjustment documented below. No timing or percentage margin; unknown targets require review.",
       "transaction_model": "versioned_concurrent",
       "private_retained_bytes_after_completion": 0,
       "dependency_versions": {
@@ -320,7 +320,34 @@
         "sha256": "a654232161cfb920bb73f11aa7172771c73bf3d69f7ba0e706f254d2bce68a1d",
         "transaction_model": "provider_serialized"
       },
-      "timing_acceptance": "Not established by allocation-only observations; requires a controlled host and an independent noise bound."
+      "timing_acceptance": "Not established by allocation-only observations; requires a controlled host and an independent noise bound.",
+      "bounded_private_overlay": {
+        "introduced_by": "affea6e2d",
+        "runtime_revision": "1c6edf35f",
+        "workload": "commit_batch_256/0",
+        "metric": "bytes_peak",
+        "previous_ceiling": 8292246,
+        "ceiling": 8292278,
+        "fixed_metadata_bytes": 32,
+        "explanation": "Private roots now retain a resident-byte counter and a shared spilled-run handle. Each field is eight bytes on the reviewed 64-bit targets. Compacting the run handle removes sixteen bytes from the reported peak; the remaining thirty-two bytes are fixed overlay metadata. Payload-copy regressions are removed, and every other allocation ceiling and every output expectation is unchanged.",
+        "macos_observation": {
+          "source": "target/benchmark-runs/nori-redb-final.json",
+          "sha256": "86040ba7ee26b8aeea7345cc510912402acbec81a2998187ca529df3eed9a70b",
+          "bytes": 5480,
+          "runtime_sources_sha256": "46783dd8116e9a00c4fe360225994ba56660b8c965c47c228e47f97249ef8d56",
+          "benchmark_sha256": "890a79d629d4459359289e9cdd503960a86bd7c298ada9e50566b2233d5fd745",
+          "observed_peak": 8292278,
+          "gate_passed_at_collection": false
+        },
+        "linux_derivation": {
+          "source": "https://github.com/cognica-io/uqa-engine/actions/runs/37174415133/artifacts/11293220174",
+          "artifact_file": "nori-redb-native.json",
+          "observed_peak_before_compact_handles": 8292294,
+          "compact_handle_reduction_bytes": 16,
+          "expected_peak": 8292278,
+          "validation": "Derived from the CI observation and the matching 64-bit layout reduction; final Linux runtime has not been remeasured."
+        }
+      }
     },
     "transaction_model": "versioned_concurrent"
   }
