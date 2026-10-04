@@ -201,7 +201,9 @@ impl Engine {
             })?;
         if let Some(changes) = self.command_overlay_changes(table)? {
             for doc_id in doc_ids {
-                if !changes.contains_change(*doc_id) {
+                if !changes.contains_change(*doc_id).map_err(|error| {
+                    document_store_read_error("read private generated document projection", &error)
+                })? {
                     continue;
                 }
                 if let Some(document) = changes.get_stored(*doc_id).map_err(|error| {
@@ -249,15 +251,23 @@ impl Engine {
         let table_state = self.require_query_table(table)?;
         let columns = table_state.columns.read().clone();
         let changes = self.command_overlay_changes(table)?;
-        let persisted_ids = doc_ids
-            .iter()
-            .copied()
-            .filter(|id| {
-                changes
-                    .as_ref()
-                    .is_none_or(|changes| !changes.contains_change(*id))
-            })
-            .collect::<Vec<_>>();
+        let changes_error =
+            |error| document_store_read_error("read private document projection", &error);
+        let mut persisted_ids = Vec::with_capacity(doc_ids.len());
+        let mut private_ids = Vec::new();
+        for id in doc_ids.iter().copied() {
+            match changes
+                .as_ref()
+                .map(|changes| changes.change_presence(id))
+                .transpose()
+                .map_err(changes_error)?
+                .flatten()
+            {
+                None => persisted_ids.push(id),
+                Some(true) => private_ids.push(id),
+                Some(false) => {}
+            }
+        }
         let mut projected = uqa_execution::query::document_projection::read_document_projection(
             &**table_state.document_store.read(),
             &persisted_ids,
@@ -265,11 +275,6 @@ impl Engine {
             &columns,
         )?;
         if let Some(changes) = changes {
-            let private_ids = doc_ids
-                .iter()
-                .copied()
-                .filter(|id| changes.change_presence(*id) == Some(true))
-                .collect::<Vec<_>>();
             projected.extend(
                 uqa_execution::query::document_projection::read_document_projection(
                     &changes,

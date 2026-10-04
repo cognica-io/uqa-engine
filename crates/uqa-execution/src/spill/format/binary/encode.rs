@@ -47,6 +47,32 @@ pub(crate) fn encode_physical_row_record(
     Ok(record)
 }
 
+/// The bytes [`encode_document`] writes for `fields`.
+pub(crate) fn encoded_document_size(
+    fields: &uqa_storage::document_store::Document,
+) -> ExecResult<usize> {
+    let mut bytes = 9_usize;
+    for (name, value) in fields {
+        add_string_size(&mut bytes, name, "document field name")?;
+        add_value_size(&mut bytes, value, 1)?;
+    }
+    Ok(bytes)
+}
+
+/// Write `fields` as the map value they form, without building that value.
+pub(crate) fn encode_document(
+    writer: &mut impl Write,
+    fields: &uqa_storage::document_store::Document,
+) -> ExecResult<()> {
+    write_tag(writer, 9)?;
+    write_u64(writer, fields.len())?;
+    for (name, value) in fields {
+        write_bytes(writer, name.as_bytes())?;
+        encode_value(writer, value, 1)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn encoded_physical_row_record_size(
     row: &PhysicalRow,
     physical_width: usize,

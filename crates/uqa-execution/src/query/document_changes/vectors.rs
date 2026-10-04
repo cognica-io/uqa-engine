@@ -7,7 +7,7 @@
 //! Private rows retain the physical canonical sources captured with their evaluated versions.
 
 use super::{
-    Arc, Change, DocumentChanges, DocumentSelection, DocumentStore, StorageBackendResult,
+    Arc, Change, DocId, DocumentChanges, DocumentSelection, DocumentStore, StorageBackendResult,
     StorageReadControl,
 };
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryReservation};
@@ -110,35 +110,53 @@ impl DocumentChanges {
         column: Option<&ColumnDef>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNReadChanges>> {
-        for (_, change) in self.rows() {
+        let physical = |change: &Change| matches!(change, Change::Captured(source, true) if source.vector(field, column).is_some_and(|source| source.source.is_some()));
+        let source = |document: DocId, change: &Change| {
+            if !change.present() {
+                return (document, None);
+            }
+            let Change::Captured(source, _) = change else {
+                unreachable!("validated private source");
+            };
+            (
+                document,
+                Some(
+                    source
+                        .vector(field, column)
+                        .expect("validated private column")
+                        .source
+                        .as_ref()
+                        .expect("validated private physical source")
+                        .clone(),
+                ),
+            )
+        };
+        if self.staged_views().is_empty() {
+            for (_, change) in self.rows() {
+                control.check()?;
+                if change.present() && !physical(change) {
+                    return Ok(None);
+                }
+            }
+            return DiskANNReadChanges::capture(
+                self.rows()
+                    .iter()
+                    .map(|(document, change)| Ok(source(*document, change))),
+                control,
+            )
+            .map(Some);
+        }
+        // Rows that commands staged are evaluated fields, which no physical source supplies, so only their deletions leave a physical selection.
+        for change in self.change_rows_after(None) {
             control.check()?;
-            if change.present()
-                && !matches!(change, Change::Captured(source, true) if source.vector(field, column).is_some_and(|source| source.source.is_some()))
-            {
+            let (_, change) = change?;
+            if change.present() && !physical(&change) {
                 return Ok(None);
             }
         }
         DiskANNReadChanges::capture(
-            self.rows().iter().map(|(document, change)| {
-                if !change.present() {
-                    return Ok((*document, None));
-                }
-                let Change::Captured(source, _) = change else {
-                    unreachable!("validated private source");
-                };
-                Ok((
-                    *document,
-                    Some(
-                        source
-                            .vector(field, column)
-                            .expect("validated private column")
-                            .source
-                            .as_ref()
-                            .expect("validated private physical source")
-                            .clone(),
-                    ),
-                ))
-            }),
+            self.change_rows_after(None)
+                .map(|change| change.map(|(document, change)| source(document, &change))),
             control,
         )
         .map(Some)
@@ -152,32 +170,41 @@ impl DocumentChanges {
         column: Option<&ColumnDef>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<VectorReadSnapshot>> {
-        for (_, change) in self.rows() {
+        let values = |change: &Change| match change {
+            Change::Captured(source, true) => source
+                .vector(field, column)
+                .map(|source| source.values.clone()),
+            _ => None,
+        };
+        if self.staged_views().is_empty() {
+            for (_, change) in self.rows() {
+                control.check()?;
+                if change.present() && values(change).is_none() {
+                    return Ok(None);
+                }
+            }
+            return SelectedVectorRead::capture(
+                base,
+                dimensions,
+                self.rows()
+                    .iter()
+                    .map(|(document, change)| (*document, values(change))),
+                control,
+            )
+            .map(Some);
+        }
+        // Rows that commands staged are evaluated fields, which no physical source supplies, so only their deletions leave a physical selection.
+        let mut selected = BudgetedVec::new(control.memory());
+        for change in self.change_rows_after(None) {
             control.check()?;
-            if change.present()
-                && !matches!(change, Change::Captured(source, true) if source.vector(field, column).is_some())
-            {
+            let (document, change) = change?;
+            let source = values(&change);
+            if change.present() && source.is_none() {
                 return Ok(None);
             }
+            selected.push((document, source))?;
         }
-        SelectedVectorRead::capture(
-            base,
-            dimensions,
-            self.rows().iter().map(|(document, change)| {
-                let source = match change {
-                    Change::Captured(source, true) => Some(
-                        source
-                            .vector(field, column)
-                            .expect("validated private column")
-                            .values
-                            .clone(),
-                    ),
-                    _ => None,
-                };
-                (*document, source)
-            }),
-            control,
-        )
-        .map(Some)
+        let (selected, _memory) = selected.into_parts();
+        SelectedVectorRead::capture(base, dimensions, selected, control).map(Some)
     }
 }

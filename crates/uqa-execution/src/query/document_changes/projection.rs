@@ -16,9 +16,10 @@ impl DocumentChanges {
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<()> {
         let nulls = vec![&Value::Null; fields.len()];
+        let mut staged = self.staged_reader(ids);
         let mut index = 0;
         while index < ids.len() {
-            if let Some((end, source)) = self.source_run(ids, index) {
+            if let Some((end, source)) = self.batch_source_run(ids, index, &mut staged)? {
                 let mut keep_going = true;
                 source.for_each_fields_multi_ref_with_presence(
                     &ids[index..end],
@@ -34,7 +35,8 @@ impl DocumentChanges {
                 index = end;
             } else {
                 let id = ids[index];
-                let keep_going = match self.get(id).and_then(Change::fields) {
+                let change = self.batch_change(&mut staged, id)?;
+                let keep_going = match change.as_deref().and_then(Change::fields) {
                     Some(document) => {
                         let values = fields
                             .iter()

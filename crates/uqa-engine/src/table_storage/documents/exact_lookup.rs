@@ -10,8 +10,11 @@ use crate::{Engine, TableState};
 use std::sync::Arc;
 use uqa_core::{DocId, Value};
 use uqa_execution::{
+    mutation::overlay::CommandMutationOverlay,
+    query::document_changes::DocumentChanges,
     query::exact_lookup::{ExactLookup, ExactLookupOverlay, FieldPresence},
     serializable::SerializableRelationRead,
+    storage_errors::storage_error,
 };
 use uqa_sql::SQLError;
 use uqa_storage::ValueIndexKey;
@@ -23,31 +26,23 @@ struct CommandOverlay<'a> {
 
 impl ExactLookupOverlay for CommandOverlay<'_> {
     fn is_empty(&self) -> Result<bool, SQLError> {
-        Ok(self
+        Ok(!self
             .engine
             .session
             .command_mutation_overlays
             .lock()
             .iter()
-            .all(|overlay| {
-                overlay
-                    .documents(&self.table)
-                    .is_none_or(uqa_core::memory::BudgetedMap::is_empty)
-            }))
+            .any(|overlay| overlay.holds(&self.table)))
     }
 
     fn masks(&self, doc_id: DocId) -> Result<bool, SQLError> {
-        Ok(self
-            .engine
-            .session
-            .command_mutation_overlays
-            .lock()
-            .iter()
-            .any(|overlay| {
-                overlay
-                    .documents(&self.table)
-                    .is_some_and(|documents| documents.contains_key(&doc_id))
-            }))
+        let control = self.engine.query_retention_control()?;
+        CommandMutationOverlay::stages(
+            &self.engine.session.command_mutation_overlays.lock(),
+            &self.table,
+            doc_id,
+            &control,
+        )
     }
 
     fn find_match(
@@ -61,6 +56,64 @@ impl ExactLookupOverlay for CommandOverlay<'_> {
     }
 }
 
+/// The changes a read merges for a table: this transaction's rows that a fixed snapshot does not show, below the rows the running commands staged, whose exact indexes answer key probes.
+struct QueryOverlay<'a> {
+    fixed: DocumentChanges,
+    commands: CommandOverlay<'a>,
+}
+
+impl<'a> QueryOverlay<'a> {
+    fn new(engine: &'a Engine, table: &str) -> Result<Self, SQLError> {
+        let canonical = engine.command_overlay_table_name(table)?;
+        Ok(Self {
+            fixed: engine
+                .fixed_transaction_row_changes(&canonical)?
+                .unwrap_or_default(),
+            commands: CommandOverlay {
+                engine,
+                table: canonical,
+            },
+        })
+    }
+}
+
+impl ExactLookupOverlay for QueryOverlay<'_> {
+    fn is_empty(&self) -> Result<bool, SQLError> {
+        Ok(!self.fixed.has_changes() && self.commands.is_empty()?)
+    }
+
+    fn masks(&self, doc_id: DocId) -> Result<bool, SQLError> {
+        Ok(self.commands.masks(doc_id)? || self.fixed.masks(doc_id)?)
+    }
+
+    /// The smallest visible identity whose row matches: a staged row, or a fixed-snapshot row that no command restaged.
+    fn find_match(
+        &self,
+        columns: &[String],
+        values: &[Value],
+        presence: FieldPresence,
+    ) -> Result<Option<DocId>, SQLError> {
+        let staged = self.commands.find_match(columns, values, presence)?;
+        if !self.fixed.has_changes() {
+            return Ok(staged);
+        }
+        for change in self.fixed.changes() {
+            let (id, present) =
+                change.map_err(|error| storage_error("read private exact key", &error))?;
+            if staged.is_some_and(|staged| id >= staged) {
+                break;
+            }
+            if !present || self.commands.masks(id)? {
+                continue;
+            }
+            if self.fixed.row_matches(id, columns, values, presence)? {
+                return Ok(Some(id));
+            }
+        }
+        Ok(staged)
+    }
+}
+
 impl Engine {
     pub fn find_doc_id_by_field(
         &self,
@@ -69,7 +122,7 @@ impl Engine {
         value: &Value,
     ) -> Result<Option<DocId>, SQLError> {
         self.with_direct_table_read(table, |engine, name, table| {
-            let overlay = engine.command_overlay_changes(name)?.unwrap_or_default();
+            let overlay = QueryOverlay::new(engine, name)?;
             let read = engine.serializable_table_state_read(table)?;
             ExactLookup {
                 table: table.as_ref(),
@@ -107,7 +160,7 @@ impl Engine {
         values: &[Value],
     ) -> Result<Option<DocId>, SQLError> {
         self.with_direct_table_read(table, |engine, name, table| {
-            let overlay = engine.command_overlay_changes(name)?.unwrap_or_default();
+            let overlay = QueryOverlay::new(engine, name)?;
             let read = engine.serializable_table_state_read(table)?;
             engine.find_conflict_in_state(name, table, columns, values, &overlay, read.as_ref())
         })

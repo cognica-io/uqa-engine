@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! A transaction larger than its session's memory allowance spills its private changes to encrypted temporary files and commits, as `PostgreSQL` commits a transaction of any size.
+//! A transaction or a single statement larger than its session's memory allowance spills its private changes to encrypted temporary files and completes, as `PostgreSQL` completes a transaction or a statement of any size.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -18,8 +18,12 @@ use uqa_storage_sqlite::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorage
 const ALLOWANCE: usize = 4 << 20;
 
 fn engines(directory: &Path) -> Vec<(&'static str, Engine)> {
+    engines_with(directory, ALLOWANCE)
+}
+
+fn engines_with(directory: &Path, allowance: usize) -> Vec<(&'static str, Engine)> {
     let options = VersionedSessionOptions {
-        retained_bytes: ALLOWANCE,
+        retained_bytes: allowance,
     };
     let native = {
         let connection = ManagedConnection::open(&directory.join("native.db")).unwrap();
@@ -137,6 +141,141 @@ fn a_rollback_to_a_savepoint_discards_only_the_changes_after_it_across_spills() 
         assert_eq!(
             scalar(&engine, "SELECT max(id) FROM docs"),
             Value::Int(25_000),
+            "{backend}"
+        );
+    }
+}
+
+/// The rows each statement below writes, more than `ALLOWANCE` holds.
+const STATEMENT_ROWS: i64 = 12_000;
+
+#[test]
+fn statements_larger_than_the_session_allowance_complete() {
+    let directory = tempfile::tempdir().unwrap();
+    for (backend, engine) in engines(directory.path()) {
+        exec(
+            &engine,
+            "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
+        );
+        insert_rows(&engine, 0, STATEMENT_ROWS, STATEMENT_ROWS, "payload");
+        exec(&engine, "UPDATE docs SET body = body || ' updated'");
+        exec(&engine, "BEGIN");
+        exec(&engine, "DELETE FROM docs WHERE id % 2 = 0");
+        exec(&engine, "UPDATE docs SET body = 'renamed' WHERE id % 3 = 0");
+        exec(&engine, "COMMIT");
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs"),
+            Value::Int(STATEMENT_ROWS / 2),
+            "{backend}"
+        );
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'renamed'"),
+            Value::Int(STATEMENT_ROWS / 6),
+            "{backend}"
+        );
+        assert_eq!(
+            scalar(&engine, "SELECT body FROM docs WHERE id = 7"),
+            Value::Str(format!("{}7 updated", "payload ".repeat(12))),
+            "{backend}"
+        );
+    }
+}
+
+#[test]
+fn keys_stay_unique_across_the_rows_of_a_statement_larger_than_the_session_allowance() {
+    let directory = tempfile::tempdir().unwrap();
+    for (backend, engine) in engines(directory.path()) {
+        exec(
+            &engine,
+            "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
+        );
+        let duplicate = engine
+            .sql(
+                &format!(
+                    "INSERT INTO docs SELECT g, repeat('payload ', 12) || g FROM generate_series(1, {STATEMENT_ROWS}) AS g UNION ALL SELECT 1, 'again'"
+                ),
+                &[],
+            )
+            .unwrap_err();
+        assert_eq!(
+            duplicate.sqlstate(),
+            Some("23505"),
+            "{backend}: {duplicate}"
+        );
+        assert!(
+            duplicate
+                .to_string()
+                .contains("duplicate key value violates unique constraint \"docs_pkey\""),
+            "{backend}: {duplicate}"
+        );
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs"),
+            Value::Int(0),
+            "{backend}"
+        );
+        exec(
+            &engine,
+            &format!(
+                "INSERT INTO docs SELECT g % {} + 1, repeat('payload ', 12) || g FROM generate_series(1, {STATEMENT_ROWS}) AS g ON CONFLICT (id) DO NOTHING",
+                STATEMENT_ROWS / 2
+            ),
+        );
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs"),
+            Value::Int(STATEMENT_ROWS / 2),
+            "{backend}"
+        );
+        let twice = engine
+            .sql(
+                &format!(
+                    "INSERT INTO docs SELECT g, repeat('payload ', 12) || g FROM generate_series({}, {}) AS g UNION ALL SELECT {}, 'again' ON CONFLICT (id) DO UPDATE SET body = excluded.body",
+                    STATEMENT_ROWS / 2 + 1,
+                    STATEMENT_ROWS * 3 / 2,
+                    STATEMENT_ROWS / 2 + 1
+                ),
+                &[],
+            )
+            .unwrap_err();
+        assert_eq!(twice.sqlstate(), Some("21000"), "{backend}: {twice}");
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs"),
+            Value::Int(STATEMENT_ROWS / 2),
+            "{backend}"
+        );
+    }
+}
+
+/// The rows of the statement below and an allowance they exceed. Each call of its function reads the table, so the statement's work grows with the square of its rows.
+const READ_BACK_ROWS: i64 = 2_000;
+const READ_BACK_ALLOWANCE: usize = 512 << 10;
+
+#[test]
+fn a_volatile_function_reads_the_rows_that_a_statement_larger_than_the_session_allowance_wrote_before(
+) {
+    let directory = tempfile::tempdir().unwrap();
+    for (backend, engine) in engines_with(directory.path(), READ_BACK_ALLOWANCE) {
+        exec(
+            &engine,
+            "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
+        );
+        exec(
+            &engine,
+            "CREATE FUNCTION earlier(k integer) RETURNS text VOLATILE LANGUAGE sql AS $$ SELECT count(*)::text FROM docs WHERE id = k - 1 $$",
+        );
+        exec(
+            &engine,
+            &format!(
+                "INSERT INTO docs SELECT g, earlier(g) || repeat(' payload', 12) FROM generate_series(1, {READ_BACK_ROWS}) AS g"
+            ),
+        );
+        assert_eq!(
+            scalar(&engine, "SELECT count(*) FROM docs WHERE body LIKE '1 %'"),
+            Value::Int(READ_BACK_ROWS - 1),
+            "{backend}"
+        );
+        assert_eq!(
+            scalar(&engine, "SELECT body FROM docs WHERE id = 1"),
+            Value::Str(format!("0{}", " payload".repeat(12))),
             "{backend}"
         );
     }

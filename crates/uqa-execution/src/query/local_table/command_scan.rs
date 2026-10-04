@@ -91,14 +91,26 @@ impl LocalTableRowSource {
                     self.command_base_exhausted = true;
                 }
             }
+            if self.command_change_page.is_empty() && !self.command_changes_exhausted {
+                let page = limit.max(crate::DEFAULT_BATCH_SIZE);
+                for change in changes.changes_after(self.command_change_after).take(page) {
+                    self.command_change_page.push_back(
+                        change.map_err(|error| {
+                            storage_error("scan command-visible changes", &error)
+                        })?,
+                    );
+                }
+                self.command_changes_exhausted = self.command_change_page.len() < page;
+            }
             let next_base = self.command_base_ids.front().copied();
-            let next_change = changes.changes_after(self.command_change_after).next();
+            let next_change = self.command_change_page.front().copied();
             match (next_base, next_change) {
                 (Some(base), Some((id, _))) if base < id => {
                     self.command_base_ids.pop_front();
                     candidates.push(CommandScanCandidate::Persisted(base));
                 }
                 (_, Some((id, present))) => {
+                    self.command_change_page.pop_front();
                     if next_base == Some(id) {
                         self.command_base_ids.pop_front();
                     }

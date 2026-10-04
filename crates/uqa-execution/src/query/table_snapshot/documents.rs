@@ -46,7 +46,7 @@ impl RetainedDocuments {
         memory: &mut MemoryReservation,
     ) -> StorageBackendResult<Option<Value>> {
         self.checked_read(|| {
-            if self.0.changes.contains_change(id) {
+            if self.0.changes.contains_change(id)? {
                 self.0
                     .private_layout
                     .base_field(&self.0.changes, id, field, memory)
@@ -78,8 +78,9 @@ impl RetainedDocuments {
         control.check()?;
         let mut count = source.len()?;
         let mut unselected = count;
-        for (id, replacement) in changes.changes() {
+        for change in changes.changes() {
             control.check()?;
+            let (id, replacement) = change?;
             let present = source.contains_doc_id(id)?;
             if present {
                 unselected = unselected.checked_sub(1).ok_or_else(|| {
@@ -222,7 +223,7 @@ impl DocumentStore for RetainedDocuments {
 
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
         self.checked_read(|| {
-            if self.0.changes.contains_change(id) {
+            if self.0.changes.contains_change(id)? {
                 self.0.changes.get_metadata(id)
             } else {
                 self.0.source.get_metadata(id)
@@ -245,7 +246,7 @@ impl DocumentStore for RetainedDocuments {
         for id in ids {
             self.0.control.check()?;
             control.check()?;
-            let private = self.0.changes.contains_change(*id);
+            let private = self.0.changes.contains_change(*id)?;
             let (source, layout): (&dyn DocumentStore, &RowLayout) = if private {
                 (&self.0.changes, &self.0.private_layout)
             } else {
@@ -292,7 +293,7 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
-        self.checked_read(|| match self.0.changes.change_presence(id) {
+        self.checked_read(|| match self.0.changes.change_presence(id)? {
             Some(present) => Ok(present),
             None => self.0.source.contains_doc_id(id),
         })
@@ -390,7 +391,7 @@ impl DocumentStore for RetainedDocuments {
         };
         for id in ids {
             self.0.control.check()?;
-            if self.0.changes.contains_change(*id) {
+            if self.0.changes.contains_change(*id)? {
                 return Ok(None);
             }
         }

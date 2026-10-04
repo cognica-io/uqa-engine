@@ -6,7 +6,6 @@
 
 //! Bind constraint execution to the active catalog, row generation, and transaction.
 use crate::Engine;
-use std::collections::BTreeSet;
 use uqa_core::{DocId, PostingList, Predicate, Value};
 use uqa_execution::catalog::security::schema::SchemaAclPrivilege;
 use uqa_execution::{
@@ -80,12 +79,11 @@ impl MutationRead for Engine {
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
         Engine::get_live_document(self, table, doc_id)
     }
-    fn command_overlay_changed_ids(
+    fn command_overlay_changes(
         &self,
         table: &str,
-    ) -> Result<Option<BTreeSet<DocId>>, SQLError> {
-        self.command_overlay_changes(table)
-            .map(|changes| changes.map(|changes| changes.changes().map(|(id, _)| id).collect()))
+    ) -> Result<Option<uqa_execution::query::document_changes::DocumentChanges>, SQLError> {
+        Engine::command_overlay_changes(self, table)
     }
 }
 impl MutationIndexRead for Engine {
@@ -105,6 +103,14 @@ impl MutationIndexRead for Engine {
         values: &[Value],
     ) -> Result<Option<DocId>, SQLError> {
         Engine::find_mutation_conflict(self, table, columns, values)
+    }
+    fn staged_matches(
+        &self,
+        table: &str,
+        columns: &[String],
+        values: &[Value],
+    ) -> Result<Vec<DocId>, SQLError> {
+        Engine::command_overlay_matches(self, table, columns, values)
     }
     fn value_index_scan_key(
         &self,

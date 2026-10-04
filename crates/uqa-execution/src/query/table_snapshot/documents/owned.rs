@@ -18,7 +18,7 @@ impl RetainedDocuments {
         memory: &mut MemoryReservation,
     ) -> StorageBackendResult<Option<StoredDocument>> {
         self.0.control.check()?;
-        let private = self.0.changes.contains_change(id);
+        let private = self.0.changes.contains_change(id)?;
         let source: &dyn uqa_storage::DocumentStore = if private {
             &self.0.changes
         } else {

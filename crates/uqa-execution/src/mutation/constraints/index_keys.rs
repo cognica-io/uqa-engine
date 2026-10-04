@@ -27,6 +27,11 @@ impl<'a> ConstraintContext<'a> {
     }
 }
 
+/// A failed read of the changes a command staged.
+pub(crate) fn changes_error(error: uqa_storage::StorageBackendError) -> SQLError {
+    crate::storage_errors::storage_error("read command changes", &error)
+}
+
 pub fn index_predicate_accepts(
     context: IndexExpressionContext<'_>,
     table: &str,
@@ -161,25 +166,26 @@ impl EnforcedKeyExecution for EnforcedKey {
                 .ok_or_else(|| SQLError::Internal(format!("missing physical index {key:?}")))?;
             let changes = context
                 .reads
-                .command_overlay_changed_ids(table)?
+                .command_overlay_changes(table)?
                 .unwrap_or_default();
             for entry in indexed.entries() {
                 let id = entry.doc_id;
-                if Some(id) == ignored || changes.contains(&id) {
+                if Some(id) == ignored || changes.contains_change(id).map_err(changes_error)? {
                     continue;
                 }
                 if context.reads.get_document(table, id)?.is_some() {
                     return Ok(Some(id));
                 }
             }
-            for id in changes.iter() {
-                if Some(*id) == ignored {
+            for change in changes.changes() {
+                let (id, present) = change.map_err(changes_error)?;
+                if !present || Some(id) == ignored {
                     continue;
                 }
-                if let Some(document) = context.reads.get_document(table, *id)? {
+                if let Some(document) = context.reads.get_document(table, id)? {
                     if let Some(actual) = self.values(context, table, &document)? {
                         if key_values_equal(&actual, values)? {
-                            return Ok(Some(*id));
+                            return Ok(Some(id));
                         }
                     }
                 }
@@ -222,9 +228,12 @@ impl EnforcedKeyExecution for EnforcedKey {
                 .into_iter()
                 .collect()
         };
-        if let Some(changes) = context.reads.command_overlay_changed_ids(table)? {
-            ids.extend(changes);
-        }
+        // A row the running command staged holds its key in the command's own index rather than in storage.
+        ids.extend(
+            context
+                .indexes
+                .staged_matches(table, &self.columns, values)?,
+        );
         for id in ids {
             if Some(id) == ignored {
                 continue;

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Evaluated query changes share immutable row sources instead of recopying private payloads.
+//! Evaluated query changes share immutable row sources instead of recopying private payloads. Rows that running commands staged stay in the commands' own tiers above the selected changes, so a read of them copies nothing.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -16,8 +16,11 @@ use uqa_storage::{
 };
 
 mod desired;
+mod layers;
 mod projection;
 pub use desired::DocumentSelection;
+pub use layers::Changes;
+use layers::{ChangeRef, StagedLayers};
 mod selection;
 use selection::Selection;
 mod vectors;
@@ -67,9 +70,12 @@ impl Change {
     }
 }
 
-/// A fixed selection of replacements and tombstones. Clones and document snapshots share both the selection and its allocation lease; fallible extensions charge replacement capacity while retaining the original source owners.
+/// A fixed selection of replacements and tombstones, and the rows running commands staged above it. Clones and document snapshots share both the selection and its allocation lease; fallible extensions charge replacement capacity while retaining the original source owners.
 #[derive(Clone, Default)]
-pub struct DocumentChanges(Option<Arc<Selection>>);
+pub struct DocumentChanges {
+    selection: Option<Arc<Selection>>,
+    staged: Option<Arc<StagedLayers>>,
+}
 
 impl DocumentChanges {
     /// Serialized providers copy selected private rows while their live handle is guarded; immutable providers use `with_retained` instead.
@@ -118,29 +124,20 @@ impl DocumentChanges {
     }
 
     pub fn has_changes(&self) -> bool {
-        !self.rows().is_empty()
+        !self.rows().is_empty() || !self.staged_views().is_empty()
     }
 
-    pub fn contains_change(&self, id: DocId) -> bool {
-        self.get(id).is_some()
+    pub fn contains_change(&self, id: DocId) -> StorageBackendResult<bool> {
+        Ok(self.stages(id)? || self.selected(id).is_some())
     }
 
-    pub fn change_presence(&self, id: DocId) -> Option<bool> {
-        self.get(id).map(Change::present)
+    pub fn change_presence(&self, id: DocId) -> StorageBackendResult<Option<bool>> {
+        Ok(self.get(id)?.map(|change| change.present()))
     }
 
-    pub fn changes(&self) -> impl Iterator<Item = (DocId, bool)> + '_ {
-        self.rows()
-            .iter()
-            .map(|(id, change)| (*id, change.present()))
-    }
-
-    pub fn changes_after(&self, after: Option<DocId>) -> impl Iterator<Item = (DocId, bool)> + '_ {
-        self.rows()[self
-            .rows()
-            .partition_point(|(id, _)| after.is_some_and(|after| *id <= after))..]
-            .iter()
-            .map(|(id, change)| (*id, change.present()))
+    /// Visit every change in identity order, each with whether its row is present afterwards.
+    pub fn changes(&self) -> Changes<bool, bool> {
+        self.changes_after(None)
     }
 
     /// `source` must already retain an immutable snapshot. Membership checks normalize missing replacements into tombstones without reading complete row payloads.
@@ -253,7 +250,14 @@ impl DocumentChanges {
     pub fn into_rows(
         self,
     ) -> impl Iterator<Item = StorageBackendResult<(DocId, Option<StoredDocument>)>> {
-        let (mut owned, shared) = match self.0.map(Arc::try_unwrap) {
+        if self.staged.is_some() {
+            // Staged rows stream from the commands' tiers a bounded page at a time; the selection below them is shared.
+            return Box::new(self.change_rows_after(None).map(|change| {
+                change.and_then(|(id, change)| change.into_stored(id).map(|row| (id, row)))
+            }))
+                as Box<dyn Iterator<Item = StorageBackendResult<(DocId, Option<StoredDocument>)>>>;
+        }
+        let (mut owned, shared) = match self.selection.map(Arc::try_unwrap) {
             Some(Ok(selection)) => {
                 let (rows, capacity, allocation) = selection.into_parts();
                 (
@@ -261,11 +265,17 @@ impl DocumentChanges {
                     Self::default(),
                 )
             }
-            Some(Err(selection)) => (None, Self(Some(selection))),
+            Some(Err(selection)) => (
+                None,
+                Self {
+                    selection: Some(selection),
+                    staged: None,
+                },
+            ),
             None => (None, Self::default()),
         };
         let mut position = 0;
-        std::iter::from_fn(move || {
+        Box::new(std::iter::from_fn(move || {
             let (id, change) = if let Some((rows, _, _)) = owned.as_mut() {
                 rows.next()?
             } else {
@@ -274,25 +284,29 @@ impl DocumentChanges {
                 row
             };
             Some(change.into_stored(id).map(|row| (id, row)))
-        })
+        }))
     }
 
+    /// The end of the run of `ids` from `start` whose rows one retained source supplies, with that source.
     fn source_run<'a>(
         &'a self,
         ids: &[DocId],
         start: usize,
-    ) -> Option<(usize, &'a Arc<dyn DocumentStore>)> {
-        let source = self.get(ids[start])?.retained_source()?;
+    ) -> StorageBackendResult<Option<(usize, &'a Arc<dyn DocumentStore>)>> {
+        let retained = |id: DocId| -> StorageBackendResult<Option<&'a Arc<dyn DocumentStore>>> {
+            if self.stages(id)? {
+                return Ok(None);
+            }
+            Ok(self.selected(id).and_then(Change::retained_source))
+        };
+        let Some(source) = retained(ids[start])? else {
+            return Ok(None);
+        };
         let mut end = start + 1;
-        while end < ids.len()
-            && self
-                .get(ids[end])
-                .and_then(Change::retained_source)
-                .is_some_and(|next| Arc::ptr_eq(source, next))
-        {
+        while end < ids.len() && retained(ids[end])?.is_some_and(|next| Arc::ptr_eq(source, next)) {
             end += 1;
         }
-        Some((end, source))
+        Ok(Some((end, source)))
     }
 }
 
@@ -326,9 +340,8 @@ impl DocumentStore for DocumentChanges {
     }
 
     fn get_stored(&self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
-        self.get(id)
-            .cloned()
-            .unwrap_or(Change::Deleted)
+        self.get(id)?
+            .map_or(Change::Deleted, ChangeRef::into_owned)
             .into_stored(id)
     }
 
@@ -337,14 +350,18 @@ impl DocumentStore for DocumentChanges {
         ids: &[DocId],
     ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
         let mut rows = BTreeMap::new();
+        let mut staged = self.staged_reader(ids);
         let mut index = 0;
         while index < ids.len() {
-            if let Some((end, source)) = self.source_run(ids, index) {
+            if let Some((end, source)) = self.batch_source_run(ids, index, &mut staged)? {
                 rows.extend(source.get_stored_many(&ids[index..end])?);
                 index = end;
             } else {
                 let id = ids[index];
-                if let Some(row) = self.get_stored(id)? {
+                let change = self
+                    .batch_change(&mut staged, id)?
+                    .map_or(Change::Deleted, ChangeRef::into_owned);
+                if let Some(row) = change.into_stored(id)? {
                     rows.insert(id, row);
                 }
                 index += 1;
@@ -362,10 +379,11 @@ impl DocumentStore for DocumentChanges {
         control.check()?;
         let mut rows = uqa_core::memory::BudgetedVec::new(control.memory());
         rows.reserve(ids.len())?;
+        let mut staged = self.staged_reader(ids);
         let mut index = 0;
         while index < ids.len() {
             control.check()?;
-            if let Some((end, source)) = self.source_run(ids, index) {
+            if let Some((end, source)) = self.batch_source_run(ids, index, &mut staged)? {
                 let (page, _memory) =
                     read_stored_documents(source.as_ref(), &ids[index..end], control)?.into_parts();
                 for row in page {
@@ -374,7 +392,8 @@ impl DocumentStore for DocumentChanges {
                 }
                 index = end;
             } else {
-                let row = match self.get(ids[index]) {
+                let change = self.batch_change(&mut staged, ids[index])?;
+                let row = match change.as_deref() {
                     Some(Change::Fields(fields, metadata)) => {
                         Some(RetainedStoredDocument::with_metadata(
                             fields.retain_with_control(control)?,
@@ -395,7 +414,7 @@ impl DocumentStore for DocumentChanges {
     }
 
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
-        Ok(match self.get(id) {
+        Ok(match self.get(id)?.as_deref() {
             Some(Change::Fields(_, metadata)) => Some(*metadata),
             Some(Change::Retained(source)) => return source.get_metadata(id),
             Some(Change::Captured(source, true)) => return source.documents.get_metadata(id),
@@ -411,12 +430,13 @@ impl DocumentStore for DocumentChanges {
         visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
         control.check()?;
-        let change = self.get(id);
-        if let Some(source) = change.and_then(Change::retained_source) {
+        let change = self.get(id)?;
+        if let Some(source) = change.as_deref().and_then(Change::retained_source) {
             source.with_field_ref_controlled(id, field, control, visitor)?;
         } else {
             visitor(
                 change
+                    .as_deref()
                     .and_then(Change::fields)
                     .and_then(|fields| fields.get(field)),
             )?;
@@ -435,10 +455,11 @@ impl DocumentStore for DocumentChanges {
         if fields.is_empty() {
             return Ok(present);
         }
+        let mut staged = self.staged_reader(ids);
         let mut index = 0;
         while index < ids.len() {
             control.check()?;
-            if let Some((end, source)) = self.source_run(ids, index) {
+            if let Some((end, source)) = self.batch_source_run(ids, index, &mut staged)? {
                 let page = uqa_storage::document_store::read_field_presence(
                     source.as_ref(),
                     &ids[index..end],
@@ -448,7 +469,8 @@ impl DocumentStore for DocumentChanges {
                 present.extend_from_slice(&page)?;
                 index = end;
             } else {
-                let row = self.get(ids[index]).and_then(Change::fields);
+                let change = self.batch_change(&mut staged, ids[index])?;
+                let row = change.as_deref().and_then(Change::fields);
                 for field in fields {
                     control.check()?;
                     present.push(row.is_some_and(|row| row.contains_key(*field)))?;
@@ -461,14 +483,15 @@ impl DocumentStore for DocumentChanges {
     }
 
     fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
-        Ok(self.change_presence(id) == Some(true))
+        Ok(self.change_presence(id)? == Some(true))
     }
 
     fn get_field(&self, id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
-        let change = self.get(id);
-        match change.and_then(Change::retained_source) {
+        let change = self.get(id)?;
+        match change.as_deref().and_then(Change::retained_source) {
             Some(source) => source.get_field(id, field),
             None => Ok(change
+                .as_deref()
                 .and_then(Change::fields)
                 .and_then(|fields| fields.get(field))
                 .cloned()),
@@ -527,25 +550,35 @@ impl DocumentStore for DocumentChanges {
         if ids.is_empty() {
             return Ok(Some(Vec::new()));
         }
-        match self.source_run(ids, 0) {
+        match self.source_run(ids, 0)? {
             Some((end, source)) if end == ids.len() => source.get_shared_fields(ids, fields),
             _ => Ok(None),
         }
     }
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
-        Ok(self
-            .changes()
-            .filter_map(|(id, present)| present.then_some(id))
-            .collect())
+        let mut ids = Vec::new();
+        for change in self.changes() {
+            let (id, present) = change?;
+            if present {
+                ids.push(id);
+            }
+        }
+        Ok(ids)
     }
 
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
-        Ok(self
-            .changes_after(after)
-            .filter_map(|(id, present)| present.then_some(id))
-            .take(limit)
-            .collect())
+        let mut ids = Vec::new();
+        for change in self.changes_after(after) {
+            if ids.len() == limit {
+                break;
+            }
+            let (id, present) = change?;
+            if present {
+                ids.push(id);
+            }
+        }
+        Ok(ids)
     }
 
     fn next_doc_ids_controlled(
@@ -559,11 +592,12 @@ impl DocumentStore for DocumentChanges {
         if limit == 0 {
             return Ok(ids);
         }
-        for (id, present) in self.changes_after(after) {
+        for change in self.changes_after(after) {
             control.check()?;
             if ids.len() == limit {
                 break;
             }
+            let (id, present) = change?;
             if present {
                 ids.push(id)?;
             }
@@ -573,7 +607,13 @@ impl DocumentStore for DocumentChanges {
     }
 
     fn len(&self) -> StorageBackendResult<usize> {
-        Ok(self.changes().filter(|(_, present)| *present).count())
+        let mut count = 0;
+        for change in self.changes() {
+            if change?.1 {
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {

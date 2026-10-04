@@ -157,7 +157,8 @@ fn copied_private_capture_transfers_provider_fields_without_copying_or_rechargin
     assert_eq!(source.calls.load(Ordering::Relaxed), 1);
     let returned = source.returned.lock();
     for (id, row) in [1, 3].into_iter().zip(returned.iter()) {
-        let Some(Change::Fields(fields, metadata)) = changes.get(id) else {
+        let change = changes.get(id).unwrap();
+        let Some(Change::Fields(fields, metadata)) = change.as_deref() else {
             panic!("retained copied fields");
         };
         assert!(std::ptr::eq(fields.as_ref(), row.fields()));

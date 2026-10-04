@@ -36,6 +36,9 @@ pub struct LocalTableRowSource {
     recheck_cursor: usize,
     command_changes: Option<super::document_changes::DocumentChanges>,
     command_change_after: Option<uqa_core::DocId>,
+    /// The next changes of the command scan after `command_change_after`, read a page at a time.
+    command_change_page: std::collections::VecDeque<(uqa_core::DocId, bool)>,
+    command_changes_exhausted: bool,
     command_base_after: Option<uqa_core::DocId>,
     command_base_ids: std::collections::VecDeque<uqa_core::DocId>,
     command_base_exhausted: bool,
@@ -155,6 +158,8 @@ impl LocalTableRowSource {
             after: None,
             recheck_cursor: 0,
             command_change_after: None,
+            command_change_page: std::collections::VecDeque::new(),
+            command_changes_exhausted: false,
             command_base_after: None,
             command_base_ids: std::collections::VecDeque::new(),
             command_base_exhausted: false,

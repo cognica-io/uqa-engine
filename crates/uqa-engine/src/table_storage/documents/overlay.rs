@@ -5,6 +5,7 @@
 //
 
 use super::{Arc, CommandOverlayDocument, DocId, Document, Engine, SQLError, Value};
+use uqa_execution::mutation::overlay::CommandMutationOverlay;
 use uqa_execution::query::document_changes::{DocumentChanges, DocumentSelection};
 use uqa_execution::storage_errors::storage_error;
 use uqa_storage::{DocumentMetadata, StoredDocument};
@@ -43,11 +44,7 @@ impl Engine {
             .command_mutation_overlays
             .lock()
             .iter()
-            .any(|overlay| {
-                overlay
-                    .documents(&canonical)
-                    .is_some_and(|documents| !documents.is_empty())
-            })
+            .any(|overlay| overlay.holds(&canonical))
             || self
                 .query_transaction_overlay
                 .as_ref()
@@ -106,27 +103,25 @@ impl Engine {
         table: &str,
         doc_id: DocId,
     ) -> Result<Option<CommandOverlayDocument>, SQLError> {
+        if self.session.command_mutation_overlays.lock().is_empty() {
+            return Ok(None);
+        }
         let table = self.command_overlay_table_name(table)?;
-        Ok(self
-            .session
-            .command_mutation_overlays
-            .lock()
-            .iter()
-            .rev()
-            .find_map(|overlay| {
-                overlay
-                    .documents(&table)
-                    .and_then(|documents| documents.get(&doc_id))
-                    .map(|document| match document {
-                        Some(document) => {
-                            CommandOverlayDocument::Present(StoredDocument::with_metadata(
-                                document.fields.as_ref().clone(),
-                                document.metadata,
-                            ))
-                        }
-                        None => CommandOverlayDocument::Deleted,
-                    })
-            }))
+        let control = self.query_retention_control()?;
+        let overlays = self.session.command_mutation_overlays.lock();
+        Ok(
+            CommandMutationOverlay::row(&overlays, &table, doc_id, &control)?.map(|document| {
+                match document {
+                    Some(document) => {
+                        CommandOverlayDocument::Present(StoredDocument::with_metadata(
+                            document.fields.into_document(),
+                            document.metadata,
+                        ))
+                    }
+                    None => CommandOverlayDocument::Deleted,
+                }
+            }),
+        )
     }
 
     pub(super) fn command_overlay_exact_match(
@@ -138,7 +133,7 @@ impl Engine {
     ) -> Result<Option<DocId>, SQLError> {
         let table = self.command_overlay_table_name(table)?;
         let control = self.query_retention_control()?;
-        uqa_execution::mutation::overlay::CommandMutationOverlay::find_match(
+        CommandMutationOverlay::find_match(
             &mut self.session.command_mutation_overlays.lock(),
             &table,
             fields,
@@ -148,12 +143,31 @@ impl Engine {
         )
     }
 
+    /// The visible rows the running commands staged for `table` whose `fields` hold `values`.
+    pub(crate) fn command_overlay_matches(
+        &self,
+        table: &str,
+        fields: &[String],
+        values: &[Value],
+    ) -> Result<Vec<DocId>, SQLError> {
+        if self.session.command_mutation_overlays.lock().is_empty() {
+            return Ok(Vec::new());
+        }
+        let table = self.command_overlay_table_name(table)?;
+        let control = self.query_retention_control()?;
+        let mut overlays = self.session.command_mutation_overlays.lock();
+        let (matches, _memory) =
+            CommandMutationOverlay::matches(&mut overlays, &table, fields, values, &control)?
+                .into_parts();
+        Ok(matches)
+    }
+
     pub(crate) fn command_overlay_changes(
         &self,
         table: &str,
     ) -> Result<Option<DocumentChanges>, SQLError> {
         let canonical = self.command_overlay_table_name(table)?;
-        let mut changes = self
+        let changes = self
             .fixed_transaction_row_changes(&canonical)?
             .unwrap_or_default();
         let overlays = self.session.command_mutation_overlays.lock();
@@ -161,26 +175,7 @@ impl Engine {
             return Ok(None);
         }
         let control = self.query_retention_control()?;
-        for overlay in overlays.iter() {
-            if let Some(documents) = overlay.documents(&canonical) {
-                let additions = DocumentChanges::from_retained(
-                    documents.iter().map(|(id, document)| {
-                        (
-                            *id,
-                            document
-                                .as_ref()
-                                .map(|document| (document.fields.clone(), document.metadata)),
-                        )
-                    }),
-                    &control,
-                )
-                .map_err(|error| storage_error("capture command selection", &error))?;
-                changes
-                    .extend(additions, &control)
-                    .map_err(|error| storage_error("merge command selection", &error))?;
-            }
-        }
-        Ok(Some(changes))
+        CommandMutationOverlay::changes(&overlays, &canonical, changes, &control).map(Some)
     }
 
     pub(crate) fn fixed_transaction_row_changes(

@@ -33,7 +33,7 @@ fn desired_rows_charge_capacity_and_resolve_repeated_changes_in_evaluation_order
         .with_retained(probe.snapshot().unwrap(), desired, &control)
         .unwrap();
     assert_eq!(
-        changes.changes().collect::<Vec<_>>(),
+        changes.changes().collect::<Result<Vec<_>, _>>().unwrap(),
         [(1, true), (4, false), (u64::MAX, true)]
     );
     assert!(probe.copies.lock().is_empty());
@@ -69,7 +69,7 @@ fn shared_selection_keeps_its_allowance_through_failed_copy_and_last_reader_drop
         Some("53200")
     );
     assert_eq!(
-        changes.changes().collect::<Vec<_>>(),
+        changes.changes().collect::<Result<Vec<_>, _>>().unwrap(),
         [(1, false), (3, false)]
     );
     assert_eq!(control.memory().used(), control.memory().limit());
@@ -77,7 +77,7 @@ fn shared_selection_keeps_its_allowance_through_failed_copy_and_last_reader_drop
     changes.insert_shared(2, None, &control).unwrap();
     assert!(control.memory().used() > retained);
     assert_eq!(
-        original.changes().collect::<Vec<_>>(),
+        original.changes().collect::<Result<Vec<_>, _>>().unwrap(),
         [(1, false), (3, false)]
     );
     drop(changes);
@@ -98,7 +98,10 @@ fn rejected_merge_and_cancellation_preserve_rows_and_reservations() {
         .reserve(control.memory().limit() - retained)
         .unwrap();
     assert!(original.extend(newer.clone(), &control).is_err());
-    assert_eq!(original.changes().collect::<Vec<_>>(), [(1, false)]);
+    assert_eq!(
+        original.changes().collect::<Result<Vec<_>, _>>().unwrap(),
+        [(1, false)]
+    );
     assert_eq!(control.memory().used(), control.memory().limit());
     drop(full);
     control.cancellation().cancel();
@@ -110,7 +113,7 @@ fn rejected_merge_and_cancellation_preserve_rows_and_reservations() {
     control.cancellation().reset();
     original.extend(newer, &control).unwrap();
     assert_eq!(
-        original.changes().collect::<Vec<_>>(),
+        original.changes().collect::<Result<Vec<_>, _>>().unwrap(),
         [(1, false), (2, false)]
     );
     drop(original);

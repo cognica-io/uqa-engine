@@ -33,7 +33,7 @@ impl RetainedDocuments {
         while index < ids.len() {
             self.0.control.check()?;
             let id = ids[index];
-            let private = self.0.changes.contains_change(id);
+            let private = self.0.changes.contains_change(id)?;
             let projection = if private {
                 &private_projection
             } else {
@@ -41,7 +41,7 @@ impl RetainedDocuments {
             };
             if let Some(projection) = projection.as_ref() {
                 let start = index;
-                while index < ids.len() && self.0.changes.contains_change(ids[index]) == private {
+                while index < ids.len() && self.0.changes.contains_change(ids[index])? == private {
                     self.0.control.check()?;
                     index += 1;
                 }

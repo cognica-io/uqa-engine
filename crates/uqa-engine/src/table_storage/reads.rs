@@ -175,7 +175,10 @@ impl Engine {
         let mut visible = doc_ids
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
-        for (doc_id, present) in changes.changes() {
+        for change in changes.changes() {
+            let (doc_id, present) = change.map_err(|error| {
+                SQLError::Internal(format!("read command-visible ids: {error}"))
+            })?;
             if present {
                 visible.insert(doc_id);
             } else {
@@ -200,7 +203,10 @@ impl Engine {
             return Ok(count);
         };
         let store = t.document_store.read();
-        for (doc_id, present) in changes.changes() {
+        for change in changes.changes() {
+            let (doc_id, present) = change.map_err(|error| {
+                SQLError::Internal(format!("read command-visible document count: {error}"))
+            })?;
             let persisted = store.contains_doc_id(doc_id).map_err(|error| {
                 SQLError::Internal(format!("read command-visible document count: {error}"))
             })?;

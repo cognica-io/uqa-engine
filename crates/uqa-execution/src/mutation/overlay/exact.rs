@@ -8,12 +8,16 @@
 
 use super::{
     keys::{document_key, ExactKey, FieldSet},
-    resource_error, CommandStoredDocument, DocId, SQLError, StorageReadControl,
+    resource_error,
+    staged::MemoryRows,
+    CommandStoredDocument, DocId, SQLError, StorageReadControl,
 };
 use uqa_core::memory::{BudgetedMap, PreparedMapEntry};
 
+/// The canonical keys of the rows in memory, with the ordinal under which the spilled tier keeps the entries of its own rows.
 pub(super) struct CommandExactIndex {
     doc_ids_by_key: BudgetedMap<ExactKey, KeyRows>,
+    ordinal: u32,
 }
 
 struct KeyRows {
@@ -35,12 +39,14 @@ enum Replacement {
 
 impl CommandExactIndex {
     pub(super) fn build(
-        documents: &BudgetedMap<DocId, Option<CommandStoredDocument>>,
+        documents: &MemoryRows,
         fields: &FieldSet,
+        ordinal: u32,
         control: &StorageReadControl,
     ) -> Result<Self, SQLError> {
         let mut index = Self {
             doc_ids_by_key: BudgetedMap::new(control.memory()),
+            ordinal,
         };
         for (id, document) in documents {
             control.check().map_err(resource_error)?;
@@ -49,6 +55,15 @@ impl CommandExactIndex {
             index.apply(*id, change);
         }
         Ok(index)
+    }
+
+    pub(super) fn ordinal(&self) -> u32 {
+        self.ordinal
+    }
+
+    /// Release the entries of the rows in memory once those rows are spilled.
+    pub(super) fn clear(&mut self) {
+        self.doc_ids_by_key = BudgetedMap::new(self.doc_ids_by_key.budget());
     }
 
     pub(super) fn candidates(&self, key: &[u8]) -> Option<&BudgetedMap<DocId, ()>> {

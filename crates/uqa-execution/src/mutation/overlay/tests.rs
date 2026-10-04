@@ -8,6 +8,8 @@ use super::*;
 use crate::query::exact_lookup::FieldPresence;
 use std::collections::BTreeMap;
 
+mod spilled;
+
 fn stage(
     overlay: &mut CommandMutationOverlay,
     id: DocId,
@@ -22,6 +24,19 @@ fn stage(
             control,
         )
         .unwrap();
+}
+
+/// The row `overlay` staged for `id` in `items`.
+fn staged(overlay: &CommandMutationOverlay, id: DocId) -> CommandStoredDocument {
+    CommandMutationOverlay::row(
+        std::slice::from_ref(overlay),
+        "items",
+        id,
+        &StorageReadControl::with_limit(1024 * 1024),
+    )
+    .unwrap()
+    .flatten()
+    .expect("a staged present row")
 }
 
 fn document(a: i64, z: &str) -> Document {
@@ -58,7 +73,7 @@ fn command_nodes_are_reserved_before_publishing_the_first_tombstone() {
     let mut overlay = CommandMutationOverlay::default();
     let error = overlay.stage("items", 1, None, &control).unwrap_err();
     assert_eq!(error.sqlstate(), Some("53200"));
-    assert!(overlay.documents("items").is_none());
+    assert!(!overlay.holds("items"));
     assert_eq!(control.memory().used(), 0);
 }
 
@@ -200,14 +215,7 @@ fn nested_frames_mask_old_keys_and_release_their_cache_with_the_command() {
         .unwrap(),
         Some(1)
     );
-    assert_eq!(
-        overlays[0].documents("items").unwrap()[&1]
-            .as_ref()
-            .unwrap()
-            .metadata
-            .tuple_xmin(),
-        Some(17)
-    );
+    assert_eq!(staged(&overlays[0], 1).metadata.tuple_xmin(), Some(17));
     drop(overlays);
     assert_eq!(control.memory().used(), 0);
 }
@@ -230,11 +238,7 @@ fn later_key_preparation_failure_preserves_all_cached_keys_and_the_previous_row(
             Some(7)
         );
     }
-    let previous = overlays[0].documents("items").unwrap()[&7]
-        .as_ref()
-        .unwrap()
-        .fields
-        .clone();
+    let previous = staged(&overlays[0], 7).fields.clone();
     let replacement = Arc::new(document(2, &"x".repeat(8192)));
     let before = control.memory().used();
     let adopted = CommandStoredDocument::new(
@@ -262,11 +266,7 @@ fn later_key_preparation_failure_preserves_all_cached_keys_and_the_previous_row(
     assert_eq!(control.memory().used(), before);
     assert!(std::ptr::eq(
         previous.as_ref(),
-        overlays[0].documents("items").unwrap()[&7]
-            .as_ref()
-            .unwrap()
-            .fields
-            .as_ref()
+        staged(&overlays[0], 7).fields.as_ref()
     ));
     for (field, value, expected) in [
         ("a", Value::Int(1), Some(7)),
@@ -285,14 +285,7 @@ fn later_key_preparation_failure_preserves_all_cached_keys_and_the_previous_row(
             expected
         );
     }
-    assert_eq!(
-        overlays[0].documents("items").unwrap()[&7]
-            .as_ref()
-            .unwrap()
-            .metadata
-            .tuple_xmin(),
-        Some(17)
-    );
+    assert_eq!(staged(&overlays[0], 7).metadata.tuple_xmin(), Some(17));
 }
 
 #[test]
@@ -425,11 +418,7 @@ fn shared_command_fields_keep_their_payload_after_cached_keys_are_released() {
         &control,
     )
     .unwrap();
-    let retained = overlays[0].documents("items").unwrap()[&1]
-        .as_ref()
-        .unwrap()
-        .fields
-        .clone();
+    let retained = staged(&overlays[0], 1).fields.clone();
     let before = control.memory().used();
     drop(overlays);
     assert_eq!(retained["z"], Value::Str("x".repeat(4096)));
