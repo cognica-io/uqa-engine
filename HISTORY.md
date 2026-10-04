@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Admit retained HNSW mutation inputs before constructing a derived graph, so an oversized input fails without first building a graph that cannot be published.
 - Synchronize deadline cancellation with handle cleanup so a dequeued timer cannot cancel the next statement after its original handle is dropped; retain explicit cancellation and permanent session termination.
 - Validate PRIMARY KEY, UNIQUE and partitioned unique-index declarations with PostgreSQL's column requirements, duplicate-declaration handling, creation order and index-build diagnostics.
 - Check immediate foreign keys after the statement writes its rows, and order referential actions with AFTER triggers in one statement queue. Preserve statement-trigger sharing and reject rows already modified by triggered commands with SQLSTATE `27000`; expose `pg_trigger_depth()`.
