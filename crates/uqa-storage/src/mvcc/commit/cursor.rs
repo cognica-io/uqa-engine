@@ -50,16 +50,41 @@ impl<'a> PreparedWriteCursor<'a> {
         &mut self,
         control: &StorageReadControl,
     ) -> VersionResult<Option<PreparedRecordWrite>> {
+        self.next_matching(None, control)
+    }
+
+    /// Read only one record family, skipping other payloads without loading them.
+    pub(in crate::mvcc) fn next_with_kind(
+        &mut self,
+        kind: super::RecordWriteKind,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<PreparedRecordWrite>> {
+        self.next_matching(Some(kind), control)
+    }
+
+    fn next_matching(
+        &mut self,
+        kind: Option<super::RecordWriteKind>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<PreparedRecordWrite>> {
         match &mut self.source {
             Source::Resident(writes) => {
+                for write in writes.by_ref() {
+                    control.cancellation().check()?;
+                    if kind.is_none_or(|kind| write.kind() == kind) {
+                        return Ok(Some(write.clone()));
+                    }
+                }
                 control.cancellation().check()?;
-                Ok(writes.next().cloned())
+                Ok(None)
             }
             Source::Spilled(cursor) => {
-                let Some(entry) = cursor.next(control)? else {
-                    return Ok(None);
-                };
-                spilled_write(cursor.run(), entry, control).map(Some)
+                while let Some(entry) = cursor.next(control)? {
+                    if kind.is_none_or(|kind| entry.kind == kind) {
+                        return spilled_write(cursor.run(), entry, control).map(Some);
+                    }
+                }
+                Ok(None)
             }
         }
     }

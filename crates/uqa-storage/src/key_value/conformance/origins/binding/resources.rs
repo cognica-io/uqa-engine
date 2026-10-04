@@ -280,3 +280,95 @@ pub fn verify_diskann_resource_reopen(
     )?;
     Ok(())
 }
+
+/// A long transaction retains and publishes more canonical vector bytes than its original session allowance. Only its private record overlay and population replay may grow; decoded inputs must remain bounded.
+pub fn verify_diskann_transaction_spill(
+    backend: &dyn PersistentStorageBackend,
+) -> StorageBackendResult<()> {
+    const ROWS: u64 = 2048;
+    const ALLOWANCE: usize = 512 << 10;
+    let temporary = DiskANNTemporaryBudget::new(TEMPORARY_BYTES);
+    {
+        let setup = StorageReadControl::with_limit(OWNER_BYTES);
+        let session = backend.open_controlled_session(&setup)?;
+        setup_catalog_dimensions(&*session.catalog, DIMENSIONS)?;
+        let mut definition = row([91; 16])?;
+        definition.parameters_json =
+            serde_json::to_string(&options()?.parameters.to_catalog_map(DIMENSIONS)?)?;
+        session.catalog.save_catalog_index_row(&definition)?;
+        session.backend.begin_transaction()?;
+        let mut index = open(
+            &*session.backend,
+            &temporary,
+            &setup,
+            VectorIndexOpenMode::Create,
+        )?;
+        index.add(1, raw(1))?;
+        index.initialize()?;
+        session.backend.commit_transaction()?;
+    }
+    let control = StorageReadControl::with_limit(ALLOWANCE);
+    {
+        let session = backend.open_controlled_session(&control)?;
+        let mut index = open(
+            &*session.backend,
+            &temporary,
+            &control,
+            VectorIndexOpenMode::Restore,
+        )?;
+        session.backend.begin_transaction()?;
+        for document in 2..=ROWS {
+            index.add(document, raw(document))?;
+        }
+        let keep = crate::StorageSavepointId::allocate();
+        session.backend.savepoint(keep)?;
+        index.add_many(2, vec![raw(3), raw(4)])?;
+        session.backend.rollback_to_savepoint(keep)?;
+        session.backend.commit_transaction()?;
+        expect_eq(
+            &index.count()?,
+            &(ROWS as usize),
+            "spilled vector transaction count",
+        )?;
+        let nearest = index.search_knn(&raw(2), 1)?;
+        expect_eq(
+            &nearest
+                .iter()
+                .map(|entry| (entry.doc_id, entry.payload.score))
+                .collect::<Vec<_>>(),
+            &vec![(2, 1.0)],
+            "spilled transaction preserves the rolled-back vector and canonical cosine",
+        )?;
+        let counts = metadata(&*index, &control)?.canonical_counts;
+        expect_eq(
+            &counts,
+            &Some(crate::diskann_index::DiskANNCanonicalCounts::new(
+                ROWS,
+                ROWS - 1,
+            )?),
+            "spilled origins retain complete population counts after undo and commit",
+        )?;
+    }
+    expect_eq(
+        &control.memory().used(),
+        &0,
+        "spilled transaction releases original allowance",
+    )?;
+    expect(
+        control.memory().peak() <= ALLOWANCE,
+        "spilled transaction respects its original allowance",
+    )?;
+    let reopened = backend.open_controlled_session(&control)?;
+    let index = open(
+        &*reopened.backend,
+        &temporary,
+        &control,
+        VectorIndexOpenMode::Restore,
+    )?;
+    expect_eq(
+        &index.count()?,
+        &(ROWS as usize),
+        "fresh session restores every vector",
+    )?;
+    Ok(())
+}

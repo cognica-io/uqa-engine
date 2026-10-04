@@ -12,10 +12,9 @@ use crate::mvcc::{
 };
 use crate::read_control::StorageReadControl;
 use std::sync::Arc;
-use uqa_core::memory::BudgetedVec;
 
 pub(in crate::mvcc) fn stage(
-    origins: &[PreparedRecordWrite],
+    origins: &PreparedRecordCommit,
     lifecycle: &[OwnedPopulationMutation],
     before: &MergedRecordSnapshot,
     after: &MergedRecordSnapshot,
@@ -78,7 +77,6 @@ fn reconcile(
                 "provider has no DiskANN population layout",
             ))?;
     let changes = PrivateRecordChanges::new(control.memory());
-    let mut origins = BudgetedVec::new(control.memory());
     let structural = StructuralRecords::new(original, control)?;
     let mut originals = original.writes();
     let mut position = 0;
@@ -90,7 +88,6 @@ fn reconcile(
         let kind = match write.kind() {
             RecordWriteKind::DiskANNOrigin => {
                 validate(current.as_ref(), position, write, control)?;
-                origins.push(write.clone())?;
                 mode.kind(RecordWriteKind::DiskANNOrigin)
             }
             RecordWriteKind::DiskANNPopulationPreview => {
@@ -124,7 +121,9 @@ fn reconcile(
         control,
         structural: Some(&structural),
     }
-    .run(&origins, lifecycle)?;
+    .run(original, lifecycle)?;
+    drop(after);
+    drop(before);
     let mut generated_writes = generated.writes();
     while let Some(write) = generated_writes.next(control)? {
         changes.apply_owned(

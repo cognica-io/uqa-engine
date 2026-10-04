@@ -37,7 +37,10 @@ pub use binding::{
     verify_diskann_publication_reopen,
 };
 pub use binding::{verify_diskann_query_reopen, verify_diskann_query_views};
-pub use binding::{verify_diskann_resource_reopen, verify_diskann_resource_source};
+pub use binding::{
+    verify_diskann_resource_reopen, verify_diskann_resource_source,
+    verify_diskann_transaction_spill,
+};
 mod catalog;
 pub use binding::verify_diskann_catalog_binding;
 pub use binding::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};
