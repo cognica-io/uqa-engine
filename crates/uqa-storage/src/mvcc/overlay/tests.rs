@@ -100,6 +100,41 @@ fn assert_matches(snapshot: &PrivateRecordSnapshot, model: &Model, control: &Sto
 }
 
 #[test]
+fn resident_cursor_borrows_keys_without_allocating_merge_scratch() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let changes = PrivateRecordChanges::new(control.memory());
+    for key in [b"before".as_slice(), b"first", b"second"] {
+        changes
+            .apply(
+                &[RecordWrite {
+                    key,
+                    expected: None,
+                    value: Some(key),
+                }],
+                &control,
+            )
+            .unwrap();
+    }
+    let state = changes.owner.state.lock();
+    let allocation = allocation_counter::measure(|| {
+        let mut cursor = TieredCursor::new(
+            Some(&state.records),
+            &state.runs,
+            std::ops::Bound::Included(b"first".as_slice()),
+            &control,
+        )
+        .unwrap();
+        for expected in [b"first".as_slice(), b"second"] {
+            assert_eq!(cursor.next(&control).unwrap().unwrap().key(), expected);
+        }
+        assert!(cursor.next(&control).unwrap().is_none());
+        assert!(cursor.next(&control).unwrap().is_none());
+    });
+    assert_eq!(allocation.count_total, 0);
+    assert_eq!(allocation.bytes_total, 0);
+}
+
+#[test]
 fn shared_changes_keep_one_strong_counter_until_the_final_owner_drops() {
     let memory = MemoryBudget::new(1024);
     let bytes = size_of::<Owner>() + size_of::<usize>();

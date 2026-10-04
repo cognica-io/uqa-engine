@@ -56,9 +56,13 @@ impl Edit {
 }
 
 impl Records {
-    pub(super) fn new(control: &StorageReadControl) -> Self {
+    pub(super) fn budget(&self) -> &MemoryBudget {
+        self.resident.budget()
+    }
+
+    pub(super) fn new(memory: &MemoryBudget) -> Self {
         Self {
-            resident: BudgetedVec::new(&control.memory().child(control.memory().limit() / 32)),
+            resident: BudgetedVec::new(memory),
             spilled: None,
         }
     }
@@ -102,18 +106,9 @@ impl Records {
     }
 
     fn spill(&mut self, control: &StorageReadControl) -> VersionResult<()> {
-        let mut file = file::Journal::new(control)?;
-        for edit in self.resident.iter() {
-            file.push(
-                edit.key.bytes(),
-                edit.value.as_ref().map(|value| &value[..]),
-                edit.kind,
-                edit.prefix,
-                control,
-            )?;
-        }
-        self.spilled = Some(file);
-        self.resident = BudgetedVec::new(self.resident.budget());
+        // The batch shares one bounded resident prefix allowance across every record group.
+        // Keep that prefix for zero-copy application; only the remaining edits enter the journal.
+        self.spilled = Some(file::Journal::new(control)?);
         Ok(())
     }
 
@@ -123,12 +118,12 @@ impl Records {
         mut visit: impl FnMut(&Edit) -> VersionResult<()>,
     ) -> VersionResult<()> {
         control.check()?;
-        if let Some(file) = &self.spilled {
-            return file.visit(control, visit);
-        }
         for edit in self.resident.iter() {
             control.check()?;
             visit(edit)?;
+        }
+        if let Some(file) = &self.spilled {
+            return file.visit(control, visit);
         }
         control.check()?;
         Ok(())

@@ -6,10 +6,93 @@
 
 use super::*;
 
+fn records(control: &StorageReadControl) -> Records {
+    Records::new(&control.memory().child(control.memory().limit() / 32))
+}
+
+#[test]
+fn spilled_edits_share_the_resident_prefix_without_reloading_its_payload() {
+    let control = StorageReadControl::with_limit(32 * 1024);
+    let mut records = records(&control);
+    records
+        .push(
+            b"resident",
+            Some(b"shared"),
+            RecordWriteKind::Canonical,
+            false,
+            &control,
+        )
+        .unwrap();
+    let original = records.resident[0].value.as_ref().unwrap().clone();
+    let payload = vec![7; 4096];
+    records
+        .push(
+            b"spilled",
+            Some(&payload),
+            RecordWriteKind::Canonical,
+            false,
+            &control,
+        )
+        .unwrap();
+    let mut count = 0;
+    records
+        .visit(&control, |edit| {
+            if count == 0 {
+                assert_eq!(edit.key.bytes(), b"resident");
+                assert!(Arc::ptr_eq(edit.value.as_ref().unwrap(), &original));
+            } else {
+                assert_eq!(edit.key.bytes(), b"spilled");
+                assert_eq!(&edit.value.as_ref().unwrap()[..], payload);
+            }
+            count += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(count, 2);
+    drop((records, original));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn record_groups_share_one_resident_allowance_and_spill_their_remainders() {
+    let control = StorageReadControl::with_limit(32 * 1024);
+    let memory = control.memory().child(1024);
+    let payload = vec![5; 256];
+    let mut groups = Vec::new();
+    for index in 0..8_u64 {
+        let mut records = Records::new(&memory);
+        records
+            .push(
+                &index.to_le_bytes(),
+                Some(&payload),
+                RecordWriteKind::Canonical,
+                false,
+                &control,
+            )
+            .unwrap();
+        groups.push(records);
+    }
+    assert!(memory.used() > 0 && memory.used() <= memory.limit());
+    for (index, records) in groups.iter().enumerate() {
+        let mut count = 0;
+        records
+            .visit(&control, |edit| {
+                assert_eq!(edit.key.bytes(), &(index as u64).to_le_bytes());
+                assert_eq!(&edit.value.as_ref().unwrap()[..], payload);
+                count += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+    drop(groups);
+    assert_eq!(control.memory().used(), 0);
+}
+
 #[test]
 fn evaluated_record_spill_preserves_order_kinds_empty_values_and_prefixes() {
     let control = StorageReadControl::with_limit(32 * 1024);
-    let mut records = Records::new(&control);
+    let mut records = records(&control);
     let payload = vec![0xA5; 4096];
     records
         .push(
@@ -91,7 +174,7 @@ fn evaluated_record_spill_preserves_order_kinds_empty_values_and_prefixes() {
 #[test]
 fn evaluated_record_spill_rejects_failed_appends_without_losing_prior_edits() {
     let control = StorageReadControl::with_limit(32 * 1024);
-    let mut records = Records::new(&control);
+    let mut records = records(&control);
     let payload = vec![7; 4096];
     records
         .push(

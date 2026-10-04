@@ -110,10 +110,23 @@ impl<'a> Batch<'a> {
         prefix: bool,
     ) -> StorageBackendResult<()> {
         if !matches!(self.operations.last(), Some(Operation::Records(_))) {
+            // All record groups retain their prefixes against the first group's allowance.
+            let memory = self
+                .operations
+                .iter()
+                .rev()
+                .find_map(|operation| match operation {
+                    Operation::Records(records) => Some(records.budget().clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    self.store
+                        .control
+                        .memory()
+                        .child(self.store.control.memory().limit() / 32)
+                });
             self.operations
-                .push(Operation::Records(records::Records::new(
-                    &self.store.control,
-                )))?;
+                .push(Operation::Records(records::Records::new(&memory)))?;
         }
         let Some(Operation::Records(records)) = self.operations.last_mut() else {
             unreachable!()

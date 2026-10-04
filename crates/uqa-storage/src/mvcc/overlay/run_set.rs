@@ -9,6 +9,7 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
+use triomphe::Arc as StrongArc;
 use uqa_core::memory::MemoryBudget;
 
 use crate::mvcc::VersionResult;
@@ -22,7 +23,7 @@ const FAN_IN: usize = 4;
 
 /// The spilled runs of a private root, newest last. Cloning shares them, so a savepoint or a command view keeps the runs it saw while the transaction adds or merges others. A root that never spilled holds no allocation.
 #[derive(Clone)]
-pub(super) struct RunSet(Option<Arc<[Arc<SpilledRun>]>>);
+pub(super) struct RunSet(Option<StrongArc<Vec<Arc<SpilledRun>>>>);
 
 impl RunSet {
     pub(super) const fn empty() -> Self {
@@ -49,7 +50,7 @@ impl RunSet {
     }
 
     fn runs(&self) -> &[Arc<SpilledRun>] {
-        self.0.as_deref().unwrap_or_default()
+        self.0.as_deref().map_or(&[], Vec::as_slice)
     }
 
     pub(super) fn newest_first(&self) -> impl Iterator<Item = &Arc<SpilledRun>> {
@@ -124,7 +125,7 @@ impl RunSet {
             runs.truncate(count - merging);
             runs.push(Arc::new(merged));
         }
-        Ok(Self(Some(Arc::from(runs))))
+        Ok(Self(Some(StrongArc::new(runs))))
     }
 }
 
@@ -136,7 +137,7 @@ fn merge(
 ) -> VersionResult<SpilledRun> {
     let entries = runs.iter().map(|run| run.len()).sum();
     let entry_bytes = runs.iter().map(|run| run.entry_bytes()).sum();
-    let set = RunSet(Some(Arc::from(runs.to_vec())));
+    let set = RunSet(Some(StrongArc::new(runs.to_vec())));
     let mut cursor = TieredCursor::new(None, &set, Bound::Unbounded, control)?;
     let mut writer = SpilledRunWriter::new(entries, entry_bytes, memory)?;
     while let Some(change) = cursor.next(control)? {

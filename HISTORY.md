@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse resident record prefixes when evaluated MVCC batches spill, share their memory allowance across record groups, and avoid unnecessary cursor allocations and spilled-run handle overhead.
 - Admit retained HNSW mutation inputs before constructing a derived graph, so an oversized input fails without first building a graph that cannot be published.
 - Synchronize deadline cancellation with handle cleanup so a dequeued timer cannot cancel the next statement after its original handle is dropped; retain explicit cancellation and permanent session termination.
 - Validate PRIMARY KEY, UNIQUE and partitioned unique-index declarations with PostgreSQL's column requirements, duplicate-declaration handling, creation order and index-build diagnostics.
