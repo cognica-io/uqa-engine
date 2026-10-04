@@ -142,7 +142,10 @@ fn verify_retained_occurrences(
     expect(writable.clear().is_err(), "snapshot rejects clearing")?;
     expect(
         writable
-            .try_rebuild_documents(vec![(9, fields("forbidden"))])
+            .try_rebuild_documents(&mut crate::inverted_index::TextIndexDocuments::new(vec![(
+                9,
+                fields("forbidden"),
+            )]))
             .is_err(),
         "snapshot rejects rebuild",
     )?;

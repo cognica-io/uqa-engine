@@ -188,7 +188,11 @@ fn occurrence_snapshots_keep_discarded_branches_and_reject_all_mutation() {
     assert!(baseline.add_document(9, fields("forbidden")).is_err());
     assert!(baseline.remove_document(1).is_err());
     assert!(baseline.clear().is_err());
-    assert!(baseline.try_rebuild_documents(vec![]).is_err());
+    assert!(baseline
+        .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+            vec![]
+        ))
+        .is_err());
     assert!(baseline
         .set_field_analyzer("body", keyword_analyzer(), AnalyzerPhase::Both)
         .is_err());
@@ -295,7 +299,7 @@ fn occurrence_validation_errors_and_same_document_conflicts_publish_nothing_part
         "body",
         keyword_analyzer().compile().unwrap(),
         AnalyzerPhase::Both,
-        vec![(7, fields("one token"))],
+        &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![(7, fields("one token"))]),
     )
     .unwrap();
     assert_eq!(a.get_term_freq(7, "body", "one token").unwrap(), 1);
@@ -360,13 +364,17 @@ fn native_source_rebuild_retires_legacy_and_corrupt_discarded_rows_atomically() 
     assert!(live.field_stats_scalar_budgeted("body", &control).is_err());
     assert_eq!(control.memory().used(), 0);
     connection.begin_transaction().unwrap();
-    live.try_rebuild_documents(vec![(7, fields("alpha alpha"))])
-        .unwrap();
+    live.try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+        vec![(7, fields("alpha alpha"))],
+    ))
+    .unwrap();
     assert!(!live.source_rebuild_required().unwrap());
     connection.rollback_transaction().unwrap();
     assert!(live.source_rebuild_required().unwrap());
-    live.try_rebuild_documents(vec![(7, fields("alpha alpha"))])
-        .unwrap();
+    live.try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+        vec![(7, fields("alpha alpha"))],
+    ))
+    .unwrap();
     assert_eq!(live.get_term_freq(7, "body", "alpha").unwrap(), 2);
     assert!(legacy.source_rebuild_required().unwrap());
     connection
@@ -438,10 +446,12 @@ fn native_controlled_cursors_preserve_committed_and_private_clusters_between_pag
         .unwrap();
     let mut sibling = index(&connection.new_session(), "docs");
     sibling
-        .try_rebuild_documents(vec![
-            (1, fields("alpha")),
-            (65_536, fields("alpha alpha alpha alpha")),
-        ])
+        .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+            vec![
+                (1, fields("alpha")),
+                (65_536, fields("alpha alpha alpha alpha")),
+            ],
+        ))
         .unwrap();
     assert_eq!(cursor.doc_freq(), 3);
     assert_eq!(cursor.advance().unwrap().unwrap().term_freq, 2);

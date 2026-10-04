@@ -831,10 +831,10 @@ fn key_value_rebuild_analysis_failure_preserves_old_index() {
         .unwrap();
 
     let error = index
-        .try_rebuild_documents(vec![
+        .try_rebuild_documents(&mut crate::inverted_index::TextIndexDocuments::new(vec![
             (2, BTreeMap::from([("title".into(), "sqlite".into())])),
             (3, BTreeMap::from([("body".into(), "failure".into())])),
-        ])
+        ]))
         .unwrap_err();
     assert!(error.to_string().contains("gram"));
     assert_eq!(index.doc_count().unwrap(), 1);

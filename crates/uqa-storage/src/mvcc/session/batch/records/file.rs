@@ -4,12 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Batch order is retained in authenticated temporary records; incomplete appends never become visible.
+//! Batch order is retained in authenticated temporary records; incomplete appends never become visible. Records collect in a tail of less than one block, which reaches the file once it fills a block, so a record costs a copy rather than the rewrite of a partial block, and a visit reads each block once.
 
 use super::{Edit, RecordKey, RecordWriteKind, StorageReadControl, VersionError, VersionResult};
 use crate::{temporary_file::BlockTemporaryFile, StorageBackendError};
 use std::{
-    io::{self, IoSlice, Read, Seek, SeekFrom},
+    io::{self, BufReader, IoSlice, Read, Seek, SeekFrom},
     sync::Arc,
 };
 use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation};
@@ -19,8 +19,12 @@ const HEADER: usize = 18;
 
 pub(super) struct Journal {
     file: BlockTemporaryFile<BLOCK>,
-    length: u64,
+    /// The bytes the file holds, a whole number of blocks.
+    written: u64,
+    /// The bytes after the file's last block, fewer than a block.
+    tail: Vec<u8>,
     failed: bool,
+    /// The tail and a visit's block buffer.
     _memory: MemoryReservation,
 }
 
@@ -36,7 +40,8 @@ impl Journal {
             .reserve(size_of::<Self>() + 2 * BLOCK + HEADER)?;
         Ok(Self {
             file: BlockTemporaryFile::new().map_err(io_error)?,
-            length: 0,
+            written: 0,
+            tail: Vec::with_capacity(BLOCK),
             failed: false,
             _memory: memory,
         })
@@ -59,9 +64,10 @@ impl Journal {
             .checked_add(value_length)
             .and_then(|n| n.checked_add(HEADER as u64))
             .ok_or(MemoryError::SizeOverflow)?;
-        let end = self
-            .length
-            .checked_add(length)
+        let total = u64::try_from(self.tail.len())
+            .ok()
+            .and_then(|tail| tail.checked_add(length))
+            .filter(|total| self.written.checked_add(*total).is_some())
             .ok_or(MemoryError::SizeOverflow)?;
         let mut header = [0; HEADER];
         header[0] = if prefix {
@@ -74,25 +80,46 @@ impl Journal {
         header[1] = kind.code();
         header[2..10].copy_from_slice(&key_length.to_le_bytes());
         header[10..].copy_from_slice(&value_length.to_le_bytes());
+        let block = BLOCK as u64;
+        if total < block {
+            self.tail.extend_from_slice(&header);
+            self.tail.extend_from_slice(key);
+            self.tail.extend_from_slice(bytes);
+            return Ok(());
+        }
+        let parts: [&[u8]; 4] = [&self.tail, &header, key, bytes];
+        // Whole blocks reach the file from the tail and the record; the rest becomes the new tail.
+        let full = total - total % block;
+        let mut slices = [IoSlice::new(&[]); 4];
+        let mut remaining = full;
+        for (slice, part) in slices.iter_mut().zip(parts) {
+            let taken = remaining.min(part.len() as u64) as usize;
+            *slice = IoSlice::new(&part[..taken]);
+            remaining -= taken as u64;
+        }
         self.file
-            .seek(SeekFrom::Start(self.length))
+            .seek(SeekFrom::Start(self.written))
             .map_err(io_error)?;
         let result = self
             .file
-            .write_all_vectored(&mut [
-                IoSlice::new(&header),
-                IoSlice::new(key),
-                IoSlice::new(bytes),
-            ])
+            .write_all_vectored(&mut slices)
             .map_err(io_error)
             .and_then(|()| control.check().map_err(Into::into));
         if let Err(error) = result {
-            if self.file.set_len(self.length).is_err() {
+            if self.file.set_len(self.written).is_err() {
                 self.failed = true;
             }
             return Err(error);
         }
-        self.length = end;
+        let mut tail = Vec::with_capacity(BLOCK);
+        let mut skipped = full;
+        for part in parts {
+            let taken = skipped.min(part.len() as u64) as usize;
+            skipped -= taken as u64;
+            tail.extend_from_slice(&part[taken..]);
+        }
+        self.written += full;
+        self.tail = tail;
         Ok(())
     }
 
@@ -102,12 +129,14 @@ impl Journal {
         mut visit: impl FnMut(&Edit) -> VersionResult<()>,
     ) -> VersionResult<()> {
         self.check()?;
-        let mut file = self.file.reopen().map_err(io_error)?;
+        let file = self.file.reopen().map_err(io_error)?.take(self.written);
+        let mut reader = BufReader::with_capacity(BLOCK, file).chain(self.tail.as_slice());
+        let length = self.written + self.tail.len() as u64;
         let mut position = 0;
-        while position < self.length {
+        while position < length {
             control.check()?;
             let mut header = [0; HEADER];
-            file.read_exact(&mut header).map_err(io_error)?;
+            reader.read_exact(&mut header).map_err(io_error)?;
             let action = header[0];
             let kind = RecordWriteKind::from_code(header[1])?;
             let key_length = u64::from_le_bytes(header[2..10].try_into().expect("key length"));
@@ -116,15 +145,15 @@ impl Journal {
                 .checked_add(HEADER as u64)
                 .and_then(|p| p.checked_add(key_length))
                 .and_then(|p| p.checked_add(value_length))
-                .filter(|p| *p <= self.length)
+                .filter(|p| *p <= length)
                 .ok_or_else(invalid)?;
             if action > 2 || (action != 2 && value_length != 0) {
                 return Err(invalid());
             }
-            let key = read_bytes(&mut file, key_length, control)?;
+            let key = read_bytes(&mut reader, key_length, control)?;
             let key = RecordKey::from_budgeted(key);
             let value = if action == 2 {
-                Some(Arc::new(read_bytes(&mut file, value_length, control)?))
+                Some(Arc::new(read_bytes(&mut reader, value_length, control)?))
             } else {
                 None
             };
@@ -149,7 +178,7 @@ impl Journal {
 }
 
 fn read_bytes(
-    file: &mut BlockTemporaryFile<BLOCK>,
+    file: &mut impl Read,
     length: u64,
     control: &StorageReadControl,
 ) -> VersionResult<BudgetedVec<u8>> {

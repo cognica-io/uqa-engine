@@ -331,3 +331,50 @@ fn a_repeatable_read_transaction_larger_than_the_session_allowance_reads_its_own
         );
     }
 }
+
+#[test]
+fn a_text_index_over_more_rows_than_the_session_allowance_holds_builds() {
+    let directory = tempfile::tempdir().unwrap();
+    for (backend, engine) in engines(directory.path()) {
+        exec(
+            &engine,
+            "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
+        );
+        // Identities three apart span two posting clusters.
+        for first in (0..40_000).step_by(4_000) {
+            exec(
+                &engine,
+                &format!(
+                    "INSERT INTO docs SELECT g * 3, 'w' || (g % 100) || ' x' || (g % 37) || ' common filler ' || g FROM generate_series({}, {}) AS g",
+                    first + 1,
+                    first + 4_000
+                ),
+            );
+        }
+        exec(&engine, "CREATE INDEX docs_body ON docs USING gin (body)");
+        for (query, expected) in [
+            (
+                "SELECT count(*) FROM docs WHERE text_match(body, 'common')",
+                40_000,
+            ),
+            (
+                "SELECT count(*) FROM docs WHERE text_match(body, 'w7')",
+                400,
+            ),
+            (
+                "SELECT count(*) FROM docs WHERE text_match(body, 'w7') AND id > 65536",
+                181,
+            ),
+            (
+                "SELECT id FROM docs WHERE text_match(body, '39999')",
+                119_997,
+            ),
+        ] {
+            assert_eq!(
+                scalar(&engine, query),
+                Value::Int(expected),
+                "{backend}: {query}"
+            );
+        }
+    }
+}

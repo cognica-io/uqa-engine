@@ -492,11 +492,12 @@ mod term_keys;
 
 use legacy::{decode_positions, encode_positions};
 pub use legacy::{decode_terms, encode_terms};
+pub(crate) use occurrences::encode_posting;
 pub(crate) use occurrences::validate_occurrence_cluster;
 pub use occurrences::{
     decode_occurrence_cluster, decode_occurrence_cluster_budgeted,
     decode_occurrence_document_budgeted, encode_occurrence_cluster,
-    encode_occurrence_cluster_controlled, OccurrencePosting,
+    encode_occurrence_cluster_controlled, OccurrenceClusterBuilder, OccurrencePosting,
 };
 use scores::{decode_score_block_into, encode_scores, parse_score_blob};
 pub(crate) use term_keys::encode_term_key_refs;

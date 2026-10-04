@@ -8,9 +8,8 @@ use super::{
     analyzer_registry, Arc, BTreeMap, DocId, Document, Engine, FieldName, FtsIndexStat, SQLError,
     TableState, Value,
 };
+use uqa_storage::inverted_index::DocumentTextSource;
 use uqa_storage::InvertedIndex;
-
-type TextIndexDocuments = Vec<(DocId, BTreeMap<FieldName, String>)>;
 
 impl Engine {
     pub(crate) fn fts_fields_for_table(&self, name: &str) -> Result<Vec<FieldName>, SQLError> {
@@ -146,60 +145,31 @@ impl Engine {
         Ok(names)
     }
 
-    pub(crate) fn project_fts_sources(t: &Arc<TableState>) -> Result<TextIndexDocuments, String> {
-        Self::project_fts_sources_inner(t, None)
-    }
-
-    pub(crate) fn project_fts_sources_cancellable(
-        t: &Arc<TableState>,
-        cancellation: &uqa_core::CancellationToken,
-    ) -> Result<TextIndexDocuments, String> {
-        Self::project_fts_sources_inner(t, Some(cancellation))
-    }
-
-    fn project_fts_sources_inner(
+    /// The text of the table's indexed fields, which a rebuild reads a page at a time from a snapshot of its documents instead of collecting it first.
+    pub(crate) fn fts_source(
         t: &Arc<TableState>,
         cancellation: Option<&uqa_core::CancellationToken>,
-    ) -> Result<TextIndexDocuments, String> {
+    ) -> Result<DocumentTextSource, String> {
         if let Some(cancellation) = cancellation {
             cancellation.check().map_err(|error| error.to_string())?;
         }
-        let fts_fields = t.fts_fields();
-        let indexed_docs = {
-            let store = t.document_store.read();
-            let doc_ids = store.doc_ids().map_err(|error| error.to_string())?;
-            let fields: Vec<&str> = fts_fields.iter().map(String::as_str).collect();
-            let mut indexed_docs = Vec::with_capacity(doc_ids.len());
-            store
-                .for_each_fields_multi_ref(&doc_ids, &fields, &mut |doc_id, projected_values| {
-                    if cancellation.is_some_and(uqa_core::CancellationToken::is_cancelled) {
-                        return false;
-                    }
-                    let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
-                    for (field, value) in fts_fields.iter().zip(projected_values) {
-                        if let Value::Str(text) = value {
-                            text_fields.insert(field.clone(), text.clone());
-                        }
-                    }
-                    if !text_fields.is_empty() {
-                        indexed_docs.push((doc_id, text_fields));
-                    }
-                    true
-                })
-                .map_err(|error| error.to_string())?;
-            if let Some(cancellation) = cancellation {
-                cancellation.check().map_err(|error| error.to_string())?;
-            }
-            indexed_docs
-        };
-        Ok(indexed_docs)
+        let documents = t
+            .document_store
+            .read()
+            .snapshot()
+            .map_err(|error| error.to_string())?;
+        Ok(DocumentTextSource::new(
+            documents,
+            t.fts_fields(),
+            cancellation.cloned(),
+        ))
     }
 
     pub(crate) fn rebuild_fts_index(t: &Arc<TableState>) -> Result<(), String> {
-        let documents = Self::project_fts_sources(t)?;
+        let mut source = Self::fts_source(t, None)?;
         t.inverted_index
             .write()
-            .try_rebuild_documents(documents)
+            .try_rebuild_documents(&mut source)
             .map_err(|error| error.to_string())
     }
 
@@ -207,10 +177,10 @@ impl Engine {
         t: &Arc<TableState>,
         cancellation: &uqa_core::CancellationToken,
     ) -> Result<(), String> {
-        let documents = Self::project_fts_sources_cancellable(t, cancellation)?;
+        let mut source = Self::fts_source(t, Some(cancellation))?;
         t.inverted_index
             .write()
-            .try_rebuild_documents_cancellable(documents, cancellation)
+            .try_rebuild_documents_cancellable(&mut source, cancellation)
             .map_err(|error| error.to_string())
     }
 

@@ -126,7 +126,9 @@ fn captured_rebuild_marker_survives_source_reconstruction() {
     }).unwrap();
     let legacy = index.snapshot().unwrap();
     index
-        .try_rebuild_documents(vec![(1, fields([("body", "beta")]))])
+        .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+            vec![(1, fields([("body", "beta")]))],
+        ))
         .unwrap();
     assert!(!index.source_rebuild_required().unwrap());
     assert!(legacy.source_rebuild_required().unwrap());
@@ -143,7 +145,9 @@ fn captured_legacy_rows_without_a_marker_survive_source_reconstruction() {
     assert!(index.source_rebuild_required().unwrap());
     let legacy = index.snapshot().unwrap();
     index
-        .try_rebuild_documents(vec![(1, fields([("body", "alpha")]))])
+        .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+            vec![(1, fields([("body", "alpha")]))],
+        ))
         .unwrap();
     assert!(!index.source_rebuild_required().unwrap());
     assert!(legacy.source_rebuild_required().unwrap());

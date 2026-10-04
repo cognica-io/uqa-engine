@@ -315,10 +315,12 @@ fn controlled_occurrence_cursors_keep_their_view_between_cluster_pages() {
         .posting_read_cursor_key_budgeted("body", &term, &control)
         .unwrap();
     writer
-        .try_rebuild_documents(vec![
-            (1, fields("alpha")),
-            (65_536, fields("alpha alpha alpha alpha")),
-        ])
+        .try_rebuild_documents(&mut uqa_storage::inverted_index::TextIndexDocuments::new(
+            vec![
+                (1, fields("alpha")),
+                (65_536, fields("alpha alpha alpha alpha")),
+            ],
+        ))
         .unwrap();
     assert_eq!(cursor.doc_freq(), 3);
     assert_eq!(cursor.advance().unwrap().unwrap().term_freq, 2);

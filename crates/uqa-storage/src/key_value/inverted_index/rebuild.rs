@@ -4,64 +4,82 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Publish a complete graph index from original sources in one storage batch.
+//! Publish a complete graph index from original sources in one storage batch. The documents are analyzed one at a time and staged in a spillable record set before the batch opens, so the batch receives each field record and each cluster once, in the order the index stores them, without every posting in memory.
 
+use super::super::codec::u64_value;
+use super::data::{analyze_document, Revisions};
 use super::{
-    cluster_id, BTreeMap, ClusterKey, DocId, FieldName, KeyValueBatch, OccurrencePosting,
-    OccurrenceRead, StorageBackendResult,
+    keys, AnalyzerBindings, FieldStats, KeyValueBatch, OccurrenceRead, StorageBackendResult,
 };
+use crate::inverted_index::{SourceRebuild, TextIndexSource};
+use crate::read_control::StorageReadControl;
+
+/// Analyze and stage the documents `source` reads with the revisions `bindings` select, under the session's `control`. A source may read the provider's session, so this runs outside its scopes.
+pub(super) fn stage_source(
+    bindings: &AnalyzerBindings,
+    control: &StorageReadControl,
+    source: &mut dyn TextIndexSource,
+    cancellation: Option<&uqa_core::CancellationToken>,
+) -> StorageBackendResult<SourceRebuild> {
+    let mut staged = SourceRebuild::new(control);
+    let mut revisions = Revisions::new();
+    while let Some((doc_id, fields)) = source.next_document()? {
+        let document = analyze_document(bindings, control, fields, &mut revisions, cancellation)?;
+        staged.stage(
+            doc_id,
+            document
+                .iter()
+                .map(|(field, snapshot)| (field.as_str(), &snapshot.metadata, &snapshot.terms)),
+        )?;
+    }
+    Ok(staged)
+}
 
 impl OccurrenceRead<'_> {
-    pub(super) fn rebuild_documents_inner(
+    /// Replace the index with `staged` in `batch`.
+    pub(super) fn write_rebuild(
         &self,
         batch: &mut dyn KeyValueBatch,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        staged: &SourceRebuild,
         cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<()> {
-        if let Some(cancellation) = cancellation {
-            cancellation.check()?;
-        }
-        let staged = self.stage_documents_inner(documents, true, cancellation)?;
-        let mut totals = BTreeMap::new();
-        let mut clusters = BTreeMap::<ClusterKey, Vec<OccurrencePosting>>::new();
-        for (doc_id, fields) in &staged {
-            Self::add_field_statistics(&mut totals, fields)?;
-            for (field, snapshot) in fields {
-                for (term, occurrences) in &snapshot.terms {
-                    if let Some(cancellation) = cancellation {
-                        cancellation.check()?;
-                    }
-                    clusters
-                        .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
-                        .or_default()
-                        .push(OccurrencePosting {
-                            doc_id: *doc_id,
-                            doc_length: snapshot.metadata.length,
-                            occurrences: occurrences.clone(),
-                        });
-                }
-            }
-        }
-        if let Some(cancellation) = cancellation {
-            cancellation.check()?;
-        }
+        let check = || cancellation.map_or(Ok(()), uqa_core::CancellationToken::check);
+        check()?;
         self.clear_index_batch(batch)?;
-        for ((field, term, cluster), entries) in clusters {
-            if let Some(cancellation) = cancellation {
-                cancellation.check()?;
-            }
-            self.put_cluster(batch, &field, &term, cluster, &entries)?;
-        }
-        for (doc_id, fields) in &staged {
-            if let Some(cancellation) = cancellation {
-                cancellation.check()?;
-            }
-            self.put_document(batch, *doc_id, fields)?;
-        }
+        staged.visit_documents(&mut |record| {
+            check()?;
+            batch.put(
+                &keys::metadata_key(self.table, record.field, record.doc_id)?,
+                &record.metadata.to_bytes()?,
+            )?;
+            batch.put(
+                &keys::document_key(self.table, keys::LENGTH, record.doc_id, record.field)?,
+                &u64_value(record.metadata.length),
+            )?;
+            batch.put(
+                &keys::document_key(self.table, keys::DOCUMENT, record.doc_id, record.field)?,
+                record.terms,
+            )
+        })?;
+        staged.visit_clusters(&mut |cluster| {
+            check()?;
+            self.put_encoded_cluster(batch, &cluster)
+        })?;
+        let totals = staged
+            .totals()
+            .iter()
+            .map(|(field, totals)| {
+                (
+                    field.clone(),
+                    FieldStats {
+                        revision: totals.revision,
+                        doc_count: totals.doc_count,
+                        total_length: totals.total_length,
+                    },
+                )
+            })
+            .collect();
         self.put_field_statistics(batch, totals)?;
-        if let Some(cancellation) = cancellation {
-            cancellation.check()?;
-        }
-        Ok(())
+        Ok(check()?)
     }
 }

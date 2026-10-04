@@ -64,7 +64,10 @@ fn sqlite_korean_assignments_store_the_complete_source_graph() {
             "body",
             revision.clone(),
             AnalyzerPhase::Both,
-            vec![(2, fields(&[("body", "한국")]))],
+            &mut uqa_storage::inverted_index::TextIndexDocuments::new(vec![(
+                2,
+                fields(&[("body", "한국")]),
+            )]),
         )
         .unwrap();
     let stream = uqa_storage::inverted_index::analyze_index_field(&revision, "한국").unwrap();

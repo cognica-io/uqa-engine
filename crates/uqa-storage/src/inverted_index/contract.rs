@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::IndexedFieldMetadata;
 use super::{
     Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName, IndexStats, PostingEntry,
     PostingList, StorageBackendError, StorageBackendResult,
 };
+use super::{IndexedFieldMetadata, TextIndexSource};
 use crate::clustered_postings::BudgetedPostingReadCursor;
 use crate::clustered_postings::{
     MaterializedPostingCursor, OccurrencePosting, PostingCursor, PostingScore,
@@ -121,12 +121,13 @@ pub trait InvertedIndex: Send + Sync {
         self.clear()
     }
 
+    /// Replace every indexed document with the documents `source` reads. The default replaces them one at a time for custom backends; providers with atomic publication override it.
     fn try_rebuild_documents(
         &mut self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        source: &mut dyn TextIndexSource,
     ) -> StorageBackendResult<()> {
         self.try_clear()?;
-        for (doc_id, fields) in documents {
+        while let Some((doc_id, fields)) = source.next_document()? {
             if !fields.is_empty() {
                 self.try_add_document(doc_id, fields)?;
             }
@@ -717,7 +718,7 @@ pub trait InvertedIndex: Send + Sync {
         _field: &str,
         _revision: Arc<uqa_analysis::CompiledAnalyzer>,
         _phase: AnalyzerPhase,
-        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        _source: &mut dyn TextIndexSource,
     ) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
             "atomic analyzer revision rebuild is not supported by this backend".into(),
@@ -727,7 +728,7 @@ pub trait InvertedIndex: Send + Sync {
     /// Rebuild under the caller's cancellation token. Cancellation must retain the complete previous index; custom providers must implement atomic staging and cancellation.
     fn try_rebuild_documents_cancellable(
         &mut self,
-        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        _source: &mut dyn TextIndexSource,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         cancellation.check()?;
@@ -742,7 +743,7 @@ pub trait InvertedIndex: Send + Sync {
         _field: &str,
         _revision: Arc<uqa_analysis::CompiledAnalyzer>,
         _phase: AnalyzerPhase,
-        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        _source: &mut dyn TextIndexSource,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         cancellation.check()?;

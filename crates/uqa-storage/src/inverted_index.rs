@@ -36,6 +36,8 @@ mod metadata;
 mod read_cursor;
 mod retained;
 mod snapshot;
+mod source;
+mod source_rebuild;
 
 #[cfg(test)]
 mod tests;
@@ -50,6 +52,10 @@ pub use changes::{visit_field_replacement, InvertedIndexChange, InvertedIndexCha
 pub use contract::{AnalyzerPhase, InvertedIndex};
 pub use metadata::IndexedFieldRevision;
 pub use retained::RetainedInvertedIndexBuilder;
+pub use source::{DocumentTextSource, TextIndexDocuments, TextIndexSource};
+pub use source_rebuild::{
+    FieldTotals, SourceRebuild, StagedCluster, StagedFieldRecord, StagedFields,
+};
 
 /// Linear term/position stores cannot install morphology without immutable graph revisions.
 pub fn validate_linear_analyzer(analyzer: &Analyzer) -> StorageBackendResult<()> {
