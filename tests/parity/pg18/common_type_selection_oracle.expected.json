@@ -1,0 +1,925 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cci_t (a int, b text);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cci_ids (relname text, id oid);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cci_t VALUES (1, 'x'), (2, 'y');",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cci_ids SELECT r.relname, r.oid FROM pg_class r WHERE r.oid IN ('cci_t'::regclass, 'cci_ids'::regclass);",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT relname FROM cci_ids ORDER BY relname;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "cci_ids"
+            ],
+            [
+              "cci_t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE cci_t SET b = 'z' WHERE 'cci_t'::regclass::oid IN ('cci_t'::regclass, 'cci_ids'::regclass) AND a = 1;",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DELETE FROM cci_t WHERE 1259::oid IN ('pg_class'::regclass, 1247) AND a = 2;",
+      "command_tags": [
+        "DELETE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, b FROM cci_t ORDER BY a;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "z"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DELETE FROM cci_t WHERE 1::oid IN ('pg_class'::regclass, now());",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: oid = timestamp with time zone",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cci_ids SELECT 'x', 1 WHERE 1::oid IN (1, '2001-01-01'::date);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: oid = date",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'pg_class'::regclass::oid IN ('pg_class'::regclass, 'pg_type'::regclass);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'pg_class'::regclass IN (1259::oid, 1247::oid);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'pg_class'::regclass IN (1259, 1247);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1259 IN ('pg_class'::regclass, 'pg_type'::regclass);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'pg_class'::regclass IN ('int4'::regtype, 'pg_type'::regclass);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES (1::oid), ('pg_class'::regclass)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "oid"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES ('pg_class'::regclass), (1::oid)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES (1), ('pg_class'::regclass)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES ('pg_class'::regclass), (1)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES (1::int2), ('pg_class'::regclass)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES (1::bigint), ('pg_class'::regclass)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES ('pg_class'::regclass), (1::bigint)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES (1::oid), (2)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "oid"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES (2), (1::oid)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "oid"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES ('pg_class'::regclass), (1::oid), (2)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION cci_f() RETURNS int LANGUAGE sql RETURN 1;",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES ('cci_f'::regproc), ('cci_f()'::regprocedure)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regproc"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES ('cci_f()'::regprocedure), ('cci_f'::regproc)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regprocedure"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES ('12:00'::time), ('12:00+01'::timetz)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "time with time zone"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (VALUES ('12:00+01'::timetz), ('12:00'::time)) v(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "time with time zone"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(CASE WHEN true THEN 1::oid ELSE 'pg_class'::regclass END)::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(CASE WHEN true THEN 'pg_class'::regclass ELSE 1::oid END)::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "oid"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(CASE WHEN true THEN 'pg_class'::regclass WHEN false THEN 1259 END)::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(COALESCE('pg_class'::regclass, 1259))::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(COALESCE(1259::oid, 'pg_class'::regclass))::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "oid"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (SELECT 'pg_class'::regclass UNION SELECT 1259::oid) s(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x)::text FROM (SELECT 1259::oid UNION SELECT 'pg_class'::regclass) s(x) LIMIT 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "oid"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(ARRAY['pg_class'::regclass, 1259::oid])::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(ARRAY[1259::oid, 'pg_class'::regclass])::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "oid[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(GREATEST('pg_class'::regclass, 1259))::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 1::oid ELSE 'pg_class'::regclass END;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "case"
+          ],
+          "type_oids": [
+            2205
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT x FROM (VALUES ('pg_class'::regclass), (1247::oid)) v(x) ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            2205
+          ],
+          "rows": [
+            [
+              "pg_type"
+            ],
+            [
+              "pg_class"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

@@ -339,10 +339,12 @@ impl Binder<'_, '_> {
                         }
                     }
                 }
+                // `transformCaseExpr` selects the result type with the ELSE result first.
                 let ty = self.common_type(
-                    when.iter()
-                        .map(|(_, result)| result)
-                        .chain(else_branch.iter().map(Box::as_ref)),
+                    else_branch
+                        .iter()
+                        .map(Box::as_ref)
+                        .chain(when.iter().map(|(_, result)| result)),
                 )?;
                 if let Some(ty) = ty {
                     for (_, result) in &mut when {

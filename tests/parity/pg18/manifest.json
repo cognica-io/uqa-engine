@@ -218,7 +218,8 @@
       "aggregates.mode-equality-and-ties",
       "types.legacy-vector-coherence",
       "dml.assignment-subscripts",
-      "dml.failing-row-details"
+      "dml.failing-row-details",
+      "types.common-type-selection"
     ],
     "M5": [
       "protocol.frontend-backend-3.2-extended",
@@ -1141,6 +1142,14 @@
       "supported_version": "Unreleased: 216 PostgreSQL 18.4 statements on memory and SQLite engines cover CREATE FUNCTION and CREATE PROCEDURE checks in CreateFunction's order (schema CREATE; repeated and procedure-only attribute clauses in written order; SET values and privileges; COST and ROWS positive after float4 rounding; SUPPORT; PARALLEL; the missing or unknown language; LEAKPROOF; TRANSFORM FOR TYPE; each argument's type named as written and unquoted, VARIADIC placement and array type, repeated names and defaults; the quoted result type; the body form; ROWS applicability), COST and ROWS in pg_proc and across reopen including float4 infinity, ALTER FUNCTION actions in AlterFunction's order after lookup and ownership, the already-exists and must-be-owner messages each command uses, per-item DROP ownership with the schema owner allowed",
       "status": "partial",
       "open_issue": "Parameter defaults transformed and coerced to their types at creation, WINDOW functions, pg_get_functiondef, DROP ROUTINE, ALTER FUNCTION SET SCHEMA, COMMENT ON, and superuser-only settings such as log_min_messages that the configuration catalog lacks remain."
+    },
+    {
+      "id": "types.common-type-selection",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, rows, SQLSTATEs, messages, DETAIL and HINT in tests/parity/pg18/common_type_selection_oracle.expected.json; select_common_type and coerce_to_common_type in src/backend/parser/parse_coerce.c; transformAExprIn and transformCaseExpr in src/backend/parser/parse_expr.c; typcategory and typispreferred in src/include/catalog/pg_type.dat and implicit casts in src/include/catalog/pg_cast.dat",
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_common_type_selection; env UQA_USQL=target/debug/usql python3 tests/parity/pg18/run_routines_stateful.py --suite check-inheritance",
+      "supported_version": "Unreleased: 42 PostgreSQL 18.4 statements on memory and SQLite engines cover common types selected by type category, preferred type and implicit casts for oid, the OID alias types and integers in VALUES, CASE with its ELSE result first, COALESCE, UNION, ARRAY and GREATEST, regproc with regprocedure and time with timetz, and IN lists in SELECT, INSERT, UPDATE and DELETE that compare at the common type or fall back to each item's = operator",
+      "status": "partial",
+      "open_issue": "The construct each select_common_type error names (VALUES, CASE, UNION, INTERSECT, EXCEPT, COALESCE, ARRAY, GREATEST, LEAST, JOIN/USING), coerce_to_common_type's 42846 could not convert type errors, and reg* literal input during analysis (an unknown role is reported before the types are matched) remain."
     },
     {
       "id": "ddl.create-table-analysis-order",

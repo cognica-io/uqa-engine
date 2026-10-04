@@ -248,7 +248,7 @@ pub(super) fn scalar_type_inner_with_control(
                 })
                 .transpose()?
                 .flatten();
-            let mut result = None;
+            let mut results = Vec::with_capacity(when.len() + 1);
             for (condition, value) in when {
                 let condition_type = if simple {
                     common::common_context_expression_type_with_control(
@@ -265,22 +265,22 @@ pub(super) fn scalar_type_inner_with_control(
                         control,
                     )?;
                 }
-                result = common::merge_value_types(
-                    result,
-                    common::common_context_expression_type_with_control(
-                        value, schema, params, resolver, control,
-                    )?,
-                    control,
-                )?;
+                results.push(common::common_context_expression_type_with_control(
+                    value, schema, params, resolver, control,
+                )?);
             }
             if let Some(value) = else_branch {
-                result = common::merge_value_types(
-                    result,
+                // `transformCaseExpr` selects the result type with the ELSE result first.
+                results.insert(
+                    0,
                     common::common_context_expression_type_with_control(
                         value, schema, params, resolver, control,
                     )?,
-                    control,
-                )?;
+                );
+            }
+            let mut result = None;
+            for ty in results {
+                result = common::merge_value_types(result, ty, control)?;
             }
             match result {
                 Some(result) => common::case::case_output_type_with_control(

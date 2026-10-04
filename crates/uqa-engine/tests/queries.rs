@@ -32,6 +32,8 @@ mod sql_aggregates;
 mod sql_blocking_spill;
 #[path = "queries/sql_boolean_conditions.rs"]
 mod sql_boolean_conditions;
+#[path = "queries/sql_common_type_selection.rs"]
+mod sql_common_type_selection;
 #[path = "queries/sql_composites.rs"]
 mod sql_composites;
 #[path = "queries/sql_composites_reopen.rs"]

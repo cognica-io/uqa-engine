@@ -36,6 +36,25 @@ impl Preparation<'_> {
         Ok(Some(common))
     }
 
+    /// `transformAExprIn`: the needle and the list compare at their common type when they have one, and otherwise each item is compared with the needle through its own `=` operator.
+    fn in_list(&mut self, values: &mut [ExpressionType]) -> Result<(), SQLError> {
+        let types = values
+            .iter()
+            .map(|value| value.ty.as_ref())
+            .collect::<Vec<_>>();
+        if crate::type_resolution::select_common_input_type(&types)?.is_some() {
+            self.common(values)?;
+            return Ok(());
+        }
+        let Some((needle, items)) = values.split_first_mut() else {
+            return Ok(());
+        };
+        for item in items {
+            self.binary(BinaryOp::Equal, needle, item)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn binary(
         &mut self,
         op: BinaryOp,
@@ -151,7 +170,7 @@ impl Preparation<'_> {
                 for item in list {
                     values.push(self.expression(item, input, subqueries)?);
                 }
-                self.common(&mut values)?;
+                self.in_list(&mut values)?;
                 Some(ColumnType::Boolean)
             }
             ScalarExpr::Case {
