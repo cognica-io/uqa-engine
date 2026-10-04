@@ -7,10 +7,10 @@
 //! Bound PL/pgSQL cursor execution.
 
 use super::{
-    bind_statement, coerce_routine_value, compile, result_row_values, CursorDirection, Expr,
-    FetchCursorStmt, Flow, Interpreter, IntoTarget, LoopSignal, PLpgSQLCursorArgument,
-    PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLRowField, PLpgSQLStmt, SQLError,
-    SQLParam, Statement, Value,
+    coerce_routine_value, compile, result_row_values, CursorDirection, Expr, FetchCursorStmt, Flow,
+    Interpreter, IntoTarget, LoopSignal, PLpgSQLCursorArgument, PLpgSQLCursorCount,
+    PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLRowField, PLpgSQLStmt, SQLError, SQLParam, Statement,
+    Value,
 };
 use uqa_sql::plan::UnifiedPlan;
 use uqa_sql::plpgsql::PLpgSQLCursor;
@@ -40,7 +40,7 @@ impl Interpreter<'_> {
                 scroll,
                 source_sql,
             } => (
-                bind_statement(query, &mut self.resolver())?,
+                self.bind_query(query)?,
                 Vec::new(),
                 *scroll,
                 std::sync::Arc::clone(source_sql),
@@ -135,7 +135,7 @@ impl Interpreter<'_> {
         source_sql: &str,
         body: &[PLpgSQLStmt],
     ) -> Result<Flow, SQLError> {
-        let query = bind_statement(query, &mut self.resolver())?;
+        let query = self.bind_query(query)?;
         let plan = self.lower_cursor_plan(query)?;
         let portal_name = self.open_internal_for_portal(&[], &plan, source_sql)?;
         self.exec_pinned_for_portal(&portal_name, label, target, body, true)
@@ -360,7 +360,7 @@ impl Interpreter<'_> {
         for field in fields {
             self.push_binding(&field.name, field.varno);
         }
-        let query = bind_statement(&query, &mut self.resolver());
+        let query = self.bind_query(&query);
         for field in fields.iter().rev() {
             self.pop_binding(&field.name);
         }

@@ -62,3 +62,5 @@ mod scalar_and_resolution;
 mod set_returning;
 #[path = "sql_plpgsql/sql_language.rs"]
 mod sql_language;
+#[path = "sql_plpgsql/variable_conflicts.rs"]
+mod variable_conflicts;

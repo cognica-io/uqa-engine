@@ -22,19 +22,40 @@ use uqa_sql::{
     SQLError,
 };
 
-/// The body a session compiles when it first calls a routine whose body `CREATE FUNCTION` left unexamined, under the routine's own settings, which the caller has applied; the session keeps it for later calls of the same definition.
-fn compile_deferred_body(
+/// The body this session runs for `function`. Each `PostgreSQL` backend compiles a function at its first call, under the settings then in effect, and keeps the compilation for later calls of the same definition: a body `CREATE FUNCTION` left unexamined is compiled now, and a `PL/pgSQL` body takes the session's `plpgsql.variable_conflict` unless it declares its own. The caller has applied the routine's own settings.
+fn session_compiled_body(
     context: &RoutineInvocationContext<'_>,
     function: &Arc<SQLUserFunction>,
 ) -> Result<Arc<CompiledFunctionBody>, SQLError> {
     if let Some(body) = context.session.compiled_routine_body(function) {
         return Ok(body);
     }
-    let body = Arc::new(compile_function_body(&context.compilation, &function.def)?);
+    let mut body = match &function.compiled {
+        CompiledFunctionBody::Deferred => {
+            compile_function_body(&context.compilation, &function.def)?
+        }
+        compiled => compiled.clone(),
+    };
+    if let CompiledFunctionBody::PLpgSQL(parsed) = &mut body {
+        crate::routines::compilation::apply_session_compile_options(context.session, parsed);
+    }
+    let body = Arc::new(body);
     context
         .session
         .retain_compiled_routine_body(function, Arc::clone(&body));
     Ok(body)
+}
+
+/// The body to run for `function` in this session: a SQL body runs as `CREATE FUNCTION` compiled it, every other body as this session compiled it.
+fn running_body<'b>(
+    context: &RoutineInvocationContext<'_>,
+    function: &'b Arc<SQLUserFunction>,
+    session_body: &'b mut Option<Arc<CompiledFunctionBody>>,
+) -> Result<&'b CompiledFunctionBody, SQLError> {
+    if matches!(function.compiled, CompiledFunctionBody::SQL(_)) {
+        return Ok(&function.compiled);
+    }
+    Ok(session_body.insert(session_compiled_body(context, function)?))
 }
 
 pub(super) fn execute_routine(
@@ -65,13 +86,8 @@ pub(super) fn execute_routine(
     let _transaction_context = RoutineTransactionGuard::enter(context.runtime.session, nonatomic);
     uqa_sql::routines::security::ensure_routine_execute_privilege(context.authority, definition)?;
     super::scopes::with_routine_context(context.session, definition, || {
-        let deferred;
-        let compiled = if matches!(function.compiled, CompiledFunctionBody::Deferred) {
-            deferred = compile_deferred_body(context, function)?;
-            deferred.as_ref()
-        } else {
-            &function.compiled
-        };
+        let mut session_body = None;
+        let compiled = running_body(context, function, &mut session_body)?;
         execute_compiled_body(context, definition, specialized.is_some(), compiled, bound)
     })
 }
@@ -115,13 +131,8 @@ pub fn execute_trigger_routine(
     let _guard = DepthGuard::enter(context.session)?;
     let _transaction_context = RoutineTransactionGuard::enter(context.runtime.session, false);
     super::scopes::with_routine_context(context.session, &function.def, || {
-        let deferred;
-        let compiled = if matches!(function.compiled, CompiledFunctionBody::Deferred) {
-            deferred = compile_deferred_body(context, function)?;
-            deferred.as_ref()
-        } else {
-            &function.compiled
-        };
+        let mut session_body = None;
+        let compiled = running_body(context, function, &mut session_body)?;
         let CompiledFunctionBody::PLpgSQL(parsed) = compiled else {
             return Err(SQLError::Unsupported(
                 "only LANGUAGE plpgsql trigger functions are executable".into(),
@@ -153,7 +164,7 @@ fn execute_sql_language(
 ) -> Result<RoutineOutcome, SQLError> {
     crate::routines::sql_body::execute_sql_language(
         context.runtime,
-        &context.compilation,
+        context.types,
         &context.overloads,
         definition,
         plans,

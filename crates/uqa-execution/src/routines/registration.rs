@@ -8,9 +8,10 @@
 
 use super::{
     catalog::RoutineMutationContext,
-    compilation::with_routine_settings,
+    compilation::{apply_session_compile_options, with_routine_settings},
     configuration::{self, RoutineConfigurationSession},
     definition::{compile_catalog_bound_routine, RoutineBodyCompilation, RoutineDefinitionContext},
+    invocation::context::RoutineInvocationSession,
 };
 use crate::catalog::security::roles::{
     dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
@@ -42,6 +43,8 @@ pub struct RoutineRegistrationContext<'a> {
     pub support: &'a dyn RoutineSupportAuthority,
     pub configuration: &'a dyn RoutineConfigurationSession,
     pub overloads: RoutineOverloadContext<'a>,
+    /// The session whose compilation of a body `CREATE FUNCTION` examined serves its later calls.
+    pub session: &'a dyn RoutineInvocationSession,
 }
 
 /// Whether `CREATE FUNCTION` examines the body, as `check_function_bodies` says.
@@ -55,6 +58,46 @@ const fn body_compilation(checks_bodies: bool) -> RoutineBodyCompilation {
     } else {
         RoutineBodyCompilation::Unchecked
     }
+}
+
+/// Keep the `PL/pgSQL` body `CREATE FUNCTION` compiled, when it examined the body, as this session's compilation of the published definition, as `PostgreSQL`'s validator leaves its compilation in the backend's function cache: the body takes the settings of the moment, under the routine's own.
+fn retain_creating_session_compilation(
+    context: &RoutineRegistrationContext<'_>,
+    function: Option<&Arc<SQLUserFunction>>,
+) -> Result<(), SQLError> {
+    let Some(function) = function else {
+        return Ok(());
+    };
+    let CompiledFunctionBody::PLpgSQL(parsed) = &function.compiled else {
+        return Ok(());
+    };
+    let mut parsed = parsed.clone();
+    with_routine_settings(&context.definition.compilation, &function.def, || {
+        apply_session_compile_options(context.session, &mut parsed);
+        Ok(())
+    })?;
+    context
+        .session
+        .retain_compiled_routine_body(function, Arc::new(CompiledFunctionBody::PLpgSQL(parsed)));
+    Ok(())
+}
+
+/// The definition a registry holds for a routine's name, signature and kind.
+fn published_definition(
+    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    name: &str,
+    signature: &[String],
+    is_procedure: bool,
+) -> Option<Arc<SQLUserFunction>> {
+    registry.get(name).and_then(|overloads| {
+        overloads
+            .iter()
+            .find(|function| {
+                routine_signature_types(&function.def) == signature
+                    && function.def.is_procedure == is_procedure
+            })
+            .cloned()
+    })
 }
 
 /// Validate a SQL body once the routine is visible, so that the body can call it, as `PostgreSQL` validates a body after it stores the routine: a SQL-standard body is analyzed whatever `check_function_bodies` says, and a body given as a string is analyzed under the routine's own settings only when it is on; the final statement is checked against the declared result only when it is on.
@@ -214,11 +257,13 @@ pub fn register_sql_function(
         .catalog
         .publication
         .persist_routine_definitions(&next)?;
+    let published = published_definition(&next, &name, &signature, def.is_procedure);
     **registry = next;
     drop(registry);
     drop(memberships);
     drop(roles);
     context.catalog.changes.catalog_registry_changed();
+    retain_creating_session_compilation(context, published.as_ref().filter(|_| checks_bodies))?;
     // A failure aborts the statement, whose rollback withdraws the routine.
     validate_registered_sql_body(context, &def, &compiled, checks_bodies)
 }

@@ -138,37 +138,38 @@ impl SchemaScope {
         });
     }
 
-    fn bind_statement_parameters(
+    /// Walk one statement with `outer`, the parameters of the routine whose body it belongs to, as its outermost scope.
+    pub(super) fn bind_statement_parameters(
         &mut self,
         routines: &dyn RoutineResolution,
         plan: &mut UnifiedPlan,
         params: &[SQLParam],
-        parameters: &RowSchema,
+        outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         let command = match plan {
             UnifiedPlan::Query(query) => {
-                return self.bind_query_parameters(routines, query, params, parameters);
+                return self.bind_query_parameters(routines, query, params, outer);
             }
             UnifiedPlan::Command(command) => command.as_mut(),
         };
         match command {
             CommandPlan::Explain { body, .. } => {
-                self.bind_statement_parameters(routines, body, params, parameters)
+                self.bind_statement_parameters(routines, body, params, outer)
             }
             CommandPlan::CreateTableAs { query, .. }
             | CommandPlan::CreateMaterializedView { query, .. }
             | CommandPlan::DeclareCursor { query, .. } => {
-                self.bind_query_parameters(routines, query, params, parameters)
+                self.bind_query_parameters(routines, query, params, outer)
             }
             CommandPlan::Call { args, .. } => {
                 for argument in args {
-                    self.bind_expression_parameters(routines, argument, params, parameters)?;
+                    self.bind_expression_parameters(routines, argument, params, outer)?;
                 }
                 Ok(())
             }
             command if command.mutation_target().is_some() => {
                 self.set_command_lookup_mode(command);
-                self.bind_command_routines_for_storage(routines, command, params, Some(parameters))
+                self.bind_command_routines_for_storage(routines, command, params, outer)
             }
             // A utility statement is not analyzed with the routine's parameters: `PostgreSQL` runs it as written.
             _ => Ok(()),
@@ -181,7 +182,7 @@ impl SchemaScope {
         routines: &dyn RoutineResolution,
         query: &mut QueryPlan,
         params: &[SQLParam],
-        parameters: &RowSchema,
+        outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         let previous = self.resolution.set_lookup_mode(if query.relations_bound {
             RelationLookupMode::Bound
@@ -189,7 +190,7 @@ impl SchemaScope {
             RelationLookupMode::Dynamic
         });
         let result = self
-            .bind_query_routines_for_storage(routines, query, params, Some(parameters))
+            .bind_query_routines_for_storage(routines, query, params, outer)
             .map(|_| ());
         self.resolution.set_lookup_mode(previous);
         result
@@ -200,12 +201,14 @@ impl SchemaScope {
         routines: &dyn RoutineResolution,
         expression: &mut ExpressionPlan,
         params: &[SQLParam],
-        parameters: &RowSchema,
+        outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         for subquery in &mut expression.subqueries {
-            self.bind_query_parameters(routines, subquery, params, parameters)?;
+            self.bind_query_parameters(routines, subquery, params, outer)?;
         }
-        self.canonicalize_routine_parameters(&mut expression.scalar, parameters);
+        let schema = outer.cloned().unwrap_or_default();
+        self.canonicalize_routine_parameters(&mut expression.scalar, &schema);
+        self.resolve_variable_sites(&mut expression.scalar, &schema);
         Ok(())
     }
 }
@@ -221,5 +224,5 @@ pub fn bind_routine_parameter_references(
     let mut scope = SchemaScope::for_analysis(ctes)?;
     scope.routine_parameters = Some(parameters.clone());
     scope.binds_routine_identities = false;
-    scope.bind_statement_parameters(routines, plan, params, parameters.schema())
+    scope.bind_statement_parameters(routines, plan, params, Some(parameters.schema()))
 }

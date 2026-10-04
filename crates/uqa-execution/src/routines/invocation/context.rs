@@ -8,6 +8,7 @@
 use crate::routines::RoutineContext;
 use std::sync::Arc;
 use uqa_sql::{
+    plpgsql::VariableConflict,
     routines::{
         compilation::{RoutineCompilationContext, RoutineParserCatalog},
         declaration::RoutineTypeCatalog,
@@ -40,6 +41,8 @@ pub trait RoutineInvocationSession {
         function: &Arc<SQLUserFunction>,
         body: Arc<CompiledFunctionBody>,
     );
+    /// The `plpgsql.variable_conflict` setting a `PL/pgSQL` body compiled now takes, with the language's library loaded as its call handler loads it.
+    fn plpgsql_variable_conflict(&self) -> VariableConflict;
 }
 pub struct RoutineInvocationContext<'a> {
     pub runtime: RoutineContext<'a>,

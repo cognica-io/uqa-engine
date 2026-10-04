@@ -57,17 +57,6 @@ pub fn sql_body_parameter_scope(
     ))
 }
 
-/// Resolve the parameter references of one statement of a body given as a string, against the catalog as it stands when the statement is analyzed, as `PostgreSQL` analyzes each statement of such a body just before it runs it.
-pub fn resolve_sql_body_parameters(
-    context: &RoutineCompilationContext<'_>,
-    scope: &RoutineParameterScope,
-    plan: &mut UnifiedPlan,
-    params: &[SQLParam],
-) -> Result<(), SQLError> {
-    let snapshot = context.catalog.binding_snapshot()?;
-    bind_routine_parameter_references(context.routines, plan, params, &snapshot.context(), scope)
-}
-
 /// Record in the statements of a SQL-standard body each name that resolves to a parameter, as the positional parameter it names, so that a later change to the relations the body reads cannot take the name: `PostgreSQL` stores the analyzed statements, in which a parameter reference stays a parameter. Returns whether a statement changed.
 pub fn record_sql_standard_body_parameters(
     context: &RoutineCompilationContext<'_>,

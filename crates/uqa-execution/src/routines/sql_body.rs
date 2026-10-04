@@ -12,15 +12,13 @@ use super::{
 use uqa_sql::{
     assignment::routines::coerce_routine_value_from,
     ast::FunctionBody,
-    binding::statements::AnalyzedResult,
+    binding::{bind_routine_parameter_references, statements::AnalyzedResult},
     plan::{CommandPlan, UnifiedPlan},
     plpgsql::runtime_diagnostics::result_row_values,
     routines::{
-        body_parameters::{
-            is_sql_body_parameter, resolve_sql_body_parameters, sql_body_parameter_scope,
-        },
+        body_parameters::{is_sql_body_parameter, sql_body_parameter_scope},
         body_validation::{reject_output_argument_call, reject_undefined_parameters},
-        compilation::RoutineCompilationContext,
+        declaration::RoutineTypeCatalog,
         resolution::RoutineOverloadContext,
         result_check::check_sql_function_result,
         routine_returns_anonymous_record,
@@ -31,13 +29,12 @@ use uqa_sql::{
 #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
 pub fn execute_sql_language(
     context: RoutineContext<'_>,
-    compilation: &RoutineCompilationContext<'_>,
+    types: &dyn RoutineTypeCatalog,
     overloads: &RoutineOverloadContext<'_>,
     def: &CreateFunction,
     plans: &[UnifiedPlan],
     bound: &[Value],
 ) -> Result<RoutineOutcome, SQLError> {
-    let types = compilation.types;
     let call_params = def.call_params();
     if call_params.len() != bound.len() {
         return Err(SQLError::Internal(format!(
@@ -78,7 +75,17 @@ pub fn execute_sql_language(
     for (position, plan) in plans.iter().enumerate() {
         let mut statement = plan.clone();
         if let Some(parameters) = &parameters {
-            resolve_sql_body_parameters(compilation, parameters, &mut statement, &params)?;
+            context
+                .statements
+                .with_statement_scope(&mut |routines, ctes| {
+                    bind_routine_parameter_references(
+                        routines,
+                        &mut statement,
+                        &params,
+                        ctes,
+                        parameters,
+                    )
+                })?;
         }
         reject_undefined_parameters(&mut statement, params.len())?;
         if let UnifiedPlan::Command(command) = &statement {

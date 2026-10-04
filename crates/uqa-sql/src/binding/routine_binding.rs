@@ -8,9 +8,9 @@
 
 use super::{
     cte_references_own_name, extend_cte_generated_schema, extend_recursive_cte_binding_schema,
-    operator_join_relation_schemas, overlay_outer_schema, projection_columns, rename_schema,
-    BindingContext, ColumnType, QueryPlan, RelationalPlan, RowSchema, SQLError, SQLParam,
-    ScalarExpr, SchemaScope, SourcePlan,
+    operator_join_relation_schemas, overlay_outer_schema, rename_schema, BindingContext,
+    ColumnType, QueryPlan, RelationalPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope,
+    SourcePlan,
 };
 use crate::ast::FunctionBinding;
 use crate::plan::ExpressionPlan;
@@ -217,6 +217,16 @@ impl SchemaScope {
     ) -> Result<RowSchema, SQLError> {
         match root {
             RelationalPlan::QueryBlock(block) => {
+                // The sources' own expressions resolve before the sources are analyzed, so that an analysis sees the names a nested query resolved, such as its output names in GROUP BY.
+                if let Some(source) = block.from.as_mut() {
+                    self.bind_source_routines_for_storage(
+                        routines,
+                        source,
+                        &block.subqueries,
+                        params,
+                        outer,
+                    )?;
+                }
                 let source_schema = match block.from.as_mut() {
                     Some(source) => self.bind_source_for_execution(
                         routines,
@@ -227,15 +237,6 @@ impl SchemaScope {
                     )?,
                     None => RowSchema::default(),
                 };
-                if let Some(source) = block.from.as_mut() {
-                    self.bind_source_routines_for_storage(
-                        routines,
-                        source,
-                        &block.subqueries,
-                        params,
-                        outer,
-                    )?;
-                }
                 let expression_schema = overlay_outer_schema(&source_schema, outer);
                 for subquery in &mut block.subqueries {
                     self.bind_query_routines_for_storage(
@@ -316,6 +317,7 @@ impl SchemaScope {
                     &block.projections,
                     &source_schema,
                 )?;
+                self.bind_grouping_variable_sites(block, &source_schema);
                 crate::semantics::grouping_sets::bind_grouping_names(
                     routines,
                     block,
@@ -356,13 +358,15 @@ impl SchemaScope {
                     )?;
                 }
                 // A bare name in ORDER BY or DISTINCT ON names an output column before any input column or parameter, as `findTargetlistEntrySQL92` resolves it.
-                let output_names = projection_columns(&block.projections);
+                let output_names = self.output_names(&block.projections);
                 let names_output = |expression: &ScalarExpr| match expression {
                     ScalarExpr::Column(name) => output_names.contains(name),
                     _ => false,
                 };
                 for order in &mut block.order_by {
-                    if names_output(&order.expr) {
+                    if names_output(&order.expr)
+                        || self.output_takes_variable_site(&order.expr, &output_names)
+                    {
                         continue;
                     }
                     self.bind_scalar_routines_for_storage(
@@ -395,7 +399,9 @@ impl SchemaScope {
                     )?;
                 }
                 for expression in &mut block.distinct_on {
-                    if names_output(expression) {
+                    if names_output(expression)
+                        || self.output_takes_variable_site(expression, &output_names)
+                    {
                         continue;
                     }
                     self.bind_scalar_routines_for_storage(
@@ -596,6 +602,7 @@ impl SchemaScope {
         let schema = &schema;
         self.canonicalize_stored_outer_columns(expression, schema);
         self.canonicalize_routine_parameters(expression, schema);
+        self.resolve_variable_sites(expression, schema);
         if !self.binds_routine_identities {
             return Ok(());
         }

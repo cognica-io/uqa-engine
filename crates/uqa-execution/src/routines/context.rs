@@ -10,8 +10,9 @@ use uqa_core::Value;
 use uqa_sql::{
     assignment::routines::RoutineValueContext,
     ast::{ColumnType, Expr, FetchCursorStmt, Statement},
-    binding::statements::AnalyzedResult,
+    binding::{statements::AnalyzedResult, BindingContext},
     plan::{ExpressionPlan, UnifiedPlan},
+    routines::RoutineResolution,
     SQLError, SQLParam, SQLResult,
 };
 
@@ -50,7 +51,12 @@ pub trait RoutineStatements {
     fn assertions_enabled(&self) -> bool;
     /// Load the library of a procedural language into the session, as its call handler does on first use.
     fn load_language_library(&self, language: &str);
+    /// Run `analyze` with the routines and the catalog, namespace and transition relations that a statement the routine runs now is analyzed with.
+    fn with_statement_scope(&self, analyze: StatementScopeOperation<'_>) -> Result<(), SQLError>;
 }
+/// An analysis that runs with the routines and the binding scope of a statement the routine runs.
+pub type StatementScopeOperation<'a> =
+    &'a mut dyn FnMut(&dyn RoutineResolution, &BindingContext<'_>) -> Result<(), SQLError>;
 pub trait RoutineTransactions {
     fn depth(&self) -> usize;
     fn begin(&self) -> Result<(), SQLError>;

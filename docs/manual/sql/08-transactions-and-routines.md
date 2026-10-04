@@ -202,6 +202,7 @@ A name of two or more identifiers separated by dots that no parameter defines be
 | `idle_in_transaction_session_timeout`, `idle_session_timeout`, `transaction_timeout` | `0`, no limit |
 | `client_min_messages` | `notice` |
 | `check_function_bodies` | `on`; `off` stores routine bodies given as strings without examining them, as described in [Body validation](#body-validation) |
+| `plpgsql.variable_conflict` | Superuser setting, `error`, `use_variable` or `use_column`, defined once the session loads PL/pgSQL, as described in [Variable names in statements](#variable-names-in-statements) |
 | `plan_cache_mode` | `auto`, `force_generic_plan`, or `force_custom_plan` |
 | `enable_indexonlyscan` | `on`; `off` makes every query read its rows instead of [index entries](02-ddl.md#relational-b-tree-indexes) |
 | `default_transaction_isolation`, `default_transaction_read_only`, `default_transaction_deferrable` | Transaction defaults `read committed`, `off`, `off` |
@@ -301,6 +302,10 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
 The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer, static-query, dynamic-query, and bound-cursor `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, assertions, procedural transaction control, and cursors covered by the routine tests.
+
+### Variable names in statements
+
+A PL/pgSQL variable, including a parameter, that a statement or an expression names stands for its current value, but a name that a column or relation the statement can see at that point also takes is resolved as `plpgsql.variable_conflict` directs. Under `error`, its default, the statement fails when it first runs with `42702`, `column reference "id" is ambiguous`, and the detail `It could refer to either a PL/pgSQL variable or a table column.`; `use_variable` takes the variable and `use_column` the column. A bare name in `ORDER BY`, `GROUP BY` or `DISTINCT ON` that matches an output column of its query names that column whatever the setting says, the rows of an `INSERT` see no relation, and the text of a dynamic `EXECUTE` names no variables. A body can choose for itself with `#variable_conflict error`, `#variable_conflict use_variable` or `#variable_conflict use_column` before its first block, which takes precedence over the setting. The setting is a superuser setting, defined when the session loads PL/pgSQL, and applies when a session compiles a body: `CREATE FUNCTION` compiles it in the creating session while `check_function_bodies` is on, every other session at its first call, each under the routine's own `SET` clauses, and the session keeps that compilation until the definition changes; an anonymous block is compiled when it runs.
 
 Scalar domain declarations retain their type identity in routine parameters, local variables, and return values. A local variable without an initializer starts with NULL; a domain default does not supply its initial value, and a NOT NULL domain rejects that initialization. Converting a base value checks domain constraints, while passing, assigning, or returning an already typed value preserves it without repeating those checks. Constraint functions that change stored state participate in the statement transaction, including implicit parameter, local-variable, and return coercions.
 

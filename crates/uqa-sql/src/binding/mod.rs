@@ -26,6 +26,7 @@ mod scope;
 mod sources;
 pub mod statements;
 mod type_resolution;
+mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
 pub use preparation::infer_prepared_parameter_types;
@@ -51,6 +52,7 @@ pub use sources::{
     analyze_source_plan_schema, bind_source_plan_schema, bind_source_plan_schema_for_execution,
     with_query_table_pseudo_columns,
 };
+pub use variable_sites::{resolve_variable_sites, VariableSiteResolution};
 
 use catalog_sources::operator_join_relation_schemas;
 use cte_controls::extend_recursive_cte_binding_schema;
@@ -93,6 +95,8 @@ struct SchemaScope {
     routine_parameters: Option<RoutineParameterScope>,
     /// Whether binding a stored expression also fixes the routines it calls; a pass that only resolves routine parameters leaves calls to analysis.
     binds_routine_identities: bool,
+    /// The names of a `PL/pgSQL` statement that the function's variables take, checked against what the statement can see.
+    variable_sites: Option<variable_sites::VariableSites>,
 }
 
 fn non_returning_cte_error(name: &str) -> SQLError {
@@ -114,6 +118,7 @@ impl SchemaScope {
             stored_expression_outer: None,
             routine_parameters: None,
             binds_routine_identities: true,
+            variable_sites: None,
         })
     }
 
@@ -135,6 +140,7 @@ impl SchemaScope {
             stored_expression_outer: None,
             routine_parameters: None,
             binds_routine_identities: true,
+            variable_sites: None,
         }
     }
 

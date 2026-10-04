@@ -23,6 +23,16 @@ struct ClauseScope<'a> {
     expressions: Vec<&'a mut ScalarExpr>,
 }
 
+/// The row scopes of a data-modifying statement, each over the scope that encloses the statement.
+struct CommandScopes {
+    /// The target's columns, unqualified.
+    target: RowSchema,
+    /// The target with the statement's other sources, which every clause but `RETURNING` sees.
+    clauses: RowSchema,
+    /// What `RETURNING` sees: the clauses' scope with the target's `old` and `new` aliases.
+    returning: RowSchema,
+}
+
 impl SchemaScope {
     /// Bind the routine calls and resolve the routine parameters of a data-modifying statement, each clause against the relations it can name. `outer` is the scope that encloses the statement.
     pub(super) fn bind_command_routines_for_storage(
@@ -52,30 +62,56 @@ impl SchemaScope {
         if let Some(source) = command.source_input_mut() {
             self.bind_source_routines_for_storage(routines, source, &subqueries, params, outer)?;
         }
-        let (target, expression) = self.command_expression_schema(routines, command, params)?;
+        let scopes = self.command_scopes(routines, command, params, outer)?;
         let labels = command
             .returning()
             .map(super::routine_parameters::column_labels)
             .unwrap_or_default();
-        self.bind_command_clause_scopes(routines, command, &target, &expression, params, outer)?;
+        self.bind_command_clause_scopes(routines, command, &scopes, params, outer)?;
         if let Some(returning) = command.returning_mut() {
             super::routine_parameters::keep_column_labels(returning, labels);
         }
         Ok(())
     }
 
+    fn command_scopes(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        command: &CommandPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<CommandScopes, SQLError> {
+        let (target, returning) = self.command_expression_schema(routines, command, params)?;
+        let source = command
+            .source_input()
+            .map(|source| {
+                self.bind_source(routines, source, command.scalar_subqueries(), params, None)
+            })
+            .transpose()?;
+        let qualifier = command.target_qualifier().unwrap_or_default();
+        let mut clauses =
+            crate::semantics::mutation_clause_schema(&target, qualifier, source.as_ref());
+        if target.columns_are_open(None) {
+            clauses = RowSchema::with_open_columns(&clauses, command.target_qualifier());
+        }
+        Ok(CommandScopes {
+            clauses: overlay_outer_schema(&clauses, outer),
+            returning: overlay_outer_schema(&returning, outer),
+            target,
+        })
+    }
+
     fn bind_command_clause_scopes(
         &mut self,
         routines: &dyn RoutineResolution,
         command: &mut CommandPlan,
-        target: &RowSchema,
-        expression: &RowSchema,
+        scopes: &CommandScopes,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         match command {
             CommandPlan::Insert(insert) => {
-                self.bind_insert_clauses(routines, insert, target, expression, params, outer)
+                self.bind_insert_clauses(routines, insert, scopes, params, outer)
             }
             CommandPlan::Update(update) => {
                 let UpdatePlan {
@@ -85,18 +121,31 @@ impl SchemaScope {
                     subqueries,
                     ..
                 } = update.as_mut();
-                let schema = overlay_outer_schema(expression, outer);
-                let expressions = assignments
-                    .iter_mut()
-                    .flat_map(AssignmentPlan::expressions_mut)
-                    .chain(predicate.as_mut())
-                    .chain(returning.iter_mut().map(|projection| &mut projection.expr))
-                    .collect();
-                let clauses = vec![ClauseScope {
-                    schema: schema.clone(),
-                    expressions,
-                }];
-                self.bind_clause_scopes(routines, clauses, subqueries, &schema, params, outer)
+                let clauses = vec![
+                    ClauseScope {
+                        schema: scopes.clauses.clone(),
+                        expressions: assignments
+                            .iter_mut()
+                            .flat_map(AssignmentPlan::expressions_mut)
+                            .chain(predicate.as_mut())
+                            .collect(),
+                    },
+                    ClauseScope {
+                        schema: scopes.returning.clone(),
+                        expressions: returning
+                            .iter_mut()
+                            .map(|projection| &mut projection.expr)
+                            .collect(),
+                    },
+                ];
+                self.bind_clause_scopes(
+                    routines,
+                    clauses,
+                    subqueries,
+                    &scopes.clauses,
+                    params,
+                    outer,
+                )
             }
             CommandPlan::Delete(delete) => {
                 let DeletePlan {
@@ -105,20 +154,30 @@ impl SchemaScope {
                     subqueries,
                     ..
                 } = delete.as_mut();
-                let schema = overlay_outer_schema(expression, outer);
-                let expressions = predicate
-                    .as_mut()
-                    .into_iter()
-                    .chain(returning.iter_mut().map(|projection| &mut projection.expr))
-                    .collect();
-                let clauses = vec![ClauseScope {
-                    schema: schema.clone(),
-                    expressions,
-                }];
-                self.bind_clause_scopes(routines, clauses, subqueries, &schema, params, outer)
+                let clauses = vec![
+                    ClauseScope {
+                        schema: scopes.clauses.clone(),
+                        expressions: predicate.as_mut().into_iter().collect(),
+                    },
+                    ClauseScope {
+                        schema: scopes.returning.clone(),
+                        expressions: returning
+                            .iter_mut()
+                            .map(|projection| &mut projection.expr)
+                            .collect(),
+                    },
+                ];
+                self.bind_clause_scopes(
+                    routines,
+                    clauses,
+                    subqueries,
+                    &scopes.clauses,
+                    params,
+                    outer,
+                )
             }
             CommandPlan::Merge(merge) => {
-                self.bind_merge_clauses(routines, merge, target, expression, params, outer)
+                self.bind_merge_clauses(routines, merge, scopes, params, outer)
             }
             _ => Ok(()),
         }
@@ -128,8 +187,7 @@ impl SchemaScope {
         &mut self,
         routines: &dyn RoutineResolution,
         insert: &mut InsertPlan,
-        target: &RowSchema,
-        expression: &RowSchema,
+        scopes: &CommandScopes,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
@@ -147,14 +205,13 @@ impl SchemaScope {
         }
         let excluded = RowSchema::with_qualified_types(
             "excluded",
-            target.columns().to_vec(),
-            target.column_types().to_vec(),
+            scopes.target.columns().to_vec(),
+            scopes.target.column_types().to_vec(),
         );
         let conflict_update = overlay_outer_schema(
-            &RowSchema::join(expression, &excluded, std::iter::empty::<String>()),
+            &RowSchema::join(&scopes.clauses, &excluded, std::iter::empty::<String>()),
             outer,
         );
-        let expression = overlay_outer_schema(expression, outer);
         let mut arbiter = Vec::new();
         let mut update = Vec::new();
         if let Some(conflict) = on_conflict {
@@ -184,7 +241,7 @@ impl SchemaScope {
                     .collect(),
             },
             ClauseScope {
-                schema: expression.clone(),
+                schema: scopes.clauses.clone(),
                 expressions: arbiter,
             },
             ClauseScope {
@@ -192,22 +249,28 @@ impl SchemaScope {
                 expressions: update,
             },
             ClauseScope {
-                schema: expression.clone(),
+                schema: scopes.returning.clone(),
                 expressions: returning
                     .iter_mut()
                     .map(|projection| &mut projection.expr)
                     .collect(),
             },
         ];
-        self.bind_clause_scopes(routines, clauses, subqueries, &expression, params, outer)
+        self.bind_clause_scopes(
+            routines,
+            clauses,
+            subqueries,
+            &scopes.clauses,
+            params,
+            outer,
+        )
     }
 
     fn bind_merge_clauses(
         &mut self,
         routines: &dyn RoutineResolution,
         merge: &mut MergePlan,
-        target: &RowSchema,
-        joined: &RowSchema,
+        scopes: &CommandScopes,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
@@ -218,8 +281,8 @@ impl SchemaScope {
         let target = overlay_outer_schema(
             &RowSchema::with_qualified_types(
                 qualifier,
-                target.columns().to_vec(),
-                target.column_types().to_vec(),
+                scopes.target.columns().to_vec(),
+                scopes.target.column_types().to_vec(),
             ),
             outer,
         );
@@ -227,7 +290,6 @@ impl SchemaScope {
             &self.bind_source(routines, &merge.source, &merge.subqueries, params, None)?,
             outer,
         );
-        let joined = overlay_outer_schema(joined, outer);
         let MergePlan {
             join_condition,
             target_predicate,
@@ -236,65 +298,13 @@ impl SchemaScope {
             subqueries,
             ..
         } = merge;
-        let mut matched = vec![join_condition];
+        let (mut matched, not_matched, not_matched_by_source) =
+            merge_action_expressions(when_clauses);
+        matched.insert(0, join_condition);
         matched.extend(target_predicate.as_mut());
-        let mut not_matched = Vec::new();
-        let mut not_matched_by_source = Vec::new();
-        for clause in when_clauses {
-            match clause {
-                MergeWhenPlan::UpdateMatched {
-                    condition,
-                    assignments,
-                } => {
-                    matched.extend(condition.as_mut());
-                    matched.extend(
-                        assignments
-                            .iter_mut()
-                            .flat_map(AssignmentPlan::expressions_mut),
-                    );
-                }
-                MergeWhenPlan::DeleteMatched { condition }
-                | MergeWhenPlan::NothingMatched { condition } => {
-                    matched.extend(condition.as_mut());
-                }
-                MergeWhenPlan::InsertNotMatched {
-                    condition,
-                    columns,
-                    values,
-                    ..
-                } => {
-                    not_matched.extend(condition.as_mut());
-                    not_matched.extend(
-                        columns
-                            .iter_mut()
-                            .flat_map(AssignmentTarget::expressions_mut),
-                    );
-                    not_matched.extend(values.iter_mut());
-                }
-                MergeWhenPlan::NothingNotMatched { condition } => {
-                    not_matched.extend(condition.as_mut());
-                }
-                MergeWhenPlan::UpdateNotMatchedBySource {
-                    condition,
-                    assignments,
-                } => {
-                    not_matched_by_source.extend(condition.as_mut());
-                    not_matched_by_source.extend(
-                        assignments
-                            .iter_mut()
-                            .flat_map(AssignmentPlan::expressions_mut),
-                    );
-                }
-                MergeWhenPlan::DeleteNotMatchedBySource { condition }
-                | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
-                    not_matched_by_source.extend(condition.as_mut());
-                }
-            }
-        }
-        matched.extend(returning.iter_mut().map(|projection| &mut projection.expr));
         let clauses = vec![
             ClauseScope {
-                schema: joined.clone(),
+                schema: scopes.clauses.clone(),
                 expressions: matched,
             },
             ClauseScope {
@@ -305,8 +315,22 @@ impl SchemaScope {
                 schema: target,
                 expressions: not_matched_by_source,
             },
+            ClauseScope {
+                schema: scopes.returning.clone(),
+                expressions: returning
+                    .iter_mut()
+                    .map(|projection| &mut projection.expr)
+                    .collect(),
+            },
         ];
-        self.bind_clause_scopes(routines, clauses, subqueries, &joined, params, outer)
+        self.bind_clause_scopes(
+            routines,
+            clauses,
+            subqueries,
+            &scopes.clauses,
+            params,
+            outer,
+        )
     }
 
     /// Bind each clause's subqueries within the clause's scope, and then the clause's expressions. A subquery that no clause expression names, such as one in a join condition of the statement's sources, is bound within `fallback`.
@@ -350,4 +374,69 @@ impl SchemaScope {
         }
         Ok(())
     }
+}
+
+/// The expressions of a MERGE statement's actions by the relations their match kind lets them see: those of matched rows, which see the target and the source, those of source rows the target lacks, which see the source, and those of target rows the source lacks, which see the target.
+type MergeActionExpressions<'a> = (
+    Vec<&'a mut ScalarExpr>,
+    Vec<&'a mut ScalarExpr>,
+    Vec<&'a mut ScalarExpr>,
+);
+
+fn merge_action_expressions(when_clauses: &mut [MergeWhenPlan]) -> MergeActionExpressions<'_> {
+    let mut matched = Vec::new();
+    let mut not_matched = Vec::new();
+    let mut not_matched_by_source = Vec::new();
+    for clause in when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateMatched {
+                condition,
+                assignments,
+            } => {
+                matched.extend(condition.as_mut());
+                matched.extend(
+                    assignments
+                        .iter_mut()
+                        .flat_map(AssignmentPlan::expressions_mut),
+                );
+            }
+            MergeWhenPlan::DeleteMatched { condition }
+            | MergeWhenPlan::NothingMatched { condition } => {
+                matched.extend(condition.as_mut());
+            }
+            MergeWhenPlan::InsertNotMatched {
+                condition,
+                columns,
+                values,
+                ..
+            } => {
+                not_matched.extend(condition.as_mut());
+                not_matched.extend(
+                    columns
+                        .iter_mut()
+                        .flat_map(AssignmentTarget::expressions_mut),
+                );
+                not_matched.extend(values.iter_mut());
+            }
+            MergeWhenPlan::NothingNotMatched { condition } => {
+                not_matched.extend(condition.as_mut());
+            }
+            MergeWhenPlan::UpdateNotMatchedBySource {
+                condition,
+                assignments,
+            } => {
+                not_matched_by_source.extend(condition.as_mut());
+                not_matched_by_source.extend(
+                    assignments
+                        .iter_mut()
+                        .flat_map(AssignmentPlan::expressions_mut),
+                );
+            }
+            MergeWhenPlan::DeleteNotMatchedBySource { condition }
+            | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
+                not_matched_by_source.extend(condition.as_mut());
+            }
+        }
+    }
+    (matched, not_matched, not_matched_by_source)
 }
