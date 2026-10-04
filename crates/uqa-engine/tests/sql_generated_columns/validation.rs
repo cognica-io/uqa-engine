@@ -30,7 +30,7 @@ fn generated_column_validation_is_failure_atomic_and_rejects_virtual_indexes() {
         (
             "unknown_function_generated",
             "CREATE TABLE unknown_function_generated (source INTEGER, derived INTEGER GENERATED ALWAYS AS (missing_function(source)))",
-            "unknown function",
+            "function missing_function(integer) does not exist",
         ),
         (
             "keyed_virtual_generated",

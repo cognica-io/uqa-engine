@@ -161,6 +161,7 @@
       "routines.function-procedure-drop-cascade",
       "routines.function-procedure-drop-cascade-extended",
       "routines.attribute-checks",
+      "ddl.create-table-analysis-order",
       "ddl.check-constraint-inheritance",
       "types.domain-declarations-and-coercion",
       "execution.prepared-parameter-contracts",
@@ -1140,6 +1141,14 @@
       "supported_version": "Unreleased: 216 PostgreSQL 18.4 statements on memory and SQLite engines cover CREATE FUNCTION and CREATE PROCEDURE checks in CreateFunction's order (schema CREATE; repeated and procedure-only attribute clauses in written order; SET values and privileges; COST and ROWS positive after float4 rounding; SUPPORT; PARALLEL; the missing or unknown language; LEAKPROOF; TRANSFORM FOR TYPE; each argument's type named as written and unquoted, VARIADIC placement and array type, repeated names and defaults; the quoted result type; the body form; ROWS applicability), COST and ROWS in pg_proc and across reopen including float4 infinity, ALTER FUNCTION actions in AlterFunction's order after lookup and ownership, the already-exists and must-be-owner messages each command uses, per-item DROP ownership with the schema owner allowed",
       "status": "partial",
       "open_issue": "Parameter defaults transformed and coerced to their types at creation, WINDOW functions, pg_get_functiondef, DROP ROUTINE, ALTER FUNCTION SET SCHEMA, COMMENT ON, and superuser-only settings such as log_min_messages that the configuration catalog lacks remain."
+    },
+    {
+      "id": "ddl.create-table-analysis-order",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, rows, SQLSTATEs, messages, DETAIL, HINT and notices in tests/parity/pg18/create_table_order_oracle.expected.json; transformCreateStmt in src/backend/parser/parse_utilcmd.c; DefineRelation, MergeAttributes and MergeCheckConstraint in src/backend/commands/tablecmds.c; AddRelationNewConstraints, MergeWithExistingConstraint, StoreRelCheck and cookDefault in src/backend/catalog/heap.c; ChooseConstraintName in src/backend/catalog/pg_constraint.c; ATExecAddConstraint in src/backend/commands/tablecmds.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::pg18_constraint_lifecycle::table_creation_order",
+      "supported_version": "Unreleased: 103 PostgreSQL 18.4 statements on memory and SQLite engines cover CREATE TABLE in DefineRelation's order: the sequences of serial and identity columns before MergeAttributes, parent CHECKs merged by name in MergeAttributes, defaults and generation expressions in column order before the partition bound, the default partition's rows and the partition key, the keys a partition clones before its CHECKs, then the CHECKs in written order, each transformed, checked against the names earlier CHECKs took, merged with the inherited constraint of its name with its notice, rejected when a cloned key or foreign key holds the name, or named after the one column it references, and rejected as NO INHERIT on a partitioned table; names on DEFAULT, NULL, generation and identity clauses ignored; foreign key names checked before their referenced tables; the undefined function a generation expression calls named with its argument types; CHECKs that ALTER TABLE ADD COLUMN adds named by the columns they reference",
+      "status": "partial",
+      "open_issue": "AddRelationNotNullConstraints (duplicate and conflicting NOT NULL declarations, unknown columns after the CHECKs, generated names, and a name a CHECK holds reported as a pg_constraint unique violation), the relation name and OIDs reserved where heap_create_with_catalog reserves them, foreign keys in written order each checked before the next, typeless PARTITION OF column options, the column declaration conflicts transformColumnDefinition rejects, MergeAttributes merge notices and conflict details, and cookDefault's generation expression diagnostics remain."
     },
     {
       "id": "types.type-object-lifecycle",

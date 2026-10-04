@@ -210,6 +210,18 @@ pub struct CreateTable {
     /// time, then persists the canonical hierarchy with the table schema.
     #[serde(default)]
     pub hierarchy: TableHierarchy,
+    /// Each CHECK the statement declares, in written order, which `DefineRelation` adds in that order. Only the statement carries it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub check_order: Vec<DeclaredCheck>,
+}
+
+/// Where a CHECK that a CREATE TABLE statement declares is held.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeclaredCheck {
+    /// The CHECK the named column holds as its own.
+    Column(String),
+    /// The entry at this position among the statement's own entries of `CreateTable::checks`.
+    Table(usize),
 }
 
 /// A syntactically valid `CREATE TABLE IF NOT EXISTS` whose definition must be analyzed only after execution has established that the target relation does not already exist.

@@ -263,6 +263,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `expressions.interval-arithmetic` | `M1` | `verified` |
 | `routines.sql-standard-body-deparse` | `M1` | `verified` |
 | `routines.attribute-checks` | `M3` | `partial` |
+| `ddl.create-table-analysis-order` | `M3` | `partial` |
 | `types.type-object-lifecycle` | `M3` | `verified` |
 | `catalog.object-dependencies` | `M3` | `partial` |
 | `catalog.creation-ordered-oids` | `M3` | `partial` |

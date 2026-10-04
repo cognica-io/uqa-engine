@@ -188,7 +188,11 @@ pub fn merge_create_table_hierarchy(
             check.object_id = None;
             check.catalog_oid = None;
             check.validated = check.enforced;
-            inherited_checks.push(check);
+            super::check_inheritance::merge_inherited_check(
+                &mut inherited_checks,
+                check,
+                &inherited_columns,
+            )?;
         }
         if is_partition {
             inherited_foreign_keys.extend(constraints.foreign_keys.into_iter().map(|mut key| {

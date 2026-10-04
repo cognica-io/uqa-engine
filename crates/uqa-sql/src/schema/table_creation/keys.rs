@@ -22,11 +22,13 @@ use crate::SQLError;
 #[cfg(test)]
 mod tests;
 
-/// The unique indexes a partition clones from its parent before its statement's own keys are defined.
+/// The keys and foreign keys a partition clones from its parent before its statement's own constraints are defined.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct InheritedKeys {
     /// The parent's keys, which precede the declared keys of the table.
     pub keys: usize,
+    /// The parent's foreign keys, which precede the declared foreign keys of the table.
+    pub foreign_keys: usize,
     /// The key attributes of the parent's unique indexes that no key constraint owns.
     pub unique_indexes: Vec<Vec<crate::ast::IndexKey>>,
 }
@@ -53,7 +55,7 @@ pub fn transform_declared_keys(
         validate_declared_key(&mut columns, key)?;
     }
     table.key_constraints = index_order(std::mem::take(&mut table.key_constraints));
-    // The column flags follow the keys that survive; `define_created_keys` sets them again.
+    // The column flags follow the keys that survive; `define_declared_keys` sets them again.
     for column in &mut table.columns {
         column.primary_key = false;
         column.unique = false;
@@ -159,27 +161,22 @@ pub fn declare_primary_key_not_null(columns: &mut [ColumnDef], keys: &[TableKeyC
     }
 }
 
-/// Define the new table's keys as `DefineRelation` and then `DefineIndex` do: each unique index cloned from a partition's parent against the table's own partition key, then each declared key, primary key first, against an inherited primary key, the partition key and its index attributes. Each key's index is named after its checks, so a later key's errors follow an earlier key's name conflict.
-pub fn define_created_keys(
-    catalog: &dyn IndexNameCatalog,
+/// The keys a partition clones from its parent, which `DefineRelation` creates before the table's CHECK constraints: each unique index cloned from the parent is checked against the table's own partition key, and each cloned key's index is named, a name the CHECKs the table inherits hold being taken. The namer goes on to name the declared keys.
+pub fn clone_parent_keys<'a>(
+    catalog: &'a dyn IndexNameCatalog,
     table: &mut CreateTable,
     inherited: &InheritedKeys,
-) -> Result<(), SQLError> {
+) -> Result<ConstraintIndexNamer<'a>, SQLError> {
     let mut indexes = ConstraintIndexNamer::new(catalog, &table.name)?;
     indexes.occupy(
         table
-            .columns
+            .checks
             .iter()
-            .flat_map(|column| [column.not_null_name.clone(), column.check_name.clone()])
-            .chain(table.checks.iter().map(|check| check.name.clone()))
-            .flatten(),
+            .filter(|check| !check.is_local)
+            .filter_map(|check| check.name.clone()),
     );
-    let inherited_primary_key = table.key_constraints[..inherited.keys]
-        .iter()
-        .any(|key| key.kind == TableKeyConstraintKind::PrimaryKey);
     let partition = table.hierarchy.partition_spec.as_ref();
-    let (cloned, declared) = table.key_constraints.split_at_mut(inherited.keys);
-    for key in cloned {
+    for key in &mut table.key_constraints[..inherited.keys] {
         if let Some(partition) = partition {
             validate_partitioned_key_constraint(&table.name, key, partition)?;
         }
@@ -202,6 +199,28 @@ pub fn define_created_keys(
             )?;
         }
     }
+    Ok(indexes)
+}
+
+/// Define the keys the table declares as `DefineIndex` does once the table's CHECK and NOT NULL constraints exist: each key, primary key first, against an inherited primary key, the partition key and its index attributes. Each key's index is named after its checks, so a later key's errors follow an earlier key's name conflict, and no index takes a name a constraint of the table holds.
+pub fn define_declared_keys(
+    mut indexes: ConstraintIndexNamer<'_>,
+    table: &mut CreateTable,
+    inherited: &InheritedKeys,
+) -> Result<(), SQLError> {
+    indexes.occupy(
+        table
+            .columns
+            .iter()
+            .flat_map(|column| [column.not_null_name.clone(), column.check_name.clone()])
+            .chain(table.checks.iter().map(|check| check.name.clone()))
+            .flatten(),
+    );
+    let inherited_primary_key = table.key_constraints[..inherited.keys]
+        .iter()
+        .any(|key| key.kind == TableKeyConstraintKind::PrimaryKey);
+    let partition = table.hierarchy.partition_spec.as_ref();
+    let declared = &mut table.key_constraints[inherited.keys..];
     for key in declared.iter_mut() {
         validate_key_definition(
             &KeyRelation {
@@ -214,7 +233,7 @@ pub fn define_created_keys(
         )?;
         indexes.name(key)?;
     }
-    mark_single_column_keys(&mut table.columns, declared);
+    mark_single_column_keys(&mut table.columns, &table.key_constraints[inherited.keys..]);
     Ok(())
 }
 

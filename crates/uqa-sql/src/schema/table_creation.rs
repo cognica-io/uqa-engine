@@ -107,5 +107,6 @@ pub fn create_table_as_columns(
     Ok(columns)
 }
 
+pub mod checks;
 pub mod declaration;
 pub mod keys;

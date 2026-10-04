@@ -16,6 +16,7 @@ use uqa_sql::ast::{
     ColumnType, CreateTable, DeferredCreateTable, OnCommitAction, RelationPersistence,
     TableConstraintSet, TableHierarchy,
 };
+use uqa_sql::schema::table_creation::checks;
 use uqa_sql::schema::table_creation::declaration::{self, CreateTableAnalysisContext};
 use uqa_sql::{SQLError, SQLResult};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
@@ -150,11 +151,19 @@ fn preflight(
     }
     Ok(Some((name, persistence)))
 }
+/// Create the table in `DefineRelation`'s order, after the sequences of its columns: `MergeAttributes` and the relation's name, then its expressions and constraints, and then the relation and its catalog state.
 fn create_after_preflight(
     context: &CreateTableContext<'_>,
     mut table: CreateTable,
     owner: &crate::catalog::security::roles::locking::RoleBinding,
 ) -> Result<SQLResult, SQLError> {
+    implicit::materialize_implicit_sequences(
+        &context.sequences,
+        "CREATE TABLE",
+        &table.name,
+        &mut table.columns,
+        table.persistence,
+    )?;
     let inherited_keys =
         declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
     context.creation.retain_owner(owner)?;
@@ -169,16 +178,7 @@ fn create_after_preflight(
     {
         return Ok(SQLResult::empty());
     }
-    bind_partitioning(context, &mut table)?;
-    implicit::materialize_implicit_sequences(
-        &context.sequences,
-        "CREATE TABLE",
-        &table.name,
-        &mut table.columns,
-        table.persistence,
-    )?;
-    declaration::validate_create_table_expressions(&context.analysis, &mut table)?;
-    declaration::define_create_table_constraints(&context.analysis, &mut table, &inherited_keys)?;
+    define_expressions_and_constraints(context, &mut table, &inherited_keys)?;
     let mut vector_fields = Vec::new();
     for column in &table.columns {
         match &column.ty {
@@ -242,6 +242,28 @@ fn create_after_preflight(
         .refresh_value_indexes(&table.name)
         .map_err(|error| storage_error("CREATE TABLE btree indexes", error))?;
     Ok(SQLResult::empty())
+}
+
+/// The defaults and generation expressions in column order, the partition bound and key, the keys a partition clones, the CHECK constraints in written order, and then the declared keys and foreign keys, in the order `DefineRelation` and the commands it queues define them.
+fn define_expressions_and_constraints(
+    context: &CreateTableContext<'_>,
+    table: &mut CreateTable,
+    inherited_keys: &declaration::InheritedKeys,
+) -> Result<(), SQLError> {
+    declaration::define_create_table_defaults(&context.analysis, table)?;
+    bind_partitioning(context, table)?;
+    let indexes =
+        declaration::clone_create_table_parent_keys(&context.analysis, table, inherited_keys)?;
+    let cloned = declaration::cloned_constraint_names(table, inherited_keys);
+    let mut notices = Vec::new();
+    let checks =
+        checks::define_create_table_checks(&context.analysis, table, &cloned, &mut notices);
+    // A notice reaches the client before the error that ends the statement.
+    for notice in notices {
+        context.notices.push(notice);
+    }
+    checks?;
+    declaration::define_create_table_constraints(&context.analysis, table, indexes, inherited_keys)
 }
 
 /// `DefineRelation` binds a new partition's bound and the table's partition key once the relation exists, and `check_default_partition_contents` rejects a bound that accepts a row the parent's default partition holds.

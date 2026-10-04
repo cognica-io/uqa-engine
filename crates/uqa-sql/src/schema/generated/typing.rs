@@ -662,8 +662,8 @@ fn infer_function(
     let call_arguments = generated_call_arguments(args)?;
     let mut argument_names = Vec::with_capacity(call_arguments.len());
     let mut argument_types = Vec::with_capacity(call_arguments.len());
-    for argument in call_arguments {
-        argument_names.push(argument.name);
+    for argument in &call_arguments {
+        argument_names.push(argument.name.clone());
         argument_types.push(infer_expression(
             engine,
             columns,
@@ -713,8 +713,23 @@ fn infer_function(
     }
 
     let dispatch_name = builtin_function_dispatch_name(&name.to_ascii_lowercase());
-    infer_builtin_function(&dispatch_name, &argument_names, &argument_types)?
-        .ok_or_else(|| SQLError::UnknownFunction(name.to_string()))
+    infer_builtin_function(&dispatch_name, &argument_names, &argument_types)?.ok_or_else(|| {
+        // No function has the name: `ParseFuncOrColumn` names the call with the types its arguments have.
+        let argument_types = call_arguments
+            .iter()
+            .zip(&argument_types)
+            .map(|(argument, inferred)| {
+                generation_expression_column_type(columns, argument.value, inferred)
+            })
+            .collect::<Vec<_>>();
+        crate::type_resolution::function_resolution_error(
+            "42883",
+            name,
+            &argument_names,
+            &argument_types,
+            "does not exist",
+        )
+    })
 }
 
 /// Return type of a call bound to a user SQL routine: its invocation's resolved type, else the routine's declared result.

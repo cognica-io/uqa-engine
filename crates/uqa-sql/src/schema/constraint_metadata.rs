@@ -178,12 +178,8 @@ pub fn materialize_constraint_metadata_with_names(
         changed |= identity::materialize_default_oid(column, allocate)?;
     }
     for column in columns.iter_mut() {
-        if column.check.is_some() {
-            changed |= assign_constraint_name(
-                &mut column.check_name,
-                (&relation.name, &column.name, "check"),
-                &mut used,
-            )?;
+        if let Some(check) = &column.check {
+            changed |= assign_check_name(&relation.name, check, &mut column.check_name, &mut used)?;
             changed |= assign_catalog_object_id(
                 &mut column.check_object_id,
                 "CHECK constraint",
@@ -259,18 +255,7 @@ fn materialize_checks(
 ) -> ConstraintMetadataResult<bool> {
     let mut changed = false;
     for constraint in checks {
-        let mut referenced_columns = Vec::new();
-        collect_constraint_columns(&constraint.expr, &mut referenced_columns);
-        let component = if referenced_columns.len() == 1 {
-            referenced_columns[0].as_str()
-        } else {
-            ""
-        };
-        changed |= assign_constraint_name(
-            &mut constraint.name,
-            (&relation.name, component, "check"),
-            used,
-        )?;
+        changed |= assign_check_name(&relation.name, &constraint.expr, &mut constraint.name, used)?;
         changed |=
             assign_catalog_object_id(&mut constraint.object_id, "CHECK constraint", allocate)?;
         changed |= identity::materialize_check_oid(
@@ -502,6 +487,22 @@ fn duplicate_constraint(relation: &RelationIdentity, name: &str) -> ConstraintMe
             ),
         ),
     ))
+}
+
+/// Name an unnamed CHECK as `AddRelationNewConstraints` does, wherever the statement wrote it: after the relation, the one column the expression references when it references exactly one, then `check`, unique among `used` as `ChooseConstraintName` makes it.
+pub(super) fn assign_check_name(
+    relation: &str,
+    expression: &crate::ast::Expr,
+    target: &mut Option<String>,
+    used: &mut BTreeSet<String>,
+) -> ConstraintMetadataResult<bool> {
+    let mut referenced_columns = Vec::new();
+    collect_constraint_columns(expression, &mut referenced_columns);
+    let component = match referenced_columns.as_slice() {
+        [column] => column.as_str(),
+        _ => "",
+    };
+    assign_constraint_name(target, (relation, component, "check"), used)
 }
 
 pub(super) fn assign_constraint_name(

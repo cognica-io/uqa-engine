@@ -12,7 +12,9 @@ use super::{
     CreateIndex, CreateTable, Expr, NodeEnum, Result, SQLError, TableKeyConstraint,
     TableKeyConstraintKind,
 };
-use crate::ast::{AutoIncrement, ColumnType, GeneratedColumn, GeneratedColumnKind, TableCheck};
+use crate::ast::{
+    AutoIncrement, ColumnType, DeclaredCheck, GeneratedColumn, GeneratedColumnKind, TableCheck,
+};
 
 struct TableNotNullConstraint {
     name: Option<String>,
@@ -29,7 +31,6 @@ pub(in crate::compiler) fn compile_create_table(
     stmt: &pg_query::protobuf::CreateStmt,
 ) -> Result<CreateTable> {
     use crate::ast::ForeignKey;
-    use std::collections::BTreeSet;
     crate::compiler::validate_create_table_envelope(stmt, "CREATE TABLE")?;
     let relation = stmt
         .relation
@@ -44,10 +45,10 @@ pub(in crate::compiler) fn compile_create_table(
     }
     let mut columns = Vec::new();
     let mut checks: Vec<TableCheck> = Vec::new();
+    let mut check_order = Vec::new();
     let mut foreign_keys: Vec<ForeignKey> = Vec::new();
     let mut key_constraints: Vec<TableKeyConstraint> = Vec::new();
     let mut table_not_nulls = Vec::new();
-    let mut named_constraints = BTreeSet::new();
     for elt in &stmt.table_elts {
         let inner = elt
             .node
@@ -55,158 +56,140 @@ pub(in crate::compiler) fn compile_create_table(
             .ok_or_else(|| SQLError::Internal("CREATE TABLE contains an empty element".into()))?;
         match inner {
             NodeEnum::ColumnDef(col) => {
-                for constraint in &col.constraints {
-                    let inner = constraint.node.as_ref().ok_or_else(|| {
-                        SQLError::Internal("column contains an empty constraint".into())
-                    })?;
-                    let NodeEnum::Constraint(cstr) = inner else {
-                        return Err(SQLError::Internal(format!(
-                            "unexpected column constraint node {inner:?}"
-                        )));
-                    };
-                    if !is_key_constraint(cstr) {
-                        register_constraint_name(
-                            &mut named_constraints,
-                            &cstr.conname,
-                            &relation.relname,
-                        )?;
-                    }
-                }
                 key_constraints.extend(compile_column_key_constraints(col)?);
                 let (column, column_checks) = compile_column_def(col)?;
-                columns.push(column);
-                checks.extend(column_checks);
-            }
-            NodeEnum::Constraint(cstr) => {
-                if !is_key_constraint(cstr) {
-                    register_constraint_name(
-                        &mut named_constraints,
-                        &cstr.conname,
-                        &relation.relname,
-                    )?;
-                }
-                match cstr.contype() {
-                    pg_query::protobuf::ConstrType::ConstrCheck => {
-                        let raw = cstr
-                            .raw_expr
-                            .as_deref()
-                            .ok_or_else(|| SQLError::Internal("CHECK without expression".into()))?;
-                        let expr = compile_expr(raw)?;
-                        let cname = if cstr.conname.is_empty() {
-                            None
-                        } else {
-                            Some(cstr.conname.clone())
-                        };
-                        checks.push(TableCheck {
-                            catalog_oid: None,
-                            name: cname,
-                            expr,
-                            enforced: cstr.is_enforced,
-                            validated: cstr.initially_valid && cstr.is_enforced,
-                            no_inherit: cstr.is_no_inherit,
-                            object_id: None,
-                            is_local: true,
-                            partition_constraint: None,
-                        });
+                if column_checks.is_empty() {
+                    if column.check.is_some() {
+                        check_order.push(DeclaredCheck::Column(column.name.clone()));
                     }
-                    pg_query::protobuf::ConstrType::ConstrForeign => {
-                        if cstr.fk_with_period != cstr.pk_with_period {
-                            return Err(SQLError::TypeMismatch(
+                } else {
+                    for check in column_checks {
+                        check_order.push(DeclaredCheck::Table(checks.len()));
+                        checks.push(check);
+                    }
+                }
+                columns.push(column);
+            }
+            NodeEnum::Constraint(cstr) => match cstr.contype() {
+                pg_query::protobuf::ConstrType::ConstrCheck => {
+                    let raw = cstr
+                        .raw_expr
+                        .as_deref()
+                        .ok_or_else(|| SQLError::Internal("CHECK without expression".into()))?;
+                    let expr = compile_expr(raw)?;
+                    let cname = if cstr.conname.is_empty() {
+                        None
+                    } else {
+                        Some(cstr.conname.clone())
+                    };
+                    check_order.push(DeclaredCheck::Table(checks.len()));
+                    checks.push(TableCheck {
+                        catalog_oid: None,
+                        name: cname,
+                        expr,
+                        enforced: cstr.is_enforced,
+                        validated: cstr.initially_valid && cstr.is_enforced,
+                        no_inherit: cstr.is_no_inherit,
+                        object_id: None,
+                        is_local: true,
+                        partition_constraint: None,
+                    });
+                }
+                pg_query::protobuf::ConstrType::ConstrForeign => {
+                    if cstr.fk_with_period != cstr.pk_with_period {
+                        return Err(SQLError::TypeMismatch(
                                 "FOREIGN KEY must use PERIOD on both the referencing and referenced key"
                                     .into(),
                             ));
-                        }
-                        let local_columns = extract_strings(&cstr.fk_attrs)?;
-                        let ref_table =
-                            cstr.pktable.as_ref().map(range_var_name).ok_or_else(|| {
-                                SQLError::Internal("FOREIGN KEY without referenced table".into())
-                            })?;
-                        let ref_columns = extract_strings(&cstr.pk_attrs)?;
-                        if local_columns.is_empty() {
-                            return Err(SQLError::Internal(
-                                "FOREIGN KEY without local columns".into(),
-                            ));
-                        }
-                        if !ref_columns.is_empty() && local_columns.len() != ref_columns.len() {
-                            return Err(SQLError::TypeMismatch(format!(
-                                "FOREIGN KEY has {} local columns but {} referenced columns",
-                                local_columns.len(),
-                                ref_columns.len()
-                            )));
-                        }
-                        let cname = if cstr.conname.is_empty() {
-                            None
-                        } else {
-                            Some(cstr.conname.clone())
-                        };
-                        let on_delete_set_columns = extract_strings(&cstr.fk_del_set_cols)?;
-                        validate_foreign_key_set_columns(
-                            &local_columns,
-                            &on_delete_set_columns,
-                            &cstr.fk_del_action,
-                        )?;
-                        foreign_keys.push(ForeignKey {
-                            referenced_key: None,
-                            referenced_index: None,
-                            name: cname,
-                            object_id: None,
-                            catalog_identity: None,
-                            local_columns,
-                            ref_table,
-                            ref_columns,
-                            on_update: compile_foreign_key_action(&cstr.fk_upd_action)?,
-                            on_delete: compile_foreign_key_action(&cstr.fk_del_action)?,
-                            on_delete_set_columns,
-                            match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
-                            enforced: cstr.is_enforced,
-                            validated: cstr.initially_valid && cstr.is_enforced,
-                            deferrable: cstr.deferrable,
-                            initially_deferred: cstr.initdeferred,
-                            period: cstr.fk_with_period,
-                            referenced_partitions: Vec::new(),
-                        });
                     }
-                    pg_query::protobuf::ConstrType::ConstrPrimary
-                    | pg_query::protobuf::ConstrType::ConstrUnique => {
-                        let kind =
-                            if cstr.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
-                                TableKeyConstraintKind::PrimaryKey
-                            } else {
-                                TableKeyConstraintKind::Unique
-                            };
-                        let key_columns = extract_strings(&cstr.keys)?;
-                        key_constraints.push(TableKeyConstraint {
-                            catalog_identity: None,
-                            index_identity: None,
-                            name: constraint_name(&cstr.conname),
-                            kind,
-                            columns: key_columns,
-                            included_columns: extract_strings(&cstr.including)?,
-                            nulls_not_distinct: cstr.nulls_not_distinct,
-                            without_overlaps: cstr.without_overlaps,
-                        });
+                    let local_columns = extract_strings(&cstr.fk_attrs)?;
+                    let ref_table = cstr.pktable.as_ref().map(range_var_name).ok_or_else(|| {
+                        SQLError::Internal("FOREIGN KEY without referenced table".into())
+                    })?;
+                    let ref_columns = extract_strings(&cstr.pk_attrs)?;
+                    if local_columns.is_empty() {
+                        return Err(SQLError::Internal(
+                            "FOREIGN KEY without local columns".into(),
+                        ));
                     }
-                    pg_query::protobuf::ConstrType::ConstrNotnull => {
-                        let key_columns = extract_strings(&cstr.keys)?;
-                        let [column] = key_columns.as_slice() else {
-                            return Err(SQLError::TypeMismatch(
-                                "NOT NULL constraint must name exactly one column".into(),
-                            ));
-                        };
-                        table_not_nulls.push(TableNotNullConstraint {
-                            name: constraint_name(&cstr.conname),
-                            column: column.clone(),
-                            validated: cstr.initially_valid,
-                            no_inherit: cstr.is_no_inherit,
-                        });
-                    }
-                    other => {
-                        return Err(SQLError::Unsupported(format!(
-                            "table constraint {other:?} is not supported"
+                    if !ref_columns.is_empty() && local_columns.len() != ref_columns.len() {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "FOREIGN KEY has {} local columns but {} referenced columns",
+                            local_columns.len(),
+                            ref_columns.len()
                         )));
                     }
+                    let cname = if cstr.conname.is_empty() {
+                        None
+                    } else {
+                        Some(cstr.conname.clone())
+                    };
+                    let on_delete_set_columns = extract_strings(&cstr.fk_del_set_cols)?;
+                    validate_foreign_key_set_columns(
+                        &local_columns,
+                        &on_delete_set_columns,
+                        &cstr.fk_del_action,
+                    )?;
+                    foreign_keys.push(ForeignKey {
+                        referenced_key: None,
+                        referenced_index: None,
+                        name: cname,
+                        object_id: None,
+                        catalog_identity: None,
+                        local_columns,
+                        ref_table,
+                        ref_columns,
+                        on_update: compile_foreign_key_action(&cstr.fk_upd_action)?,
+                        on_delete: compile_foreign_key_action(&cstr.fk_del_action)?,
+                        on_delete_set_columns,
+                        match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
+                        enforced: cstr.is_enforced,
+                        validated: cstr.initially_valid && cstr.is_enforced,
+                        deferrable: cstr.deferrable,
+                        initially_deferred: cstr.initdeferred,
+                        period: cstr.fk_with_period,
+                        referenced_partitions: Vec::new(),
+                    });
                 }
-            }
+                pg_query::protobuf::ConstrType::ConstrPrimary
+                | pg_query::protobuf::ConstrType::ConstrUnique => {
+                    let kind = if cstr.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
+                        TableKeyConstraintKind::PrimaryKey
+                    } else {
+                        TableKeyConstraintKind::Unique
+                    };
+                    let key_columns = extract_strings(&cstr.keys)?;
+                    key_constraints.push(TableKeyConstraint {
+                        catalog_identity: None,
+                        index_identity: None,
+                        name: constraint_name(&cstr.conname),
+                        kind,
+                        columns: key_columns,
+                        included_columns: extract_strings(&cstr.including)?,
+                        nulls_not_distinct: cstr.nulls_not_distinct,
+                        without_overlaps: cstr.without_overlaps,
+                    });
+                }
+                pg_query::protobuf::ConstrType::ConstrNotnull => {
+                    let key_columns = extract_strings(&cstr.keys)?;
+                    let [column] = key_columns.as_slice() else {
+                        return Err(SQLError::TypeMismatch(
+                            "NOT NULL constraint must name exactly one column".into(),
+                        ));
+                    };
+                    table_not_nulls.push(TableNotNullConstraint {
+                        name: constraint_name(&cstr.conname),
+                        column: column.clone(),
+                        validated: cstr.initially_valid,
+                        no_inherit: cstr.is_no_inherit,
+                    });
+                }
+                other => {
+                    return Err(SQLError::Unsupported(format!(
+                        "table constraint {other:?} is not supported"
+                    )));
+                }
+            },
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "CREATE TABLE element {other:?} is not supported"
@@ -275,34 +258,12 @@ pub(in crate::compiler) fn compile_create_table(
         persistence,
         on_commit,
         hierarchy,
+        check_order,
     })
-}
-
-/// Key constraint names belong to their indexes and are checked when the indexes are named, as `index_create` does.
-fn is_key_constraint(constraint: &pg_query::protobuf::Constraint) -> bool {
-    matches!(
-        constraint.contype(),
-        pg_query::protobuf::ConstrType::ConstrPrimary
-            | pg_query::protobuf::ConstrType::ConstrUnique
-    )
 }
 
 pub(in crate::compiler) fn constraint_name(name: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
-}
-
-pub(in crate::compiler) fn register_constraint_name(
-    names: &mut std::collections::BTreeSet<String>,
-    name: &str,
-    relation: &str,
-) -> Result<()> {
-    if !name.is_empty() && !names.insert(name.to_string()) {
-        return Err(SQLError::Routine {
-            sqlstate: "42710".into(),
-            message: format!("constraint \"{name}\" for relation \"{relation}\" already exists"),
-        });
-    }
-    Ok(())
 }
 
 pub(in crate::compiler) fn compile_column_key_constraints(

@@ -23,86 +23,96 @@ pub fn prepare_generated_columns(
     columns: &mut [ColumnDef],
     foreign_keys: &[ForeignKey],
 ) -> Result<(), SQLError> {
-    let engine = context.catalog;
     let snapshot = columns.to_vec();
-    for (index, column) in snapshot.iter().enumerate() {
-        let Some(generated) = column.generated.as_ref() else {
-            continue;
-        };
-        if column.default.is_some() {
-            return Err(SQLError::TypeMismatch(format!(
-                "both default and generation expression specified for column `{}`",
-                column.name
-            )));
-        }
-        if column.auto_increment.is_some() {
-            return Err(SQLError::TypeMismatch(format!(
-                "both identity and generation expression specified for column `{}`",
-                column.name
-            )));
-        }
-        if generated.kind == GeneratedColumnKind::Virtual {
-            validate_virtual_column_envelope(column, foreign_keys)?;
-        }
-        let plan = crate::plan::ExpressionPlan::lower((*generated.expression).clone());
-        if !plan.subqueries.is_empty() {
-            return Err(SQLError::TypeMismatch(
-                "cannot use subquery in column generation expression".into(),
-            ));
-        }
-        if aggregates::contains_aggregate(engine, &plan.scalar) {
-            return Err(SQLError::TypeMismatch(
-                "aggregate functions are not allowed in column generation expressions".into(),
-            ));
-        }
-        validate_generation_expression(qualifier, &snapshot, &generated.expression)?;
-        if generated.kind == GeneratedColumnKind::Virtual {
-            virtual_security::check_virtual_host_functions(engine, &generated.expression)?;
-        }
-        let prepared = columns[index]
-            .generated
-            .as_mut()
-            .ok_or_else(|| SQLError::Internal("generated column disappeared".into()))?;
-        bind_schema_column_references(&mut prepared.expression, qualifier);
-        let (expression_type, function_dependencies) =
-            typing::infer_generation_expression(engine, &snapshot, &mut prepared.expression)?;
-        if generated.kind == GeneratedColumnKind::Virtual {
-            virtual_security::check_virtual_generated_security(
-                engine,
-                &snapshot,
-                &prepared.expression,
-            )?;
-        }
-        crate::catalog::regrole_dependencies::reject_stored_regrole_constants(
-            engine,
-            &prepared.expression,
-            Some(&column.ty),
-        )?;
-        if let typing::GenerationType::UnknownLiteral(value) = &expression_type {
-            convert_value_to_column_type(uqa_core::Value::Str(value.clone()), &column.ty)?;
-        } else if !typing::generation_type_assignable_to(&expression_type, &column.ty) {
-            return Err(SQLError::TypeMismatch(format!(
-                "column `{}` has type {} but generation expression has type {}",
-                column.name,
-                crate::catalog::type_metadata::column_type_name(&column.ty),
-                typing::generation_type_name(&expression_type)
-            )));
-        }
-        prepared.function_dependencies = function_dependencies;
-        // The generation result is assigned to the column; its routines, user-defined types and enum constants are stored by identity as parse analysis stores them.
-        crate::catalog::stored_ast::fold_assigned_stored_literal(
-            &mut prepared.expression,
-            &column.ty,
-            crate::FunctionTypeResolver::enum_labels(engine),
-        )?;
-        super::constraints::bind_stored_check_expression(
-            context,
-            qualifier,
-            qualifier,
-            &snapshot,
-            &mut prepared.expression,
-        )?;
+    for index in 0..columns.len() {
+        prepare_generated_column(context, qualifier, &snapshot, columns, index, foreign_keys)?;
     }
+    Ok(())
+}
+
+/// Validate and bind the generation expression of `columns[index]`, if it has one, against the relation's columns as `snapshot` describes them before any of their expressions was bound.
+pub fn prepare_generated_column(
+    context: &super::SchemaBindingContext<'_, '_>,
+    qualifier: &str,
+    snapshot: &[ColumnDef],
+    columns: &mut [ColumnDef],
+    index: usize,
+    foreign_keys: &[ForeignKey],
+) -> Result<(), SQLError> {
+    let engine = context.catalog;
+    let column = &snapshot[index];
+    let Some(generated) = column.generated.as_ref() else {
+        return Ok(());
+    };
+    if column.default.is_some() {
+        return Err(SQLError::TypeMismatch(format!(
+            "both default and generation expression specified for column `{}`",
+            column.name
+        )));
+    }
+    if column.auto_increment.is_some() {
+        return Err(SQLError::TypeMismatch(format!(
+            "both identity and generation expression specified for column `{}`",
+            column.name
+        )));
+    }
+    if generated.kind == GeneratedColumnKind::Virtual {
+        validate_virtual_column_envelope(column, foreign_keys)?;
+    }
+    let plan = crate::plan::ExpressionPlan::lower((*generated.expression).clone());
+    if !plan.subqueries.is_empty() {
+        return Err(SQLError::TypeMismatch(
+            "cannot use subquery in column generation expression".into(),
+        ));
+    }
+    if aggregates::contains_aggregate(engine, &plan.scalar) {
+        return Err(SQLError::TypeMismatch(
+            "aggregate functions are not allowed in column generation expressions".into(),
+        ));
+    }
+    validate_generation_expression(qualifier, snapshot, &generated.expression)?;
+    if generated.kind == GeneratedColumnKind::Virtual {
+        virtual_security::check_virtual_host_functions(engine, &generated.expression)?;
+    }
+    let prepared = columns[index]
+        .generated
+        .as_mut()
+        .ok_or_else(|| SQLError::Internal("generated column disappeared".into()))?;
+    bind_schema_column_references(&mut prepared.expression, qualifier);
+    let (expression_type, function_dependencies) =
+        typing::infer_generation_expression(engine, snapshot, &mut prepared.expression)?;
+    if generated.kind == GeneratedColumnKind::Virtual {
+        virtual_security::check_virtual_generated_security(engine, snapshot, &prepared.expression)?;
+    }
+    crate::catalog::regrole_dependencies::reject_stored_regrole_constants(
+        engine,
+        &prepared.expression,
+        Some(&column.ty),
+    )?;
+    if let typing::GenerationType::UnknownLiteral(value) = &expression_type {
+        convert_value_to_column_type(uqa_core::Value::Str(value.clone()), &column.ty)?;
+    } else if !typing::generation_type_assignable_to(&expression_type, &column.ty) {
+        return Err(SQLError::TypeMismatch(format!(
+            "column `{}` has type {} but generation expression has type {}",
+            column.name,
+            crate::catalog::type_metadata::column_type_name(&column.ty),
+            typing::generation_type_name(&expression_type)
+        )));
+    }
+    prepared.function_dependencies = function_dependencies;
+    // The generation result is assigned to the column; its routines, user-defined types and enum constants are stored by identity as parse analysis stores them.
+    crate::catalog::stored_ast::fold_assigned_stored_literal(
+        &mut prepared.expression,
+        &column.ty,
+        crate::FunctionTypeResolver::enum_labels(engine),
+    )?;
+    super::constraints::bind_stored_check_expression(
+        context,
+        qualifier,
+        qualifier,
+        snapshot,
+        &mut prepared.expression,
+    )?;
     Ok(())
 }
 

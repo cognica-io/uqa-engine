@@ -5,16 +5,17 @@
 //
 
 //! Bind complete table declarations around their sequence and catalog publication boundaries.
-use crate::ast::{ColumnDef, ColumnType, CreateTable, Expr};
+use crate::ast::{ColumnDef, CreateTable, Expr};
 use crate::schema::constraints::validate_foreign_key_definition;
 use crate::schema::foreign_keys::{resolve_foreign_key_parent, ForeignKeyDefinitionContext};
-use crate::schema::indexes::names::IndexNameCatalog;
+use crate::schema::indexes::names::{ConstraintIndexNamer, IndexNameCatalog};
 use crate::schema::inheritance::InheritanceContext;
 pub use crate::schema::table_creation::keys::InheritedKeys;
 use crate::schema::{SchemaBindingContext, SchemaExpressionCatalog};
 use crate::semantics::conflict::InferenceBindingScope;
 use crate::type_resolution::FunctionTypeResolver;
 use crate::SQLError;
+use std::collections::BTreeSet;
 
 pub struct CreateTableAnalysisContext<'a> {
     pub types: &'a dyn FunctionTypeResolver,
@@ -43,8 +44,10 @@ pub fn prepare_create_table_declaration(
     c: &mut CreateTable,
 ) -> Result<InheritedKeys, SQLError> {
     let declared = c.key_constraints.len();
+    let declared_foreign_keys = c.foreign_keys.len();
     super::super::inheritance::merge_create_table_hierarchy(&context.inheritance, c)?;
     let keys = c.key_constraints.len() - declared;
+    let foreign_keys = c.foreign_keys.len() - declared_foreign_keys;
     super::keys::declare_primary_key_not_null(&mut c.columns, &c.key_constraints[keys..]);
     for column in &c.columns {
         context.types.require_type_usage(&column.ty)?;
@@ -62,6 +65,7 @@ pub fn prepare_create_table_declaration(
     };
     Ok(InheritedKeys {
         keys,
+        foreign_keys,
         unique_indexes,
     })
 }
@@ -74,14 +78,65 @@ pub fn bind_create_table_partitioning(
     super::super::inheritance::bind_create_table_partitioning(&context.inheritance, c)
 }
 
-/// Define the keys and then bind the foreign keys, which `PostgreSQL` creates after the keys so that a foreign key can reference a key of its own table.
+/// The defaults and generation expressions of the new table's columns, which `DefineRelation` transforms in column order before it binds the table's partitioning, since a partition key may name a generated column.
+pub fn define_create_table_defaults(
+    context: &CreateTableAnalysisContext<'_>,
+    c: &mut CreateTable,
+) -> Result<(), SQLError> {
+    let binding = context.bindings.binding_scope()?;
+    let schema = SchemaBindingContext {
+        catalog: context.schema,
+        binding: &binding.context(),
+    };
+    let snapshot = c.columns.clone();
+    for index in 0..c.columns.len() {
+        let column = &mut c.columns[index];
+        if let Some(default) = &mut column.default {
+            super::super::defaults::validate_default_expression(&schema, default, &column.ty)?;
+        }
+        super::super::generated::prepare_generated_column(
+            &schema,
+            &c.qualifier,
+            &snapshot,
+            &mut c.columns,
+            index,
+            &c.foreign_keys,
+        )?;
+    }
+    Ok(())
+}
+
+/// The keys a partition clones from its parent, which `DefineRelation` creates once the table's own partition key is stored and before its CHECK constraints: each is checked against that partition key and its index named, beside the CHECKs the table inherits. The namer then names the declared keys.
+pub fn clone_create_table_parent_keys<'a>(
+    context: &CreateTableAnalysisContext<'a>,
+    c: &mut CreateTable,
+    inherited: &InheritedKeys,
+) -> Result<ConstraintIndexNamer<'a>, SQLError> {
+    super::keys::clone_parent_keys(context.index_names, c, inherited)
+}
+
+/// The names of the constraints a new table holds before its CHECKs besides the ones it inherits: the keys and foreign keys a partition clones from its parent.
+pub fn cloned_constraint_names(c: &CreateTable, inherited: &InheritedKeys) -> BTreeSet<String> {
+    c.key_constraints[..inherited.keys]
+        .iter()
+        .filter_map(|key| key.name.clone())
+        .chain(
+            c.foreign_keys[..inherited.foreign_keys]
+                .iter()
+                .filter_map(|foreign_key| foreign_key.name.clone()),
+        )
+        .collect()
+}
+
+/// Define the declared keys and then bind the foreign keys, which `PostgreSQL` creates after the keys so that a foreign key can reference a key of its own table.
 pub fn define_create_table_constraints(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
+    indexes: ConstraintIndexNamer<'_>,
     inherited: &InheritedKeys,
 ) -> Result<(), SQLError> {
-    super::keys::define_created_keys(context.index_names, c, inherited)?;
-    bind_create_table_relation_references(context.foreign_keys.catalog, c)?;
+    super::keys::define_declared_keys(indexes, c, inherited)?;
+    bind_create_table_relation_references(context.foreign_keys.catalog, c, inherited)?;
     for foreign_key in &mut c.foreign_keys {
         if !foreign_key.period {
             continue;
@@ -109,52 +164,6 @@ pub fn define_create_table_constraints(
             foreign_key.ref_table = canonical;
         }
     }
-    Ok(())
-}
-
-pub fn validate_create_table_expressions(
-    context: &CreateTableAnalysisContext<'_>,
-    c: &mut CreateTable,
-) -> Result<(), SQLError> {
-    let check_columns = c.columns.clone();
-    for column in &mut c.columns {
-        if let Some(default) = &mut column.default {
-            validate_default_expression(context, default, &column.ty)?;
-        }
-        if let Some(check) = &mut column.check {
-            validate_check_expression(context, &c.name, &c.qualifier, &check_columns, check)?;
-            crate::catalog::regrole_dependencies::reject_stored_regrole_constants(
-                context.schema,
-                check,
-                None,
-            )?;
-        }
-    }
-    for check in &mut c.checks {
-        validate_check_expression(
-            context,
-            &c.name,
-            &c.qualifier,
-            &check_columns,
-            &mut check.expr,
-        )?;
-        crate::catalog::regrole_dependencies::reject_stored_regrole_constants(
-            context.schema,
-            &check.expr,
-            None,
-        )?;
-    }
-    super::super::check_inheritance::merge_create_checks(c)?;
-    let binding = context.bindings.binding_scope()?;
-    super::super::generated::prepare_generated_columns(
-        &SchemaBindingContext {
-            catalog: context.schema,
-            binding: &binding.context(),
-        },
-        &c.qualifier,
-        &mut c.columns,
-        &c.foreign_keys,
-    )?;
     Ok(())
 }
 
@@ -203,23 +212,7 @@ pub fn bind_created_table_foreign_keys(
     Ok(())
 }
 
-fn validate_default_expression(
-    context: &CreateTableAnalysisContext<'_>,
-    expression: &mut Expr,
-    target: &ColumnType,
-) -> Result<(), SQLError> {
-    let binding = context.bindings.binding_scope()?;
-    super::super::defaults::validate_default_expression(
-        &SchemaBindingContext {
-            catalog: context.schema,
-            binding: &binding.context(),
-        },
-        expression,
-        target,
-    )
-}
-
-fn validate_check_expression(
+pub(super) fn validate_check_expression(
     context: &CreateTableAnalysisContext<'_>,
     table: &str,
     qualifier: &str,
@@ -239,18 +232,50 @@ fn validate_check_expression(
     )
 }
 
+/// `ATExecAddConstraint` for each foreign key the statement declares: its name cannot be one a constraint of the table already holds, and then its referenced table is looked up.
 fn bind_create_table_relation_references(
     catalog: &dyn super::super::foreign_keys::ForeignKeyDefinitionCatalog,
     table: &mut CreateTable,
+    inherited: &InheritedKeys,
 ) -> Result<(), SQLError> {
     let table_name = table.name.clone();
     let qualifier = table.qualifier.clone();
+    let relation =
+        uqa_core::RelationIdentity::from_legacy_name(&table_name).map_err(SQLError::Internal)?;
+    let mut held = table
+        .columns
+        .iter()
+        .flat_map(|column| {
+            [
+                column.not_null_name.clone().filter(|_| column.not_null),
+                column.check_name.clone().filter(|_| column.check.is_some()),
+            ]
+        })
+        .chain(table.checks.iter().map(|check| check.name.clone()))
+        .chain(table.key_constraints.iter().map(|key| key.name.clone()))
+        .chain(
+            table.foreign_keys[..inherited.foreign_keys]
+                .iter()
+                .map(|foreign_key| foreign_key.name.clone()),
+        )
+        .flatten()
+        .collect::<BTreeSet<_>>();
+    let mut claim = |name: Option<&String>| match name {
+        Some(name) if !held.insert(name.clone()) => Err(
+            super::super::check_inheritance::duplicate_check(&relation.name, name),
+        ),
+        _ => Ok(()),
+    };
     for column in &mut table.columns {
         if let Some(reference) = column.references.as_mut() {
+            claim(reference.name.as_ref())?;
             bind_create_table_reference(catalog, &table_name, &qualifier, &mut reference.table)?;
         }
     }
-    for foreign_key in &mut table.foreign_keys {
+    for (position, foreign_key) in table.foreign_keys.iter_mut().enumerate() {
+        if position >= inherited.foreign_keys {
+            claim(foreign_key.name.as_ref())?;
+        }
         bind_create_table_reference(catalog, &table_name, &qualifier, &mut foreign_key.ref_table)?;
     }
     Ok(())
