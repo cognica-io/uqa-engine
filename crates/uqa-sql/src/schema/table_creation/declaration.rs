@@ -26,15 +26,56 @@ pub struct CreateTableAnalysisContext<'a> {
     pub foreign_keys: ForeignKeyDefinitionContext<'a>,
 }
 
-/// Resolve the declared column types and validate the declared keys, which `PostgreSQL` does while it analyzes the statement, before the relation's name is checked.
+/// Examine the statement's elements in written order as `transformCreateStmt` does while it analyzes the statement, before the relation's name is checked: each column's type and then its clauses, and each NOT NULL table constraint; then validate the declared keys.
 pub fn transform_create_table(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
 ) -> Result<(), SQLError> {
-    for column in &mut c.columns {
-        column.ty =
-            crate::type_resolution::resolve_declared_column_type(context.types, &column.ty)?;
+    use crate::ast::DeclaredElement;
+    let target = super::column_declarations::ColumnDeclarationTarget {
+        table: &c.qualifier,
+        partitioned: c.hierarchy.partition_spec.is_some(),
+    };
+    let lost =
+        || SQLError::Internal("the written order of CREATE TABLE elements lost a column".into());
+    let mut columns = c.columns.iter_mut();
+    let mut deferrable_key = false;
+    for element in &c.element_order {
+        match element {
+            DeclaredElement::Column(declaration) => {
+                let column = columns.next().ok_or_else(lost)?;
+                super::column_declarations::check_serial_array(declaration)?;
+                column.ty = crate::type_resolution::resolve_declared_column_type(
+                    context.types,
+                    &column.ty,
+                )?;
+                deferrable_key |= super::column_declarations::check_column_declaration(
+                    declaration,
+                    &column.name,
+                    target,
+                )?;
+            }
+            DeclaredElement::NotNull { no_inherit } => {
+                if target.partitioned && *no_inherit {
+                    return Err(SQLError::Routine {
+                        sqlstate: "0A000".into(),
+                        message: "not-null constraints on partitioned tables cannot be NO INHERIT"
+                            .into(),
+                    });
+                }
+            }
+            DeclaredElement::DeferrableKey => deferrable_key = true,
+        }
     }
+    if columns.next().is_some() {
+        return Err(lost());
+    }
+    if deferrable_key {
+        return Err(SQLError::Unsupported(
+            "CREATE TABLE: DEFERRABLE PRIMARY KEY and UNIQUE constraints are not supported".into(),
+        ));
+    }
+    c.element_order.clear();
     super::keys::transform_declared_keys(&context.inheritance, c)
 }
 

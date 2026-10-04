@@ -178,8 +178,10 @@ impl From<pg_query::Error> for SQLError {
                     message,
                 }
             }
+            // `processCASbits` reports a constraint attribute that the constraint's kind cannot take as unsupported.
             pg_query::Error::Parse(message)
-                if message.contains("constraints cannot be altered to be NOT VALID") =>
+                if message.contains("constraints cannot be altered to be NOT VALID")
+                    || message.contains(" constraints cannot be marked ") =>
             {
                 SQLError::Routine {
                     sqlstate: "0A000".into(),

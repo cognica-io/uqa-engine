@@ -46,6 +46,7 @@ pub(super) fn extract_strings(nodes: &[Node]) -> Result<Vec<String>> {
 // CREATE TABLE
 // -------------------------------------------------------------------------
 
+mod column_declaration;
 mod ddl;
 mod expression_atoms;
 mod expression_core;
@@ -56,6 +57,7 @@ mod locking;
 mod select;
 mod window;
 
+pub(in crate::compiler) use column_declaration::compile_column_declaration;
 pub(in crate::compiler) use ddl::*;
 pub(in crate::compiler) use expression_atoms::*;
 pub(in crate::compiler) use expression_core::*;

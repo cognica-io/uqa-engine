@@ -955,6 +955,8 @@ fn drop_restrict_dependency_precedes_a_pending_parent_event() {
 
 #[path = "pg18_constraint_lifecycle/catalog_lifecycle.rs"]
 mod catalog_lifecycle;
+#[path = "pg18_constraint_lifecycle/column_declarations.rs"]
+mod column_declarations;
 #[path = "pg18_constraint_lifecycle/merge_attributes.rs"]
 mod merge_attributes;
 #[path = "pg18_constraint_lifecycle/table_creation_order.rs"]

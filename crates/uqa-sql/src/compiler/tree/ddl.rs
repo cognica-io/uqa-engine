@@ -13,7 +13,8 @@ use super::{
     TableKeyConstraintKind,
 };
 use crate::ast::{
-    AutoIncrement, ColumnType, DeclaredCheck, GeneratedColumn, GeneratedColumnKind, TableCheck,
+    AutoIncrement, ColumnType, DeclaredCheck, DeclaredElement, GeneratedColumn,
+    GeneratedColumnKind, TableCheck,
 };
 
 struct TableNotNullConstraint {
@@ -46,6 +47,7 @@ pub(in crate::compiler) fn compile_create_table(
     let mut columns = Vec::new();
     let mut checks: Vec<TableCheck> = Vec::new();
     let mut check_order = Vec::new();
+    let mut element_order = Vec::new();
     let mut foreign_keys: Vec<ForeignKey> = Vec::new();
     let mut key_constraints: Vec<TableKeyConstraint> = Vec::new();
     let mut table_not_nulls = Vec::new();
@@ -56,6 +58,9 @@ pub(in crate::compiler) fn compile_create_table(
             .ok_or_else(|| SQLError::Internal("CREATE TABLE contains an empty element".into()))?;
         match inner {
             NodeEnum::ColumnDef(col) => {
+                element_order.push(DeclaredElement::Column(super::compile_column_declaration(
+                    col,
+                )?));
                 key_constraints.extend(compile_column_key_constraints(col)?);
                 let (column, column_checks) = compile_column_def(col)?;
                 if column_checks.is_empty() {
@@ -153,6 +158,9 @@ pub(in crate::compiler) fn compile_create_table(
                 }
                 pg_query::protobuf::ConstrType::ConstrPrimary
                 | pg_query::protobuf::ConstrType::ConstrUnique => {
+                    if cstr.deferrable || cstr.initdeferred {
+                        element_order.push(DeclaredElement::DeferrableKey);
+                    }
                     let kind = if cstr.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
                         TableKeyConstraintKind::PrimaryKey
                     } else {
@@ -171,6 +179,9 @@ pub(in crate::compiler) fn compile_create_table(
                     });
                 }
                 pg_query::protobuf::ConstrType::ConstrNotnull => {
+                    element_order.push(DeclaredElement::NotNull {
+                        no_inherit: cstr.is_no_inherit,
+                    });
                     let key_columns = extract_strings(&cstr.keys)?;
                     let [column] = key_columns.as_slice() else {
                         return Err(SQLError::TypeMismatch(
@@ -259,6 +270,7 @@ pub(in crate::compiler) fn compile_create_table(
         on_commit,
         hierarchy,
         check_order,
+        element_order,
     })
 }
 
@@ -333,7 +345,6 @@ pub(in crate::compiler) fn compile_column_def(
     }
     let mut last_enforceable = None;
     let mut saw_deferrability = false;
-    let mut saw_initial_timing = false;
     for c in &col.constraints {
         let inner = c
             .node
@@ -462,63 +473,33 @@ pub(in crate::compiler) fn compile_column_def(
                     });
                     last_enforceable = Some(EnforceableConstraint::ForeignKey);
                     saw_deferrability = false;
-                    saw_initial_timing = false;
                 }
                 pg_query::protobuf::ConstrType::ConstrAttrDeferrable
                 | pg_query::protobuf::ConstrType::ConstrAttrNotDeferrable
                 | pg_query::protobuf::ConstrType::ConstrAttrDeferred
                 | pg_query::protobuf::ConstrType::ConstrAttrImmediate => {
                     use pg_query::protobuf::ConstrType;
-                    let kind = cstr.contype();
-                    let clause = match kind {
-                        ConstrType::ConstrAttrDeferrable => "DEFERRABLE",
-                        ConstrType::ConstrAttrNotDeferrable => "NOT DEFERRABLE",
-                        ConstrType::ConstrAttrDeferred => "INITIALLY DEFERRED",
-                        _ => "INITIALLY IMMEDIATE",
-                    };
-                    if !matches!(last_enforceable, Some(EnforceableConstraint::ForeignKey)) {
-                        return Err(SQLError::Routine {
-                            sqlstate: "42601".into(),
-                            message: format!("misplaced {clause} clause"),
-                        });
-                    }
-                    let reference = references.as_mut().ok_or_else(|| {
-                        SQLError::Internal("REFERENCES timing attribute lost its constraint".into())
-                    })?;
-                    if matches!(
-                        kind,
-                        ConstrType::ConstrAttrDeferrable | ConstrType::ConstrAttrNotDeferrable
-                    ) {
-                        if saw_deferrability {
-                            return Err(SQLError::Routine {
-                                sqlstate: "42601".into(),
-                                message: "multiple DEFERRABLE/NOT DEFERRABLE clauses not allowed"
-                                    .into(),
-                            });
+                    // `transformColumnDefinition` reports a misplaced or repeated attribute once it finds the relation; a valid one applies to the REFERENCES before it.
+                    if let (Some(EnforceableConstraint::ForeignKey), Some(reference)) =
+                        (last_enforceable, references.as_mut())
+                    {
+                        match cstr.contype() {
+                            ConstrType::ConstrAttrDeferrable => {
+                                saw_deferrability = true;
+                                reference.deferrable = true;
+                            }
+                            ConstrType::ConstrAttrNotDeferrable => {
+                                saw_deferrability = true;
+                                reference.deferrable = false;
+                            }
+                            ConstrType::ConstrAttrDeferred => {
+                                reference.initially_deferred = true;
+                                if !saw_deferrability {
+                                    reference.deferrable = true;
+                                }
+                            }
+                            _ => reference.initially_deferred = false,
                         }
-                        saw_deferrability = true;
-                        reference.deferrable = kind == ConstrType::ConstrAttrDeferrable;
-                    } else {
-                        if saw_initial_timing {
-                            return Err(SQLError::Routine {
-                                sqlstate: "42601".into(),
-                                message:
-                                    "multiple INITIALLY IMMEDIATE/DEFERRED clauses not allowed"
-                                        .into(),
-                            });
-                        }
-                        saw_initial_timing = true;
-                        reference.initially_deferred = kind == ConstrType::ConstrAttrDeferred;
-                        if reference.initially_deferred && !saw_deferrability {
-                            reference.deferrable = true;
-                        }
-                    }
-                    if reference.initially_deferred && !reference.deferrable {
-                        return Err(SQLError::Routine {
-                            sqlstate: "42601".into(),
-                            message: "constraint declared INITIALLY DEFERRED must be DEFERRABLE"
-                                .into(),
-                        });
                     }
                 }
                 pg_query::protobuf::ConstrType::ConstrAttrEnforced
@@ -543,12 +524,8 @@ pub(in crate::compiler) fn compile_column_def(
                                 reference.validated = false;
                             }
                         }
-                        None => {
-                            return Err(SQLError::Unsupported(
-                                "constraint enforcement attribute without CHECK or FOREIGN KEY"
-                                    .into(),
-                            ));
-                        }
+                        // A misplaced enforcement attribute is reported with the column's other clauses.
+                        None => {}
                     }
                 }
                 pg_query::protobuf::ConstrType::ConstrNull => last_enforceable = None,

@@ -25,6 +25,49 @@ use recursion::{materialize_recursive_action_names, run_recursive_alter_action};
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
 }
+/// `ATExecAddColumn` transforms an added column once it knows the column is new, as `ATParseTransformCmd` does: the column's type and then its clauses, as `transformColumnDefinition` checks them for the relation the statement found.
+fn check_added_column_declaration<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    table: &str,
+    qualifier: &str,
+    action: &mut AlterTableAction,
+) -> Result<(), SQLError> {
+    use uqa_sql::schema::table_creation::column_declarations::{
+        check_column_declaration, check_serial_array, ColumnDeclarationTarget,
+    };
+    let AlterTableAction::AddColumn {
+        column,
+        declaration,
+        ..
+    } = action
+    else {
+        return Ok(());
+    };
+    let partitioned = context
+        .hierarchy
+        .partitions
+        .catalog
+        .try_table_hierarchy(table)
+        .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?
+        .partition_spec
+        .is_some();
+    check_serial_array(declaration)?;
+    column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
+        context.hierarchy.partitions.types,
+        &column.ty,
+    )?;
+    let target = ColumnDeclarationTarget {
+        table: qualifier,
+        partitioned,
+    };
+    if check_column_declaration(declaration, &column.name, target)? {
+        return Err(SQLError::Unsupported(
+            "ALTER TABLE: DEFERRABLE PRIMARY KEY and UNIQUE constraints are not supported".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn run_alter_table<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     stmt: AlterTableStmt,
@@ -61,6 +104,7 @@ pub fn run_alter_table<S: Clone + 'static>(
                 continue;
             }
         }
+        check_added_column_declaration(context, &table, &qualifier, &mut action)?;
         let column_checks = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
         run_recursive_alter_action(
             context,

@@ -213,6 +213,59 @@ pub struct CreateTable {
     /// Each CHECK the statement declares, in written order, which `DefineRelation` adds in that order. Only the statement carries it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub check_order: Vec<DeclaredCheck>,
+    /// The columns and NOT NULL table constraints the statement declares, in written order, as `transformCreateStmt` examines them. Only the statement carries it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub element_order: Vec<DeclaredElement>,
+}
+
+/// An element of a CREATE TABLE statement that `transformCreateStmt` examines in written order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeclaredElement {
+    /// The statement's next column, with the clauses it writes.
+    Column(ColumnDeclaration),
+    /// A table constraint `NOT NULL column`.
+    NotNull { no_inherit: bool },
+    /// A table PRIMARY KEY or UNIQUE constraint that is DEFERRABLE or INITIALLY DEFERRED.
+    DeferrableKey,
+}
+
+/// The clauses a column definition writes, in written order, which `transformColumnDefinition` checks against each other.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnDeclaration {
+    /// The column's type is SERIAL, SMALLSERIAL or BIGSERIAL, which adds a default after the written clauses.
+    pub serial: bool,
+    /// The column's type is an array of a SERIAL type.
+    pub serial_array: bool,
+    pub clauses: Vec<ColumnClause>,
+}
+
+/// One clause of a column definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnClause {
+    pub kind: ColumnClauseKind,
+    /// The name a `CONSTRAINT` clause gives it.
+    pub name: Option<String>,
+    pub no_inherit: bool,
+}
+
+/// The kind of a column definition's clause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColumnClauseKind {
+    Null,
+    NotNull,
+    Default,
+    Identity,
+    Generated,
+    Check,
+    PrimaryKey,
+    Unique,
+    ForeignKey,
+    Deferrable,
+    NotDeferrable,
+    InitiallyDeferred,
+    InitiallyImmediate,
+    Enforced,
+    NotEnforced,
 }
 
 /// Where a CHECK that a CREATE TABLE statement declares is held.
