@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Use the default NEON ChaCha20 backend on supported ARM64 targets for encrypted temporary files and compressed SQLite containers, preserving ciphertext formats and key and stream-buffer zeroization.
 - Maintain native SQLite transaction cache revisions by changed record family and owner, so catalog refresh after a large write does not rescan every private row. Revision summaries spill under the same memory allowance and preserve savepoints and retained reads.
 - Default `search_path` to `"$user", public`, preserve its assigned text and empty paths, and make `Engine::set_search_path` return a `Result`. `QueryCancelled` now carries a `CancellationReason` instead of being a unit struct; see the [unreleased upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-changes-after-049).
 - Store type references by OID identity in routine signatures, casts, typed constants and view plans, and enum constants by label identity, so that names follow renames; deparse stored definitions through the catalog with search-path visibility; compile string-bodied routines at first use in each session, as PostgreSQL's function cache does.

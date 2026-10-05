@@ -30,7 +30,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use argon2::{Argon2, Block};
 use chacha20poly1305::aead::{Aead, Payload};
-use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
+use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
 #[cfg(not(target_os = "emscripten"))]
 use fs2::FileExt;
 use hmac::{Hmac, Mac};
