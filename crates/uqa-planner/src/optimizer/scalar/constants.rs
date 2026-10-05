@@ -117,6 +117,12 @@ pub(super) fn fold_literal_expression(
     expression: ScalarExpr,
     evaluate: crate::optimizer::ConstantEvaluator,
 ) -> Result<ScalarExpr, SQLError> {
+    if matches!(&expression, ScalarExpr::Func { binding: Some(binding), .. }
+        if matches!(binding.dispatch, Some(uqa_sql::ast::FunctionDispatch::NamedArgument | uqa_sql::ast::FunctionDispatch::VariadicArgument)))
+    {
+        // Argument markers carry syntax for their enclosing call; only that call evaluates them as arguments.
+        return Ok(expression);
+    }
     if literal_value(&expression).is_some() || !is_constant(&expression) {
         return Ok(expression);
     }

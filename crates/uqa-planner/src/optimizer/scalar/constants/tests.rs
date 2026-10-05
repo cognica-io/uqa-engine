@@ -65,6 +65,27 @@ fn folds_value_builtins_after_binding_without_evaluating_stateful_or_set_calls()
 }
 
 #[test]
+fn named_arguments_keep_their_call_context_during_constant_planning() {
+    let uqa_sql::Statement::Select(mut select) = uqa_sql::compile(
+        "SELECT json_strip_nulls(strip_in_arrays => true, target => '{\"keep\":1,\"drop\":null}'::json)",
+    ).unwrap().remove(0) else {
+        panic!("SELECT expression");
+    };
+    let mut expression =
+        uqa_sql::plan::ExpressionPlan::lower(select.projections.remove(0).expr).scalar;
+    let before = uqa_execution::scalar::eval_constant_scalar(&expression).unwrap();
+    crate::optimizer::optimize_scalar_expression(
+        &mut expression,
+        &crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+    )
+    .unwrap();
+    assert_eq!(
+        uqa_execution::scalar::eval_constant_scalar(&expression).unwrap(),
+        before
+    );
+}
+
+#[test]
 fn constant_numeric_comparisons_match_postgresql_before_replacing_the_expression() {
     let oracle: serde_json::Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
