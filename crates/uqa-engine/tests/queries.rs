@@ -24,6 +24,8 @@ mod operator_tree_full_surface;
 mod operator_tree_pipeline;
 #[path = "optimizer_passes.rs"]
 mod optimizer_passes;
+#[path = "queries/row_change_journal.rs"]
+mod row_change_journal;
 #[path = "queries/row_metadata_filters.rs"]
 mod row_metadata_filters;
 #[path = "queries/sql_aggregate_nulls.rs"]

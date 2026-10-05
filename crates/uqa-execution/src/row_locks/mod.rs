@@ -75,7 +75,7 @@ use waits::{deadlock_detected, relation_deadlock_exists, CrossWaitGuard};
 
 /// Cross-process coordination attachment for durable file databases. A sidecar that cannot be opened surfaces its reason on the first lock attempt instead of silently degrading to process-local locking.
 enum CrossAttachment {
-    Active(Box<FileLockCoordinator>),
+    Active(Arc<FileLockCoordinator>),
     Unavailable(String),
 }
 

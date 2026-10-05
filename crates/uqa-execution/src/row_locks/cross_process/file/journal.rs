@@ -4,18 +4,56 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Row-change journal publication, lookup, and codec.
-//!
-//! The journal coordinates the statements of running processes. A statement reads only the entries after the journal length it observed as its baseline, and a baseline lives in the memory of the process that took it, so no reader of an entry outlives a machine failure. Entries therefore reach other processes through the file cache without a sync of their own, and entries that a machine failure loses were readable by no statement that still exists. Such a failure may also leave the file ending inside an entry; the sequence counts whole entries only, and the next publication writes over the partial one.
+//! Row-change journal publication and leased history reclamation. Snapshot baselines retain process watermarks; atomic generation replacement preserves logical sequence numbers and keeps only the suffix needed by live readers.
 
 use super::{
-    lock_strengths_conflict, lock_would_block, read_exact_at, write_all_at, FileLockCoordinator,
-    LockStrength, PhysicalRowChangeTarget, RowChangeTarget, CHANGE_ENTRY_MAGIC, CHANGE_ENTRY_SIZE,
-    CHANGE_JOURNAL_LOCK_BYTE, CHANGE_JOURNAL_WAIT_LIMIT,
+    lock_strengths_conflict, lock_would_block, FileLockCoordinator, LockStrength,
+    PhysicalRowChangeTarget, RowChangeTarget, CHANGE_JOURNAL_LOCK_BYTE, CHANGE_JOURNAL_WAIT_LIMIT,
 };
+use std::sync::Arc;
+
+mod codec;
+mod log;
+mod readers;
+pub(in crate::row_locks) use readers::JournalReadLease;
+pub(super) use readers::Readers;
+
+struct JournalLock<'a>(&'a FileLockCoordinator);
+impl Drop for JournalLock<'_> {
+    fn drop(&mut self) {
+        let _ = self
+            .0
+            .apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, Some(true), None);
+    }
+}
 
 impl FileLockCoordinator {
-    /// Append committed tuple-version events to an unbounded sidecar journal. Entries are never overwritten, so a long-lived statement cannot lose the generation history needed to distinguish an update chain from a delete followed by primary-key reuse.
+    fn lock_journal(&self) -> Result<JournalLock<'_>, String> {
+        let deadline = std::time::Instant::now() + CHANGE_JOURNAL_WAIT_LIMIT;
+        loop {
+            match self.apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, None, Some(true)) {
+                Ok(()) => return Ok(JournalLock(self)),
+                Err(error) if lock_would_block(&error) => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err("timed out acquiring the row-change journal lock".into());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => return Err(format!("acquire row-change journal lock: {error}")),
+            }
+        }
+    }
+
+    pub(in crate::row_locks) fn pin_change_sequence(
+        self: &Arc<Self>,
+    ) -> Result<(u64, Arc<JournalReadLease>), String> {
+        let mut readers = self.change_journal.lock();
+        let _lock = self.lock_journal()?;
+        let log = log::Log::open(&self.change_path)?;
+        let lease = readers.pin(self, log.next)?;
+        Ok((log.next, lease))
+    }
+
     pub(in crate::row_locks) fn publish_changes(
         &self,
         changes: &[super::PublishedRowChange],
@@ -23,82 +61,23 @@ impl FileLockCoordinator {
         if changes.is_empty() {
             return Ok(());
         }
-        let _guard = self.change_journal.lock();
-        let deadline = std::time::Instant::now() + CHANGE_JOURNAL_WAIT_LIMIT;
-        loop {
-            match self.apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, None, Some(true)) {
-                Ok(()) => break,
-                Err(error) if lock_would_block(&error) => {
-                    if std::time::Instant::now() >= deadline {
-                        return Err(format!(
-                            "timed out after {} seconds acquiring the row-change journal lock",
-                            CHANGE_JOURNAL_WAIT_LIMIT.as_secs()
-                        ));
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-                Err(error) => {
-                    return Err(format!("acquire row-change journal lock failed: {error}"));
-                }
-            }
-        }
-        let mut original_len = None;
-        let publication = (|| {
-            let mut next = self.change_sequence_unlocked()?;
-            let journal_len = next.checked_mul(CHANGE_ENTRY_SIZE).ok_or_else(|| {
-                "row-change journal byte length overflow before publication".to_string()
-            })?;
-            original_len = Some(journal_len);
-            for change in changes {
-                let offset = next.checked_mul(CHANGE_ENTRY_SIZE).ok_or_else(|| {
-                    "row-change journal byte offset overflow during publication".to_string()
-                })?;
-                let entry = encode_change_entry(next, change);
-                write_all_at(&self.change_file, &entry, offset).map_err(|error| {
-                    format!("write row-change journal entry {next} failed: {error}")
-                })?;
-                next = next.checked_add(1).ok_or_else(|| {
-                    "row-change journal sequence overflow during publication".to_string()
-                })?;
-            }
-            Ok(())
-        })();
-        let publication = match (publication, original_len) {
-            (Err(error), Some(original_len)) => {
-                let rollback = self
-                        .change_file
-                        .set_len(original_len)
-                        .map_err(|rollback_error| {
-                            format!(
-                                "{error}; restore row-change journal to {original_len} bytes failed: {rollback_error}"
-                            )
-                        });
-                rollback.and(Err(error))
-            }
-            (result, _) => result,
-        };
-        let unlock = self
-            .apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, Some(true), None)
-            .map_err(|error| format!("release row-change journal lock failed: {error}"));
-        match (publication, unlock) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-            (Err(error), Err(unlock_error)) => Err(format!("{error}; {unlock_error}")),
-        }
+        let mut readers = self.change_journal.lock();
+        let _lock = self.lock_journal()?;
+        let mut log = log::Log::open(&self.change_path)?;
+        let oldest = readers.oldest(self, log.next)?;
+        log.reclaim(&self.change_path, oldest)?;
+        log.append(changes)
     }
 
-    fn change_sequence_unlocked(&self) -> Result<u64, String> {
-        let bytes = self
-            .change_file
-            .metadata()
-            .map_err(|error| format!("read row-change journal length failed: {error}"))?
-            .len();
-        Ok(bytes / CHANGE_ENTRY_SIZE)
-    }
-
-    /// Sequence immediately after the newest committed tuple-version event.
+    #[cfg(test)]
     pub(in crate::row_locks) fn change_sequence(&self) -> Result<u64, String> {
-        self.change_sequence_unlocked()
+        let _local = self.change_journal.lock();
+        let _lock = self.lock_journal()?;
+        Ok(log::Log::open(&self.change_path)?.next)
+    }
+
+    pub(super) fn detach_journal_reader(&self) {
+        self.change_journal.lock().detach(self);
     }
 
     pub(in crate::row_locks) fn change_target_after(
@@ -129,19 +108,22 @@ impl FileLockCoordinator {
         baseline: u64,
         wanted: LockStrength,
     ) -> Result<PhysicalRowChangeTarget, String> {
-        let next = self.change_sequence()?;
+        let log = {
+            let _local = self.change_journal.lock();
+            let _lock = self.lock_journal()?;
+            log::Log::open(&self.change_path)?
+        };
+        if baseline < log.base {
+            return Err("row-change baseline no longer has a retained reader lease".into());
+        }
+        let next = log.next;
         if baseline >= next {
             return Ok(PhysicalRowChangeTarget::Unchanged);
         }
         let mut current = super::PublishedRowIdentity { table_hash, doc_id };
         let mut changed = false;
         for sequence in baseline..next {
-            let offset = sequence.saturating_mul(CHANGE_ENTRY_SIZE);
-            let mut entry = [0_u8; CHANGE_ENTRY_SIZE as usize];
-            read_exact_at(&self.change_file, &mut entry, offset).map_err(|error| {
-                format!("read row-change journal entry {sequence} failed: {error}")
-            })?;
-            let event = decode_change_entry(sequence, &entry)?;
+            let event = log.read(sequence)?;
             if event.table_hash != current.table_hash || event.doc_id != current.doc_id {
                 continue;
             }
@@ -170,128 +152,6 @@ impl FileLockCoordinator {
         } else {
             PhysicalRowChangeTarget::Unchanged
         })
-    }
-}
-
-fn encode_change_entry(
-    sequence: u64,
-    change: &super::PublishedRowChange,
-) -> [u8; CHANGE_ENTRY_SIZE as usize] {
-    let mut entry = [0_u8; CHANGE_ENTRY_SIZE as usize];
-    entry[0..4].copy_from_slice(&CHANGE_ENTRY_MAGIC.to_be_bytes());
-    let (kind, successor) = match change.kind {
-        super::PublishedRowChangeKind::Update => (
-            1,
-            super::PublishedRowIdentity {
-                table_hash: 0,
-                doc_id: 0,
-            },
-        ),
-        super::PublishedRowChangeKind::Delete => (
-            2,
-            super::PublishedRowIdentity {
-                table_hash: 0,
-                doc_id: 0,
-            },
-        ),
-        super::PublishedRowChangeKind::Rewrite(successor) => (3, successor),
-    };
-    entry[4] = kind;
-    entry[5] = strength_code(change.strength);
-    entry[8..16].copy_from_slice(&sequence.wrapping_add(1).to_be_bytes());
-    entry[16..24].copy_from_slice(&change.table_hash.to_be_bytes());
-    entry[24..32].copy_from_slice(&change.doc_id.to_be_bytes());
-    entry[32..40].copy_from_slice(&successor.doc_id.to_be_bytes());
-    entry[40..48].copy_from_slice(&successor.table_hash.to_be_bytes());
-    entry
-}
-
-fn decode_change_entry(
-    sequence: u64,
-    entry: &[u8; CHANGE_ENTRY_SIZE as usize],
-) -> Result<super::PublishedRowChange, String> {
-    if entry[0..4] != CHANGE_ENTRY_MAGIC.to_be_bytes() {
-        return Err(format!(
-            "row-change journal entry {sequence} has invalid magic"
-        ));
-    }
-    let stored_sequence = u64::from_be_bytes(
-        entry[8..16]
-            .try_into()
-            .map_err(|_| format!("decode row-change journal sequence for entry {sequence}"))?,
-    );
-    if stored_sequence != sequence.wrapping_add(1) {
-        return Err(format!(
-            "row-change journal entry {sequence} changed while it was read"
-        ));
-    }
-    let table_hash = u64::from_be_bytes(
-        entry[16..24]
-            .try_into()
-            .map_err(|_| format!("decode row-change table for entry {sequence}"))?,
-    );
-    let doc_id = u64::from_be_bytes(
-        entry[24..32]
-            .try_into()
-            .map_err(|_| format!("decode row-change id for entry {sequence}"))?,
-    );
-    let successor_doc_id = u64::from_be_bytes(
-        entry[32..40]
-            .try_into()
-            .map_err(|_| format!("decode row-change successor for entry {sequence}"))?,
-    );
-    let successor_table_hash = u64::from_be_bytes(
-        entry[40..48]
-            .try_into()
-            .map_err(|_| format!("decode row-change successor table for entry {sequence}"))?,
-    );
-    let kind = match entry[4] {
-        1 => super::PublishedRowChangeKind::Update,
-        2 => super::PublishedRowChangeKind::Delete,
-        3 => super::PublishedRowChangeKind::Rewrite(super::PublishedRowIdentity {
-            // Journals created before cross-partition successor tracking left these reserved bytes zeroed; such rewrites were necessarily within the source table.
-            table_hash: if successor_table_hash == 0 {
-                table_hash
-            } else {
-                successor_table_hash
-            },
-            doc_id: successor_doc_id,
-        }),
-        kind => {
-            return Err(format!(
-                "row-change journal entry {sequence} has invalid kind {kind}"
-            ));
-        }
-    };
-    Ok(super::PublishedRowChange {
-        table_hash,
-        doc_id,
-        kind,
-        strength: decode_strength(entry[5]).ok_or_else(|| {
-            format!(
-                "row-change journal entry {sequence} has invalid lock strength {}",
-                entry[5]
-            )
-        })?,
-    })
-}
-
-const fn strength_code(strength: LockStrength) -> u8 {
-    match strength {
-        LockStrength::ForKeyShare => 0,
-        LockStrength::ForShare => 1,
-        LockStrength::ForNoKeyUpdate => 2,
-        LockStrength::ForUpdate => 3,
-    }
-}
-
-const fn decode_strength(code: u8) -> Option<LockStrength> {
-    match code {
-        0 => Some(LockStrength::ForKeyShare),
-        1 => Some(LockStrength::ForShare),
-        2 => Some(LockStrength::ForNoKeyUpdate),
-        3 => Some(LockStrength::ForUpdate),
-        _ => None,
     }
 }
 

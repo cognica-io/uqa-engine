@@ -270,6 +270,9 @@ fn stable_hash(parts: &[&[u8]]) -> u64 {
 pub(super) use file::FileLockCoordinator;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) use file::journal::JournalReadLease;
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 // Native record locks and process-liveness probes have no stable safe wrapper in std. The unsafe surface is confined to operating-system calls over file handles, process handles, and their plain C data structures.
 #[allow(unsafe_code)]
 mod file;
@@ -278,8 +281,14 @@ mod file;
 pub(super) use fallback::FileLockCoordinator;
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
+pub(super) use fallback::JournalReadLease;
+
+#[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 mod fallback {
     use std::path::Path;
+
+    #[derive(Debug)]
+    pub(in crate::row_locks) struct JournalReadLease;
 
     use super::super::sequence_positions::{
         RecordedSequencePosition, SequencePosition, SequencePositionKey, SequenceSlot,
@@ -401,8 +410,10 @@ mod fallback {
             Ok(())
         }
 
-        pub(in crate::row_locks) fn change_sequence(&self) -> Result<u64, String> {
-            Ok(0)
+        pub(in crate::row_locks) fn pin_change_sequence(
+            self: &std::sync::Arc<Self>,
+        ) -> Result<(u64, std::sync::Arc<JournalReadLease>), String> {
+            Ok((0, std::sync::Arc::new(JournalReadLease)))
         }
 
         pub(in crate::row_locks) fn allocate_transaction_xid(&self) -> Result<Option<u32>, String> {

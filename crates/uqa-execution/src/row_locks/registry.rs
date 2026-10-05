@@ -57,7 +57,7 @@ impl RowLockManager {
         #[cfg(any(unix, windows))]
         {
             let cross = match FileLockCoordinator::open(path) {
-                Ok(coordinator) => CrossAttachment::Active(Box::new(coordinator)),
+                Ok(coordinator) => CrossAttachment::Active(Arc::new(coordinator)),
                 Err(reason) => CrossAttachment::Unavailable(reason),
             };
             Self::with_cross_attachment(Some(cross))
