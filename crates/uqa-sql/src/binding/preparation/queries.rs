@@ -147,15 +147,16 @@ impl Preparation<'_> {
             .iter()
             .chain(block.grouping_sets.iter().flatten())
         {
-            let expression = crate::semantics::grouping_sets::resolve_grouping_expression(
-                self.routines,
-                expression,
-                &block.projections,
-                &source,
-                None,
-                &self.parameters.values(),
-            )?;
-            let mut value = self.expression(&expression, &input, &block.subqueries)?;
+            let expression =
+                crate::semantics::grouping_sets::resolve_grouping_expression_reference(
+                    self.routines,
+                    expression,
+                    &block.projections,
+                    &source,
+                    None,
+                    &self.parameters.values(),
+                )?;
+            let mut value = self.expression(expression, &input, &block.subqueries)?;
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::Text)?;
         }

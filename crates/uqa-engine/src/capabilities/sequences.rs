@@ -143,6 +143,11 @@ impl SequenceCreationPublication for Engine {
             .write()
             .insert(relation.clone(), security);
         self.note_catalog_registry_changed();
+        self.note_prepared_catalog_change(
+            uqa_execution::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                catalog_oid,
+            ),
+        );
         Ok(true)
     }
 }
@@ -304,6 +309,7 @@ impl uqa_execution::schema::sequences::role_ownership::SequenceSecurityPublicati
             .sequence_security
             .write()
             .insert(relation.clone(), security);
+        self.note_prepared_relation_change(relation);
     }
 }
 
@@ -357,7 +363,9 @@ impl uqa_execution::schema::sequences::lifecycle::SequenceStateRename for Engine
         source: &RelationIdentity,
         target: &RelationIdentity,
     ) -> Result<(), SQLError> {
-        self.move_sequence_state(source, target)
+        self.move_sequence_state(source, target)?;
+        self.note_prepared_relation_change(target);
+        Ok(())
     }
 }
 impl uqa_execution::schema::sequences::lifecycle::SequenceRenameCatalog for Engine {
@@ -365,9 +373,15 @@ impl uqa_execution::schema::sequences::lifecycle::SequenceRenameCatalog for Engi
         self.storage.catalog.is_some()
     }
     fn rename_sequence_row(&self, source: &str, target: &str) -> StorageBackendResult<bool> {
-        self.storage.catalog.as_ref().map_or(Ok(false), |catalog| {
+        let renamed = self.storage.catalog.as_ref().map_or(Ok(false), |catalog| {
             catalog.rename_sequence_row(source, target)
-        })
+        })?;
+        if renamed {
+            let relation = RelationIdentity::from_legacy_name(source)
+                .map_err(uqa_storage::StorageBackendError::Other)?;
+            self.note_prepared_relation_change(&relation);
+        }
+        Ok(renamed)
     }
 }
 impl uqa_execution::schema::sequences::dispatch::SequenceCommandCatalog for Engine {

@@ -31,6 +31,7 @@ use uqa_sql::catalog::{
 use uqa_storage::CatalogFacade;
 pub type TableSecurityWrite<'a> = Box<dyn DerefMut<Target = BoundTableSecurity> + 'a>;
 pub trait TableGrantState: TablePrivilegeState {
+    fn relation_oid(&self) -> u32;
     fn security_write(&self) -> TableSecurityWrite<'_>;
     fn persistence(&self) -> uqa_sql::ast::RelationPersistence;
 }

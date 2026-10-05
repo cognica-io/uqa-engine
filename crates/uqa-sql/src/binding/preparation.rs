@@ -20,10 +20,46 @@ mod tests;
 use super::{BindingContext, RowSchema, SchemaScope};
 use crate::plan::{QueryPlan, UnifiedPlan};
 use crate::routines::RoutineResolution;
+use crate::schema::dependencies::oid_alias::OidAliasInput;
 use crate::ScalarExpr;
 use crate::{ColumnType, SQLError};
 use parameters::{error, ExpressionType, ParameterTypes};
 use schema_expressions::{SchemaExpressionContext, SchemaExpressionKind};
+
+#[derive(Debug)]
+pub(crate) struct PreparedInputAnalysis {
+    pub parameter_types: Vec<Option<ColumnType>>,
+    pub dependencies: crate::prepared::dependencies::PreparedAnalysisDependencies,
+}
+
+/// Read input constants while the prepared definition's original tree stays in place. The short-lived literal identities never escape this operation; only converted values enter the stored plan.
+pub(crate) fn read_prepared_inputs(
+    routines: &dyn RoutineResolution,
+    plan: &mut UnifiedPlan,
+    declared: &[Option<ColumnType>],
+    ctes: &BindingContext,
+    aliases: Option<&dyn OidAliasInput>,
+) -> Result<PreparedInputAnalysis, SQLError> {
+    let mut scope = SchemaScope::for_analysis(ctes)?;
+    scope.prepared_dependencies =
+        Some(crate::prepared::dependencies::PreparedAnalysisDependencies::default());
+    let mut analysis = Preparation {
+        routines,
+        scope,
+        parameters: ParameterTypes::with_input_constants(declared, aliases, routines.enum_labels()),
+        schema_expression: None,
+    };
+    analysis.plan(plan)?;
+    let constants = analysis.parameters.take_input_constants();
+    let parameters = analysis.parameters.finish()?;
+    constants.apply(plan)?;
+    let mut dependencies = analysis.scope.prepared_dependencies.unwrap_or_default();
+    plan.visit_scalar_expressions(&mut |expression| dependencies.include_expression(expression));
+    Ok(PreparedInputAnalysis {
+        parameter_types: parameters,
+        dependencies,
+    })
+}
 
 pub fn infer_prepared_parameter_types(
     routines: &dyn RoutineResolution,
@@ -37,14 +73,7 @@ pub fn infer_prepared_parameter_types(
         parameters: ParameterTypes::new(declared),
         schema_expression: None,
     };
-    match plan {
-        UnifiedPlan::Query(query) => {
-            analysis.query(query, None)?;
-        }
-        UnifiedPlan::Command(command) => {
-            analysis.command(command)?;
-        }
-    }
+    analysis.plan(plan)?;
     analysis.parameters.finish()
 }
 
@@ -101,7 +130,7 @@ fn analyze_schema_expression(
 struct Preparation<'a> {
     routines: &'a dyn RoutineResolution,
     scope: SchemaScope,
-    parameters: ParameterTypes,
+    parameters: ParameterTypes<'a>,
     schema_expression: Option<SchemaExpressionContext<'a>>,
 }
 
@@ -126,6 +155,18 @@ impl QueryOutput {
 }
 
 impl Preparation<'_> {
+    fn plan(&mut self, plan: &UnifiedPlan) -> Result<(), SQLError> {
+        match plan {
+            UnifiedPlan::Query(query) => {
+                self.query(query, None)?;
+            }
+            UnifiedPlan::Command(command) => {
+                self.command(command)?;
+            }
+        }
+        Ok(())
+    }
+
     fn known_type(
         &mut self,
         expression: &ScalarExpr,

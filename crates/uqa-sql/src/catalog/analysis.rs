@@ -29,6 +29,31 @@ pub struct ViewDefinition {
 
 /// Immutable namespace-aware lookup for SQL analysis. This contract exposes definitions only; it grants no row access, mutation, locking, or transaction services.
 pub trait AnalysisCatalog: Send + Sync {
+    /// Exact revisions of the requested identities in this catalog view. Return `None` only when the catalog has no revision capability; within an available snapshot, include every requested identity and use a missing value for an absent object.
+    fn prepared_dependency_snapshot(
+        &self,
+        _dependencies: &crate::prepared::dependencies::PreparedAnalysisDependencies,
+    ) -> Result<Option<crate::prepared::dependencies::PreparedDependencySnapshot>, SQLError> {
+        Ok(None)
+    }
+
+    /// The OID of a relation successfully selected in this same immutable namespace. The binder calls this after selecting a catalog relation, never for a CTE or an unsuccessful lookup candidate. Catalog fixtures without identities may leave this unavailable.
+    fn relation_dependency(
+        &self,
+        _resolution: &RelationNameResolution,
+        _name: &str,
+    ) -> Result<Option<u32>, SQLError> {
+        Ok(None)
+    }
+
+    /// The schemas that exist and that the analyzing role may use, including implicit namespaces, and its creation namespace. Catalogs without namespace state leave this unavailable.
+    fn effective_search_path(
+        &self,
+        _resolution: &RelationNameResolution,
+    ) -> Result<Option<super::resolution::EffectiveSearchPath>, SQLError> {
+        Ok(None)
+    }
+
     fn table_resolved(
         &self,
         resolution: &RelationNameResolution,

@@ -52,13 +52,18 @@ impl ForeignTableRemovalContext<'_> {
         self.publication.memory_tables_write().remove(&relation);
         let mut tables = self.publication.tables_write();
         let mut table_security = self.publication.security_write();
-        let removed = tables.remove(&relation).is_some();
+        let removed = tables.remove(&relation);
         table_security.remove(&relation);
         drop(table_security);
         drop(tables);
-        if removed {
+        if let Some(table) = &removed {
             self.changes.catalog_registry_changed();
+            self.changes.prepared_catalog_changed(
+                crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                    table.relation_oids().relation,
+                ),
+            );
         }
-        Ok(removed)
+        Ok(removed.is_some())
     }
 }

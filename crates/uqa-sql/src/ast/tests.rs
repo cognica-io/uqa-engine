@@ -336,6 +336,7 @@ fn routine_identity_and_call_parameters_are_distinct() {
     };
     let function = CreateFunction {
         object_id: None,
+        catalog_revision: None,
         catalog_oid: None,
         name: "f".into(),
         or_replace: false,

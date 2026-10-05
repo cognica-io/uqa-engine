@@ -8,6 +8,8 @@
 
 #[path = "sql_prepared/analysis.rs"]
 mod analysis;
+#[path = "sql_prepared/input_lifetime.rs"]
+mod input_lifetime;
 #[path = "sql_prepared/parameters.rs"]
 mod parameters;
 #[path = "sql_prepared/planning.rs"]

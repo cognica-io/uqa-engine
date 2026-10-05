@@ -13,7 +13,7 @@ use crate::{
 use std::sync::Arc;
 
 /// Verify record identity retention on a fresh disposable versioned store.
-pub fn verify_catalog_record_revisions(store: Arc<dyn KeyValueStore>) -> StorageBackendResult<()> {
+pub fn verify_catalog_record_revisions(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<()> {
     let catalog = KeyValueCatalog::new(store.clone());
     let selected = [
         CatalogRecordRef::Metadata("revision-a"),

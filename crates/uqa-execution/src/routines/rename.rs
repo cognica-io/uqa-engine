@@ -66,8 +66,10 @@ pub fn rename_sql_routine(
         ))
     })?;
     let registry = context.mutation.registry.routine_snapshot();
+    let previous = registry.clone();
     let target = resolve_routine_rename_target(context, stmt, &registry)?;
-    let renamed_registry = analysis::move_routine_registry_entry(registry, &target)?;
+    let mut renamed_registry = analysis::move_routine_registry_entry(registry, &target)?;
+    super::catalog::revision::renamed(&mut renamed_registry, &target.new_name, &target.binding)?;
     **context.mutation.registry.routines_write() = renamed_registry;
 
     let rewritten_registry =
@@ -92,6 +94,11 @@ pub fn rename_sql_routine(
         .mutation
         .publication
         .persist_routine_definitions(&rewritten_registry)?;
+    super::catalog::publication::record_changes(
+        context.mutation.changes,
+        &previous,
+        &rewritten_registry,
+    );
     context.mutation.changes.catalog_registry_changed();
     Ok(())
 }
@@ -106,6 +113,7 @@ pub fn relocate_sql_routines(
     let new_name = uqa_core::RelationIdentity::new(schema, &identity.name).qualified_name();
     loop {
         let registry = context.mutation.registry.routine_snapshot();
+        let previous = registry.clone();
         let Some(function) = registry
             .get(registry_key)
             .and_then(|overloads| overloads.first())
@@ -133,7 +141,12 @@ pub fn relocate_sql_routines(
                 resolution_error: None,
             },
         };
-        let renamed_registry = analysis::move_routine_registry_entry(registry, &target)?;
+        let mut renamed_registry = analysis::move_routine_registry_entry(registry, &target)?;
+        super::catalog::revision::renamed(
+            &mut renamed_registry,
+            &target.new_name,
+            &target.binding,
+        )?;
         **context.mutation.registry.routines_write() = renamed_registry;
         let rewritten_registry =
             rewrite_routine_owned_dependency_identity(context, &target.binding, &target.new_name)?;
@@ -157,6 +170,11 @@ pub fn relocate_sql_routines(
             .mutation
             .publication
             .persist_routine_definitions(&rewritten_registry)?;
+        super::catalog::publication::record_changes(
+            context.mutation.changes,
+            &previous,
+            &rewritten_registry,
+        );
         context.mutation.changes.catalog_registry_changed();
     }
 }
@@ -232,7 +250,7 @@ fn rewrite_routine_owned_dependency_identity(
                 analysis::rewrite_routine_owned_dependency_identity(&mut def, target, new_name)?;
             if changed {
                 let body = persisted_routine_body(&context.compilation, &def)?;
-                next_overloads.push(Arc::new(SQLUserFunction::new(def, body)));
+                next_overloads.push(super::catalog::revision::replacement(def, body)?);
             } else {
                 next_overloads.push(function);
             }

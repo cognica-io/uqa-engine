@@ -9,6 +9,13 @@
 use crate::catalog::roles::RoleReference;
 use crate::SQLError;
 
+/// The usable namespace order and creation target of one analysis. An explicitly placed `pg_catalog` can leave the lookup order unchanged while changing the creation namespace, which `SearchPathMatchesCurrentEnvironment` also compares.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectiveSearchPath {
+    pub schemas: Vec<String>,
+    pub creation_namespace: Option<String>,
+}
+
 /// Immutable session inputs used to resolve unqualified relation names during one statement.
 #[derive(Clone)]
 pub struct RelationNameResolution {

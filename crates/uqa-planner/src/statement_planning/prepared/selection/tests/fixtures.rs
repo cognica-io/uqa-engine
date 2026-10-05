@@ -19,6 +19,20 @@ impl uqa_sql::FunctionTypeResolver for NoRoutines {
 }
 impl uqa_sql::routines::RoutineResolution for NoRoutines {}
 impl uqa_sql::catalog::analysis::AnalysisCatalog for NoRoutines {
+    fn effective_search_path(
+        &self,
+        resolution: &uqa_sql::catalog::resolution::RelationNameResolution,
+    ) -> Result<Option<uqa_sql::catalog::resolution::EffectiveSearchPath>, uqa_sql::SQLError> {
+        let mut schemas = resolution.search_path.clone();
+        if !schemas.iter().any(|name| name == "pg_catalog") {
+            schemas.insert(0, "pg_catalog".into());
+        }
+        Ok(Some(uqa_sql::catalog::resolution::EffectiveSearchPath {
+            schemas,
+            creation_namespace: resolution.search_path.first().cloned(),
+        }))
+    }
+
     fn table_resolved(
         &self,
         _: &uqa_sql::catalog::resolution::RelationNameResolution,

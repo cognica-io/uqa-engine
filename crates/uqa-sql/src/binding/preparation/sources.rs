@@ -6,10 +6,7 @@
 
 //! Ordered FROM analysis, including lateral scopes and join coercion.
 
-use super::super::{
-    overlay_outer_schema, rename_schema, table_function_member_source, JoinSchemaBinding,
-    SourcePlan,
-};
+use super::super::{overlay_outer_schema, rename_schema, JoinSchemaBinding, SourcePlan};
 use super::{Preparation, QueryPlan, RowSchema, SQLError};
 
 impl Preparation<'_> {
@@ -62,9 +59,7 @@ impl Preparation<'_> {
                 self.call(name, binding.as_ref(), args, &input, subqueries)?;
             }
             SourcePlan::FunctionGroup { functions, .. } => {
-                for function in functions {
-                    self.source(&table_function_member_source(function), subqueries, outer)?;
-                }
+                self.source_functions(functions, subqueries, outer)?;
             }
             SourcePlan::Join {
                 left,
@@ -114,5 +109,24 @@ impl Preparation<'_> {
             &self.parameters.values(),
             outer,
         )
+    }
+
+    fn source_functions(
+        &mut self,
+        functions: &[crate::plan::TableFunctionPlan],
+        subqueries: &[QueryPlan],
+        outer: Option<&RowSchema>,
+    ) -> Result<(), SQLError> {
+        let input = outer.cloned().unwrap_or_default();
+        for function in functions {
+            self.call(
+                &function.name,
+                function.binding.as_ref(),
+                &function.args,
+                &input,
+                subqueries,
+            )?;
+        }
+        Ok(())
     }
 }

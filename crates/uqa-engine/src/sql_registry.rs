@@ -49,7 +49,7 @@ impl Engine {
             RegisteredSQLFunction::new(Arc::new(function), options),
         );
         self.clear_sql_statement_cache();
-        self.invalidate_prepared_plans();
+        self.invalidate_prepared_analysis();
         Ok(())
     }
 
@@ -82,7 +82,7 @@ impl Engine {
             RegisteredSQLFunction::new(Arc::new(function), options),
         );
         self.clear_sql_statement_cache();
-        self.invalidate_prepared_plans();
+        self.invalidate_prepared_analysis();
         Ok(())
     }
 
@@ -117,7 +117,7 @@ impl Engine {
         // Aggregate-vs-projection is a structural choice in `QueryPlan`.
         // Cached plans compiled before this registration must be rebound.
         self.clear_sql_statement_cache();
-        self.invalidate_prepared_plans();
+        self.invalidate_prepared_analysis();
         Ok(())
     }
 

@@ -186,6 +186,7 @@ impl Engine {
             self.session.sequence_caches.lock().remove(relation);
         }
         self.note_catalog_registry_changed();
+        self.note_prepared_relation_change(relation);
         Ok(())
     }
 

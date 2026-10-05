@@ -112,7 +112,7 @@ pub fn grant_schema_privileges(
             .registry
             .schemas_write()
             .insert(name, value.security);
-        context.changes.catalog_registry_changed();
+        context.changes.namespace_catalog_changed();
         if let Some(notice) = value.notice {
             context.notices.schema_privilege_notice(notice);
         }

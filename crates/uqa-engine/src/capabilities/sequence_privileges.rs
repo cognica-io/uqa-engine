@@ -69,6 +69,9 @@ impl SequencePrivilegePublication for Engine {
     fn catalog_changed(&self) {
         self.note_catalog_registry_changed();
     }
+    fn prepared_relation_changed(&self, relation: &RelationIdentity) {
+        self.note_prepared_relation_change(relation);
+    }
     fn notice(&self, notice: uqa_sql::SQLNotice) {
         self.push_sql_notice(notice);
     }

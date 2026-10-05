@@ -51,7 +51,13 @@ impl SQLUserFunction {
         }
     }
 
-    /// A fingerprint of the definition. It changes whenever the routine's catalog entry changes, as `cached_function_compile` notices a new `pg_proc` tuple by its `xmin` and `ctid`, and it survives reloading the unchanged definition from storage.
+    /// The identity of this catalog tuple, preserved through reload and rollback. A legacy definition starts from its immutable object identity; publication assigns a new revision even when it keeps every SQL attribute unchanged.
+    #[must_use]
+    pub fn catalog_revision(&self) -> Option<[u8; 16]> {
+        self.def.catalog_revision.or(self.def.object_id)
+    }
+
+    /// A fingerprint for the compiled-body cache, including the published catalog revision so an identical replacement recompiles its body. Exact catalog dependency checks use `catalog_revision` instead of this hash.
     pub fn definition_version(&self) -> Result<u64, SQLError> {
         if let Some(version) = self.version.get() {
             return Ok(*version);

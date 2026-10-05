@@ -111,11 +111,8 @@ impl TableSchemaState for SchemaTableBinding<'_> {
         })
     }
     fn persist_columns(&self, columns: &[ColumnDef]) -> StorageBackendResult<()> {
-        if self.engine.is_persistent() {
-            self.engine
-                .try_save_table_schema_with_columns(&self.name, &self.state, columns)?;
-        }
-        Ok(())
+        self.engine
+            .try_save_table_schema_with_columns(&self.name, &self.state, columns)
     }
     fn constraint_header(&self) -> TableConstraintSet {
         TableConstraintSet {
@@ -170,15 +167,12 @@ impl TableSchemaState for SchemaTableBinding<'_> {
         columns: &[ColumnDef],
         constraints: &TableConstraintSet,
     ) -> StorageBackendResult<()> {
-        if self.engine.is_persistent() {
-            self.engine.try_save_table_schema_with_components(
-                &self.name,
-                &self.state,
-                columns,
-                constraints,
-            )?;
-        }
-        Ok(())
+        self.engine.try_save_table_schema_with_components(
+            &self.name,
+            &self.state,
+            columns,
+            constraints,
+        )
     }
     fn publish_columns(
         &self,
@@ -278,11 +272,25 @@ impl uqa_execution::schema::publication::dependencies::ForeignSchemaPublication 
     ) {
         let mut tables = self.durable.foreign_tables.write();
         for (relation, table) in updates {
+            self.note_prepared_catalog_change(
+                uqa_execution::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                    table.relation_oids().relation,
+                ),
+            );
             tables.insert(relation, table);
         }
     }
 }
 impl uqa_execution::schema::publication::dependencies::CatalogPublicationChanges for Engine {
+    fn prepared_relation_changed(&self, relation: &uqa_core::RelationIdentity) {
+        self.note_prepared_relation_change(relation);
+    }
+    fn prepared_catalog_changed(
+        &self,
+        change: uqa_execution::statement::prepared::invalidation::PreparedCatalogChange,
+    ) {
+        self.note_prepared_catalog_change(change);
+    }
     fn table_catalog_changed(&self) {
         self.note_table_catalog_changed();
     }

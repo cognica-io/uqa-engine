@@ -73,11 +73,21 @@ impl TableGrantContext<'_> {
         let table_changed = !updates.is_empty();
         for (_, table, security) in updates {
             table.security_write().clone_from(&security);
+            self.changes.prepared_catalog_changed(
+                crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                    table.relation_oid(),
+                ),
+            );
         }
         let view_changed = !view_updates.is_empty();
         if view_changed {
             let mut views = self.views.views_write();
             for (relation, view) in view_updates {
+                self.changes.prepared_catalog_changed(
+                    crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                        view.relation_oids().relation,
+                    ),
+                );
                 views.insert(relation, view);
             }
         }
@@ -85,6 +95,7 @@ impl TableGrantContext<'_> {
         if foreign_changed {
             let mut securities = self.foreign.security_write();
             for (relation, security) in foreign_updates {
+                self.changes.prepared_relation_changed(&relation);
                 securities.insert(relation, security);
             }
         }

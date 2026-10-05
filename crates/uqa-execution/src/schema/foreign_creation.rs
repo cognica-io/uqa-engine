@@ -14,6 +14,7 @@ use crate::schema::{
         ownership::{self, ImplicitOwnershipContext},
     },
 };
+use crate::statement::prepared::invalidation::PreparedCatalogChange;
 use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
@@ -308,6 +309,8 @@ impl ForeignCreationContext<'_> {
             },
         )?;
         self.changes.catalog_registry_changed();
+        self.changes
+            .prepared_catalog_changed(PreparedCatalogChange::Relation(catalog_oids.relation));
         Ok(())
     }
     pub fn drop_foreign_server_inner(&self, name: &str) -> Result<bool, String> {

@@ -7,6 +7,8 @@
 //! Routine registry snapshots, retained write guards, and durable publication.
 
 pub(crate) mod encoding;
+pub(super) mod publication;
+pub(super) mod revision;
 
 use std::ops::DerefMut;
 use uqa_sql::{routines::lifecycle::RoutineRegistry, SQLError};

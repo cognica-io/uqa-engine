@@ -105,11 +105,23 @@ impl SchemaRegistrationPersistence for MutationCoordinator<'_> {
     }
 }
 impl NamespaceCatalogChanges for MutationCoordinator<'_> {
+    fn prepared_catalog_changed(
+        &self,
+        change: uqa_execution::statement::prepared::invalidation::PreparedCatalogChange,
+    ) {
+        self.note_prepared_catalog_change(change);
+    }
     fn catalog_registry_changed(&self) {
         self.note_catalog_registry_changed();
     }
 }
 impl NamespaceCatalogChanges for Engine {
+    fn prepared_catalog_changed(
+        &self,
+        change: uqa_execution::statement::prepared::invalidation::PreparedCatalogChange,
+    ) {
+        self.note_prepared_catalog_change(change);
+    }
     fn catalog_registry_changed(&self) {
         self.note_catalog_registry_changed();
     }

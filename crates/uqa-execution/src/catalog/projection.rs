@@ -408,3 +408,5 @@ pub(crate) use pg_catalog::legacy_index_relations;
 pub use pg_catalog::pg_get_constraintdef_value;
 
 pub(crate) use pg_catalog::CatalogIndexRelation;
+
+pub(crate) use regtypes::relation_oid::resolved_relation_oid;

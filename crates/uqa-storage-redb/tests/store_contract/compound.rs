@@ -131,5 +131,6 @@ fn merged_vector_generations_conflicts_and_reopen() {
 fn selected_catalog_record_revisions_preserve_replacement_and_undo_identity() {
     let directory = tempfile::tempdir().unwrap();
     let storage = RedbStorage::open(directory.path().join("revisions.redb")).unwrap();
-    verify_catalog_record_revisions(Arc::new(storage.store())).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(storage.store());
+    verify_catalog_record_revisions(&store).unwrap();
 }

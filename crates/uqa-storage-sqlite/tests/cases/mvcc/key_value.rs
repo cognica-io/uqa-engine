@@ -451,6 +451,7 @@ fn orphaned_or_changed_legacy_guards_are_rejected_without_recreating_records() {
 #[test]
 fn selected_catalog_record_revisions_preserve_replacement_and_undo_identity() {
     let connection = ManagedConnection::open_in_memory().unwrap();
-    let store = std::sync::Arc::new(SQLiteKeyValueStore::new(connection).unwrap());
-    uqa_storage::key_value::conformance::verify_catalog_record_revisions(store).unwrap();
+    let store: std::sync::Arc<dyn uqa_storage::KeyValueStore> =
+        std::sync::Arc::new(SQLiteKeyValueStore::new(connection).unwrap());
+    uqa_storage::key_value::conformance::verify_catalog_record_revisions(&store).unwrap();
 }

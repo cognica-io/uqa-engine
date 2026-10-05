@@ -14,7 +14,7 @@ use crate::{
     },
     row_locks::shared_objects::SharedObjectLockSession,
 };
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
     ast::{GrantRoutineStmt, RoutineRevokeBehavior},
@@ -22,7 +22,7 @@ use uqa_sql::{
     routines::lifecycle::RoutineRegistry,
     routines::{
         declaration::RoutineTypeCatalog, lifecycle::binding::resolve_sql_routine_alter_target,
-        security as analysis, SQLUserFunction,
+        security as analysis,
     },
     SQLError,
 };
@@ -69,6 +69,7 @@ pub fn grant_sql_routine(
         .catalog
         .publication
         .persist_routine_definitions(&next)?;
+    super::catalog::publication::record_changes(context.catalog.changes, &registry, &next);
     **registry = next;
     drop(registry);
     drop(memberships);
@@ -168,10 +169,9 @@ fn prepare_privileges<'a>(
         // The command stores the ACL even when it grants or revokes nothing.
         analysis::make_routine_acl_explicit(&mut def)?;
         analysis::binding::added_routine_acl_roles(&existing.def, &def, &roles, &mut dependencies)?;
-        if def.execute_acl != existing.def.execute_acl {
-            next.get_mut(&name).expect("resolved routine key")[position] =
-                Arc::new(SQLUserFunction::new(def, existing.body.clone()));
-        }
+        // `ExecGrant_common` stores a new catalog tuple even when its ACL is unchanged.
+        next.get_mut(&name).expect("resolved routine key")[position] =
+            super::catalog::revision::replacement(def, existing.body.clone())?;
     }
     Ok(RoleDependencyCandidate {
         value: RoutinePrivilegeCandidate {

@@ -379,6 +379,7 @@ impl Engine {
             .rename_event_column_inner(&table_name, from, to)?;
         self.mark_column_stats_dirty(&table_name, &t)?;
         self.refresh_value_indexes_for_table(&table_name)?;
+        self.note_prepared_table_change(&t);
         Ok(true)
     }
 
@@ -485,6 +486,7 @@ impl Engine {
         self.mark_column_stats_dirty(&to, &state)?;
         self.refresh_value_indexes_for_table(&to)?;
         self.rename_constraint_transaction_relation(&from_relation, &to_relation);
+        self.note_prepared_table_change(&state);
         Ok(true)
     }
 }

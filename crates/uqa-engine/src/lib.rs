@@ -349,6 +349,7 @@ struct TransactionFrame {
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty_at_begin: TransactionDirtyState,
+    prepared_changes: uqa_execution::statement::prepared::invalidation::PreparedInvalidationLog,
     /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.
     begin_lock_mark: u32,
     lock_mark: u32,
@@ -421,6 +422,8 @@ struct TransactionSavepoint {
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty: TransactionDirtyState,
+    prepared_change_mark:
+        uqa_execution::statement::prepared::invalidation::PreparedInvalidationMark,
     lock_mark: u32,
     /// The length of the frame's row changes at the savepoint. The changes only grow after it, so a rollback truncates them to this length.
     row_changes: usize,

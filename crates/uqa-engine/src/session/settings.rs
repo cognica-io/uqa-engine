@@ -305,7 +305,7 @@ impl Engine {
                 return Ok(());
             }
             DiscardTarget::Plans => {
-                self.invalidate_prepared_plans();
+                self.invalidate_prepared_analysis();
                 session.sql_statement_cache.clear();
             }
             DiscardTarget::Sequences | DiscardTarget::Temp => {}

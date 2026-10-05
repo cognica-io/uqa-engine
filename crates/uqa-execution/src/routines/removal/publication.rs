@@ -22,6 +22,7 @@ pub fn commit_routine_registry_drop(
 
     analysis_dependencies::remove_routine_registry_targets(&mut next, targets)?;
     context.publication.persist_routine_definitions(&next)?;
+    super::super::catalog::publication::record_changes(context.changes, &registry, &next);
     **registry = next;
     drop(registry);
     context.changes.catalog_registry_changed();

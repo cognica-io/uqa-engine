@@ -63,7 +63,10 @@ impl TableRemovalPublication for Engine {
                 self.note_table_catalog_changed();
             }
         }
-        self.storage.tables.write().remove(relation);
+        let removed = self.storage.tables.write().remove(relation);
+        if let Some(table) = removed {
+            self.note_prepared_table_change(&table);
+        }
         self.forget_constraint_transaction_relation(relation);
         self.clear_regtype_output_cache();
         if temporary {

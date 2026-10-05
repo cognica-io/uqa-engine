@@ -10,6 +10,43 @@ use uqa_sql::catalog::analysis::{AnalysisCatalog, TableDefinition, ViewDefinitio
 use uqa_sql::{ColumnType, SQLError};
 
 impl AnalysisCatalog for CatalogReadView {
+    fn relation_dependency(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+    ) -> Result<Option<u32>, SQLError> {
+        let Some((canonical, kind)) = self
+            .relation_kind_resolution(resolution, name)?
+            .into_found()
+        else {
+            return Ok(None);
+        };
+        super::projection::resolved_relation_oid(self, resolution, &canonical, kind)
+            .and_then(|oid| {
+                u32::try_from(oid)
+                    .map_err(|_| SQLError::Internal(format!("invalid relation OID {oid}")))
+            })
+            .map(Some)
+    }
+
+    fn prepared_dependency_snapshot(
+        &self,
+        dependencies: &uqa_sql::prepared::dependencies::PreparedAnalysisDependencies,
+    ) -> Result<Option<uqa_sql::prepared::dependencies::PreparedDependencySnapshot>, SQLError> {
+        super::prepared_dependencies::capture(self, dependencies).map(Some)
+    }
+
+    fn effective_search_path(
+        &self,
+        resolution: &RelationNameResolution,
+    ) -> Result<Option<uqa_sql::catalog::resolution::EffectiveSearchPath>, SQLError> {
+        let role = &resolution.current_user;
+        Ok(Some(uqa_sql::catalog::resolution::EffectiveSearchPath {
+            schemas: super::namespaces::current_schema_names(self, resolution, role, true),
+            creation_namespace: super::namespaces::current_schema_name(self, resolution, role),
+        }))
+    }
+
     fn table_resolved(
         &self,
         resolution: &RelationNameResolution,

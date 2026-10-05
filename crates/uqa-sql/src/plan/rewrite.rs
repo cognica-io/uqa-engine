@@ -11,16 +11,24 @@ use super::{
     QueryPlan, RelationalPlan, ScalarExpr, ScalarFrameBound, SourcePlan,
 };
 
-pub(super) fn rewrite_query_scalars(
-    query: &mut QueryPlan,
-    rewrite: &mut dyn FnMut(&mut ScalarExpr),
-) {
-    for cte in &mut query.ctes {
+fn rewrite_ctes(ctes: &mut [super::CtePlan], rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+    for cte in ctes {
         match &mut cte.body {
             super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
             super::CtePlanBody::Command(command) => rewrite_command_scalars(command, rewrite),
         }
+        if let Some(cycle) = &mut cte.cycle {
+            rewrite_scalar(&mut cycle.mark_value, rewrite);
+            rewrite_scalar(&mut cycle.mark_default, rewrite);
+        }
     }
+}
+
+pub(super) fn rewrite_query_scalars(
+    query: &mut QueryPlan,
+    rewrite: &mut dyn FnMut(&mut ScalarExpr),
+) {
+    rewrite_ctes(&mut query.ctes, rewrite);
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
             if let Some(source) = &mut block.from {
@@ -180,14 +188,7 @@ pub(super) fn rewrite_command_scalars(
             {
                 rewrite_scalar(expression, rewrite);
             }
-            for cte in &mut plan.ctes {
-                match &mut cte.body {
-                    super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
-                    super::CtePlanBody::Command(command) => {
-                        rewrite_command_scalars(command, rewrite);
-                    }
-                }
-            }
+            rewrite_ctes(&mut plan.ctes, rewrite);
             for row in &mut plan.rows {
                 for expression in row {
                     rewrite_scalar(expression, rewrite);
@@ -221,14 +222,7 @@ pub(super) fn rewrite_command_scalars(
             rewrite_subqueries(&mut plan.subqueries, rewrite);
         }
         CommandPlan::Update(plan) => {
-            for cte in &mut plan.ctes {
-                match &mut cte.body {
-                    super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
-                    super::CtePlanBody::Command(command) => {
-                        rewrite_command_scalars(command, rewrite);
-                    }
-                }
-            }
+            rewrite_ctes(&mut plan.ctes, rewrite);
             if let Some(source) = &mut plan.source {
                 rewrite_source_scalars(source, rewrite);
             }
@@ -241,14 +235,7 @@ pub(super) fn rewrite_command_scalars(
             rewrite_subqueries(&mut plan.subqueries, rewrite);
         }
         CommandPlan::Delete(plan) => {
-            for cte in &mut plan.ctes {
-                match &mut cte.body {
-                    super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
-                    super::CtePlanBody::Command(command) => {
-                        rewrite_command_scalars(command, rewrite);
-                    }
-                }
-            }
+            rewrite_ctes(&mut plan.ctes, rewrite);
             if let Some(source) = &mut plan.source {
                 rewrite_source_scalars(source, rewrite);
             }
@@ -257,14 +244,7 @@ pub(super) fn rewrite_command_scalars(
             rewrite_subqueries(&mut plan.subqueries, rewrite);
         }
         CommandPlan::Merge(plan) => {
-            for cte in &mut plan.ctes {
-                match &mut cte.body {
-                    super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
-                    super::CtePlanBody::Command(command) => {
-                        rewrite_command_scalars(command, rewrite);
-                    }
-                }
-            }
+            rewrite_ctes(&mut plan.ctes, rewrite);
             rewrite_source_scalars(&mut plan.source, rewrite);
             rewrite_optional_scalar(&mut plan.target_predicate, rewrite);
             rewrite_scalar(&mut plan.join_condition, rewrite);

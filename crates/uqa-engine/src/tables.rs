@@ -72,9 +72,11 @@ impl Engine {
         security: &crate::state::BoundTableSecurity,
     ) -> StorageBackendResult<()> {
         if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            self.note_prepared_table_change(table);
             return Ok(());
         }
         let Some(catalog) = self.storage.catalog.as_ref() else {
+            self.note_prepared_table_change(table);
             return Ok(());
         };
         let analyzer_json =
@@ -109,6 +111,7 @@ impl Engine {
             constraints_json,
         })?;
         self.note_table_catalog_changed();
+        self.note_prepared_table_change(table);
         Ok(())
     }
 
@@ -311,6 +314,7 @@ impl Engine {
         }
         let analyzer_bindings =
             self.initialize_table_analyzer_bindings(name, &table_arc, default_revision)?;
+        self.note_prepared_table_change(&table_arc);
         self.storage.tables.write().insert(relation, table_arc);
         self.durable
             .table_field_analyzers

@@ -61,8 +61,11 @@ impl ForeignDefinitionContext<'_> {
             return Ok(Some(false));
         }
         self.persist_foreign_table_definition(&relation, &table)?;
-        self.publication.tables_write().insert(relation, table);
+        self.publication
+            .tables_write()
+            .insert(relation.clone(), table);
         self.changes.catalog_registry_changed();
+        self.changes.prepared_relation_changed(&relation);
         Ok(Some(true))
     }
 
@@ -146,8 +149,11 @@ impl ForeignDefinitionContext<'_> {
         self.publication
             .tables_write()
             .insert(relation.clone(), table);
-        self.publication.security_write().insert(relation, security);
+        self.publication
+            .security_write()
+            .insert(relation.clone(), security);
         self.changes.catalog_registry_changed();
+        self.changes.prepared_relation_changed(&relation);
         Ok(Some(true))
     }
 
@@ -165,6 +171,13 @@ impl ForeignDefinitionContext<'_> {
         }
         for (relation, table) in &updates {
             self.persist_foreign_table_definition(relation, table)?;
+        }
+        for (_, table) in &updates {
+            self.changes.prepared_catalog_changed(
+                crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                    table.relation_oids().relation,
+                ),
+            );
         }
         let changed = !updates.is_empty();
         if changed {

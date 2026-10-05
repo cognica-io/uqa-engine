@@ -18,6 +18,24 @@ use uqa_sql::{
 };
 
 impl Engine {
+    pub(crate) fn note_prepared_relation_change(&self, relation: &uqa_core::RelationIdentity) {
+        self.mutation_coordinator()
+            .note_prepared_relation_change(relation);
+    }
+
+    pub(crate) fn note_prepared_table_change(&self, table: &crate::TableState) {
+        self.mutation_coordinator()
+            .note_prepared_table_change(table);
+    }
+
+    pub(crate) fn note_prepared_catalog_change(
+        &self,
+        change: uqa_execution::statement::prepared::invalidation::PreparedCatalogChange,
+    ) {
+        self.mutation_coordinator()
+            .note_prepared_catalog_change(change);
+    }
+
     pub(crate) fn prepared_definition_context(
         &self,
     ) -> uqa_sql::prepared::definition::PreparedDefinitionContext<'_> {
@@ -36,6 +54,7 @@ impl Engine {
             analysis: self.prepared_definition_context(),
             aggregates: self,
             registry: self,
+            transaction_timestamp_micros: Some(self.transaction_timestamp_micros()),
             clock: uqa_sql::expr::clock_timestamp_micros,
         }
     }

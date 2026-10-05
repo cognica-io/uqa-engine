@@ -192,6 +192,6 @@ pub fn rename_schema(
     }
     context.persistence.drop_schema_row(name)?;
     context.persistence.save_schema_row(new_name, &current)?;
-    context.changes.catalog_registry_changed();
+    context.changes.namespace_catalog_changed();
     Ok(())
 }

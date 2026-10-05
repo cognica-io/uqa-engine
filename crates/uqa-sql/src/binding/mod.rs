@@ -17,6 +17,7 @@ mod command_scopes;
 mod commands;
 mod cte_controls;
 mod ctes;
+mod dependencies;
 mod merge_scopes;
 mod preparation;
 mod projection;
@@ -30,8 +31,8 @@ mod type_resolution;
 mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
-pub(crate) use preparation::analyze_domain_check;
 pub use preparation::{analyze_column_type_transform, infer_prepared_parameter_types};
+pub(crate) use preparation::{analyze_domain_check, read_prepared_inputs};
 
 #[cfg(test)]
 mod tests;
@@ -101,6 +102,7 @@ struct SchemaScope {
     variable_sites: Option<variable_sites::VariableSites>,
     /// Keep `*` projections and `GROUP BY` output-name references as written, so a bound copy of stored syntax still corresponds to that syntax node for node.
     preserve_syntax_shape: bool,
+    prepared_dependencies: Option<crate::prepared::dependencies::PreparedAnalysisDependencies>,
 }
 
 fn non_returning_cte_error(name: &str) -> SQLError {
@@ -124,6 +126,7 @@ impl SchemaScope {
             binds_routine_identities: true,
             variable_sites: None,
             preserve_syntax_shape: false,
+            prepared_dependencies: None,
         })
     }
 
@@ -147,6 +150,7 @@ impl SchemaScope {
             binds_routine_identities: true,
             variable_sites: None,
             preserve_syntax_shape: false,
+            prepared_dependencies: None,
         }
     }
 
@@ -435,6 +439,7 @@ impl SchemaScope {
                     return result;
                 }
                 if self.catalog.sequence_exists(&self.resolution, name)? {
+                    self.record_relation_dependency(name)?;
                     let schema = RowSchema::with_qualified_types(
                         qualifier,
                         vec!["last_value".into(), "log_cnt".into(), "is_called".into()],
@@ -448,6 +453,7 @@ impl SchemaScope {
                 }
                 let view = self.catalog.view_resolved(&self.resolution, name)?;
                 if let Some(view) = view {
+                    self.record_relation_dependency(name)?;
                     if view.materialized {
                         let columns = view.output_columns.unwrap_or_default();
                         if columns.len() != view.materialized_column_types.len() {
@@ -470,6 +476,7 @@ impl SchemaScope {
                             "view `{name}` has a recursive schema dependency"
                         )));
                     }
+                    self.record_stored_query_dependencies(&view.query);
                     let result = self
                         .bind_query(routines, &view.query, params, outer)
                         .and_then(|schema| {
@@ -485,6 +492,7 @@ impl SchemaScope {
                 }
                 let table = self.catalog.table_resolved(&self.resolution, name)?;
                 if let Some(table) = table {
+                    self.record_relation_dependency(name)?;
                     let columns = table
                         .columns
                         .iter()
@@ -510,6 +518,7 @@ impl SchemaScope {
                     .catalog
                     .foreign_table_resolved(&self.resolution, name)?;
                 if let Some(foreign_table) = foreign_table {
+                    self.record_relation_dependency(name)?;
                     let typed_columns = foreign_table
                         .columns
                         .iter()
@@ -529,6 +538,7 @@ impl SchemaScope {
                     .catalog
                     .virtual_relation_schema(&self.resolution, name)?
                 {
+                    self.record_relation_dependency(name)?;
                     let (columns, types): (Vec<_>, Vec<_>) = schema
                         .into_iter()
                         .map(|(column, ty)| (column, Some(ty)))
@@ -653,6 +663,9 @@ impl SchemaScope {
                         .map(|resolved| resolved.function.as_ref()),
                     column_types,
                 )?;
+                if let Some(function) = &user_function {
+                    self.record_routine_dependency(&function.binding);
+                }
                 let catalog_columns = if !self.validate_references && user_function.is_none() {
                     user_function_output_columns(self.catalog.as_ref(), &self.resolution, name)?
                 } else {

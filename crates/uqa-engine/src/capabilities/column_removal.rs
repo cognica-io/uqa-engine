@@ -128,9 +128,6 @@ impl ColumnDropTable for ColumnDropBinding<'_> {
         self.state.document_store.read().get(id)
     }
     fn persist_drop(&self, table: &str, column: &str) -> StorageBackendResult<()> {
-        if !self.engine.is_persistent() {
-            return Ok(());
-        }
         if let Some(catalog) = self.engine.storage.catalog.as_ref() {
             catalog.drop_column_data(table, column)?;
         }
