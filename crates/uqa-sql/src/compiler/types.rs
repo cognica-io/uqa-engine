@@ -430,10 +430,10 @@ pub(super) fn compile_pg_type_name(
             "float8" | "double" | "double precision" => Ok(ColumnType::DoublePrecision),
             "numeric" | "decimal" => {
                 if type_name.typmods.len() > 2 {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "NUMERIC accepts at most precision and scale, got {} modifiers",
-                        type_name.typmods.len()
-                    )));
+                    return Err(SQLError::Routine {
+                        sqlstate: "22023".into(),
+                        message: "invalid NUMERIC type modifier".into(),
+                    });
                 }
                 let mut typmods_iter = type_name.typmods.iter();
                 let precision = typmods_iter
@@ -441,9 +441,12 @@ pub(super) fn compile_pg_type_name(
                     .map(|n| {
                         let value = expect_integer_const(n)?;
                         if !(1..=1000).contains(&value) {
-                            return Err(SQLError::TypeMismatch(format!(
-                                "NUMERIC precision must be between 1 and 1000, got {value}"
-                            )));
+                            return Err(SQLError::Routine {
+                                sqlstate: "22023".into(),
+                                message: format!(
+                                    "NUMERIC precision {value} must be between 1 and 1000"
+                                ),
+                            });
                         }
                         Ok(value as u32)
                     })
@@ -453,9 +456,12 @@ pub(super) fn compile_pg_type_name(
                     .map(|n| {
                         let value = expect_integer_const(n)?;
                         if !(-1000..=1000).contains(&value) {
-                            return Err(SQLError::TypeMismatch(format!(
-                                "NUMERIC scale must be between -1000 and 1000, got {value}"
-                            )));
+                            return Err(SQLError::Routine {
+                                sqlstate: "22023".into(),
+                                message: format!(
+                                    "NUMERIC scale {value} must be between -1000 and 1000"
+                                ),
+                            });
                         }
                         Ok(value as i32)
                     })

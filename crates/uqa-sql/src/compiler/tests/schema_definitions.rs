@@ -9,6 +9,61 @@
 use super::*;
 
 #[test]
+fn numeric_modifiers_preserve_postgresql_parameter_diagnostics() {
+    for (modifiers, message) in [
+        ("0", "NUMERIC precision 0 must be between 1 and 1000"),
+        ("-1", "NUMERIC precision -1 must be between 1 and 1000"),
+        ("1001", "NUMERIC precision 1001 must be between 1 and 1000"),
+        (
+            "1,1001",
+            "NUMERIC scale 1001 must be between -1000 and 1000",
+        ),
+        (
+            "1,-1001",
+            "NUMERIC scale -1001 must be between -1000 and 1000",
+        ),
+        ("0,1001", "NUMERIC precision 0 must be between 1 and 1000"),
+        ("1,2,3", "invalid NUMERIC type modifier"),
+    ] {
+        for sql in [
+            format!("CREATE TABLE numeric_input (a numeric({modifiers}))"),
+            format!("SELECT 0::numeric({modifiers})"),
+            format!("SELECT NULL::numeric({modifiers})"),
+            format!("SELECT 0::numeric({modifiers}) WHERE false"),
+            format!("SELECT CASE WHEN false THEN 0::numeric({modifiers}) ELSE 1 END"),
+        ] {
+            let error = compile(&sql).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("22023"), "{sql}");
+            assert_eq!(error.to_string(), message, "{sql}");
+            assert_eq!(error.detail(), None);
+            assert_eq!(error.hint(), None);
+        }
+    }
+}
+
+#[test]
+fn numeric_modifier_boundaries_retain_unconstrained_and_default_scale_types() {
+    for (declaration, precision, scale) in [
+        ("numeric", None, None),
+        ("numeric(1)", Some(1), Some(0)),
+        ("numeric(1000)", Some(1000), Some(0)),
+        ("numeric(1,-1000)", Some(1), Some(-1000)),
+        ("numeric(1,1000)", Some(1), Some(1000)),
+    ] {
+        let Statement::CreateTable(table) =
+            first(&format!("CREATE TABLE numeric_input (a {declaration})"))
+        else {
+            panic!("expected CREATE TABLE");
+        };
+        assert_eq!(
+            table.columns[0].ty,
+            ColumnType::Numeric { precision, scale },
+            "{declaration}"
+        );
+    }
+}
+
+#[test]
 fn sequence_options_do_not_truncate_or_ignore_values() {
     let Statement::CreateSequence(sequence) = first(
         "CREATE SEQUENCE app.s AS integer INCREMENT BY 3 MINVALUE 2 MAXVALUE 10 START WITH 8 CACHE 4 CYCLE",

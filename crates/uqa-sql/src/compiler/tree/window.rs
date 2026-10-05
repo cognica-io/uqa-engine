@@ -580,6 +580,9 @@ fn compile_cast_type_name(type_name: &pg_query::protobuf::TypeName) -> Result<St
     if ty == "interval" && !type_name.typmods.is_empty() {
         ty = crate::compiler::types::compile_pg_type_name(type_name, "cast")?.sql_name();
     }
+    if matches!(ty.as_str(), "numeric" | "decimal") && !type_name.typmods.is_empty() {
+        crate::compiler::types::compile_pg_type_name(type_name, "cast")?;
+    }
     // Carry length / precision modifiers (`varchar(1)`, `numeric(10,2)`)
     // so the evaluator can truncate / rescale like PostgreSQL.
     if matches!(
