@@ -7,6 +7,24 @@
 use super::*;
 
 #[test]
+fn available_workspace_follows_the_tightest_ancestor_and_sibling_reservations() {
+    let root = MemoryBudget::new(100);
+    let branch = root.child(80);
+    let leaf = branch.child(usize::MAX);
+    assert_eq!(leaf.available(), 80);
+    let sibling = root.child(100).reserve(50).unwrap();
+    assert_eq!(leaf.available(), 50);
+    let own = leaf.reserve(40).unwrap();
+    assert_eq!(leaf.available(), 10);
+    assert!(leaf.reserve(11).is_err());
+    assert_eq!(leaf.available(), 10);
+    drop(sibling);
+    assert_eq!(leaf.available(), 40);
+    drop(own);
+    assert_eq!(leaf.available(), 80);
+}
+
+#[test]
 fn child_limits_never_replace_ancestor_limits_and_failed_grow_rolls_back() {
     let root = MemoryBudget::new(100);
     let left = root.child(80);

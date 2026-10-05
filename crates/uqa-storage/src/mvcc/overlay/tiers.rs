@@ -58,8 +58,10 @@ impl<'a> TieredCursor<'a> {
     ) -> VersionResult<Self> {
         let memtable = records.map(|records| records.range_from::<[u8]>(start).peekable());
         let mut heads = Vec::new();
+        // Every run retains a reader concurrently. Leave half the shared workspace for decoded heads, returned values and the consumer instead of letting the first runs take full blocks.
+        let block_limit = control.memory().available() / 2 / runs.newest_first().count().max(1);
         for run in runs.newest_first() {
-            let mut cursor = run.cursor(start);
+            let mut cursor = run.cursor(start).with_block_limit(block_limit);
             let head = cursor.next(control)?;
             heads.push(RunHead { cursor, head });
         }

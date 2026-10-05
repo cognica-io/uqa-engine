@@ -51,26 +51,45 @@ impl EntryReader {
         index: usize,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
-        match run.read_block(index, control) {
-            Ok(bytes) => Ok(Self::Cached { bytes, position: 0 }),
-            Err(VersionError::Memory(MemoryError::Limit { .. })) => {
-                let mut memory = control
-                    .memory()
-                    .reserve(size_of::<StreamingReader>() + STREAM_BYTES)?;
-                let block = &run.blocks[index];
-                let mut file = run.entries.reopen().map_err(spill_error)?;
-                file.seek(SeekFrom::Start(block.offset))
-                    .map_err(spill_error)?;
-                let reader = BufReader::with_capacity(STREAM_BYTES, file);
-                memory.grow(reader.capacity() - STREAM_BYTES)?;
-                Ok(Self::Streaming(Box::new(StreamingReader {
-                    reader,
-                    remaining: block.end - block.offset,
-                    _memory: memory,
-                })))
-            }
-            Err(error) => Err(error),
+        Self::with_block_limit(run, index, usize::MAX, control)
+    }
+
+    pub(super) fn with_block_limit(
+        run: &SpilledRun,
+        index: usize,
+        maximum: usize,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        control.check()?;
+        if let Some(bytes) = run.cache.block(index) {
+            return Ok(Self::Cached { bytes, position: 0 });
         }
+        run.cache.discard_other_block(index);
+        let maximum = maximum.min(control.memory().available() / 2);
+        let block = &run.blocks[index];
+        if block.end - block.offset <= maximum as u64 {
+            match run.read_block(index, control) {
+                Ok(bytes) => return Ok(Self::Cached { bytes, position: 0 }),
+                Err(VersionError::Memory(MemoryError::Limit { .. })) => (),
+                Err(error) => return Err(error),
+            }
+        }
+        let capacity = maximum
+            .saturating_sub(size_of::<StreamingReader>())
+            .clamp(1, STREAM_BYTES);
+        let mut memory = control
+            .memory()
+            .reserve(size_of::<StreamingReader>() + capacity)?;
+        let mut file = run.entries.reopen().map_err(spill_error)?;
+        file.seek(SeekFrom::Start(block.offset))
+            .map_err(spill_error)?;
+        let reader = BufReader::with_capacity(capacity, file);
+        memory.grow(reader.capacity() - capacity)?;
+        Ok(Self::Streaming(Box::new(StreamingReader {
+            reader,
+            remaining: block.end - block.offset,
+            _memory: memory,
+        })))
     }
 
     pub(super) fn next_matching(

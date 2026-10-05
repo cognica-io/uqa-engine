@@ -75,6 +75,52 @@ fn point_reads_find_every_change_and_no_absent_key_across_blocks() {
 }
 
 #[test]
+fn spill_writer_shares_small_remaining_ancestor_workspace_with_retained_input() {
+    use uqa_core::memory::MemoryBudget;
+    let memory = MemoryBudget::new(64 << 10);
+    let retained_input = memory.reserve(40 << 10).unwrap();
+    let child = memory.child(256 << 10);
+    let control = StorageReadControl::new(&child, &uqa_core::CancellationToken::new());
+    let (run, identities) = run(1_024, &control);
+    assert!(run.blocks.len() > 1);
+    let entries_path = run.entries.path().to_path_buf();
+    let values_path = run.values.path().to_path_buf();
+    for (position, identity) in identities.iter().enumerate() {
+        let index = position * 2;
+        let entry = run.get(&key(index), &control).unwrap().unwrap();
+        assert_eq!(entry.identity, *identity);
+        assert_eq!(entry.expected, expected(index));
+        let bytes = entry
+            .value
+            .map(|location| run.load_value(location, &control).unwrap().to_vec());
+        assert_eq!(bytes, value(index));
+    }
+    assert_eq!(memory.used(), retained_input.bytes() + child.used());
+    assert!(memory.peak() <= memory.limit());
+    drop(run);
+    assert_eq!(memory.used(), retained_input.bytes());
+    assert_eq!(child.used(), 0);
+    assert!(!entries_path.exists());
+    assert!(!values_path.exists());
+}
+
+#[test]
+fn already_charged_entry_cache_does_not_require_new_reader_workspace() {
+    let owner = StorageReadControl::with_limit(64 << 20);
+    let (run, _) = run(1_024, &owner);
+    let baseline = owner.memory().used();
+    let retained = run.cache_reader();
+    let first = super::reader::EntryReader::new(&run, 0, &owner).unwrap();
+    assert!(owner.memory().used() > baseline);
+    let reader = StorageReadControl::with_limit(0);
+    let reused = super::reader::EntryReader::with_block_limit(&run, 0, 0, &reader).unwrap();
+    assert!(matches!(reused, super::reader::EntryReader::Cached { .. }));
+    assert_eq!(reader.memory().used(), 0);
+    drop((first, reused, retained));
+    assert_eq!(owner.memory().used(), baseline);
+}
+
+#[test]
 fn cursors_and_last_before_honor_their_bounds() {
     let control = StorageReadControl::with_limit(64 << 20);
     let (run, _) = run(2000, &control);

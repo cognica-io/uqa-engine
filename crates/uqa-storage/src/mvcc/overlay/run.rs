@@ -225,6 +225,15 @@ impl SpilledRun {
             return Ok(Some((chunk, begin)));
         }
         let end = (start + VALUE_CHUNK).min(self.bytes - self.entry_bytes);
+        // Cache admission must preserve workspace for the value copy and the other active readers, even when the run and consumer share one allowance.
+        let available = self
+            .cache
+            .memory()
+            .available()
+            .min(control.memory().available());
+        if end - start > (available / 2) as u64 {
+            return Ok(None);
+        }
         match read_range(
             &self.values,
             start,
