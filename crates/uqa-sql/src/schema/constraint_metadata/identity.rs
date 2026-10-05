@@ -14,7 +14,8 @@ pub mod foreign_keys;
 pub mod keys;
 pub mod legacy;
 
-pub(super) fn materialize_key_identity(
+/// `DefineIndex` and `index_constraint_create`: a key's enforcing index takes its OID, then the constraint takes its own.
+pub fn materialize_key_identity(
     key: &mut crate::ast::TableKeyConstraint,
     allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> ConstraintMetadataResult<bool> {
@@ -100,7 +101,8 @@ pub fn materialize_default_oid(
     Ok(true)
 }
 
-pub(super) fn materialize_not_null_identity(
+/// `StoreRelNotNull`: a NOT NULL constraint takes its incarnation and `pg_constraint` OID when it is stored.
+pub fn materialize_not_null_identity(
     column: &mut ColumnDef,
     allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> ConstraintMetadataResult<bool> {

@@ -39,6 +39,16 @@ impl std::error::Error for ConstraintMetadataError {
         }
     }
 }
+impl ConstraintMetadataError {
+    /// The error as a statement reports it: an invalid identity is internal, an execution error is itself.
+    pub fn into_sql_error(self) -> crate::SQLError {
+        match self {
+            Self::Invalid(message) => crate::SQLError::Internal(message),
+            Self::Execution(error) => *error,
+        }
+    }
+}
+
 pub type ConstraintMetadataResult<T> = Result<T, ConstraintMetadataError>;
 pub type CatalogIdentityAllocator<'a> = dyn CatalogObjectAllocator + 'a;
 
@@ -180,13 +190,8 @@ pub fn materialize_constraint_metadata_with_names(
     for column in columns.iter_mut() {
         if let Some(check) = &column.check {
             changed |= assign_check_name(&relation.name, check, &mut column.check_name, &mut used)?;
-            changed |= assign_catalog_object_id(
+            changed |= materialize_check_identity(
                 &mut column.check_object_id,
-                "CHECK constraint",
-                allocate,
-            )?;
-            changed |= identity::materialize_check_oid(
-                column.check_object_id,
                 &mut column.check_catalog_oid,
                 allocate,
             )?;
@@ -225,9 +230,11 @@ pub fn materialize_constraint_metadata_with_names(
                 (&relation.name, &column.name, "fkey"),
                 &mut used,
             )?;
-            changed |= assign_constraint_object_id(&mut reference.object_id, allocate)?;
-            changed |=
-                identity::foreign_keys::materialize(&mut reference.catalog_identity, allocate)?;
+            changed |= materialize_foreign_key_identity(
+                &mut reference.object_id,
+                &mut reference.catalog_identity,
+                allocate,
+            )?;
         }
     }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
@@ -238,8 +245,11 @@ pub fn materialize_constraint_metadata_with_names(
             (&relation.name, &component, "fkey"),
             &mut used,
         )?;
-        changed |= assign_constraint_object_id(&mut constraint.object_id, allocate)?;
-        changed |= identity::foreign_keys::materialize(&mut constraint.catalog_identity, allocate)?;
+        changed |= materialize_foreign_key_identity(
+            &mut constraint.object_id,
+            &mut constraint.catalog_identity,
+            allocate,
+        )?;
     }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     changed |= identity::keys::synchronize_provenance(constraints);
@@ -256,14 +266,34 @@ fn materialize_checks(
     let mut changed = false;
     for constraint in checks {
         changed |= assign_check_name(&relation.name, &constraint.expr, &mut constraint.name, used)?;
-        changed |=
-            assign_catalog_object_id(&mut constraint.object_id, "CHECK constraint", allocate)?;
-        changed |= identity::materialize_check_oid(
-            constraint.object_id,
+        changed |= materialize_check_identity(
+            &mut constraint.object_id,
             &mut constraint.catalog_oid,
             allocate,
         )?;
     }
+    Ok(changed)
+}
+
+/// `StoreRelCheck`: a CHECK constraint takes its incarnation and its `pg_constraint` OID when it is stored and keeps them afterwards.
+pub fn materialize_check_identity(
+    object_id: &mut Option<[u8; 16]>,
+    catalog_oid: &mut Option<i64>,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> ConstraintMetadataResult<bool> {
+    let mut changed = assign_catalog_object_id(object_id, "CHECK constraint", allocate)?;
+    changed |= identity::materialize_check_oid(*object_id, catalog_oid, allocate)?;
+    Ok(changed)
+}
+
+/// `CreateConstraintEntry` for a foreign key: the constraint row's incarnation and OID, allocated when the constraint is created and kept afterwards.
+pub fn materialize_foreign_key_identity(
+    object_id: &mut Option<[u8; 16]>,
+    catalog_identity: &mut Option<crate::ast::ConstraintCatalogIdentity>,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> ConstraintMetadataResult<bool> {
+    let mut changed = assign_constraint_object_id(object_id, allocate)?;
+    changed |= identity::foreign_keys::materialize(catalog_identity, allocate)?;
     Ok(changed)
 }
 

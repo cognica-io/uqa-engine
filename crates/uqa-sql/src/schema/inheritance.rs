@@ -79,7 +79,7 @@ pub fn merge_create_table_hierarchy(
     context: &InheritanceContext<'_>,
     table: &mut CreateTable,
     notices: &mut Vec<crate::SQLNotice>,
-) -> Result<(), SQLError> {
+) -> Result<Vec<String>, SQLError> {
     table.hierarchy.local_columns = table
         .columns
         .iter()
@@ -95,7 +95,8 @@ pub fn merge_create_table_hierarchy(
             return Err(SQLError::Internal(format!("column `{column}` has no type")));
         }
         column_merge::check_column_count(table.columns.len())?;
-        return column_merge::reject_repeated_columns(&table.columns);
+        column_merge::reject_repeated_columns(&table.columns)?;
+        return Ok(Vec::new());
     }
     let is_partition = table.hierarchy.partition_bound.is_some();
     if is_partition && table.hierarchy.parents.len() != 1 {
@@ -206,13 +207,16 @@ pub fn merge_create_table_hierarchy(
         for column in columns {
             inherited.merge_parent_column(column, notices)?;
         }
-        for mut check in context
+        // The relation cache holds a parent's CHECK constraints in name order, and `MergeAttributes` takes them in that order.
+        let mut parent_checks = context
             .catalog
             .check_definitions(parent)
             .map_err(|error| SQLError::Internal(format!("read inherited CHECKs: {error}")))?
             .into_iter()
             .filter(|check| !check.no_inherit)
-        {
+            .collect::<Vec<_>>();
+        parent_checks.sort_by(|left, right| left.name.cmp(&right.name));
+        for mut check in parent_checks {
             super::check_inheritance::bind_parent_check_columns(parent, &mut check.expr)?;
             check.is_local = false;
             check.object_id = None;
@@ -247,6 +251,7 @@ pub fn merge_create_table_hierarchy(
     table.untyped_columns.clear();
     column_merge::check_column_count(inherited.columns.len())?;
     inherited.reject_conflicting_defaults()?;
+    let expressions = inherited.inherited_expressions();
     table.columns = inherited.columns;
     inherited_checks.append(&mut table.checks);
     table.checks = inherited_checks;
@@ -257,7 +262,7 @@ pub fn merge_create_table_hierarchy(
         table.key_constraints = inherited_keys;
     }
     table.hierarchy.parents = canonical_parents;
-    Ok(())
+    Ok(expressions)
 }
 
 /// `MergeAttributes` keeps a temporary relation out of a permanent hierarchy: a temporary partition of a permanent table, and a permanent child or partition of a temporary one.

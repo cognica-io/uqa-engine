@@ -963,5 +963,7 @@ mod default_cooking;
 mod merge_attributes;
 #[path = "pg18_constraint_lifecycle/partition_column_options.rs"]
 mod partition_column_options;
+#[path = "pg18_constraint_lifecycle/table_creation_oids.rs"]
+mod table_creation_oids;
 #[path = "pg18_constraint_lifecycle/table_creation_order.rs"]
 mod table_creation_order;

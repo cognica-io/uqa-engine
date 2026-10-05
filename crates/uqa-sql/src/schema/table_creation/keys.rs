@@ -8,6 +8,10 @@
 
 use crate::ast::{ColumnDef, ColumnType, CreateTable, TableKeyConstraint, TableKeyConstraintKind};
 use crate::schema::columns::POSTGRES_SYSTEM_COLUMNS;
+use crate::schema::constraint_metadata::{
+    identity::materialize_key_identity, materialize_foreign_key_identity, CatalogIdentityAllocator,
+    ConstraintMetadataError,
+};
 use crate::schema::indexes::names::{ConstraintIndexNamer, IndexNameCatalog};
 use crate::schema::indexes::unique::{
     validate_partitioned_key_constraint, validate_partitioned_unique_key, PartitionedUniqueKey,
@@ -22,9 +26,11 @@ use crate::SQLError;
 #[cfg(test)]
 mod tests;
 
-/// The keys and foreign keys a partition clones from its parent before its statement's own constraints are defined.
+/// What a new table takes from its parents before its own definitions: the columns whose expressions the parents give, and the keys and foreign keys a partition clones from its parent.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct InheritedKeys {
+pub struct InheritedDefinitions {
+    /// The columns whose default or generation expression a parent gives and the statement does not replace, which `heap_create_with_catalog` stores with the relation.
+    pub expressions: Vec<String>,
     /// The parent's keys, which precede the declared keys of the table.
     pub keys: usize,
     /// The parent's foreign keys, which precede the declared foreign keys of the table.
@@ -161,11 +167,12 @@ pub fn declare_primary_key_not_null(columns: &mut [ColumnDef], keys: &[TableKeyC
     }
 }
 
-/// The keys a partition clones from its parent, which `DefineRelation` creates before the table's CHECK constraints: each unique index cloned from the parent is checked against the table's own partition key, and each cloned key's index is named, a name the CHECKs the table inherits hold being taken. The namer goes on to name the declared keys.
+/// The keys a partition clones from its parent, which `DefineRelation` creates before the table's CHECK constraints: each unique index cloned from the parent is checked against the table's own partition key, and each cloned key's index is named, a name the CHECKs the table inherits hold being taken, and takes its OIDs; then `CloneForeignKeyConstraints` creates the partition's copies of the parent's foreign keys. The namer goes on to name the declared keys.
 pub fn clone_parent_keys<'a>(
     catalog: &'a dyn IndexNameCatalog,
     table: &mut CreateTable,
-    inherited: &InheritedKeys,
+    inherited: &InheritedDefinitions,
+    allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> Result<ConstraintIndexNamer<'a>, SQLError> {
     let mut indexes = ConstraintIndexNamer::new(catalog, &table.name)?;
     indexes.occupy(
@@ -181,6 +188,15 @@ pub fn clone_parent_keys<'a>(
             validate_partitioned_key_constraint(&table.name, key, partition)?;
         }
         indexes.name(key)?;
+        materialize_key_identity(key, allocate).map_err(ConstraintMetadataError::into_sql_error)?;
+    }
+    for foreign_key in &mut table.foreign_keys[..inherited.foreign_keys] {
+        materialize_foreign_key_identity(
+            &mut foreign_key.object_id,
+            &mut foreign_key.catalog_identity,
+            allocate,
+        )
+        .map_err(ConstraintMetadataError::into_sql_error)?;
     }
     if let Some(partition) = partition {
         for keys in &inherited.unique_indexes {
@@ -202,11 +218,12 @@ pub fn clone_parent_keys<'a>(
     Ok(indexes)
 }
 
-/// Define the keys the table declares as `DefineIndex` does once the table's CHECK and NOT NULL constraints exist: each key, primary key first, against an inherited primary key, the partition key and its index attributes. Each key's index is named after its checks, so a later key's errors follow an earlier key's name conflict, and no index takes a name a constraint of the table holds.
+/// Define the keys the table declares as `DefineIndex` does once the table's CHECK and NOT NULL constraints exist: each key, primary key first, against an inherited primary key, the partition key and its index attributes. Each key's index is named after its checks, so a later key's errors follow an earlier key's name conflict, and no index takes a name a constraint of the table holds; the index then takes its OID and the constraint its own.
 pub fn define_declared_keys(
     mut indexes: ConstraintIndexNamer<'_>,
     table: &mut CreateTable,
-    inherited: &InheritedKeys,
+    inherited: &InheritedDefinitions,
+    allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> Result<(), SQLError> {
     indexes.occupy(
         table
@@ -232,6 +249,7 @@ pub fn define_declared_keys(
             key,
         )?;
         indexes.name(key)?;
+        materialize_key_identity(key, allocate).map_err(ConstraintMetadataError::into_sql_error)?;
     }
     mark_single_column_keys(&mut table.columns, &table.key_constraints[inherited.keys..]);
     Ok(())

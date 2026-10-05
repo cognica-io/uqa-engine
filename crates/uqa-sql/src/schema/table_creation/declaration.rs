@@ -5,12 +5,17 @@
 //
 
 //! Bind complete table declarations around their sequence and catalog publication boundaries.
-use crate::ast::{ColumnDef, CreateTable, Expr};
+use crate::ast::{ColumnDef, CreateTable, Expr, ForeignKey};
+use crate::schema::constraint_metadata::{
+    identity::{materialize_default_oid, materialize_not_null_identity},
+    materialize_check_identity, materialize_foreign_key_identity, CatalogIdentityAllocator,
+    ConstraintMetadataError,
+};
 use crate::schema::constraints::validate_foreign_key_definition;
 use crate::schema::foreign_keys::{resolve_foreign_key_parent, ForeignKeyDefinitionContext};
 use crate::schema::indexes::names::{ConstraintIndexNamer, IndexNameCatalog};
 use crate::schema::inheritance::InheritanceContext;
-pub use crate::schema::table_creation::keys::InheritedKeys;
+pub use crate::schema::table_creation::keys::InheritedDefinitions;
 use crate::schema::{SchemaBindingContext, SchemaExpressionCatalog};
 use crate::semantics::conflict::InferenceBindingScope;
 use crate::type_resolution::FunctionTypeResolver;
@@ -87,10 +92,11 @@ pub fn prepare_create_table_declaration(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
     notices: &mut Vec<crate::SQLNotice>,
-) -> Result<InheritedKeys, SQLError> {
+) -> Result<InheritedDefinitions, SQLError> {
     let declared = c.key_constraints.len();
     let declared_foreign_keys = c.foreign_keys.len();
-    super::super::inheritance::merge_create_table_hierarchy(&context.inheritance, c, notices)?;
+    let expressions =
+        super::super::inheritance::merge_create_table_hierarchy(&context.inheritance, c, notices)?;
     let keys = c.key_constraints.len() - declared;
     let foreign_keys = c.foreign_keys.len() - declared_foreign_keys;
     super::keys::declare_primary_key_not_null(&mut c.columns, &c.key_constraints[keys..]);
@@ -108,11 +114,93 @@ pub fn prepare_create_table_declaration(
         }
         _ => Vec::new(),
     };
-    Ok(InheritedKeys {
+    Ok(InheritedDefinitions {
+        expressions,
         keys,
         foreign_keys,
         unique_indexes,
     })
+}
+
+/// `heap_create_with_catalog` stores what the parents give with the relation, before the statement's own expressions are analyzed: the inherited defaults and generation expressions in column order, then the inherited CHECK constraints in the order `MergeAttributes` collected them.
+pub fn define_inherited_expressions(
+    c: &mut CreateTable,
+    inherited: &InheritedDefinitions,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> Result<(), SQLError> {
+    for column in &mut c.columns {
+        if inherited.expressions.contains(&column.name) {
+            allocate_expression_identity(column, allocate)?;
+        }
+    }
+    for check in c.checks.iter_mut().filter(|check| !check.is_local) {
+        materialize_check_identity(&mut check.object_id, &mut check.catalog_oid, allocate)
+            .map_err(ConstraintMetadataError::into_sql_error)?;
+    }
+    Ok(())
+}
+
+/// `StoreAttrDefault`: a column's default or generation expression takes its `pg_attrdef` OID when it is stored; a column without one takes none. The column's own incarnation comes first.
+fn allocate_expression_identity(
+    column: &mut ColumnDef,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> Result<(), SQLError> {
+    if column.object_id.is_none() {
+        column.object_id = Some(
+            allocate
+                .allocate_object_id("column")
+                .map_err(ConstraintMetadataError::into_sql_error)?,
+        );
+    }
+    materialize_default_oid(column, allocate).map_err(ConstraintMetadataError::into_sql_error)?;
+    Ok(())
+}
+
+/// `AddRelationNotNullConstraints` stores the NOT NULL constraints after the CHECKs: the ones the statement declares, then the ones only parents give.
+pub fn define_not_null_identities(
+    c: &mut CreateTable,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> Result<(), SQLError> {
+    for local in [true, false] {
+        for column in c
+            .columns
+            .iter_mut()
+            .filter(|column| column.not_null && column.not_null_is_local == local)
+        {
+            materialize_not_null_identity(column, allocate)
+                .map_err(ConstraintMetadataError::into_sql_error)?;
+        }
+    }
+    Ok(())
+}
+
+/// `ATAddForeignKeyConstraint` creates each foreign key's constraint row once the key it references is found: the column foreign keys, then the table's, after the ones a partition cloned.
+pub fn define_foreign_key_identities(
+    columns: &mut [ColumnDef],
+    foreign_keys: &mut [ForeignKey],
+    cloned: usize,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> Result<(), SQLError> {
+    for reference in columns
+        .iter_mut()
+        .filter_map(|column| column.references.as_mut())
+    {
+        materialize_foreign_key_identity(
+            &mut reference.object_id,
+            &mut reference.catalog_identity,
+            allocate,
+        )
+        .map_err(ConstraintMetadataError::into_sql_error)?;
+    }
+    for foreign_key in &mut foreign_keys[cloned..] {
+        materialize_foreign_key_identity(
+            &mut foreign_key.object_id,
+            &mut foreign_key.catalog_identity,
+            allocate,
+        )
+        .map_err(ConstraintMetadataError::into_sql_error)?;
+    }
+    Ok(())
 }
 
 /// Bind the partition bound and key of the created relation, which `DefineRelation` computes once the relation exists.
@@ -123,10 +211,11 @@ pub fn bind_create_table_partitioning(
     super::super::inheritance::bind_create_table_partitioning(&context.inheritance, c)
 }
 
-/// The defaults and generation expressions of the new table's columns, which `DefineRelation` transforms in column order before it binds the table's partitioning, since a partition key may name a generated column.
+/// The defaults and generation expressions of the new table's columns, which `DefineRelation` transforms in column order before it binds the table's partitioning, since a partition key may name a generated column; each stored expression takes its `pg_attrdef` OID as `AddRelationNewConstraints` stores it.
 pub fn define_create_table_defaults(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
+    allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> Result<(), SQLError> {
     let binding = context.bindings.binding_scope()?;
     let schema = SchemaBindingContext {
@@ -154,6 +243,7 @@ pub fn define_create_table_defaults(
             index,
             &c.foreign_keys,
         )?;
+        allocate_expression_identity(&mut c.columns[index], allocate)?;
     }
     Ok(())
 }
@@ -162,13 +252,17 @@ pub fn define_create_table_defaults(
 pub fn clone_create_table_parent_keys<'a>(
     context: &CreateTableAnalysisContext<'a>,
     c: &mut CreateTable,
-    inherited: &InheritedKeys,
+    inherited: &InheritedDefinitions,
+    allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> Result<ConstraintIndexNamer<'a>, SQLError> {
-    super::keys::clone_parent_keys(context.index_names, c, inherited)
+    super::keys::clone_parent_keys(context.index_names, c, inherited, allocate)
 }
 
 /// The names of the constraints a new table holds before its CHECKs besides the ones it inherits: the keys and foreign keys a partition clones from its parent.
-pub fn cloned_constraint_names(c: &CreateTable, inherited: &InheritedKeys) -> BTreeSet<String> {
+pub fn cloned_constraint_names(
+    c: &CreateTable,
+    inherited: &InheritedDefinitions,
+) -> BTreeSet<String> {
     c.key_constraints[..inherited.keys]
         .iter()
         .filter_map(|key| key.name.clone())
@@ -185,9 +279,10 @@ pub fn define_create_table_constraints(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
     indexes: ConstraintIndexNamer<'_>,
-    inherited: &InheritedKeys,
+    inherited: &InheritedDefinitions,
+    allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> Result<(), SQLError> {
-    super::keys::define_declared_keys(indexes, c, inherited)?;
+    super::keys::define_declared_keys(indexes, c, inherited, allocate)?;
     bind_create_table_relation_references(context.foreign_keys.catalog, c, inherited)?;
     for foreign_key in &mut c.foreign_keys {
         if !foreign_key.period {
@@ -288,7 +383,7 @@ pub(super) fn validate_check_expression(
 fn bind_create_table_relation_references(
     catalog: &dyn super::super::foreign_keys::ForeignKeyDefinitionCatalog,
     table: &mut CreateTable,
-    inherited: &InheritedKeys,
+    inherited: &InheritedDefinitions,
 ) -> Result<(), SQLError> {
     let table_name = table.name.clone();
     let qualifier = table.qualifier.clone();

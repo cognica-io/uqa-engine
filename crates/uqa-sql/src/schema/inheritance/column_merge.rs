@@ -44,6 +44,8 @@ pub(super) fn reject_repeated_columns(columns: &[ColumnDef]) -> Result<(), SQLEr
 pub(super) struct InheritedColumns {
     pub(super) columns: Vec<ColumnDef>,
     conflicting_defaults: Vec<String>,
+    /// The columns whose default or generation expression the statement declares, replacing whatever the parents give; the other expressions are inherited.
+    local_expressions: Vec<String>,
 }
 
 impl InheritedColumns {
@@ -108,6 +110,9 @@ impl InheritedColumns {
             .iter()
             .position(|existing| existing.name == column.name)
         else {
+            if column.default.is_some() || column.generated.is_some() {
+                self.local_expressions.push(column.name.clone());
+            }
             self.columns.push(column);
             return Ok(());
         };
@@ -146,6 +151,7 @@ impl InheritedColumns {
             }
             self.conflicting_defaults
                 .retain(|name| *name != column.name);
+            self.local_expressions.push(column.name.clone());
         }
         adopt_declared_constraints(inherited, column);
         Ok(())
@@ -166,13 +172,26 @@ impl InheritedColumns {
         let inherited = &mut self.columns[index];
         check_generation_merge(inherited, &column)?;
         merge_local_not_null(inherited, &column);
-        if column.generated.is_some() {
-            inherited.generated = column.generated.take();
-        } else if column.default.is_some() {
-            inherited.default = column.default.take();
+        if column.default.is_some() || column.generated.is_some() {
+            if column.generated.is_some() {
+                inherited.generated = column.generated.take();
+            } else {
+                inherited.default = column.default.take();
+            }
+            self.local_expressions.push(column.name.clone());
         }
         adopt_declared_constraints(inherited, column);
         Ok(())
+    }
+
+    /// The columns whose default or generation expression a parent gives and the statement does not replace: `heap_create_with_catalog` stores these cooked expressions with the relation, before the statement's own are analyzed.
+    pub(super) fn inherited_expressions(&self) -> Vec<String> {
+        self.columns
+            .iter()
+            .filter(|column| column.default.is_some() || column.generated.is_some())
+            .filter(|column| !self.local_expressions.contains(&column.name))
+            .map(|column| column.name.clone())
+            .collect()
     }
 
     /// The columns whose parents gave different defaults that the new table does not replace, as `MergeAttributes` reports them last.

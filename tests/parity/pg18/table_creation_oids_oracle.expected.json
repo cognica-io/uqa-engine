@@ -1,0 +1,2256 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_a (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_b (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_b'::regclass::oid::bigint - 'oid_a'::regclass::oid::bigint AS plain_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plain_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT reltype::bigint - oid::bigint AS rowtype_off FROM pg_class WHERE oid = 'oid_a'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rowtype_off"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_c (a int DEFAULT 1, b int CHECK (b > 0), c int NOT NULL, d int UNIQUE, e int GENERATED ALWAYS AS (a + 1) STORED, CHECK (a < 10));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_d (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_d'::regclass::oid::bigint - 'oid_c'::regclass::oid::bigint AS full_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "full_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_c'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_c'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "5",
+              "oid_c_b_check",
+              "c"
+            ],
+            [
+              "6",
+              "oid_c_a_check",
+              "c"
+            ],
+            [
+              "7",
+              "oid_c_c_not_null",
+              "n"
+            ],
+            [
+              "9",
+              "oid_c_d_key",
+              "u"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_c'::regclass::oid::bigint AS off, adnum FROM pg_attrdef WHERE adrelid = 'oid_c'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "adnum"
+          ],
+          "type_oids": [
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ],
+            [
+              "4",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT indexrelid::bigint - 'oid_c'::regclass::oid::bigint AS off FROM pg_index WHERE indrelid = 'oid_c'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_e (a int PRIMARY KEY, b int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_f (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_f'::regclass::oid::bigint - 'oid_e'::regclass::oid::bigint AS pk_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pk_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_e'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_e'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "3",
+              "oid_e_a_not_null",
+              "n"
+            ],
+            [
+              "5",
+              "oid_e_pkey",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT indexrelid::bigint - 'oid_e'::regclass::oid::bigint AS off FROM pg_index WHERE indrelid = 'oid_e'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_g (a serial, b int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_h (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_g_a_seq'::regclass::oid::bigint - 'oid_g'::regclass::oid::bigint AS seq_off;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "seq_off"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_h'::regclass::oid::bigint - 'oid_g'::regclass::oid::bigint AS serial_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "serial_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_g'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_g'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "4",
+              "oid_g_a_not_null",
+              "n"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_g'::regclass::oid::bigint AS off, adnum FROM pg_attrdef WHERE adrelid = 'oid_g'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "adnum"
+          ],
+          "type_oids": [
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_i (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_fail1 (a int DEFAULT 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_j (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_j'::regclass::oid::bigint - 'oid_i'::regclass::oid::bigint AS failed_default;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "failed_default"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_fail2 (a int, CHECK (a > 0), CHECK (nosuch > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_k (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_k'::regclass::oid::bigint - 'oid_j'::regclass::oid::bigint AS failed_check;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "failed_check"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_fail3 (a int PRIMARY KEY, b int REFERENCES nosuch);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_l (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_l'::regclass::oid::bigint - 'oid_k'::regclass::oid::bigint AS failed_fk;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "failed_fk"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_fail4 (a nosuchtype);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_m (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_m'::regclass::oid::bigint - 'oid_l'::regclass::oid::bigint AS failed_type;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "failed_type"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_fail5 (a int, b int DEFAULT 1, c int DEFAULT 'y');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"y\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_n (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_n'::regclass::oid::bigint - 'oid_m'::regclass::oid::bigint AS failed_second_default;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "failed_second_default"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_fail6 (a int NOT NULL, b int, UNIQUE (nosuch));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nosuch\" named in key does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_o (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_o'::regclass::oid::bigint - 'oid_n'::regclass::oid::bigint AS failed_key_column;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "failed_key_column"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_fail7 (a int NOT NULL, b int, CHECK (a > 0), CONSTRAINT oid_fail7_a_check CHECK (b > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "check constraint \"oid_fail7_a_check\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_p (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_p'::regclass::oid::bigint - 'oid_o'::regclass::oid::bigint AS failed_duplicate_check;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "failed_duplicate_check"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_fail8 (a int, b int NOT NULL, CHECK (a > 0), c int UNIQUE, d int PRIMARY KEY, e int REFERENCES nosuch_table);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch_table\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_q (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_q'::regclass::oid::bigint - 'oid_p'::regclass::oid::bigint AS failed_fk_target;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "failed_fk_target"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "13"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_r (a int PRIMARY KEY, b int) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_r1 PARTITION OF oid_r (CHECK (b > 0)) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_s (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_s'::regclass::oid::bigint - 'oid_r1'::regclass::oid::bigint AS partition_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_r1'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_r1'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "4",
+              "oid_r1_pkey",
+              "p"
+            ],
+            [
+              "5",
+              "oid_r1_b_check",
+              "c"
+            ],
+            [
+              "6",
+              "oid_r_a_not_null",
+              "n"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT indexrelid::bigint - 'oid_r1'::regclass::oid::bigint AS off FROM pg_index WHERE indrelid = 'oid_r1'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_t (a int, b int, c int DEFAULT 2, CONSTRAINT oid_t_c CHECK (c > 0), CONSTRAINT oid_t_b CHECK (b > 0), UNIQUE (a, b), UNIQUE (b));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_u (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_u'::regclass::oid::bigint - 'oid_t'::regclass::oid::bigint AS two_keys_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "two_keys_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_t'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_t'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "4",
+              "oid_t_c",
+              "c"
+            ],
+            [
+              "5",
+              "oid_t_b",
+              "c"
+            ],
+            [
+              "7",
+              "oid_t_a_b_key",
+              "u"
+            ],
+            [
+              "9",
+              "oid_t_b_key",
+              "u"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT indexrelid::bigint - 'oid_t'::regclass::oid::bigint AS off, indexrelid::regclass::text FROM pg_index WHERE indrelid = 'oid_t'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "indexrelid"
+          ],
+          "type_oids": [
+            20,
+            25
+          ],
+          "rows": [
+            [
+              "6",
+              "oid_t_a_b_key"
+            ],
+            [
+              "8",
+              "oid_t_b_key"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_t'::regclass::oid::bigint AS off, adnum FROM pg_attrdef WHERE adrelid = 'oid_t'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "adnum"
+          ],
+          "type_oids": [
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_v (a int REFERENCES oid_e, b int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_v'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_v'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "3",
+              "oid_v_a_fkey",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_w0 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN;",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_w (a int PRIMARY KEY);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK;",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_x (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_x'::regclass::oid::bigint - 'oid_w0'::regclass::oid::bigint AS rolled_back_pk_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rolled_back_pk_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_par (a int DEFAULT 1, b int, CONSTRAINT oid_par_zz CHECK (a > 0), CONSTRAINT oid_par_aa CHECK (b > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_child (c int DEFAULT 3, d int, CHECK (c > 0), b int DEFAULT 2) INHERITS (oid_par);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"b\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE oid_after1 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_after1'::regclass::oid::bigint - 'oid_child'::regclass::oid::bigint AS child_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "child_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_child'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_child'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "4",
+              "oid_par_aa",
+              "c"
+            ],
+            [
+              "5",
+              "oid_par_zz",
+              "c"
+            ],
+            [
+              "8",
+              "oid_child_c_check",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_child'::regclass::oid::bigint AS off, adnum FROM pg_attrdef WHERE adrelid = 'oid_child'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "adnum"
+          ],
+          "type_oids": [
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ],
+            [
+              "6",
+              "2"
+            ],
+            [
+              "7",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_pp (a int, b int DEFAULT 5, CHECK (b > 0)) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_pp1 PARTITION OF oid_pp (b DEFAULT 6) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_after2 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_after2'::regclass::oid::bigint - 'oid_pp1'::regclass::oid::bigint AS partition_override;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition_override"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_pp1'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_pp1'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "3",
+              "oid_pp_b_check",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_pp1'::regclass::oid::bigint AS off, adnum FROM pg_attrdef WHERE adrelid = 'oid_pp1'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "adnum"
+          ],
+          "type_oids": [
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "4",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_pp2 PARTITION OF oid_pp FOR VALUES IN (2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_after3 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_after3'::regclass::oid::bigint - 'oid_pp2'::regclass::oid::bigint AS partition_inherited;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition_inherited"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_pp2'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_pp2'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "4",
+              "oid_pp_b_check",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_pp2'::regclass::oid::bigint AS off, adnum FROM pg_attrdef WHERE adrelid = 'oid_pp2'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "adnum"
+          ],
+          "type_oids": [
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_par2 (e int, CONSTRAINT oid_par2_mm CHECK (e > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_child2 () INHERITS (oid_par2, oid_par);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_child2'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_child2'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "4",
+              "oid_par2_mm",
+              "c"
+            ],
+            [
+              "5",
+              "oid_par_aa",
+              "c"
+            ],
+            [
+              "6",
+              "oid_par_zz",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_child2'::regclass::oid::bigint AS off, adnum FROM pg_attrdef WHERE adrelid = 'oid_child2'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "adnum"
+          ],
+          "type_oids": [
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_child3 (CONSTRAINT oid_par_zz CHECK (a > 0), f int DEFAULT 9) INHERITS (oid_par);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging constraint \"oid_par_zz\" with inherited definition",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE oid_after4 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_after4'::regclass::oid::bigint - 'oid_child3'::regclass::oid::bigint AS merged_check_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "merged_check_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_child3'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_child3'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "4",
+              "oid_par_aa",
+              "c"
+            ],
+            [
+              "5",
+              "oid_par_zz",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_child3'::regclass::oid::bigint AS off, adnum FROM pg_attrdef WHERE adrelid = 'oid_child3'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "adnum"
+          ],
+          "type_oids": [
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ],
+            [
+              "6",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_s0 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE pg_catalog.oid_sys (a int DEFAULT 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied to create \"pg_catalog.oid_sys\"",
+        "detail": "System catalog modifications are currently disallowed.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_s1 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_s1'::regclass::oid::bigint - 'oid_s0'::regclass::oid::bigint AS refused_system_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "refused_system_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE oid_tmp (a int DEFAULT 1, b int CHECK (b > 0), c int PRIMARY KEY);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_s2 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_s2'::regclass::oid::bigint - 'oid_tmp'::regclass::oid::bigint AS temp_table;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "temp_table"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'oid_tmp'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'oid_tmp'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "4",
+              "oid_tmp_b_check",
+              "c"
+            ],
+            [
+              "5",
+              "oid_tmp_c_not_null",
+              "n"
+            ],
+            [
+              "7",
+              "oid_tmp_pkey",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_s3 AS SELECT 1 AS a;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_s4 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_s4'::regclass::oid::bigint - 'oid_s3'::regclass::oid::bigint AS table_as;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "table_as"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS oid_s4 (a int DEFAULT 1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "42P07",
+          "message": "relation \"oid_s4\" already exists, skipping",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE oid_s5 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_s5'::regclass::oid::bigint - 'oid_s4'::regclass::oid::bigint AS skipped_existing;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "skipped_existing"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_s4 (a int DEFAULT 1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"oid_s4\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE oid_s6 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'oid_s6'::regclass::oid::bigint - 'oid_s5'::regclass::oid::bigint AS duplicate_name;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "duplicate_name"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

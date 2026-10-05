@@ -12,10 +12,13 @@ use super::{
         ownership::{self, ImplicitOwnershipContext},
     },
 };
+use crate::catalog::identity::{allocate_catalog_object_id, CatalogIdentityReservationContext};
 use uqa_sql::ast::{
     ColumnType, CreateTable, DeferredCreateTable, OnCommitAction, RelationPersistence,
     TableConstraintSet, TableHierarchy,
 };
+use uqa_sql::catalog::relation_oids::{RelationCatalogOids, RelationOidKind};
+use uqa_sql::schema::constraint_metadata::CatalogIdentityAllocator;
 use uqa_sql::schema::table_creation::checks;
 use uqa_sql::schema::table_creation::declaration::{self, CreateTableAnalysisContext};
 use uqa_sql::{SQLError, SQLResult};
@@ -28,12 +31,14 @@ pub trait TableCreationNamespace {
     fn relation_exists(&self, name: &str) -> Result<bool, SQLError>;
 }
 pub trait TableCreationPublication {
+    /// Create the relation under the OIDs `CREATE TABLE` allocated for it where `heap_create_with_catalog` allocates them.
     fn create_table(
         &self,
         name: &str,
         persistence: RelationPersistence,
         on_commit: OnCommitAction,
         owner: &crate::catalog::security::roles::locking::RoleBinding,
+        catalog_oids: RelationCatalogOids,
     ) -> StorageBackendResult<()>;
     fn create_vector_field(
         &self,
@@ -60,6 +65,8 @@ pub struct CreateTableContext<'a> {
     pub ownership: ImplicitOwnershipContext<'a>,
     pub schema_transactions: &'a dyn SchemaWriteTransaction,
     pub publication: &'a dyn TableCreationPublication,
+    /// The database's OID counter and catalog, from which the statement draws the OIDs of the relation and of each object it defines.
+    pub identities: CatalogIdentityReservationContext<'a>,
     pub notices: &'a crate::query::NoticeQueue,
 }
 fn storage_error(action: &str, error: StorageBackendError) -> SQLError {
@@ -151,7 +158,7 @@ fn preflight(
     }
     Ok(Some((name, persistence)))
 }
-/// Create the table in `DefineRelation`'s order, after the sequences of its columns: `MergeAttributes` and the relation's name, then its expressions and constraints, and then the relation and its catalog state.
+/// Create the table in `DefineRelation`'s order, after the sequences of its columns: `MergeAttributes` and the relation's name, then the relation's OIDs as `heap_create_with_catalog` allocates them, its expressions and constraints, each taking its OIDs as it is defined, and then the relation and its catalog state. A statement that fails after the relation's OIDs has used them, as the counter advances outside the transaction.
 fn create_after_preflight(
     context: &CreateTableContext<'_>,
     mut table: CreateTable,
@@ -165,13 +172,13 @@ fn create_after_preflight(
         table.persistence,
     )?;
     let mut notices = Vec::new();
-    let inherited_keys =
+    let inherited =
         declaration::prepare_create_table_declaration(&context.analysis, &mut table, &mut notices);
     // A notice reaches the client before the error that ends the statement.
     for notice in notices {
         context.notices.push(notice);
     }
-    let inherited_keys = inherited_keys?;
+    let inherited = inherited?;
     context.creation.retain_owner(owner)?;
     if preflight(
         context,
@@ -184,7 +191,13 @@ fn create_after_preflight(
     {
         return Ok(SQLResult::empty());
     }
-    define_expressions_and_constraints(context, &mut table, &inherited_keys)?;
+    // `heap_create_with_catalog` checks the row type's name, allocates the relation's OIDs and stores the inherited expressions before `DefineRelation` analyzes the statement's own.
+    context.creation.reserve_row_type_name(&table.name)?;
+    let relation =
+        uqa_core::RelationIdentity::from_legacy_name(&table.name).map_err(SQLError::Internal)?;
+    let mut allocator = context.identities.allocator(allocate_catalog_object_id);
+    let catalog_oids = allocator.allocate_relation_oids(RelationOidKind::Table, &relation)?;
+    define_expressions_and_constraints(context, &mut table, &inherited, &mut allocator)?;
     let mut vector_fields = Vec::new();
     for column in &table.columns {
         match &column.ty {
@@ -196,7 +209,13 @@ fn create_after_preflight(
     }
     context
         .publication
-        .create_table(&table.name, table.persistence, table.on_commit, owner)
+        .create_table(
+            &table.name,
+            table.persistence,
+            table.on_commit,
+            owner,
+            catalog_oids,
+        )
         .map_err(|error| storage_error("CREATE TABLE", error))?;
     for (field, dimensions) in vector_fields {
         context
@@ -210,6 +229,23 @@ fn create_after_preflight(
         &mut table,
         &mut registered_columns,
     )?;
+    // `ATAddForeignKeyConstraint` creates a foreign key's row once its referenced key is found.
+    declaration::define_foreign_key_identities(
+        &mut registered_columns,
+        &mut table.foreign_keys,
+        inherited.foreign_keys,
+        &mut allocator,
+    )?;
+    publish_catalog_state(context, &table, registered_columns)?;
+    Ok(SQLResult::empty())
+}
+
+/// Publish the created relation's columns and constraints, the ownership of its sequences and its hierarchy, then persist its schema and refresh its indexes.
+fn publish_catalog_state(
+    context: &CreateTableContext<'_>,
+    table: &CreateTable,
+    registered_columns: Vec<uqa_sql::ast::ColumnDef>,
+) -> Result<(), SQLError> {
     let constraints = TableConstraintSet {
         columns_declared: Some(true),
         persistence: table.persistence,
@@ -238,7 +274,7 @@ fn create_after_preflight(
         .publication
         .install_hierarchy(&table.name, table.hierarchy.clone())
         .map_err(|error| storage_error("CREATE TABLE hierarchy", error))?;
-    republish_ancestor_references(context, &table)?;
+    republish_ancestor_references(context, table)?;
     context
         .publication
         .persist_schema(&table.name)
@@ -246,30 +282,43 @@ fn create_after_preflight(
     context
         .publication
         .refresh_value_indexes(&table.name)
-        .map_err(|error| storage_error("CREATE TABLE btree indexes", error))?;
-    Ok(SQLResult::empty())
+        .map_err(|error| storage_error("CREATE TABLE btree indexes", error))
 }
 
-/// The defaults and generation expressions in column order, the partition bound and key, the keys a partition clones, the CHECK constraints in written order, and then the declared keys and foreign keys, in the order `DefineRelation` and the commands it queues define them.
+/// The inherited expressions, the defaults and generation expressions in column order, the partition bound and key, the keys a partition clones, the CHECK constraints in written order, the NOT NULL constraints, and then the declared keys and the foreign keys' references, in the order `DefineRelation` and the commands it queues define them; each defined object takes its OIDs from `allocate` as it is defined.
 fn define_expressions_and_constraints(
     context: &CreateTableContext<'_>,
     table: &mut CreateTable,
-    inherited_keys: &declaration::InheritedKeys,
+    inherited: &declaration::InheritedDefinitions,
+    allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> Result<(), SQLError> {
-    declaration::define_create_table_defaults(&context.analysis, table)?;
+    declaration::define_inherited_expressions(table, inherited, allocate)?;
+    declaration::define_create_table_defaults(&context.analysis, table, allocate)?;
     bind_partitioning(context, table)?;
     let indexes =
-        declaration::clone_create_table_parent_keys(&context.analysis, table, inherited_keys)?;
-    let cloned = declaration::cloned_constraint_names(table, inherited_keys);
+        declaration::clone_create_table_parent_keys(&context.analysis, table, inherited, allocate)?;
+    let cloned = declaration::cloned_constraint_names(table, inherited);
     let mut notices = Vec::new();
-    let checks =
-        checks::define_create_table_checks(&context.analysis, table, &cloned, &mut notices);
+    let checks = checks::define_create_table_checks(
+        &context.analysis,
+        table,
+        &cloned,
+        &mut notices,
+        allocate,
+    );
     // A notice reaches the client before the error that ends the statement.
     for notice in notices {
         context.notices.push(notice);
     }
     checks?;
-    declaration::define_create_table_constraints(&context.analysis, table, indexes, inherited_keys)
+    declaration::define_not_null_identities(table, allocate)?;
+    declaration::define_create_table_constraints(
+        &context.analysis,
+        table,
+        indexes,
+        inherited,
+        allocate,
+    )
 }
 
 /// `DefineRelation` binds a new partition's bound and the table's partition key once the relation exists, and `check_default_partition_contents` rejects a bound that accepts a row the parent's default partition holds.
