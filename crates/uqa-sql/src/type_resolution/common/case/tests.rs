@@ -23,6 +23,10 @@ fn inferred(
         ScalarExpr::Column(name) if name == "chosen" => ColumnType::Varchar(Some(3)),
         ScalarExpr::Column(name) if name == "otherwise" => ColumnType::Varchar(Some(9)),
         ScalarExpr::Literal(Value::Int(_)) => ColumnType::Integer,
+        ScalarExpr::TypedLiteral {
+            bound_type: Some(ty),
+            ..
+        } => ty.clone(),
         _ => ColumnType::Boolean,
     };
     ty.clone_with_control(control).map(Some).map_err(Into::into)
@@ -159,4 +163,36 @@ fn case_refinement_honors_both_cancellation_sources() {
         );
         assert_eq!(budget.used(), 0);
     }
+}
+
+#[test]
+fn simple_case_with_bound_condition_selects_the_matching_arm() {
+    let budget = MemoryBudget::new(64 * 1024);
+    let cancellation = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &cancellation, &cancellation);
+    // Binding reads the `unknown` literal of `CASE 1 WHEN '1'` into the integer constant it compares, which still selects the arm.
+    let expression = ScalarExpr::Case {
+        base: Some(Box::new(ScalarExpr::Literal(Value::Int(1)))),
+        when: vec![(
+            ScalarExpr::TypedLiteral {
+                value: Value::Int(1),
+                ty: "integer".into(),
+                bound_type: Some(ColumnType::Integer),
+                parameter_index: None,
+            },
+            ScalarExpr::Column("chosen".into()),
+        )],
+        else_branch: Some(Box::new(ScalarExpr::Column("otherwise".into()))),
+    };
+    let output = case_output_type_with_control(
+        &expression,
+        &ColumnType::Varchar(None),
+        &mut |expression| inferred(expression, &control),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(*output, ColumnType::Varchar(Some(3)));
+    assert_eq!(budget.used(), output.reserved_bytes());
+    drop(output);
+    assert_eq!(budget.used(), 0);
 }

@@ -66,7 +66,8 @@ fn each_statement_of_a_query_starts_its_own_statement_timeout() {
     let engine = Engine::new();
     let mut results = Vec::new();
     let outcome = engine.sql_simple_query(
-        "SET statement_timeout = 200; SELECT pg_sleep(0.15); SELECT pg_sleep(0.15); SELECT pg_sleep(60)",
+        // Two statements of 0.6 s pass under a 1 s limit that would cancel their sum; the margin absorbs the scheduling delays of a loaded test host.
+        "SET statement_timeout = 1000; SELECT pg_sleep(0.6); SELECT pg_sleep(0.6); SELECT pg_sleep(60)",
         &[],
         |result| {
             results.push(result.command_tag.clone());

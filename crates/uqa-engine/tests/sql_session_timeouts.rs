@@ -135,9 +135,10 @@ fn a_statement_that_outlasts_transaction_timeout_terminates_the_session() {
 #[test]
 fn an_idle_transaction_that_outlasts_transaction_timeout_terminates_the_session() {
     let engine = Engine::new();
-    sql(&engine, "SET transaction_timeout = 150");
+    // Each statement outside a transaction block is its own transaction, so three statements of 0.4 s pass under a 1 s limit; the margin absorbs the scheduling delays of a loaded test host.
+    sql(&engine, "SET transaction_timeout = 1000");
     for _ in 0..3 {
-        sql(&engine, "SELECT pg_sleep(0.1)");
+        sql(&engine, "SELECT pg_sleep(0.4)");
     }
     sql(&engine, "BEGIN");
     sql(&engine, "SELECT 1");
