@@ -28,6 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Check an added column's target before its type and clauses: a directly targeted partition reports `42809`, duplicate and system-column names report `42701`, and `IF NOT EXISTS` skips an existing ordinary column with PostgreSQL's notice. Preserve recursive additions and statement and savepoint rollback.
 - Release the selected role catalog guard before describing DROP ROLE dependencies, preventing a fixed-snapshot catalog refresh from deadlocking while preserving dependency errors and role tuple identity checks.
 - Release SQLite coordination descriptors when their last transport or lease closes, without waiting for another database open; preserve live aliases, snapshot readers and serializable participants.
 - Read spilled record metadata without loading its payload, and reuse exact transaction-local requirements instead of rereading endpoint and membership revisions for every graph edge. Keep requirement keys and lookup nodes within the original session allowance, preserve savepoint undo and external observed revisions, and retain conflict validation at command refresh and commit.

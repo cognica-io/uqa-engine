@@ -28,3 +28,30 @@ fn column_declarations_match_postgresql_sqlite() {
         &Engine::open(&directory.path().join("column-declarations.db")).unwrap(),
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn add_column_checks_match_postgresql(#[case] provider: usize) {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("add-column-checks.db");
+    let engine = match provider {
+        0 => Engine::new(),
+        1 => Engine::open(&path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    };
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../../tests/parity/pg18/add_column_checks_oracle.expected.json"),
+    );
+}
