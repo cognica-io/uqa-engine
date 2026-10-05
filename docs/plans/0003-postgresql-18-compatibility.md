@@ -266,6 +266,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `types.common-type-selection` | `M4` | `partial` |
 | `ddl.default-cooking` | `M3` | `partial` |
 | `ddl.create-table-oid-allocation` | `M3` | `partial` |
+| `ddl.create-table-not-null-constraints` | `M3` | `partial` |
 | `ddl.create-table-analysis-order` | `M3` | `partial` |
 | `types.type-object-lifecycle` | `M3` | `verified` |
 | `catalog.object-dependencies` | `M3` | `partial` |

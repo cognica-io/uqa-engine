@@ -6,6 +6,7 @@
 
 //! CREATE TABLE inheritance and partition row-type preparation.
 
+use crate::schema::table_creation::not_nulls::InheritedNotNull;
 use crate::semantics::partition::{
     transform_partition_bound, validate_new_partition_bound, PartitionContext,
 };
@@ -79,7 +80,7 @@ pub fn merge_create_table_hierarchy(
     context: &InheritanceContext<'_>,
     table: &mut CreateTable,
     notices: &mut Vec<crate::SQLNotice>,
-) -> Result<Vec<String>, SQLError> {
+) -> Result<MergedParents, SQLError> {
     table.hierarchy.local_columns = table
         .columns
         .iter()
@@ -96,7 +97,7 @@ pub fn merge_create_table_hierarchy(
         }
         column_merge::check_column_count(table.columns.len())?;
         column_merge::reject_repeated_columns(&table.columns)?;
-        return Ok(Vec::new());
+        return Ok(MergedParents::default());
     }
     let is_partition = table.hierarchy.partition_bound.is_some();
     if is_partition && table.hierarchy.parents.len() != 1 {
@@ -122,6 +123,7 @@ pub fn merge_create_table_hierarchy(
     column_merge::check_column_count(table.columns.len())?;
     column_merge::reject_repeated_columns(&table.columns)?;
     let mut inherited = column_merge::InheritedColumns::default();
+    let mut inherited_not_nulls = Vec::new();
     let mut inherited_checks = Vec::new();
     let mut inherited_foreign_keys = Vec::new();
     let mut inherited_keys = Vec::new();
@@ -204,6 +206,15 @@ pub fn merge_create_table_hierarchy(
                 }
             }
         }
+        for column in &columns {
+            if column.not_null {
+                InheritedNotNull::record(
+                    &mut inherited_not_nulls,
+                    &column.name,
+                    column.not_null_name.as_deref(),
+                );
+            }
+        }
         for column in columns {
             inherited.merge_parent_column(column, notices)?;
         }
@@ -262,7 +273,17 @@ pub fn merge_create_table_hierarchy(
         table.key_constraints = inherited_keys;
     }
     table.hierarchy.parents = canonical_parents;
-    Ok(expressions)
+    Ok(MergedParents {
+        expressions,
+        not_nulls: inherited_not_nulls,
+    })
+}
+
+/// What `MergeAttributes` hands the steps that follow it: the columns whose default or generation expression a parent gives, and the NOT NULL constraints the parents give.
+#[derive(Debug, Default)]
+pub struct MergedParents {
+    pub expressions: Vec<String>,
+    pub not_nulls: Vec<InheritedNotNull>,
 }
 
 /// `MergeAttributes` keeps a temporary relation out of a permanent hierarchy: a temporary partition of a permanent table, and a permanent child or partition of a temporary one.

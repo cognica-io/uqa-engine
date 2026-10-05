@@ -14,15 +14,8 @@ use super::{
 };
 use crate::ast::{
     AutoIncrement, ColumnType, DeclaredCheck, DeclaredElement, GeneratedColumn,
-    GeneratedColumnKind, TableCheck,
+    GeneratedColumnKind, NotNullDeclaration, TableCheck,
 };
-
-struct TableNotNullConstraint {
-    name: Option<String>,
-    column: String,
-    validated: bool,
-    no_inherit: bool,
-}
 
 #[expect(
     clippy::too_many_lines,
@@ -51,7 +44,6 @@ pub(in crate::compiler) fn compile_create_table(
     let mut untyped_columns = Vec::new();
     let mut foreign_keys: Vec<ForeignKey> = Vec::new();
     let mut key_constraints: Vec<TableKeyConstraint> = Vec::new();
-    let mut table_not_nulls = Vec::new();
     for elt in &stmt.table_elts {
         let inner = elt
             .node
@@ -171,6 +163,11 @@ pub(in crate::compiler) fn compile_create_table(
                         TableKeyConstraintKind::Unique
                     };
                     let key_columns = extract_strings(&cstr.keys)?;
+                    if kind == TableKeyConstraintKind::PrimaryKey {
+                        element_order.push(DeclaredElement::PrimaryKey {
+                            columns: key_columns.clone(),
+                        });
+                    }
                     key_constraints.push(TableKeyConstraint {
                         catalog_identity: None,
                         index_identity: None,
@@ -183,21 +180,19 @@ pub(in crate::compiler) fn compile_create_table(
                     });
                 }
                 pg_query::protobuf::ConstrType::ConstrNotnull => {
-                    element_order.push(DeclaredElement::NotNull {
-                        no_inherit: cstr.is_no_inherit,
-                    });
                     let key_columns = extract_strings(&cstr.keys)?;
                     let [column] = key_columns.as_slice() else {
                         return Err(SQLError::TypeMismatch(
                             "NOT NULL constraint must name exactly one column".into(),
                         ));
                     };
-                    table_not_nulls.push(TableNotNullConstraint {
-                        name: constraint_name(&cstr.conname),
+                    // CREATE TABLE validates every NOT NULL constraint it creates; NOT VALID applies to ALTER TABLE.
+                    element_order.push(DeclaredElement::NotNull(NotNullDeclaration {
                         column: column.clone(),
-                        validated: cstr.initially_valid,
+                        name: constraint_name(&cstr.conname),
                         no_inherit: cstr.is_no_inherit,
-                    });
+                        explicit: true,
+                    }));
                 }
                 other => {
                     return Err(SQLError::Unsupported(format!(
@@ -211,31 +206,6 @@ pub(in crate::compiler) fn compile_create_table(
                 )));
             }
         }
-    }
-    for constraint in table_not_nulls {
-        let column = columns
-            .iter_mut()
-            .find(|column| column.name == constraint.column)
-            .ok_or_else(|| {
-                SQLError::TypeMismatch(format!(
-                    "NOT NULL constraint references unknown column `{}`",
-                    constraint.column
-                ))
-            })?;
-        if column.not_null_explicit {
-            return Err(SQLError::Routine {
-                sqlstate: "55000".into(),
-                message: format!(
-                    "cannot create not-null constraint on column \"{}\": a not-null constraint already exists",
-                    constraint.column
-                ),
-            });
-        }
-        column.not_null = true;
-        column.not_null_explicit = true;
-        column.not_null_name = constraint.name;
-        column.not_null_validated = constraint.validated;
-        column.not_null_no_inherit = constraint.no_inherit;
     }
     for foreign_key in &foreign_keys {
         if !foreign_key.period {
@@ -274,6 +244,7 @@ pub(in crate::compiler) fn compile_create_table(
         on_commit,
         hierarchy,
         check_order,
+        not_null_declarations: Vec::new(),
         element_order,
         untyped_columns,
     })

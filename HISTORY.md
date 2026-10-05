@@ -38,6 +38,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Route `INSERT`, `UPDATE`, `DELETE` and `MERGE` through automatically updatable views onto an underlying view's `INSTEAD OF` trigger, count the rows a suppressed trigger lets through, and report non-updatable views with `view_query_is_auto_updatable`'s DETAIL and HINT.
 - Check `CREATE FUNCTION` and `CREATE PROCEDURE` attributes as PostgreSQL does (repeated and procedure-only attributes, `SET`, `COST`, `ROWS`, `SUPPORT`, `PARALLEL` and the language), and place new relations in the namespace and with the persistence `RangeVarGetCreationNamespace` and `RangeVarAdjustRelationPersistence` assign.
 - Select common types as `select_common_type` does for `IN` lists, `CASE` and same-category operands, cast OID aliases to `name`, `varchar` and `char` through their output functions, and draw every catalog OID from one database counter in creation order, unchanged by reopening.
+- Create a new table's NOT NULL constraints as `AddRelationNotNullConstraints` does: after the CHECK constraints, one per column from the column clauses, table constraints and PRIMARY KEY columns in declaration order and then from the parents, with PostgreSQL's `42601`, `42703`, `0A000`, `42804`, `42710` and `23505` diagnostics, inherited names kept unless the table holds them, every constraint validated, and the OIDs PostgreSQL allocates.
 
 ## [0.4.9] - 2026-10-03
 

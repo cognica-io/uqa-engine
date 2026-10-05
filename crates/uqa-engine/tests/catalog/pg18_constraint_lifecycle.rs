@@ -961,6 +961,8 @@ mod column_declarations;
 mod default_cooking;
 #[path = "pg18_constraint_lifecycle/merge_attributes.rs"]
 mod merge_attributes;
+#[path = "pg18_constraint_lifecycle/not_null_constraints.rs"]
+mod not_null_constraints;
 #[path = "pg18_constraint_lifecycle/partition_column_options.rs"]
 mod partition_column_options;
 #[path = "pg18_constraint_lifecycle/table_creation_oids.rs"]

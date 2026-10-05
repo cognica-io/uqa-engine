@@ -19,8 +19,8 @@ use uqa_sql::ast::{
 };
 use uqa_sql::catalog::relation_oids::{RelationCatalogOids, RelationOidKind};
 use uqa_sql::schema::constraint_metadata::CatalogIdentityAllocator;
-use uqa_sql::schema::table_creation::checks;
 use uqa_sql::schema::table_creation::declaration::{self, CreateTableAnalysisContext};
+use uqa_sql::schema::table_creation::{checks, not_nulls};
 use uqa_sql::{SQLError, SQLResult};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
@@ -197,7 +197,13 @@ fn create_after_preflight(
         uqa_core::RelationIdentity::from_legacy_name(&table.name).map_err(SQLError::Internal)?;
     let mut allocator = context.identities.allocator(allocate_catalog_object_id);
     let catalog_oids = allocator.allocate_relation_oids(RelationOidKind::Table, &relation)?;
-    define_expressions_and_constraints(context, &mut table, &inherited, &mut allocator)?;
+    define_expressions_and_constraints(
+        context,
+        &mut table,
+        &inherited,
+        catalog_oids.relation,
+        &mut allocator,
+    )?;
     let mut vector_fields = Vec::new();
     for column in &table.columns {
         match &column.ty {
@@ -285,11 +291,12 @@ fn publish_catalog_state(
         .map_err(|error| storage_error("CREATE TABLE btree indexes", error))
 }
 
-/// The inherited expressions, the defaults and generation expressions in column order, the partition bound and key, the keys a partition clones, the CHECK constraints in written order, the NOT NULL constraints, and then the declared keys and the foreign keys' references, in the order `DefineRelation` and the commands it queues define them; each defined object takes its OIDs from `allocate` as it is defined.
+/// The inherited expressions, the defaults and generation expressions in column order, the partition bound and key, the keys a partition clones, the CHECK constraints in written order, the NOT NULL constraints as `AddRelationNotNullConstraints` creates them, and then the declared keys and the foreign keys' references, in the order `DefineRelation` and the commands it queues define them; each defined object takes its OIDs from `allocate` as it is defined. `relation_oid` is the relation's OID, which a constraint name violation reports.
 fn define_expressions_and_constraints(
     context: &CreateTableContext<'_>,
     table: &mut CreateTable,
     inherited: &declaration::InheritedDefinitions,
+    relation_oid: u32,
     allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> Result<(), SQLError> {
     declaration::define_inherited_expressions(table, inherited, allocate)?;
@@ -311,7 +318,13 @@ fn define_expressions_and_constraints(
         context.notices.push(notice);
     }
     checks?;
-    declaration::define_not_null_identities(table, allocate)?;
+    not_nulls::define_not_null_constraints(
+        &context.analysis,
+        table,
+        inherited,
+        relation_oid,
+        allocate,
+    )?;
     declaration::define_create_table_constraints(
         &context.analysis,
         table,

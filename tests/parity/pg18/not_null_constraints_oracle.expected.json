@@ -1,0 +1,2166 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn1 (a int PRIMARY KEY, NOT NULL a NO INHERIT);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting NO INHERIT declaration for not-null constraint on column \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn2 (a int NOT NULL NO INHERIT, PRIMARY KEY (a));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting NO INHERIT declaration for not-null constraint on column \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn3 (a int, NOT NULL a NO INHERIT, PRIMARY KEY (a));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting NO INHERIT declaration for not-null constraint on column \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn4 (a int NOT NULL, NOT NULL a NO INHERIT, CHECK (nofunc() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn4b (a int NOT NULL, NOT NULL a NO INHERIT);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting NO INHERIT declaration for not-null constraint on column \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn5 (a int CONSTRAINT x NOT NULL, CONSTRAINT y NOT NULL a, CHECK (nofunc() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn5b (a int CONSTRAINT x NOT NULL, CONSTRAINT y NOT NULL a);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting not-null constraint names \"x\" and \"y\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn6 (a int CONSTRAINT x NOT NULL, b int CONSTRAINT x NOT NULL);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"x\" for relation \"ctn_nn6\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn7 (a int, b int, CONSTRAINT x NOT NULL a, CONSTRAINT x NOT NULL b);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"x\" for relation \"ctn_nn7\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn8 (a int NOT NULL, CONSTRAINT y NOT NULL a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname FROM pg_constraint WHERE conrelid = 'ctn_nn8'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "y"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn9 (a int CONSTRAINT y NOT NULL, NOT NULL a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname FROM pg_constraint WHERE conrelid = 'ctn_nn9'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "y"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn9b (a int CONSTRAINT x NOT NULL, CONSTRAINT x NOT NULL a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname FROM pg_constraint WHERE conrelid = 'ctn_nn9b'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "x"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn10 (a int, NOT NULL ctid);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot add not-null constraint on system column \"ctid\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn10b (a int, NOT NULL nocol);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" of relation \"ctn_nn10b\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn10c (a int, NOT NULL nocol, CHECK (nofunc() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nnp (a int NOT NULL, b int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn11 (NOT NULL a NO INHERIT) INHERITS (ctn_nnp);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot define not-null constraint with NO INHERIT on column \"a\"",
+        "detail": "The column has an inherited not-null constraint.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn13 (CONSTRAINT ctn_nnp_a_not_null CHECK (true)) INHERITS (ctn_nnp);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ctn_nn13'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ctn_nn13_a_not_null",
+              "n"
+            ],
+            [
+              "ctn_nnp_a_not_null",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn14 (CONSTRAINT ctn_nn14_a_not_null CHECK (true)) INHERITS (ctn_nnp);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ctn_nn14'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ctn_nn14_a_not_null",
+              "c"
+            ],
+            [
+              "ctn_nnp_a_not_null",
+              "n"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn22 (a int, NOT NULL a, NOT NULL a, NOT NULL a NO INHERIT);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting NO INHERIT declaration for not-null constraint on column \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn23 (a serial, NOT NULL a NO INHERIT);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting NO INHERIT declaration for not-null constraint on column \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn24 (a int GENERATED ALWAYS AS IDENTITY, NOT NULL a NO INHERIT);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting NO INHERIT declaration for not-null constraint on column \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn29 (CONSTRAINT ctn_nn29_a_not_null CHECK (true), a int NOT NULL);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ctn_nn29'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ctn_nn29_a_not_null",
+              "c"
+            ],
+            [
+              "ctn_nn29_a_not_null1",
+              "n"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nnq (a int CONSTRAINT ctn_q NOT NULL) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nnq1 PARTITION OF ctn_nnq (CONSTRAINT ctn_q CHECK (true)) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ctn_nnq1'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ctn_nnq1_a_not_null",
+              "n"
+            ],
+            [
+              "ctn_q",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nnq2 PARTITION OF ctn_nnq (CONSTRAINT ctn_q2 NOT NULL a) FOR VALUES IN (2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'ctn_nnq2'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            19,
+            18,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "ctn_q2",
+              "n",
+              "t",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn31 (CONSTRAINT ctn_mine NOT NULL a) INHERITS (ctn_nnp);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'ctn_nn31'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            19,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "ctn_mine",
+              "t",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn32 (CONSTRAINT ctn_mine NOT NULL b) INHERITS (ctn_nnp);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'ctn_nn32'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            19,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "ctn_mine",
+              "t",
+              "0"
+            ],
+            [
+              "ctn_nnp_a_not_null",
+              "f",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn33 (NOT NULL a, NOT NULL b) INHERITS (ctn_nnp);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'ctn_nn33'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            19,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "ctn_nn33_a_not_null",
+              "t",
+              "1"
+            ],
+            [
+              "ctn_nn33_b_not_null",
+              "t",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nv2 (a int, NOT NULL a NOT VALID);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, convalidated FROM pg_constraint WHERE conrelid = 'ctn_nv2'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "convalidated"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "ctn_nv2_a_not_null",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nv7 (a int NOT NULL, NOT NULL a NOT VALID);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, convalidated FROM pg_constraint WHERE conrelid = 'ctn_nv7'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "convalidated"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "ctn_nv7_a_not_null",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nnp2 (a int CONSTRAINT ctn_p2nn NOT NULL);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn28 (CONSTRAINT ctn_p2nn CHECK (true)) INHERITS (ctn_nnp2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ctn_nn28'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ctn_nn28_a_not_null",
+              "n"
+            ],
+            [
+              "ctn_p2nn",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nnr (a int PRIMARY KEY);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn18 (a int NOT NULL CONSTRAINT ctn_nn18_a_not_null REFERENCES ctn_nnr);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"ctn_nn18_a_not_null\" for relation \"ctn_nn18\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn19 (a int NOT NULL, CONSTRAINT ctn_nn19_a_not_null UNIQUE (a));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"ctn_nn19_a_not_null\" for relation \"ctn_nn19\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn20 (b int, a int PRIMARY KEY, NOT NULL b);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ctn_nn20'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ctn_nn20_a_not_null",
+              "n"
+            ],
+            [
+              "ctn_nn20_b_not_null",
+              "n"
+            ],
+            [
+              "ctn_nn20_pkey",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_nn21 (NOT NULL nocol, a int DEFAULT nofunc());",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ctn_nn31 (b) VALUES (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "null value in column \"a\" of relation \"ctn_nn31\" violates not-null constraint",
+        "detail": "Failing row contains (null, 1).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ctn_nn33 (a) VALUES (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "null value in column \"b\" of relation \"ctn_nn33\" violates not-null constraint",
+        "detail": "Failing row contains (1, null).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o1 (a int PRIMARY KEY, NOT NULL a NO INHERIT, CHECK (nofunc() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_op (a int NOT NULL, b int NOT NULL);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o7 (c int NOT NULL, NOT NULL b) INHERITS (ctn_op);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'ctn_o7'::regclass::oid::bigint AS off, conname, contype, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'ctn_o7'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "ctn_o7_c_not_null",
+              "n",
+              "t",
+              "0"
+            ],
+            [
+              "4",
+              "ctn_o7_b_not_null",
+              "n",
+              "t",
+              "1"
+            ],
+            [
+              "5",
+              "ctn_op_a_not_null",
+              "n",
+              "f",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o8 (a int NOT NULL NOT NULL);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname FROM pg_constraint WHERE conrelid = 'ctn_o8'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "ctn_o8_a_not_null"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o10 (a int, CONSTRAINT ctn_o10_a_not_null CHECK (a > 0), NOT NULL a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ctn_o10'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ctn_o10_a_not_null",
+              "c"
+            ],
+            [
+              "ctn_o10_a_not_null1",
+              "n"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o11 (a int NOT NULL, NOT NULL a NOT VALID, CHECK (nofunc() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o13 (a int, b int NOT NULL, NOT NULL c, CHECK (nofunc() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o14 (a int, NOT NULL a, NOT NULL a NOT VALID);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, convalidated FROM pg_constraint WHERE conrelid = 'ctn_o14'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "convalidated"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "ctn_o14_a_not_null",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o15 (b int, CONSTRAINT ctn_op_a_not_null NOT NULL b) INHERITS (ctn_op);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"b\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'ctn_o15'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            19,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "ctn_o15_a_not_null",
+              "f",
+              "1"
+            ],
+            [
+              "ctn_op_a_not_null",
+              "t",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o16 (CONSTRAINT ctn_op_a_not_null CHECK (true), CONSTRAINT ctn_op_b_not_null CHECK (true)) INHERITS (ctn_op);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'ctn_o16'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'ctn_o16'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "3",
+              "ctn_op_a_not_null",
+              "c"
+            ],
+            [
+              "4",
+              "ctn_op_b_not_null",
+              "c"
+            ],
+            [
+              "5",
+              "ctn_o16_a_not_null",
+              "n"
+            ],
+            [
+              "6",
+              "ctn_o16_b_not_null",
+              "n"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_oq (a int NOT NULL, b int) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_oq1 PARTITION OF ctn_oq (NOT NULL b, CONSTRAINT ctn_oq_a_not_null CHECK (true)) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'ctn_oq1'::regclass::oid::bigint AS off, conname, contype, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'ctn_oq1'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "ctn_oq_a_not_null",
+              "c",
+              "t",
+              "0"
+            ],
+            [
+              "4",
+              "ctn_oq1_b_not_null",
+              "n",
+              "t",
+              "0"
+            ],
+            [
+              "5",
+              "ctn_oq1_a_not_null",
+              "n",
+              "f",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o17 (a int, b int, NOT NULL b, NOT NULL a, PRIMARY KEY (a));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'ctn_o17'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'ctn_o17'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "3",
+              "ctn_o17_b_not_null",
+              "n"
+            ],
+            [
+              "4",
+              "ctn_o17_a_not_null",
+              "n"
+            ],
+            [
+              "6",
+              "ctn_o17_pkey",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o18 (a int, NOT NULL a NO INHERIT, CHECK (nofunc() > 0), PRIMARY KEY (a));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting NO INHERIT declaration for not-null constraint on column \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o19 (a int CONSTRAINT ctn_x NOT NULL, b int, CONSTRAINT ctn_x UNIQUE (b));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"ctn_x\" for relation \"ctn_o19\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o20 (a int, b int CONSTRAINT ctn_y NOT NULL, CONSTRAINT ctn_y FOREIGN KEY (a) REFERENCES ctn_o5 (c));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"ctn_y\" for relation \"ctn_o20\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o5 (a int NOT NULL, b int NOT NULL, c int PRIMARY KEY, NOT NULL b, d int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'ctn_o5'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'ctn_o5'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "3",
+              "ctn_o5_a_not_null",
+              "n"
+            ],
+            [
+              "4",
+              "ctn_o5_b_not_null",
+              "n"
+            ],
+            [
+              "5",
+              "ctn_o5_c_not_null",
+              "n"
+            ],
+            [
+              "7",
+              "ctn_o5_pkey",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o6 (b int, a int PRIMARY KEY, NOT NULL b);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid::bigint - 'ctn_o6'::regclass::oid::bigint AS off, conname, contype FROM pg_constraint WHERE conrelid = 'ctn_o6'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            20,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "3",
+              "ctn_o6_a_not_null",
+              "n"
+            ],
+            [
+              "4",
+              "ctn_o6_b_not_null",
+              "n"
+            ],
+            [
+              "6",
+              "ctn_o6_pkey",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o22 (a int, NOT NULL a NO INHERIT, NOT NULL a NO INHERIT);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, connoinherit FROM pg_constraint WHERE conrelid = 'ctn_o22'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "connoinherit"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "ctn_o22_a_not_null",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o23 (a int) INHERITS (ctn_op);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging column \"a\" with inherited definition",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT oid::bigint - 'ctn_o23'::regclass::oid::bigint AS off, conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'ctn_o23'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "off",
+            "conname",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            20,
+            19,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "ctn_op_a_not_null",
+              "f",
+              "1"
+            ],
+            [
+              "4",
+              "ctn_op_b_not_null",
+              "f",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ctn_o23 (a, b) VALUES (1, NULL);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "null value in column \"b\" of relation \"ctn_o23\" violates not-null constraint",
+        "detail": "Failing row contains (1, null).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_o24 (CONSTRAINT ctn_op_a_not_null CHECK (true), CONSTRAINT ctn_o24_a_not_null CHECK (true)) INHERITS (ctn_op);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ctn_o24'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ctn_o24_a_not_null",
+              "c"
+            ],
+            [
+              "ctn_o24_a_not_null1",
+              "n"
+            ],
+            [
+              "ctn_op_a_not_null",
+              "c"
+            ],
+            [
+              "ctn_op_b_not_null",
+              "n"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c0 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DO $$ BEGIN CREATE TABLE ctn_c1 (a int CONSTRAINT ctn_cx NOT NULL, CONSTRAINT ctn_cx CHECK (true)); EXCEPTION WHEN unique_violation THEN RAISE NOTICE '% %', SQLSTATE, SQLERRM; END $$;",
+      "command_tags": [
+        "DO"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "23505 duplicate key value violates unique constraint \"pg_constraint_conrelid_contypid_conname_index\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE ctn_c2 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ctn_c2'::regclass::oid::bigint - 'ctn_c0'::regclass::oid::bigint AS held_name_consumes;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "held_name_consumes"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c3 (a int CONSTRAINT x NOT NULL, b int CONSTRAINT x NOT NULL);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"x\" for relation \"ctn_c3\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c4 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ctn_c4'::regclass::oid::bigint - 'ctn_c2'::regclass::oid::bigint AS repeated_name_consumes;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "repeated_name_consumes"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c5 (a int CONSTRAINT x NOT NULL, CONSTRAINT y NOT NULL a);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "conflicting not-null constraint names \"x\" and \"y\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c6 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ctn_c6'::regclass::oid::bigint - 'ctn_c4'::regclass::oid::bigint AS conflicting_names_consume;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conflicting_names_consume"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c7 (a int, NOT NULL nocol);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" of relation \"ctn_c7\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c8 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ctn_c8'::regclass::oid::bigint - 'ctn_c6'::regclass::oid::bigint AS unknown_column_consumes;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "unknown_column_consumes"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c9 (NOT NULL a NO INHERIT) INHERITS (ctn_nnp);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot define not-null constraint with NO INHERIT on column \"a\"",
+        "detail": "The column has an inherited not-null constraint.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c10 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ctn_c10'::regclass::oid::bigint - 'ctn_c8'::regclass::oid::bigint AS no_inherit_on_inherited_consumes;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no_inherit_on_inherited_consumes"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c11 (a int NOT NULL, b int NOT NULL, CONSTRAINT ctn_c11_b_not_null CHECK (true));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ctn_c12 (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ctn_c12'::regclass::oid::bigint - 'ctn_c10'::regclass::oid::bigint AS chosen_name_avoids_check;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "chosen_name_avoids_check"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ctn_c11'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "ctn_c11_a_not_null",
+              "n"
+            ],
+            [
+              "ctn_c11_b_not_null",
+              "c"
+            ],
+            [
+              "ctn_c11_b_not_null1",
+              "n"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

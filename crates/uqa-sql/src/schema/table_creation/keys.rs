@@ -31,6 +31,8 @@ mod tests;
 pub struct InheritedDefinitions {
     /// The columns whose default or generation expression a parent gives and the statement does not replace, which `heap_create_with_catalog` stores with the relation.
     pub expressions: Vec<String>,
+    /// The NOT NULL constraints the parents give, in parent order, which `AddRelationNotNullConstraints` creates after the declared ones.
+    pub not_nulls: Vec<super::not_nulls::InheritedNotNull>,
     /// The parent's keys, which precede the declared keys of the table.
     pub keys: usize,
     /// The parent's foreign keys, which precede the declared foreign keys of the table.
