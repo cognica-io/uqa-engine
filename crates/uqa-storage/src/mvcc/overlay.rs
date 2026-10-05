@@ -21,6 +21,8 @@ use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWrite, VersionError
 
 mod cursor;
 pub use cursor::{PrivateRecordCursor, PrivateRecordEntry};
+mod selection;
+pub(super) use selection::PrivateRecordSelection;
 mod retained;
 mod scopes;
 pub use scopes::PrivateRevisionScope;

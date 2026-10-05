@@ -51,6 +51,28 @@ impl RunCursor {
         &mut self,
         control: &StorageReadControl,
     ) -> VersionResult<Option<RunEntry>> {
+        self.read_next(None, control)
+    }
+
+    /// Continue at or beyond `key`, skipping intervening blocks while retaining an already loaded block when it covers the requested key.
+    pub(in crate::mvcc) fn seek_to(
+        &mut self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RunEntry>> {
+        let block = self.run.first_block_from(Bound::Included(key));
+        if block >= self.next_block {
+            self.block = None;
+            self.next_block = block;
+        }
+        self.read_next(Some(key), control)
+    }
+
+    fn read_next(
+        &mut self,
+        minimum: Option<&[u8]>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RunEntry>> {
         loop {
             control.cancellation().check()?;
             if self.block.is_none() {
@@ -76,7 +98,7 @@ impl RunCursor {
                             }
                             self.start = None;
                         }
-                        true
+                        minimum.is_none_or(|minimum| key >= minimum)
                     })?;
             if entry.is_some() {
                 return Ok(entry);

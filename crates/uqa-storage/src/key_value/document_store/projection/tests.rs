@@ -13,6 +13,8 @@ use crate::{
 };
 use std::sync::Arc;
 
+mod selected;
+
 fn fixture() -> (
     KeyValueDocumentStore,
     Arc<MemoryKeyValueStore>,

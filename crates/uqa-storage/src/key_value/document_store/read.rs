@@ -26,7 +26,7 @@ pub(super) struct Documents<'a> {
     pub(super) table: &'a str,
 }
 
-fn decode_id(prefix: &[u8], key: &[u8]) -> StorageBackendResult<DocId> {
+pub(super) fn decode_id(prefix: &[u8], key: &[u8]) -> StorageBackendResult<DocId> {
     let bytes = key
         .get(prefix.len()..)
         .and_then(|bytes| bytes.try_into().ok())

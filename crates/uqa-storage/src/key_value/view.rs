@@ -49,6 +49,11 @@ pub(crate) fn for_each_key(
 }
 
 pub type KeyValueReadScope<'a> = dyn FnMut(&dyn KeyValueRead) -> StorageBackendResult<()> + 'a;
+pub type KeyValueReadKeyIterator<'a> =
+    dyn Iterator<Item = StorageBackendResult<BudgetedVec<u8>>> + 'a;
+pub type KeyValuePointVisitor<'a> =
+    dyn FnMut(&[u8], Option<&[u8]>) -> StorageBackendResult<bool> + 'a;
+pub type KeyPresenceVisitor<'a> = dyn FnMut(&[u8], bool) -> StorageBackendResult<bool> + 'a;
 pub type KeyValueMutation<'a> =
     dyn FnMut(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()> + 'a;
 pub type KeyValueVersionedMutation<'a> = dyn FnMut(
@@ -96,6 +101,56 @@ pub trait KeyValueRead {
         prefix: &[u8],
         visit: &mut KeyValueReadVisitor<'_>,
     ) -> StorageBackendResult<()>;
+
+    /// Borrow requested values in input order on this boundary. Key production and callbacks are internal and must not reenter persistence. A false visitor or an error stops before producing the next key; defaults require only ordinary point reads.
+    fn visit_values(
+        &self,
+        keys: &mut KeyValueReadKeyIterator<'_>,
+        visit: &mut KeyValuePointVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        loop {
+            self.control().check()?;
+            let Some(key) = keys.next() else {
+                return Ok(());
+            };
+            let key = key?;
+            let mut more = true;
+            self.visit_value(&key, &mut |value| {
+                more = visit(&key, value)?;
+                Ok(())
+            })?;
+            self.control().check()?;
+            if !more {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Probe requested identities in input order without loading their values. The default uses the existing key-only scan capability; versioned readers reuse private selection cursors.
+    fn visit_key_presence(
+        &self,
+        keys: &mut KeyValueReadKeyIterator<'_>,
+        visit: &mut KeyPresenceVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        loop {
+            self.control().check()?;
+            let Some(key) = keys.next() else {
+                return Ok(());
+            };
+            let key = key?;
+            let mut present = false;
+            self.visit_keys_after(&key, None, 1, self.control(), &mut |found| {
+                present = found == &*key;
+                Ok(())
+            })?;
+            self.control().check()?;
+            let more = visit(&key, present)?;
+            self.control().check()?;
+            if !more {
+                return Ok(());
+            }
+        }
+    }
 
     /// Visit one value on this same boundary, charging temporary provider buffers to the supplied query allowance.
     fn visit_value_budgeted(

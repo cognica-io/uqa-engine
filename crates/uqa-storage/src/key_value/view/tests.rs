@@ -7,6 +7,65 @@
 use super::KeyValueReadRevision;
 use crate::mvcc::{CommitSequence, DatabaseId};
 
+#[test]
+fn value_batch_default_uses_required_point_reads_and_stops_before_the_next_key() {
+    use super::*;
+    use std::cell::Cell;
+
+    struct Legacy {
+        control: StorageReadControl,
+        calls: Cell<usize>,
+    }
+    impl KeyValueRead for Legacy {
+        fn control(&self) -> &StorageReadControl {
+            &self.control
+        }
+        fn revision(&self, _: &[&[u8]]) -> StorageBackendResult<KeyValueReadRevision> {
+            Ok(KeyValueReadRevision::fresh())
+        }
+        fn visit_value(
+            &self,
+            key: &[u8],
+            visit: &mut ValueReadVisitor<'_>,
+        ) -> StorageBackendResult<()> {
+            self.calls.set(self.calls.get() + 1);
+            visit((key == b"found").then_some(b"value".as_slice()))
+        }
+        fn visit_prefix(
+            &self,
+            _: &[u8],
+            _: &mut KeyValueReadVisitor<'_>,
+        ) -> StorageBackendResult<()> {
+            panic!("point batches do not require prefix reads")
+        }
+    }
+    let provider = Legacy {
+        control: StorageReadControl::with_limit(1024),
+        calls: Cell::new(0),
+    };
+    let mut requested = [b"missing".as_slice(), b"found", b"found"]
+        .into_iter()
+        .map(|key| {
+            let mut bytes = BudgetedVec::new(provider.control.memory());
+            bytes.extend_from_slice(key)?;
+            Ok(bytes)
+        })
+        .chain(std::iter::from_fn(|| {
+            panic!("a stopped visitor cannot generate the next key")
+        }));
+    let mut calls = 0;
+    provider
+        .visit_values(&mut requested, &mut |key, value| {
+            assert_eq!(value, (key == b"found").then_some(b"value".as_slice()));
+            calls += 1;
+            Ok(calls < 3)
+        })
+        .unwrap();
+    assert_eq!(calls, 3);
+    assert_eq!(provider.calls.get(), 3);
+    assert_eq!(provider.control.memory().used(), 0);
+}
+
 fn committed(database: u8, sequence: u64) -> KeyValueReadRevision {
     KeyValueReadRevision::records(
         DatabaseId::from_bytes([database; 16]),

@@ -8,6 +8,8 @@
 
 mod fingerprint;
 mod last;
+mod selected;
+pub use selected::SelectedRecordRead;
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -565,25 +567,7 @@ impl MergedRecordSnapshot {
         control: &StorageReadControl,
         visit: &mut RecordPointVisitor<'_>,
     ) -> VersionResult<()> {
-        if self.private_revision().is_none() {
-            return self.committed.visit_values(keys, control, visit);
-        }
-        loop {
-            control.check()?;
-            let Some(key) = keys.next() else {
-                return Ok(());
-            };
-            let key = key?;
-            let mut more = true;
-            self.visit_value(&key, control, &mut |record| {
-                more = visit(&key, record)?;
-                Ok(())
-            })?;
-            control.check()?;
-            if !more {
-                return Ok(());
-            }
-        }
+        self.selected(control).visit_values(keys, control, visit)
     }
 
     /// Preserve private replacement/tombstone precedence while enforcing the physical source's encoded-value cap.
