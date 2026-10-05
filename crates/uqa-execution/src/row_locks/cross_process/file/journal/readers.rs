@@ -177,6 +177,10 @@ fn decode(record: &[u8; SLOT_BYTES as usize]) -> Result<u64, String> {
     Ok(value)
 }
 
+fn io(error: std::io::Error) -> String {
+    format!("row-change reader registry I/O: {error}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,8 +203,4 @@ mod tests {
             }
         }
     }
-}
-
-fn io(error: std::io::Error) -> String {
-    format!("row-change reader registry I/O: {error}")
 }

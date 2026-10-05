@@ -473,6 +473,7 @@ fn row_change_epochs_ignore_unrelated_commits() {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
         _retention: None,
+        _manager: None,
     };
     let table = manager.table_key("public.accounts");
     let target = RowLockKey { table, doc_id: 1 };
@@ -505,6 +506,7 @@ fn row_change_epochs_ignore_unrelated_commits() {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
         _retention: None,
+        _manager: None,
     };
     manager
         .publish_row_changes(
@@ -528,6 +530,7 @@ fn key_share_ignores_compatible_non_key_mutations() {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
         _retention: None,
+        _manager: None,
     };
     let key = RowLockKey {
         table: manager.table_key("public.accounts"),
@@ -585,6 +588,7 @@ fn conflicting_change_targets_follow_primary_key_rewrites() {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
         _retention: None,
+        _manager: None,
     };
     let table = manager.table_key("public.accounts");
     let old = RowLockKey { table, doc_id: 1 };
@@ -631,6 +635,7 @@ fn physical_change_targets_follow_rewrites_across_relations() {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
         _retention: None,
+        _manager: None,
     };
     let source = RowLockKey {
         table: manager.table_key("public.items_low"),
@@ -685,6 +690,7 @@ fn delete_then_reinsert_of_the_same_key_terminates_the_old_generation() {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
         _retention: None,
+        _manager: None,
     };
     let key = RowLockKey {
         table: manager.table_key("public.accounts"),
@@ -727,6 +733,7 @@ fn primary_key_rewrite_chains_keep_commit_order() {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
         _retention: None,
+        _manager: None,
     };
     let table = manager.table_key("public.accounts");
     let three = RowLockKey { table, doc_id: 3 };

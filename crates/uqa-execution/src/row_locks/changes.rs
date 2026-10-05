@@ -12,11 +12,22 @@ use super::{
     LockStrength, RowLockKey, RowLockManager, SQLError,
 };
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct RowChangeBaseline {
     pub epoch: u64,
     pub cross_sequence: u64,
     pub(super) _retention: Option<Arc<cross_process::JournalReadLease>>,
+    pub(super) _manager: Option<Arc<RowLockManager>>,
+}
+
+impl std::fmt::Debug for RowChangeBaseline {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RowChangeBaseline")
+            .field("epoch", &self.epoch)
+            .field("cross_sequence", &self.cross_sequence)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PartialEq for RowChangeBaseline {

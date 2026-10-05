@@ -80,6 +80,8 @@ enum CrossAttachment {
 }
 
 pub struct RowLockManager {
+    /// A retained baseline keeps the registered manager, and therefore its single native lock descriptor, alive until the reader finishes.
+    baseline_owner: Weak<Self>,
     next_session: AtomicU64,
     next_transaction_xid: AtomicU64,
     /// The OID counter of a database whose storage does not reserve identifiers durably.

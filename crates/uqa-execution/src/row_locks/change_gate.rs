@@ -40,6 +40,7 @@ impl RowChangeSnapshot<'_> {
             epoch,
             cross_sequence,
             _retention: retention,
+            _manager: self.manager.baseline_owner.upgrade(),
         })
     }
 }
