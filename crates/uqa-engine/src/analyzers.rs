@@ -8,8 +8,12 @@ use super::{
     analyzer_registry, normalize_analyzer_phase, parse_analyzer_config, AnalyzerPhase, Arc, Engine,
     TableState,
 };
+use uqa_execution::storage_errors::storage_error;
 use uqa_sql::ast::ColumnType;
-use uqa_storage::{AnalyzerBindingOwner, FieldAnalyzerBinding};
+use uqa_sql::SQLError;
+use uqa_storage::{
+    AnalyzerBindingOwner, FieldAnalyzerBinding, StorageBackendError, StorageBackendResult,
+};
 
 mod persistence;
 
@@ -17,20 +21,24 @@ impl Engine {
     pub(crate) fn resolve_analyzer_revision(
         &self,
         name: &str,
-    ) -> Result<Arc<uqa_analysis::CompiledAnalyzer>, String> {
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
         let name = name.trim();
         if name.is_empty() {
-            return Err("analyzer name cannot be empty".into());
+            return Err(StorageBackendError::Other(
+                "analyzer name cannot be empty".into(),
+            ));
         }
         if let Ok(analyzer) = analyzer_registry::get_analyzer(name) {
-            return analyzer.compile().map_err(|error| error.to_string());
+            return Ok(analyzer.compile()?);
         }
         self.durable
             .named_analyzers
             .read()
             .get(name)
             .cloned()
-            .ok_or_else(|| format!("analyzer `{name}` is not registered"))
+            .ok_or_else(|| {
+                StorageBackendError::Other(format!("analyzer `{name}` is not registered"))
+            })
     }
 
     pub fn register_named_analyzer(
@@ -164,44 +172,50 @@ impl Engine {
         phase: &str,
     ) -> std::result::Result<(), String> {
         self.with_implicit_string_transaction(|engine| {
-            engine.set_table_field_analyzer_inner(table, field, analyzer_name, phase)
+            engine
+                .set_table_field_analyzer_inner(table, field, analyzer_name, phase)
+                .map_err(|error| error.to_string())
         })
     }
 
-    fn set_table_field_analyzer_inner(
+    pub(crate) fn set_table_field_analyzer_inner(
         &self,
         table: &str,
         field: &str,
         analyzer_name: &str,
         phase: &str,
-    ) -> std::result::Result<(), String> {
+    ) -> Result<(), SQLError> {
         self.synchronize_catalog_registries()
-            .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
+            .map_err(|error| storage_error("refresh analyzer catalog", &error))?;
         let table_name = self
             .try_resolve_table_name(table)
-            .map_err(|err| format!("resolve table `{table}`: {err}"))?
-            .ok_or_else(|| format!("set_table_analyzer: table `{table}` does not exist"))?;
+            .map_err(|error| storage_error("resolve analyzer table", &error))?
+            .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
         let Some(t) = self
             .try_table(&table_name)
-            .map_err(|err| format!("resolve table `{table}`: {err}"))?
+            .map_err(|error| storage_error("resolve analyzer table", &error))?
         else {
-            return Err(format!(
-                "set_table_analyzer: table `{table}` does not exist"
-            ));
+            return Err(SQLError::UnknownTable(table.into()));
         };
-        Self::validate_table_analyzer_field(&table_name, &t, field)?;
+        Self::validate_table_analyzer_field(&table_name, &t, field)
+            .map_err(SQLError::Unsupported)?;
         let analyzer_name = analyzer_name.trim();
-        let analyzer = self.resolve_analyzer_revision(analyzer_name)?;
-        let (_, phase) = normalize_analyzer_phase(phase)?;
+        let analyzer =
+            self.resolve_analyzer_revision(analyzer_name)
+                .map_err(|error| match error {
+                    StorageBackendError::Other(message) => SQLError::Unsupported(message),
+                    error => storage_error("resolve analyzer revision", &error),
+                })?;
+        let (_, phase) = normalize_analyzer_phase(phase).map_err(SQLError::Unsupported)?;
         let (old_index, old_search) = {
             let index = t.inverted_index.read();
             (
                 index
                     .index_analyzer_revision(field)
-                    .map_err(|error| format!("resolve prior index analyzer: {error}"))?,
+                    .map_err(|error| storage_error("resolve prior index analyzer", &error))?,
                 index
                     .search_analyzer_revision(field)
-                    .map_err(|error| format!("resolve prior search analyzer: {error}"))?,
+                    .map_err(|error| storage_error("resolve prior search analyzer", &error))?,
             )
         };
         let previous = self
@@ -214,7 +228,7 @@ impl Engine {
                 FieldAnalyzerBinding::unassigned(old_index.clone(), old_search.clone())
             });
         if previous.owner == AnalyzerBindingOwner::Gin {
-            return Err(format!("field `{table_name}`.`{field}` has a GIN-owned analyzer; recreate its owning index before assigning a field analyzer"));
+            return Err(SQLError::Unsupported(format!("field `{table_name}`.`{field}` has a GIN-owned analyzer; recreate its owning index before assigning a field analyzer")));
         }
         let candidate = previous.assigned(
             analyzer_name,
@@ -225,7 +239,8 @@ impl Engine {
         let rebuild = matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field);
         if rebuild {
-            let mut source = Self::fts_source(&t, Some(&self.runtime.cancellation))?;
+            let mut source = Self::fts_source(&t, Some(&self.runtime.cancellation))
+                .map_err(|error| storage_error("read FTS rebuild source", &error))?;
             t.inverted_index
                 .write()
                 .rebuild_with_analyzer_revision_cancellable(
@@ -235,16 +250,21 @@ impl Engine {
                     &mut source,
                     &self.runtime.cancellation,
                 )
-                .map_err(|error| format!("set_table_analyzer: {error}"))?;
+                .map_err(|error| storage_error("set_table_analyzer", &error))?;
         } else {
             t.inverted_index
                 .write()
                 .set_field_analyzer_revision(field, analyzer, phase)
-                .map_err(|error| format!("set_table_analyzer: {error}"))?;
+                .map_err(|error| SQLError::Unsupported(format!("set_table_analyzer: {error}")))?;
         }
         if let Err(error) = self.persist_field_analyzer_binding(&table_name, field, &candidate) {
             return Err(Self::restore_analyzer_error(
-                &t, field, old_index, old_search, rebuild, error,
+                &t,
+                field,
+                old_index,
+                old_search,
+                rebuild,
+                storage_error("persist table analyzer", &error),
             ));
         }
         self.durable
@@ -299,14 +319,17 @@ impl Engine {
         index_analyzer: Arc<uqa_analysis::CompiledAnalyzer>,
         search_analyzer: Arc<uqa_analysis::CompiledAnalyzer>,
         rebuild: bool,
-        original: String,
-    ) -> String {
+        original: SQLError,
+    ) -> SQLError {
         match Self::restore_field_analyzers(table, field, index_analyzer, search_analyzer, rebuild)
         {
             Ok(()) => original,
-            Err(cleanup) => {
-                format!("{original}; restoring the prior field analyzer also failed: {cleanup}")
-            }
+            Err(cleanup) => SQLError::Routine {
+                sqlstate: original.sqlstate().unwrap_or("XX000").into(),
+                message: format!(
+                    "{original}; restoring the prior field analyzer also failed: {cleanup}"
+                ),
+            },
         }
     }
 
@@ -316,7 +339,7 @@ impl Engine {
         index_analyzer: Arc<uqa_analysis::CompiledAnalyzer>,
         search_analyzer: Arc<uqa_analysis::CompiledAnalyzer>,
         rebuild: bool,
-    ) -> Result<(), String> {
+    ) -> StorageBackendResult<()> {
         let source = if rebuild {
             Some(Self::fts_source(table, None)?)
         } else {
@@ -324,18 +347,20 @@ impl Engine {
         };
         let mut index = table.inverted_index.write();
         if let Some(mut source) = source {
-            index
-                .rebuild_with_analyzer_revision(
-                    field,
-                    index_analyzer,
-                    AnalyzerPhase::Index,
-                    &mut source,
-                )
-                .map_err(|error| error.to_string())?;
+            index.rebuild_with_analyzer_revision(
+                field,
+                index_analyzer,
+                AnalyzerPhase::Index,
+                &mut source,
+            )?;
         } else {
-            index.set_field_analyzer_revision(field, index_analyzer, AnalyzerPhase::Index)?;
+            index
+                .set_field_analyzer_revision(field, index_analyzer, AnalyzerPhase::Index)
+                .map_err(StorageBackendError::Other)?;
         }
-        index.set_field_analyzer_revision(field, search_analyzer, AnalyzerPhase::Search)?;
+        index
+            .set_field_analyzer_revision(field, search_analyzer, AnalyzerPhase::Search)
+            .map_err(StorageBackendError::Other)?;
         Ok(())
     }
 

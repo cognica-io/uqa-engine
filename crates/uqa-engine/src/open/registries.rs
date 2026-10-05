@@ -191,7 +191,7 @@ impl Engine {
                     "GIN catalog repair references missing table `{table_name}`"
                 ))
             })?;
-            Self::rebuild_fts_index(&table).map_err(StorageBackendError::Other)?;
+            Self::rebuild_fts_index(&table)?;
         }
         Ok(())
     }

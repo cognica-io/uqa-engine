@@ -30,6 +30,7 @@ impl ScalarSession for Engine {
 impl AnalyzerRevisions for Engine {
     fn analyzer_revision(&self, name: &str) -> Result<Arc<uqa_analysis::CompiledAnalyzer>, String> {
         self.resolve_analyzer_revision(name)
+            .map_err(|error| error.to_string())
     }
 }
 
