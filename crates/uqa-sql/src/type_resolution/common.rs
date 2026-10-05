@@ -529,7 +529,7 @@ impl CommonTypeFailure {
     }
 }
 
-/// [`select_common_input_type_with_control`] without production limits.
+/// `select_common_input_type_with_control` without production limits.
 pub fn select_common_input_type(
     types: &[Option<&ColumnType>],
 ) -> Result<Option<ColumnType>, SQLError> {

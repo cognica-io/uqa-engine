@@ -164,7 +164,10 @@ fn constant_value(
 ) -> Result<Option<Produced<Value>>, SQLError> {
     control.check()?;
     match expression {
-        ScalarExpr::Literal(value) => Ok(Some(control.copy_value(value)?)),
+        // Binding reads an `unknown` literal into the typed constant it compares, which stays a constant.
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
+            Ok(Some(control.copy_value(value)?))
+        }
         ScalarExpr::Cast { expr, ty } => {
             let Some(value) = constant_value(expr, control)? else {
                 return Ok(None);
