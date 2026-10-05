@@ -71,6 +71,15 @@ fn resident_and_spilled_roots_preserve_ordered_lookup_and_independent_mutations(
     for &(key, value) in &after {
         assert_eq!(*resident.get(key).unwrap().unwrap(), value);
         assert_eq!(*disk.get(key).unwrap().unwrap(), value);
+        for map in [&resident, &disk] {
+            assert_eq!(
+                map.next_key(Some(key), &memory).unwrap(),
+                after
+                    .iter()
+                    .map(|entry| entry.0)
+                    .find(|candidate| *candidate > key)
+            );
+        }
         assert_eq!(
             disk.next(Some(key))
                 .unwrap()

@@ -8,22 +8,22 @@
 
 mod canonical;
 
-use super::{layout::Layout, IndexKind, Key, Mutation};
+use super::{layout::Layout, IndexKind, Key, VectorOperations};
 use crate::mvcc::{
     commit::{PreparedLookup, RecordWriteKind},
+    key::RecordKey,
     resolution::ResolutionMode,
     CommittedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges,
     RecordWrite, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
-use std::collections::BTreeMap;
-use uqa_core::memory::{BudgetedVec, MemoryError};
+use uqa_core::memory::BudgetedMap;
 
 struct Scope<'a> {
     layout: Layout<'a>,
     kind: IndexKind,
     header: PreparedRecordWrite,
-    operations: BudgetedVec<Mutation<'a>>,
+    operations: VectorOperations<'a>,
     rebase: bool,
 }
 
@@ -36,12 +36,6 @@ pub(in crate::mvcc) fn resolve(
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
     let effects = original.vector.as_ref().expect("requested vector effects");
-    let scope_bytes = effects
-        .operations
-        .len()
-        .checked_mul(size_of::<((IndexKind, &[u8]), Scope<'_>)>())
-        .ok_or(MemoryError::SizeOverflow)?;
-    let _scopes = control.memory().reserve(scope_bytes)?;
     let writes = PreparedLookup::new(original, control)?;
     let mut originals = original.writes();
     let mut position = 0;
@@ -51,35 +45,53 @@ pub(in crate::mvcc) fn resolve(
         }
         position += 1;
     }
-    let mut scopes = BTreeMap::<(IndexKind, &[u8]), Scope<'_>>::new();
-    for operation in effects.operations.iter() {
-        control.cancellation().check()?;
-        let key = operation.metadata.bytes();
-        let scope = if let std::collections::btree_map::Entry::Vacant(entry) =
-            scopes.entry((operation.kind, key))
-        {
-            let header = writes
-                .get(key, control)?
-                .ok_or(VersionError::InvalidEncoding(
-                    "vector input lacks a metadata replacement",
-                ))?;
-            entry.insert(Scope {
-                layout: operation.kind.layout(persistence)?,
-                kind: operation.kind,
-                header,
-                operations: BudgetedVec::new(control.memory()),
-                rebase: false,
-            })
-        } else {
-            scopes
-                .get_mut(&(operation.kind, key))
-                .expect("existing scope")
-        };
-        scope.operations.push(operation.borrowed())?;
+    let mut scopes = BudgetedMap::<(IndexKind, RecordKey), Scope<'_>>::new(control.memory());
+    for entry in effects.operations.iter() {
+        control.check()?;
+        let (position, operation) = entry?;
+        let key = (
+            operation.kind,
+            RecordKey::new(&operation.metadata, control.memory())?,
+        );
+        if !scopes.contains_key(&key) {
+            let header =
+                writes
+                    .get(&operation.metadata, control)?
+                    .ok_or(VersionError::InvalidEncoding(
+                        "vector input lacks a metadata replacement",
+                    ))?;
+            scopes.insert(
+                key.clone(),
+                Scope {
+                    layout: operation.kind.layout(persistence)?,
+                    kind: operation.kind,
+                    header,
+                    operations: VectorOperations::new(&effects.operations, control),
+                    rebase: false,
+                },
+            )?;
+        }
+        scopes
+            .get_mut(&key)
+            .expect("existing scope")
+            .operations
+            .push(position, control)?;
     }
-    for ((_, key), scope) in &mut scopes {
-        validate_scope(key, scope, original, &writes, base, current, control)?;
-    }
+    let mut validation = Ok(());
+    scopes.for_each_mut(|(_, key), scope| {
+        if validation.is_ok() {
+            validation = validate_scope(
+                key.bytes(),
+                scope,
+                original,
+                &writes,
+                base,
+                current,
+                control,
+            );
+        }
+    });
+    validation?;
     let changes = PrivateRecordChanges::new(control.memory());
     let mut originals = original.writes();
     let mut position = 0;
@@ -98,18 +110,16 @@ pub(in crate::mvcc) fn resolve(
                 .ok_or(VersionError::InvalidEncoding(
                     "vector preview targets a canonical record",
                 ))?;
-        let scope = scopes
-            .get(&(kind, &*owner))
-            .ok_or(VersionError::InvalidEncoding(
-                "vector preview lacks evaluated document input",
-            ))?;
+        let scope = scopes.get(&(kind, RecordKey::from_budgeted(owner))).ok_or(
+            VersionError::InvalidEncoding("vector preview lacks evaluated document input"),
+        )?;
         if !scope.rebase {
             validate(current, position, write.key(), write.expected(), control)?;
             changes.apply_owned(&[write.clone().with_kind(mode.kind(write.kind()))], control)?;
         }
     }
     for ((_, key), scope) in scopes.iter().filter(|(_, scope)| scope.rebase) {
-        scope.merge(key, &changes, current, mode, control)?;
+        scope.merge(key.bytes(), &changes, current, mode, control)?;
     }
     Ok(changes
         .prepare(control)?

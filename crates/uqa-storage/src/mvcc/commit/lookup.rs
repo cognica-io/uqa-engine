@@ -16,7 +16,7 @@ use crate::mvcc::VersionResult;
 use crate::read_control::StorageReadControl;
 
 use super::writes::PreparedWrites;
-use super::{PreparedRecordCommit, PreparedRecordWrite};
+use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWriteKind};
 
 enum Source<'a> {
     Resident {
@@ -96,6 +96,27 @@ impl<'a> PreparedLookup<'a> {
         control: &StorageReadControl,
         visit: &mut dyn FnMut(&PreparedRecordWrite) -> VersionResult<bool>,
     ) -> VersionResult<()> {
+        self.visit_matching_prefix(prefix, None, control, visit)
+    }
+
+    /// Select one write kind inside an exact key range without loading other kinds' payloads.
+    pub(in crate::mvcc) fn visit_prefix_with_kind(
+        &self,
+        prefix: &[u8],
+        kind: RecordWriteKind,
+        control: &StorageReadControl,
+        visit: &mut dyn FnMut(&PreparedRecordWrite) -> VersionResult<bool>,
+    ) -> VersionResult<()> {
+        self.visit_matching_prefix(prefix, Some(kind), control, visit)
+    }
+
+    fn visit_matching_prefix(
+        &self,
+        prefix: &[u8],
+        kind: Option<RecordWriteKind>,
+        control: &StorageReadControl,
+        visit: &mut dyn FnMut(&PreparedRecordWrite) -> VersionResult<bool>,
+    ) -> VersionResult<()> {
         match &self.source {
             Source::Resident { writes, .. } => {
                 for (key, write) in writes.range::<[u8], _>((
@@ -103,7 +124,10 @@ impl<'a> PreparedLookup<'a> {
                     std::ops::Bound::Unbounded,
                 )) {
                     control.cancellation().check()?;
-                    if !key.starts_with(prefix) || !visit(write)? {
+                    if !key.starts_with(prefix) {
+                        break;
+                    }
+                    if kind.is_none_or(|kind| write.kind() == kind) && !visit(write)? {
                         break;
                     }
                 }
@@ -113,6 +137,9 @@ impl<'a> PreparedLookup<'a> {
                 while let Some(entry) = cursor.next(control)? {
                     if !entry.key.bytes().starts_with(prefix) {
                         break;
+                    }
+                    if kind.is_some_and(|kind| entry.kind != kind) {
+                        continue;
                     }
                     let value = entry
                         .value

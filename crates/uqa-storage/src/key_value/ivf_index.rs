@@ -18,7 +18,9 @@ use super::index_keys::{
 use super::index_view::{read_view, IndexState, IndexView};
 use super::ivf_persistence;
 use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
-use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFMutation, IVFState};
+use crate::ivf_index::{
+    IVFCanonicalBuilder, IVFMutation, IVFPreparedMetadata, IVFReadIndex, IVFState,
+};
 use crate::vector_index::{IVFIndexParams, VectorIndex};
 use crate::{ReadOnlySnapshot, StorageBackendError, StorageBackendResult};
 
@@ -30,7 +32,7 @@ pub struct KeyValueIVFIndex {
     dimensions: u32,
     params: IVFIndexParams,
     require_persisted: bool,
-    view: IndexView<IVFIndex>,
+    view: IndexView<IVFReadIndex>,
 }
 
 impl KeyValueIVFIndex {
@@ -94,7 +96,7 @@ impl KeyValueIVFIndex {
         batch.commit()
     }
 
-    fn index_at(&self, read: &dyn KeyValueRead) -> StorageBackendResult<IndexState<IVFIndex>> {
+    fn index_at(&self, read: &dyn KeyValueRead) -> StorageBackendResult<IndexState<IVFReadIndex>> {
         self.view.load(
             read,
             &[
@@ -123,7 +125,7 @@ impl KeyValueIVFIndex {
         )
     }
 
-    fn read_index(&self) -> StorageBackendResult<IndexState<IVFIndex>> {
+    fn read_index(&self) -> StorageBackendResult<IndexState<IVFReadIndex>> {
         read_view(self.store.as_ref(), |read| self.index_at(read))
     }
 
@@ -134,7 +136,10 @@ impl KeyValueIVFIndex {
     ) -> StorageBackendResult<()> {
         self.view.evaluate(self.store.as_ref(), |read, batch| {
             let cached = self.index_at(read)?;
-            let after = cached.value.prepare_metadata(mutation, read.control())?;
+            let after = cached
+                .value
+                .clone_controlled(read.control())?
+                .prepare(&[mutation])?;
             let changed_doc = match mutation {
                 IVFMutation::Replace { document, .. } | IVFMutation::Delete(document) => {
                     Some(document)
@@ -144,7 +149,7 @@ impl KeyValueIVFIndex {
             let full_rewrite = changed_doc.is_none()
                 || cached.definition_candidate
                 || cached.revision.is_none()
-                || !cached.value.centroids_match(&after);
+                || cached.value.header().centroids != after.header().centroids;
             canonical(batch)?;
             let preview =
                 !cached.definition_candidate && cached.revision.is_some() && changed_doc.is_some();
@@ -165,9 +170,20 @@ impl KeyValueIVFIndex {
     fn build_from_canonical(
         &self,
         read: &dyn KeyValueRead,
-    ) -> StorageBackendResult<Budgeted<IVFIndex>> {
-        let entries = self.raw.load_all_from(read)?;
-        IVFIndex::from_canonical_controlled(self.dimensions, self.params, &entries, read.control())
+    ) -> StorageBackendResult<Budgeted<IVFReadIndex>> {
+        IVFReadIndex::new(self.canonical_candidate(read)?)
+    }
+
+    fn canonical_candidate(
+        &self,
+        read: &dyn KeyValueRead,
+    ) -> StorageBackendResult<IVFPreparedMetadata> {
+        let mut builder = IVFCanonicalBuilder::new(self.dimensions, self.params, read.control())?;
+        self.raw
+            .visit_canonical_from(read, |document, ordinal, vector| {
+                builder.vector(document, ordinal, vector)
+            })?;
+        builder.finish()
     }
 
     fn rebuild(&self) -> StorageBackendResult<()> {
@@ -179,13 +195,9 @@ impl KeyValueIVFIndex {
                     self.table, self.field
                 )));
             }
-            let vectors = self.raw.load_all_from(read)?;
-            let candidate = IVFIndex::prepare_canonical(
-                self.dimensions,
-                self.params,
-                &vectors,
-                read.control(),
-            )?;
+            let candidate = self
+                .canonical_candidate(read)?
+                .prepare(&[IVFMutation::Train])?;
             self.stage_snapshot(
                 batch,
                 &candidate,
@@ -200,7 +212,7 @@ impl KeyValueIVFIndex {
     fn stage_snapshot(
         &self,
         batch: &mut dyn KeyValueBatch,
-        snapshot: &IVFMetadataSnapshot,
+        snapshot: &IVFPreparedMetadata,
         revision: u64,
         full_rewrite: bool,
         changed_doc: Option<DocId>,
@@ -267,10 +279,15 @@ impl VectorIndex for KeyValueIVFIndex {
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         read_view(self.store.as_ref(), |read| {
             let cached = self.index_at(read)?;
-            if cached.value.state() != IVFState::Stale {
+            if cached.value.header().state != IVFState::Stale {
                 return Ok(cached.snapshot);
             }
-            let candidate = cached.value.trained_snapshot_controlled(read.control())?;
+            let candidate = IVFReadIndex::new(
+                cached
+                    .value
+                    .clone_controlled(read.control())?
+                    .prepare(&[IVFMutation::Train])?,
+            )?;
             ReadOnlySnapshot::from_budgeted(candidate)?
                 .with_canonical_vectors(Some(read.control()))?
                 .with_vector_read_control(read.control())?

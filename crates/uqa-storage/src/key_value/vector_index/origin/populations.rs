@@ -53,6 +53,17 @@ impl DiskANNPopulationRecordLayout for KeyValueDiskANNPopulationRecords {
         })
     }
 
+    fn origin_prefix(
+        &self,
+        field: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>> {
+        if field_len(field)? != field.len() {
+            return Err(invalid("population field has trailing bytes"));
+        }
+        concatenate(&[super::ROOT, field], control)
+    }
+
     fn origin_header_prefix(
         &self,
         key: &[u8],

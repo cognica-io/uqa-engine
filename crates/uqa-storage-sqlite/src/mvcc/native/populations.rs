@@ -103,6 +103,16 @@ impl DiskANNPopulationRecordLayout for NativeRecordNamespace {
         })
     }
 
+    fn origin_prefix(
+        &self,
+        field: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>> {
+        let field = Field::decode(field, control)?;
+        Identity::new(Family::VectorOrigins, field.owner)?
+            .encode_prefix(&[ValueRef::Text(&field.name)], control)
+    }
+
     fn origin_header_prefix(
         &self,
         key: &[u8],

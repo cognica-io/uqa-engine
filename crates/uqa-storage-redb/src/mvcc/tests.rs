@@ -22,6 +22,7 @@ mod read;
 mod receipts;
 mod reclamation;
 mod serializable;
+mod vector_spill;
 
 #[derive(Clone, Debug, Default)]
 struct FaultBackend {

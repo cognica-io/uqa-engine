@@ -109,21 +109,42 @@ impl<V: Record> Map<V> {
         }
     }
 
+    pub(crate) fn contains_key(&self, key: u128) -> StorageBackendResult<bool> {
+        match &self.root {
+            Root::Memory(map) => Ok(map.get(&key).is_some_and(Option::is_some)),
+            Root::Disk(map) => map.contains_key(key),
+        }
+    }
+
     pub(crate) fn get(&self, key: u128) -> StorageBackendResult<Option<Read<'_, V>>> {
+        self.get_with_memory(key, &self.memory)
+    }
+
+    pub(crate) fn get_with_memory(
+        &self,
+        key: u128,
+        memory: &MemoryBudget,
+    ) -> StorageBackendResult<Option<Read<'_, V>>> {
         match &self.root {
             Root::Memory(map) => Ok(map
                 .get(&key)
                 .and_then(Option::as_ref)
                 .map(|value| Read::Borrowed(&***value))),
-            Root::Disk(map) => map
-                .get(key, &self.memory)
-                .map(|value| value.map(Read::Owned)),
+            Root::Disk(map) => map.get(key, memory).map(|value| value.map(Read::Owned)),
         }
     }
 
     pub(crate) fn next(
         &self,
         after: Option<u128>,
+    ) -> StorageBackendResult<Option<(u128, Read<'_, V>)>> {
+        self.next_with_memory(after, &self.memory)
+    }
+
+    pub(crate) fn next_with_memory(
+        &self,
+        after: Option<u128>,
+        memory: &MemoryBudget,
     ) -> StorageBackendResult<Option<(u128, Read<'_, V>)>> {
         match &self.root {
             Root::Memory(map) => Ok(map
@@ -138,8 +159,26 @@ impl<V: Record> Map<V> {
                         .map(|value| (*key, Read::Borrowed(&***value)))
                 })),
             Root::Disk(map) => map
-                .next(after, &self.memory)
+                .next(after, memory)
                 .map(|entry| entry.map(|(key, value)| (key, Read::Owned(value)))),
+        }
+    }
+
+    /// Enumerate metadata without decoding a spilled payload.
+    pub(crate) fn next_key(
+        &self,
+        after: Option<u128>,
+        memory: &MemoryBudget,
+    ) -> StorageBackendResult<Option<u128>> {
+        match &self.root {
+            Root::Memory(map) => Ok(map
+                .range_from(
+                    after
+                        .as_ref()
+                        .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
+                )
+                .find_map(|(key, value)| value.as_ref().map(|_| *key))),
+            Root::Disk(map) => map.next_key(after, memory),
         }
     }
 

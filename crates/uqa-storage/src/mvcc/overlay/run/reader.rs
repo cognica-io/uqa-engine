@@ -100,6 +100,8 @@ impl EntryReader {
                         return Ok(None);
                     }
                     let raw = entry::decode(bytes, position)?;
+                    #[cfg(test)]
+                    super::read_counts::entry();
                     match selection(raw.key) {
                         Selection::Take => return raw.owned(control.memory()).map(Some),
                         Selection::End => return Ok(None),
@@ -111,6 +113,8 @@ impl EntryReader {
                         return Ok(None);
                     }
                     let entry = entry::read(&mut stream.reader, &mut stream.remaining, control)?;
+                    #[cfg(test)]
+                    super::read_counts::entry();
                     match selection(entry.key.bytes()) {
                         Selection::Take => return Ok(Some(entry)),
                         Selection::End => return Ok(None),

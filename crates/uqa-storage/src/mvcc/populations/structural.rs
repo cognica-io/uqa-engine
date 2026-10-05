@@ -21,6 +21,10 @@ impl<'a> StructuralRecords<'a> {
         PreparedLookup::new(prepared, control).map(Self)
     }
 
+    pub(super) fn writes(&self) -> &PreparedLookup<'a> {
+        &self.0
+    }
+
     /// The canonical write of `key`, if the batch has one.
     pub(super) fn get(
         &self,

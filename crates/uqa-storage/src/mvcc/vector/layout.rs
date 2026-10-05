@@ -6,7 +6,7 @@
 
 //! Dispatch physical codecs while keeping vector transaction rules shared.
 
-use super::{IndexKind, Key, Mutation};
+use super::{IndexKind, Key, VectorOperations};
 use crate::mvcc::{
     CommittedRecordSnapshot, HNSWRecordKey, HNSWRecordLayout, IVFRecordKey, IVFRecordLayout,
     PrivateRecordChanges, VersionError, VersionResult, VersionedPersistence,
@@ -139,7 +139,7 @@ impl Layout<'_> {
     pub(in crate::mvcc) fn merge(
         self,
         key: &[u8],
-        operations: &[Mutation<'_>],
+        operations: &VectorOperations<'_>,
         changes: &PrivateRecordChanges,
         current: &dyn CommittedRecordSnapshot,
         control: &StorageReadControl,

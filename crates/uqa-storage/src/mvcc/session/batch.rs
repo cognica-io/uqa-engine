@@ -5,7 +5,7 @@
 //
 
 use std::sync::Arc;
-use uqa_core::memory::BudgetedVec;
+use uqa_core::memory::{Budgeted, BudgetedVec};
 
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::graph::OwnedGraphMutation;
@@ -36,14 +36,9 @@ enum Operation {
     OccurrenceReset(BudgetedVec<u8>),
     Fence(BudgetedVec<u8>),
     Graph(OwnedGraphMutation),
-    VectorInput(OwnedVectorMutation),
+    VectorInput(Budgeted<OwnedVectorMutation>),
     Population(OwnedPopulationMutation),
     VectorFence(IndexKind, BudgetedVec<u8>),
-    TypedRecord {
-        key: RecordKey,
-        value: Option<SharedRecordValue>,
-        kind: RecordWriteKind,
-    },
     /// A canonical record at a key that never had one.
     UnusedRecord(RecordKey, SharedRecordValue),
 }
@@ -53,6 +48,7 @@ pub(super) struct Batch<'a> {
     operations: BudgetedVec<Operation>,
     participant: Option<SerializableTransactionId>,
     writes: BudgetedVec<OwnedPredicate>,
+    has_origins: bool,
 }
 
 impl<'a> Batch<'a> {
@@ -65,6 +61,7 @@ impl<'a> Batch<'a> {
             operations: BudgetedVec::new(store.control.memory()),
             participant,
             writes: BudgetedVec::new(store.control.memory()),
+            has_origins: false,
         }
     }
     fn copy(&self, bytes: &[u8]) -> StorageBackendResult<BudgetedVec<u8>> {
@@ -88,17 +85,8 @@ impl<'a> Batch<'a> {
         value: Option<&[u8]>,
         kind: RecordWriteKind,
     ) -> StorageBackendResult<()> {
-        if kind != RecordWriteKind::DiskANNOrigin {
-            return self.record_edit(key, value, kind, false);
-        }
-        self.operations.push(Operation::TypedRecord {
-            key: RecordKey::new(key, self.store.control.memory())
-                .map_err(VersionError::into_storage_error)?,
-            value: value
-                .map(|value| self.copy(value).map(Arc::new))
-                .transpose()?,
-            kind,
-        })?;
+        self.record_edit(key, value, kind, false)?;
+        self.has_origins |= kind == RecordWriteKind::DiskANNOrigin;
         Ok(())
     }
 
@@ -148,21 +136,13 @@ impl<'a> Batch<'a> {
                 "evaluated batch changed serializable participant",
             ));
         }
-        let population_view = self
-            .operations
-            .iter()
-            .any(|operation| {
-                matches!(
-                    operation,
-                    Operation::Population(_)
-                        | Operation::TypedRecord {
-                            kind: RecordWriteKind::DiskANNOrigin,
-                            ..
-                        }
-                )
-            })
-            .then(|| transaction.view())
-            .transpose()?;
+        let population_view = (self.has_origins
+            || self
+                .operations
+                .iter()
+                .any(|operation| matches!(operation, Operation::Population(_))))
+        .then(|| transaction.view())
+        .transpose()?;
         for operation in self.operations.iter() {
             match operation {
                 Operation::Requirement(key) => {
@@ -205,18 +185,15 @@ impl<'a> Batch<'a> {
                 Operation::Population(mutation) => transaction.population_mutation(mutation)?,
                 Operation::VectorInput(mutation) => {
                     let guard = mutation.kind.layout(&*self.store.persistence)?.key(
-                        mutation.metadata.bytes(),
+                        &mutation.metadata,
                         Key::Document(mutation.document),
                         control,
                     )?;
                     transaction.fence_record(&guard, control)?;
-                    transaction.vector_mutation(mutation)?;
+                    transaction.vector_mutation(mutation, control)?;
                 }
                 Operation::VectorFence(kind, prefix) => {
                     self.fence_vector_structures(transaction, *kind, prefix)?;
-                }
-                Operation::TypedRecord { key, value, kind } => {
-                    transaction.write_shared_record(key, value.as_ref(), *kind, control)?;
                 }
                 Operation::UnusedRecord(key, value) => {
                     transaction.write_unused_record(key, value, control)?;
@@ -278,26 +255,25 @@ impl<'a> Batch<'a> {
             control.check()?;
             match operation {
                 Operation::Population(mutation) => lifecycle.push(mutation.clone())?,
-                Operation::TypedRecord {
-                    key,
-                    value,
-                    kind: RecordWriteKind::DiskANNOrigin,
-                } => {
-                    let expected = before
-                        .metadata(key.bytes(), control)?
-                        .and_then(|row| row.revision);
-                    let write = crate::mvcc::PreparedRecordWrite::from_shared(
-                        key.clone(),
-                        expected,
-                        value.clone(),
-                    )
-                    .with_kind(RecordWriteKind::DiskANNOrigin);
-                    origins.apply_owned(&[write], control)?;
-                }
+                Operation::Records(records) => records.visit(control, |edit| {
+                    if edit.kind == RecordWriteKind::DiskANNOrigin {
+                        let expected = before
+                            .metadata(edit.key.bytes(), control)?
+                            .and_then(|row| row.revision);
+                        let write = crate::mvcc::PreparedRecordWrite::from_shared(
+                            edit.key.clone(),
+                            expected,
+                            edit.value.clone(),
+                        )
+                        .with_kind(RecordWriteKind::DiskANNOrigin);
+                        origins.apply_owned(&[write], control)?;
+                    }
+                    Ok(())
+                })?,
                 _ => {}
             }
         }
-        let origins = origins.prepare(control)?.collect(control)?;
+        let origins = origins.prepare(control)?;
         let after = transaction.view()?;
         let generated = crate::mvcc::populations::stage(
             &origins,

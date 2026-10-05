@@ -7,10 +7,7 @@
 //! Versioned IVF metadata encoding, restoration, and atomic snapshot writes.
 
 use serde::{Deserialize, Serialize};
-use uqa_core::{
-    memory::{Budgeted, BudgetedVec},
-    DocId,
-};
+use uqa_core::{memory::Budgeted, DocId};
 
 use super::codec::{
     blob_to_vector, decode_u64_value, decode_value, encode_value, other_error, read_u64,
@@ -21,7 +18,9 @@ use super::index_keys::{
     ivf_centroid_prefix, ivf_metadata_key,
 };
 use super::{KeyValueBatch, KeyValueRead, KeyValueVectorIndex};
-use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFState};
+use crate::ivf_index::{
+    IVFMetadataSnapshot, IVFPreparedMetadata, IVFReadIndex, IVFRestoreBuilder, IVFState,
+};
 use crate::vector_index::IVFIndexParams;
 use crate::StorageBackendResult;
 
@@ -56,7 +55,7 @@ pub(super) fn restore_state(
     field: &str,
     dimensions: u32,
     params: IVFIndexParams,
-) -> StorageBackendResult<(Budgeted<IVFIndex>, u64)> {
+) -> StorageBackendResult<(Budgeted<IVFReadIndex>, u64)> {
     let metadata = load_metadata(store, table, field)?.ok_or_else(|| {
         other_error(format!(
             "missing persisted IVF metadata for {table}.{field}"
@@ -67,23 +66,25 @@ pub(super) fn restore_state(
     let deletes_since_train =
         checked_usize(metadata.deletes_since_train, "IVF deletes_since_train")?;
     let vector_count = checked_usize(metadata.vector_count, "IVF vector_count")?;
-    let centroids = load_centroids(store, table, field)?;
-    let assignments = load_assignments(store, table, field)?;
-    let vectors = raw.load_all_from(store)?;
-    let (centroids, centroid_memory) = centroids.into_parts();
-    let (assignments, assignment_memory) = assignments.into_parts();
-    let (vectors, vector_memory) = vectors.into_parts();
-    let _decoded_memory = (centroid_memory, assignment_memory, vector_memory);
-    let snapshot = IVFMetadataSnapshot {
-        state: metadata.state.into(),
-        centroids,
-        assignments,
-        trained_size,
-        deletes_since_train,
-        vector_count,
-    };
-    let index =
-        IVFIndex::restore_controlled(dimensions, params, vectors, snapshot, store.control())?;
+    let mut builder = IVFRestoreBuilder::new(
+        dimensions,
+        params,
+        IVFMetadataSnapshot {
+            state: metadata.state.into(),
+            centroids: Vec::new(),
+            assignments: Vec::new(),
+            trained_size,
+            deletes_since_train,
+            vector_count,
+        },
+        store.control(),
+    )?;
+    load_centroids(store, table, field, &mut builder)?;
+    load_assignments(store, table, field, &mut builder)?;
+    raw.visit_canonical_from(store, |document, ordinal, vector| {
+        builder.vector(document, ordinal, vector)
+    })?;
+    let index = IVFReadIndex::new(builder.finish()?)?;
     Ok((index, metadata.revision))
 }
 
@@ -105,12 +106,13 @@ pub(super) fn stage_snapshot(
     field: &str,
     dimensions: u32,
     params: IVFIndexParams,
-    snapshot: &IVFMetadataSnapshot,
+    candidate: &IVFPreparedMetadata,
     revision: u64,
     full_rewrite: bool,
     changed_doc: Option<DocId>,
     preview: bool,
 ) -> StorageBackendResult<()> {
+    let snapshot = candidate.header();
     if !preview {
         batch.fence_ivf_prefix(&ivf_metadata_key(table, field)?)?;
     }
@@ -133,8 +135,9 @@ pub(super) fn stage_snapshot(
                 &vector_to_blob(vector)?,
             )?;
         }
-        for (doc_id, ordinal, centroid) in &snapshot.assignments {
-            put_assignment(batch, table, field, *doc_id, *ordinal, *centroid, preview)?;
+        for assignment in candidate.assignments() {
+            let (doc_id, ordinal, centroid) = assignment?;
+            put_assignment(batch, table, field, doc_id, ordinal, centroid, preview)?;
         }
     } else if let Some(doc_id) = changed_doc {
         delete_prefix(
@@ -142,12 +145,9 @@ pub(super) fn stage_snapshot(
             preview,
             &ivf_assignment_doc_prefix(table, field, doc_id)?,
         )?;
-        for (_, ordinal, centroid) in snapshot
-            .assignments
-            .iter()
-            .filter(|(candidate, _, _)| *candidate == doc_id)
-        {
-            put_assignment(batch, table, field, doc_id, *ordinal, *centroid, preview)?;
+        for assignment in candidate.document_assignments(doc_id) {
+            let (ordinal, centroid) = assignment?;
+            put_assignment(batch, table, field, doc_id, ordinal, centroid, preview)?;
         }
     }
     Ok(())
@@ -185,36 +185,27 @@ fn load_centroids(
     store: &dyn KeyValueRead,
     table: &str,
     field: &str,
-) -> StorageBackendResult<Budgeted<Vec<Vec<f32>>>> {
+    builder: &mut IVFRestoreBuilder,
+) -> StorageBackendResult<()> {
     let prefix = ivf_centroid_prefix(table, field)?;
-    let mut output = (
-        BudgetedVec::new(store.control().memory()),
-        store.control().memory().reserve(0)?,
-    );
-    let (centroids, payload) = (&mut output.0, &mut output.1);
     store.visit_prefix(&prefix, &mut |key, value| {
         let mut offset = prefix.len();
-        let found = read_u64(key, &mut offset)?;
-        if offset != key.len() || found != usize_to_u64(centroids.len(), "IVF centroid id")? {
+        let found = checked_usize(read_u64(key, &mut offset)?, "IVF centroid id")?;
+        if offset != key.len() {
             return Err(other_error("corrupt IVF centroid key sequence"));
         }
-        payload.grow(value.len())?;
-        centroids.reserve(1)?;
-        centroids.push(blob_to_vector(value)?)?;
-        Ok(())
-    })?;
-    let (centroids, mut memory) = output.0.into_parts();
-    memory.absorb(output.1);
-    Ok(Budgeted::new(centroids, memory))
+        let _memory = store.control().memory().reserve(value.len())?;
+        builder.centroid(found, &blob_to_vector(value)?)
+    })
 }
 
 fn load_assignments(
     store: &dyn KeyValueRead,
     table: &str,
     field: &str,
-) -> StorageBackendResult<Budgeted<Vec<(DocId, u32, usize)>>> {
+    builder: &mut IVFRestoreBuilder,
+) -> StorageBackendResult<()> {
     let prefix = ivf_assignment_prefix(table, field)?;
-    let mut assignments = BudgetedVec::new(store.control().memory());
     store.visit_prefix(&prefix, &mut |key, value| {
         let mut offset = prefix.len();
         let doc_id = read_u64(key, &mut offset)?;
@@ -226,11 +217,8 @@ fn load_assignments(
             ));
         }
         let centroid = checked_usize(decode_u64_value(value)?, "IVF centroid assignment")?;
-        assignments.push((doc_id, ordinal, centroid))?;
-        Ok(())
-    })?;
-    let (assignments, memory) = assignments.into_parts();
-    Ok(Budgeted::new(assignments, memory))
+        builder.assignment(doc_id, ordinal, centroid)
+    })
 }
 
 pub(super) fn metadata_from_snapshot(

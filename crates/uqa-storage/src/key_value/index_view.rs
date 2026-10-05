@@ -84,10 +84,15 @@ impl<T: VectorIndex + crate::vector_index::VectorRead + 'static> IndexView<T> {
     ) -> StorageBackendResult<IndexState<T>> {
         read.control().check()?;
         let identity = read.revision(prefixes)?;
-        if let Some((cached_identity, state)) = self.cached.lock().as_mut() {
-            if *cached_identity == identity {
-                return state.for_read(read.control());
+        {
+            let mut cached = self.cached.lock();
+            if let Some((cached_identity, state)) = cached.as_mut() {
+                if *cached_identity == identity {
+                    return state.for_read(read.control());
+                }
             }
+            // This generation cannot answer the new visibility boundary. Release the cache's stale ownership before reconstructing its replacement; retained readers keep their own immutable roots.
+            *cached = None;
         }
         let definition_candidate = self.preparing_definition.load(Ordering::Acquire);
         let (value, revision) = load(definition_candidate)?;
