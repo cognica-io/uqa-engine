@@ -23,6 +23,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Release SQLite coordination descriptors when their last transport or lease closes, without waiting for another database open; preserve live aliases, snapshot readers and serializable participants.
 - Read spilled record metadata without loading its payload, and reuse exact transaction-local requirements instead of rereading endpoint and membership revisions for every graph edge. Keep requirement keys and lookup nodes within the original session allowance, preserve savepoint undo and external observed revisions, and retain conflict validation at command refresh and commit.
 - Evaluate retrieval predicates in table UPDATE through their document support instead of the unsupported scalar-call path. Preserve boolean conditions, CTE scope, nested-write conflicts and lock-wait rechecks, and infer text query parameters for `text_match`.
 - Reclaim the cross-process row-change journal before the oldest live snapshot instead of retaining every update for the database lifetime. Preserve update chains, key reuse and logical change numbers across reclamation; release dead processes' retained history through operating-system liveness locks.

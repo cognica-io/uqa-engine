@@ -21,6 +21,7 @@ mod internal_reads;
 mod key_identities;
 mod own_commits;
 mod read_view;
+mod resource_lifetime;
 
 fn sqlite_data_version(engine: &Engine) -> u64 {
     engine

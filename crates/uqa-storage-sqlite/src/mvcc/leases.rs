@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Process-lived tagged byte leases shared by snapshot retention and SSI participation.
+//! Tagged byte leases shared by snapshot retention and SSI participation.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -48,6 +48,7 @@ pub(crate) struct LeaseNamespace {
 }
 
 struct State {
+    path: PathBuf,
     file: File,
     namespace: LeaseNamespace,
     admitted: AtomicBool,
@@ -57,9 +58,43 @@ struct State {
 type Files = HashMap<PathBuf, Arc<State>>;
 static FILES: OnceLock<Mutex<Files>> = OnceLock::new();
 
+/// Every reference outside the registry releases its ownership under the opening lock, including the final descriptor close.
+#[derive(Clone)]
+struct FileHandle(Option<Arc<State>>);
+
+impl FileHandle {
+    fn shared(&self) -> &Arc<State> {
+        self.0.as_ref().expect("live native lease file")
+    }
+}
+
+impl std::ops::Deref for FileHandle {
+    type Target = State;
+
+    fn deref(&self) -> &Self::Target {
+        self.shared()
+    }
+}
+
+impl Drop for FileHandle {
+    fn drop(&mut self) {
+        let state = self.0.take().expect("live native lease file");
+        let mut files = FILES.get_or_init(Mutex::default).lock();
+        if Arc::strong_count(&state) == 2
+            && files
+                .get(&state.path)
+                .is_some_and(|registered| Arc::ptr_eq(registered, &state))
+        {
+            files.remove(&state.path);
+        }
+        // Closing after unlocking could release the POSIX locks of a descriptor opened by a new adapter. Even non-final handle drops stay under this lock so simultaneous releases cannot leave a registry-only owner behind.
+        drop(state);
+    }
+}
+
 /// The registry retains one native descriptor until its last transport and lease are gone. Closing a second descriptor for the same file would release POSIX process locks, including locks owned by another live adapter.
 #[derive(Clone)]
-pub(crate) struct NativeLeaseFile(Arc<State>);
+pub(crate) struct NativeLeaseFile(FileHandle);
 
 pub(crate) struct NativeLeaseAdmission(NativeLeaseFile);
 
@@ -70,7 +105,7 @@ impl Drop for NativeLeaseAdmission {
 }
 
 struct Lease<T> {
-    state: Arc<State>,
+    state: FileHandle,
     slot: u32,
     _retained: T,
     _memory: MemoryReservation,
@@ -98,13 +133,11 @@ impl NativeLeaseFile {
             unreachable!("native lease file identity")
         };
         let mut files = FILES.get_or_init(Mutex::default).lock();
-        // The map's strong reference also covers the interval between a weak owner's expiration and the completion of its destructor.
-        files.retain(|_, state| Arc::strong_count(state) > 1);
         if let Some(state) = files.get(&path) {
             if state.namespace != namespace {
                 return Err(VersionError::WrongDatabase);
             }
-            return Ok(Self(Arc::clone(state)));
+            return Ok(Self(FileHandle(Some(Arc::clone(state)))));
         }
         let file = OpenOptions::new()
             .read(true)
@@ -116,13 +149,14 @@ impl NativeLeaseFile {
         #[cfg(test)]
         OPENED.with(|opened| opened.set(opened.get() + 1));
         let state = Arc::new(State {
+            path: path.clone(),
             file,
             namespace,
             admitted: AtomicBool::new(false),
             occupied: Mutex::new(BTreeMap::new()),
         });
         files.insert(path, Arc::clone(&state));
-        Ok(Self(state))
+        Ok(Self(FileHandle(Some(state))))
     }
 
     pub(crate) fn admit(
@@ -242,7 +276,7 @@ impl NativeLeaseFile {
             }
             occupied.insert(slot, tag);
             return Ok(Box::new(Lease {
-                state: Arc::clone(&self.0),
+                state: self.0.clone(),
                 slot,
                 _retained: retained,
                 _memory: memory,
@@ -264,7 +298,7 @@ impl NativeLeaseFile {
 
     #[cfg(test)]
     pub(super) fn shares_descriptor(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        Arc::ptr_eq(self.0.shared(), other.0.shared())
     }
 }
 
