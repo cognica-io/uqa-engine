@@ -116,6 +116,108 @@ fn assert_same(engine: &Engine, predicate: &str) {
     );
 }
 
+const PARAMETER_PREDICATES: &[(&str, &[i64], &[i64])] = &[
+    ("qty = $1 + 1", &[1], &[20]),
+    ("qty = $1 + 1", &[3], &[40]),
+    ("$1 + 1 = qty", &[1], &[20]),
+    ("$1 + 1 < qty", &[1], &[30, 40]),
+    ("qty BETWEEN $1 + 1 AND $2 - 1", &[0, 4], &[10, 20, 30]),
+    ("qty IN ($1 + 1, $2 * 2)", &[0, 2], &[10, 40]),
+    (
+        "qty = CASE WHEN $1 = 0 THEN 2 ELSE 10 / $1 END",
+        &[0],
+        &[20],
+    ),
+    (
+        "qty = CASE WHEN $1 = 0 THEN 2 ELSE 10 / $1 END",
+        &[5],
+        &[20],
+    ),
+];
+
+#[test]
+fn parameter_expression_index_predicates_match_scan_and_prepared_execution() {
+    let directory = tempfile::tempdir().unwrap();
+    for engine in [
+        Engine::new(),
+        Engine::open(&directory.path().join("parameter-index.db")).unwrap(),
+    ] {
+        engine.sql("CREATE TABLE indexed (id INTEGER, qty INTEGER); CREATE INDEX indexed_qty ON indexed (qty); CREATE TABLE shadow (id INTEGER, qty INTEGER)", &[]).unwrap();
+        for table in ["indexed", "shadow"] {
+            engine
+                .sql(
+                    &format!(
+                        "INSERT INTO {table} VALUES (10, 1), (20, 2), (30, 3), (40, 4), (50, NULL)"
+                    ),
+                    &[],
+                )
+                .unwrap();
+        }
+        for &(predicate, parameters, expected) in PARAMETER_PREDICATES {
+            let parameters = parameters
+                .iter()
+                .map(|&value| uqa_sql::SQLParam::scalar(Value::Int(value)))
+                .collect::<Vec<_>>();
+            for table in ["indexed", "shadow"] {
+                let result = engine
+                    .sql(
+                        &format!("SELECT id FROM {table} WHERE {predicate} ORDER BY id"),
+                        &parameters,
+                    )
+                    .unwrap();
+                assert_eq!(ids(&result), expected, "{table}: {predicate}");
+            }
+        }
+        for table in ["indexed", "shadow"] {
+            let result = engine
+                .sql(
+                    &format!("SELECT id FROM {table} WHERE qty = $1 + 1"),
+                    &[uqa_sql::SQLParam::scalar(Value::Null)],
+                )
+                .unwrap();
+            assert!(result.rows.is_empty());
+            assert_eq!(
+                engine
+                    .sql(
+                        &format!("SELECT id FROM {table} WHERE qty = 10 / $1"),
+                        &[uqa_sql::SQLParam::scalar(Value::Int(0))]
+                    )
+                    .unwrap_err()
+                    .sqlstate(),
+                Some("22012")
+            );
+        }
+        engine.sql("SET plan_cache_mode = force_generic_plan; PREPARE indexed_probe(integer) AS SELECT id FROM indexed WHERE qty = $1 + 1 ORDER BY id; PREPARE scan_probe(integer) AS SELECT id FROM shadow WHERE qty = $1 + 1 ORDER BY id", &[]).unwrap();
+        for (parameter, expected) in [(1, vec![20]), (3, vec![40]), (99, vec![])] {
+            for plan in ["indexed_probe", "scan_probe"] {
+                assert_eq!(
+                    ids(&engine
+                        .sql(&format!("EXECUTE {plan}({parameter})"), &[])
+                        .unwrap()),
+                    expected
+                );
+            }
+        }
+        engine
+            .sql(
+                "UPDATE indexed SET qty = 9 WHERE id = 20; UPDATE shadow SET qty = 9 WHERE id = 20",
+                &[],
+            )
+            .unwrap();
+        for plan in ["indexed_probe", "scan_probe"] {
+            assert_eq!(
+                ids(&engine.sql(&format!("EXECUTE {plan}(8)"), &[]).unwrap()),
+                [20]
+            );
+            assert!(engine
+                .sql(&format!("EXECUTE {plan}(1)"), &[])
+                .unwrap()
+                .rows
+                .is_empty());
+        }
+    }
+}
+
 const PREDICATES: &[&str] = &[
     "qty = 25",
     "qty = 0",

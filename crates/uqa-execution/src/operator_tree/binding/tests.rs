@@ -6,6 +6,7 @@
 
 use super::*;
 use std::cell::RefCell;
+use uqa_core::Predicate;
 use uqa_sql::{ast::Statement, plan::ExpressionPlan, retrieval::AttentionSpec};
 
 #[derive(Default)]
@@ -40,6 +41,132 @@ fn predicate(sql: &str) -> ScalarExpr {
         panic!("expected SELECT")
     };
     ExpressionPlan::lower(statement.r#where.unwrap()).scalar
+}
+
+#[test]
+fn parameter_expression_predicates_bind_each_invocations_values() {
+    let inputs = Inputs::default();
+    let binding = RetrievalBinding {
+        hook: &inputs,
+        graphs: &inputs,
+    };
+    let parameters =
+        [[3, 7], [-2, 0]].map(|values| values.map(|value| SQLParam::scalar(Value::Int(value))));
+    for (sql, expected) in [
+        (
+            "id = $1 + 1",
+            [
+                Predicate::Equals(Value::Int(4)),
+                Predicate::Equals(Value::Int(-1)),
+            ],
+        ),
+        (
+            "$1 + 1 = id",
+            [
+                Predicate::Equals(Value::Int(4)),
+                Predicate::Equals(Value::Int(-1)),
+            ],
+        ),
+        (
+            "$1 + 1 < id",
+            [
+                Predicate::GreaterThan(Value::Int(4)),
+                Predicate::GreaterThan(Value::Int(-1)),
+            ],
+        ),
+        (
+            "id BETWEEN $1 - 1 AND $2 + 1",
+            [
+                Predicate::Between {
+                    low: Value::Int(2),
+                    high: Value::Int(8),
+                },
+                Predicate::Between {
+                    low: Value::Int(-3),
+                    high: Value::Int(1),
+                },
+            ],
+        ),
+        (
+            "id IN ($1 + 1, $2 - 1, $1 + 1)",
+            [
+                Predicate::InSet([Value::Int(4), Value::Int(6)].into_iter().collect()),
+                Predicate::InSet([Value::Int(-1)].into_iter().collect()),
+            ],
+        ),
+    ] {
+        let expression = predicate(&format!("SELECT * FROM docs WHERE {sql}"));
+        for (params, expected) in parameters.iter().zip(expected) {
+            let OperatorTree::Filter {
+                field,
+                predicate,
+                source,
+            } = binding.lower_where(&expression, params).unwrap().unwrap()
+            else {
+                panic!("expected a field filter for {sql}");
+            };
+            assert_eq!(field, "id");
+            assert_eq!(predicate, expected, "{sql}");
+            assert!(source.is_none());
+        }
+    }
+    assert!(inputs.events.borrow().is_empty());
+}
+
+#[test]
+fn parameter_expression_errors_defer_and_case_only_evaluates_its_selected_arm() {
+    let inputs = Inputs::default();
+    let binding = RetrievalBinding {
+        hook: &inputs,
+        graphs: &inputs,
+    };
+    let expression = predicate("SELECT * FROM docs WHERE id = $1 / $2");
+    let params = [
+        SQLParam::scalar(Value::Int(1)),
+        SQLParam::scalar(Value::Int(0)),
+    ];
+    let ScalarExpr::Binary { rhs, .. } = &expression else {
+        panic!("expected equality");
+    };
+    assert_eq!(
+        evaluate_constant(rhs, &params).unwrap_err().sqlstate(),
+        Some("22012")
+    );
+    assert!(binding.lower_where(&expression, &params).unwrap().is_none());
+
+    let expression =
+        predicate("SELECT * FROM docs WHERE id = CASE WHEN $1 THEN $2 + 1 ELSE 1 / $3 END");
+    for (condition, divisor, expected) in
+        [(true, 0, Some(7)), (false, 0, None), (false, 2, Some(0))]
+    {
+        let params = [
+            SQLParam::scalar(Value::Bool(condition)),
+            SQLParam::scalar(Value::Int(6)),
+            SQLParam::scalar(Value::Int(divisor)),
+        ];
+        let result = binding.lower_where(&expression, &params).unwrap();
+        match (result, expected) {
+            (
+                Some(OperatorTree::Filter {
+                    field,
+                    predicate,
+                    source,
+                }),
+                Some(value),
+            ) => {
+                assert_eq!(field, "id");
+                assert_eq!(predicate, Predicate::Equals(Value::Int(value)));
+                assert!(source.is_none());
+            }
+            (None, None) => {}
+            (_, expected) => {
+                panic!(
+                    "condition {condition}: expected {expected:?}, got an unexpected access path"
+                )
+            }
+        }
+    }
+    assert!(inputs.events.borrow().is_empty());
 }
 
 #[test]
