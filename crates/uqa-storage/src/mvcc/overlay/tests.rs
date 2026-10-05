@@ -11,6 +11,44 @@ use crate::mvcc::CommitSequence;
 
 type Model = BTreeMap<Vec<u8>, (Option<CommitSequence>, Option<Vec<u8>>)>;
 
+#[test]
+fn forked_private_roots_share_prefix_and_undo_independently() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let original = PrivateRecordChanges::new(control.memory());
+    let mut initial = Model::new();
+    for index in 0..512 {
+        stage(
+            &original,
+            &mut initial,
+            index,
+            Some("x".repeat(2048)),
+            &control,
+        );
+    }
+    assert!(spilled_runs(&original) > 0);
+    let used = control.memory().used();
+    let fork = original.fork();
+    assert_eq!(control.memory().used(), used);
+    let savepoint = StorageSavepointId::allocate();
+    fork.savepoint(savepoint).unwrap();
+    let mut forked = initial.clone();
+    stage(&fork, &mut forked, 0, None, &control);
+    stage(&fork, &mut forked, 512, Some("fork".into()), &control);
+    let mut changed = initial.clone();
+    stage(
+        &original,
+        &mut changed,
+        1,
+        Some("original".into()),
+        &control,
+    );
+    assert_matches(&fork.snapshot().unwrap(), &forked, &control);
+    assert_matches(&original.snapshot().unwrap(), &changed, &control);
+    fork.rollback_to_savepoint(savepoint).unwrap();
+    assert_matches(&fork.snapshot().unwrap(), &initial, &control);
+    assert_matches(&original.snapshot().unwrap(), &changed, &control);
+}
+
 fn key(index: usize) -> Vec<u8> {
     format!("k{index:06}").into_bytes()
 }

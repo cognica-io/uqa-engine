@@ -23,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve writes made by nested VOLATILE routines when INSERT, UPDATE, DELETE and MERGE publish prepared rows, including primary-key and partition movement. Make preceding UPDATE FROM rows visible to later callbacks, keep original RETURNING images, and restore enclosing command rows and exact-key caches through nested exception and savepoint rollback.
+- Include staged command rows in indexed UPDATE and DELETE candidates, including equality, range and NULL predicates; newer replacements and deletions mask stored index entries.
 - Preserve PostgreSQL SQLSTATE `53200` when a text-index build or analyzer rebuild exhausts its allowance, including GIN removal rebuilds, without duplicating the operation prefix. Keep typed cancellation and statement rollback through the same adapters.
 - Spill retained DiskANN population inputs and ordered IVF/HNSW transaction inputs so vector transactions can exceed the session allowance across native SQLite, SQLite Key/Value and redb. Preserve fingerprints, counts, conflicts, refresh and savepoint undo; DiskANN validation and header replacement seek exact field ranges instead of rescanning unrelated origins.
 - Stream individual private spill entries through a charged 1 KiB buffer when complete read blocks cannot fit; preserve lookup/cursor bounds and record metadata while allowing native HNSW deletion/rebuild publication under its unchanged session allowance.

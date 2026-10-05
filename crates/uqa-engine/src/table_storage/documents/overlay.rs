@@ -11,6 +11,44 @@ use uqa_execution::storage_errors::storage_error;
 use uqa_storage::{DocumentMetadata, StoredDocument};
 
 impl Engine {
+    /// Refresh enclosing command rows from the just-published transaction view.
+    pub(crate) fn publish_command_document(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<(), SQLError> {
+        if self.session.command_mutation_overlays.lock().is_empty() {
+            return Ok(());
+        }
+        let table = self.command_overlay_table_name(table)?;
+        let control = self.query_retention_control()?;
+        if !CommandMutationOverlay::stages(
+            &self.session.command_mutation_overlays.lock(),
+            &table,
+            doc_id,
+            &control,
+        )? {
+            return Ok(());
+        }
+        let state = self.require_table(&table)?;
+        let document = state
+            .document_store
+            .read()
+            .get_stored(doc_id)
+            .map_err(|error| storage_error("read published command row", &error))?
+            .map(|document| {
+                let metadata = document.metadata();
+                (Arc::new(document.into_fields()), metadata)
+            });
+        CommandMutationOverlay::published(
+            &mut self.session.command_mutation_overlays.lock(),
+            &table,
+            doc_id,
+            document,
+            &control,
+        )
+    }
+
     pub(super) fn command_overlay_table_name(&self, table: &str) -> Result<String, SQLError> {
         self.try_resolve_table_name(table)
             .map_err(|error| {

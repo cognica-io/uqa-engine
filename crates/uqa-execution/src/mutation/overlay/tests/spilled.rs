@@ -7,6 +7,54 @@
 use super::*;
 use uqa_storage::DocumentStore;
 
+#[test]
+fn nested_publication_and_undo_restore_spilled_rows_and_cached_keys() {
+    let (control, held) = pressured();
+    let mut overlays = [CommandMutationOverlay::default()];
+    stage_rows(&mut overlays[0], 1..=2_000, &control);
+    assert!(spills(&overlays[0]));
+    assert_eq!(find_a(&mut overlays, 1, &control), Some(1));
+    let checkpoint = overlays[0].checkpoint();
+    CommandMutationOverlay::published(
+        &mut overlays,
+        "items",
+        1,
+        Some((
+            Arc::new(spilled_row(-1, 1)),
+            DocumentMetadata::with_tuple_xmin(23),
+        )),
+        &control,
+    )
+    .unwrap();
+    CommandMutationOverlay::published(&mut overlays, "items", 2, None, &control).unwrap();
+    stage_rows(&mut overlays[0], 2_001..=4_000, &control);
+    assert!(overlays[0]
+        .table("items")
+        .unwrap()
+        .rows
+        .memory
+        .get(&1)
+        .is_none());
+    assert!(staged(&overlays[0], 1).published);
+    assert_eq!(find_a(&mut overlays, -1, &control), Some(1));
+    assert_eq!(find_a(&mut overlays, 1, &control), None);
+    assert_eq!(find_a(&mut overlays, 2, &control), None);
+    assert!(overlays[0]
+        .was_published("items", 1, true, control.cancellation())
+        .unwrap());
+    overlays[0].restore(&checkpoint);
+    assert_eq!(find_a(&mut overlays, 1, &control), Some(1));
+    assert_eq!(find_a(&mut overlays, -1, &control), None);
+    assert_eq!(find_a(&mut overlays, 2, &control), Some(2));
+    assert!(!overlays[0]
+        .was_published("items", 1, true, control.cancellation())
+        .unwrap());
+    assert_eq!(staged(&overlays[0], 1).metadata.tuple_xmin(), Some(17));
+    drop(checkpoint);
+    drop(overlays);
+    assert_eq!(control.memory().used(), held.bytes());
+}
+
 /// An allowance that a held reservation keeps more than half used, so that staged rows spill once they hold a sixteenth of it.
 fn pressured() -> (StorageReadControl, uqa_core::memory::MemoryReservation) {
     let control = StorageReadControl::with_limit(4 << 20);

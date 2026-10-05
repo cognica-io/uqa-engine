@@ -667,10 +667,11 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                     prepared_deletes.push(PreparedMutationAction::Delete(prepared));
                 }
             }
-            drop(overlay);
+            let published = overlay.finish();
             if !prepared_deletes.is_empty() {
                 context.mutation.state.prepare_writer()?;
-                let mut publication = statement_end::publication_batch(&statement_commands);
+                let mut publication =
+                    statement_end::publication_batch(&statement_commands).with_published(published);
                 for action in prepared_deletes {
                     crate::mutation::publication::publish_prepared_mutation_action(
                         context.mutation.publication,

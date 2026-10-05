@@ -609,6 +609,7 @@ impl Engine {
         self.mark_row_write(&table_name, &t, super::DocumentCountChange::Unchanged)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         self.note_row_changed(&table_name, doc_id)?;
+        self.publish_command_document(&table_name, doc_id)?;
         Ok(())
     }
 
@@ -722,6 +723,8 @@ impl Engine {
         if existed {
             self.note_row_deleted(&table_name, doc_id)?;
         }
+        // A caller can have staged this row without publishing it yet.
+        self.publish_command_document(&table_name, doc_id)?;
         Ok(())
     }
 }

@@ -436,6 +436,7 @@ struct TransactionSavepoint {
 /// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, and statement-cache semantics. Sequence `currval` and last-used entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
 #[derive(Clone, Default)]
 struct SessionStateSnapshot {
+    command_overlays: Vec<uqa_execution::mutation::overlay::CommandOverlayCheckpoint>,
     /// A pinned physical graph view plus this transaction's changed identities. Savepoints retain only handles and changed-id checkpoints, never graph payload replicas.
     graph_overlay: Option<GraphTransactionOverlay>,
     search_path: Vec<String>,

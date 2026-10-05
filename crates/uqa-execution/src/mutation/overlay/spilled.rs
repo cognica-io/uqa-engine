@@ -113,6 +113,7 @@ pub(super) fn encode_row(row: &CommandStoredDocument) -> StorageBackendResult<Ve
         }
         None => value.extend_from_slice(&[0; 1 + size_of::<u32>()]),
     }
+    value[0] |= u8::from(row.published) << 1;
     crate::spill::encode_document(&mut value, fields).map_err(exec_error)?;
     Ok(value)
 }
@@ -125,7 +126,10 @@ fn decode_row(
     let (header, document) = value
         .split_at_checked(1 + size_of::<u32>())
         .ok_or_else(|| invalid("a spilled command row lacks its header"))?;
-    let metadata = match header[0] {
+    if header[0] > 3 {
+        return Err(invalid("a spilled command row has invalid flags"));
+    }
+    let metadata = match header[0] & 1 {
         0 => DocumentMetadata::default(),
         1 => DocumentMetadata::with_tuple_xmin(u32::from_le_bytes(
             header[1..].try_into().expect("four xmin bytes"),
@@ -136,7 +140,9 @@ fn decode_row(
     if !rest.is_empty() {
         return Err(invalid("a spilled command row has trailing bytes"));
     }
-    CommandStoredDocument::new(Arc::new(fields), metadata, control)
+    let mut row = CommandStoredDocument::new(Arc::new(fields), metadata, control)?;
+    row.published = header[0] & 2 != 0;
+    Ok(row)
 }
 
 fn exec_error(error: crate::ExecError) -> StorageBackendError {
@@ -151,6 +157,15 @@ fn version_error(error: VersionError) -> StorageBackendError {
 pub(super) struct SpilledRows {
     records: PrivateRecordChanges,
     view: Arc<PrivateRecordSnapshot>,
+}
+
+impl Clone for SpilledRows {
+    fn clone(&self) -> Self {
+        Self {
+            records: self.records.fork(),
+            view: Arc::clone(&self.view),
+        }
+    }
 }
 
 impl SpilledRows {

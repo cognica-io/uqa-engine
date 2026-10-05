@@ -26,6 +26,7 @@ use uqa_storage::StorageBackendError;
 pub mod context;
 mod deep_layers;
 mod dispatch;
+mod filter;
 mod fusion;
 mod graph;
 mod graph_runtime;
@@ -318,11 +319,7 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         // Indexed columns resolve through the value index in
         // O(log n + k); the index refuses predicates it cannot answer
         // with evaluated-scan semantics, so this never changes results.
-        if let Some(indexed) = self
-            .context
-            .indexes
-            .value_index_scan(self.table, field, predicate)?
-        {
+        if let Some(indexed) = self.value_index_scan(field, predicate)? {
             return match source {
                 Some(child) => self
                     .execute_posting_node(child)

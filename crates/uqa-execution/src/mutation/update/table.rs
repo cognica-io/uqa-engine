@@ -534,6 +534,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     doc_id,
                     original_doc,
                     doc,
+                    None,
                 )? {
                     if let Some(returning) = prepared.returning {
                         returning_rows.push(returning);
@@ -545,7 +546,8 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     ));
                 }
             }
-            drop(overlay);
+            let published = overlay.finish();
+            let mut rule_published = None;
             let (view_rule_returning, rule_returning) = if has_any_update_rules {
                 let rule_rows = pending_updates
                     .iter()
@@ -658,6 +660,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         candidate.identity.doc_id,
                         candidate.old_document,
                         candidate.proposed_document,
+                        None,
                     )? {
                         if let Some(returning) = prepared.returning {
                             returning_rows.push(returning);
@@ -669,7 +672,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         ));
                     }
                 }
-                drop(overlay);
+                rule_published = overlay.finish();
                 (view_rule_returning, rule_returning)
             } else {
                 debug_assert!(pending_updates.is_empty());
@@ -677,7 +680,9 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             };
             if !prepared_updates.is_empty() {
                 context.mutation.state.prepare_writer()?;
-                let mut publication = statement_end::publication_batch(&statement_commands);
+                let mut publication = statement_end::publication_batch(&statement_commands)
+                    .with_published(published)
+                    .with_published(rule_published);
                 for (action, after_rows) in prepared_updates {
                     crate::mutation::publication::publish_prepared_mutation_action(
                         context.mutation.publication,
