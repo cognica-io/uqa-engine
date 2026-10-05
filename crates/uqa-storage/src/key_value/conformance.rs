@@ -14,6 +14,8 @@
 use super::KeyValueStore;
 use crate::{StorageBackendError, StorageBackendResult};
 
+mod catalog_revisions;
+pub use catalog_revisions::verify_catalog_record_revisions;
 mod documents;
 pub use documents::{verify_document_ownership, verify_document_reopen};
 mod commands;

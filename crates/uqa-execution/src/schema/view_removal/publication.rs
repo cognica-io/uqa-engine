@@ -25,6 +25,9 @@ pub(super) fn drop_view_state_inner(
         .drop_relation_events_inner(&relation)
         .map_err(|error| SQLError::Internal(format!("drop view rules: {error}")))?;
     let mut views = registry.views_write();
+    let changed = views
+        .get(&relation)
+        .map(|view| view.relation_oids().relation);
     let temporary = views
         .get(&relation)
         .is_some_and(|view| view.persistence == uqa_sql::ast::RelationPersistence::Temporary);
@@ -42,6 +45,11 @@ pub(super) fn drop_view_state_inner(
     drop(views);
     if removed {
         changes.catalog_registry_changed();
+        if let Some(oid) = changed {
+            changes.prepared_catalog_changed(
+                crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(oid),
+            );
+        }
     }
     if removed {
         Ok(())

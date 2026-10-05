@@ -39,16 +39,17 @@ impl SequenceValueContext<'_> {
         &self,
         reference: &str,
     ) -> Result<BoundSequenceValue, SequenceValueError> {
-        let resolved = self
+        let target = match self
             .privileges
             .resolution
-            .visible_relation_kind(reference)
-            .map_err(SequenceValueError::Security)?;
-        let target = match resolved {
+            .visible_relation_kind(reference)?
+        {
             RelationResolution::Found(name, "sequence") => ValueReference::Name(name),
-            RelationResolution::Found(_, kind) => {
+            RelationResolution::Found(name, kind) => {
+                let relation = RelationIdentity::from_legacy_name(&name)
+                    .map_err(SequenceValueError::Internal)?;
                 return Err(SequenceValueError::WrongKind {
-                    name: reference.to_string(),
+                    name: relation.name,
                     kind,
                 });
             }
@@ -67,9 +68,9 @@ impl SequenceValueContext<'_> {
                     SequenceValueError::Internal(format!("resolve sequence `{name}`: {error}"))
                 })?
             }
-            ValueReference::Oid(oid) => snapshot
-                .relation_with_oid(oid)
-                .ok_or_else(|| SequenceValueError::Undefined(reference.into()))?,
+            ValueReference::Oid(oid) => resolve_oid_reference(&snapshot, oid, |oid| {
+                crate::catalog::projection::resolve_regclass_kind_by_oid(&self.catalog, oid)
+            })?,
         };
         let name = relation.qualified_name();
         let object_id = snapshot
@@ -141,3 +142,37 @@ impl SequenceValueContext<'_> {
         })
     }
 }
+
+fn resolve_oid_reference(
+    snapshot: &SequenceReadSnapshot,
+    oid: i64,
+    other_relation: impl FnOnce(i64) -> Result<Option<(String, String)>, uqa_sql::SQLError>,
+) -> Result<RelationIdentity, SequenceValueError> {
+    if let Some(relation) = snapshot.relation_with_oid(oid) {
+        return Ok(relation);
+    }
+    let Some((name, kind)) = other_relation(oid)? else {
+        return Err(SequenceValueError::MissingOid(oid));
+    };
+    let kind = match kind.as_str() {
+        "r" => "table",
+        "p" => "partitioned table",
+        "v" => "view",
+        "m" => "materialized view",
+        "f" => "foreign table",
+        "i" => "index",
+        "I" => "partitioned index",
+        "t" => "TOAST table",
+        "c" => "composite type",
+        "S" => return Err(SequenceValueError::MissingOid(oid)),
+        _ => {
+            return Err(SequenceValueError::Internal(format!(
+                "unknown relation kind {kind}"
+            )))
+        }
+    };
+    Err(SequenceValueError::WrongKind { name, kind })
+}
+
+#[cfg(test)]
+mod tests;

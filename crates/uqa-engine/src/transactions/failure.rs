@@ -221,6 +221,18 @@ impl Engine {
             backend_aborted,
             &mut cleanup_errors,
         );
+        if let Some(frame) = stack.last_mut() {
+            if let Some(savepoint) = frame.savepoints.last().filter(|_| !backend_aborted) {
+                frame
+                    .prepared_changes
+                    .rollback_to(savepoint.prepared_change_mark)
+                    .invalidate(self.session.prepared.write().values_mut());
+            } else {
+                frame
+                    .prepared_changes
+                    .invalidate(self.session.prepared.write().values_mut());
+            }
+        }
         self.release_aborted_statement_locks(rollback_state.keep_mark);
         // The index of changed rows is built again from the row changes when a read needs it.
         if let Some(outer) = stack.first_mut() {

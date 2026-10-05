@@ -144,3 +144,26 @@ fn the_temporary_namespace_leads_the_implicit_schemas_once_it_exists() {
         ["public"]
     );
 }
+
+#[test]
+fn analysis_paths_compare_usable_namespaces_and_the_creation_target() {
+    use uqa_sql::catalog::analysis::AnalysisCatalog;
+
+    let catalog = catalog();
+    let path = |resolution: &RelationNameResolution| {
+        catalog.effective_search_path(resolution).unwrap().unwrap()
+    };
+    let public = path(&resolution(&["public"]));
+    assert_eq!(public.schemas, ["pg_catalog", "public"]);
+    assert_eq!(public.creation_namespace.as_deref(), Some("public"));
+    let explicit_catalog = path(&resolution(&["pg_catalog", "public"]));
+    assert_eq!(explicit_catalog.schemas, public.schemas);
+    assert_ne!(explicit_catalog, public);
+    assert_eq!(path(&resolution(&["missing", "public", "public"])), public);
+    let mut denied = resolution(&["private", "public"]);
+    denied.current_user = "reader".into();
+    assert_eq!(path(&denied), public);
+    let mut temporary = resolution(&["public"]);
+    temporary.temporary_namespace_allocated = true;
+    assert_ne!(path(&temporary), public);
+}

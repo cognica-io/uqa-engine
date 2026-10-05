@@ -8,6 +8,8 @@ use super::*;
 use crate::{ast::FunctionBinding, FunctionTypeResolver, RelationIdentity};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod dependencies;
+
 struct NoRoutines;
 impl FunctionTypeResolver for NoRoutines {
     fn resolve_function_type(
@@ -148,5 +150,151 @@ fn partial_targets_can_repeat_without_changing_original_row_expression_binding()
     ] {
         let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
         infer_prepared_parameter_types(&NoRoutines, &plan, &[], &assignment_context()).unwrap();
+    }
+}
+
+#[test]
+fn prepared_input_constants_keep_their_original_sites_and_selected_types() {
+    let clock = 90_123_456_789;
+    let _clock = crate::expr::TransactionClockScope::enter(clock);
+    for (sql, expected) in [
+        ("SELECT 'now'::timestamp, 'now'::text::timestamp", 1),
+        ("SELECT now() = 'now', now() IN ('now'), now() BETWEEN 'now' AND 'now', CASE WHEN true THEN 'now' ELSE now() END, ARRAY['now', now()], COALESCE('now', now())", 7),
+        ("WITH RECURSIVE second AS (SELECT * FROM first), first AS (SELECT 'now'::timestamp AS frozen, 'now'::text AS live) SELECT * FROM second", 1),
+        ("SELECT (SELECT 'now'::timestamp), (SELECT 'now'::text)::timestamp", 1),
+        ("SELECT 'now' UNION SELECT now()", 1),
+        ("SELECT 'now'::timestamp AS frozen GROUP BY frozen", 1),
+        ("SELECT count(*) GROUP BY 'now'::timestamp", 1),
+        ("WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<2) CYCLE n SET c TO 'yes' DEFAULT 'no' USING p SELECT n,c FROM t", 0),
+        ("SELECT * FROM ROWS FROM (generate_series('now'::timestamp, 'now'::timestamp, '1 day'::interval)) AS series(t)", 3),
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        read_prepared_inputs(&NoRoutines, &mut plan, &[], &assignment_context(), None)
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        let mut constants = Vec::new();
+        plan.rewrite_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::TypedLiteral {
+                value: uqa_core::Value::Temporal(value),
+                ..
+            } = expression
+            {
+                constants.push(value.clone());
+            }
+        });
+        assert_eq!(constants.len(), expected, "{sql}: {constants:?}");
+        for value in constants {
+            match value {
+                uqa_core::TemporalValue::Timestamp { micros }
+                | uqa_core::TemporalValue::TimestampTz { micros } => {
+                    assert_eq!(micros, clock, "{sql}");
+                }
+                uqa_core::TemporalValue::Interval { .. } => {}
+                _ => panic!("unexpected constant in {sql}: {value:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn prepared_assignments_read_constants_without_freezing_runtime_text_or_parameters() {
+    let crate::Statement::CreateTable(table) = crate::compile(
+        "CREATE TABLE clock_target (id integer PRIMARY KEY, stamp timestamp, stamps timestamp[])",
+    )
+    .unwrap()
+    .remove(0) else {
+        unreachable!()
+    };
+    let context = BindingContext {
+        catalog: crate::binding::fixture::catalog(BTreeMap::from([(
+            RelationIdentity::new("public", "clock_target"),
+            crate::binding::fixture::table_definition(table.columns),
+        )])),
+        ..assignment_context()
+    };
+    let _clock = crate::expr::TransactionClockScope::enter(90_123_456_789);
+    for (sql, expected) in [
+        ("INSERT INTO clock_target(stamp) VALUES ('now')", 1),
+        ("INSERT INTO clock_target(stamp) SELECT 'now'", 1),
+        ("INSERT INTO clock_target(id, stamp) VALUES (1, 'now') ON CONFLICT(id) DO UPDATE SET stamp = 'now'", 2),
+        ("UPDATE clock_target SET stamp = 'now'", 1),
+        ("UPDATE clock_target SET stamps[1] = 'now'", 1),
+        ("MERGE INTO clock_target USING (VALUES (1)) AS s(id) ON clock_target.id = s.id WHEN MATCHED THEN UPDATE SET stamp = 'now' WHEN NOT MATCHED THEN INSERT(stamp) VALUES ('now')", 2),
+        ("UPDATE clock_target SET stamp = 'now'::text::timestamp", 0),
+        ("UPDATE clock_target SET stamp = $1::timestamp", 0),
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let declared = if sql.contains("$1") { vec![Some(ColumnType::Text)] } else { vec![] };
+        assert_eq!(
+            read_prepared_inputs(&NoRoutines, &mut plan, &declared, &context, None)
+                .unwrap_or_else(|error| panic!("{sql}: {error}"))
+                .parameter_types,
+            declared
+        );
+        let mut count = 0;
+        plan.rewrite_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::TypedLiteral {
+                value: uqa_core::Value::Temporal(uqa_core::TemporalValue::Timestamp { micros }),
+                ..
+            } = expression {
+                assert_eq!(*micros, 90_123_456_789, "{sql}");
+                count += 1;
+            }
+        });
+        assert_eq!(count, expected, "{sql}");
+    }
+}
+
+#[test]
+fn domain_input_constants_use_the_base_type_without_erasing_parameter_identity() {
+    let _clock = crate::expr::TransactionClockScope::enter(90_123_456_789);
+    for (base, text) in [
+        (ColumnType::TimestampPrecision(3), "now"),
+        (ColumnType::Int2Vector, "1 2"),
+        (ColumnType::OidVector, "1 2"),
+    ] {
+        let domain = ColumnType::Domain {
+            schema: "public".into(),
+            name: "input_domain".into(),
+            oid: 16385,
+            array_oid: Some(16386),
+            base: Box::new(base.clone()),
+        };
+        let mut plan = UnifiedPlan::lower(
+            crate::compile(&format!("SELECT '{text}'"))
+                .unwrap()
+                .remove(0),
+        );
+        let mut parameters = ParameterTypes::with_input_constants(&[None], None, None);
+        plan.rewrite_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::Literal(uqa_core::Value::Str(text)) = expression {
+                let text = text.clone();
+                let mut observed = ExpressionType::unknown_literal(expression, text);
+                parameters.coerce_unknown(&mut observed, &domain).unwrap();
+                assert_eq!(observed.ty, Some(domain.clone()));
+            }
+        });
+        let mut parameter = parameters.reference(1).unwrap();
+        parameters.coerce_unknown(&mut parameter, &domain).unwrap();
+        parameters.take_input_constants().apply(&mut plan).unwrap();
+        assert_eq!(parameters.finish().unwrap(), [Some(domain)]);
+        let mut constants = 0;
+        plan.rewrite_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::TypedLiteral {
+                value, bound_type, ..
+            } = expression
+            {
+                assert_eq!(*bound_type, Some(base.without_type_modifiers()));
+                if matches!(base, ColumnType::TimestampPrecision(_)) {
+                    assert_eq!(
+                        *value,
+                        uqa_core::Value::Temporal(uqa_core::TemporalValue::Timestamp {
+                            micros: 90_123_456_789
+                        })
+                    );
+                }
+                constants += 1;
+            }
+        });
+        assert_eq!(constants, 1);
     }
 }

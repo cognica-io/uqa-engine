@@ -17,6 +17,9 @@ pub(super) fn publish_regular_view(
     view: StoredView,
     name: &str,
 ) -> Result<(), SQLError> {
+    let change = crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+        view.relation_oids().relation,
+    );
     let mut views = publication.views_write();
     if view.persistence != RelationPersistence::Temporary && publication.has_catalog() {
         publication
@@ -30,6 +33,7 @@ pub(super) fn publish_regular_view(
     views.insert(relation, view);
     drop(views);
     changes.catalog_registry_changed();
+    changes.prepared_catalog_changed(change);
     Ok(())
 }
 pub(super) fn publish_materialized_view(
@@ -39,6 +43,9 @@ pub(super) fn publish_materialized_view(
     view: StoredView,
     name: &str,
 ) -> Result<(), SQLError> {
+    let change = crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+        view.relation_oids().relation,
+    );
     if publication.has_catalog() {
         publication
             .save_view(&catalog_view_row(&relation, &view).map_err(|error| {
@@ -50,6 +57,7 @@ pub(super) fn publish_materialized_view(
     }
     publication.views_write().insert(relation, view);
     changes.catalog_registry_changed();
+    changes.prepared_catalog_changed(change);
     Ok(())
 }
 

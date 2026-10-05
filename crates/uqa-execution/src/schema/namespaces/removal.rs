@@ -76,7 +76,7 @@ pub fn drop_empty_schema(
     let removed = schemas.remove(name).is_some();
     drop(schemas);
     if removed {
-        context.changes.catalog_registry_changed();
+        context.changes.namespace_catalog_changed();
     }
     Ok(removed)
 }

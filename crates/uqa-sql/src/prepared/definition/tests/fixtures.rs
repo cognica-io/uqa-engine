@@ -19,6 +19,20 @@ impl crate::FunctionTypeResolver for NoRoutines {
 }
 impl crate::routines::RoutineResolution for NoRoutines {}
 impl crate::catalog::analysis::AnalysisCatalog for NoRoutines {
+    fn effective_search_path(
+        &self,
+        resolution: &crate::catalog::resolution::RelationNameResolution,
+    ) -> Result<Option<crate::catalog::resolution::EffectiveSearchPath>, crate::SQLError> {
+        let mut schemas = resolution.search_path.clone();
+        if !schemas.iter().any(|name| name == "pg_catalog") {
+            schemas.insert(0, "pg_catalog".into());
+        }
+        Ok(Some(crate::catalog::resolution::EffectiveSearchPath {
+            schemas,
+            creation_namespace: resolution.search_path.first().cloned(),
+        }))
+    }
+
     fn table_resolved(
         &self,
         _: &crate::catalog::resolution::RelationNameResolution,

@@ -69,6 +69,7 @@ pub trait SequenceValueTransactions {
 }
 
 pub struct SequenceValueContext<'a> {
+    pub catalog: crate::catalog::context::CatalogContext<'a>,
     pub locks: &'a dyn RelationLockSession,
     pub transactions: &'a dyn SequenceValueTransactions,
     pub snapshots: &'a dyn SequenceSnapshotSource,

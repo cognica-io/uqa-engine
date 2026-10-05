@@ -69,6 +69,7 @@ impl SequenceRemovalPublication for Engine {
             self.durable.sequences.read().contains_key(&relation)
         };
         if removed {
+            self.note_prepared_relation_change(&relation);
             self.durable.sequences.write().remove(&relation);
             self.durable.sequence_object_ids.write().remove(&relation);
             self.durable

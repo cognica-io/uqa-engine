@@ -102,23 +102,51 @@ fn read_constant<C: OidAliasInput + ?Sized>(
     if !array {
         return read_name(catalog, ty, text).map(Value::Int);
     }
-    let elements = crate::expr::parse_pg_array_literal(text)?
-        .into_elements()
-        .into_iter()
-        .map(|element| match element {
-            Value::Null => Ok(Value::Null),
-            Value::Str(name) => read_name(catalog, ty, &name).map(Value::Int),
-            other => Err(SQLError::TypeMismatch(format!(
-                "cannot read {other:?} as {}",
-                ty.sql_name()
-            ))),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    ArrayValue::try_new(elements)
+    let array = crate::expr::parse_pg_array_literal(text)?;
+    let lower_bounds = array.lower_bounds().to_vec();
+    let mut elements = array.into_elements();
+    read_array_elements(catalog, ty, &mut elements)?;
+    ArrayValue::with_lower_bounds(elements, lower_bounds)
         .map(Value::Array)
         .ok_or_else(|| {
             SQLError::Internal(format!("{} array literal lost its shape", ty.sql_name()))
         })
+}
+
+fn read_array_elements<C: OidAliasInput + ?Sized>(
+    catalog: &C,
+    ty: &ColumnType,
+    elements: &mut [Value],
+) -> Result<(), SQLError> {
+    for element in elements {
+        match element {
+            Value::Null => {}
+            Value::Str(name) => *element = Value::Int(read_name(catalog, ty, name)?),
+            Value::List(nested) => read_array_elements(catalog, ty, nested)?,
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "cannot read {other:?} as {}",
+                    ty.sql_name(),
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Read an unknown input after ordered analysis selects an OID alias type. Other catalog-dependent input types remain the responsibility of their own binders.
+pub(crate) fn read_unknown_constant(
+    catalog: &dyn OidAliasInput,
+    ty: &ColumnType,
+    text: &str,
+) -> Result<Option<Value>, SQLError> {
+    match ty {
+        ColumnType::Array(element) if is_alias(element) => {
+            read_constant(catalog, element, text, true).map(Some)
+        }
+        scalar if is_alias(scalar) => read_constant(catalog, scalar, text, false).map(Some),
+        _ => Ok(None),
+    }
 }
 
 /// The type of the stored constant: the alias type, or an array of it.
@@ -268,7 +296,7 @@ pub fn read_oid_alias_constants_in_plan<C: OidAliasInput + ?Sized>(
     failure.map_or(Ok(()), Err)
 }
 
-/// The OID alias constants of a prepared statement, as parse analysis leaves them in the prepared plan. A `regtype`, `regproc`, `regprocedure` or `regnamespace` cast of a string literal becomes the typed constant, which `EXECUTE` prints by the object's current name, since the plan keeps no dependency on the object. A `regclass` cast is checked and left as written: `PostgreSQL` records the relations its `regclass` constants name as dependencies of the prepared plan and analyzes the statement's text anew when one is renamed or dropped, so `EXECUTE` resolves the written relation names again and reports `42P01` for a name no relation has. Every name must denote an object when the statement is prepared.
+/// Read a prepared statement's OID alias inputs once. Scalar regclass constants contribute relation dependencies separately; invalidation reads the retained original syntax again. A whole array constant retains its OIDs without becoming scalar relation dependencies.
 pub fn read_prepared_oid_alias_constants<C: OidAliasInput + ?Sized>(
     catalog: &C,
     plan: &mut UnifiedPlan,
@@ -276,7 +304,7 @@ pub fn read_prepared_oid_alias_constants<C: OidAliasInput + ?Sized>(
     let mut failure = None;
     plan.rewrite_scalar_expressions(&mut |root| {
         root.visit_mut(&mut |expression| {
-            read_scalar_constant(catalog, expression, true, &mut failure);
+            read_scalar_constant(catalog, expression, false, &mut failure);
         });
     });
     failure.map_or(Ok(()), Err)

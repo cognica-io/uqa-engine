@@ -10,6 +10,7 @@ use crate::{ColumnType, RowSchema, SQLError, SQLParam};
 use uqa_core::Value;
 pub mod arguments;
 pub mod definition;
+pub mod dependencies;
 pub mod entry;
 pub mod planning;
 

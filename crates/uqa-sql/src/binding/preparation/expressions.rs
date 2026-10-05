@@ -95,7 +95,7 @@ impl Preparation<'_> {
             ScalarExpr::Param(index) => return self.parameters.reference(*index),
             ScalarExpr::Literal(Value::Null) => return Ok(ExpressionType::unknown()),
             ScalarExpr::Literal(Value::Str(text)) => {
-                return Ok(ExpressionType::unknown_literal(text.clone()));
+                return Ok(ExpressionType::unknown_literal(expression, text.clone()));
             }
             ScalarExpr::Cast { expr, ty } => {
                 Some(self.cast_expression(expr, ty, input, subqueries)?)
@@ -408,6 +408,7 @@ impl Preparation<'_> {
             )
         };
         let targets = if let Some(selected) = &selected {
+            self.scope.record_routine_dependency(&selected.binding);
             let types = selected
                 .binding
                 .invocation

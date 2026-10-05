@@ -344,7 +344,20 @@ fn sequence_value_functions_enforce_relation_kind_and_default_bounds() {
     ] {
         let error = eng.sql(sql, &[]).unwrap_err();
         assert_eq!(error.sqlstate(), Some("42809"), "{sql}: {error}");
+        assert_eq!(error.to_string(), "cannot open relation \"not_a_sequence\"");
+        assert_eq!(
+            error.detail(),
+            Some("This operation is not supported for tables.")
+        );
     }
+    let missing = eng.sql("SELECT nextval(4294967294::oid)", &[]).unwrap_err();
+    assert_eq!(missing.sqlstate(), Some("XX000"));
+    assert_eq!(
+        missing.to_string(),
+        "could not open relation with OID 4294967294"
+    );
+    eng.sql("CREATE SEQUENCE \"123\"", &[]).unwrap();
+    assert_eq!(eng.nextval("123").unwrap(), 1);
 
     eng.sql("CREATE SEQUENCE ascending_bounds", &[]).unwrap();
     for sql in [

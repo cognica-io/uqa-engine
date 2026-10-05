@@ -68,27 +68,41 @@ fn resolved_regclass_oid(
     canonical: &str,
     kind: &str,
 ) -> Result<i64, SQLError> {
+    let catalog = context.catalog_read_view();
+    let mut resolution = context.session_execution_view().relation_name_resolution();
+    resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
+    resolved_relation_oid(&catalog, &resolution, canonical, kind)
+}
+
+/// Resolve an already-selected relation from one immutable catalog scope.
+pub(crate) fn resolved_relation_oid(
+    catalog: &crate::catalog::CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+    canonical: &str,
+    kind: &str,
+) -> Result<i64, SQLError> {
     if let Some(relation) = uqa_sql::catalog::SystemRelation::from_qualified_name(canonical) {
         return Ok(relation.oid());
     }
     if kind == "sequence" {
-        let object_id = context
-            .sequence_object_id(canonical)
-            .map_err(|error| SQLError::Internal(error.to_string()))?
+        let relation =
+            uqa_core::RelationIdentity::from_legacy_name(canonical).map_err(SQLError::Internal)?;
+        let object_id = catalog
+            .snapshot()
+            .definitions
+            .sequence_object_ids
+            .get(&relation)
             .ok_or_else(|| {
                 SQLError::Internal(format!(
                     "resolved sequence `{canonical}` has no object identity"
                 ))
             })?;
-        return Ok(context.catalog_read_view().sequence_catalog_oid(&object_id));
+        return Ok(catalog.sequence_catalog_oid(object_id));
     }
     if kind == "index" {
         let relation =
             uqa_core::RelationIdentity::from_legacy_name(canonical).map_err(SQLError::Internal)?;
-        let catalog = context.catalog_read_view();
-        let mut resolution = context.session_execution_view().relation_name_resolution();
-        resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
-        let index = catalog_index_relations(&catalog, &resolution)?
+        let index = catalog_index_relations(catalog, resolution)?
             .into_iter()
             .find(|index| index.relation == relation)
             .ok_or_else(|| {
@@ -99,14 +113,12 @@ fn resolved_regclass_oid(
         return Ok(index.oid());
     }
     if kind == "table" {
-        return super::super::table_relation_oid(context, canonical)
-            .map_err(|error| SQLError::Internal(error.to_string()));
+        return super::super::snapshot_table_relation_oid(catalog, resolution, canonical);
     }
     let relation =
         uqa_core::RelationIdentity::from_legacy_name(canonical).map_err(SQLError::Internal)?;
     match kind {
-        "view" | "materialized view" => context
-            .catalog_read_view()
+        "view" | "materialized view" => catalog
             .snapshot()
             .definitions
             .views
@@ -117,8 +129,7 @@ fn resolved_regclass_oid(
                     "resolved view `{canonical}` has no catalog definition"
                 ))
             }),
-        "foreign table" => context
-            .catalog_read_view()
+        "foreign table" => catalog
             .snapshot()
             .definitions
             .foreign_tables
@@ -129,8 +140,7 @@ fn resolved_regclass_oid(
                     "resolved foreign table `{canonical}` has no catalog definition"
                 ))
             }),
-        "composite type" => context
-            .catalog_read_view()
+        "composite type" => catalog
             .snapshot()
             .definitions
             .composites

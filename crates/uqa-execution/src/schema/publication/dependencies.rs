@@ -25,6 +25,13 @@ pub trait ForeignSchemaPublication {
     fn publish_foreign_tables(&self, updates: Vec<(RelationIdentity, StoredForeignTable)>);
 }
 pub trait CatalogPublicationChanges {
+    fn prepared_catalog_changed(
+        &self,
+        _change: crate::statement::prepared::invalidation::PreparedCatalogChange,
+    ) {
+    }
+    /// Publish a change to an existing, already-bound relation. The session adapter lends its loaded object identity; this does not resolve a SQL name.
+    fn prepared_relation_changed(&self, _relation: &RelationIdentity) {}
     fn table_catalog_changed(&self);
     fn catalog_registry_changed(&self);
 }

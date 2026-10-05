@@ -11,14 +11,12 @@ use super::{
     compilation::{persisted_routine_body, StoredRoutineCompilationContext},
 };
 use crate::schema::namespaces::NamespaceCatalogChanges;
-use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::CreateFunction,
     routines::{
         lifecycle::rewrites::{self as analysis},
         merge_columns::statement_has_removed_merge_target,
-        SQLUserFunction,
     },
     SQLError,
 };
@@ -75,14 +73,16 @@ pub fn publish_stored_routine_body_rewrites(
         return Ok(());
     }
     let mut rewritten = context.registry.routine_snapshot();
+    let previous = rewritten.clone();
     for definition in definitions {
         let function = analysis::routine_body_rewrite_target(&mut rewritten, &definition)?;
         let body = persisted_routine_body(&context.compilation, &definition)?;
-        *function = Arc::new(SQLUserFunction::new(definition, body));
+        *function = super::catalog::revision::replacement(definition, body)?;
     }
     context
         .publication
         .persist_routine_definitions(&rewritten)?;
+    super::catalog::publication::record_changes(context.changes, &previous, &rewritten);
     **context.registry.routines_write() = rewritten;
     context.changes.catalog_registry_changed();
     Ok(())

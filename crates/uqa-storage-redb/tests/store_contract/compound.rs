@@ -126,3 +126,11 @@ fn merged_vector_generations_conflicts_and_reopen() {
     verify_vector_merge_reopen(&store, VectorMergeKind::IVF).unwrap();
     verify_vector_merge_reopen(&store, VectorMergeKind::HNSW).unwrap();
 }
+
+#[test]
+fn selected_catalog_record_revisions_preserve_replacement_and_undo_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = RedbStorage::open(directory.path().join("revisions.redb")).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(storage.store());
+    verify_catalog_record_revisions(&store).unwrap();
+}

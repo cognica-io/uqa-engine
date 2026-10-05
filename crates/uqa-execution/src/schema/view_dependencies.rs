@@ -158,6 +158,15 @@ fn publish_rewritten_views(
             }
         }
     }
+    for relation in changed {
+        if let Some(view) = next.get(relation) {
+            context.changes.prepared_catalog_changed(
+                crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                    view.relation_oids().relation,
+                ),
+            );
+        }
+    }
     **context.publication.views_write() = next;
     context.changes.catalog_registry_changed();
     Ok(())

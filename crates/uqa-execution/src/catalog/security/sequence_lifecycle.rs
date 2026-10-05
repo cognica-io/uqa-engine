@@ -47,6 +47,7 @@ pub trait SequencePrivilegePublication {
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
     fn security_write(&self) -> SequenceSecurityWrite<'_>;
     fn catalog_changed(&self);
+    fn prepared_relation_changed(&self, _relation: &RelationIdentity) {}
     fn notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct SequencePrivilegeContext<'a> {
@@ -99,6 +100,7 @@ impl SequencePrivilegeContext<'_> {
         }
         let changed = !updates.is_empty();
         for (_, relation, security) in updates {
+            self.publication.prepared_relation_changed(&relation);
             registry.insert(relation, security);
         }
         drop(registry);

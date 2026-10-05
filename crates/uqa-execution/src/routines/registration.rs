@@ -248,7 +248,7 @@ pub fn register_sql_function(
                     &roles,
                     &memberships,
                 )?;
-                let published = Arc::new(SQLUserFunction::new(def, bound.body.clone()));
+                let published = super::catalog::revision::replacement(def, bound.body.clone())?;
                 overloads[pos] = Arc::clone(&published);
                 published
             } else {
@@ -256,7 +256,7 @@ pub fn register_sql_function(
                     uqa_sql::routines::security::binding::routine_role_dependencies(&def, &roles)?;
                 def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
                 def.catalog_oid = Some(created_routine_oid(&name, new_oid)?);
-                let published = Arc::new(SQLUserFunction::new(def, bound.body.clone()));
+                let published = super::catalog::revision::replacement(def, bound.body.clone())?;
                 overloads.push(Arc::clone(&published));
                 published
             };
@@ -277,6 +277,7 @@ pub fn register_sql_function(
         .catalog
         .publication
         .persist_routine_definitions(&next)?;
+    super::catalog::publication::record_changes(context.catalog.changes, &registry, &next);
     **registry = next;
     drop(registry);
     drop(memberships);
@@ -381,11 +382,12 @@ pub fn alter_sql_routine(
             "resolved ALTER routine registry entry `{name}` disappeared before mutation"
         ))
     })?;
-    overloads[position] = Arc::new(SQLUserFunction::new(def, existing.body.clone()));
+    overloads[position] = super::catalog::revision::replacement(def, existing.body.clone())?;
     context
         .catalog
         .publication
         .persist_routine_definitions(&next)?;
+    super::catalog::publication::record_changes(context.catalog.changes, &registry, &next);
     **registry = next;
     drop(registry);
     drop(memberships);

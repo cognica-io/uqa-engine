@@ -236,7 +236,7 @@ fn alter_foreign_table_role_owner(
     context
         .publication
         .security_write()
-        .insert(relation, security);
+        .insert(relation.clone(), security);
     if !sequence_updates.is_empty() {
         let mut registry = context.publication.sequence_security_write();
         for (sequence, sequence_security) in sequence_updates {
@@ -246,6 +246,7 @@ fn alter_foreign_table_role_owner(
     drop(memberships);
     drop(roles);
     context.changes.catalog_registry_changed();
+    context.changes.prepared_relation_changed(&relation);
     Ok(())
 }
 
@@ -349,9 +350,10 @@ fn rename_foreign_table_to(
     drop(tables);
     let mut memory_tables = context.publication.memory_tables_write();
     if let Some(rows) = memory_tables.remove(relation) {
-        memory_tables.insert(target, rows);
+        memory_tables.insert(target.clone(), rows);
     }
     drop(memory_tables);
     context.changes.catalog_registry_changed();
+    context.changes.prepared_relation_changed(&target);
     Ok(())
 }

@@ -32,6 +32,7 @@ pub mod graph;
 pub mod graph_oids;
 mod graph_reads;
 pub mod namespaces;
+mod prepared_dependencies;
 mod read;
 pub mod schema;
 mod snapshot_read;
@@ -41,6 +42,8 @@ mod snapshot_read;
 pub struct CatalogReadView {
     snapshot: Arc<CatalogReadSnapshot>,
     graph_reads: Option<Arc<graph_reads::GraphCatalogRead>>,
+    /// The owning session's catalog records, read only inside its retained statement transaction.
+    prepared_catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     /// The exact positions of sequences whose durable records run ahead of the values handed out. They move without a catalog change, so they are read when a sequence's values are.
     sequence_positions: Option<Arc<crate::row_locks::RowLockManager>>,
     /// The committed value records of sequences, which also move without a catalog change. A sequence's state is read from them when no position covers it.
@@ -140,6 +143,7 @@ impl CatalogReadView {
         Self {
             snapshot: Arc::new(snapshot),
             graph_reads: None,
+            prepared_catalog: None,
             sequence_positions: None,
             latest_sequence_values: None,
         }
@@ -162,6 +166,12 @@ impl CatalogReadView {
         self.latest_sequence_values = Some(values);
         self
     }
+    #[must_use]
+    pub fn with_prepared_catalog(mut self, catalog: Arc<dyn uqa_storage::CatalogFacade>) -> Self {
+        self.prepared_catalog = Some(catalog);
+        self
+    }
+
     pub fn snapshot(&self) -> &CatalogReadSnapshot {
         &self.snapshot
     }

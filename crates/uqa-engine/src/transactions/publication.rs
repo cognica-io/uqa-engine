@@ -22,6 +22,9 @@ impl Engine {
         wrote_records: bool,
     ) -> Result<(), SQLError> {
         if committed.storage_savepoint.is_none() {
+            committed
+                .prepared_changes
+                .invalidate(self.session.prepared.write().values_mut());
             self.session.state.write().graph_overlay = None;
             self.restore_local_runtime_parameters();
             let publication_result = self.row_locks.publish_row_changes(
@@ -56,6 +59,7 @@ impl Engine {
         }
         let nested_savepoint = committed.storage_savepoint;
         if let Some(parent) = stack.last_mut() {
+            parent.prepared_changes.append(committed.prepared_changes);
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
             parent.constraint_modes = committed.constraint_modes;
             parent.row_changes.extend(committed.row_changes);

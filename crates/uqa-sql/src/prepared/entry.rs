@@ -10,7 +10,14 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct PreparedStatementPlan {
+    /// Original input syntax, retained for parse analysis after invalidation.
+    pub source_plan: Arc<crate::plan::UnifiedPlan>,
     pub logical_plan: Arc<crate::plan::UnifiedPlan>,
+    pub needs_analysis: bool,
+    /// The effective namespace of the retained analysis, when its catalog supplies one.
+    pub effective_search_path: Option<crate::catalog::resolution::EffectiveSearchPath>,
+    pub dependencies: super::dependencies::PreparedAnalysisDependencies,
+    pub dependency_snapshot: Option<super::dependencies::PreparedDependencySnapshot>,
     pub plan: Option<crate::plan::UnifiedPlan>,
     pub parameter_types: Vec<Option<crate::ast::ColumnType>>,
     pub result_schema: Option<crate::RowSchema>,
@@ -44,7 +51,19 @@ impl PreparedStatementPlan {
 }
 
 impl PreparedStatementPlan {
+    pub fn invalidate(&mut self) {
+        self.plan = None;
+        self.needs_analysis = true;
+    }
+
     pub fn record_execution(&mut self, update: super::planning::PreparedPlanUpdate) {
+        if let Some(analysis) = update.reanalyzed {
+            self.logical_plan = analysis.logical_plan;
+            self.effective_search_path = analysis.effective_search_path;
+            self.dependencies = analysis.dependencies;
+            self.dependency_snapshot = analysis.dependency_snapshot;
+            self.needs_analysis = false;
+        }
         self.plan = update.generic_plan;
         self.generic_cost = update.generic_cost;
         if let Some(cost) = update.custom_cost {

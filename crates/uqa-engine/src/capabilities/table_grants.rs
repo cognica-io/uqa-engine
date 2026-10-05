@@ -62,6 +62,9 @@ impl TablePrivilegeState for GrantTable {
     }
 }
 impl TableGrantState for GrantTable {
+    fn relation_oid(&self) -> u32 {
+        self.state.relation_oids().relation
+    }
     fn security_write(&self) -> TableSecurityWrite<'_> {
         Box::new(self.state.security.write())
     }

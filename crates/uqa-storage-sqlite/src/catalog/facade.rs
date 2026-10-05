@@ -143,6 +143,14 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::cache_revisions(self)).map(Some)
     }
 
+    fn record_revisions(
+        &self,
+        records: &[uqa_storage::catalog::CatalogRecordRef<'_>],
+    ) -> StorageBackendResult<Option<Vec<Option<uqa_storage::catalog::CatalogRecordRevision>>>>
+    {
+        into_storage_result(self.native_record_revisions(records))
+    }
+
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::set_metadata(self, key, value))
     }

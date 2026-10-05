@@ -60,6 +60,9 @@ pub(crate) fn fixed_builtin_is_non_immutable(name: &str) -> bool {
     matches!(
         name,
         "random"
+            | "nextval"
+            | "currval"
+            | "setval"
             | "gen_random_uuid"
             | "uuidv4"
             | "uuidv7"

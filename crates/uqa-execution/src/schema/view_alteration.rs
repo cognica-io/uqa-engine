@@ -158,6 +158,9 @@ fn publish_altered_view(
     expected_kind: &str,
     view: StoredView,
 ) -> Result<(), SQLError> {
+    let change = crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+        view.relation_oids().relation,
+    );
     if view.persistence != RelationPersistence::Temporary && context.publication.has_catalog() {
         context
             .publication
@@ -176,6 +179,7 @@ fn publish_altered_view(
         .publication
         .views_write()
         .insert(relation.clone(), view);
+    context.changes.prepared_catalog_changed(change);
     Ok(())
 }
 
@@ -334,8 +338,12 @@ fn rename_view_to(
             relation.qualified_name()
         ))
     })?;
+    let change = crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+        view.relation_oids().relation,
+    );
     views.insert(target, view);
     drop(views);
     context.changes.catalog_registry_changed();
+    context.changes.prepared_catalog_changed(change);
     Ok(())
 }

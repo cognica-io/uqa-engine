@@ -162,6 +162,9 @@ pub struct CreateFunction {
     /// Stable catalog identity. The engine assigns this once when the routine is created and preserves it across replacement and rename.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
+    /// The catalog tuple's replacement identity. A replacement changes this token while keeping `object_id`; older definitions use their object identity until first replacement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_revision: Option<[u8; 16]>,
     /// The public OID allocated when the routine was created; replacement and rename keep it. Routines created before OIDs were recorded derive it from their identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_oid: Option<u32>,

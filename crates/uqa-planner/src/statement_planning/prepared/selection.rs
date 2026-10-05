@@ -10,8 +10,9 @@ use std::sync::Arc;
 use uqa_sql::{
     plan::UnifiedPlan,
     prepared::{
-        definition::PreparedDefinitionContext, entry::PreparedStatementPlan,
-        planning::PreparedPlanUpdate,
+        definition::PreparedDefinitionContext,
+        entry::PreparedStatementPlan,
+        planning::{PreparedPlanAnalysis, PreparedPlanUpdate},
     },
     SQLError, SQLParam,
 };
@@ -41,6 +42,21 @@ pub struct PreparedPlanningContext<'a> {
     pub optimization: &'a dyn PreparedPlanOptimization,
 }
 
+fn needs_analysis(
+    context: &PreparedDefinitionContext<'_>,
+    entry: &PreparedStatementPlan,
+) -> Result<bool, SQLError> {
+    if entry.needs_analysis {
+        return Ok(true);
+    }
+    Ok(!uqa_sql::prepared::definition::analysis_is_current(
+        context,
+        entry.effective_search_path.as_ref(),
+        &entry.dependencies,
+        entry.dependency_snapshot.as_ref(),
+    )?)
+}
+
 pub fn select_plan(
     context: &PreparedPlanningContext<'_>,
     name: &str,
@@ -50,20 +66,48 @@ pub fn select_plan(
         return Ok(None);
     };
     let mode = context.session.plan_cache_mode()?;
-    let mut generic_plan = entry.plan.clone();
+    let needs_analysis = needs_analysis(&context.analysis, &entry)?;
+    let mut generic_plan = if needs_analysis {
+        None
+    } else {
+        entry.plan.clone()
+    };
     let mut generic_cost = entry.generic_cost;
+    let reanalyzed = if needs_analysis {
+        let declared = entry
+            .parameter_types
+            .iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        Some(uqa_sql::prepared::definition::analyze_definition(
+            &context.analysis,
+            (*entry.source_plan).clone(),
+            &declared,
+        )?)
+    } else {
+        None
+    };
+    let logical_plan = reanalyzed
+        .as_ref()
+        .map_or(entry.logical_plan.as_ref(), |definition| {
+            &definition.logical_plan
+        });
     let usage = super::PreparedPlanUsage {
         has_parameters: !entry.parameter_types.is_empty(),
         custom_plans: entry.custom_plans,
         total_custom_cost: entry.total_custom_cost,
     };
     let mut custom = super::choose_custom_plan(usage, &mode, generic_cost);
-    if custom || generic_plan.is_none() {
-        let result_schema = uqa_sql::prepared::definition::analyze_result_schema(
-            &context.analysis,
-            &entry.logical_plan,
-            &entry.parameter_types,
-        )?;
+    if custom || generic_plan.is_none() || reanalyzed.is_some() {
+        let result_schema = match &reanalyzed {
+            Some(definition) => definition.result_schema.clone(),
+            None => uqa_sql::prepared::definition::analyze_result_schema(
+                &context.analysis,
+                logical_plan,
+                &entry.parameter_types,
+            )?,
+        };
         if !uqa_sql::prepared::prepared_result_schema_matches(
             entry.result_schema.as_ref(),
             result_schema.as_ref(),
@@ -75,9 +119,7 @@ pub fn select_plan(
         }
     }
     if !custom && generic_plan.is_none() {
-        let plan = context
-            .optimization
-            .optimize_plan((*entry.logical_plan).clone())?;
+        let plan = context.optimization.optimize_plan(logical_plan.clone())?;
         generic_cost = Some(context.optimization.estimate_plan(&plan)?.execution);
         generic_plan = Some(plan);
         // Building the first generic plan supplies its previously unknown cost.
@@ -85,7 +127,7 @@ pub fn select_plan(
         custom = super::choose_custom_plan(usage, &mode, generic_cost);
     }
     let (plan, custom_cost) = if custom {
-        let mut plan = (*entry.logical_plan).clone();
+        let mut plan = logical_plan.clone();
         super::specialize_parameters(&mut plan, parameters);
         let plan = context.optimization.optimize_plan(plan)?;
         let cost = context
@@ -106,6 +148,12 @@ pub fn select_plan(
         name,
         &entry.logical_plan,
         PreparedPlanUpdate {
+            reanalyzed: reanalyzed.map(|definition| PreparedPlanAnalysis {
+                logical_plan: Arc::new(definition.logical_plan),
+                effective_search_path: definition.effective_search_path,
+                dependencies: definition.dependencies,
+                dependency_snapshot: definition.dependency_snapshot,
+            }),
             generic_plan,
             generic_cost,
             custom_cost,

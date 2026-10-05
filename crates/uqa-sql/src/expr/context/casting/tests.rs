@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod enum_arrays;
+
 #[test]
 fn standalone_catalog_casts_keep_oid_output_and_array_lower_bounds() {
     let budget = MemoryBudget::new(128 * 1024);

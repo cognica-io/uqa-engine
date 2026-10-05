@@ -46,6 +46,11 @@ pub fn rewrite_view_relation_references(
     }
     let mut views = context.registry.views_write();
     for (relation, view) in updates {
+        context.changes.prepared_catalog_changed(
+            crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                view.relation_oids().relation,
+            ),
+        );
         views.insert(relation, view);
     }
     Ok(())
@@ -113,6 +118,15 @@ pub fn rewrite_view_column_references(
                     .publication
                     .save_view(&catalog_view_row(relation, view)?)?;
             }
+        }
+    }
+    for relation in changed {
+        if let Some(view) = next.get(&relation) {
+            context.changes.prepared_catalog_changed(
+                crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                    view.relation_oids().relation,
+                ),
+            );
         }
     }
     **context.registry.views_write() = next;

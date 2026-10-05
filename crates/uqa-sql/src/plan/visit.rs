@@ -27,6 +27,10 @@ fn visit_ctes(ctes: &[CtePlan], visit: &mut dyn FnMut(&ScalarExpr)) {
             CtePlanBody::Query(query) => query.visit_scalar_expressions(visit),
             CtePlanBody::Command(command) => command.visit_scalar_expressions(visit),
         }
+        if let Some(cycle) = &cte.cycle {
+            visit(&cycle.mark_value);
+            visit(&cycle.mark_default);
+        }
     }
 }
 

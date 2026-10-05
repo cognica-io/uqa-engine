@@ -21,6 +21,30 @@ pub fn resolve_grouping_expression<'a>(
     outer: Option<&RowSchema>,
     params: &[SQLParam],
 ) -> Result<Cow<'a, ScalarExpr>, SQLError> {
+    let resolved = resolve_grouping_expression_reference(
+        routines,
+        expression,
+        projections,
+        schema,
+        outer,
+        params,
+    )?;
+    Ok(if std::ptr::eq(resolved, expression) {
+        Cow::Borrowed(expression)
+    } else {
+        Cow::Owned(resolved.clone())
+    })
+}
+
+/// Borrow the original grouped expression or its projection, preserving input-literal identity during prepared analysis.
+pub(crate) fn resolve_grouping_expression_reference<'a>(
+    routines: &dyn RoutineResolution,
+    expression: &'a ScalarExpr,
+    projections: &'a [ProjectionPlan],
+    schema: &RowSchema,
+    outer: Option<&RowSchema>,
+    params: &[SQLParam],
+) -> Result<&'a ScalarExpr, SQLError> {
     let mut resolved = expression;
     if let ScalarExpr::Column(name) = expression {
         if !is_input_column(schema, outer, name) {
@@ -64,11 +88,7 @@ pub fn resolve_grouping_expression<'a>(
             message: "window functions are not allowed in GROUP BY".into(),
         });
     }
-    Ok(if std::ptr::eq(resolved, expression) {
-        Cow::Borrowed(expression)
-    } else {
-        Cow::Owned(resolved.clone())
-    })
+    Ok(resolved)
 }
 
 /// Whether `name` is a column of the query's own sources, ambiguous or not, in `schema`, which holds those columns over `outer`: `findTargetlistEntrySQL92` looks for a GROUP BY name among the columns of the query's own level only.

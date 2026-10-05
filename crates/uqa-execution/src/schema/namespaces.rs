@@ -38,7 +38,19 @@ pub trait NamespaceCatalogRefresh {
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
 }
 pub trait NamespaceCatalogChanges {
+    fn prepared_catalog_changed(
+        &self,
+        _change: crate::statement::prepared::invalidation::PreparedCatalogChange,
+    ) {
+    }
     fn catalog_registry_changed(&self);
+
+    fn namespace_catalog_changed(&self) {
+        self.catalog_registry_changed();
+        self.prepared_catalog_changed(
+            crate::statement::prepared::invalidation::PreparedCatalogChange::GlobalCatalog,
+        );
+    }
 }
 
 pub type SchemaRegistryWrite<'a> =
@@ -90,7 +102,7 @@ pub fn register_schema(
     context.persistence.persist_schema(name, &security)?;
     schemas.insert(name.to_string(), security);
     drop(schemas);
-    context.changes.catalog_registry_changed();
+    context.changes.namespace_catalog_changed();
     Ok(true)
 }
 
@@ -321,7 +333,7 @@ pub fn alter_schema_owner(
     context.tuples.replace(name, locking::tuple(&current)?)?;
     context.persistence.persist_security(name, &security)?;
     context.publication.publish_security(name, security);
-    context.changes.catalog_registry_changed();
+    context.changes.namespace_catalog_changed();
     Ok(())
 }
 

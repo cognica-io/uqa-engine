@@ -88,6 +88,11 @@ declarations! { fn lookup_local(local);
             Signature::new(&[ColumnType::Bytea], ColumnType::Bytea),
         ],
         "repeat" => &[Signature::new(&[ColumnType::Text, ColumnType::Integer], ColumnType::Text)],
+        "nextval" | "currval" => &[Signature::new(&[ColumnType::Regclass], ColumnType::BigInteger)],
+        "setval" => &[
+            Signature::new(&[ColumnType::Regclass, ColumnType::BigInteger], ColumnType::BigInteger),
+            Signature::new(&[ColumnType::Regclass, ColumnType::BigInteger, ColumnType::Boolean], ColumnType::BigInteger),
+        ],
         "md5" => &[
             Signature::new(&[ColumnType::Text], ColumnType::Text),
             Signature::new(&[ColumnType::Bytea], ColumnType::Text),

@@ -51,6 +51,7 @@ mod models;
 mod occurrence_lifecycle;
 mod path_index_data;
 mod physical_indexes;
+mod record_revisions;
 mod records;
 mod relation_acl;
 mod relations;
@@ -98,6 +99,16 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn record_revisions(
+        &self,
+        records: &[crate::catalog::CatalogRecordRef<'_>],
+    ) -> StorageBackendResult<Option<Vec<Option<crate::catalog::CatalogRecordRevision>>>> {
+        if !self.store.transaction_model().is_versioned() {
+            return Ok(None);
+        }
+        self.record_revisions_impl(records).map(Some)
+    }
+
     fn transaction_model(&self) -> crate::StorageTransactionModel {
         self.store.transaction_model()
     }

@@ -96,7 +96,7 @@ pub fn alter_sql_routine_owner(
             def.owner = Some(owner.identity());
             let mut next = registry.clone();
             next.get_mut(name).expect("resolved routine key")[position] =
-                Arc::new(SQLUserFunction::new(def, existing.body.clone()));
+                super::super::catalog::revision::replacement(def, existing.body.clone())?;
             Ok(Some((registry, next)))
         },
     )?;
@@ -107,6 +107,7 @@ pub fn alter_sql_routine_owner(
         .catalog
         .publication
         .persist_routine_definitions(&next)?;
+    super::super::catalog::publication::record_changes(context.catalog.changes, &registry, &next);
     **registry = next;
     drop(registry);
     drop(memberships);

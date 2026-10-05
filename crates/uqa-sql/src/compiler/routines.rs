@@ -378,6 +378,7 @@ pub(super) fn compile_create_function(
 
     Ok(CreateFunction {
         object_id: None,
+        catalog_revision: None,
         catalog_oid: None,
         name,
         or_replace: stmt.replace,

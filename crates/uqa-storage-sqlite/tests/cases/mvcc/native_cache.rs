@@ -320,3 +320,46 @@ fn native_cache_generation_collections_respect_the_complete_read_allowance() {
     assert!(Catalog::open(small).unwrap().cache_revisions().is_err());
     assert_eq!(catalog.cache_revisions().unwrap(), baseline);
 }
+
+#[test]
+fn selected_catalog_record_revisions_preserve_replacement_and_undo_identity() {
+    use uqa_storage::{catalog::CatalogRecordRef, CatalogFacade};
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let catalog = Catalog::open(connection.clone()).unwrap();
+    bind(&connection);
+    catalog.set_metadata("revision-a", "same").unwrap();
+    let read = || {
+        CatalogFacade::record_revisions(
+            &catalog,
+            &[
+                CatalogRecordRef::Metadata("revision-a"),
+                CatalogRecordRef::Metadata("revision-missing"),
+                CatalogRecordRef::Metadata("revision-a"),
+            ],
+        )
+        .unwrap()
+        .unwrap()
+    };
+    let original = read();
+    assert!(original[0].is_some());
+    assert!(original[1].is_none());
+    assert_eq!(original[0], original[2]);
+    catalog.set_metadata("revision-b", "unrelated").unwrap();
+    assert_eq!(read(), original);
+    catalog.set_metadata("revision-a", "same").unwrap();
+    let replaced = read();
+    assert_ne!(replaced, original);
+    connection.begin_transaction().unwrap();
+    connection.savepoint("keep").unwrap();
+    catalog.set_metadata("revision-a", "same").unwrap();
+    let private = read();
+    assert_ne!(private, replaced);
+    connection.rollback_to_savepoint("keep").unwrap();
+    assert_eq!(read(), replaced);
+    catalog.set_metadata("revision-a", "same").unwrap();
+    assert_ne!(read(), private);
+    connection.rollback_transaction().unwrap();
+    assert_eq!(read(), replaced);
+    catalog.delete_metadata("revision-a").unwrap();
+    assert!(read().iter().all(Option::is_none));
+}

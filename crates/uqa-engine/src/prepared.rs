@@ -12,11 +12,13 @@ impl Engine {
         name: String,
         definition: uqa_sql::ast::Statement,
     ) -> Result<(), uqa_sql::SQLError> {
-        uqa_execution::statement::prepared::register_statement(
-            &self.prepared_registration_context(),
-            name,
-            definition,
-        )
+        self.with_direct_read_snapshot(|engine| {
+            uqa_execution::statement::prepared::register_statement(
+                &engine.prepared_registration_context(),
+                name,
+                definition,
+            )
+        })
     }
 
     pub(crate) fn prepared_parameter_types(
@@ -42,9 +44,15 @@ impl Engine {
     /// Catalog changes are checked when each statement is next executed, so a
     /// dropped dependency cannot make unrelated commands or rollback fail.
     pub(crate) fn invalidate_prepared_plans(&self) {
-        for prepared in self.session.prepared.write().values_mut() {
-            prepared.plan = None;
-        }
+        uqa_execution::statement::prepared::invalidation::invalidate_execution_plans(
+            self.session.prepared.write().values_mut(),
+        );
+    }
+
+    /// Read original input syntax again after a binding dependency changes.
+    pub(crate) fn invalidate_prepared_analysis(&self) {
+        uqa_execution::statement::prepared::invalidation::PreparedCatalogChange::GlobalCatalog
+            .invalidate(self.session.prepared.write().values_mut());
     }
 
     pub fn deallocate_prepared(&self, name: Option<&str>) {

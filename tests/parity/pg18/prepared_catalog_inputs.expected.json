@@ -1,0 +1,27 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+  "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+  "cases": [
+    {"sql":"CREATE TYPE pe_color AS ENUM ('a', 'b')","command_tags":["CREATE TYPE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.0"},
+    {"sql":"PREPARE pe_scalar AS SELECT ('a'::pe_color)::text AS value","command_tags":["PREPARE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.1"},
+    {"sql":"PREPARE pe_array AS SELECT ('{a}'::pe_color[])::text AS value","command_tags":["PREPARE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.2"},
+    {"sql":"SELECT ('[0:1]={a,NULL}'::pe_color[])::text AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["[0:1]={a,NULL}"]]}],"notices":[],"id":"catalog_inputs.3"},
+    {"sql":"SELECT ('[0:1]={a,NULL}'::pe_color[])::text[] AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[1009],"rows":[["[0:1]={a,NULL}"]]}],"notices":[],"id":"catalog_inputs.4"},
+    {"sql":"PREPARE pe_text_array AS SELECT ('[0:1]={a,NULL}'::pe_color[])::text[] AS value","command_tags":["PREPARE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.5"},
+    {"sql":"ALTER TYPE pe_color RENAME VALUE 'a' TO 'renamed'","command_tags":["ALTER TYPE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.6"},
+    {"sql":"EXECUTE pe_scalar","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["renamed"]]}],"notices":[],"id":"catalog_inputs.7"},
+    {"sql":"EXECUTE pe_array","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["{renamed}"]]}],"notices":[],"id":"catalog_inputs.8"},
+    {"sql":"EXECUTE pe_text_array","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[1009],"rows":[["[0:1]={renamed,NULL}"]]}],"notices":[],"id":"catalog_inputs.9"},
+    {"sql":"DEALLOCATE pe_text_array","command_tags":["DEALLOCATE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.10"},
+    {"sql":"DEALLOCATE pe_scalar","command_tags":["DEALLOCATE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.11"},
+    {"sql":"DEALLOCATE pe_array","command_tags":["DEALLOCATE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.12"},
+    {"sql":"CREATE SEQUENCE pe_seq","command_tags":["CREATE SEQUENCE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.13"},
+    {"sql":"PREPARE pe_next AS SELECT nextval('pe_seq') AS value","command_tags":["PREPARE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.14"},
+    {"sql":"EXECUTE pe_next","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[20],"rows":[["1"]]}],"notices":[],"id":"catalog_inputs.15"},
+    {"sql":"ALTER SEQUENCE pe_seq RENAME TO pe_renamed","command_tags":["ALTER SEQUENCE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.16"},
+    {"sql":"EXECUTE pe_next","command_tags":[],"error":{"sqlstate":"42P01","message":"relation \"pe_seq\" does not exist","detail":null,"hint":null},"results":[],"notices":[],"id":"catalog_inputs.17"},
+    {"sql":"DEALLOCATE pe_next","command_tags":["DEALLOCATE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"id":"catalog_inputs.18"},
+    {"sql":"SELECT ('{}'::pe_color[])::text[] AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[1009],"rows":[["{}"]]}],"notices":[],"id":"catalog_inputs.19"}
+  ]
+}

@@ -341,6 +341,7 @@ impl Engine {
             session_snapshot,
             data_snapshot,
             dirty_at_begin: self.transaction_dirty_state(),
+            prepared_changes: uqa_execution::statement::prepared::invalidation::PreparedInvalidationLog::default(),
             begin_lock_mark: lock_mark,
             lock_mark,
             next_lock_mark,

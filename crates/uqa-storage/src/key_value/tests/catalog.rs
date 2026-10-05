@@ -103,3 +103,13 @@ fn key_value_catalog_rejects_a_table_without_its_parent_schema() {
     assert!(catalog.load_schemas().unwrap().is_empty());
     assert!(catalog.load_tables().unwrap().is_empty());
 }
+
+#[test]
+fn unversioned_catalog_reports_revision_capability_as_unavailable() {
+    let catalog = KeyValueCatalog::new(store());
+    catalog.set_metadata("a", "same").unwrap();
+    assert!(catalog
+        .record_revisions(&[crate::catalog::CatalogRecordRef::Metadata("a")])
+        .unwrap()
+        .is_none());
+}

@@ -76,6 +76,7 @@ impl IndexRegistryPublication for Engine {
                 self.note_table_catalog_changed();
             }
         }
+        self.note_prepared_table_change(&table);
         Ok(())
     }
 
@@ -94,6 +95,7 @@ impl IndexRegistryPublication for Engine {
                 self.note_table_catalog_changed();
             }
         }
+        self.note_prepared_relation_change(&relation);
         Ok(())
     }
 

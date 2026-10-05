@@ -51,6 +51,7 @@ impl Engine {
         let pending_listen_actions = frame.pending_listen_actions.clone();
         let pending_notifications = frame.pending_notifications.clone();
         let constraint_modes = frame.constraint_modes.clone();
+        let prepared_change_mark = frame.prepared_changes.mark();
         frame.savepoints.push(TransactionSavepoint {
             name,
             storage_savepoint,
@@ -58,6 +59,7 @@ impl Engine {
             session_snapshot,
             data_snapshot,
             dirty: self.transaction_dirty_state(),
+            prepared_change_mark,
             lock_mark: keep_mark,
             row_changes,
             statistics_changes: frame.statistics_changes.clone(),
@@ -98,6 +100,9 @@ impl Engine {
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
         }
         frame.characteristics = characteristics;
+        frame
+            .prepared_changes
+            .release(frame.savepoints[position].prepared_change_mark);
         frame.savepoints.truncate(position);
         frame.xid_levels.truncate(position + 1);
         super::fixed_identities::follow_identities(stack, |identities| {
@@ -155,6 +160,10 @@ impl Engine {
             false,
             &mut cleanup_errors,
         );
+        frame
+            .prepared_changes
+            .rollback_to(savepoint.prepared_change_mark)
+            .invalidate(self.session.prepared.write().values_mut());
         let keep_mark = savepoint.lock_mark;
         frame.restore_mutation_savepoint(position);
         frame.restore_pending_notification_savepoint(position);

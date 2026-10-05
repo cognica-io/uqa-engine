@@ -183,6 +183,9 @@ impl MutationCoordinator<'_> {
     }
 
     pub(crate) fn note_catalog_registry_changed(&self) {
+        uqa_execution::statement::prepared::invalidation::invalidate_execution_plans(
+            self.session.prepared.write().values_mut(),
+        );
         self.runtime.regtype_output_cache.clear();
         self.runtime.bayesian_params_cache.write().clear();
         if !self.session.transactions.lock().is_empty() {
@@ -279,7 +282,7 @@ impl Engine {
                 (relation, snapshot)
             })
             .collect();
-        CatalogReadView::new(CatalogReadSnapshot {
+        let view = CatalogReadView::new(CatalogReadSnapshot {
             tables,
             definitions: CatalogDefinitionSnapshot {
                 sequence_persistence: durable.sequence_persistence.clone(),
@@ -312,7 +315,11 @@ impl Engine {
                     oids,
                 }
             }),
-        })
+        });
+        match self.storage.catalog.as_ref() {
+            Some(catalog) => view.with_prepared_catalog(Arc::clone(catalog)),
+            None => view,
+        }
     }
 
     pub(crate) fn session_execution_view(&self) -> SessionExecutionView<'_> {
@@ -513,6 +520,7 @@ mod scalar_functions;
 mod retrieval_planning;
 
 mod prepared;
+mod prepared_invalidation;
 
 mod statement_transactions;
 

@@ -13,6 +13,7 @@ pub(super) mod diskann;
 mod foreign;
 pub(super) mod graph;
 mod indexes;
+mod record_revisions;
 mod relation_acl;
 mod relations;
 mod sequences;
