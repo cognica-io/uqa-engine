@@ -5,6 +5,111 @@
 //
 
 use super::*;
+use uqa_sql::catalog::roles::{RoleDefinition, RoleIdentity};
+
+struct RefreshingDependencies<'a> {
+    catalog: &'a Catalog,
+    replacement: BTreeMap<String, RoleDefinition>,
+    detail: Option<&'static str>,
+}
+
+impl super::super::context::RoleSharedDependencies for RefreshingDependencies<'_> {
+    fn role_dependency_detail(&self, _: RoleIdentity) -> Result<Option<String>, SQLError> {
+        // Catalog projection may restore committed role definitions while naming dependent objects.
+        self.catalog.released();
+        *self.catalog.roles.borrow_mut() = self.replacement.clone();
+        Ok(self.detail.map(str::to_owned))
+    }
+}
+
+#[test]
+fn deletion_releases_roles_before_dependency_projection_and_keeps_diagnostic_order() {
+    // PostgreSQL 18.4: GRANT EXECUTE ON FUNCTION role_function() TO dependent; DROP ROLE dependent.
+    const DETAIL: &str = "privileges for function role_function()";
+    for revision in [0, 1] {
+        let catalog = Catalog::new();
+        catalog.role("dependent", &[]);
+        catalog
+            .roles
+            .borrow_mut()
+            .get_mut("dependent")
+            .unwrap()
+            .revision = revision;
+        let dependencies = RefreshingDependencies {
+            catalog: &catalog,
+            replacement: catalog.roles.borrow().clone(),
+            detail: Some(DETAIL),
+        };
+        let context = RoleExecutionContext {
+            dependencies: &dependencies,
+            ..catalog.context()
+        };
+        let error = drop_roles(
+            &context,
+            &DropRoleStmt {
+                names: vec!["dependent".into()],
+                if_exists: false,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, SQLError::Diagnostic { sqlstate, message, detail, hint }
+            if sqlstate == "2BP01"
+                && message == "role \"dependent\" cannot be dropped because some objects depend on it"
+                && detail.as_deref() == Some(DETAIL)
+                && hint.is_none())
+        );
+        assert!(catalog.roles.borrow().contains_key("dependent"));
+        assert!(catalog.tuple_locks.borrow().is_empty());
+        catalog.released();
+    }
+}
+
+#[test]
+fn deletion_preserves_the_selected_tuple_across_dependency_projection() {
+    for change in ["unchanged", "updated", "replaced", "deleted"] {
+        let catalog = Catalog::new();
+        catalog.role("dependent", &[]);
+        let mut replacement = catalog.roles.borrow().clone();
+        match change {
+            "updated" => replacement
+                .get_mut("dependent")
+                .unwrap()
+                .advance_revision()
+                .unwrap(),
+            "replaced" => replacement.get_mut("dependent").unwrap().object_id = [99; 16],
+            "deleted" => {
+                replacement.remove("dependent");
+            }
+            _ => {}
+        }
+        let dependencies = RefreshingDependencies {
+            catalog: &catalog,
+            replacement,
+            detail: None,
+        };
+        let context = RoleExecutionContext {
+            dependencies: &dependencies,
+            ..catalog.context()
+        };
+        let result = drop_roles(
+            &context,
+            &DropRoleStmt {
+                names: vec!["dependent".into()],
+                if_exists: false,
+            },
+        );
+        if change == "unchanged" {
+            result.unwrap();
+            assert!(!catalog.roles.borrow().contains_key("dependent"));
+        } else {
+            assert_eq!(result.unwrap_err().sqlstate(), Some("XX000"));
+            assert_eq!(*catalog.roles.borrow(), dependencies.replacement);
+            assert_eq!(catalog.epoch.get(), 0);
+        }
+        catalog.released();
+    }
+}
 
 fn alteration() -> AlterRoleStmt {
     AlterRoleStmt {

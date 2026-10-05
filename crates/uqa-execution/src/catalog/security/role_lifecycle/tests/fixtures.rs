@@ -146,6 +146,7 @@ impl super::super::context::RoleSharedDependencies for Catalog {
             shared_dependency_detail, ObjectAddress, SharedDependency, SharedDependencyKind,
             ROLE_CLASS, ROLE_MEMBERSHIP_CLASS,
         };
+        self.released();
         self.event("shared dependencies");
         let memberships = self.memberships.borrow();
         let address = |oid: i64| u32::try_from(oid).expect("fixture OIDs fit in u32");
@@ -177,6 +178,7 @@ impl super::super::context::RoleSharedDependencies for Catalog {
 }
 impl crate::catalog::security::roles::temporary::TemporaryRoleDependencyReads for Catalog {
     fn peer_temporary_role_reference(&self, _: u32) -> Result<bool, SQLError> {
+        self.released();
         Ok(false)
     }
 }

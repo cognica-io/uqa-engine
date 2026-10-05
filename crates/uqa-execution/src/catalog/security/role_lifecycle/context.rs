@@ -42,7 +42,7 @@ pub trait RolePublication {
 }
 /// What depends on a role, as `checkSharedDependencies` reports it from `pg_shdepend`.
 pub trait RoleSharedDependencies {
-    /// The detail listing the objects that depend on `role`; `None` when nothing does.
+    /// The detail listing the objects that depend on `role`; `None` when nothing does. Projection may restore catalog state, so callers release registry guards before invoking it.
     fn role_dependency_detail(&self, role: RoleIdentity) -> Result<Option<String>, SQLError>;
 }
 #[derive(Clone, Copy)]
