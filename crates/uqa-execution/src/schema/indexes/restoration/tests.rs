@@ -39,6 +39,7 @@ fn fixture() -> (KeyValueCatalog, CatalogReadView, RelationNameResolution) {
     snapshot.tables.insert(
         relation,
         CatalogTableSnapshot {
+            row_type_array_name: None,
             object_id: [1; 16],
             catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
                 uqa_sql::catalog::relation_oids::RelationOidKind::Table,

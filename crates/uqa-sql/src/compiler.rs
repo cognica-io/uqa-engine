@@ -37,6 +37,7 @@ mod names;
 mod relations;
 mod returning;
 mod routines;
+mod schema_moves;
 mod sequences;
 mod tree;
 mod type_lifecycle;

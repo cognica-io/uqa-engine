@@ -45,6 +45,7 @@ pub trait ViewAlterPublication: ViewPublication {
 }
 
 pub struct ViewAlterContext<'a> {
+    pub schema_moves: super::relation_alteration::relocation::RelationSchemaContext<'a>,
     pub names: &'a dyn RelationAlterNames,
     pub catalog: &'a dyn ViewAlterCatalog,
     pub authority: crate::catalog::security::table_inquiry::TablePrivilegeContext<'a>,
@@ -137,6 +138,19 @@ fn execute_alter_view(
         AlterViewAction::OwnerTo(_) => unreachable!("owner changes prepare their role dependency"),
         AlterViewAction::RenameTo(new_name) => {
             return rename_view(context, relation, new_name, expected_kind);
+        }
+        AlterViewAction::SetSchema(schema) => {
+            if let Some(target) = context
+                .schema_moves
+                .target(relation, schema, view.persistence)?
+            {
+                let relocation = context
+                    .schema_moves
+                    .prepare(relation, &target, view.object_id)?;
+                rename_view_to(context, relation, target.clone(), expected_kind)?;
+                relocation.publish(&context.schema_moves)?;
+            }
+            return Ok(());
         }
     }
     if statement.kind == AlterViewKind::View {
@@ -292,9 +306,17 @@ fn rename_view_to(
     target: RelationIdentity,
     expected_kind: &str,
 ) -> Result<(), SQLError> {
-    context
-        .creation
-        .reserve_row_type_name(&target.qualified_name())?;
+    let current = context
+        .catalog
+        .view(relation)
+        .ok_or_else(|| SQLError::Internal("renamed view disappeared".into()))?;
+    let array_name = super::types::relation_arrays::rename(
+        &context.creation,
+        relation,
+        &target,
+        current.row_type_array_name.as_deref(),
+        current.relation_oids().array_type,
+    )?;
     rewrite_relation_rename_dependents(context.dependencies, relation, &target).map_err(
         |error| {
             SQLError::Internal(format!(
@@ -332,12 +354,24 @@ fn rename_view_to(
             target.qualified_name()
         )));
     }
-    let view = views.remove(relation).ok_or_else(|| {
+    let mut view = views.remove(relation).ok_or_else(|| {
         SQLError::Internal(format!(
             "{expected_kind} `{}` disappeared during rename",
             relation.qualified_name()
         ))
     })?;
+    view.row_type_array_name = array_name;
+    if persistent {
+        context
+            .publication
+            .save_view(
+                &crate::catalog::view::catalog_view_row(&target, &view)
+                    .map_err(|error| SQLError::Internal(error.to_string()))?,
+            )
+            .map_err(|error| {
+                uqa_sql::catalog::errors::storage_error("view array rename", &error)
+            })?;
+    }
     let change = crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
         view.relation_oids().relation,
     );

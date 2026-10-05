@@ -41,6 +41,8 @@ pub struct StoredViewDefinition {
     /// The view's public OIDs, allocated when it was created; replacement keeps them. Views created before OIDs were recorded derive them from their identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_oids: Option<super::relation_oids::RelationCatalogOids>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_type_array_name: Option<String>,
 }
 
 impl StoredViewDefinition {

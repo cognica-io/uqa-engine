@@ -371,6 +371,9 @@ pub struct TableConstraintSet {
     /// The relation's public OIDs, allocated when it was created. Tables created before OIDs were recorded derive them from their identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_oids: Option<crate::catalog::relation_oids::RelationCatalogOids>,
+    /// The generated row-array type name, which can move independently when an explicit type takes its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_type_array_name: Option<String>,
 }
 
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>

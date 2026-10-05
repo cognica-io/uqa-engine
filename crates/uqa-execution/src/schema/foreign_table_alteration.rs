@@ -52,6 +52,11 @@ pub trait ForeignTableOwnerWriter {
     fn prepare_writer(&self) -> Result<(), SQLError>;
 }
 pub trait ForeignTableAlterPublication {
+    fn persist_definition(
+        &self,
+        relation: &RelationIdentity,
+        table: &StoredForeignTable,
+    ) -> StorageBackendResult<()>;
     fn persist_rename(
         &self,
         from: &RelationIdentity,
@@ -68,6 +73,7 @@ pub trait ForeignTableAlterPublication {
     ) -> Result<(), SQLError>;
 }
 pub struct ForeignTableAlterContext<'a> {
+    pub schema_moves: super::relation_alteration::relocation::RelationSchemaContext<'a>,
     pub names: &'a dyn RelationAlterNames,
     pub catalog: &'a dyn ForeignTableAlterCatalog,
     pub authority: crate::catalog::security::table_inquiry::TablePrivilegeContext<'a>,
@@ -159,6 +165,26 @@ pub fn alter_foreign_table(
             AlterForeignTableAction::RenameTo(new_name) => {
                 context.locks.prepare_definition_write()?;
                 rename_foreign_table(context, &binding.value.relation, new_name)
+            }
+            AlterForeignTableAction::SetSchema(schema) => {
+                let relation = &binding.value.relation;
+                let current = context
+                    .catalog
+                    .table(relation)
+                    .ok_or_else(|| SQLError::Internal("moved foreign table disappeared".into()))?;
+                if let Some(target) = context.schema_moves.target(
+                    relation,
+                    schema,
+                    uqa_sql::ast::RelationPersistence::Permanent,
+                )? {
+                    let relocation =
+                        context
+                            .schema_moves
+                            .prepare(relation, &target, current.object_id)?;
+                    rename_foreign_table_to(context, relation, target.clone())?;
+                    relocation.publish(&context.schema_moves)?;
+                }
+                Ok(())
             }
         }
     }))
@@ -295,9 +321,17 @@ fn rename_foreign_table_to(
     relation: &RelationIdentity,
     target: RelationIdentity,
 ) -> Result<(), SQLError> {
-    context
-        .creation
-        .reserve_row_type_name(&target.qualified_name())?;
+    let current = context
+        .catalog
+        .table(relation)
+        .ok_or_else(|| SQLError::Internal("renamed foreign table disappeared".into()))?;
+    let array_name = super::types::relation_arrays::rename(
+        &context.creation,
+        relation,
+        &target,
+        current.row_type_array_name.as_deref(),
+        current.relation_oids().array_type,
+    )?;
     rewrite_relation_rename_dependents(context.dependencies, relation, &target).map_err(
         |error| {
             SQLError::Internal(format!(
@@ -344,10 +378,19 @@ fn rename_foreign_table_to(
         ))
     })?;
     table.name = target.qualified_name();
+    table.row_type_array_name = array_name;
     tables.insert(target.clone(), table);
     security.insert(target.clone(), table_security);
     drop(security);
     drop(tables);
+    let renamed = context
+        .catalog
+        .table(&target)
+        .ok_or_else(|| SQLError::Internal("renamed foreign table disappeared".into()))?;
+    context
+        .publication
+        .persist_definition(&target, &renamed)
+        .map_err(|error| uqa_sql::catalog::errors::storage_error("foreign array rename", &error))?;
     let mut memory_tables = context.publication.memory_tables_write();
     if let Some(rows) = memory_tables.remove(relation) {
         memory_tables.insert(target.clone(), rows);

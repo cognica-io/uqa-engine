@@ -68,6 +68,7 @@ impl Engine {
     }
     pub(crate) fn table_alter_context(&self) -> TableAlterContext<'_, StatementReadSnapshot> {
         TableAlterContext {
+            schema_moves: self.relation_schema_context(),
             row_changes: self,
             binding: self.table_alter_binding_context(),
             ownership: self.table_ownership_context(),
@@ -119,7 +120,7 @@ impl RelationEventAlterTransactions for Engine {
 }
 impl TableLifecycle for Engine {
     fn rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
-        self.try_rename_table(from, to)
+        self.try_rename_table_inner(from, to)
     }
     fn rename_column(&self, table: &str, from: &str, to: &str) -> StorageBackendResult<bool> {
         self.try_rename_column(table, from, to)

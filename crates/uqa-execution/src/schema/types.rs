@@ -19,6 +19,7 @@ use uqa_sql::{
 pub mod arrays;
 mod lifecycle;
 mod privileges;
+pub mod relation_arrays;
 
 pub(crate) use lifecycle::lock_named_type;
 pub use lifecycle::{alter_type_object, relocate_type_object};

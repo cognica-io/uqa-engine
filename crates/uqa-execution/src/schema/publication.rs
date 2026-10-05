@@ -241,6 +241,9 @@ pub fn replace_constraint_state(
         .catalog
         .table_state(&table_name)?
         .ok_or_else(|| table_not_found(&table_name))?;
+    if constraints.row_type_array_name.is_none() {
+        constraints.row_type_array_name = state.constraint_header().row_type_array_name;
+    }
     constraints.columns_declared = Some(
         constraints
             .columns_declared

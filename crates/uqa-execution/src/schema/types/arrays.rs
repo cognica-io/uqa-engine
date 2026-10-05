@@ -103,5 +103,5 @@ pub fn displace_array_type(
         composite_type::publish(registries.composites, &before, registry)?;
         return Ok(true);
     }
-    Ok(false)
+    creation.runtime.displace_relation_array(requested)
 }

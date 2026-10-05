@@ -50,6 +50,7 @@ pub enum AlterViewAction {
     Reset(Vec<String>),
     OwnerTo(RoleSpecification),
     RenameTo(String),
+    SetSchema(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +65,7 @@ pub struct AlterViewStmt {
 pub enum AlterForeignTableAction {
     OwnerTo(RoleSpecification),
     RenameTo(String),
+    SetSchema(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +83,8 @@ struct AlterForeignTableStmtSerde {
     owner: Option<RoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rename_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    set_schema: Option<String>,
 }
 
 impl Serialize for AlterForeignTableStmt {
@@ -88,15 +92,17 @@ impl Serialize for AlterForeignTableStmt {
     where
         S: serde::Serializer,
     {
-        let (owner, rename_to) = match &self.action {
-            AlterForeignTableAction::OwnerTo(owner) => (Some(owner.clone()), None),
-            AlterForeignTableAction::RenameTo(name) => (None, Some(name.clone())),
+        let (owner, rename_to, set_schema) = match &self.action {
+            AlterForeignTableAction::OwnerTo(owner) => (Some(owner.clone()), None, None),
+            AlterForeignTableAction::RenameTo(name) => (None, Some(name.clone()), None),
+            AlterForeignTableAction::SetSchema(schema) => (None, None, Some(schema.clone())),
         };
         AlterForeignTableStmtSerde {
             name: self.name.clone(),
             if_exists: self.if_exists,
             owner,
             rename_to,
+            set_schema,
         }
         .serialize(serializer)
     }
@@ -108,17 +114,18 @@ impl<'de> Deserialize<'de> for AlterForeignTableStmt {
         D: serde::Deserializer<'de>,
     {
         let value = AlterForeignTableStmtSerde::deserialize(deserializer)?;
-        let action = match (value.owner, value.rename_to) {
-            (Some(owner), None) => AlterForeignTableAction::OwnerTo(owner),
-            (None, Some(name)) => AlterForeignTableAction::RenameTo(name),
-            (Some(_), Some(_)) => {
+        let action = match (value.owner, value.rename_to, value.set_schema) {
+            (Some(owner), None, None) => AlterForeignTableAction::OwnerTo(owner),
+            (None, Some(name), None) => AlterForeignTableAction::RenameTo(name),
+            (None, None, Some(schema)) => AlterForeignTableAction::SetSchema(schema),
+            (Some(_), Some(_), None) => {
                 return Err(serde::de::Error::custom(
                     "ALTER FOREIGN TABLE cannot contain both owner and rename_to",
                 ));
             }
-            (None, None) => {
+            _ => {
                 return Err(serde::de::Error::custom(
-                    "ALTER FOREIGN TABLE requires owner or rename_to",
+                    "ALTER FOREIGN TABLE requires exactly one of owner, rename_to or set_schema",
                 ));
             }
         };

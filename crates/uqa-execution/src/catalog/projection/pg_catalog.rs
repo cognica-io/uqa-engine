@@ -13,6 +13,7 @@ mod constraints;
 mod indexes;
 mod relations;
 mod roles;
+mod row_types;
 mod sequences;
 mod types;
 pub use attributes::{attrdef_catalog_oid, build_pg_attrdef, build_pg_attribute};

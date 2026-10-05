@@ -12,9 +12,7 @@ use super::administrative::{
 };
 use super::cursors::{compile_close_cursor, compile_declare_cursor, compile_fetch_cursor};
 use super::dml::{compile_delete, compile_update};
-use super::drop_alter::{
-    compile_alter_object_schema, compile_alter_table, compile_drop, compile_rename,
-};
+use super::drop_alter::{compile_alter_table, compile_drop, compile_rename};
 use super::events::{compile_create_rule, compile_create_trigger};
 use super::merge::compile_merge;
 use super::relations::{
@@ -28,6 +26,7 @@ use super::routines::{
     compile_create_function, compile_create_role, compile_do, compile_drop_role, compile_grant,
     compile_grant_role,
 };
+use super::schema_moves::compile_alter_object_schema;
 use super::sequences::{compile_alter_sequence, compile_create_sequence};
 use super::type_lifecycle;
 use super::{

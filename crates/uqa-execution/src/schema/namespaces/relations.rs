@@ -32,6 +32,9 @@ use uqa_sql::{
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 pub trait RelationCreationRuntime {
+    fn relation_array_name(&self, relation: &RelationIdentity, array_oid: u32) -> Option<String>;
+    fn displace_generated_array(&self, identity: &RelationIdentity) -> Result<bool, SQLError>;
+    fn displace_relation_array(&self, identity: &RelationIdentity) -> Result<bool, SQLError>;
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()>;
     fn synchronize_table_catalog(&self) -> StorageBackendResult<()>;
     fn synchronize_table_data(&self) -> StorageBackendResult<()>;

@@ -72,6 +72,7 @@ fn relation_dependencies_resolve_the_bound_identity_and_report_missing_objects()
     snapshot.tables.insert(
         RelationIdentity::new("public", "docs"),
         CatalogTableSnapshot {
+            row_type_array_name: None,
             object_id: object,
             catalog_oids: oids,
             security: Arc::new(super::super::security::BoundTableSecurity::owner(

@@ -37,6 +37,9 @@ use uqa_storage::read_control::StorageReadControl;
 use crate::error::redb_error;
 use codec::{read_u64, receipt_bytes, status};
 
+/// Writers preserve relation row-type array identities and names.
+const RECORD_FORMAT: u64 = 54;
+
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
 const HEADS: TableDefinition<&[u8], u64> = TableDefinition::new("uqa_mvcc_heads");
 const VERSIONS: TableDefinition<(&[u8], u64), &[u8]> = TableDefinition::new("uqa_mvcc_versions");
@@ -76,7 +79,7 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=53) {
+                if !(1..=RECORD_FORMAT).contains(&format) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 if present != if format < 5 { 15 } else { 31 } {
@@ -107,8 +110,10 @@ impl RedbRecordStore {
                 }
                 if format < 53 {
                     identifiers::consolidate_diskann_generations(&mut identifiers)?;
+                }
+                if format < RECORD_FORMAT {
                     metadata
-                        .insert("format", 53_u64.to_be_bytes().as_slice())
+                        .insert("format", RECORD_FORMAT.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 codec::receipt_limit(&metadata)?;
@@ -439,7 +444,7 @@ fn initialize_record_metadata(
         .insert("database", bytes.as_slice())
         .map_err(redb_error)?;
     metadata
-        .insert("format", 53_u64.to_be_bytes().as_slice())
+        .insert("format", RECORD_FORMAT.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
         .insert("allocated", 0_u64.to_be_bytes().as_slice())

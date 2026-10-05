@@ -133,6 +133,7 @@ impl Engine {
             persistence: source.persistence,
             on_commit: source.on_commit,
             catalog_oids: source.recorded_catalog_oids(),
+            row_type_array_name: CatalogCell::from_snapshot(source.row_type_array_name.snapshot()),
         }))
     }
 }

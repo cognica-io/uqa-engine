@@ -497,9 +497,38 @@ fn run_alter_table_action<S: Clone + 'static>(
             )));
         }
         AlterTableAction::SetSchema { schema } => {
-            return Err(SQLError::Unsupported(format!(
-                "ALTER TABLE SET SCHEMA {schema} is not supported for tables"
-            )));
+            let source = uqa_core::RelationIdentity::from_legacy_name(&stmt.table)
+                .map_err(SQLError::Internal)?;
+            let catalog = context
+                .schema_moves
+                .indexes
+                .identities
+                .catalog
+                .current_catalog_snapshot();
+            let table = catalog
+                .snapshot()
+                .tables
+                .get(&source)
+                .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?;
+            if let Some(target) =
+                context
+                    .schema_moves
+                    .target(&source, &schema, table.persistence)?
+            {
+                let relocation = context
+                    .schema_moves
+                    .prepare(&source, &target, table.object_id)?;
+                if !context
+                    .lifecycle
+                    .rename_table(&stmt.table, &target.qualified_name())
+                    .map_err(|error| ddl_storage_error("ALTER TABLE SET SCHEMA", error))?
+                {
+                    return Err(SQLError::Internal(
+                        "table disappeared during schema movement".into(),
+                    ));
+                }
+                relocation.publish(&context.schema_moves)?;
+            }
         }
         AlterTableAction::SetDefault { name, default } => {
             crate::schema::columns::alteration::set_default(

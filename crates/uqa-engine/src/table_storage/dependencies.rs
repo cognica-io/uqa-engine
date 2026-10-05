@@ -174,6 +174,7 @@ impl Engine {
             key_constraints: key_constraints.to_vec(),
             hierarchy: hierarchy.clone(),
             catalog_oids: table.recorded_catalog_oids(),
+            row_type_array_name: table.row_type_array_name.read().clone(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }

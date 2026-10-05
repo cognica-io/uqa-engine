@@ -101,6 +101,9 @@ pub fn alter_view_from_table_syntax(
         [AlterTableAction::ChangeOwner { owner }] => {
             Some(crate::ast::AlterViewAction::OwnerTo(owner.clone()))
         }
+        [AlterTableAction::SetSchema { schema }] => {
+            Some(crate::ast::AlterViewAction::SetSchema(schema.clone()))
+        }
         _ => None,
     };
     if let Some(action) = action {
@@ -150,6 +153,9 @@ pub fn alter_foreign_table_from_table_syntax(
         }
         [AlterTableAction::RenameTable { to }] => {
             crate::ast::AlterForeignTableAction::RenameTo(to.clone())
+        }
+        [AlterTableAction::SetSchema { schema }] => {
+            crate::ast::AlterForeignTableAction::SetSchema(schema.clone())
         }
         _ => {
             return Err(SQLError::Routine {

@@ -975,6 +975,8 @@ mod oid_relabel;
 mod partition_column_options;
 #[path = "pg18_constraint_lifecycle/regclass_input.rs"]
 mod regclass_input;
+#[path = "pg18_constraint_lifecycle/relation_row_types.rs"]
+mod relation_row_types;
 #[path = "pg18_constraint_lifecycle/table_creation_oids.rs"]
 mod table_creation_oids;
 #[path = "pg18_constraint_lifecycle/table_creation_order.rs"]

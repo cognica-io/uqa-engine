@@ -9,6 +9,11 @@
 /// `PostgreSQL` stores type names in a `name` column of `NAMEDATALEN - 1` bytes.
 const MAX_TYPE_NAME_BYTES: usize = 63;
 
+/// A persisted `PostgreSQL` type name is a nonempty, NUL-free `name` value, at most 63 UTF-8 bytes.
+pub fn valid_type_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= MAX_TYPE_NAME_BYTES && !name.contains('\0')
+}
+
 /// `PostgreSQL`'s `makeArrayTypeName`: an underscore-prefixed name for `pass == 0`, then a numeric suffix, clipping the base name at a UTF-8 boundary so the result fits 63 bytes.
 pub fn array_type_name(type_name: &str, pass: u32) -> String {
     let suffix = (pass > 0).then(|| pass.to_string());
@@ -41,7 +46,16 @@ pub fn choose_array_type_name(type_name: &str, mut in_use: impl FnMut(&str) -> b
 
 #[cfg(test)]
 mod tests {
-    use super::{array_type_name, choose_array_type_name};
+    use super::{array_type_name, choose_array_type_name, valid_type_name};
+
+    #[test]
+    fn stored_type_names_use_the_name_types_byte_limit() {
+        assert!(valid_type_name(&"x".repeat(63)));
+        assert!(valid_type_name("_quoted name"));
+        assert!(!valid_type_name(""));
+        assert!(!valid_type_name("a\0b"));
+        assert!(!valid_type_name(&"é".repeat(32)));
+    }
 
     #[test]
     fn array_names_prefix_suffix_and_clip_like_make_array_type_name() {

@@ -78,60 +78,12 @@ pub fn row_type_relation(
     Ok(None)
 }
 
-/// Resolve a type name to the row type of a table, view, materialized view or foreign table, searching schemas in the order `regtype` input uses. Row types have no array spellings here.
-fn resolve_row_type_oid(context: &CatalogContext<'_>, name: &str) -> Result<Option<i64>, SQLError> {
-    let Some(parsed) = uqa_sql::parse_regtype_name(name)? else {
-        return Ok(None);
-    };
-    if parsed.array_dimensions > 0 {
-        return Ok(None);
-    }
-    let catalog = context.catalog_read_view();
-    let snapshot = catalog.snapshot();
-    let in_schema = |schema: &str, local: &str| -> Option<i64> {
-        let identity = RelationIdentity::new(schema, local);
-        snapshot
-            .tables
-            .get(&identity)
-            .map(|table| i64::from(table.catalog_oids.reltype()))
-            .or_else(|| {
-                snapshot
-                    .definitions
-                    .views
-                    .get(&identity)
-                    .map(super::super::view_rowtype_oid)
-            })
-            .or_else(|| {
-                snapshot
-                    .definitions
-                    .foreign_tables
-                    .get(&identity)
-                    .map(super::super::foreign_table_rowtype_oid)
-            })
-    };
-    match parsed.names.as_slice() {
-        [schema, local] => Ok(in_schema(schema, local)),
-        [local] => {
-            for schema in context.current_schema_names(true)? {
-                if let Some(oid) = in_schema(&schema, local) {
-                    return Ok(Some(oid));
-                }
-            }
-            Ok(None)
-        }
-        _ => Ok(None),
-    }
-}
-
-/// `regtype` input extended to relation row types, for statements that name any type object.
+/// Resolve any type object through the same catalog and visibility rules as ordinary `regtype` input.
 pub fn resolve_type_object_oid(
     context: &CatalogContext<'_>,
     name: &str,
 ) -> Result<Option<i64>, SQLError> {
-    if let Some(oid) = super::resolve_regobject_oid(context, &ColumnType::Regtype, name)? {
-        return Ok(Some(oid));
-    }
-    resolve_row_type_oid(context, name)
+    super::resolve_regobject_oid(context, &ColumnType::Regtype, name)
 }
 
 /// `format_type_be` for any type object, including relation row types, which print as their relation's name.
@@ -139,13 +91,5 @@ pub fn format_type_object(
     context: &CatalogContext<'_>,
     oid: i64,
 ) -> Result<Option<String>, String> {
-    if let Some(name) = super::resolve_regtype_output(context, &ColumnType::Regtype, oid)? {
-        return Ok(Some(name));
-    }
-    let Ok(oid) = u32::try_from(oid) else {
-        return Ok(None);
-    };
-    row_type_relation(context, oid)
-        .map(|relation| relation.map(|relation| relation.name))
-        .map_err(|error| error.to_string())
+    super::resolve_regtype_output(context, &ColumnType::Regtype, oid)
 }

@@ -258,11 +258,6 @@ impl ForeignCreationContext<'_> {
         )?;
         self.ensure_foreign_server_exists(&server_name)?;
         self.creation.reserve_row_type_name(name)?;
-        let mut opt_map: std::collections::BTreeMap<String, String> =
-            std::collections::BTreeMap::new();
-        for (k, v) in options {
-            opt_map.insert(k, v);
-        }
         let object_id = (self.allocate_identity)().map_err(|error| {
             uqa_sql::SQLError::Internal(format!(
                 "allocate foreign table `{name}` object identity: {error}"
@@ -273,10 +268,15 @@ impl ForeignCreationContext<'_> {
             name: name.to_string(),
             object_id,
             catalog_oids: Some(catalog_oids),
+            row_type_array_name: Some(crate::schema::types::arrays::reserve_array_name(
+                &self.creation,
+                &relation.schema,
+                &relation.name,
+            )?),
             server_name,
             columns,
             checks,
-            options: opt_map,
+            options: options.into_iter().collect(),
         };
         let security = BoundTableSecurity::owner(target.owner.identity());
         let mut tables = self.publication.tables_write();

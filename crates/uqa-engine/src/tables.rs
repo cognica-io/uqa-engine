@@ -42,6 +42,7 @@ impl Engine {
             on_commit: table.on_commit,
             hierarchy: table.hierarchy.read().clone(),
             catalog_oids: table.recorded_catalog_oids(),
+            row_type_array_name: table.row_type_array_name.read().clone(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }
@@ -236,32 +237,29 @@ impl Engine {
                 "relation `{name}` already exists as {kind}"
             )));
         }
-        let default_revision = if fts_fields.is_empty() {
-            None
-        } else {
-            Some(analyzer.compile()?)
-        };
+        let default_revision = (!fts_fields.is_empty())
+            .then(|| analyzer.compile())
+            .transpose()?;
         let analyzer = match &default_revision {
             Some(revision) => revision.descriptor().configuration()?,
             None => analyzer,
         };
-        let (docs, inv): (Box<dyn DocumentStore>, Box<dyn InvertedIndex>) =
-            if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-                (
-                    Box::new(MemoryDocumentStore::new()),
-                    Box::new(MemoryInvertedIndex::new(analyzer.clone())),
-                )
-            } else if let Some(backend) = self.storage.backend.as_ref() {
-                (
-                    backend.document_store(name),
-                    backend.inverted_index(name, analyzer.clone()),
-                )
-            } else {
-                (
-                    Box::new(MemoryDocumentStore::new()),
-                    Box::new(MemoryInvertedIndex::new(analyzer.clone())),
-                )
-            };
+        let (docs, inv): (Box<dyn DocumentStore>, Box<dyn InvertedIndex>) = if let Some(backend) =
+            self.storage
+                .backend
+                .as_ref()
+                .filter(|_| persistence != uqa_sql::ast::RelationPersistence::Temporary)
+        {
+            (
+                backend.document_store(name),
+                backend.inverted_index(name, analyzer.clone()),
+            )
+        } else {
+            (
+                Box::new(MemoryDocumentStore::new()),
+                Box::new(MemoryInvertedIndex::new(analyzer.clone())),
+            )
+        };
         self.relation_creation_context()
             .retain_owner(owner)
             .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?;
@@ -279,6 +277,12 @@ impl Engine {
                 )
                 .map_err(|error| StorageBackendError::backend("CREATE TABLE OIDs", error))?
         };
+        let row_type_array_name = uqa_execution::schema::types::arrays::reserve_array_name(
+            &self.relation_creation_context(),
+            &relation.schema,
+            &relation.name,
+        )
+        .map_err(|error| StorageBackendError::backend("CREATE TABLE array type", error))?;
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
@@ -307,6 +311,7 @@ impl Engine {
             persistence,
             on_commit,
             catalog_oids: Some(catalog_oids),
+            row_type_array_name: crate::state::CatalogCell::new(Some(row_type_array_name)),
         };
         let table_arc = Arc::new(table);
         if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {

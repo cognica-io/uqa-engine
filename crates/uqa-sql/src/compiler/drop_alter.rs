@@ -944,33 +944,3 @@ fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Stat
         actions: vec![action],
     }))
 }
-
-pub(super) fn compile_alter_object_schema(
-    stmt: &pg_query::protobuf::AlterObjectSchemaStmt,
-) -> Result<Statement> {
-    use pg_query::protobuf::ObjectType;
-    let relation = stmt
-        .relation
-        .as_ref()
-        .ok_or_else(|| SQLError::Internal("ALTER SET SCHEMA without relation".into()))?;
-    let name = range_var_name(relation);
-    let schema = render_relation_component(&stmt.newschema);
-    match stmt.object_type() {
-        ObjectType::ObjectSequence => Ok(Statement::AlterSequence(AlterSequence {
-            name,
-            if_exists: stmt.missing_ok,
-            lifecycle: SequenceLifecycle::SetSchema { schema },
-            ..AlterSequence::default()
-        })),
-        ObjectType::ObjectTable => Ok(Statement::AlterTable(AlterTableStmt {
-            table: name,
-            qualifier: relation.relname.clone(),
-            if_exists: stmt.missing_ok,
-            recurse: false,
-            actions: vec![AlterTableAction::SetSchema { schema }],
-        })),
-        other => Err(SQLError::Unsupported(format!(
-            "ALTER {other:?} SET SCHEMA is not supported"
-        ))),
-    }
-}

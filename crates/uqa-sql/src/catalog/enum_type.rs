@@ -21,7 +21,6 @@ use crate::SQLError;
 
 /// `PostgreSQL` stores labels in a `name` column of `NAMEDATALEN - 1` bytes.
 pub const MAX_ENUM_LABEL_BYTES: usize = 63;
-const MAX_TYPE_NAME_BYTES: usize = 63;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -301,8 +300,7 @@ pub fn validate_enum_registry(
         if definition.identity.schema.is_empty()
             || definition.identity.name.is_empty()
             || definition.identity.qualified_name() != *name
-            || definition.array_name.is_empty()
-            || definition.array_name.len() > MAX_TYPE_NAME_BYTES
+            || !super::array_type_names::valid_type_name(&definition.array_name)
         {
             return Err(format!("inconsistent enum name for `{name}`"));
         }

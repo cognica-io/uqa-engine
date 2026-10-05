@@ -11,6 +11,7 @@ use super::*;
 mod column_checks;
 mod domains;
 mod foreign_tables;
+mod schema_moves;
 
 #[test]
 fn trigger_statements_preserve_postgresql_event_and_lifecycle_shape() {

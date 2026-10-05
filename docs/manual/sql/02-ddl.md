@@ -211,6 +211,30 @@ WHERE attrelid = 'tickets'::regclass AND attname = 'state';
 SELECT pg_get_viewdef('open_tickets'::regclass) AS definition;
 ```
 
+## Relation row type catalogs
+
+Tables, inherited and partitioned tables, views, materialized views and foreign tables expose their automatically created row type through `pg_class.reltype = pg_type.oid`. Its `typtype` is `c`, `typrelid` identifies the relation and `typarray` identifies the generated array type. The array's `typelem` points back to the row type. Row types use PostgreSQL's record input/output metadata; arrays use its array metadata. Sequences and indexes do not own row types.
+
+`'schema.relation'::regtype` and `to_regtype('schema.relation')` resolve that row type. Appending `[]` to the relation name selects its array type; additional dimensions select the same array type. A generated array's catalog name, such as `_relation`, can also be resolved directly, but appending `[]` to that already-array name reports `42704` because it has no further array type. `to_regtype` returns NULL for that missing type. `regtype` text output and `format_type` use the current relation name, qualify it when another type shadows it in the effective search path, and include the session's temporary namespace.
+
+The generated array name is stored with its relation. A new explicit type or row type can displace an existing generated array name without changing its OID. Renaming the relation chooses its new array name using PostgreSQL's collision rules; moving the relation to another schema preserves its current array name and rejects an occupied destination with `42710`. Owner changes apply to both catalog rows. Transaction and savepoint rollback restore names and definitions, and durable reopen preserves their identities. Stored `regtype` constants continue to denote the same type after a rename and prevent dropping the owning relation while a dependent stored expression remains.
+
+`ALTER TABLE`, `ALTER VIEW`, `ALTER MATERIALIZED VIEW` and `ALTER FOREIGN TABLE name SET SCHEMA destination` move the relation and its row and array types together. A table's indexes and owned `SERIAL` and identity sequences move with it; their catalog identities and dependent view references remain intact. The caller must own the relation and have `CREATE` on the destination schema. A conflicting relation, index or sequence name reports `42P07`; a missing schema reports `3F000`. Moving into or out of a temporary schema reports `0A000`.
+
+```sql execute
+CREATE TABLE row_type_example(id integer);
+SELECT t.typname, t.typtype, a.typname AS array_name,
+       t.typrelid = c.oid AS same_relation,
+       a.typelem = t.oid AS same_element
+FROM pg_class c
+JOIN pg_type t ON t.oid = c.reltype
+JOIN pg_type a ON a.oid = t.typarray
+WHERE c.oid = 'row_type_example'::regclass;
+SELECT 'row_type_example'::regtype::text,
+       'row_type_example[][]'::regtype::text;
+DROP TABLE row_type_example;
+```
+
 ## Tables
 
 ```sql
