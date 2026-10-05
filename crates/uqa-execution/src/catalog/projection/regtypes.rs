@@ -178,11 +178,7 @@ fn type_oid_in_schema(
         .types
         .iter()
         .find(|(_, entry)| entry.namespace_oid == namespace_oid && entry.name == local)?;
-    let true_array = catalog
-        .types
-        .get(&entry.element_oid)
-        .is_some_and(|element| element.array_oid == *oid);
-    if array_dimensions == 0 || true_array {
+    if array_dimensions == 0 {
         return Some(*oid);
     }
     (entry.array_oid != 0).then_some(entry.array_oid)
@@ -195,6 +191,13 @@ fn parsed_regtype_oid(
 ) -> Result<Option<i64>, SQLError> {
     let (schema, local) = object_name(&parsed.names)?;
     if let Some(schema) = schema {
+        let temporary_schema;
+        let schema = if schema == "pg_temp" {
+            temporary_schema = context.session.temporary_schema_name();
+            temporary_schema.as_str()
+        } else {
+            schema
+        };
         if context.schema_security_for_privilege(schema).is_none() {
             return Err(SQLError::Routine {
                 sqlstate: "3F000".into(),
@@ -633,18 +636,12 @@ impl RegtypeOutputCatalog {
 /// The namespaces the output functions treat as visible: `current_schemas(true)` for routine names, as `regprocout` and `regprocedureout` test a function's visibility, and the search path for type names, as `format_type` tests a type's.
 pub(crate) struct OutputVisibility {
     schemas: Vec<String>,
-    search_path: Vec<String>,
 }
 
 impl OutputVisibility {
     fn from_context(context: &CatalogContext<'_>) -> Result<Self, SQLError> {
         Ok(Self {
             schemas: context.current_schema_names(true)?,
-            search_path: context
-                .session
-                .relation_name_resolution()
-                .search_path()
-                .to_vec(),
         })
     }
 
@@ -656,7 +653,6 @@ impl OutputVisibility {
                 &resolution.current_user,
                 true,
             ),
-            search_path: resolution.search_path().to_vec(),
         }
     }
 }
@@ -890,8 +886,17 @@ fn format_regtype(
     } else {
         uqa_sql::expr::quote_ident(&entry.name)
     };
+    let visible_schema = visibility.schemas.iter().find(|candidate_schema| {
+        catalog
+            .namespace_oid(candidate_schema)
+            .is_some_and(|namespace| {
+                catalog.types.values().any(|candidate| {
+                    candidate.namespace_oid == namespace && candidate.name == entry.name
+                })
+            })
+    });
     Some(
-        if schema == "pg_catalog" || visibility.search_path.iter().any(|name| name == schema) {
+        if schema == "pg_catalog" || visible_schema.map(String::as_str) == Some(schema) {
             local
         } else {
             format!("{}.{}", uqa_sql::expr::quote_ident(schema), local)
