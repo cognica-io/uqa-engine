@@ -164,6 +164,7 @@
       "ddl.create-table-analysis-order",
       "ddl.default-cooking",
       "ddl.create-table-oid-allocation",
+      "ddl.create-table-not-null-constraints",
       "ddl.check-constraint-inheritance",
       "types.domain-declarations-and-coercion",
       "execution.prepared-parameter-contracts",
@@ -1168,6 +1169,14 @@
       "supported_version": "Unreleased: 109 PostgreSQL 18.4 statements on memory and SQLite engines cover the OIDs CREATE TABLE and CREATE TEMP TABLE allocate, a table CREATE TABLE AS creates, a relation refused in pg_catalog, a name IF NOT EXISTS skips and a taken name: the relation, its array type and its row type after the name check; the inherited defaults and CHECK constraints (parent order, name order within a parent) stored with the relation; the table's own defaults and generation expressions in column order; a partition's cloned keys (index, then constraint) and cloned foreign keys; CHECKs in written order, a CHECK merged with an inherited one keeping the inherited OID; NOT NULL constraints; keys (index, then constraint) and foreign keys; and the OIDs a failing statement has used (an invalid default, a second CHECK or default that fails, a foreign key to a missing table after the keys, a duplicate CHECK name, a rolled-back table) against the ones a statement failing before the relation uses none of (an unknown type, a key on a missing column)",
       "status": "partial",
       "open_issue": "The RI triggers of a foreign key (four pg_trigger OIDs) and the TOAST relation and index of a table with variable-length columns take no OIDs; a parent's standalone unique indexes cloned onto a partition take their OIDs at publication instead of before the partition's CHECKs; NOT NULL constraints take their OIDs in column order with the inherited ones last instead of in written order with the primary key's last; foreign keys take theirs with the column foreign keys first instead of in written order; pg_type has no rows for relation row types and their array types."
+    },
+    {
+      "id": "ddl.create-table-not-null-constraints",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, rows, SQLSTATEs, messages, DETAIL, HINT and notices in tests/parity/pg18/not_null_constraints_oracle.expected.json; AddRelationNotNullConstraints and StoreRelNotNull in src/backend/catalog/heap.c; transformCreateStmt, transformColumnDefinition, transformTableConstraint and transformIndexConstraint in src/backend/parser/parse_utilcmd.c; ChooseConstraintName in src/backend/catalog/pg_constraint.c; MergeAttributes in src/backend/commands/tablecmds.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::pg18_constraint_lifecycle::not_null_constraints",
+      "supported_version": "Unreleased: 110 PostgreSQL 18.4 statements on memory and SQLite engines cover the NOT NULL constraints CREATE TABLE creates after its CHECK constraints: column clauses, table constraints and PRIMARY KEY columns in declaration order with one constraint per column (a later declaration adopting or agreeing with the earlier one's name), the constraints parents give after them with the first parent's name unless the relation holds it, conflicting NO INHERIT declarations and conflicting names (42601, a table PRIMARY KEY over a NO INHERIT column at parse analysis), unknown (42703) and system (0A000) columns, NO INHERIT on an inherited constraint (42804 with its DETAIL), a repeated given name (42710), a given name a CHECK constraint holds (23505 for pg_constraint_conrelid_contypid_conname_index with the relation's OID), chosen names avoiding CHECK names with ChooseConstraintName's suffixes, NOT VALID validated as CREATE TABLE validates every constraint, conislocal and coninhcount of declared and inherited constraints, the OIDs declared and inherited constraints take, and the OIDs a failing statement has used",
+      "status": "partial",
+      "open_issue": "ALTER TABLE ... ADD PRIMARY KEY over a NOT NULL NO INHERIT column does not report 55000 cannot create primary key with PostgreSQL's DETAIL and HINT; a column clause NOT NULL NOT VALID, a syntax error in PostgreSQL, is not checked; GET STACKED DIAGNOSTICS, which would let a fixture read the 23505 DETAIL, is unsupported (issue #306)."
     },
     {
       "id": "ddl.create-table-analysis-order",

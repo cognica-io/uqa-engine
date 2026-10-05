@@ -5,11 +5,10 @@
 //
 
 //! Bind complete table declarations around their sequence and catalog publication boundaries.
-use crate::ast::{ColumnDef, CreateTable, Expr, ForeignKey};
+use crate::ast::{ColumnDef, CreateTable, Expr, ForeignKey, NotNullDeclaration};
 use crate::schema::constraint_metadata::{
-    identity::{materialize_default_oid, materialize_not_null_identity},
-    materialize_check_identity, materialize_foreign_key_identity, CatalogIdentityAllocator,
-    ConstraintMetadataError,
+    identity::materialize_default_oid, materialize_check_identity,
+    materialize_foreign_key_identity, CatalogIdentityAllocator, ConstraintMetadataError,
 };
 use crate::schema::constraints::validate_foreign_key_definition;
 use crate::schema::foreign_keys::{resolve_foreign_key_parent, ForeignKeyDefinitionContext};
@@ -46,6 +45,8 @@ pub fn transform_create_table(
         || SQLError::Internal("the written order of CREATE TABLE elements lost a column".into());
     let mut columns = c.columns.iter_mut();
     let mut deferrable_key = false;
+    let mut declarations = Vec::new();
+    let mut primary_keys = Vec::new();
     for element in &c.element_order {
         match element {
             DeclaredElement::Column(declaration) => {
@@ -62,16 +63,27 @@ pub fn transform_create_table(
                     &column.name,
                     target,
                 )?;
+                // A column's NOT NULL clause, or the constraint its PRIMARY KEY, SERIAL or identity implies, joins the constraints in the column's position.
+                if column.not_null {
+                    declarations.push(NotNullDeclaration {
+                        column: column.name.clone(),
+                        name: column.not_null_name.clone(),
+                        no_inherit: column.not_null_no_inherit,
+                        explicit: column.not_null_explicit,
+                    });
+                }
             }
-            DeclaredElement::NotNull { no_inherit } => {
-                if target.partitioned && *no_inherit {
+            DeclaredElement::NotNull(declaration) => {
+                if target.partitioned && declaration.no_inherit {
                     return Err(SQLError::Routine {
                         sqlstate: "0A000".into(),
                         message: "not-null constraints on partitioned tables cannot be NO INHERIT"
                             .into(),
                     });
                 }
+                declarations.push(declaration.clone());
             }
+            DeclaredElement::PrimaryKey { columns } => primary_keys.push(columns.clone()),
             DeclaredElement::DeferrableKey => deferrable_key = true,
         }
     }
@@ -84,7 +96,34 @@ pub fn transform_create_table(
         ));
     }
     c.element_order.clear();
-    super::keys::transform_declared_keys(&context.inheritance, c)
+    super::keys::transform_declared_keys(&context.inheritance, c)?;
+    // `transformIndexConstraints` makes each column of a table PRIMARY KEY NOT NULL once every element is examined: a NO INHERIT declaration of the column conflicts, and a column without a declaration takes a generated constraint.
+    for columns in primary_keys {
+        for column in columns {
+            match declarations
+                .iter()
+                .find(|declaration| declaration.column == column)
+            {
+                Some(declaration) if declaration.no_inherit => {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: format!(
+                            "conflicting NO INHERIT declaration for not-null constraint on column \"{column}\""
+                        ),
+                    });
+                }
+                Some(_) => {}
+                None => declarations.push(NotNullDeclaration {
+                    column,
+                    name: None,
+                    no_inherit: false,
+                    explicit: false,
+                }),
+            }
+        }
+    }
+    c.not_null_declarations = declarations;
+    Ok(())
 }
 
 /// Describe the new table's columns before its name is claimed: the parents' columns merge ahead of the local ones as `MergeAttributes` merges them, the declared primary key's columns take their NOT NULL constraints, `BuildDescForRelation` requires `USAGE` on every column's type, and `CheckAttributeNamesTypes` rejects system column names and pseudo-types.
@@ -95,7 +134,7 @@ pub fn prepare_create_table_declaration(
 ) -> Result<InheritedDefinitions, SQLError> {
     let declared = c.key_constraints.len();
     let declared_foreign_keys = c.foreign_keys.len();
-    let expressions =
+    let parents =
         super::super::inheritance::merge_create_table_hierarchy(&context.inheritance, c, notices)?;
     let keys = c.key_constraints.len() - declared;
     let foreign_keys = c.foreign_keys.len() - declared_foreign_keys;
@@ -115,7 +154,8 @@ pub fn prepare_create_table_declaration(
         _ => Vec::new(),
     };
     Ok(InheritedDefinitions {
-        expressions,
+        expressions: parents.expressions,
+        not_nulls: parents.not_nulls,
         keys,
         foreign_keys,
         unique_indexes,
@@ -153,24 +193,6 @@ fn allocate_expression_identity(
         );
     }
     materialize_default_oid(column, allocate).map_err(ConstraintMetadataError::into_sql_error)?;
-    Ok(())
-}
-
-/// `AddRelationNotNullConstraints` stores the NOT NULL constraints after the CHECKs: the ones the statement declares, then the ones only parents give.
-pub fn define_not_null_identities(
-    c: &mut CreateTable,
-    allocate: &mut CatalogIdentityAllocator<'_>,
-) -> Result<(), SQLError> {
-    for local in [true, false] {
-        for column in c
-            .columns
-            .iter_mut()
-            .filter(|column| column.not_null && column.not_null_is_local == local)
-        {
-            materialize_not_null_identity(column, allocate)
-                .map_err(ConstraintMetadataError::into_sql_error)?;
-        }
-    }
     Ok(())
 }
 

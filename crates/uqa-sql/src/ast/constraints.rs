@@ -213,9 +213,12 @@ pub struct CreateTable {
     /// Each CHECK the statement declares, in written order, which `DefineRelation` adds in that order. Only the statement carries it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub check_order: Vec<DeclaredCheck>,
-    /// The columns and NOT NULL table constraints the statement declares, in written order, as `transformCreateStmt` examines them. Only the statement carries it.
+    /// The columns, NOT NULL table constraints and table PRIMARY KEY constraints the statement declares, in written order, as `transformCreateStmt` examines them. Only the statement carries it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub element_order: Vec<DeclaredElement>,
+    /// The NOT NULL constraints the statement declares, in the order `AddRelationNotNullConstraints` takes them once the relation's columns exist: each column's clause or implied constraint and each table constraint in written order, then the ones a table PRIMARY KEY adds. Only the statement carries it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_null_declarations: Vec<NotNullDeclaration>,
     /// The columns a `PARTITION OF` statement declares without a type, which are options on the parent's columns and take their types when the columns merge. Only the statement carries it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub untyped_columns: Vec<String>,
@@ -227,9 +230,21 @@ pub enum DeclaredElement {
     /// The statement's next column, with the clauses it writes.
     Column(ColumnDeclaration),
     /// A table constraint `NOT NULL column`.
-    NotNull { no_inherit: bool },
+    NotNull(NotNullDeclaration),
+    /// A table PRIMARY KEY constraint, whose columns `transformIndexConstraints` makes NOT NULL after every element is examined.
+    PrimaryKey { columns: Vec<String> },
     /// A table PRIMARY KEY or UNIQUE constraint that is DEFERRABLE or INITIALLY DEFERRED.
     DeferrableKey,
+}
+
+/// A NOT NULL constraint a CREATE TABLE statement declares or implies, which `AddRelationNotNullConstraints` resolves against the relation's columns once they exist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotNullDeclaration {
+    pub column: String,
+    pub name: Option<String>,
+    pub no_inherit: bool,
+    /// Whether the statement wrote the constraint, as a column clause or a table constraint, rather than implying it with a PRIMARY KEY, SERIAL or identity.
+    pub explicit: bool,
 }
 
 /// The clauses a column definition writes, in written order, which `transformColumnDefinition` checks against each other.

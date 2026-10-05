@@ -111,3 +111,4 @@ pub mod checks;
 pub mod column_declarations;
 pub mod declaration;
 pub mod keys;
+pub mod not_nulls;
