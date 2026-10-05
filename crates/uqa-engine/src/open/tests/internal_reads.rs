@@ -649,11 +649,13 @@ fn mutation_exact_probes_use_current_documents_and_indexes_without_reentering_th
             let (sender, receiver) = mpsc::channel();
             let source = &root;
             let worker = scope.spawn(move || {
-                assert_eq!(
-                    PointMutationStorage::find_doc_id_by_field(source, "t", "v", &Value::Int(2))
-                        .unwrap(),
-                    Some(id)
-                );
+                for (field, value) in [("v", Value::Int(2)), ("k", Value::Str("new".into()))] {
+                    assert_eq!(
+                        PointMutationStorage::find_doc_id_by_field(source, "t", field, &value)
+                            .unwrap(),
+                        Some(id)
+                    );
+                }
                 assert_eq!(
                     MutationIndexRead::find_conflict(
                         source,
@@ -705,6 +707,11 @@ fn mutation_exact_probes_use_current_documents_and_indexes_without_reentering_th
         );
         assert_eq!(
             root.find_doc_id_by_field("t", "v", &Value::Int(1)).unwrap(),
+            Some(id)
+        );
+        assert_eq!(
+            root.find_doc_id_by_field("t", "k", &Value::Str("old".into()))
+                .unwrap(),
             Some(id)
         );
         root.sql("ROLLBACK", &[]).unwrap();

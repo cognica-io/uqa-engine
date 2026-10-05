@@ -123,18 +123,29 @@ impl crate::Engine {
         read: Option<&uqa_execution::serializable::SerializableRelationRead>,
     ) -> Result<Option<PostingList>, SQLError> {
         let observed = read.map(|read| (read, t.columns.snapshot()));
-        let scan = |index: &ColumnValueIndex| {
+        self.read_value_index_state(table, t, field, |index| {
             index.scan_observing(predicate, || {
                 if let Some((read, columns)) = &observed {
                     read.observe_column_index(columns, field, predicate)?;
                 }
                 Ok(())
             })
-        };
+        })
+    }
+
+    /// Read an accelerator belonging to the caller's selected table, hydrating
+    /// that same view before handing it to the execution-owned reader.
+    pub(crate) fn read_value_index_state<T>(
+        &self,
+        table: &str,
+        t: &std::sync::Arc<TableState>,
+        field: &ValueIndexKey,
+        read: impl FnOnce(&ColumnValueIndex) -> Result<Option<T>, SQLError>,
+    ) -> Result<Option<T>, SQLError> {
         {
             let indexes = t.value_indexes.read();
             if let Some(index) = indexes.get(field) {
-                return scan(index);
+                return read(index);
             }
         }
         if !self
@@ -147,7 +158,7 @@ impl crate::Engine {
         }
         let indexes = t.value_indexes.read();
         match indexes.get(field) {
-            Some(index) => scan(index),
+            Some(index) => read(index),
             None => Ok(None),
         }
     }
