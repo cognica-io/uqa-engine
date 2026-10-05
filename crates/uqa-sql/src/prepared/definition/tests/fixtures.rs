@@ -87,3 +87,8 @@ pub(super) fn binding_context() -> crate::binding::context::BindingContext<'stat
         scalar_subqueries: &[],
     }
 }
+impl crate::schema::dependencies::regclass::RegclassInput for NoRoutines {
+    fn resolve_regclass_input(&self, _: &str) -> Result<Option<i64>, crate::SQLError> {
+        Ok(None)
+    }
+}

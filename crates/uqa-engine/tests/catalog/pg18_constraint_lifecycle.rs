@@ -965,6 +965,8 @@ mod merge_attributes;
 mod not_null_constraints;
 #[path = "pg18_constraint_lifecycle/partition_column_options.rs"]
 mod partition_column_options;
+#[path = "pg18_constraint_lifecycle/regclass_input.rs"]
+mod regclass_input;
 #[path = "pg18_constraint_lifecycle/table_creation_oids.rs"]
 mod table_creation_oids;
 #[path = "pg18_constraint_lifecycle/table_creation_order.rs"]

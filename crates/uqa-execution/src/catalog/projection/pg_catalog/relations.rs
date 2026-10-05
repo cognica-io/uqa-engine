@@ -9,7 +9,7 @@
 #[cfg(test)]
 mod tests;
 
-use uqa_core::Value;
+use uqa_core::{RelationIdentity, Value};
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::catalog::{CatalogReadView, RelationNameResolution};
@@ -84,6 +84,64 @@ pub fn table_relation_oid_from(
         ));
     }
     Err(SQLError::UnknownTable(table.to_string()))
+}
+
+/// The relation that holds `oid`, as `regclassout` finds it: a table, view, sequence, foreign table, index or system relation of the catalog.
+pub fn relation_identity_for_oid(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    oid: i64,
+) -> Result<Option<RelationIdentity>, SQLError> {
+    if let Some(relation) =
+        uqa_sql::catalog::SystemRelation::all().find(|relation| relation.oid() == oid)
+    {
+        return Ok(Some(RelationIdentity::new(
+            relation.namespace(),
+            relation.name(),
+        )));
+    }
+    let snapshot = catalog.snapshot();
+    if let Some((identity, _)) = snapshot
+        .tables
+        .iter()
+        .find(|(_, table)| i64::from(table.catalog_oids.relation) == oid)
+    {
+        return Ok(Some(identity.clone()));
+    }
+    if let Some((identity, _)) = snapshot
+        .definitions
+        .views
+        .iter()
+        .find(|(_, view)| i64::from(view.definition.relation_oids().relation) == oid)
+    {
+        return Ok(Some(identity.clone()));
+    }
+    if let Some((identity, _)) =
+        snapshot
+            .definitions
+            .sequence_object_ids
+            .iter()
+            .find(|(_, object_id)| {
+                crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
+                    &snapshot.definitions.sequence_catalog_oids,
+                    object_id,
+                ) == oid
+            })
+    {
+        return Ok(Some(identity.clone()));
+    }
+    if let Some((identity, _)) = snapshot
+        .definitions
+        .foreign_tables
+        .iter()
+        .find(|(_, table)| crate::catalog::projection::foreign_table_relation_oid(table) == oid)
+    {
+        return Ok(Some(identity.clone()));
+    }
+    Ok(super::catalog_index_relations(catalog, resolution)?
+        .into_iter()
+        .find(|index| index.oid() == oid)
+        .map(|index| index.relation))
 }
 
 pub fn table_rowtype_oid_from(

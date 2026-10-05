@@ -6,10 +6,7 @@
 
 //! Shared exact routine lookup for strict regprocedure input and nullable catalog inquiry.
 
-use super::{
-    numeric_regobject_oid, object_name, parsed_regtype_oid, regtype_output_catalog,
-    NumericRegobjectOid,
-};
+use super::{object_name, parse_dash_or_oid, parsed_regtype_oid, regtype_output_catalog};
 use crate::catalog::{context::CatalogContext, security::schema::SchemaAclPrivilege};
 use uqa_sql::SQLError;
 
@@ -36,18 +33,8 @@ pub fn resolve_regprocedure_input_oid(
     context: &CatalogContext<'_>,
     name: &str,
 ) -> Result<i64, SQLError> {
-    match numeric_regobject_oid(name) {
-        NumericRegobjectOid::Valid(oid) => return Ok(oid),
-        NumericRegobjectOid::InvalidSyntax => {
-            return Err(input_error(
-                "22P02",
-                format!("invalid input syntax for type oid: \"{name}\""),
-            ))
-        }
-        NumericRegobjectOid::OutOfRange => {
-            return Err(input_error("22003", "OID out of range".into()))
-        }
-        NumericRegobjectOid::NotNumeric => {}
+    if let Some(oid) = parse_dash_or_oid(name)? {
+        return Ok(oid);
     }
     let parsed = uqa_sql::parse_regprocedure_name(name)?
         .ok_or_else(|| input_error("42602", format!("invalid name syntax: \"{name}\"")))?;
