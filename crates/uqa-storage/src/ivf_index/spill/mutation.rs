@@ -27,22 +27,7 @@ impl IVFPreparedMetadata {
                 self.remove_document(document)?;
                 for (ordinal, raw) in vectors.iter().enumerate() {
                     self.control.check()?;
-                    let _memory = self
-                        .control
-                        .memory()
-                        .reserve(raw.len().checked_mul(4).ok_or(MemoryError::SizeOverflow)?)?;
-                    let mut normalized = raw.clone();
-                    l2_normalize(&mut normalized);
-                    let centroid = if self.snapshot.centroids.is_empty() {
-                        None
-                    } else {
-                        Some(nearest_centroid_controlled(
-                            &normalized,
-                            &self.snapshot.centroids,
-                            Some(&self.control),
-                        )?)
-                    };
-                    self.insert(document, ordinal as u32, raw, centroid)?;
+                    self.insert_assigned(document, ordinal as u32, raw)?;
                 }
                 self.snapshot.vector_count = self.vectors.len();
                 if self.snapshot.state == IVFState::Untrained
@@ -86,6 +71,30 @@ impl IVFPreparedMetadata {
             IVFMutation::Train => self.train()?,
         }
         Ok(())
+    }
+
+    pub(super) fn insert_assigned(
+        &mut self,
+        document: DocId,
+        ordinal: u32,
+        raw: &[f32],
+    ) -> StorageBackendResult<()> {
+        let _memory = self
+            .control
+            .memory()
+            .reserve(raw.len().checked_mul(4).ok_or(MemoryError::SizeOverflow)?)?;
+        let mut normalized = raw.to_vec();
+        l2_normalize(&mut normalized);
+        let centroid = if self.snapshot.centroids.is_empty() {
+            None
+        } else {
+            Some(nearest_centroid_controlled(
+                &normalized,
+                &self.snapshot.centroids,
+                Some(&self.control),
+            )?)
+        };
+        self.insert(document, ordinal, raw, centroid)
     }
 
     fn remove_document(&mut self, document: DocId) -> StorageBackendResult<usize> {

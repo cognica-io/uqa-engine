@@ -90,6 +90,8 @@ fn check_reader_controls<T: VectorIndex + crate::vector_index::VectorRead + 'sta
         Err(StorageBackendError::Memory(_))
     ));
     assert_eq!(limited.snapshot.count().unwrap(), 2);
+    assert!(limited.snapshot.contains_document(1).unwrap());
+    assert!(!limited.snapshot.contains_document(3).unwrap());
     assert_eq!(zero.memory().used(), 0);
     assert_eq!(
         current
@@ -148,4 +150,23 @@ fn unchanged_graphs_reuse_readers_only_for_the_same_allowance_and_cancellation_s
     )
     .unwrap();
     check_reader_controls(ivf, &control);
+}
+
+#[test]
+fn bounded_ivf_cache_does_not_inherit_another_readers_cancellation() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut builder = crate::ivf_index::IVFCanonicalBuilder::new(
+        2,
+        IVFIndexParams {
+            nlist: 2,
+            nprobe: 2,
+            train_threshold: 2,
+        },
+        &control,
+    )
+    .unwrap();
+    builder.vector(1, 0, &[1.0, 0.0]).unwrap();
+    builder.vector(2, 0, &[0.0, 1.0]).unwrap();
+    let index = crate::ivf_index::IVFReadIndex::new(builder.finish().unwrap()).unwrap();
+    check_reader_controls(index, &control);
 }
