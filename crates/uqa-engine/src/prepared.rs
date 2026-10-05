@@ -47,6 +47,13 @@ impl Engine {
         }
     }
 
+    /// Read original input syntax again after a binding dependency changes.
+    pub(crate) fn invalidate_prepared_analysis(&self) {
+        for prepared in self.session.prepared.write().values_mut() {
+            prepared.invalidate();
+        }
+    }
+
     pub fn deallocate_prepared(&self, name: Option<&str>) {
         match name {
             Some(name) => {

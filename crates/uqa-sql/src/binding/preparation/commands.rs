@@ -10,6 +10,7 @@ use super::{error, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, 
 use crate::assignment::targets;
 use crate::ast::AssignmentTarget;
 use crate::plan::{AssignmentPlan, CommandPlan, ConflictActionPlan, MergeWhenPlan};
+use std::borrow::Cow;
 
 impl Preparation<'_> {
     pub(super) fn command(&mut self, command: &CommandPlan) -> Result<Option<RowSchema>, SQLError> {
@@ -238,15 +239,17 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
         targets::validate_repeated_targets(columns, true)?;
-        let names: Vec<AssignmentTarget<ScalarExpr>> = if columns.is_empty() {
-            target
-                .columns()
-                .iter()
-                .cloned()
-                .map(AssignmentTarget::from)
-                .collect::<Vec<_>>()
+        let names: Cow<'_, [AssignmentTarget<ScalarExpr>]> = if columns.is_empty() {
+            Cow::Owned(
+                target
+                    .columns()
+                    .iter()
+                    .cloned()
+                    .map(AssignmentTarget::from)
+                    .collect::<Vec<_>>(),
+            )
         } else {
-            columns.to_vec()
+            Cow::Borrowed(columns)
         };
         if values.len() > names.len() {
             return Err(error(
@@ -260,8 +263,8 @@ impl Preparation<'_> {
                 "INSERT has more target columns than expressions".into(),
             ));
         }
-        for (value, column) in values.iter_mut().zip(names) {
-            self.assignment(value, &column, target, input, subqueries)?;
+        for (value, column) in values.iter_mut().zip(names.iter()) {
+            self.assignment(value, column, target, input, subqueries)?;
         }
         Ok(())
     }

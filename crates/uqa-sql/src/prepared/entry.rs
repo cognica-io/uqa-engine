@@ -10,7 +10,10 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct PreparedStatementPlan {
+    /// Original input syntax, retained for parse analysis after invalidation.
+    pub source_plan: Arc<crate::plan::UnifiedPlan>,
     pub logical_plan: Arc<crate::plan::UnifiedPlan>,
+    pub needs_analysis: bool,
     pub plan: Option<crate::plan::UnifiedPlan>,
     pub parameter_types: Vec<Option<crate::ast::ColumnType>>,
     pub result_schema: Option<crate::RowSchema>,
@@ -44,7 +47,16 @@ impl PreparedStatementPlan {
 }
 
 impl PreparedStatementPlan {
+    pub fn invalidate(&mut self) {
+        self.plan = None;
+        self.needs_analysis = true;
+    }
+
     pub fn record_execution(&mut self, update: super::planning::PreparedPlanUpdate) {
+        if let Some(plan) = update.reanalyzed_plan {
+            self.logical_plan = plan;
+            self.needs_analysis = false;
+        }
         self.plan = update.generic_plan;
         self.generic_cost = update.generic_cost;
         if let Some(cost) = update.custom_cost {

@@ -23,6 +23,25 @@ use crate::ScalarExpr;
 use crate::{ColumnType, SQLError};
 use parameters::{error, ExpressionType, ParameterTypes};
 
+/// Read input constants while the prepared definition's original tree stays in place. The short-lived literal identities never escape this operation; only converted values enter the stored plan.
+pub(crate) fn read_prepared_inputs(
+    routines: &dyn RoutineResolution,
+    plan: &mut UnifiedPlan,
+    declared: &[Option<ColumnType>],
+    ctes: &BindingContext,
+) -> Result<Vec<Option<ColumnType>>, SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope: SchemaScope::for_analysis(ctes)?,
+        parameters: ParameterTypes::with_input_constants(declared),
+    };
+    analysis.plan(plan)?;
+    let constants = analysis.parameters.take_input_constants();
+    let parameters = analysis.parameters.finish()?;
+    constants.apply(plan)?;
+    Ok(parameters)
+}
+
 pub fn infer_prepared_parameter_types(
     routines: &dyn RoutineResolution,
     plan: &UnifiedPlan,
@@ -34,14 +53,7 @@ pub fn infer_prepared_parameter_types(
         scope: SchemaScope::for_analysis(ctes)?,
         parameters: ParameterTypes::new(declared),
     };
-    match plan {
-        UnifiedPlan::Query(query) => {
-            analysis.query(query, None)?;
-        }
-        UnifiedPlan::Command(command) => {
-            analysis.command(command)?;
-        }
-    }
+    analysis.plan(plan)?;
     analysis.parameters.finish()
 }
 
@@ -72,6 +84,18 @@ impl QueryOutput {
 }
 
 impl Preparation<'_> {
+    fn plan(&mut self, plan: &UnifiedPlan) -> Result<(), SQLError> {
+        match plan {
+            UnifiedPlan::Query(query) => {
+                self.query(query, None)?;
+            }
+            UnifiedPlan::Command(command) => {
+                self.command(command)?;
+            }
+        }
+        Ok(())
+    }
+
     fn known_type(
         &mut self,
         expression: &ScalarExpr,

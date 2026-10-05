@@ -31,6 +31,7 @@ mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
 pub use preparation::infer_prepared_parameter_types;
+pub(crate) use preparation::read_prepared_inputs;
 
 #[cfg(test)]
 mod tests;

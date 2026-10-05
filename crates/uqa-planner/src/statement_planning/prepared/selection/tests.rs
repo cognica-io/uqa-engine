@@ -31,7 +31,9 @@ impl Default for Inputs {
         ));
         Self {
             entry: RefCell::new(Some(PreparedStatementPlan {
+                source_plan: logical_plan.clone(),
                 logical_plan,
+                needs_analysis: false,
                 plan: None,
                 parameter_types: vec![Some(ColumnType::Integer)],
                 result_schema: Some(RowSchema::with_types(
@@ -215,4 +217,72 @@ fn cached_generic_plan_reuses_its_descriptor_and_only_publishes_usage() {
     assert!(has_parameter(&inputs.select().unwrap().unwrap()));
     assert_eq!(*inputs.events.borrow(), ["lookup", "mode", "publish"]);
     assert_eq!(inputs.entry.borrow().as_ref().unwrap().generic_plans, 1);
+}
+
+#[test]
+fn invalidation_reads_original_inputs_and_only_publishes_successful_analysis() {
+    let inputs = Inputs::default();
+    let source = UnifiedPlan::lower(
+        uqa_sql::compile("SELECT 'now'::timestamp AS value")
+            .unwrap()
+            .remove(0),
+    );
+    let _preparation_clock = uqa_sql::expr::TransactionClockScope::enter(90_123_456_789);
+    let definition = uqa_sql::prepared::definition::analyze_definition(
+        &inputs.context().analysis,
+        source.clone(),
+        &[],
+    )
+    .unwrap();
+    {
+        let mut entry = inputs.entry.borrow_mut();
+        let entry = entry.as_mut().unwrap();
+        entry.source_plan = Arc::new(source);
+        entry.logical_plan = Arc::new(definition.logical_plan);
+        entry.parameter_types = definition.parameter_types;
+        entry.result_schema = definition.result_schema;
+    }
+    for (invalidate, clock, expected) in [
+        (false, 190_123_456_789, 90_123_456_789),
+        (true, 290_123_456_789, 290_123_456_789),
+        (false, 390_123_456_789, 290_123_456_789),
+    ] {
+        if invalidate {
+            inputs.entry.borrow_mut().as_mut().unwrap().invalidate();
+        }
+        let _execution_clock = uqa_sql::expr::TransactionClockScope::enter(clock);
+        let mut selected = select_plan(&inputs.context(), "saved", &[])
+            .unwrap()
+            .unwrap();
+        let mut values = Vec::new();
+        selected.rewrite_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::TypedLiteral {
+                value: Value::Temporal(uqa_core::TemporalValue::Timestamp { micros }),
+                ..
+            } = expression
+            {
+                values.push(*micros);
+            }
+        });
+        assert_eq!(values, [expected]);
+        assert!(!inputs.entry.borrow().as_ref().unwrap().needs_analysis);
+    }
+    let identity = {
+        let mut entry = inputs.entry.borrow_mut();
+        let entry = entry.as_mut().unwrap();
+        entry.invalidate();
+        entry.result_schema = Some(RowSchema::with_types(
+            vec!["changed".into()],
+            vec![Some(ColumnType::Timestamp)],
+        ));
+        entry.logical_plan.clone()
+    };
+    let error = select_plan(&inputs.context(), "saved", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    let entry = inputs.entry.borrow();
+    let entry = entry.as_ref().unwrap();
+    assert!(Arc::ptr_eq(&entry.logical_plan, &identity));
+    assert!(entry.needs_analysis);
+    assert!(entry.plan.is_none());
+    assert_eq!(entry.generic_plans, 3);
 }

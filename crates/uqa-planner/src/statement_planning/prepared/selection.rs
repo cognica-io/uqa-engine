@@ -52,18 +52,41 @@ pub fn select_plan(
     let mode = context.session.plan_cache_mode()?;
     let mut generic_plan = entry.plan.clone();
     let mut generic_cost = entry.generic_cost;
+    let reanalyzed = if entry.needs_analysis {
+        let declared = entry
+            .parameter_types
+            .iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        Some(uqa_sql::prepared::definition::analyze_definition(
+            &context.analysis,
+            (*entry.source_plan).clone(),
+            &declared,
+        )?)
+    } else {
+        None
+    };
+    let logical_plan = reanalyzed
+        .as_ref()
+        .map_or(entry.logical_plan.as_ref(), |definition| {
+            &definition.logical_plan
+        });
     let usage = super::PreparedPlanUsage {
         has_parameters: !entry.parameter_types.is_empty(),
         custom_plans: entry.custom_plans,
         total_custom_cost: entry.total_custom_cost,
     };
     let mut custom = super::choose_custom_plan(usage, &mode, generic_cost);
-    if custom || generic_plan.is_none() {
-        let result_schema = uqa_sql::prepared::definition::analyze_result_schema(
-            &context.analysis,
-            &entry.logical_plan,
-            &entry.parameter_types,
-        )?;
+    if custom || generic_plan.is_none() || reanalyzed.is_some() {
+        let result_schema = match &reanalyzed {
+            Some(definition) => definition.result_schema.clone(),
+            None => uqa_sql::prepared::definition::analyze_result_schema(
+                &context.analysis,
+                logical_plan,
+                &entry.parameter_types,
+            )?,
+        };
         if !uqa_sql::prepared::prepared_result_schema_matches(
             entry.result_schema.as_ref(),
             result_schema.as_ref(),
@@ -75,9 +98,7 @@ pub fn select_plan(
         }
     }
     if !custom && generic_plan.is_none() {
-        let plan = context
-            .optimization
-            .optimize_plan((*entry.logical_plan).clone())?;
+        let plan = context.optimization.optimize_plan(logical_plan.clone())?;
         generic_cost = Some(context.optimization.estimate_plan(&plan)?.execution);
         generic_plan = Some(plan);
         // Building the first generic plan supplies its previously unknown cost.
@@ -85,7 +106,7 @@ pub fn select_plan(
         custom = super::choose_custom_plan(usage, &mode, generic_cost);
     }
     let (plan, custom_cost) = if custom {
-        let mut plan = (*entry.logical_plan).clone();
+        let mut plan = logical_plan.clone();
         super::specialize_parameters(&mut plan, parameters);
         let plan = context.optimization.optimize_plan(plan)?;
         let cost = context
@@ -106,6 +127,7 @@ pub fn select_plan(
         name,
         &entry.logical_plan,
         PreparedPlanUpdate {
+            reanalyzed_plan: reanalyzed.map(|definition| Arc::new(definition.logical_plan)),
             generic_plan,
             generic_cost,
             custom_cost,

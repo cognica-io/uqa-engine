@@ -36,6 +36,7 @@ impl Engine {
             analysis: self.prepared_definition_context(),
             aggregates: self,
             registry: self,
+            transaction_timestamp_micros: Some(self.transaction_timestamp_micros()),
             clock: uqa_sql::expr::clock_timestamp_micros,
         }
     }

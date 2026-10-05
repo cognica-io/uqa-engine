@@ -6,7 +6,8 @@
 
 //! Ordered parameter occurrences and their independently resolved SQL types.
 
-use crate::{ColumnType, SQLError, SQLParam};
+use crate::{plan::UnifiedPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
+use std::{collections::BTreeMap, ptr::NonNull};
 use uqa_core::Value;
 
 #[derive(Clone)]
@@ -17,7 +18,7 @@ pub(super) struct ExpressionType {
     // callbacks with no declared result type stay unresolved until execution.
     coercible_unknown: bool,
     /// The text of an `unknown` string literal, which the selected type's input function reads when a context coerces it.
-    literal: Option<String>,
+    literal: Option<(NonNull<ScalarExpr>, String)>,
 }
 
 impl ExpressionType {
@@ -40,12 +41,12 @@ impl ExpressionType {
     }
 
     /// A bare string literal, `unknown` until its context selects a type that reads it.
-    pub(super) fn unknown_literal(text: String) -> Self {
+    pub(super) fn unknown_literal(expression: &ScalarExpr, text: String) -> Self {
         Self {
             ty: None,
             occurrence: None,
             coercible_unknown: true,
-            literal: Some(text),
+            literal: Some((NonNull::from(expression), text)),
         }
     }
 
@@ -57,6 +58,29 @@ impl ExpressionType {
 pub(super) struct ParameterTypes {
     types: Vec<Option<ColumnType>>,
     occurrences: Vec<(usize, Option<ColumnType>)>,
+    input_constants: Option<InputConstants>,
+}
+
+/// Original leaf identities, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
+#[derive(Default)]
+pub(super) struct InputConstants(BTreeMap<NonNull<ScalarExpr>, ScalarExpr>);
+
+impl InputConstants {
+    pub(super) fn apply(mut self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
+        // Replacing leaves preserves every other node's address; the plan is neither cloned nor moved between analysis and this walk.
+        plan.rewrite_scalar_expressions(&mut |expression| {
+            if let Some(constant) = self.0.remove(&NonNull::from(&*expression)) {
+                *expression = constant;
+            }
+        });
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            Err(SQLError::Internal(
+                "prepared input constant did not belong to the analyzed plan".into(),
+            ))
+        }
+    }
 }
 
 impl ParameterTypes {
@@ -64,7 +88,19 @@ impl ParameterTypes {
         Self {
             types: types.to_vec(),
             occurrences: Vec::new(),
+            input_constants: None,
         }
+    }
+
+    pub(super) fn with_input_constants(types: &[Option<ColumnType>]) -> Self {
+        Self {
+            input_constants: Some(InputConstants::default()),
+            ..Self::new(types)
+        }
+    }
+
+    pub(super) fn take_input_constants(&mut self) -> InputConstants {
+        self.input_constants.take().unwrap_or_default()
     }
 
     pub(super) fn reference(&mut self, number: usize) -> Result<ExpressionType, SQLError> {
@@ -92,20 +128,31 @@ impl ParameterTypes {
             return Ok(());
         }
         let target = target.without_type_modifiers();
-        if let Some(text) = &expression.literal {
-            // `coerce_to_common_type` reads an `unknown` constant with the selected type's input function, which reports what the type rejects; a type whose input function consults the catalog is read when the expression is bound to it.
-            // Domain input first uses the base type; its enclosing coercion still applies the domain's modifiers and constraints.
+        if let Some((origin, text)) = &expression.literal {
+            // `coerce_type` reads a domain input with its base type's input function, then leaves the enclosing domain coercion to apply its modifiers and constraints.
             let mut input_type = &target;
             while let ColumnType::Domain { base, .. } = input_type {
                 input_type = base;
             }
             let input_type = input_type.without_type_modifiers();
+            // A type whose input function consults the catalog is read when the expression is bound to it.
             if !crate::type_resolution::catalog_input_type(&input_type) {
-                crate::expr::cast_value_from(
+                let value = crate::expr::cast_value_from(
                     &Value::Str(text.clone()),
                     &input_type.catalog_name(),
                     None,
                 )?;
+                if let Some(constants) = &mut self.input_constants {
+                    constants.0.insert(
+                        *origin,
+                        ScalarExpr::TypedLiteral {
+                            value,
+                            ty: input_type.catalog_name(),
+                            bound_type: Some(input_type),
+                            parameter_index: None,
+                        },
+                    );
+                }
             }
         }
         if let Some(occurrence) = expression.occurrence {

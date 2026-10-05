@@ -17,6 +17,7 @@ pub trait PreparedPlanProvider {
 }
 
 pub struct PreparedPlanUpdate {
+    pub reanalyzed_plan: Option<std::sync::Arc<UnifiedPlan>>,
     pub generic_plan: Option<UnifiedPlan>,
     pub generic_cost: Option<f64>,
     pub custom_cost: Option<f64>,

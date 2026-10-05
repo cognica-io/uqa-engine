@@ -15,6 +15,21 @@ struct CatalogVersions {
     storage: Option<u64>,
 }
 
+#[derive(Clone, Copy)]
+enum PreparedInvalidation {
+    Execution,
+    Analysis,
+}
+
+impl PreparedInvalidation {
+    fn apply(self, engine: &Engine) {
+        match self {
+            Self::Execution => engine.invalidate_prepared_plans(),
+            Self::Analysis => engine.invalidate_prepared_analysis(),
+        }
+    }
+}
+
 impl Engine {
     pub(crate) fn table_catalog_metadata_fingerprint(
         table: &super::TableState,
@@ -323,7 +338,7 @@ impl Engine {
         self.clear_regtype_output_cache();
         self.clear_bayesian_params_cache();
         self.clear_sql_statement_cache();
-        self.invalidate_prepared_plans();
+        self.invalidate_prepared_analysis();
         if let Some(frame) = self.session.transactions.lock().first_mut() {
             frame.fixed_catalog_baseline = Some(latest_baseline);
         }
@@ -472,11 +487,25 @@ impl Engine {
                 }
             }
         };
-        let tables = self.reload_table_catalog_after_rollback();
+        let invalidation = if pinned || in_transaction {
+            match self.rollback_prepared_invalidation() {
+                Ok(invalidation) => invalidation,
+                Err(error) => {
+                    cleanup_errors.push(format!("rollback catalog revisions: {error}"));
+                    PreparedInvalidation::Analysis
+                }
+            }
+        } else {
+            PreparedInvalidation::Analysis
+        };
+        let tables = match invalidation {
+            PreparedInvalidation::Analysis => self.reload_table_catalog_after_rollback(),
+            PreparedInvalidation::Execution => self.restore_rolled_back_table_catalog(invalidation),
+        };
         if let Err(error) = &tables {
             cleanup_errors.push(format!("table catalog restore: {error}"));
         }
-        let registries = self.reload_catalog_registries_after_rollback();
+        let registries = self.reload_catalog_registries_after_rollback(invalidation);
         if let Err(error) = &registries {
             cleanup_errors.push(format!("registry restore: {error}"));
         }
@@ -490,6 +519,38 @@ impl Engine {
                 cleanup_errors.push(format!("rollback read snapshot release: {error}"));
             }
         }
+    }
+
+    fn rollback_prepared_invalidation(&self) -> StorageBackendResult<PreparedInvalidation> {
+        let binding_revisions = |revisions: &uqa_storage::CatalogCacheRevisions| {
+            (
+                revisions.table_catalog,
+                revisions.registries,
+                revisions.graphs.clone(),
+                revisions.storage_schema,
+            )
+        };
+        let previous = self
+            .epochs
+            .storage_cache_revisions
+            .lock()
+            .as_ref()
+            .map(binding_revisions);
+        let current = self
+            .storage
+            .catalog
+            .as_ref()
+            .map(|catalog| catalog.cache_revisions())
+            .transpose()?
+            .flatten();
+        // Equal binding generations prove that rollback changed data alone. The physical stores still need their full restoration; only the analyzed SQL inputs remain valid.
+        Ok(
+            if previous.is_some() && previous == current.as_ref().map(binding_revisions) {
+                PreparedInvalidation::Execution
+            } else {
+                PreparedInvalidation::Analysis
+            },
+        )
     }
 
     /// Begin a read transaction and pin its snapshot. Returns the commit version when the monitor shows that no commit came between the two reads around the pin, as a refresh reads them.
@@ -545,6 +606,13 @@ impl Engine {
     }
 
     pub(crate) fn reload_table_catalog_after_rollback(&self) -> StorageBackendResult<()> {
+        self.restore_rolled_back_table_catalog(PreparedInvalidation::Analysis)
+    }
+
+    fn restore_rolled_back_table_catalog(
+        &self,
+        invalidation: PreparedInvalidation,
+    ) -> StorageBackendResult<()> {
         // First, so that a failed reload cannot leave a count ahead of its store.
         self.discard_persistent_document_counts();
         *self.epochs.storage_cache_revisions.lock() = None;
@@ -554,7 +622,7 @@ impl Engine {
             .table_catalog
             .published
             .load(std::sync::atomic::Ordering::Acquire);
-        self.reload_table_catalog(target_epoch)?;
+        self.reload_table_catalog_with_invalidation(target_epoch, invalidation)?;
         self.epochs
             .table_catalog
             .dirty
@@ -582,6 +650,14 @@ impl Engine {
     }
 
     pub(super) fn reload_table_catalog(&self, target_epoch: u64) -> StorageBackendResult<()> {
+        self.reload_table_catalog_with_invalidation(target_epoch, PreparedInvalidation::Analysis)
+    }
+
+    fn reload_table_catalog_with_invalidation(
+        &self,
+        target_epoch: u64,
+        invalidation: PreparedInvalidation,
+    ) -> StorageBackendResult<()> {
         self.clear_regtype_output_cache();
         let Some(catalog) = self.storage.catalog.as_ref() else {
             self.epochs
@@ -673,7 +749,7 @@ impl Engine {
             .seen
             .store(target_epoch, std::sync::atomic::Ordering::Release);
         self.clear_sql_statement_cache();
-        self.invalidate_prepared_plans();
+        invalidation.apply(self);
         Ok(())
     }
 
@@ -726,13 +802,16 @@ impl Engine {
         self.reload_catalog_registries(target_epoch)
     }
 
-    pub(crate) fn reload_catalog_registries_after_rollback(&self) -> StorageBackendResult<()> {
+    fn reload_catalog_registries_after_rollback(
+        &self,
+        invalidation: PreparedInvalidation,
+    ) -> StorageBackendResult<()> {
         let target_epoch = self
             .epochs
             .catalog_registry
             .published
             .load(std::sync::atomic::Ordering::Acquire);
-        self.reload_catalog_registries(target_epoch)?;
+        self.reload_catalog_registries_with_invalidation(target_epoch, invalidation)?;
         self.epochs
             .catalog_registry
             .dirty
@@ -741,6 +820,17 @@ impl Engine {
     }
 
     pub(super) fn reload_catalog_registries(&self, target_epoch: u64) -> StorageBackendResult<()> {
+        self.reload_catalog_registries_with_invalidation(
+            target_epoch,
+            PreparedInvalidation::Analysis,
+        )
+    }
+
+    fn reload_catalog_registries_with_invalidation(
+        &self,
+        target_epoch: u64,
+        invalidation: PreparedInvalidation,
+    ) -> StorageBackendResult<()> {
         self.clear_regtype_output_cache();
         self.clear_bayesian_params_cache();
         let Some(catalog) = self.storage.catalog.as_ref() else {
@@ -812,7 +902,7 @@ impl Engine {
             .seen
             .store(target_epoch, std::sync::atomic::Ordering::Release);
         self.clear_sql_statement_cache();
-        self.invalidate_prepared_plans();
+        invalidation.apply(self);
         Ok(())
     }
 }

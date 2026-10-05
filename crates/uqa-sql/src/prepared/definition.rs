@@ -36,9 +36,9 @@ pub fn analyze_definition(
     let parameter_types =
         super::declared_parameter_types(context.types, &mut logical_plan, declared)?;
     let parameter_types = with_scope_result(context.scopes, |scope| {
-        crate::binding::infer_prepared_parameter_types(
+        crate::binding::read_prepared_inputs(
             context.routines,
-            &logical_plan,
+            &mut logical_plan,
             &parameter_types,
             &scope.binding_context()?,
         )

@@ -16,6 +16,7 @@ use crate::{plan::QueryBlockPlan, FunctionTypeResolver, SQLError, SQLParam};
 
 mod expressions;
 mod names;
+pub(crate) use names::resolve_grouping_expression_reference;
 pub use names::{bind_grouping_names, resolve_grouping_expression};
 mod validation;
 pub use validation::validate_grouped_expressions;

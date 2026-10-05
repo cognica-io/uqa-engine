@@ -26,6 +26,8 @@ pub struct PreparedRegistrationContext<'a> {
     pub analysis: PreparedDefinitionContext<'a>,
     pub aggregates: &'a dyn AggregateClassifier,
     pub registry: &'a dyn PreparedDefinitionRegistry,
+    /// The session's active transaction clock, including direct host registration.
+    pub transaction_timestamp_micros: Option<i64>,
     pub clock: fn() -> i64,
 }
 
@@ -45,6 +47,10 @@ pub fn register_plan(
     declared: &[ColumnType],
     source_sql: Option<&str>,
 ) -> Result<(), SQLError> {
+    let _transaction_clock = context
+        .transaction_timestamp_micros
+        .map(uqa_sql::expr::TransactionClockScope::enter);
+    let source_plan = Arc::new(logical_plan.clone());
     let definition = uqa_sql::prepared::definition::analyze_definition(
         &context.analysis,
         logical_plan,
@@ -53,7 +59,9 @@ pub fn register_plan(
     context.registry.write_definitions().insert(
         name,
         PreparedStatementPlan {
+            source_plan,
             logical_plan: Arc::new(definition.logical_plan),
+            needs_analysis: false,
             plan: None,
             parameter_types: definition.parameter_types,
             result_schema: definition.result_schema,
