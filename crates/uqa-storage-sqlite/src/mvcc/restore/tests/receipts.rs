@@ -109,7 +109,7 @@ fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent(
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )?;
-            assert_eq!(format, 56);
+            assert_eq!(format, 57);
             assert_eq!(
                 limit,
                 if predecessor >= 44 {

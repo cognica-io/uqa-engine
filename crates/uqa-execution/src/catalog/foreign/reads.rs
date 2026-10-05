@@ -9,8 +9,10 @@ use super::StoredForeignTable;
 use crate::catalog::security::BoundTableSecurity;
 use std::{collections::BTreeMap, ops::Deref};
 use uqa_core::RelationIdentity;
-pub type ForeignServersRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<String, uqa_fdw::ForeignServer>> + 'a>;
+pub type ForeignServersRead<'a> = Box<
+    dyn Deref<Target = BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>
+        + 'a,
+>;
 pub type ForeignTablesRead<'a> =
     Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
 pub type ForeignSecurityRead<'a> =

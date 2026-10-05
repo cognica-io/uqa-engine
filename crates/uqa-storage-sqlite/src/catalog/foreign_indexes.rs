@@ -8,8 +8,8 @@
 
 use super::native::{text, RelationRecord};
 use super::{
-    params, Catalog, CatalogIndexRow, ForeignTableRow, RelationIdentity, RelationKind, Result,
-    SQLiteError,
+    params, Catalog, CatalogIndexRow, ForeignServerRow, ForeignTableRow, RelationIdentity,
+    RelationKind, Result, SQLiteError,
 };
 use crate::mvcc::native::NativeRecordFamily as Family;
 
@@ -33,8 +33,8 @@ impl Catalog {
         }
         self.conn.with(|c| {
             c.execute(
-                "INSERT OR REPLACE INTO _foreign_servers (name, fdw_type, options) \
-                 VALUES (?1, ?2, ?3)",
+                "INSERT INTO _foreign_servers (name, fdw_type, options) \
+                 VALUES (?1, ?2, ?3) ON CONFLICT(name) DO UPDATE SET fdw_type = excluded.fdw_type, options = excluded.options",
                 params![name, fdw_type, options_json],
             )?;
             Ok(())
@@ -42,40 +42,73 @@ impl Catalog {
     }
 
     pub fn drop_foreign_server(&self, name: &str) -> Result<()> {
-        if self
-            .drop_native_named(Family::ForeignServers, name)?
-            .is_some()
-        {
+        if self.drop_native_foreign_server(name)?.is_some() {
             return Ok(());
         }
-        self.conn.with(|c| {
-            c.execute(
-                "DELETE FROM _foreign_servers WHERE name = ?1",
-                params![name],
+        self.conn.with_mut(|connection| {
+            let transaction = connection.savepoint()?;
+            transaction.execute(
+                "DELETE FROM _foreign_server_metadata WHERE name = ?1",
+                [name],
             )?;
+            transaction.execute("DELETE FROM _foreign_servers WHERE name = ?1", [name])?;
+            transaction.commit()?;
             Ok(())
         })
     }
 
     pub fn load_foreign_servers(&self) -> Result<Vec<(String, String, String)>> {
-        if let Some(servers) = self.load_native_foreign_servers()? {
+        Ok(self
+            .load_foreign_server_rows()?
+            .into_iter()
+            .map(|row| (row.name, row.fdw_type, row.options_json))
+            .collect())
+    }
+
+    pub fn save_foreign_server_row(&self, row: &ForeignServerRow) -> Result<()> {
+        if self.save_native_foreign_server_row(row)?.is_some() {
+            return Ok(());
+        }
+        self.conn.with_mut(|connection| {
+            let transaction = connection.savepoint()?;
+            transaction.execute(
+                "INSERT INTO _foreign_servers (name, fdw_type, options) VALUES (?1, ?2, ?3) ON CONFLICT(name) DO UPDATE SET fdw_type = excluded.fdw_type, options = excluded.options",
+                params![row.name, row.fdw_type, row.options_json],
+            )?;
+            match &row.metadata_json {
+                Some(metadata) => {
+                    transaction.execute("INSERT INTO _foreign_server_metadata (name, metadata) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET metadata = excluded.metadata", params![row.name, metadata])?;
+                }
+                None => {
+                    transaction.execute("DELETE FROM _foreign_server_metadata WHERE name = ?1", [&row.name])?;
+                }
+            }
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn load_foreign_server_rows(&self) -> Result<Vec<ForeignServerRow>> {
+        if let Some(servers) = self.load_native_foreign_server_rows()? {
             return Ok(servers);
         }
-        self.conn.with(|c| {
-            let mut stmt =
-                c.prepare("SELECT name, fdw_type, options FROM _foreign_servers ORDER BY name")?;
-            let rows = stmt.query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
+        self.conn.with(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT s.name, s.fdw_type, s.options, m.metadata FROM _foreign_servers s LEFT JOIN _foreign_server_metadata m USING(name) UNION ALL SELECT m.name, NULL, NULL, m.metadata FROM _foreign_server_metadata m WHERE NOT EXISTS (SELECT 1 FROM _foreign_servers s WHERE s.name=m.name) ORDER BY 1",
+            )?;
+            let mut rows = statement.query([])?;
+            let mut servers = Vec::new();
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(0)?;
+                let fdw_type = row.get::<_, Option<String>>(1)?.ok_or_else(|| SQLiteError::StorageBackend(format!("foreign server metadata references missing server `{name}`")))?;
+                servers.push(ForeignServerRow {
+                    name,
+                    fdw_type,
+                    options_json: row.get(2)?,
+                    metadata_json: row.get(3)?,
+                });
             }
-            Ok(out)
+            Ok(servers)
         })
     }
 

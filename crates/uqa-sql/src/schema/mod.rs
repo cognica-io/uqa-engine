@@ -222,6 +222,7 @@ pub mod truncate;
 
 pub mod type_objects;
 
+pub mod foreign_servers;
 pub mod foreign_tables;
 
 pub mod retention;

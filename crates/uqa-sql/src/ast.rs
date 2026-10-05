@@ -742,6 +742,10 @@ pub enum MergeWhen {
 pub struct CreateForeignServer {
     pub name: String,
     pub fdw_type: String,
+    #[serde(default)]
+    pub server_type: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
     pub options: Vec<(String, String)>,
     pub if_not_exists: bool,
 }

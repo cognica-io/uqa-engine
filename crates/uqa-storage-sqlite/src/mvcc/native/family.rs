@@ -73,6 +73,7 @@ pub enum NativeRecordFamily {
     VectorPopulations = 60,
     VectorPopulationWitnesses = 61,
     SequenceValues = 62,
+    ForeignServerMetadata = 63,
 }
 
 impl NativeRecordFamily {
@@ -81,6 +82,9 @@ impl NativeRecordFamily {
     }
 
     pub fn from_id(id: u16) -> Option<Self> {
+        if id == Self::ForeignServerMetadata.id() {
+            return Some(Self::ForeignServerMetadata);
+        }
         if id == Self::SequenceValues.id() {
             return Some(Self::SequenceValues);
         }
@@ -112,6 +116,9 @@ impl NativeRecordFamily {
     }
 
     pub fn layout(self) -> &'static NativeRecordLayout {
+        if self == Self::ForeignServerMetadata {
+            return &super::foreign_servers::LAYOUT;
+        }
         if self == Self::SequenceValues {
             return &super::sequence_values::LAYOUT;
         }
@@ -143,6 +150,7 @@ impl NativeRecordFamily {
     }
 
     pub fn all() -> impl ExactSizeIterator<Item = Self> {
-        (1..=Self::SequenceValues.id()).map(|id| Self::from_id(id).expect("assigned native family"))
+        (1..=Self::ForeignServerMetadata.id())
+            .map(|id| Self::from_id(id).expect("assigned native family"))
     }
 }

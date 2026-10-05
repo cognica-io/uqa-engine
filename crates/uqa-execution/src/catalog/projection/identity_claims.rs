@@ -146,6 +146,13 @@ pub fn largest_catalog_oid(
         oids.push(uqa_sql::catalog::type_metadata::pg_type_oid(&ty));
         oids.push(uqa_sql::catalog::type_metadata::pg_type_array_oid(&ty));
     }
+    oids.extend(
+        snapshot
+            .definitions
+            .foreign_servers
+            .values()
+            .map(|server| i64::from(server.metadata.oid)),
+    );
     for function in snapshot.definitions.sql_user_functions.values().flatten() {
         oids.push(super::user_routine_catalog_oid(function)?);
     }

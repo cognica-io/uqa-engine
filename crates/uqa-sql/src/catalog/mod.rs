@@ -852,6 +852,7 @@ pub mod composite_type;
 pub mod domain;
 pub mod enum_type;
 pub mod events;
+pub mod foreign_server;
 pub mod index;
 pub mod roles;
 

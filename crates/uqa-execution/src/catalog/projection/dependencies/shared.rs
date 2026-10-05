@@ -10,8 +10,9 @@ use super::{DependencyBuilder, MemberObject};
 use std::collections::BTreeSet;
 use uqa_core::catalog_role::RoleIdentity;
 use uqa_sql::catalog::dependencies::{
-    ObjectAddress, SharedDependency, SharedDependencyKind, DATABASE_CLASS, NAMESPACE_CLASS,
-    PROCEDURE_CLASS, RELATION_CLASS, ROLE_CLASS, ROLE_MEMBERSHIP_CLASS, TYPE_CLASS,
+    ObjectAddress, SharedDependency, SharedDependencyKind, DATABASE_CLASS, FOREIGN_SERVER_CLASS,
+    NAMESPACE_CLASS, PROCEDURE_CLASS, RELATION_CLASS, ROLE_CLASS, ROLE_MEMBERSHIP_CLASS,
+    TYPE_CLASS,
 };
 use uqa_sql::SQLError;
 
@@ -194,6 +195,14 @@ impl DependencyBuilder<'_> {
                     .iter()
                     .flatten()
                     .map(|entry| (entry.role, entry.grantor)),
+            );
+        }
+        for server in snapshot.definitions.foreign_servers.values() {
+            self.record_role(
+                database,
+                ObjectAddress::whole(FOREIGN_SERVER_CLASS, server.metadata.oid),
+                server.metadata.owner.oid,
+                SharedDependencyKind::Owner,
             );
         }
         for function in catalog.all_sql_functions() {

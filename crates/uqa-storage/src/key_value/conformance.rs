@@ -15,7 +15,9 @@ use super::KeyValueStore;
 use crate::{StorageBackendError, StorageBackendResult};
 
 mod catalog_revisions;
+mod foreign_servers;
 pub use catalog_revisions::verify_catalog_record_revisions;
+pub use foreign_servers::{verify_foreign_server_reopen, verify_foreign_server_rows};
 mod documents;
 pub use documents::{verify_document_ownership, verify_document_reopen};
 mod commands;

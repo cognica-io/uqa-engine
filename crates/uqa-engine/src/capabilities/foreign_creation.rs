@@ -7,7 +7,7 @@
 //! Bind foreign declaration execution to retained registries, fresh catalog scopes and the session transaction.
 use crate::Engine;
 use uqa_execution::schema::foreign_creation::{
-    entry::{ForeignCreationTransactions, ForeignServerWrite, ForeignTableWrite},
+    entry::{ForeignCatalogWrite, ForeignCreationTransactions},
     ForeignCreationContext, ForeignCreationNamespace, ForeignCreationRegistry, ForeignSecurityRead,
     ForeignServersRead, ForeignServersWrite, ForeignTablesRead,
 };
@@ -66,10 +66,7 @@ impl ForeignCreationNamespace for Engine {
     }
 }
 impl ForeignCreationTransactions for Engine {
-    fn with_foreign_server_write(&self, write: ForeignServerWrite<'_>) -> Result<(), String> {
-        self.with_implicit_string_transaction(|engine| write(&engine.foreign_creation_context()))
-    }
-    fn with_foreign_table_write(&self, write: ForeignTableWrite<'_>) -> Result<(), SQLError> {
+    fn with_foreign_catalog_write(&self, write: ForeignCatalogWrite<'_>) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| write(&engine.foreign_creation_context()))
     }
 }

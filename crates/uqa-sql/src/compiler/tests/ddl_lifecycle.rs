@@ -10,6 +10,7 @@ use super::*;
 
 mod column_checks;
 mod domains;
+mod foreign_servers;
 mod foreign_tables;
 mod schema_moves;
 

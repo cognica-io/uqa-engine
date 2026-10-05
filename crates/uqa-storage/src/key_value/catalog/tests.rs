@@ -16,6 +16,7 @@ use crate::{RelationSecurityRow, TableAclEntry};
 use std::collections::BTreeMap;
 
 mod diskann;
+mod foreign_servers;
 mod relation_acls;
 mod sequence_values;
 

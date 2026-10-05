@@ -12,6 +12,7 @@ pub(crate) use row::{binary_pair_limit, variable_fields_limit, vector_row_limit}
 mod family;
 mod field_guards;
 pub(crate) use field_guards::VECTOR_FIELD_GUARD_PREFIX;
+pub(crate) mod foreign_servers;
 mod format;
 mod graph_cache;
 mod graph_guards;

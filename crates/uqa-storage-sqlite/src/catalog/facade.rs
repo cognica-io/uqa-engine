@@ -8,9 +8,9 @@
 
 use super::{
     Catalog, CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow,
-    ForeignTableRow, GraphSnapshot, OptionalExtension, RelationIdentity, Result, SQLiteError,
-    SequenceReservationResult, SequenceRow, SequenceSetValueResult, StorageBackendError,
-    StorageBackendResult, TableSchema, ViewRow,
+    ForeignServerRow, ForeignTableRow, GraphSnapshot, OptionalExtension, RelationIdentity, Result,
+    SQLiteError, SequenceReservationResult, SequenceRow, SequenceSetValueResult,
+    StorageBackendError, StorageBackendResult, TableSchema, ViewRow,
 };
 
 fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
@@ -705,6 +705,14 @@ impl CatalogFacade for Catalog {
 
     fn load_foreign_servers(&self) -> StorageBackendResult<Vec<(String, String, String)>> {
         into_storage_result(Catalog::load_foreign_servers(self))
+    }
+
+    fn save_foreign_server_row(&self, row: &ForeignServerRow) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_foreign_server_row(self, row))
+    }
+
+    fn load_foreign_server_rows(&self) -> StorageBackendResult<Vec<ForeignServerRow>> {
+        into_storage_result(Catalog::load_foreign_server_rows(self))
     }
 
     fn save_foreign_table(&self, row: &ForeignTableRow) -> StorageBackendResult<()> {

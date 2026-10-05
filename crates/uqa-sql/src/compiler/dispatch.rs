@@ -58,7 +58,11 @@ impl<'sql> ParsedStatement<'sql> {
 
     /// Compile this statement into the engine's internal SQL representation.
     pub fn compile(&self) -> Result<Statement> {
-        compile_stmt(&self.node)
+        let mut statement = compile_stmt(&self.node)?;
+        if let Statement::CreateForeignServer(server) = &mut statement {
+            super::foreign_servers::retain_string_presence(self.sql, server)?;
+        }
+        Ok(statement)
     }
 }
 

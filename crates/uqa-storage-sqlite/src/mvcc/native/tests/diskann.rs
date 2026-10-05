@@ -125,7 +125,22 @@ pub(in crate::mvcc::native) fn remove_empty_changes(
 pub(in crate::mvcc::native) fn remove_empty_sequence_values(
     sqlite: &rusqlite::Connection,
 ) -> crate::Result<()> {
+    remove_empty_foreign_server_metadata(sqlite)?;
     let table = NativeRecordFamily::SequenceValues.layout().table;
+    assert_eq!(
+        sqlite.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
+            .get::<_, i64>(0))?,
+        0
+    );
+    sqlite.execute_batch(&format!("DROP TABLE {table}"))?;
+    Ok(())
+}
+
+/// Strip the empty family when constructing a predecessor native format.
+pub(in crate::mvcc::native) fn remove_empty_foreign_server_metadata(
+    sqlite: &rusqlite::Connection,
+) -> crate::Result<()> {
+    let table = NativeRecordFamily::ForeignServerMetadata.layout().table;
     assert_eq!(
         sqlite.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
             .get::<_, i64>(0))?,

@@ -332,14 +332,10 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         &self,
         statement: &CreateForeignServer,
     ) -> Result<SQLResult, SQLError> {
-        crate::schema::foreign_creation::entry::register_foreign_server(
+        crate::schema::foreign_creation::entry::register_foreign_server_statement(
             self.context.foreign,
-            statement.name.clone(),
-            statement.fdw_type.clone(),
-            statement.options.clone(),
-            statement.if_not_exists,
-        )
-        .map_err(SQLError::Unsupported)?;
+            statement.clone(),
+        )?;
         Ok(SQLResult::empty())
     }
 

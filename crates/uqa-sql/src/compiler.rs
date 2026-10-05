@@ -30,6 +30,7 @@ mod domains;
 mod drop_alter;
 mod enums;
 mod events;
+mod foreign_servers;
 mod foreign_tables;
 mod hierarchy;
 mod locking;

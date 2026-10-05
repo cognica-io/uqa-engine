@@ -8,6 +8,7 @@ use crate::Engine;
 
 mod definitions;
 mod runtime;
+mod servers;
 use std::{
     cell::Cell,
     collections::BTreeMap,
@@ -22,12 +23,16 @@ use uqa_execution::schema::{
 };
 
 struct ServerWrite<'a> {
-    guard:
-        Option<parking_lot::MappedRwLockWriteGuard<'a, BTreeMap<String, uqa_fdw::ForeignServer>>>,
+    guard: Option<
+        parking_lot::MappedRwLockWriteGuard<
+            'a,
+            BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
+        >,
+    >,
     held: &'a Cell<bool>,
 }
 impl Deref for ServerWrite<'_> {
-    type Target = BTreeMap<String, uqa_fdw::ForeignServer>;
+    type Target = BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>;
     fn deref(&self) -> &Self::Target {
         self.guard.as_deref().unwrap()
     }
@@ -92,6 +97,7 @@ impl CatalogPublicationChanges for Publication<'_> {
 #[test]
 fn server_registration_releases_the_actual_guard_before_epoch_publication() {
     let engine = Engine::new();
+    engine.sql("BEGIN", &[]).unwrap();
     let publication = Publication {
         engine: &engine,
         held: Cell::new(false),
@@ -126,6 +132,7 @@ fn server_registration_releases_the_actual_guard_before_epoch_publication() {
         engine.foreign_server("source").unwrap().unwrap().fdw_type,
         "memory_fdw"
     );
+    engine.sql("COMMIT", &[]).unwrap();
 }
 
 #[test]

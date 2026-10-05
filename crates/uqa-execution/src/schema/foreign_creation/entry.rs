@@ -10,23 +10,17 @@ use uqa_sql::{
     ast::{ColumnDef, DeferredCreateForeignTable, TableCheck},
     SQLError,
 };
-pub type ForeignServerWrite<'a> =
-    Box<dyn FnOnce(&ForeignCreationContext<'_>) -> Result<(), String> + 'a>;
-pub type ForeignTableWrite<'a> =
+pub type ForeignCatalogWrite<'a> =
     Box<dyn FnOnce(&ForeignCreationContext<'_>) -> Result<(), SQLError> + 'a>;
 pub trait ForeignCreationTransactions {
-    fn with_foreign_server_write(&self, write: ForeignServerWrite<'_>) -> Result<(), String>;
-    fn with_foreign_table_write(&self, write: ForeignTableWrite<'_>) -> Result<(), SQLError>;
+    fn with_foreign_catalog_write(&self, write: ForeignCatalogWrite<'_>) -> Result<(), SQLError>;
 }
-pub fn register_foreign_server(
+pub fn register_foreign_server_statement(
     transactions: &dyn ForeignCreationTransactions,
-    name: String,
-    fdw_type: String,
-    options: Vec<(String, String)>,
-    if_not_exists: bool,
-) -> Result<(), String> {
-    transactions.with_foreign_server_write(Box::new(move |context| {
-        context.register_foreign_server_inner(name, &fdw_type, options, if_not_exists)
+    statement: uqa_sql::ast::CreateForeignServer,
+) -> Result<(), SQLError> {
+    transactions.with_foreign_catalog_write(Box::new(move |context| {
+        context.register_foreign_server_statement(&statement)
     }))
 }
 pub fn register_foreign_table_with_checks(
@@ -38,7 +32,7 @@ pub fn register_foreign_table_with_checks(
     options: Vec<(String, String)>,
     if_not_exists: bool,
 ) -> Result<(), SQLError> {
-    transactions.with_foreign_table_write(Box::new(move |context| {
+    transactions.with_foreign_catalog_write(Box::new(move |context| {
         context.register_foreign_table_inner(
             &name,
             server_name,
@@ -53,7 +47,7 @@ pub fn register_deferred_foreign_table(
     transactions: &dyn ForeignCreationTransactions,
     deferred: DeferredCreateForeignTable,
 ) -> Result<(), SQLError> {
-    transactions.with_foreign_table_write(Box::new(move |context| {
+    transactions.with_foreign_catalog_write(Box::new(move |context| {
         context.register_deferred_foreign_table(deferred)
     }))
 }
@@ -63,7 +57,7 @@ pub fn register_foreign_table_statement(
     transactions: &dyn ForeignCreationTransactions,
     statement: uqa_sql::ast::CreateForeignTable,
 ) -> Result<(), SQLError> {
-    transactions.with_foreign_table_write(Box::new(move |context| {
+    transactions.with_foreign_catalog_write(Box::new(move |context| {
         context.register_foreign_table_statement(statement)
     }))
 }
