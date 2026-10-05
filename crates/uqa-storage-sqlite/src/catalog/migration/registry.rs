@@ -92,6 +92,10 @@ impl Catalog {
                 .map_err(|_| SQLiteError::InvalidSchemaVersion(version))?,
             None => 0,
         };
+        // This marker belongs to native MVCC conversion, not the physical migration sequence. A bound native session validates its mapping before reaching this dispatcher.
+        if current == 49 {
+            return Err(SQLiteError::LogicalSessionRequired);
+        }
         if current > CURRENT_SCHEMA_VERSION {
             return Err(SQLiteError::UnsupportedSchemaVersion {
                 found: current,

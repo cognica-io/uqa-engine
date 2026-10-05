@@ -85,6 +85,7 @@ fn downgrade(connection: &ManagedConnection, namespace: uqa_storage::mvcc::Datab
     with(connection, |sqlite| {
         let _permit = schema::WritePermit::acquire(sqlite)?;
         let transaction = schema::begin(sqlite)?;
+        crate::mvcc::native::tests::diskann::remove_empty_foreign_server_metadata(&transaction)?;
         for table in ["_uqa_mvcc_versions", "_uqa_mvcc_heads"] {
             transaction.execute(
                 &format!("DELETE FROM {table} WHERE substr(key, 1, ?2) = ?1"),

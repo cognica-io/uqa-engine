@@ -12,8 +12,8 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{
-    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
+    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignServerRow,
+    ForeignTableRow, GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
     SequenceReservationResult, SequenceRow, SequenceSetValueResult, TableSchema, ViewRow,
 };
 use crate::{StorageBackendError, StorageBackendResult};
@@ -666,6 +666,14 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn load_foreign_servers(&self) -> StorageBackendResult<Vec<(String, String, String)>> {
         self.load_foreign_servers_impl()
+    }
+
+    fn save_foreign_server_row(&self, row: &ForeignServerRow) -> StorageBackendResult<()> {
+        self.save_foreign_server_row_impl(row)
+    }
+
+    fn load_foreign_server_rows(&self) -> StorageBackendResult<Vec<ForeignServerRow>> {
+        self.load_foreign_server_rows_impl()
     }
 
     fn save_foreign_table(&self, row: &ForeignTableRow) -> StorageBackendResult<()> {

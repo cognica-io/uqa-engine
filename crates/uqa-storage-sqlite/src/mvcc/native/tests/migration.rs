@@ -100,7 +100,7 @@ fn failed_native_import_restores_the_original_schema_and_can_be_retried() {
                     [],
                     |row| row.get::<_, String>(0)
                 )?,
-                "48"
+                crate::catalog::CURRENT_SCHEMA_VERSION.to_string()
             );
             assert_eq!(
                 connection.query_row(

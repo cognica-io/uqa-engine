@@ -142,6 +142,15 @@ pub struct ForeignTableRow {
     pub options_json: String,
 }
 
+/// One foreign-server definition. Execution owns the versioned SQL metadata; absence identifies a legacy row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForeignServerRow {
+    pub name: String,
+    pub fdw_type: String,
+    pub options_json: String,
+    pub metadata_json: Option<String>,
+}
+
 /// One durable view definition. `definition_json` contains a serialized
 /// planner query plan, while ownership remains a typed catalog relation.
 #[derive(Debug, Clone)]
@@ -681,6 +690,30 @@ pub trait CatalogFacade: Send + Sync {
     ) -> StorageBackendResult<()>;
     fn drop_foreign_server(&self, name: &str) -> StorageBackendResult<()>;
     fn load_foreign_servers(&self) -> StorageBackendResult<Vec<(String, String, String)>>;
+
+    /// Atomically replace a complete foreign-server row. A catalog without metadata support must reject it instead of discarding the metadata.
+    fn save_foreign_server_row(&self, row: &ForeignServerRow) -> StorageBackendResult<()> {
+        if row.metadata_json.is_some() {
+            return Err(StorageBackendError::Other(
+                "foreign-server metadata is not supported by this catalog".into(),
+            ));
+        }
+        self.save_foreign_server(&row.name, &row.fdw_type, &row.options_json)
+    }
+
+    /// Read definitions and their metadata from one catalog view. Legacy implementations expose absent metadata explicitly.
+    fn load_foreign_server_rows(&self) -> StorageBackendResult<Vec<ForeignServerRow>> {
+        Ok(self
+            .load_foreign_servers()?
+            .into_iter()
+            .map(|(name, fdw_type, options_json)| ForeignServerRow {
+                name,
+                fdw_type,
+                options_json,
+                metadata_json: None,
+            })
+            .collect())
+    }
 
     fn save_foreign_table(&self, row: &ForeignTableRow) -> StorageBackendResult<()>;
     /// Atomically move one foreign-table catalog row and its shared relation claim.

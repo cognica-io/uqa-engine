@@ -9,6 +9,7 @@ use crate::{Catalog, ManagedConnection, SQLiteRecordStore};
 
 mod changes;
 mod diskann;
+mod foreign_servers;
 mod populations;
 mod sequence_values;
 

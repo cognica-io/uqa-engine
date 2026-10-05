@@ -8,9 +8,10 @@
 
 use super::{
     decode_relation_key, decode_value, encode_value, key_with_tag, read_str, relation_key,
-    single_str_key, ForeignTableRow, KeyValueCatalog, RelationIdentity, RelationKind,
-    StorageBackendError, StorageBackendResult, StoredForeignServer, StoredForeignTable,
-    STORED_FOREIGN_TABLE_SECURITY_VERSION, TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE, TAG_RELATION,
+    single_str_key, ForeignServerRow, ForeignTableRow, KeyValueCatalog, RelationIdentity,
+    RelationKind, StorageBackendError, StorageBackendResult, StoredForeignServer,
+    StoredForeignTable, STORED_FOREIGN_TABLE_SECURITY_VERSION, TAG_FOREIGN_SERVER,
+    TAG_FOREIGN_TABLE, TAG_RELATION,
 };
 
 impl KeyValueCatalog {
@@ -20,11 +21,34 @@ impl KeyValueCatalog {
         fdw_type: &str,
         options_json: &str,
     ) -> StorageBackendResult<()> {
+        let key = single_str_key(TAG_FOREIGN_SERVER, name)?;
+        self.store.with_mutation(&mut |read, batch| {
+            let metadata_json = read
+                .get(&key)?
+                .map(|bytes| decode_value::<StoredForeignServer>(&bytes))
+                .transpose()?
+                .and_then(|row| row.metadata_json);
+            batch.put(
+                &key,
+                &encode_value(&StoredForeignServer {
+                    fdw_type: fdw_type.to_string(),
+                    options_json: options_json.to_string(),
+                    metadata_json,
+                })?,
+            )
+        })
+    }
+
+    pub(super) fn save_foreign_server_row_impl(
+        &self,
+        row: &ForeignServerRow,
+    ) -> StorageBackendResult<()> {
         self.store.put(
-            &single_str_key(TAG_FOREIGN_SERVER, name)?,
+            &single_str_key(TAG_FOREIGN_SERVER, &row.name)?,
             &encode_value(&StoredForeignServer {
-                fdw_type: fdw_type.to_string(),
-                options_json: options_json.to_string(),
+                fdw_type: row.fdw_type.clone(),
+                options_json: row.options_json.clone(),
+                metadata_json: row.metadata_json.clone(),
             })?,
         )
     }
@@ -37,15 +61,33 @@ impl KeyValueCatalog {
     pub(super) fn load_foreign_servers_impl(
         &self,
     ) -> StorageBackendResult<Vec<(String, String, String)>> {
-        let mut rows = Vec::new();
-        for (key, value) in self.store.scan_prefix(&key_with_tag(TAG_FOREIGN_SERVER))? {
-            let mut offset = 1;
-            let name = read_str(&key, &mut offset)?;
-            let stored: StoredForeignServer = decode_value(&value)?;
-            rows.push((name, stored.fdw_type, stored.options_json));
-        }
-        rows.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(rows)
+        Ok(self
+            .load_foreign_server_rows_impl()?
+            .into_iter()
+            .map(|row| (row.name, row.fdw_type, row.options_json))
+            .collect())
+    }
+
+    pub(super) fn load_foreign_server_rows_impl(
+        &self,
+    ) -> StorageBackendResult<Vec<ForeignServerRow>> {
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            let mut rows = Vec::new();
+            read.visit_prefix(&key_with_tag(TAG_FOREIGN_SERVER), &mut |key, value| {
+                let mut offset = 1;
+                let name = read_str(key, &mut offset)?;
+                let stored: StoredForeignServer = decode_value(value)?;
+                rows.push(ForeignServerRow {
+                    name,
+                    fdw_type: stored.fdw_type,
+                    options_json: stored.options_json,
+                    metadata_json: stored.metadata_json,
+                });
+                Ok(())
+            })?;
+            rows.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(rows)
+        })
     }
 
     pub(super) fn save_foreign_table_impl(

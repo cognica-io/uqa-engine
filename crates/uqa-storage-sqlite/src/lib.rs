@@ -31,8 +31,8 @@ pub use detect::{detect_database_file_format, DatabaseFileFormat};
 pub use document_store::SQLiteDocumentStore;
 pub use inverted_index::SQLiteInvertedIndex;
 pub use uqa_storage::catalog::{
-    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    TableSchema, VectorFieldSchema,
+    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignServerRow,
+    ForeignTableRow, TableSchema, VectorFieldSchema,
 };
 pub use vector_index::{
     RetainedSQLiteDiskANNCanonical, SQLiteDiskANNCanonical, SQLiteDiskANNHandle, SQLiteHNSWIndex,

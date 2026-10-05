@@ -9,6 +9,8 @@ use uqa_storage_redb::RedbStorage;
 
 #[path = "store_contract/documents.rs"]
 mod documents;
+#[path = "store_contract/foreign_servers.rs"]
+mod foreign_servers;
 #[path = "store_contract/graph_identifiers.rs"]
 mod graph_identifiers;
 #[path = "store_contract/guards.rs"]

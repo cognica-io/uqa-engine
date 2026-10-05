@@ -18,8 +18,8 @@ use rusqlite::{params, OptionalExtension};
 use crate::connection::{ManagedConnection, Result, SQLiteError};
 use uqa_storage::backend::{StorageBackendError, StorageBackendResult};
 use uqa_storage::catalog::{
-    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
+    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignServerRow,
+    ForeignTableRow, GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
     SequenceReservationResult, SequenceRow, SequenceSetValueResult, TableSchema, VectorFieldSchema,
     ViewRow,
 };
@@ -32,7 +32,7 @@ use super::catalog_lifecycle::{
 };
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 48;
+pub const CURRENT_SCHEMA_VERSION: u32 = 50;
 
 const LEGACY_VIEWS_METADATA_KEY: &str = "sql_views_json";
 const LEGACY_SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";

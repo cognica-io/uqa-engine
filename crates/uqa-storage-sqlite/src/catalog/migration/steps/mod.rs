@@ -56,6 +56,7 @@ mod v45;
 mod v46;
 mod v47;
 mod v48;
+mod v50;
 
 type MigrationFn = fn(&rusqlite::Connection) -> Result<()>;
 
@@ -88,7 +89,7 @@ impl MigrationStep {
 }
 
 /// Migrations applied in order. Each version is run in one transaction and the metadata schema-version row is bumped only after its step succeeds.
-pub(super) const MIGRATIONS: [MigrationStep; 48] = [
+pub(super) const MIGRATIONS: [MigrationStep; 49] = [
     MigrationStep::sql(1, v01::SQL),
     MigrationStep::sql(2, v02::SQL),
     MigrationStep::sql(3, v03::SQL),
@@ -137,4 +138,6 @@ pub(super) const MIGRATIONS: [MigrationStep; 48] = [
     MigrationStep::custom(46, v46::migrate),
     MigrationStep::custom(47, v47::migrate),
     MigrationStep::custom(48, v48::migrate),
+    // Version 49 identifies catalogs already converted to native MVCC records.
+    MigrationStep::custom(50, v50::migrate),
 ];

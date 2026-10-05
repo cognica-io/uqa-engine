@@ -9,24 +9,82 @@
 use super::{
     optional_text, string, text, Catalog, Family, NativeRecordOwner, RelationRecord, Result,
 };
-use crate::catalog::{ForeignTableRow, RelationIdentity};
-
-type ServerRow = (String, String, String);
+use crate::catalog::{ForeignServerRow, ForeignTableRow, RelationIdentity};
+use crate::SQLiteError;
+use std::collections::BTreeMap;
 
 impl Catalog {
-    pub(in crate::catalog) fn load_native_foreign_servers(&self) -> Result<Option<Vec<ServerRow>>> {
+    pub(in crate::catalog) fn load_native_foreign_server_rows(
+        &self,
+    ) -> Result<Option<Vec<ForeignServerRow>>> {
         self.read_native(|snapshot| {
-            let mut servers = Vec::new();
-            snapshot.visit_rows(
+            let owner = NativeRecordOwner::Database(snapshot.database);
+            let mut servers = BTreeMap::new();
+            snapshot.visit_rows(Family::ForeignServers, Some(owner), &[], |row| {
+                let name = string(row[0])?;
+                servers.insert(
+                    name.clone(),
+                    ForeignServerRow {
+                        name,
+                        fdw_type: string(row[1])?,
+                        options_json: string(row[2])?,
+                        metadata_json: None,
+                    },
+                );
+                Ok(())
+            })?;
+            snapshot.visit_rows(Family::ForeignServerMetadata, Some(owner), &[], |row| {
+                let name = string(row[0])?;
+                let server = servers.get_mut(&name).ok_or_else(|| {
+                    SQLiteError::StorageBackend(format!(
+                        "foreign server metadata references missing server `{name}`"
+                    ))
+                })?;
+                server.metadata_json = Some(string(row[1])?);
+                Ok(())
+            })?;
+            Ok(servers.into_values().collect())
+        })
+    }
+
+    pub(in crate::catalog) fn save_native_foreign_server_row(
+        &self,
+        row: &ForeignServerRow,
+    ) -> Result<Option<()>> {
+        self.conn.with_native_write(|snapshot, batch| {
+            let owner = NativeRecordOwner::Database(snapshot.database);
+            snapshot.put_row(
+                batch,
                 Family::ForeignServers,
-                Some(NativeRecordOwner::Database(snapshot.database)),
-                &[],
-                |row| {
-                    servers.push((string(row[0])?, string(row[1])?, string(row[2])?));
-                    Ok(())
-                },
+                owner,
+                &[
+                    text(&row.name),
+                    text(&row.fdw_type),
+                    text(&row.options_json),
+                ],
             )?;
-            Ok(servers)
+            match &row.metadata_json {
+                Some(metadata) => snapshot.put_row(
+                    batch,
+                    Family::ForeignServerMetadata,
+                    owner,
+                    &[text(&row.name), text(metadata)],
+                ),
+                None => snapshot.delete_prefix(
+                    batch,
+                    Family::ForeignServerMetadata,
+                    owner,
+                    &[text(&row.name)],
+                ),
+            }
+        })
+    }
+
+    pub(in crate::catalog) fn drop_native_foreign_server(&self, name: &str) -> Result<Option<()>> {
+        self.conn.with_native_write(|snapshot, batch| {
+            let owner = NativeRecordOwner::Database(snapshot.database);
+            snapshot.delete_prefix(batch, Family::ForeignServerMetadata, owner, &[text(name)])?;
+            snapshot.delete_prefix(batch, Family::ForeignServers, owner, &[text(name)])
         })
     }
 

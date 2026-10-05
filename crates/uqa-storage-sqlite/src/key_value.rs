@@ -618,6 +618,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn foreign_server_metadata_preserves_snapshots_undo_and_reopen() {
+        use uqa_storage::key_value::conformance::{
+            verify_foreign_server_reopen, verify_foreign_server_rows,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("foreign-servers.sqlite3");
+        {
+            let storage = SQLiteKeyValueStore::open(&path).unwrap();
+            let a: Arc<dyn KeyValueStore> = Arc::new(storage.new_session());
+            let b: Arc<dyn KeyValueStore> = Arc::new(storage.new_session());
+            verify_foreign_server_rows(&a, &b).unwrap();
+        }
+        let store: Arc<dyn KeyValueStore> = Arc::new(SQLiteKeyValueStore::open(&path).unwrap());
+        verify_foreign_server_reopen(&store).unwrap();
+    }
+
+    #[test]
     fn sqlite_key_value_store_round_trips_and_reopens() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("keyvalue.sqlite3");

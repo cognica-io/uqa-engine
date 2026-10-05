@@ -30,6 +30,8 @@ pub(super) struct StoredEdge {
 pub(super) struct StoredForeignServer {
     pub(super) fdw_type: String,
     pub(super) options_json: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) metadata_json: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

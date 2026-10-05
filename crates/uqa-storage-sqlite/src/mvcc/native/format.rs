@@ -46,7 +46,10 @@ const FORMAT_TWELVE: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INT
 
 const FORMAT_THIRTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 13), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
 
-const CURRENT_VERSION: u32 = 14;
+const FORMAT_FOURTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 14), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
+
+const CURRENT_VERSION: u32 = 15;
+const FOREIGN_SERVER_METADATA_VERSION: u32 = 15;
 
 /// The first format that keeps sequence value state in value records of its own.
 const SEQUENCE_VALUES_VERSION: u32 = 14;
@@ -55,7 +58,7 @@ const SEQUENCE_VALUES_VERSION: u32 = 14;
 mod tests;
 
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 14), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 15), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
@@ -160,13 +163,15 @@ fn prepare_catalog_sources(
     crate::Catalog::prepare_native_fts_sources(connection)?;
     let source: Option<bool> = connection
         .query_row(
-            "SELECT value = '48' FROM _metadata WHERE key = 'schema_version'",
-            [],
+            "SELECT value = ?1 FROM _metadata WHERE key = 'schema_version'",
+            [crate::catalog::CURRENT_SCHEMA_VERSION.to_string()],
             |row| row.get(0),
         )
         .optional()?;
     if source != Some(true) {
-        return Err(invalid("native mapping requires an initialized schema 48 catalog").into());
+        return Err(
+            invalid("native mapping requires the current initialized physical catalog").into(),
+        );
     }
     Ok(())
 }
@@ -331,6 +336,7 @@ fn stored_version(connection: &Connection) -> PhysicalResult<u32> {
         FORMAT_ELEVEN,
         FORMAT_TWELVE,
         FORMAT_THIRTEEN,
+        FORMAT_FOURTEEN,
     ]) {
         if schema::definition_matches(connection, TABLES[0].0, definition)? == Some(true) {
             return Ok(version);
@@ -415,6 +421,18 @@ fn reopen(
         super::sequence_values::backfill(connection, identity, control)?;
         install_family_guards(connection, Family::SequenceValues)?;
     }
+    if version < FOREIGN_SERVER_METADATA_VERSION {
+        connection.execute_batch(super::foreign_servers::SQL)?;
+        for action in ["INSERT", "UPDATE", "DELETE"] {
+            let (_, sql) = crate::Catalog::cache_revision_trigger(
+                Family::ForeignServerMetadata.layout().table,
+                false,
+                action,
+            );
+            connection.execute_batch(&sql)?;
+        }
+        install_family_guards(connection, Family::ForeignServerMetadata)?;
+    }
     if version < CURRENT_VERSION {
         upgrade_format(connection, version, identity)?;
     }
@@ -488,6 +506,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
                 11 => FORMAT_ELEVEN,
                 12 => FORMAT_TWELVE,
                 13 => FORMAT_THIRTEEN,
+                14 => FORMAT_FOURTEEN,
                 _ => sql,
             }
         } else {
@@ -539,6 +558,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
             super::sequence_values::SQL,
         )?;
     }
+    validate_foreign_server_metadata(connection, version)?;
     for family in families(version) {
         for action in ["INSERT", "UPDATE", "DELETE"] {
             let (name, sql) = schema::trigger(family.layout().table, action);
@@ -564,6 +584,17 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
         }
     }
     validate_layouts(connection, version)
+}
+
+fn validate_foreign_server_metadata(connection: &Connection, version: u32) -> PhysicalResult<()> {
+    if version >= FOREIGN_SERVER_METADATA_VERSION {
+        require_definition(
+            connection,
+            Family::ForeignServerMetadata.layout().table,
+            super::foreign_servers::SQL,
+        )?;
+    }
+    Ok(())
 }
 
 fn require_definition(connection: &Connection, name: &str, sql: &str) -> PhysicalResult<()> {
@@ -618,6 +649,7 @@ fn families(version: u32) -> impl Iterator<Item = Family> {
         Family::VectorChanges => version >= 12,
         Family::VectorPopulations | Family::VectorPopulationWitnesses => version >= 13,
         Family::SequenceValues => version >= SEQUENCE_VALUES_VERSION,
+        Family::ForeignServerMetadata => version >= FOREIGN_SERVER_METADATA_VERSION,
         _ => true,
     })
 }
