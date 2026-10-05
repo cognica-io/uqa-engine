@@ -29,6 +29,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve foreign-server catalog identity, owning role and TYPE/VERSION metadata through transactions, refresh and reopen; prevent dangling owners after DROP ROLE, and match PostgreSQL server creation diagnostics and notices. Upgrade old rows once while preserving connection options; see the [upgrade guide](docs/manual/reference/10-upgrading.md#foreign-server-identities-and-owners).
+
 - Report PostgreSQL `22023` diagnostics for invalid NUMERIC precision, scale and modifier counts in declarations and casts; validate cast types even for NULL inputs, empty results and unselected CASE branches.
 - Preserve PostgreSQL foreign-table declaration order and diagnostics across type lookup, constraint attributes, forbidden keys and EXCLUDE. Retain table-level NOT NULL constraints and their names through transactions and reopen, keep namespace and IF NOT EXISTS checks ahead of definition analysis, and report PostgreSQL's unsupported-utility error in SQL-standard routine bodies while preserving quoted bodies.
 - Expose relation row types and generated arrays through `pg_type`, `regtype` and `format_type`, preserving catalog identities, generated names and search-path shadowing across rename, schema movement, rollback and reopen. Move indexes and owned sequences with their table. Reject extra dimensions on generated array names with PostgreSQL's `42704` error.
