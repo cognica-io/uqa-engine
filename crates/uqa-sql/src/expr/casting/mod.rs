@@ -277,41 +277,29 @@ pub fn cast_value_from_with_control(
             }
             return character_value(text, limit, true, control);
         }
-        "date" => cast_date(v, source_ty, control),
-        "time" | "time without time zone" => cast_temporal(
-            v,
-            TemporalCastTarget::Time,
-            TemporalValue::parse_time_with_control,
-            "time",
-            modifier,
-            control,
-        ),
-        "timetz" | "time with time zone" => cast_temporal(
-            v,
-            TemporalCastTarget::TimeTz,
-            TemporalValue::parse_time_tz_with_control,
-            "time with time zone",
-            modifier,
-            control,
-        ),
+        "date" => cast_temporal(v, source_ty, TemporalCastTarget::Date, None, control),
+        "time" | "time without time zone" => {
+            cast_temporal(v, source_ty, TemporalCastTarget::Time, modifier, control)
+        }
+        "timetz" | "time with time zone" => {
+            cast_temporal(v, source_ty, TemporalCastTarget::TimeTz, modifier, control)
+        }
         "timestamp" | "datetime" | "timestamp without time zone" => cast_temporal(
             v,
+            source_ty,
             TemporalCastTarget::Timestamp,
-            TemporalValue::parse_timestamp_with_control,
-            "timestamp",
             modifier,
             control,
         ),
         "timestamptz" | "timestamp with time zone" => cast_temporal(
             v,
+            source_ty,
             TemporalCastTarget::TimestampTz,
-            TemporalValue::parse_timestamp_tz_with_control,
-            "timestamp with time zone",
             modifier,
             control,
         ),
-        "interval" => temporal::cast_interval(v, ty, control),
-        name if name.starts_with("interval ") => temporal::cast_interval(v, ty, control),
+        "interval" => temporal::cast_interval(v, source_ty, ty, control),
+        name if name.starts_with("interval ") => temporal::cast_interval(v, source_ty, ty, control),
         "int4range" => return cast_range(v, source_ty, RangeSubtype::Integer, control),
         "int8range" => return cast_range(v, source_ty, RangeSubtype::BigInteger, control),
         "numrange" => return cast_range(v, source_ty, RangeSubtype::Numeric, control),
@@ -528,8 +516,12 @@ fn canonical_cast_source_with_control(
         Value::Float(_) => "double precision",
         Value::Decimal(_) => "numeric",
         Value::Bytes(_) => "bytea",
+        Value::Temporal(TemporalValue::Date { .. }) => "date",
+        Value::Temporal(TemporalValue::Time { .. }) => "time without time zone",
+        Value::Temporal(TemporalValue::TimeTz { .. }) => "time with time zone",
+        Value::Temporal(TemporalValue::Timestamp { .. }) => "timestamp without time zone",
+        Value::Temporal(TemporalValue::TimestampTz { .. }) => "timestamp with time zone",
         Value::Temporal(TemporalValue::Interval { .. }) => "interval",
-        Value::Temporal(_) => "timestamp",
         Value::Json(_) => "json",
         Value::JsonB(_) => "jsonb",
         Value::Array(_) => "anyarray",
@@ -754,7 +746,7 @@ use binary_oid::{
     bytea_to_integer, cast_bytea, cast_oid, cast_regclass, cast_regnamespace, cast_regrole,
     cast_xid,
 };
-use temporal::{cast_date, cast_temporal, TemporalCastTarget};
+use temporal::{cast_temporal, TemporalCastTarget};
 
 #[cfg(test)]
 mod production_tests;

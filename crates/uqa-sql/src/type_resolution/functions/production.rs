@@ -835,12 +835,11 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             |ty| matches!(base_type(ty), ColumnType::Boolean).then_some(ColumnType::Boolean),
             control,
         ),
-        "starts_with" | "like" | "ilike" | "similar_to" | "regexp_like" | "isfinite"
-        | "json_contains" | "json_contained_by" | "json_has_key" | "json_has_any_key"
-        | "json_has_all_keys" | "jsonb_path_exists" | "jsonpath_exists" | "jsonb_path_match"
-        | "jsonpath_match" | "array_overlap" | "st_within" | "st_dwithin" | "overlaps" => {
-            inline(ColumnType::Boolean, control)
-        }
+        "starts_with" | "like" | "ilike" | "similar_to" | "regexp_like" | "regex_match_op"
+        | "regex_imatch_op" | "isfinite" | "json_contains" | "json_contained_by"
+        | "json_has_key" | "json_has_any_key" | "json_has_all_keys" | "jsonb_path_exists"
+        | "jsonpath_exists" | "jsonb_path_match" | "jsonpath_match" | "array_overlap"
+        | "st_within" | "st_dwithin" | "overlaps" => inline(ColumnType::Boolean, control),
         "coalesce" | "greatest" | "least" => common_argument_type(
             crate::type_resolution::CommonTypeContext::function(name)
                 .unwrap_or(crate::type_resolution::CommonTypeContext::Coalesce),

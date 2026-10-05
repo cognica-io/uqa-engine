@@ -56,6 +56,8 @@ mod sql_cte_commands;
 mod sql_cte_pg18_controls;
 #[path = "sql_cursor.rs"]
 mod sql_cursor;
+#[path = "queries/sql_datetime_input.rs"]
+mod sql_datetime_input;
 #[path = "queries/sql_domains.rs"]
 mod sql_domains;
 #[path = "sql_dpccp_join_order.rs"]

@@ -142,17 +142,17 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                         vec![compile_expr(lhs)?, compile_expr(rhs)?],
                     ));
                 }
-                // POSIX regex operators: `~` match, `~*` case-insensitive
-                // match, `!~` / `!~*` their negations.
+                // POSIX regex operators: `~` match, `~*` case-insensitive match, `!~` / `!~*` their negations, lowered under names no PostgreSQL function has so that they label and print as operators while `regexp_like(...)` stays a call.
                 "~" | "~*" | "!~" | "!~*" => {
-                    let mut args = vec![compile_expr(lhs)?, compile_expr(rhs)?];
-                    if op_name.ends_with('*') {
-                        args.push(Expr::Literal(Value::Str("i".into())));
-                    }
                     let call = Expr::Func {
                         binding: None,
-                        name: "regexp_like".into(),
-                        args,
+                        name: if op_name.ends_with('*') {
+                            "regex_imatch_op"
+                        } else {
+                            "regex_match_op"
+                        }
+                        .into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
                         order_by: Vec::new(),
                         filter: None,

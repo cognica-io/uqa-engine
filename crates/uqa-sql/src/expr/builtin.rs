@@ -172,7 +172,11 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         {
             Some(true)
         }
-        "like" | "ilike" | "similar_to" if argument_count == 2 => Some(true),
+        "like" | "ilike" | "similar_to" | "regex_match_op" | "regex_imatch_op"
+            if argument_count == 2 =>
+        {
+            Some(true)
+        }
         "like" | "ilike" | "similar_to" if argument_count == 3 => Some(false),
         "array_to_string" if argument_count == 2 => Some(true),
         "substring" | "substr" | "lpad" | "rpad" if matches!(argument_count, 2 | 3) => Some(true),

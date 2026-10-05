@@ -8,6 +8,7 @@ use super::{
     canonical_routine_type_name, generation_type_name, BinaryOp, GenerationType, RangeSubtype,
     SQLError, TypeClass, Value,
 };
+use crate::ast::ColumnType;
 
 pub(super) fn infer_binary_type(
     op: BinaryOp,
@@ -42,12 +43,19 @@ pub(super) fn infer_binary_type(
         }
         return common_numeric_type(&[lhs.clone(), rhs.clone()]);
     }
+    if lhs_unknown != rhs_unknown && (is_temporal(lhs) || is_temporal(rhs)) {
+        return temporal_operator_with_unknown(op, lhs, rhs);
+    }
     use GenerationType as T;
     match (lhs, rhs, op) {
         (T::JsonB, T::Text | T::Integer | T::Array(_), BinaryOp::Subtract) => Ok(T::JsonB),
         (T::Date, T::Integer, BinaryOp::Add | BinaryOp::Subtract)
         | (T::Integer, T::Date, BinaryOp::Add) => Ok(T::Date),
         (T::Date, T::Date, BinaryOp::Subtract) => Ok(T::Integer),
+        (T::Date, T::Time, BinaryOp::Add) | (T::Time, T::Date, BinaryOp::Add) => Ok(T::Timestamp),
+        (T::Date, T::TimeTz, BinaryOp::Add) | (T::TimeTz, T::Date, BinaryOp::Add) => {
+            Ok(T::TimestampTz)
+        }
         (T::Interval, T::Interval, BinaryOp::Add | BinaryOp::Subtract) => Ok(T::Interval),
         (T::Interval, other, BinaryOp::Add) | (other, T::Interval, BinaryOp::Add) => {
             temporal_plus_interval_type(other)
@@ -68,6 +76,31 @@ pub(super) fn infer_binary_type(
             generation_type_name(rhs)
         ))),
     }
+}
+
+/// A temporal operand beside an `unknown` literal selects the operator as `oper_select_candidate` selects it in the operator catalog (`timestamp + '1 day'` is `timestamp + interval`, `timestamp - '1 day'` is `timestamp - timestamp`, `date + '1'` is ambiguous), and the literal is read by the selected operand type's input function.
+fn temporal_operator_with_unknown(
+    op: BinaryOp,
+    lhs: &GenerationType,
+    rhs: &GenerationType,
+) -> Result<GenerationType, SQLError> {
+    let column_type = |ty: &GenerationType| -> Result<Option<ColumnType>, SQLError> {
+        if is_unknown(ty) {
+            return Ok(None);
+        }
+        ColumnType::from_sql_name(&generation_type_name(ty)).map(Some)
+    };
+    let (left, right) = (column_type(lhs)?, column_type(rhs)?);
+    let [left_operand, right_operand, result] =
+        crate::type_resolution::binary_operator_types(op, left.as_ref(), right.as_ref())?;
+    validate_unknown_literal_cast(lhs, &left_operand.catalog_name())?;
+    validate_unknown_literal_cast(rhs, &right_operand.catalog_name())?;
+    generation_type_from_name(&result.catalog_name()).ok_or_else(|| {
+        SQLError::TypeMismatch(format!(
+            "operator {op:?} result type {} is not a generation type",
+            result.catalog_name()
+        ))
+    })
 }
 
 pub(super) fn temporal_plus_interval_type(

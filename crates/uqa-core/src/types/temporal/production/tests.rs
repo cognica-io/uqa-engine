@@ -51,10 +51,13 @@ fn temporal_quota_and_both_cancellation_scopes_leave_no_scratch() {
         TemporalValue::parse_interval_with_control("1 year", &control),
         Err(ValueRetentionError::Memory(_))
     ));
-    assert!(matches!(
-        TemporalValue::parse_time_with_control("24:00:00", &control),
-        Err(ValueRetentionError::Memory(_))
-    ));
+    // Reading a time allocates no scratch, so it succeeds under an empty allowance.
+    assert_eq!(
+        TemporalValue::parse_time_with_control("24:00:00", &control).unwrap(),
+        Some(TemporalValue::Time {
+            micros: 86_400_000_000
+        })
+    );
     assert_eq!(budget.used(), 0);
     for cancel_original in [false, true] {
         let original = CancellationToken::new();
@@ -133,4 +136,62 @@ fn same_kind_parser_preserves_each_temporal_variant_and_cancellation() {
             assert_eq!(budget.used(), 0);
         }
     }
+}
+
+#[test]
+fn years_print_without_a_sign_and_with_the_bc_era() {
+    let days = |year, month, day| {
+        i32::try_from(
+            NaiveDate::from_ymd_opt(year, month, day)
+                .unwrap()
+                .signed_duration_since(epoch_date())
+                .num_days(),
+        )
+        .unwrap()
+    };
+    let micros = |year, month, day, seconds: i64| {
+        i64::from(days(year, month, day)) * MICROS_PER_DAY + seconds * MICROS_PER_SECOND
+    };
+    assert_eq!(
+        TemporalValue::Date {
+            days: days(99_999, 1, 1)
+        }
+        .to_sql_string(),
+        "99999-01-01"
+    );
+    assert_eq!(
+        TemporalValue::Date {
+            days: days(0, 12, 31)
+        }
+        .to_sql_string(),
+        "0001-12-31 BC"
+    );
+    assert_eq!(
+        TemporalValue::Date {
+            days: days(-1, 6, 15)
+        }
+        .to_sql_string(),
+        "0002-06-15 BC"
+    );
+    assert_eq!(
+        TemporalValue::Timestamp {
+            micros: micros(99_999, 1, 1, 0)
+        }
+        .to_sql_string(),
+        "99999-01-01 00:00:00"
+    );
+    assert_eq!(
+        TemporalValue::Timestamp {
+            micros: micros(0, 12, 31, 86_399)
+        }
+        .to_sql_string(),
+        "0001-12-31 23:59:59 BC"
+    );
+    assert_eq!(
+        TemporalValue::TimestampTz {
+            micros: micros(-1, 6, 15, 36_000)
+        }
+        .to_sql_string(),
+        "0002-06-15 10:00:00+00 BC"
+    );
 }

@@ -98,7 +98,7 @@ pub(crate) fn function_projection_label(
     name
 }
 
-/// The calls the parser lowers operator syntax to under names no `PostgreSQL` function has: `||`, `@@`, `@?`, `@>`, `<@`, `&&`, `?`, `?|`, `?&`, `#-`, `LIKE`, `ILIKE` and `SIMILAR TO`.
+/// The calls the parser lowers operator syntax to under names no `PostgreSQL` function has: `||`, `@@`, `@?`, `@>`, `<@`, `&&`, `?`, `?|`, `?&`, `#-`, `~`, `~*`, `LIKE`, `ILIKE` and `SIMILAR TO`.
 fn operator_call(name: &str) -> bool {
     matches!(
         name,
@@ -115,6 +115,8 @@ fn operator_call(name: &str) -> bool {
             | "like"
             | "ilike"
             | "similar_to"
+            | "regex_match_op"
+            | "regex_imatch_op"
     )
 }
 

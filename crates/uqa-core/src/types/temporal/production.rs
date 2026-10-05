@@ -7,11 +7,12 @@
 //! Temporal producers use admitted text and borrowed parser tokens.
 
 use super::{
-    epoch_date, parse_interval_literal, parse_time_micros, split_offset_suffix, DateTime, Duration,
-    NaiveTime, ProductionControl, ProductionString, TemporalValue, ValueRetentionError,
-    MICROS_PER_DAY, MICROS_PER_SECOND,
+    epoch_date, parse_interval_literal, wall_clock_micros, DateTime, Duration, ProductionControl,
+    ProductionString, TemporalInputError, TemporalValue, ValueRetentionError, MICROS_PER_DAY,
+    MICROS_PER_SECOND,
 };
 use crate::memory::Produced;
+use chrono::{Datelike, NaiveDate, NaiveTime};
 
 impl TemporalValue {
     pub fn parse_same_kind_with_control(
@@ -33,71 +34,111 @@ impl TemporalValue {
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        Ok(Self::try_parse_date_with_control(input, control)?.ok())
-    }
-
-    pub fn try_parse_date_with_control(
-        input: &str,
-        control: &ProductionControl<'_>,
-    ) -> Result<Result<Self, chrono::ParseError>, ValueRetentionError> {
-        check_input(input, control)?;
-        let value = Self::try_parse_date(input);
-        control.check()?;
-        Ok(value)
+        Ok(Self::date_input_with_control(input, wall_clock_micros(), control)?.ok())
     }
 
     pub fn parse_time_with_control(
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        check_input(input, control)?;
-        let value = parse_time_micros(input.trim(), control)?.map(|micros| Self::Time { micros });
-        control.check()?;
-        Ok(value)
+        Ok(Self::time_input_with_control(input, wall_clock_micros(), control)?.ok())
     }
 
     pub fn parse_time_tz_with_control(
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        check_input(input, control)?;
-        let Some((time, offset_minutes)) = split_offset_suffix(input.trim()) else {
-            return Ok(None);
-        };
-        let value = parse_time_micros(time.trim(), control)?.map(|micros| Self::TimeTz {
-            micros,
-            offset_minutes,
-        });
-        control.check()?;
-        Ok(value)
+        Ok(Self::time_tz_input_with_control(input, wall_clock_micros(), control)?.ok())
     }
 
     pub fn parse_timestamp_with_control(
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        check_input(input, control)?;
-        let value = Self::parse_timestamp(input);
-        control.check()?;
-        Ok(value)
+        Ok(Self::timestamp_input_with_control(input, wall_clock_micros(), control)?.ok())
     }
 
     pub fn parse_timestamp_tz_with_control(
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        check_input(input, control)?;
-        let value = Self::parse_timestamp_tz(input);
-        control.check()?;
-        Ok(value)
+        Ok(Self::timestamp_tz_input_with_control(input, wall_clock_micros(), control)?.ok())
     }
 
     pub fn parse_interval_with_control(
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
+        Ok(Self::interval_input_with_control(input, control)?.ok())
+    }
+
+    /// `date_in` under production limits, with `now_micros` as the transaction start the special values name; the reading itself allocates nothing, so only cancellation is checked.
+    pub fn date_input_with_control(
+        text: &str,
+        now_micros: i64,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        check_input(text, control)?;
+        let value = Self::date_input(text, now_micros);
         control.check()?;
-        parse_interval_literal(input, control)
+        Ok(value)
+    }
+
+    /// `time_in` under production limits.
+    pub fn time_input_with_control(
+        text: &str,
+        now_micros: i64,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        check_input(text, control)?;
+        let value = Self::time_input(text, now_micros);
+        control.check()?;
+        Ok(value)
+    }
+
+    /// `timetz_in` under production limits.
+    pub fn time_tz_input_with_control(
+        text: &str,
+        now_micros: i64,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        check_input(text, control)?;
+        let value = Self::time_tz_input(text, now_micros);
+        control.check()?;
+        Ok(value)
+    }
+
+    /// `timestamp_in` under production limits.
+    pub fn timestamp_input_with_control(
+        text: &str,
+        now_micros: i64,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        check_input(text, control)?;
+        let value = Self::timestamp_input(text, now_micros);
+        control.check()?;
+        Ok(value)
+    }
+
+    /// `timestamptz_in` under production limits.
+    pub fn timestamp_tz_input_with_control(
+        text: &str,
+        now_micros: i64,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        check_input(text, control)?;
+        let value = Self::timestamp_tz_input(text, now_micros);
+        control.check()?;
+        Ok(value)
+    }
+
+    /// `interval_in` under production limits: the lower-cased copy of the text is admitted against the allowance.
+    pub fn interval_input_with_control(
+        text: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        control.check()?;
+        parse_interval_literal(text, control)
     }
 
     pub fn to_sql_string_with_control(
@@ -107,7 +148,12 @@ impl TemporalValue {
         match self {
             Self::Date { days } => {
                 match epoch_date().checked_add_signed(Duration::days(i64::from(*days))) {
-                    Some(date) => control.format(format_args!("{date}")),
+                    Some(date) => {
+                        let mut out = ProductionString::new(*control);
+                        push_date(&mut out, date, control)?;
+                        push_era(&mut out, date)?;
+                        out.finish()
+                    }
                     None => control.format(format_args!("{days}")),
                 }
             }
@@ -200,10 +246,10 @@ fn format_timestamp(
         return control.format(format_args!("{micros}"));
     };
     let mut out = ProductionString::new(*control);
-    out.push_str(&control.format(format_args!(
-        "{}",
-        dt.naive_utc().format("%Y-%m-%d %H:%M:%S")
-    ))?)?;
+    let local = dt.naive_utc();
+    push_date(&mut out, local.date(), control)?;
+    out.push(' ')?;
+    out.push_str(&control.format(format_args!("{}", local.format("%H:%M:%S")))?)?;
     append_fraction(
         &mut out,
         micros.rem_euclid(MICROS_PER_SECOND) as u64,
@@ -212,7 +258,31 @@ fn format_timestamp(
     if utc {
         out.push_str("+00")?;
     }
+    push_era(&mut out, local.date())?;
     out.finish()
+}
+
+/// `EncodeDateOnly`'s calendar fields: a year of at least four digits without a sign, counting years before the common era from 1 BC as `-(year - 1)` does, followed by the month and day.
+fn push_date(
+    out: &mut ProductionString<'_>,
+    date: NaiveDate,
+    control: &ProductionControl<'_>,
+) -> Result<(), ValueRetentionError> {
+    let year = i64::from(date.year());
+    let displayed = if year > 0 { year } else { 1 - year };
+    out.push_str(&control.format(format_args!(
+        "{displayed:04}-{:02}-{:02}",
+        date.month(),
+        date.day()
+    ))?)
+}
+
+/// The ` BC` suffix `EncodeDateOnly` and `EncodeDateTime` append to a year at or before zero.
+fn push_era(out: &mut ProductionString<'_>, date: NaiveDate) -> Result<(), ValueRetentionError> {
+    if date.year() <= 0 {
+        out.push_str(" BC")?;
+    }
+    Ok(())
 }
 
 fn format_interval(

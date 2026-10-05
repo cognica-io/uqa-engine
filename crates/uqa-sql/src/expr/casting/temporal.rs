@@ -4,14 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Date, time, timestamp, and interval conversion.
+//! Date, time, timestamp, and interval conversion: text is read by the type's input function against the statement's transaction clock, a temporal value of another kind converts as the catalog's casts convert it, and any other source has no cast.
 
-use uqa_core::{memory::ProductionControl, TemporalValue, Value, ValueRetentionError};
+use uqa_core::{memory::ProductionControl, TemporalInputError, TemporalValue, Value};
 
 use crate::ast::{ColumnType, IntervalFields};
 use crate::error::{Result, SQLError};
 
-use super::{canonical_cast_source_with_control, undefined_cast, value_to_string_with_control};
+use super::{canonical_cast_source_with_control, undefined_cast};
 
 #[derive(Clone, Copy)]
 pub(super) enum TemporalCastTarget {
@@ -23,32 +23,81 @@ pub(super) enum TemporalCastTarget {
     Interval,
 }
 
+impl TemporalCastTarget {
+    /// The type name the input function's diagnostics print (`invalid input syntax for type time`).
+    fn input_name(self) -> &'static str {
+        match self {
+            Self::Date => "date",
+            Self::Time => "time",
+            Self::TimeTz => "time with time zone",
+            Self::Timestamp => "timestamp",
+            Self::TimestampTz => "timestamp with time zone",
+            Self::Interval => "interval",
+        }
+    }
+
+    /// The type name `format_type` prints in a cast diagnostic (`cannot cast type integer to time without time zone`).
+    fn cast_name(self) -> &'static str {
+        match self {
+            Self::Time => "time without time zone",
+            Self::Timestamp => "timestamp without time zone",
+            other => other.input_name(),
+        }
+    }
+
+    /// The input function, reading `text` with `now_micros` as the transaction start the special values name.
+    fn read(
+        self,
+        text: &str,
+        now_micros: i64,
+        control: &ProductionControl<'_>,
+    ) -> Result<std::result::Result<TemporalValue, TemporalInputError>> {
+        Ok(match self {
+            Self::Date => TemporalValue::date_input_with_control(text, now_micros, control)?,
+            Self::Time => TemporalValue::time_input_with_control(text, now_micros, control)?,
+            Self::TimeTz => TemporalValue::time_tz_input_with_control(text, now_micros, control)?,
+            Self::Timestamp => {
+                TemporalValue::timestamp_input_with_control(text, now_micros, control)?
+            }
+            Self::TimestampTz => {
+                TemporalValue::timestamp_tz_input_with_control(text, now_micros, control)?
+            }
+            Self::Interval => TemporalValue::interval_input_with_control(text, control)?,
+        })
+    }
+}
+
+/// Cast `v` to the temporal type `target`, with `precision` the type modifier's fractional digits. Text reaches the type through its input function, as `coerce_type` and the I/O conversion casts read it, with the diagnostics of `DateTimeParseError`; a temporal value of another kind converts as the catalog's casts convert it; any other value has no cast to the type.
 pub(super) fn cast_temporal(
     v: &Value,
+    source_ty: Option<&str>,
     target: TemporalCastTarget,
-    parse: fn(
-        &str,
-        &ProductionControl<'_>,
-    ) -> std::result::Result<Option<TemporalValue>, ValueRetentionError>,
-    ty: &str,
     precision: Option<&str>,
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
-    let mut value = match v {
-        Value::Temporal(value) => cast_temporal_kind(value, target)
-            .map(Value::Temporal)
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to {ty}"))),
-        other => parse(&value_to_string_with_control(other, control)?, control)?
-            .map(Value::Temporal)
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to {ty}"))),
-    }?;
+    let converted = match v {
+        Value::Temporal(value) => cast_temporal_kind(value, target),
+        Value::Str(text) | Value::FixedChar(text) => Some(
+            target
+                .read(text, crate::expr::transaction_timestamp_or_clock(), control)?
+                .map_err(|error| input_error(error, target.input_name(), text))?,
+        ),
+        _ => None,
+    };
+    let Some(mut value) = converted.map(Value::Temporal) else {
+        return Err(undefined_cast(
+            &canonical_cast_source_with_control(source_ty, v, control)?,
+            target.cast_name(),
+        ));
+    };
     if let Some(precision) = precision {
-        round_temporal(&mut value, precision, ty)?;
+        round_temporal(&mut value, precision)?;
     }
     Ok(value)
 }
 
-fn round_temporal(value: &mut Value, precision: &str, ty: &str) -> Result<()> {
+/// `AdjustTimestampForTypmod`, `AdjustTimeForTypmod` and `AdjustIntervalForTypmod`: round the fractional seconds to `precision` digits.
+fn round_temporal(value: &mut Value, precision: &str) -> Result<()> {
     let precision = precision
         .parse::<u32>()
         .map_err(|_| SQLError::TypeMismatch(format!("invalid temporal precision: {precision}")))?
@@ -56,15 +105,16 @@ fn round_temporal(value: &mut Value, precision: &str, ty: &str) -> Result<()> {
     let Value::Temporal(value) = value else {
         return Ok(());
     };
-    let (micros, epoch) = match value {
-        TemporalValue::Time { micros }
-        | TemporalValue::TimeTz { micros, .. }
-        | TemporalValue::Interval { micros, .. } => (micros, 0),
+    let (micros, epoch, overflow) = match value {
+        TemporalValue::Time { micros } | TemporalValue::TimeTz { micros, .. } => {
+            (micros, 0, ("22008", "time"))
+        }
+        TemporalValue::Interval { micros, .. } => (micros, 0, ("22015", "interval")),
         // PostgreSQL rounds signed timestamps around its 2000 epoch, including ties before that epoch.
         TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros } => {
-            (micros, 946_684_800_000_000_i128)
+            (micros, 946_684_800_000_000_i128, ("22008", "timestamp"))
         }
-        _ => return Ok(()),
+        TemporalValue::Date { .. } => return Ok(()),
     };
     let scale = 10_i128.pow(6 - precision);
     let offset = i128::from(*micros) - epoch;
@@ -74,22 +124,23 @@ fn round_temporal(value: &mut Value, precision: &str, ty: &str) -> Result<()> {
         -((-offset + scale / 2) / scale * scale)
     };
     *micros = i64::try_from(rounded + epoch).map_err(|_| SQLError::Routine {
-        sqlstate: if ty == "interval" { "22015" } else { "22008" }.into(),
-        message: format!("{ty} out of range"),
+        sqlstate: overflow.0.into(),
+        message: format!("{} out of range", overflow.1),
     })?;
     Ok(())
 }
 
+/// Cast to `interval` or to `interval` with fields, truncating the fields the declaration excludes as `AdjustIntervalForTypmod` truncates them.
 pub(super) fn cast_interval(
     value: &Value,
+    source_ty: Option<&str>,
     ty: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
     let mut value = cast_temporal(
         value,
+        source_ty,
         TemporalCastTarget::Interval,
-        TemporalValue::parse_interval_with_control,
-        "interval",
         None,
         control,
     )?;
@@ -129,52 +180,9 @@ pub(super) fn cast_interval(
         | IntervalFields::MinuteToSecond => {}
     }
     if let Some(precision) = precision {
-        round_temporal(
-            &mut value,
-            &control.format(format_args!("{precision}"))?,
-            "interval",
-        )?;
+        round_temporal(&mut value, &control.format(format_args!("{precision}"))?)?;
     }
     Ok(value)
-}
-
-pub(super) fn cast_date(
-    v: &Value,
-    source_ty: Option<&str>,
-    control: &ProductionControl<'_>,
-) -> Result<Value> {
-    match v {
-        Value::Temporal(value) => match cast_temporal_kind(value, TemporalCastTarget::Date) {
-            Some(value) => Ok(Value::Temporal(value)),
-            None => Err(undefined_cast(
-                &canonical_cast_source_with_control(source_ty, v, control)?,
-                "date",
-            )),
-        },
-        Value::Str(text) | Value::FixedChar(text) => {
-            TemporalValue::try_parse_date_with_control(text, control)?
-                .map(Value::Temporal)
-                .map_err(|error| {
-                    let field_overflow = matches!(
-                        error.kind(),
-                        chrono::format::ParseErrorKind::OutOfRange
-                            | chrono::format::ParseErrorKind::Impossible
-                    );
-                    SQLError::Routine {
-                        sqlstate: if field_overflow { "22008" } else { "22007" }.into(),
-                        message: if field_overflow {
-                            format!("date/time field value out of range: \"{text}\"")
-                        } else {
-                            format!("invalid input syntax for type date: \"{text}\"")
-                        },
-                    }
-                })
-        }
-        _ => Err(undefined_cast(
-            &canonical_cast_source_with_control(source_ty, v, control)?,
-            "date",
-        )),
-    }
 }
 
 fn cast_temporal_kind(value: &TemporalValue, target: TemporalCastTarget) -> Option<TemporalValue> {
@@ -262,5 +270,43 @@ fn cast_temporal_kind(value: &TemporalValue, target: TemporalCastTarget) -> Opti
             })
         }
         _ => None,
+    }
+}
+
+/// The diagnostic `DateTimeParseError` reports for input the type `ty` rejects: `22007` for text that is not a value, `22008` for a field or value out of range with the `DateStyle` hint when the month or day order could be the cause, `22009` for a UTC offset out of range, `22023` for an unknown time zone and `22015` for an interval field that does not fit.
+fn input_error(error: TemporalInputError, ty: &str, text: &str) -> SQLError {
+    let (sqlstate, message, hint) = match error {
+        TemporalInputError::InvalidSyntax => (
+            "22007",
+            format!("invalid input syntax for type {ty}: \"{text}\""),
+            None,
+        ),
+        TemporalInputError::FieldOverflow { date_style } => (
+            "22008",
+            format!("date/time field value out of range: \"{text}\""),
+            date_style.then(|| "Perhaps you need a different \"DateStyle\" setting.".to_string()),
+        ),
+        TemporalInputError::OutOfRange => ("22008", format!("{ty} out of range: \"{text}\""), None),
+        TemporalInputError::ZoneDisplacement => (
+            "22009",
+            format!("time zone displacement out of range: \"{text}\""),
+            None,
+        ),
+        TemporalInputError::UnknownZone(zone) => (
+            "22023",
+            format!("time zone \"{zone}\" not recognized"),
+            None,
+        ),
+        TemporalInputError::IntervalFieldOverflow => (
+            "22015",
+            format!("interval field value out of range: \"{text}\""),
+            None,
+        ),
+    };
+    SQLError::Diagnostic {
+        sqlstate: sqlstate.into(),
+        message,
+        detail: None,
+        hint,
     }
 }

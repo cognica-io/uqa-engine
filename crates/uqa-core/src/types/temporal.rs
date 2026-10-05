@@ -6,14 +6,17 @@
 
 //! SQL temporal values, parsing, formatting, and total ordering.
 
-use super::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Ordering, Timelike};
+use super::{DateTime, Duration, NaiveDate, Ordering};
 use crate::{
     memory::{ProductionControl, ProductionString},
     ValueRetentionError,
 };
 
+mod input;
 mod keys;
 mod production;
+
+pub use input::TemporalInputError;
 
 pub(super) const MICROS_PER_SECOND: i64 = 1_000_000;
 pub(super) const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
@@ -51,75 +54,25 @@ pub enum TemporalValue {
 }
 
 impl TemporalValue {
+    /// The `parse_*` readers are the input functions with the wall clock standing in for the transaction start that `now` and `today` name; a text the type rejects reads as `None`.
     pub fn parse_date(input: &str) -> Option<Self> {
-        Self::try_parse_date(input).ok()
-    }
-
-    /// Parse a date while retaining whether the input format or a field value is invalid.
-    pub fn try_parse_date(input: &str) -> Result<Self, chrono::ParseError> {
-        let date = NaiveDate::parse_from_str(input.trim(), "%Y-%m-%d")?;
-        let days = date.signed_duration_since(epoch_date()).num_days();
-        Ok(Self::Date {
-            days: i32::try_from(days)
-                .expect("chrono's date range fits PostgreSQL's i32 day carrier"),
-        })
+        Self::date_input(input, wall_clock_micros()).ok()
     }
 
     pub fn parse_time(input: &str) -> Option<Self> {
-        Self::parse_time_with_control(input, &ProductionControl::uncontrolled())
-            .ok()
-            .flatten()
+        Self::time_input(input, wall_clock_micros()).ok()
     }
 
     pub fn parse_time_tz(input: &str) -> Option<Self> {
-        Self::parse_time_tz_with_control(input, &ProductionControl::uncontrolled())
-            .ok()
-            .flatten()
+        Self::time_tz_input(input, wall_clock_micros()).ok()
     }
 
     pub fn parse_timestamp(input: &str) -> Option<Self> {
-        let input = input.trim();
-        if let Some(Self::Date { days }) = Self::parse_date(input) {
-            return Some(Self::Timestamp {
-                micros: i64::from(days) * MICROS_PER_DAY,
-            });
-        }
-        parse_naive_datetime(input).map(|dt| Self::Timestamp {
-            micros: dt.and_utc().timestamp_micros(),
-        })
+        Self::timestamp_input(input, wall_clock_micros()).ok()
     }
 
     pub fn parse_timestamp_tz(input: &str) -> Option<Self> {
-        let input = input.trim();
-        if let Ok(dt) = DateTime::parse_from_rfc3339(input) {
-            return Some(Self::TimestampTz {
-                micros: dt.timestamp_micros(),
-            });
-        }
-        for fmt in [
-            "%Y-%m-%d %H:%M:%S%.f%:z",
-            "%Y-%m-%d %H:%M:%S%.f %:z",
-            "%Y-%m-%dT%H:%M:%S%.f%:z",
-            "%Y-%m-%d %H:%M%:z",
-            "%Y-%m-%d %H:%M %:z",
-            "%Y-%m-%dT%H:%M%:z",
-            "%Y-%m-%d %H:%M:%S%.f%z",
-            "%Y-%m-%d %H:%M:%S%.f %z",
-            "%Y-%m-%dT%H:%M:%S%.f%z",
-            // PostgreSQL text output uses a bare-hour offset (`+00`).
-            "%Y-%m-%d %H:%M:%S%.f%#z",
-            "%Y-%m-%dT%H:%M:%S%.f%#z",
-        ] {
-            if let Ok(dt) = DateTime::parse_from_str(input, fmt) {
-                return Some(Self::TimestampTz {
-                    micros: dt.timestamp_micros(),
-                });
-            }
-        }
-        Self::parse_timestamp(input).and_then(|value| match value {
-            Self::Timestamp { micros } => Some(Self::TimestampTz { micros }),
-            _ => None,
-        })
+        Self::timestamp_tz_input(input, wall_clock_micros()).ok()
     }
 
     pub fn parse_same_kind(&self, input: &str) -> Option<Self> {
@@ -200,204 +153,137 @@ fn epoch_date() -> NaiveDate {
     DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive()
 }
 
-fn parse_naive_time(input: &str) -> Option<NaiveTime> {
-    for fmt in ["%H:%M:%S%.f", "%H:%M"] {
-        if let Ok(time) = NaiveTime::parse_from_str(input, fmt) {
-            return Some(time);
-        }
-    }
-    None
+/// The platform clock in Unix microseconds, which stands in for the transaction start when no statement supplies one.
+fn wall_clock_micros() -> i64 {
+    chrono::Utc::now().timestamp_micros()
 }
 
-fn parse_time_micros(
-    input: &str,
-    control: &ProductionControl<'_>,
-) -> Result<Option<i64>, ValueRetentionError> {
-    if let Some(suffix) = input.strip_prefix("24:") {
-        let text = control.format(format_args!("00:{suffix}"))?;
-        return Ok(parse_naive_time(&text).and_then(|time| {
-            (time.num_seconds_from_midnight() == 0 && time.nanosecond() == 0)
-                .then_some(MICROS_PER_DAY)
-        }));
-    }
-    Ok(parse_naive_time(input).map(time_to_micros))
-}
-
-fn parse_naive_datetime(input: &str) -> Option<NaiveDateTime> {
-    for fmt in [
-        "%Y-%m-%d %H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%dT%H:%M",
-    ] {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(input, fmt) {
-            return Some(dt);
-        }
-    }
-    None
-}
-
-fn time_to_micros(time: NaiveTime) -> i64 {
-    i64::from(time.num_seconds_from_midnight()) * MICROS_PER_SECOND
-        + i64::from(time.nanosecond() / 1_000)
-}
-
-fn split_offset_suffix(input: &str) -> Option<(&str, i32)> {
-    if let Some(body) = input.strip_suffix('Z') {
-        return Some((body, 0));
-    }
-    let plus = input.rfind('+');
-    let minus = input.rfind('-');
-    let pos = match (plus, minus) {
-        (Some(p), Some(m)) => Some(p.max(m)),
-        (Some(p), None) => Some(p),
-        (None, Some(m)) => Some(m),
-        (None, None) => None,
-    }?;
-    let (body, offset) = input.split_at(pos);
-    Some((body, parse_offset_minutes(offset)?))
-}
-
-fn parse_offset_minutes(offset: &str) -> Option<i32> {
-    let sign = match offset.as_bytes().first()? {
-        b'+' => 1,
-        b'-' => -1,
-        _ => return None,
-    };
-    let body = &offset[1..];
-    let (hours, minutes) = if let Some((h, m)) = body.split_once(':') {
-        (h.parse::<i32>().ok()?, m.parse::<i32>().ok()?)
-    } else if matches!(body.len(), 1 | 2) {
-        (body.parse::<i32>().ok()?, 0)
-    } else if body.len() == 4 {
-        (
-            body[..2].parse::<i32>().ok()?,
-            body[2..].parse::<i32>().ok()?,
-        )
-    } else {
-        return None;
-    };
-    if !(0..=23).contains(&hours) || !(0..=59).contains(&minutes) {
-        return None;
-    }
-    Some(sign * (hours * 60 + minutes))
-}
-
-/// Parse a `PostgreSQL` interval literal into `(months, days, micros)`.
+/// Read a `PostgreSQL` interval literal as `interval_in` reads the traditional and SQL standard forms (`'1 day'`, `'90 minutes'`, `'1 day 3 hours'`, `'1-2'`, `'3 4:05:06'`, bare seconds, a leading `@`, a trailing `ago`), keeping `DecodeInterval`'s distinctions: text that is not an interval is a syntax error and a field or quantity that does not fit is an interval field overflow. Fractional quantities cascade into the next smaller unit (`'1.5 mons'` is `1 mon 15 days`).
 fn parse_interval_literal(
     input: &str,
     control: &ProductionControl<'_>,
-) -> Result<Option<TemporalValue>, ValueRetentionError> {
+) -> Result<Result<TemporalValue, TemporalInputError>, ValueRetentionError> {
     let mut text = ProductionString::new(*control);
     for character in input.trim().chars() {
         text.push(character.to_ascii_lowercase())?;
     }
-    let value = parse_interval_tokens(&text, control);
+    let value = parse_interval_tokens(&text, control)?;
     control.check()?;
     Ok(value)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves temporal token error order"
-)]
-fn parse_interval_tokens(input: &str, control: &ProductionControl<'_>) -> Option<TemporalValue> {
-    #[derive(Default)]
-    struct Acc {
-        months: i64,
-        days: i64,
-        micros: i64,
+type IntervalInput<T> = Result<T, TemporalInputError>;
+
+/// The accumulating fields of an interval, each addition checked for the carrier's range.
+#[derive(Default)]
+struct IntervalFields {
+    months: i64,
+    days: i64,
+    micros: i64,
+}
+
+impl IntervalFields {
+    fn add_months(&mut self, value: f64) -> IntervalInput<()> {
+        self.months = checked_sum(self.months, rounded_f64_to_i64(value))?;
+        Ok(())
     }
-    impl Acc {
-        fn add_months(&mut self, value: f64) -> bool {
-            let Some(value) = rounded_f64_to_i64(value) else {
-                return false;
-            };
-            let Some(total) = self.months.checked_add(value) else {
-                return false;
-            };
-            self.months = total;
-            true
-        }
 
-        fn add_days(&mut self, value: f64) -> bool {
-            let Some(value) = truncated_f64_to_i64(value) else {
-                return false;
-            };
-            let Some(total) = self.days.checked_add(value) else {
-                return false;
-            };
-            self.days = total;
-            true
-        }
+    fn add_days(&mut self, value: f64) -> IntervalInput<()> {
+        self.days = checked_sum(self.days, truncated_f64_to_i64(value))?;
+        Ok(())
+    }
 
-        fn add_rounded_days(&mut self, value: f64) -> bool {
-            let Some(value) = rounded_f64_to_i64(value) else {
-                return false;
-            };
-            let Some(total) = self.days.checked_add(value) else {
-                return false;
-            };
-            self.days = total;
-            true
-        }
+    fn add_rounded_days(&mut self, value: f64) -> IntervalInput<()> {
+        self.days = checked_sum(self.days, rounded_f64_to_i64(value))?;
+        Ok(())
+    }
 
-        fn add_micros(&mut self, value: f64) -> bool {
-            let Some(value) = rounded_f64_to_i64(value) else {
-                return false;
-            };
-            self.add_micros_exact(value)
-        }
+    fn add_micros(&mut self, value: f64) -> IntervalInput<()> {
+        self.micros = checked_sum(self.micros, rounded_f64_to_i64(value))?;
+        Ok(())
+    }
 
-        fn add_micros_exact(&mut self, value: i64) -> bool {
-            let Some(total) = self.micros.checked_add(value) else {
-                return false;
-            };
-            self.micros = total;
-            true
-        }
+    fn add_micros_exact(&mut self, value: i64) -> IntervalInput<()> {
+        self.micros = checked_sum(self.micros, Some(value))?;
+        Ok(())
+    }
 
-        // Carry a fractional remainder downward exactly like
-        // PostgreSQL: month fractions become days (x30), day/week
-        // fractions become microseconds (x86400s).
-        fn add_unit(&mut self, unit: &str, quantity: f64) -> bool {
-            const MICROS_PER_HOUR: i64 = 3_600 * MICROS_PER_SECOND;
-            const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;
-            let whole = quantity.trunc();
-            let frac = quantity - whole;
-            match unit {
-                "microsecond" | "microseconds" | "us" => self.add_micros(quantity),
-                "millisecond" | "milliseconds" | "ms" => self.add_micros(quantity * 1_000.0),
-                "second" | "seconds" | "sec" | "secs" | "s" => {
-                    self.add_micros(quantity * MICROS_PER_SECOND as f64)
-                }
-                "minute" | "minutes" | "min" | "mins" | "m" => {
-                    self.add_micros(quantity * MICROS_PER_MINUTE as f64)
-                }
-                "hour" | "hours" | "hr" | "hrs" | "h" => {
-                    self.add_micros(quantity * MICROS_PER_HOUR as f64)
-                }
-                "day" | "days" | "d" => {
-                    self.add_days(whole) && self.add_micros(frac * MICROS_PER_DAY as f64)
-                }
-                "week" | "weeks" | "w" => {
-                    let total_days = quantity * 7.0;
-                    self.add_days(total_days.trunc())
-                        && self
-                            .add_micros((total_days - total_days.trunc()) * MICROS_PER_DAY as f64)
-                }
-                "month" | "months" | "mon" | "mons" => {
-                    self.add_months(whole) && self.add_rounded_days(frac * 30.0)
-                }
-                "year" | "years" | "yr" | "yrs" | "y" => self.add_months(quantity * 12.0),
-                "decade" | "decades" => self.add_months(quantity * 120.0),
-                "century" | "centuries" => self.add_months(quantity * 1_200.0),
-                "millennium" | "millenniums" | "millennia" => self.add_months(quantity * 12_000.0),
-                _ => false,
+    /// Add `quantity` of `unit`, carrying a fractional remainder downward as `PostgreSQL` does: month fractions become days (x30), day and week fractions become microseconds. A word that names no unit is a syntax error.
+    fn add_unit(&mut self, unit: &str, quantity: f64) -> IntervalInput<()> {
+        const MICROS_PER_HOUR: i64 = 3_600 * MICROS_PER_SECOND;
+        const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;
+        let whole = quantity.trunc();
+        let frac = quantity - whole;
+        match unit {
+            "microsecond" | "microseconds" | "us" => self.add_micros(quantity),
+            "millisecond" | "milliseconds" | "ms" => self.add_micros(quantity * 1_000.0),
+            "second" | "seconds" | "sec" | "secs" | "s" => {
+                self.add_micros(quantity * MICROS_PER_SECOND as f64)
             }
+            "minute" | "minutes" | "min" | "mins" | "m" => {
+                self.add_micros(quantity * MICROS_PER_MINUTE as f64)
+            }
+            "hour" | "hours" | "hr" | "hrs" | "h" => {
+                self.add_micros(quantity * MICROS_PER_HOUR as f64)
+            }
+            "day" | "days" | "d" => {
+                self.add_days(whole)?;
+                self.add_micros(frac * MICROS_PER_DAY as f64)
+            }
+            "week" | "weeks" | "w" => {
+                let total_days = quantity * 7.0;
+                self.add_days(total_days.trunc())?;
+                self.add_micros((total_days - total_days.trunc()) * MICROS_PER_DAY as f64)
+            }
+            "month" | "months" | "mon" | "mons" => {
+                self.add_months(whole)?;
+                self.add_rounded_days(frac * 30.0)
+            }
+            "year" | "years" | "yr" | "yrs" | "y" => self.add_months(quantity * 12.0),
+            "decade" | "decades" => self.add_months(quantity * 120.0),
+            "century" | "centuries" => self.add_months(quantity * 1_200.0),
+            "millennium" | "millenniums" | "millennia" => self.add_months(quantity * 12_000.0),
+            _ => Err(TemporalInputError::InvalidSyntax),
         }
     }
 
+    fn negate(&mut self) -> IntervalInput<()> {
+        self.months = self
+            .months
+            .checked_neg()
+            .ok_or(TemporalInputError::IntervalFieldOverflow)?;
+        self.days = self
+            .days
+            .checked_neg()
+            .ok_or(TemporalInputError::IntervalFieldOverflow)?;
+        self.micros = self
+            .micros
+            .checked_neg()
+            .ok_or(TemporalInputError::IntervalFieldOverflow)?;
+        Ok(())
+    }
+
+    fn finish(self) -> IntervalInput<TemporalValue> {
+        Ok(TemporalValue::Interval {
+            months: i32::try_from(self.months)
+                .map_err(|_| TemporalInputError::IntervalFieldOverflow)?,
+            days: i32::try_from(self.days)
+                .map_err(|_| TemporalInputError::IntervalFieldOverflow)?,
+            micros: self.micros,
+        })
+    }
+}
+
+fn checked_sum(total: i64, value: Option<i64>) -> IntervalInput<i64> {
+    value
+        .and_then(|value| total.checked_add(value))
+        .ok_or(TemporalInputError::IntervalFieldOverflow)
+}
+
+fn parse_interval_tokens(
+    input: &str,
+    control: &ProductionControl<'_>,
+) -> Result<IntervalInput<TemporalValue>, ValueRetentionError> {
     let mut text = input;
     let mut negate_all = false;
     if let Some(stripped) = text.strip_suffix("ago") {
@@ -405,69 +291,70 @@ fn parse_interval_tokens(input: &str, control: &ProductionControl<'_>) -> Option
         text = stripped.trim_end();
     }
     if text.is_empty() {
-        return None;
+        return Ok(Err(TemporalInputError::InvalidSyntax));
     }
-    let mut acc = Acc::default();
+    let mut fields = IntervalFields::default();
     let mut pending: Option<f64> = None;
     for token in text.split_whitespace() {
-        if control.check_cancellation().is_err() {
-            return None;
-        }
-        if let Some(rest) = parse_interval_time_token(token) {
-            // `HH:MM[:SS[.frac]]` (or `[+-]HH:MM...`) time-of-day part.
-            // A bare number right before it is a day count
-            // (`'3 4:05:06'` = 3 days 04:05:06).
-            if let Some(days) = pending.take() {
-                if !acc.add_days(days.trunc())
-                    || !acc.add_micros((days - days.trunc()) * MICROS_PER_DAY as f64)
-                {
-                    return None;
-                }
-            }
-            if !acc.add_micros_exact(rest) {
-                return None;
-            }
+        control.check()?;
+        // `ParseDateTime` passes over the `@` of the verbose form.
+        if token == "@" {
             continue;
         }
-        if let Some((y, m)) = parse_interval_year_month_token(token) {
-            let months = y.checked_mul(12)?.checked_add(m)?;
-            acc.months = acc.months.checked_add(months)?;
-            continue;
-        }
-        if let Ok(number) = token.parse::<f64>() {
-            if !number.is_finite() {
-                return None;
-            }
-            if let Some(prev) = pending.take() {
-                // Two bare numbers in a row: the first was seconds.
-                if !acc.add_micros(prev * MICROS_PER_SECOND as f64) {
-                    return None;
-                }
-            }
-            pending = Some(number);
-            continue;
-        }
-        let quantity = pending.take().unwrap_or(1.0);
-        if !acc.add_unit(token, quantity) {
-            return None;
+        let token = token.strip_prefix('@').unwrap_or(token);
+        let outcome = interval_token(token, &mut fields, &mut pending);
+        if let Err(error) = outcome {
+            return Ok(Err(error));
         }
     }
-    if let Some(number) = pending {
-        // Trailing bare number: PostgreSQL reads it as seconds.
-        if !acc.add_micros(number * MICROS_PER_SECOND as f64) {
-            return None;
+    let finished = (|| {
+        if let Some(number) = pending {
+            // A trailing bare number is seconds.
+            fields.add_micros(number * MICROS_PER_SECOND as f64)?;
         }
+        if negate_all {
+            fields.negate()?;
+        }
+        fields.finish()
+    })();
+    Ok(finished)
+}
+
+/// Fold one token into the fields: a time of day, a year-month pair, a bare quantity awaiting its unit, or a unit word.
+fn interval_token(
+    token: &str,
+    fields: &mut IntervalFields,
+    pending: &mut Option<f64>,
+) -> IntervalInput<()> {
+    if let Some(micros) = parse_interval_time_token(token)? {
+        // `HH:MM[:SS[.frac]]`; a bare number right before it is a day count (`'3 4:05:06'` is 3 days 04:05:06).
+        if let Some(days) = pending.take() {
+            fields.add_days(days.trunc())?;
+            fields.add_micros((days - days.trunc()) * MICROS_PER_DAY as f64)?;
+        }
+        return fields.add_micros_exact(micros);
     }
-    if negate_all {
-        acc.months = acc.months.checked_neg()?;
-        acc.days = acc.days.checked_neg()?;
-        acc.micros = acc.micros.checked_neg()?;
+    if let Some((years, months)) = parse_interval_year_month_token(token)? {
+        let total = years
+            .checked_mul(12)
+            .and_then(|value| value.checked_add(months))
+            .ok_or(TemporalInputError::IntervalFieldOverflow)?;
+        fields.months = checked_sum(fields.months, Some(total))?;
+        return Ok(());
     }
-    Some(TemporalValue::Interval {
-        months: i32::try_from(acc.months).ok()?,
-        days: i32::try_from(acc.days).ok()?,
-        micros: acc.micros,
-    })
+    if let Ok(number) = token.parse::<f64>() {
+        if !number.is_finite() {
+            return Err(TemporalInputError::InvalidSyntax);
+        }
+        // Two bare numbers in a row name no unit for the first, as `DecodeInterval` rejects.
+        if pending.is_some() {
+            return Err(TemporalInputError::InvalidSyntax);
+        }
+        *pending = Some(number);
+        return Ok(());
+    }
+    let quantity = pending.take().unwrap_or(1.0);
+    fields.add_unit(token, quantity)
 }
 
 fn truncated_f64_to_i64(value: f64) -> Option<i64> {
@@ -484,56 +371,83 @@ fn rounded_f64_to_i64(value: f64) -> Option<i64> {
     truncated_f64_to_i64(value.round())
 }
 
-/// `[+-]HH:MM[:SS[.frac]]` -> signed microseconds. Rejects minute or
-/// second fields of 60 or more, mirroring `PostgreSQL`.
-fn parse_interval_time_token(token: &str) -> Option<i64> {
+/// `[+-]HH:MM[:SS[.frac]]` as signed microseconds, or `None` for a token that is no time of day. A minute past 59 or a second past 60 is an interval field overflow, as `DecodeTime` reports it for intervals; a sixtieth second carries into the next minute.
+fn parse_interval_time_token(token: &str) -> IntervalInput<Option<i64>> {
     if !token.contains(':') {
-        return None;
+        return Ok(None);
     }
-    let (sign, body) = match token.as_bytes().first()? {
-        b'-' => (-1i64, &token[1..]),
-        b'+' => (1, &token[1..]),
+    let (sign, body) = match token.as_bytes().first() {
+        Some(b'-') => (-1i64, &token[1..]),
+        Some(b'+') => (1, &token[1..]),
         _ => (1, token),
     };
     let mut parts = body.split(':');
-    let hours: i64 = parts.next()?.parse().ok()?;
-    let minutes: i64 = parts.next()?.parse().ok()?;
+    let hours: i64 = parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .ok_or(TemporalInputError::InvalidSyntax)?;
+    let minutes: i64 = parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .ok_or(TemporalInputError::InvalidSyntax)?;
     let seconds = parts.next();
     if parts.next().is_some() {
-        return None;
+        return Err(TemporalInputError::InvalidSyntax);
     }
     if !(0..60).contains(&minutes) {
-        return None;
+        return Err(TemporalInputError::IntervalFieldOverflow);
     }
+    let overflow = || TemporalInputError::IntervalFieldOverflow;
     let mut micros = hours
-        .checked_mul(3_600)?
-        .checked_mul(MICROS_PER_SECOND)?
-        .checked_add(minutes.checked_mul(60)?.checked_mul(MICROS_PER_SECOND)?)?;
+        .checked_mul(3_600)
+        .and_then(|value| value.checked_mul(MICROS_PER_SECOND))
+        .and_then(|value| value.checked_add(minutes * 60 * MICROS_PER_SECOND))
+        .ok_or_else(overflow)?;
     if let Some(seconds) = seconds {
-        let seconds: f64 = seconds.parse().ok()?;
-        if !(0.0..60.0).contains(&seconds) {
-            return None;
+        let seconds: f64 = seconds
+            .parse()
+            .map_err(|_| TemporalInputError::InvalidSyntax)?;
+        if !(0.0..=60.0).contains(&seconds) {
+            return Err(TemporalInputError::IntervalFieldOverflow);
         }
-        micros = micros.checked_add(rounded_f64_to_i64(seconds * MICROS_PER_SECOND as f64)?)?;
+        micros = micros
+            .checked_add(
+                rounded_f64_to_i64(seconds * MICROS_PER_SECOND as f64).ok_or_else(overflow)?,
+            )
+            .ok_or_else(overflow)?;
     }
-    sign.checked_mul(micros)
+    Ok(Some(sign.checked_mul(micros).ok_or_else(overflow)?))
 }
 
-/// SQL-standard year-month literal `[+-]Y-M` -> `(years, months)`.
-fn parse_interval_year_month_token(token: &str) -> Option<(i64, i64)> {
-    let (sign, body) = match token.as_bytes().first()? {
-        b'-' => (-1i64, &token[1..]),
-        b'+' => (1, &token[1..]),
+/// The SQL standard year-month literal `[+-]Y-M` as `(years, months)`, or `None` for a token of another shape; a month past 11 is an interval field overflow.
+fn parse_interval_year_month_token(token: &str) -> IntervalInput<Option<(i64, i64)>> {
+    let (sign, body) = match token.as_bytes().first() {
+        Some(b'-') => (-1i64, &token[1..]),
+        Some(b'+') => (1, &token[1..]),
         _ => (1, token),
     };
-    let (y, m) = body.split_once('-')?;
-    if y.is_empty() || m.is_empty() || !y.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
+    let Some((years, months)) = body.split_once('-') else {
+        return Ok(None);
+    };
+    if years.is_empty()
+        || months.is_empty()
+        || !years.bytes().all(|byte| byte.is_ascii_digit())
+        || !months.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Ok(None);
     }
-    let years: i64 = y.parse().ok()?;
-    let months: i64 = m.parse().ok()?;
+    let years: i64 = years
+        .parse()
+        .map_err(|_| TemporalInputError::IntervalFieldOverflow)?;
+    let months: i64 = months
+        .parse()
+        .map_err(|_| TemporalInputError::IntervalFieldOverflow)?;
     if !(0..12).contains(&months) {
-        return None;
+        return Err(TemporalInputError::IntervalFieldOverflow);
     }
-    Some((sign.checked_mul(years)?, sign.checked_mul(months)?))
+    let overflow = || TemporalInputError::IntervalFieldOverflow;
+    Ok(Some((
+        sign.checked_mul(years).ok_or_else(overflow)?,
+        sign.checked_mul(months).ok_or_else(overflow)?,
+    )))
 }

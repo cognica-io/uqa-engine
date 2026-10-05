@@ -22,6 +22,8 @@ LIMIT 20 OFFSET 0;
 
 Ascending order defaults to NULLS LAST and descending order defaults to NULLS FIRST. Use explicit `NULLS FIRST` or `NULLS LAST` when portability matters.
 
+An output column without an alias is named as `FigureColname` names it: a column reference by its column, a function call by its function, a cast by its type, and an operator expression `?column?`. The operators the parser lowers to calls (`||`, `~`, `~*`, `!~`, `!~*`, `LIKE`, `ILIKE`, `SIMILAR TO`, `@>`, `<@`, `&&`, `@@`, `@?`, `->` and `->>`) are operators here too, so `SELECT a ~ 'b' FROM t` yields `?column?` while `SELECT regexp_like(a, 'b') FROM t` yields `regexp_like`, and `pg_get_viewdef` prints them as operators.
+
 ## System columns and hierarchy scans
 
 A scan of an inherited or partitioned parent includes its physical descendants unless `ONLY` is specified. The PostgreSQL system column `tableoid` is an `OID` that identifies the physical relation which supplied each row; it can be selected, qualified, joined to `pg_catalog.pg_class`, and used in predicates. The `xmin` system column is an `XID` that identifies the transaction or savepoint subtransaction that wrote the current tuple version; `INSERT` and `UPDATE` assign it, explicit current/`OLD`/`NEW` projections expose it, persistent reopen and `VACUUM FULL` preserve it, and both system columns are omitted from `SELECT *`.

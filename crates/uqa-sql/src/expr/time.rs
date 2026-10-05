@@ -111,56 +111,7 @@ pub(super) fn temporal_arith_with_control(
     let to_f64 = |value| to_f64_with_control(value, control);
     use TemporalValue as T;
     match (a, b) {
-        (Value::Temporal(x), Value::Temporal(y)) => match (x, y, op) {
-            (T::Date { days: d1 }, T::Date { days: d2 }, BinaryOp::Subtract) => {
-                Ok(Value::Int(i64::from(*d1) - i64::from(*d2)))
-            }
-            (T::Interval { .. }, T::Interval { .. }, BinaryOp::Add | BinaryOp::Subtract) => {
-                let (left, right) = (interval_fields(x)?, interval_fields(y)?);
-                Ok(Value::Temporal(
-                    if matches!(op, BinaryOp::Add) {
-                        left.plus(right)?
-                    } else {
-                        left.minus(right)?
-                    }
-                    .value(),
-                ))
-            }
-            (_, T::Interval { .. }, BinaryOp::Add) => {
-                add_interval_to_temporal(x, interval_fields(y)?, false)
-            }
-            (_, T::Interval { .. }, BinaryOp::Subtract) => {
-                add_interval_to_temporal(x, interval_fields(y)?, true)
-            }
-            (T::Interval { .. }, _, BinaryOp::Add) => {
-                add_interval_to_temporal(y, interval_fields(x)?, false)
-            }
-            (T::Time { micros: t1 }, T::Time { micros: t2 }, BinaryOp::Subtract) => {
-                Ok(Value::Temporal(T::Interval {
-                    months: 0,
-                    days: 0,
-                    micros: t1 - t2,
-                }))
-            }
-            (_, _, BinaryOp::Subtract) => {
-                let lhs = temporal_timestamp_micros(x)?;
-                let rhs = temporal_timestamp_micros(y)?;
-                let diff = lhs
-                    .checked_sub(rhs)
-                    .ok_or_else(|| datetime_out_of_range("interval"))?;
-                // PostgreSQL justifies full 24h chunks into days but
-                // never synthesizes months from a timestamp difference.
-                Ok(Value::Temporal(T::Interval {
-                    months: 0,
-                    days: i32::try_from(diff / MICROS_PER_DAY)
-                        .map_err(|_| datetime_out_of_range("interval"))?,
-                    micros: diff % MICROS_PER_DAY,
-                }))
-            }
-            _ => Err(SQLError::TypeMismatch(format!(
-                "unsupported temporal arithmetic: {a:?} {op:?} {b:?}"
-            ))),
-        },
+        (Value::Temporal(x), Value::Temporal(y)) => temporal_pair_arith(a, b, x, y, op),
         // date +/- integer days.
         (Value::Temporal(T::Date { days }), Value::Int(n)) => match op {
             BinaryOp::Add => i64::from(*days)
@@ -205,6 +156,105 @@ pub(super) fn temporal_arith_with_control(
             "unsupported temporal arithmetic: {a:?} {op:?} {b:?}"
         ))),
     }
+}
+
+/// Arithmetic on two temporal values: `date - date` counts days, intervals add and subtract, a date or timestamp takes an interval, `date + time` is `datetime_pl`, two instants subtract to an interval, and two times subtract to an interval.
+fn temporal_pair_arith(
+    a: &Value,
+    b: &Value,
+    x: &TemporalValue,
+    y: &TemporalValue,
+    op: BinaryOp,
+) -> Result<Value> {
+    use TemporalValue as T;
+    match (x, y, op) {
+        (T::Date { days: d1 }, T::Date { days: d2 }, BinaryOp::Subtract) => {
+            Ok(Value::Int(i64::from(*d1) - i64::from(*d2)))
+        }
+        (T::Interval { .. }, T::Interval { .. }, BinaryOp::Add | BinaryOp::Subtract) => {
+            let (left, right) = (interval_fields(x)?, interval_fields(y)?);
+            Ok(Value::Temporal(
+                if matches!(op, BinaryOp::Add) {
+                    left.plus(right)?
+                } else {
+                    left.minus(right)?
+                }
+                .value(),
+            ))
+        }
+        // `datetime_pl`, `timedate_pl`, `datetimetz_pl` and `timetzdate_pl`: the time of day on the date; a time with time zone names the instant through its offset.
+        (T::Date { days }, T::Time { micros }, BinaryOp::Add)
+        | (T::Time { micros }, T::Date { days }, BinaryOp::Add) => {
+            Ok(Value::Temporal(T::Timestamp {
+                micros: date_time_micros(*days, *micros, 0)?,
+            }))
+        }
+        (
+            T::Date { days },
+            T::TimeTz {
+                micros,
+                offset_minutes,
+            },
+            BinaryOp::Add,
+        )
+        | (
+            T::TimeTz {
+                micros,
+                offset_minutes,
+            },
+            T::Date { days },
+            BinaryOp::Add,
+        ) => Ok(Value::Temporal(T::TimestampTz {
+            micros: date_time_micros(
+                *days,
+                *micros,
+                i64::from(*offset_minutes) * MICROS_PER_MINUTE,
+            )?,
+        })),
+        (_, T::Interval { .. }, BinaryOp::Add) => {
+            add_interval_to_temporal(x, interval_fields(y)?, false)
+        }
+        (_, T::Interval { .. }, BinaryOp::Subtract) => {
+            add_interval_to_temporal(x, interval_fields(y)?, true)
+        }
+        (T::Interval { .. }, _, BinaryOp::Add) => {
+            add_interval_to_temporal(y, interval_fields(x)?, false)
+        }
+        (T::Time { micros: t1 }, T::Time { micros: t2 }, BinaryOp::Subtract) => {
+            Ok(Value::Temporal(T::Interval {
+                months: 0,
+                days: 0,
+                micros: t1 - t2,
+            }))
+        }
+        (_, _, BinaryOp::Subtract) => {
+            let lhs = temporal_timestamp_micros(x)?;
+            let rhs = temporal_timestamp_micros(y)?;
+            let diff = lhs
+                .checked_sub(rhs)
+                .ok_or_else(|| datetime_out_of_range("interval"))?;
+            // PostgreSQL justifies full 24h chunks into days but
+            // never synthesizes months from a timestamp difference.
+            Ok(Value::Temporal(T::Interval {
+                months: 0,
+                days: i32::try_from(diff / MICROS_PER_DAY)
+                    .map_err(|_| datetime_out_of_range("interval"))?,
+                micros: diff % MICROS_PER_DAY,
+            }))
+        }
+        _ => Err(SQLError::TypeMismatch(format!(
+            "unsupported temporal arithmetic: {a:?} {op:?} {b:?}"
+        ))),
+    }
+}
+
+/// The instant at `time` of day on the date `days` after the epoch, `offset` microseconds east of UTC, or `timestamp out of range` when it leaves the carrier.
+fn date_time_micros(days: i32, time: i64, offset: i64) -> Result<i64> {
+    i64::from(days)
+        .checked_mul(MICROS_PER_DAY)
+        .and_then(|date| date.checked_add(time))
+        .and_then(|local| local.checked_sub(offset))
+        .ok_or_else(|| datetime_out_of_range("timestamp"))
 }
 
 fn date_value(days: i64) -> Result<Value> {

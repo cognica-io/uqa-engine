@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use chrono::{DateTime, Duration, NaiveDate};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Document identifier.
@@ -70,7 +70,7 @@ pub use jsonb::{
 pub use legacy_vector::{LegacyVectorKind, LegacyVectorValue};
 pub use occurrence::{TokenOccurrence, TokenOccurrenceError, TokenOffsets};
 pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingEntry};
-pub use temporal::TemporalValue;
+pub use temporal::{TemporalInputError, TemporalValue};
 pub use value::{JsonValueDecoder, Value, ValueRetentionError};
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 
 use crate::{ScalarFrameBound, ScalarWindowSpec};
 use uqa_core::Value;
-use uqa_sql::ast::{BinaryOp, Expr, FunctionBinding, FunctionDispatch};
+use uqa_sql::ast::{BinaryOp, ColumnType, Expr, FunctionBinding, FunctionDispatch};
 use uqa_sql::ir::ScalarExpr;
 use uqa_sql::plan::QueryPlan;
 
@@ -248,23 +248,13 @@ impl Deparser<'_> {
             return Ok(rendered);
         }
         let display = self.type_display(ty);
-        let ty = type_name(ty);
         if let ScalarExpr::Literal(value) = expr {
-            if matches!(value, Value::Str(_))
-                && matches!(
-                    ty.as_str(),
-                    "integer" | "bigint" | "smallint" | "numeric" | "boolean"
-                )
-            {
-                let converted = uqa_sql::expr::cast_value(value, &ty)?;
-                if literal_has_type(&converted, &ty) {
-                    return literal(&converted);
+            if matches!(value, Value::Str(_)) {
+                if let Some(constant) = self.literal_cast_constant(value, ty)? {
+                    return Ok(constant);
                 }
-                return Ok(format!(
-                    "{}::{display}",
-                    uqa_sql::render::expression_sql(&Expr::Literal(value.clone()))?
-                ));
             }
+            let ty = type_name(ty);
             if literal_has_type(value, &ty) {
                 return literal(value);
             }
@@ -286,6 +276,28 @@ impl Deparser<'_> {
         } else {
             Ok(format!("({value})::{display}"))
         }
+    }
+
+    /// `get_coercion_expr`'s form of a cast of an `unknown` literal: `coerce_type` reads the literal with the type's input function, passing no type modifier except to `interval`, and the constant prints as `get_const_expr` prints it with the cast's type and modifier (`'11:00:00'::time(3) without time zone`, `'\x79'::bytea`, `1` for `'1'::int`). A type whose input consults the catalog, an enum type and a domain keep the written literal, which their own printing resolves; so does a literal the input function rejects, which the written text shows as it was accepted.
+    fn literal_cast_constant(&self, value: &Value, ty: &str) -> Result<Option<String>, SQLError> {
+        let Some(resolved) = self.resolved_type(ty) else {
+            return Ok(None);
+        };
+        if matches!(resolved, ColumnType::Domain { .. })
+            || uqa_sql::type_resolution::catalog_input_type(&resolved)
+            || uqa_sql::expr::enums::is_enum_bearing(&resolved)
+        {
+            return Ok(None);
+        }
+        let input_type = if matches!(resolved, ColumnType::IntervalWithFields { .. }) {
+            resolved.clone()
+        } else {
+            resolved.without_type_modifiers()
+        };
+        let Ok(constant) = uqa_sql::expr::cast_value(value, &input_type.catalog_name()) else {
+            return Ok(None);
+        };
+        self.typed_literal(&constant, ty).map(Some)
     }
 
     pub fn function(
@@ -431,11 +443,18 @@ impl Deparser<'_> {
     ) -> Result<String, SQLError> {
         if let ScalarExpr::Func { name, args, .. } = inner {
             if let [left, right] = args.as_slice() {
-                if matches!(name.as_str(), "like" | "ilike") {
+                // A negated pattern or regular expression match is its own operator.
+                let negated = match name.as_str() {
+                    "like" => Some("!~~"),
+                    "ilike" => Some("!~~*"),
+                    "regex_match_op" => Some("!~"),
+                    "regex_imatch_op" => Some("!~*"),
+                    _ => None,
+                };
+                if let Some(operator) = negated {
                     return Ok(self.parenthesize(format!(
-                        "{} {} {}",
+                        "{} {operator} {}",
                         self.operand(left, 40, false, scope, subqueries)?,
-                        if name == "like" { "!~~" } else { "!~~*" },
                         self.operand(right, 40, true, scope, subqueries)?
                     )));
                 }
@@ -704,17 +723,10 @@ fn literal_has_type(value: &Value, ty: &str) -> bool {
     }
 }
 
+/// `format_type_with_typemod` of a stored built-in type name: the SQL spelling with its modifier (`integer`, `character varying(3)`, `time(3) without time zone`), or the name as written when it is not a built-in type.
 pub(super) fn type_name(ty: &str) -> String {
-    match ty.to_ascii_lowercase().as_str() {
-        "int" | "int4" => "integer".into(),
-        "int8" => "bigint".into(),
-        "int2" => "smallint".into(),
-        "float8" | "double" => "double precision".into(),
-        "float4" => "real".into(),
-        "bool" => "boolean".into(),
-        "varchar" => "character varying".into(),
-        _ => ty.to_string(),
-    }
+    ColumnType::from_sql_name(ty)
+        .map_or_else(|_| ty.to_string(), |resolved| resolved.catalog_name())
 }
 
 fn precedence(expression: &ScalarExpr) -> u8 {
@@ -801,6 +813,8 @@ fn binary_function_operator(name: &str) -> Option<(&'static str, u8)> {
     match name {
         "like" => Some(("~~", 40)),
         "ilike" => Some(("~~*", 40)),
+        "regex_match_op" => Some(("~", 40)),
+        "regex_imatch_op" => Some(("~*", 40)),
         "concat_op" => Some(("||", 45)),
         _ => None,
     }
