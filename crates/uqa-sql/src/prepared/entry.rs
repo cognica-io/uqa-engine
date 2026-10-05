@@ -14,6 +14,8 @@ pub struct PreparedStatementPlan {
     pub source_plan: Arc<crate::plan::UnifiedPlan>,
     pub logical_plan: Arc<crate::plan::UnifiedPlan>,
     pub needs_analysis: bool,
+    /// The effective namespace of the retained analysis, when its catalog supplies one.
+    pub effective_search_path: Option<crate::catalog::resolution::EffectiveSearchPath>,
     pub plan: Option<crate::plan::UnifiedPlan>,
     pub parameter_types: Vec<Option<crate::ast::ColumnType>>,
     pub result_schema: Option<crate::RowSchema>,
@@ -53,8 +55,9 @@ impl PreparedStatementPlan {
     }
 
     pub fn record_execution(&mut self, update: super::planning::PreparedPlanUpdate) {
-        if let Some(plan) = update.reanalyzed_plan {
-            self.logical_plan = plan;
+        if let Some(analysis) = update.reanalyzed {
+            self.logical_plan = analysis.logical_plan;
+            self.effective_search_path = analysis.effective_search_path;
             self.needs_analysis = false;
         }
         self.plan = update.generic_plan;

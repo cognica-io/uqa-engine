@@ -15,6 +15,7 @@ struct Scopes {
     captures: Cell<usize>,
     fail_at: Option<usize>,
     events: RefCell<Vec<String>>,
+    search_path: Option<Vec<String>>,
 }
 struct Scope<'a> {
     owner: &'a Scopes,
@@ -37,7 +38,11 @@ impl StatementBindingScope for Scope<'_> {
         if self.owner.fail_at == Some(self.index) {
             return Err(SQLError::Internal("binding unavailable".into()));
         }
-        Ok(fixtures::binding_context())
+        let mut binding = fixtures::binding_context();
+        if let Some(path) = &self.owner.search_path {
+            binding.resolution.search_path.clone_from(path);
+        }
+        Ok(binding)
     }
 }
 impl StatementAnalysisScopes for Scopes {
@@ -82,6 +87,34 @@ fn inference_scope_is_released_before_result_descriptor_scope() {
             "2.binding",
             "2.release"
         ]
+    );
+}
+
+#[test]
+fn preparation_retains_the_input_scope_namespace_and_live_reads_release_their_scope() {
+    let scopes = Scopes {
+        search_path: Some(vec!["pg_catalog".into(), "public".into()]),
+        ..Scopes::default()
+    };
+    let definition = analyze(&scopes, &[]).unwrap();
+    let expected = Some(EffectiveSearchPath {
+        schemas: vec!["pg_catalog".into(), "public".into()],
+        creation_namespace: Some("pg_catalog".into()),
+    });
+    assert_eq!(definition.effective_search_path, expected);
+    assert_eq!(scopes.captures.get(), 2);
+    scopes.events.borrow_mut().clear();
+    let current = effective_search_path(&PreparedDefinitionContext {
+        types: &NoRoutines,
+        routines: &NoRoutines,
+        scopes: &scopes,
+        aliases: &NoRoutines,
+    })
+    .unwrap();
+    assert_eq!(current, expected);
+    assert_eq!(
+        *scopes.events.borrow(),
+        ["3.capture", "3.binding", "3.release"]
     );
 }
 

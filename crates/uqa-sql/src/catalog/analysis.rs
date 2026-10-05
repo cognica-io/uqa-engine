@@ -29,6 +29,14 @@ pub struct ViewDefinition {
 
 /// Immutable namespace-aware lookup for SQL analysis. This contract exposes definitions only; it grants no row access, mutation, locking, or transaction services.
 pub trait AnalysisCatalog: Send + Sync {
+    /// The schemas that exist and that the analyzing role may use, including implicit namespaces, and its creation namespace. Catalogs without namespace state leave this unavailable.
+    fn effective_search_path(
+        &self,
+        _resolution: &RelationNameResolution,
+    ) -> Result<Option<super::resolution::EffectiveSearchPath>, SQLError> {
+        Ok(None)
+    }
+
     fn table_resolved(
         &self,
         resolution: &RelationNameResolution,

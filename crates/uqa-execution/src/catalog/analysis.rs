@@ -10,6 +10,17 @@ use uqa_sql::catalog::analysis::{AnalysisCatalog, TableDefinition, ViewDefinitio
 use uqa_sql::{ColumnType, SQLError};
 
 impl AnalysisCatalog for CatalogReadView {
+    fn effective_search_path(
+        &self,
+        resolution: &RelationNameResolution,
+    ) -> Result<Option<uqa_sql::catalog::resolution::EffectiveSearchPath>, SQLError> {
+        let role = &resolution.current_user;
+        Ok(Some(uqa_sql::catalog::resolution::EffectiveSearchPath {
+            schemas: super::namespaces::current_schema_names(self, resolution, role, true),
+            creation_namespace: super::namespaces::current_schema_name(self, resolution, role),
+        }))
+    }
+
     fn table_resolved(
         &self,
         resolution: &RelationNameResolution,

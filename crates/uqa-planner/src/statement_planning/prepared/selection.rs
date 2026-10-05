@@ -10,8 +10,9 @@ use std::sync::Arc;
 use uqa_sql::{
     plan::UnifiedPlan,
     prepared::{
-        definition::PreparedDefinitionContext, entry::PreparedStatementPlan,
-        planning::PreparedPlanUpdate,
+        definition::PreparedDefinitionContext,
+        entry::PreparedStatementPlan,
+        planning::{PreparedPlanAnalysis, PreparedPlanUpdate},
     },
     SQLError, SQLParam,
 };
@@ -41,6 +42,22 @@ pub struct PreparedPlanningContext<'a> {
     pub optimization: &'a dyn PreparedPlanOptimization,
 }
 
+fn needs_analysis(
+    context: &PreparedDefinitionContext<'_>,
+    entry: &PreparedStatementPlan,
+) -> Result<bool, SQLError> {
+    if entry.needs_analysis {
+        return Ok(true);
+    }
+    match entry.effective_search_path.as_ref() {
+        Some(previous) => Ok(
+            uqa_sql::prepared::definition::effective_search_path(context)?.as_ref()
+                != Some(previous),
+        ),
+        None => Ok(false),
+    }
+}
+
 pub fn select_plan(
     context: &PreparedPlanningContext<'_>,
     name: &str,
@@ -50,9 +67,14 @@ pub fn select_plan(
         return Ok(None);
     };
     let mode = context.session.plan_cache_mode()?;
-    let mut generic_plan = entry.plan.clone();
+    let needs_analysis = needs_analysis(&context.analysis, &entry)?;
+    let mut generic_plan = if needs_analysis {
+        None
+    } else {
+        entry.plan.clone()
+    };
     let mut generic_cost = entry.generic_cost;
-    let reanalyzed = if entry.needs_analysis {
+    let reanalyzed = if needs_analysis {
         let declared = entry
             .parameter_types
             .iter()
@@ -127,7 +149,10 @@ pub fn select_plan(
         name,
         &entry.logical_plan,
         PreparedPlanUpdate {
-            reanalyzed_plan: reanalyzed.map(|definition| Arc::new(definition.logical_plan)),
+            reanalyzed: reanalyzed.map(|definition| PreparedPlanAnalysis {
+                logical_plan: Arc::new(definition.logical_plan),
+                effective_search_path: definition.effective_search_path,
+            }),
             generic_plan,
             generic_cost,
             custom_cost,

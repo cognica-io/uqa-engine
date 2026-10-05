@@ -124,6 +124,7 @@ fn registration_samples_clock_and_publishes_under_the_retained_write_guard() {
     );
     assert_eq!(entry.parameter_types, [Some(ColumnType::Integer)]);
     assert!(entry.plan.is_none());
+    assert!(entry.effective_search_path.is_none());
     assert_eq!(entry.generic_plans, 0);
     assert_eq!(entry.custom_plans, 0);
 }

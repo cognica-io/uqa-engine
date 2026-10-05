@@ -62,6 +62,7 @@ pub fn register_plan(
             source_plan,
             logical_plan: Arc::new(definition.logical_plan),
             needs_analysis: false,
+            effective_search_path: definition.effective_search_path,
             plan: None,
             parameter_types: definition.parameter_types,
             result_schema: definition.result_schema,

@@ -8,6 +8,7 @@
 
 use crate::{
     binding::statements::{StatementAnalysisScopes, StatementBindingScope},
+    catalog::resolution::EffectiveSearchPath,
     plan::UnifiedPlan,
     routines::RoutineResolution,
     ColumnType, FunctionTypeResolver, RowSchema, SQLError,
@@ -26,6 +27,7 @@ pub struct PreparedDefinition {
     pub logical_plan: UnifiedPlan,
     pub parameter_types: Vec<Option<ColumnType>>,
     pub result_schema: Option<RowSchema>,
+    pub effective_search_path: Option<EffectiveSearchPath>,
 }
 
 pub fn analyze_definition(
@@ -35,13 +37,16 @@ pub fn analyze_definition(
 ) -> Result<PreparedDefinition, SQLError> {
     let parameter_types =
         super::declared_parameter_types(context.types, &mut logical_plan, declared)?;
-    let parameter_types = with_scope_result(context.scopes, |scope| {
-        crate::binding::read_prepared_inputs(
+    let (parameter_types, effective_search_path) = with_scope_result(context.scopes, |scope| {
+        let binding = scope.binding_context()?;
+        let parameter_types = crate::binding::read_prepared_inputs(
             context.routines,
             &mut logical_plan,
             &parameter_types,
-            &scope.binding_context()?,
-        )
+            &binding,
+        )?;
+        let effective_search_path = binding.catalog.effective_search_path(&binding.resolution)?;
+        Ok((parameter_types, effective_search_path))
     })?;
     // Parse analysis reads the names of the statement's `reg*` constants when it is prepared, so a name no object has is reported here.
     crate::schema::dependencies::oid_alias::read_prepared_oid_alias_constants(
@@ -53,6 +58,17 @@ pub fn analyze_definition(
         logical_plan,
         parameter_types,
         result_schema,
+        effective_search_path,
+    })
+}
+
+/// Read the live namespace through one retained binding scope before selecting a previously analyzed prepared statement.
+pub fn effective_search_path(
+    context: &PreparedDefinitionContext<'_>,
+) -> Result<Option<EffectiveSearchPath>, SQLError> {
+    with_scope_result(context.scopes, |scope| {
+        let binding = scope.binding_context()?;
+        binding.catalog.effective_search_path(&binding.resolution)
     })
 }
 

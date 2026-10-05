@@ -16,8 +16,14 @@ pub trait PreparedPlanProvider {
     ) -> Result<Option<UnifiedPlan>, SQLError>;
 }
 
+/// A successful replacement analysis and the namespace it used, published together against the original definition identity.
+pub struct PreparedPlanAnalysis {
+    pub logical_plan: std::sync::Arc<UnifiedPlan>,
+    pub effective_search_path: Option<crate::catalog::resolution::EffectiveSearchPath>,
+}
+
 pub struct PreparedPlanUpdate {
-    pub reanalyzed_plan: Option<std::sync::Arc<UnifiedPlan>>,
+    pub reanalyzed: Option<PreparedPlanAnalysis>,
     pub generic_plan: Option<UnifiedPlan>,
     pub generic_cost: Option<f64>,
     pub custom_cost: Option<f64>,
