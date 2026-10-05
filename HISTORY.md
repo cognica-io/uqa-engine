@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Probe exact field indexes before stored-row scans when private changes are present. Mask replaced or deleted identities, preserve private matches and explicit NULL fields, and retain typed comparison errors and serializable read dependencies.
 - Stream native SQLite private document and B-tree merges through retained spill entries, and reuse selected private readers for requested-ID projections in native SQLite and common Key/Value storage, including SQLite Key/Value and redb. Sparse requests seek spill blocks instead of scanning gaps; presence reads avoid private payloads, and stopped value callbacks do not load later payloads. Preserve input order, duplicates, fixed views, savepoint undo and callback reentry.
 - Use the default NEON ChaCha20 backend on supported ARM64 targets for encrypted temporary files and compressed SQLite containers, preserving ciphertext formats and key and stream-buffer zeroization.
 - Maintain native SQLite transaction cache revisions by changed record family and owner, so catalog refresh after a large write does not rescan every private row. Revision summaries spill under the same memory allowance and preserve savepoints and retained reads.
