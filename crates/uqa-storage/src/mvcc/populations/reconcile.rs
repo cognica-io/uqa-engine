@@ -14,8 +14,8 @@ use super::{
 };
 use crate::diskann_index::{pages::DiskANNOriginReader, DiskANNPopulationState, DiskANNQueryRead};
 use crate::mvcc::{
-    commit::RecordWriteKind, DatabaseId, MergedRecordSnapshot, PreparedRecordCommit,
-    PreparedRecordWrite, PrivateRecordChanges, VersionError, VersionResult,
+    commit::RecordWriteKind, key::RecordKey, DatabaseId, MergedRecordSnapshot,
+    PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 use uqa_core::memory::{BudgetedMap, BudgetedVec};
@@ -36,30 +36,26 @@ pub(super) struct Reconciliation<'a> {
 impl Reconciliation<'_> {
     pub(super) fn run(
         &self,
-        origins: &[PreparedRecordWrite],
+        origins: &PreparedRecordCommit,
         lifecycle: &[OwnedPopulationMutation],
     ) -> VersionResult<PreparedRecordCommit> {
         let control = self.control;
         let output = PrivateRecordChanges::new(control.memory());
-        let mut decoded = BudgetedVec::new(control.memory());
-        for write in origins {
-            control.check()?;
-            if let Some(value) = write.value() {
-                decoded.push(self.layout.origin(write.key(), value, control)?)?;
-            }
-        }
-        let mut fields =
-            BudgetedMap::<&[u8], BudgetedVec<&DiskANNPopulationOrigin>>::new(control.memory());
-        for origin in decoded.iter() {
-            control.check()?;
-            if let Some(changes) = fields.get_mut(&*origin.field) {
-                changes.push(origin)?;
+        // Only distinct field identities remain resident. Replay the sealed origin records one at a time; neither canonical vectors nor all decoded origins are retained here.
+        let mut fields = BudgetedMap::<RecordKey, u32>::new(control.memory());
+        self.visit_origins(origins, None, &mut |origin| {
+            if let Some(dimensions) = fields.get(&*origin.field) {
+                if *dimensions != origin.origin.dimensions() {
+                    return Err(invalid("population inputs disagree on field dimensions"));
+                }
             } else {
-                let mut changes = BudgetedVec::new(control.memory());
-                changes.push(origin)?;
-                fields.insert(&origin.field, changes)?;
+                fields.insert(
+                    RecordKey::new(&origin.field, control.memory())?,
+                    origin.origin.dimensions(),
+                )?;
             }
-        }
+            Ok(())
+        })?;
         let mut latest = BudgetedMap::new(control.memory());
         for operation in lifecycle {
             control.check()?;
@@ -87,20 +83,17 @@ impl Reconciliation<'_> {
                 }
             }
         }
-        for (&field, changes) in &fields {
-            let dimensions = changes[0].origin.dimensions();
+        for (field, &dimensions) in &fields {
+            let field = field.bytes();
             self.with_source(field, dimensions, self.after, &mut |current| {
-                for change in changes.iter() {
-                    control.check()?;
-                    if change.origin.dimensions() != dimensions
-                        || current.document_origin(change.document, control)? != Some(change.origin)
-                    {
+                self.visit_origins(origins, Some(field), &mut |change| {
+                    if current.document_origin(change.document, control)? != Some(change.origin) {
                         return Err(invalid(
                             "population input differs from complete canonical replacement",
                         ));
                     }
-                }
-                Ok(())
+                    Ok(())
+                })
             })?;
             let prefix = self.layout.header_prefix(field, control)?;
             visit(self.after, &prefix, control, &mut |key, template| {
@@ -113,7 +106,7 @@ impl Reconciliation<'_> {
                         "population header belongs to another canonical field",
                     ));
                 }
-                self.replace(&output, key, template, &header, changes)
+                self.replace(&output, key, template, &header, origins)
             })?;
         }
         control.check()?;
@@ -166,7 +159,7 @@ impl Reconciliation<'_> {
         key: &[u8],
         template: &[u8],
         header: &DiskANNPopulationHeader,
-        changes: &[&DiskANNPopulationOrigin],
+        origins: &PreparedRecordCommit,
     ) -> VersionResult<()> {
         let control = self.control;
         let mut state = header.state;
@@ -175,8 +168,7 @@ impl Reconciliation<'_> {
             state.dimensions(),
             self.before,
             &mut |previous| {
-                for change in changes {
-                    control.check()?;
+                self.visit_origins(origins, Some(&header.field), &mut |change| {
                     let origin = previous.document_origin(change.document, control)?;
                     let witness_key = self.layout.witness_key(key, change.document, control)?;
                     let witness = self.before.get(&witness_key, control)?;
@@ -207,12 +199,33 @@ impl Reconciliation<'_> {
                             .encode_witness(&witness_key, template, witness, control)?;
                     self.put(output, &witness_key, Some(&bytes))?;
                     state = next;
-                }
-                Ok(())
+                    Ok(())
+                })
             },
         )?;
         let bytes = self.layout.encode_header(key, template, state, control)?;
         self.put(output, key, Some(&bytes))
+    }
+
+    fn visit_origins(
+        &self,
+        origins: &PreparedRecordCommit,
+        field: Option<&[u8]>,
+        visit: &mut dyn FnMut(&DiskANNPopulationOrigin) -> VersionResult<()>,
+    ) -> VersionResult<()> {
+        let mut writes = origins.writes();
+        while let Some(write) =
+            writes.next_with_kind(RecordWriteKind::DiskANNOrigin, self.control)?
+        {
+            if let Some(value) = write.value() {
+                let origin = self.layout.origin(write.key(), value, self.control)?;
+                if field.is_none_or(|field| field == &*origin.field) {
+                    visit(&origin)?;
+                }
+            }
+        }
+        self.control.check()?;
+        Ok(())
     }
 
     fn put(

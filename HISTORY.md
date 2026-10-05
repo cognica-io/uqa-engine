@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Stream DiskANN population inputs through commit-time reconciliation and reuse encrypted batch journals for origin edits, allowing vector transactions larger than the session allowance while preserving counts, conflicts and savepoint undo.
 - Stream individual private spill entries through a charged 1 KiB buffer when complete read blocks cannot fit; preserve lookup/cursor bounds and record metadata while allowing native HNSW deletion/rebuild publication under its unchanged session allowance.
 - Reuse resident record prefixes when evaluated MVCC batches spill, share their memory allowance across record groups, and avoid unnecessary cursor allocations and spilled-run handle overhead.
 - Admit retained HNSW mutation inputs before constructing a derived graph, so an oversized input fails without first building a graph that cannot be published.

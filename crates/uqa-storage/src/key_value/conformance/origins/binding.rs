@@ -39,7 +39,10 @@ pub use recovery::{
 mod resources;
 mod restore;
 mod runtime;
-pub use resources::{verify_diskann_resource_reopen, verify_diskann_resource_source};
+pub use resources::{
+    verify_diskann_resource_reopen, verify_diskann_resource_source,
+    verify_diskann_transaction_spill,
+};
 pub use restore::{
     diskann_restore_records, verify_diskann_restore_source, verify_diskann_restored,
     verify_diskann_restored_rebuild, verify_diskann_restored_writes, DiskANNRestoreRecords,

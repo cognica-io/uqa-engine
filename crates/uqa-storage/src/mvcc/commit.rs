@@ -248,20 +248,6 @@ impl PreparedRecordCommit {
         }
     }
 
-    /// Every write, in memory: for the inputs of one provider batch, which its operations already hold.
-    pub(crate) fn collect(
-        &self,
-        control: &StorageReadControl,
-    ) -> VersionResult<BudgetedVec<PreparedRecordWrite>> {
-        let mut writes = BudgetedVec::new(control.memory());
-        writes.reserve(self.len())?;
-        let mut cursor = self.writes();
-        while let Some(write) = cursor.next(control)? {
-            writes.push(write)?;
-        }
-        Ok(writes)
-    }
-
     /// Whether some write replaces `key`.
     pub(crate) fn contains_key(
         &self,

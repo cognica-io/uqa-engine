@@ -24,3 +24,13 @@ fn diskann_resources_bound_cold_provider_generations_and_concurrent_queries(
     let (backend, _records) = super::backend(&connection, native);
     verify_diskann_resource_reopen(&*backend, generation).unwrap();
 }
+
+#[rstest::rstest]
+fn diskann_transaction_larger_than_its_session_allowance_commits(
+    #[values(false, true)] native: bool,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = super::connection(&directory.path().join("transaction-spill.db"), 0);
+    let (backend, _records) = super::backend(&connection, native);
+    uqa_storage::key_value::conformance::verify_diskann_transaction_spill(&*backend).unwrap();
+}

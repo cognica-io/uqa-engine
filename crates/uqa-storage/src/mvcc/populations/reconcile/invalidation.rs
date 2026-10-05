@@ -7,17 +7,24 @@
 //! Raw writes cannot invalidate a population selected before or after the writer's original snapshot.
 
 use super::{
-    invalid, OwnedPopulationMutation, PopulationLifecycle, PreparedRecordWrite, Reconciliation,
+    invalid, OwnedPopulationMutation, PopulationLifecycle, PreparedRecordCommit, Reconciliation,
     VersionResult,
 };
 
 impl Reconciliation<'_> {
     pub(super) fn validate_invalidations(
         &self,
-        origins: &[PreparedRecordWrite],
+        origins: &PreparedRecordCommit,
         lifecycle: &PopulationLifecycle<'_>,
     ) -> VersionResult<()> {
-        for write in origins.iter().filter(|write| write.value().is_none()) {
+        let mut writes = origins.writes();
+        while let Some(write) = writes.next_with_kind(
+            crate::mvcc::commit::RecordWriteKind::DiskANNOrigin,
+            self.control,
+        )? {
+            if write.value().is_some() {
+                continue;
+            }
             self.control.check()?;
             let prefix = self
                 .layout

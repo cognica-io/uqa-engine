@@ -155,6 +155,26 @@ fn replace(store: &VersionedKeyValueStore, document: u64, count: u64) -> Storage
 }
 
 #[test]
+fn diskann_population_commit_streams_more_origins_than_the_session_allowance_holds() {
+    let persistence = Persistence::new();
+    let setup = seed(&persistence);
+    let built = Built::capture(&setup);
+    built.publish(&setup, None).unwrap();
+    let writer = persistence.session(512 << 10);
+    writer.begin_transaction().unwrap();
+    for document in 4..=2048 {
+        replace(&writer, document, 1).unwrap();
+    }
+    writer.savepoint("keep").unwrap();
+    replace(&writer, 4, 2).unwrap();
+    writer.rollback_to_savepoint("keep").unwrap();
+    assert_eq!(built.counts(&writer), (2048, 2045));
+    writer.commit_transaction().unwrap();
+    assert_eq!(built.counts(&*setup), (2048, 2045));
+    assert!(writer.retention_control().memory().peak() <= 512 << 10);
+}
+
+#[test]
 fn diskann_population_disjoint_writers_merge_in_both_orders_and_after_command_refresh() {
     for reverse in [false, true] {
         for refresh in [false, true] {
