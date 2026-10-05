@@ -13,6 +13,9 @@ use crate::batch::{PhysicalRow, RowSchema};
 
 use super::subquery::ScalarSubqueryRunner;
 
+pub(crate) type RetrievalPredicate<'a> =
+    dyn Fn(&str, &[crate::ScalarExpr]) -> Result<bool, uqa_sql::SQLError> + 'a;
+
 pub struct ScalarEvalContext<'a> {
     row: Option<&'a ResultRow>,
     row_lookup: Option<&'a dyn RowLookup>,
@@ -21,6 +24,7 @@ pub struct ScalarEvalContext<'a> {
     function_hook: Option<&'a dyn EngineHook>,
     subquery_runner: Option<&'a dyn ScalarSubqueryRunner>,
     physical_outer_row: Option<(&'a RowSchema, &'a PhysicalRow)>,
+    retrieval_predicate: Option<&'a RetrievalPredicate<'a>>,
 }
 
 impl<'a> ScalarEvalContext<'a> {
@@ -34,6 +38,7 @@ impl<'a> ScalarEvalContext<'a> {
             function_hook: None,
             subquery_runner: None,
             physical_outer_row: None,
+            retrieval_predicate: None,
         }
     }
 
@@ -47,6 +52,7 @@ impl<'a> ScalarEvalContext<'a> {
             function_hook: None,
             subquery_runner: None,
             physical_outer_row: None,
+            retrieval_predicate: None,
         }
     }
 
@@ -54,6 +60,18 @@ impl<'a> ScalarEvalContext<'a> {
     pub fn with_function_hook(mut self, hook: &'a dyn EngineHook) -> Self {
         self.function_hook = Some(hook);
         self
+    }
+
+    pub(crate) fn with_retrieval_predicate(
+        mut self,
+        predicate: &'a RetrievalPredicate<'a>,
+    ) -> Self {
+        self.retrieval_predicate = Some(predicate);
+        self
+    }
+
+    pub(crate) fn retrieval_predicate(&self) -> Option<&'a RetrievalPredicate<'a>> {
+        self.retrieval_predicate
     }
 
     #[must_use]

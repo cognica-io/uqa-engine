@@ -28,6 +28,7 @@ impl RowLockManager {
 
     fn with_cross_attachment(cross: Option<CrossAttachment>) -> Self {
         Self {
+            baseline_owner: Weak::new(),
             next_session: AtomicU64::new(1),
             next_transaction_xid: AtomicU64::new(3),
             catalog_oids: crate::catalog::identity::CatalogOidCounter::default(),
@@ -53,18 +54,26 @@ impl RowLockManager {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn for_database_file(path: &std::path::Path) -> Self {
+        Self::for_database_file_with_key(path, None)
+    }
+
+    fn for_database_file_with_key(
+        path: &std::path::Path,
+        key: Option<uqa_storage::StorageEncryptionKey>,
+    ) -> Self {
         #[cfg(any(unix, windows))]
         {
-            let cross = match FileLockCoordinator::open(path) {
-                Ok(coordinator) => CrossAttachment::Active(Box::new(coordinator)),
+            let cross = match FileLockCoordinator::open_with_key(path, key) {
+                Ok(coordinator) => CrossAttachment::Active(Arc::new(coordinator)),
                 Err(reason) => CrossAttachment::Unavailable(reason),
             };
             Self::with_cross_attachment(Some(cross))
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = path;
+            let _ = (path, key);
             Self::with_cross_attachment(None)
         }
     }
@@ -250,6 +259,7 @@ pub fn shared_provider_manager(
     shared_manager(
         identity,
         ManagerIdentity::Provider(Arc::as_ptr(provider).cast::<()>() as usize),
+        provider.auxiliary_encryption_key(),
     )
 }
 
@@ -260,12 +270,14 @@ pub fn shared_backend_manager(
     shared_manager(
         identity,
         ManagerIdentity::Provider(Arc::as_ptr(backend).cast::<()>() as usize),
+        backend.auxiliary_encryption_key(),
     )
 }
 
 fn shared_manager(
     identity: Option<uqa_storage::PersistentStorageIdentity>,
     fallback: ManagerIdentity,
+    key: Option<uqa_storage::StorageEncryptionKey>,
 ) -> Arc<RowLockManager> {
     let identity = identity.map_or(fallback, ManagerIdentity::Durable);
     let registry = DATABASE_MANAGERS.get_or_init(|| Mutex::new(HashMap::new()));
@@ -274,12 +286,48 @@ fn shared_manager(
     if let Some(manager) = registry.get(&identity).and_then(Weak::upgrade) {
         return manager;
     }
-    let manager = match &identity {
-        ManagerIdentity::Durable(uqa_storage::PersistentStorageIdentity::File(path)) => {
-            Arc::new(RowLockManager::for_database_file(path))
-        }
-        _ => Arc::new(RowLockManager::new()),
-    };
+    let manager = Arc::new_cyclic(|owner| {
+        let mut manager = match &identity {
+            ManagerIdentity::Durable(uqa_storage::PersistentStorageIdentity::File(path)) => {
+                RowLockManager::for_database_file_with_key(path, key)
+            }
+            _ => RowLockManager::new(),
+        };
+        manager.baseline_owner = owner.clone();
+        manager
+    });
     registry.insert(identity, Arc::downgrade(&manager));
     manager
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_retained_baseline_preserves_the_single_registered_coordinator() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("retained.db");
+        let open = || {
+            shared_manager(
+                Some(uqa_storage::PersistentStorageIdentity::File(path.clone())),
+                ManagerIdentity::Provider(0),
+                None,
+            )
+        };
+        let manager = open();
+        let identity = Arc::downgrade(&manager);
+        let baseline = manager
+            .begin_change_snapshot(&uqa_core::CancellationToken::new())
+            .unwrap()
+            .baseline()
+            .unwrap();
+        drop(manager);
+        let reopened = open();
+        assert!(Arc::ptr_eq(&identity.upgrade().unwrap(), &reopened));
+        drop(reopened);
+        assert!(identity.upgrade().is_some());
+        drop(baseline);
+        assert!(identity.upgrade().is_none());
+    }
 }

@@ -18,6 +18,7 @@ pub mod locking;
 pub mod generated;
 
 pub mod expressions;
+mod qualification;
 pub mod rows;
 pub mod views;
 

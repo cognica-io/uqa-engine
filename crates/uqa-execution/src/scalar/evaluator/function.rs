@@ -27,6 +27,15 @@ pub(super) fn evaluate_function(
     {
         return numeric(operator, binding, args, context, control);
     }
+    if let Some(predicate) = context.retrieval_predicate() {
+        if binding.is_none_or(|binding| binding.builtin)
+            && uqa_sql::semantics::retrieval_function(name)
+            // This name also dispatches scalar JSONPath expressions, including paths supplied by parameters or expressions.
+            && !name.eq_ignore_ascii_case("fts_match")
+        {
+            return plain(Value::Bool(predicate(name, args)?), control);
+        }
+    }
     if name.eq_ignore_ascii_case("coalesce") && binding.is_none_or(|binding| binding.builtin) {
         for argument in args {
             let value = eval_scalar_inner(argument, context, control)?;

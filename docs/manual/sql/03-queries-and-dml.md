@@ -385,6 +385,8 @@ RETURNING a.account_id, a.balance;
 
 Assignments can use expressions and scalar subqueries. Existing rows are validated against the resulting schema and constraints before publication.
 
+For a table UPDATE without FROM, `WHERE text_match(body, $1)` qualifies rows by document membership in the existing GIN retrieval result; the query parameter is inferred as text. AND, OR and NOT compose that membership with ordinary scalar conditions, including conditions using CTEs and scalar subqueries. Search scores do not become SQL truth values. Retrieval input retains the statement's read generation across nested writes, and a row changed by another transaction during a lock wait is checked against the refreshed retrieval state before assignment.
+
 ## DELETE
 
 ```sql

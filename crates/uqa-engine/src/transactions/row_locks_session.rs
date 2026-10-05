@@ -341,7 +341,7 @@ impl Engine {
         self.row_locks.row_successor_after(
             &canonical,
             doc_id,
-            self.row_lock_snapshot_change_baseline(),
+            &self.row_lock_snapshot_change_baseline()?,
         )
     }
 
@@ -354,7 +354,7 @@ impl Engine {
         self.row_locks.physical_row_successor_after(
             &canonical,
             doc_id,
-            self.row_lock_snapshot_change_baseline(),
+            &self.row_lock_snapshot_change_baseline()?,
         )
     }
 
@@ -665,7 +665,7 @@ impl Engine {
     ) -> Result<std::sync::Arc<uqa_execution::row_locks::retry_cache::RowLockRetryCache>, SQLError>
     {
         let budget_bytes = self.work_mem_bytes()?;
-        let baseline = self.row_lock_snapshot_change_baseline();
+        let baseline = self.row_lock_snapshot_change_baseline()?;
         let mut statements = self.session.row_lock_statements.lock();
         let Some(slot) = statements.last_mut() else {
             drop(statements);
@@ -691,14 +691,15 @@ impl Engine {
         Ok(cache)
     }
 
-    pub(crate) fn row_lock_snapshot_change_baseline(&self) -> crate::row_locks::RowChangeBaseline {
-        self.session.transactions.lock().first().map_or_else(
-            || crate::row_locks::RowChangeBaseline {
-                epoch: self.row_locks.current_change_epoch(),
-                cross_sequence: 0,
-            },
-            |frame| frame.snapshot_change_baseline,
-        )
+    pub(crate) fn row_lock_snapshot_change_baseline(
+        &self,
+    ) -> Result<crate::row_locks::RowChangeBaseline, SQLError> {
+        if let Some(frame) = self.session.transactions.lock().first() {
+            return Ok(frame.snapshot_change_baseline.clone());
+        }
+        self.row_locks
+            .begin_change_snapshot(&self.runtime.cancellation)?
+            .baseline()
     }
 
     pub(crate) fn update_statement_row_lock_baseline(

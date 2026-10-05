@@ -79,22 +79,26 @@ struct CoordinatorState {
     next_holder_slot: u64,
     /// Row claims of local sessions, which live in the shared claim table instead of record locks and holder slots.
     rows: row_claims::RowClaims,
+    relation_identities: relations::identities::Identities,
 }
 
 /// Process-wide coordinator for one durable database. All engine sessions of this process share one descriptor while the in-process lock table arbitrates between local sessions. On POSIX, nothing else in the process may open the sidecar path because closing another descriptor to it would drop this process's record locks.
 pub(in crate::row_locks) struct FileLockCoordinator {
     file: std::fs::File,
-    change_file: std::fs::File,
+    change_path: std::path::PathBuf,
+    change_readers: std::fs::File,
     claim_file: std::fs::File,
     sequence_file: std::fs::File,
-    change_journal: Mutex<()>,
+    relation_path: std::path::PathBuf,
+    relation_key: Option<uqa_storage::StorageEncryptionKey>,
+    change_journal: Mutex<journal::Readers>,
     transaction_xids: Mutex<xids::TransactionXids>,
     temporary_role_slots: Mutex<temporary_roles::Slots>,
     state: Mutex<CoordinatorState>,
 }
 
 mod claims;
-mod journal;
+pub(super) mod journal;
 mod platform;
 mod relations;
 mod row_claims;
@@ -104,9 +108,18 @@ mod waits;
 mod xids;
 
 use platform::{lock_would_block, process_alive, read_exact_at, write_all_at};
+pub(in crate::row_locks) use relations::identities::RelationIdentityLease;
 
 impl FileLockCoordinator {
+    #[cfg(test)]
     pub(in crate::row_locks) fn open(database_path: &Path) -> Result<Self, String> {
+        Self::open_with_key(database_path, None)
+    }
+
+    pub(in crate::row_locks) fn open_with_key(
+        database_path: &Path,
+        relation_key: Option<uqa_storage::StorageEncryptionKey>,
+    ) -> Result<Self, String> {
         let mut sidecar = database_path.as_os_str().to_owned();
         sidecar.push(".uqa-locks");
         let file = std::fs::OpenOptions::new()
@@ -123,18 +136,16 @@ impl FileLockCoordinator {
             })?;
         let mut change_sidecar = database_path.as_os_str().to_owned();
         change_sidecar.push(".uqa-row-changes");
-        let change_file = std::fs::OpenOptions::new()
+        let change_path = std::path::PathBuf::from(change_sidecar);
+        let mut reader_sidecar = database_path.as_os_str().to_owned();
+        reader_sidecar.push(".uqa-row-change-readers");
+        let change_readers = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(&change_sidecar)
-            .map_err(|error| {
-                format!(
-                    "open cross-process row-change journal `{}`: {error}",
-                    Path::new(&change_sidecar).display()
-                )
-            })?;
+            .open(&reader_sidecar)
+            .map_err(|error| format!("open row-change reader registry: {error}"))?;
         let mut claim_sidecar = database_path.as_os_str().to_owned();
         claim_sidecar.push(".uqa-row-claims");
         let claim_file = std::fs::OpenOptions::new()
@@ -164,12 +175,17 @@ impl FileLockCoordinator {
                 )
             })?;
         let pid = std::process::id();
+        let mut relation_path = database_path.as_os_str().to_owned();
+        relation_path.push(".uqa-relation-identities");
         let coordinator = Self {
             file,
-            change_file,
+            change_path,
+            change_readers,
             claim_file,
             sequence_file,
-            change_journal: Mutex::new(()),
+            relation_path: relation_path.into(),
+            relation_key,
+            change_journal: Mutex::new(journal::Readers::default()),
             transaction_xids: Mutex::new(xids::TransactionXids::new()),
             temporary_role_slots: Mutex::new(temporary_roles::Slots::default()),
             state: Mutex::new(CoordinatorState {
@@ -184,6 +200,7 @@ impl FileLockCoordinator {
                 released_holder_slots: Vec::new(),
                 next_holder_slot: u64::from(pid).wrapping_mul(31) % HOLDER_SLOT_COUNT,
                 rows: row_claims::RowClaims::default(),
+                relation_identities: relations::identities::Identities::default(),
             }),
         };
         Ok(coordinator)
@@ -200,6 +217,8 @@ impl FileLockCoordinator {
 
 impl Drop for FileLockCoordinator {
     fn drop(&mut self) {
+        self.close_relation_identities();
+        self.detach_journal_reader();
         self.detach_transaction_xids();
         self.detach_row_claims_process();
     }

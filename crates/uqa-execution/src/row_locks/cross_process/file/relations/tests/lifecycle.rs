@@ -16,6 +16,7 @@ fn conditional_manager_acquisition_checks_foreign_holders_and_preserves_prior_cl
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("relations.db");
     let manager = RowLockManager::for_database_file(&path);
+    let coordinator = manager.coordinator().unwrap().unwrap();
     let relation = manager.table_key(std::str::from_utf8(RELATION).unwrap());
     let cancel = uqa_core::CancellationToken::new();
     let mut peer = peer::Peer::start(&path);
@@ -55,7 +56,7 @@ fn conditional_manager_acquisition_checks_foreign_holders_and_preserves_prior_cl
         peer.request(&format!("try {}", Share as u8)),
         format!(
             "conflict {}",
-            relation_mode_claim(RELATION, RowExclusive, true).offset
+            relation_mode_claim(coordinator.relation_slot(RELATION), RowExclusive, true).offset
         )
     );
     assert!(manager
@@ -79,6 +80,9 @@ fn admission_closes_the_gap_between_conflict_checks_and_holder_publication() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("relations.db");
     let coordinator = FileLockCoordinator::open(&path).unwrap();
+    let mut identity = coordinator
+        .pin_relation(RELATION, &uqa_core::CancellationToken::new())
+        .unwrap();
     let mut peer = peer::Peer::start(&path);
     coordinator
         .apply_byte_mode(RELATION_ADMISSION_BYTE, None, Some(true))
@@ -95,17 +99,18 @@ fn admission_closes_the_gap_between_conflict_checks_and_holder_publication() {
         .try_admitted_relation(
             &mut coordinator.state.lock(),
             PARENT_SESSION,
-            RELATION,
+            identity.slot(),
             Share,
         )
         .unwrap()
         .unwrap();
+    identity.retain();
     admission.release().unwrap();
     assert_eq!(
         peer.request(&format!("try {}", RowExclusive as u8)),
         format!(
             "conflict {}",
-            relation_mode_claim(RELATION, Share, true).offset
+            relation_mode_claim(coordinator.relation_slot(RELATION), Share, true).offset
         )
     );
     release(&coordinator, Share);
@@ -126,6 +131,7 @@ fn waiting_relation_upgrades_cancel_without_false_deadlocks_and_report_real_cycl
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("relations.db");
     let manager = std::sync::Arc::new(RowLockManager::for_database_file(&path));
+    let coordinator = manager.coordinator().unwrap().unwrap();
     let relation = manager.table_key(std::str::from_utf8(RELATION).unwrap());
     let cancel = std::sync::Arc::new(uqa_core::CancellationToken::new());
     manager
@@ -182,7 +188,7 @@ fn waiting_relation_upgrades_cancel_without_false_deadlocks_and_report_real_cycl
         peer.request(&format!("try {}", Share as u8)),
         format!(
             "conflict {}",
-            relation_mode_claim(RELATION, RowExclusive, true).offset
+            relation_mode_claim(coordinator.relation_slot(RELATION), RowExclusive, true).offset
         )
     );
     manager.release_session(PARENT_SESSION);

@@ -6,7 +6,7 @@
 
 //! Cross-process row and relation lock coordination.
 //!
-//! Independent OS processes opening the same durable database coordinate logical locks through sidecar files next to the database. Relation locks are native byte-range locks whose offsets derive from stable hashes of the relation identity; hash collisions only make coordination more conservative, never less. Record locks die with the owning process, so a crashed process can never leave a stale logical lock behind.
+//! Independent OS processes opening the same durable database coordinate logical locks through sidecar files next to the database. Relation identities are compared in full and assigned leased native lock slots. Holders and waiters pin their selected slot against reuse. Record locks die with the owning process, so a crashed process can never leave a stale logical lock behind.
 //!
 //! Row claims are entries of a shared claim table instead of record locks, because a statement may claim any number of rows and each record lock call walks every record lock of its file. An entry names its owning process and session, and the owning process holds one record lock, its liveness byte, for as long as it is attached, so an entry whose owner died is recognized and discarded.
 //!
@@ -57,6 +57,7 @@ pub(super) enum PublishedRowChangeKind {
 }
 
 /// Sidecar layout. Coordination bytes and wait/holder slots occupy the low addresses; record-lock byte ranges start above them so lock offsets never alias structured data offsets.
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 const RELATION_BASE: u64 = 1 << 20;
 const RELATION_SPAN: u64 = 1 << 20;
 const ROW_BASE: u64 = 1 << 21;
@@ -191,51 +192,49 @@ pub(super) fn row_byte_claims(
     }
 }
 
-pub(super) fn relation_byte_claims(relation: &[u8], mode: RelationLockMode) -> [ByteClaim; 2] {
-    let offset = RELATION_BASE + stable_hash(&[relation]) % RELATION_SPAN;
-    [
-        ByteClaim {
-            offset,
-            write: matches!(mode, RelationLockMode::AccessExclusive),
-        },
-        relation_mode_claim(relation, mode, false),
-    ]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) fn relation_byte_claims(relation: u64, mode: RelationLockMode) -> [ByteClaim; 1] {
+    [relation_mode_claim(relation, mode, false)]
 }
 
 /// Each held mode occupies its own shared byte. Admission checks incompatible bytes exclusively before publishing a new holder; this also represents mutually conflicting modes that are individually self-compatible.
-pub(super) fn relation_mode_claim(
-    relation: &[u8],
-    mode: RelationLockMode,
-    write: bool,
-) -> ByteClaim {
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) fn relation_mode_claim(relation: u64, mode: RelationLockMode, write: bool) -> ByteClaim {
     ByteClaim {
-        offset: RELATION_MODE_BASE + (stable_hash(&[relation]) % RELATION_SPAN) * 8 + mode as u64,
+        offset: RELATION_MODE_BASE + relation * 8 + mode as u64,
         write,
     }
 }
 
 /// A wait descriptor names the complete requested mode, including every conflicting holder. This address is metadata only and is never claimed as a native lock byte.
-pub(super) fn relation_wait_claim(relation: &[u8], mode: RelationLockMode) -> ByteClaim {
+pub(super) fn relation_wait_claim(relation: u64, mode: RelationLockMode) -> ByteClaim {
     ByteClaim {
-        offset: RELATION_WAIT_BASE + (stable_hash(&[relation]) % RELATION_SPAN) * 8 + mode as u64,
+        offset: RELATION_WAIT_BASE + relation * 8 + mode as u64,
         write: true,
     }
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+fn relation_slot_of_claim(offset: u64) -> Option<u64> {
+    [RELATION_MODE_BASE, RELATION_WAIT_BASE]
+        .into_iter()
+        .find_map(|base| {
+            (base..base + 8 * RELATION_SPAN)
+                .contains(&offset)
+                .then(|| (offset - base) / 8)
+        })
+}
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(super) fn wait_blocking_claims(wanted: ByteClaim) -> impl Iterator<Item = ByteClaim> + Clone {
-    let mut claims = [None; 9];
+    let mut claims = [None; 8];
     if (RELATION_WAIT_BASE..RELATION_WAIT_BASE + 8 * RELATION_SPAN).contains(&wanted.offset) {
         let position = wanted.offset - RELATION_WAIT_BASE;
         let mode = RelationLockMode::ALL[(position % 8) as usize];
         let relation = position / 8;
-        claims[0] = Some(ByteClaim {
-            offset: RELATION_BASE + relation,
-            write: mode == RelationLockMode::AccessExclusive,
-        });
         for (index, held) in RelationLockMode::ALL.into_iter().enumerate() {
             if mode.conflicts_with(held) {
-                claims[index + 1] = Some(ByteClaim {
+                claims[index] = Some(ByteClaim {
                     offset: RELATION_MODE_BASE + relation * 8 + index as u64,
                     write: true,
                 });
@@ -267,7 +266,10 @@ fn stable_hash(parts: &[&[u8]]) -> u64 {
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-pub(super) use file::FileLockCoordinator;
+pub(super) use file::{FileLockCoordinator, RelationIdentityLease};
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) use file::journal::JournalReadLease;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 // Native record locks and process-liveness probes have no stable safe wrapper in std. The unsafe surface is confined to operating-system calls over file handles, process handles, and their plain C data structures.
@@ -275,11 +277,17 @@ pub(super) use file::FileLockCoordinator;
 mod file;
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
-pub(super) use fallback::FileLockCoordinator;
+pub(super) use fallback::{FileLockCoordinator, RelationIdentityLease};
+
+#[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
+pub(super) use fallback::JournalReadLease;
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 mod fallback {
     use std::path::Path;
+
+    #[derive(Debug)]
+    pub(in crate::row_locks) struct JournalReadLease;
 
     use super::super::sequence_positions::{
         RecordedSequencePosition, SequencePosition, SequencePositionKey, SequenceSlot,
@@ -289,9 +297,37 @@ mod fallback {
     /// Sandboxed targets without native processes retain process-local lock semantics instead of rejecting every persistent mutation.
     pub(in crate::row_locks) struct FileLockCoordinator {}
 
+    pub(in crate::row_locks) struct RelationIdentityLease<'a>(std::marker::PhantomData<&'a ()>);
+    impl RelationIdentityLease<'_> {
+        pub(in crate::row_locks) fn slot(&self) -> u64 {
+            0
+        }
+        pub(in crate::row_locks) fn retain(&mut self) {}
+    }
+
     impl FileLockCoordinator {
-        pub(in crate::row_locks) fn open(_database_path: &Path) -> Result<Self, String> {
+        pub(in crate::row_locks) fn open_with_key(
+            _database_path: &Path,
+            _key: Option<uqa_storage::StorageEncryptionKey>,
+        ) -> Result<Self, String> {
             Ok(Self {})
+        }
+
+        pub(in crate::row_locks) fn pin_relation<'a>(
+            &'a self,
+            _relation: &'a [u8],
+            cancel: &uqa_core::CancellationToken,
+        ) -> Result<RelationIdentityLease<'a>, uqa_sql::SQLError> {
+            cancel.check()?;
+            Ok(RelationIdentityLease(std::marker::PhantomData))
+        }
+
+        pub(in crate::row_locks) fn release_relation(
+            &self,
+            _session: u64,
+            _relation: &[u8],
+            _mode: RelationLockMode,
+        ) {
         }
 
         pub(in crate::row_locks) fn retain_temporary_role(
@@ -370,10 +406,10 @@ mod fallback {
             Ok(Ok(()))
         }
 
-        pub(in crate::row_locks) fn try_relation_claim(
+        pub(in crate::row_locks) fn try_slot_claim(
             &self,
             _session: u64,
-            _relation: &[u8],
+            _relation: u64,
             _mode: RelationLockMode,
         ) -> Result<Result<(), RelationClaimWait>, String> {
             Ok(Ok(()))
@@ -401,8 +437,10 @@ mod fallback {
             Ok(())
         }
 
-        pub(in crate::row_locks) fn change_sequence(&self) -> Result<u64, String> {
-            Ok(0)
+        pub(in crate::row_locks) fn pin_change_sequence(
+            self: &std::sync::Arc<Self>,
+        ) -> Result<(u64, std::sync::Arc<JournalReadLease>), String> {
+            Ok((0, std::sync::Arc::new(JournalReadLease)))
         }
 
         pub(in crate::row_locks) fn allocate_transaction_xid(&self) -> Result<Option<u32>, String> {

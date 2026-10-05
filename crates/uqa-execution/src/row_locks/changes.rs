@@ -12,11 +12,30 @@ use super::{
     LockStrength, RowLockKey, RowLockManager, SQLError,
 };
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Default)]
 pub struct RowChangeBaseline {
     pub epoch: u64,
     pub cross_sequence: u64,
+    pub(super) _retention: Option<Arc<cross_process::JournalReadLease>>,
+    pub(super) _manager: Option<Arc<RowLockManager>>,
 }
+
+impl std::fmt::Debug for RowChangeBaseline {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RowChangeBaseline")
+            .field("epoch", &self.epoch)
+            .field("cross_sequence", &self.cross_sequence)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for RowChangeBaseline {
+    fn eq(&self, other: &Self) -> bool {
+        self.epoch == other.epoch && self.cross_sequence == other.cross_sequence
+    }
+}
+impl Eq for RowChangeBaseline {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendingRowChange {
@@ -101,7 +120,7 @@ impl RowLockManager {
         &self,
         table: &str,
         doc_id: DocId,
-        baseline: RowChangeBaseline,
+        baseline: &RowChangeBaseline,
         wanted: LockStrength,
     ) -> Result<RowChangeTarget, SQLError> {
         let key = RowLockKey {
@@ -131,7 +150,7 @@ impl RowLockManager {
         &self,
         table: &str,
         doc_id: DocId,
-        baseline: RowChangeBaseline,
+        baseline: &RowChangeBaseline,
     ) -> Result<RowChangeTarget, SQLError> {
         let key = RowLockKey {
             table: self.table_key(table),

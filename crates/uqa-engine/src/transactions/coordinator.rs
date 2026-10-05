@@ -285,7 +285,7 @@ impl Engine {
             )?;
             (None, data_snapshot, baseline)
         } else {
-            let baseline = stack[0].snapshot_change_baseline;
+            let baseline = stack[0].snapshot_change_baseline.clone();
             let savepoint = StorageSavepointId::allocate();
             if let Some(backend) = self.storage.backend.as_ref() {
                 if !Self::backend_savepoints_deferred(stack) {
@@ -344,7 +344,7 @@ impl Engine {
             begin_lock_mark: lock_mark,
             lock_mark,
             next_lock_mark,
-            snapshot_change_baseline,
+            snapshot_change_baseline: snapshot_change_baseline.clone(),
             row_changes: Vec::new(),
             fixed_identities: None,
             statistics_changes: crate::statistics::StatisticsChanges::new(),

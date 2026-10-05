@@ -83,9 +83,9 @@ impl RowLockRetryCache {
         doc_id: uqa_core::DocId,
         strength: uqa_sql::ast::LockStrength,
     ) -> Result<crate::row_locks::RowChangeTarget, SQLError> {
-        let baseline = *self.snapshot_baseline.lock();
+        let baseline = self.snapshot_baseline.lock().clone();
         self.row_locks
-            .conflicting_change_target_after(table, doc_id, baseline, strength)
+            .conflicting_change_target_after(table, doc_id, &baseline, strength)
     }
 
     /// Fetch the latest committed image for a changed candidate row, memoized per (table, original doc id, lock strength) across duplicate occurrences in the statement. Different strengths cannot share an image because a non-key update may proceed after `FOR KEY SHARE` but conflict with a stronger later scope.

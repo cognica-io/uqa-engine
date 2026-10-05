@@ -30,6 +30,12 @@ fn encrypted_engine_reopens_catalog_with_key() {
         .unwrap();
     }
 
+    let mut registry_path = path.as_os_str().to_owned();
+    registry_path.push(".uqa-relation-identities");
+    let registry = std::fs::read(&registry_path).unwrap();
+    assert!(registry.len() >= 4096);
+    assert!(!registry.starts_with(b"SQLite format 3"));
+
     let eng = Engine::open_encrypted(&path, key).unwrap();
     let result = eng
         .sql("SELECT title, rank FROM docs WHERE id = 1", &[])

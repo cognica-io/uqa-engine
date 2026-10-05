@@ -654,6 +654,7 @@ impl FileLockCoordinator {
             }
             let (_, pid) = table::read_process(&self.claim_file, entry.owner.slot)?;
             holders.push(HolderSlot {
+                generation: 0,
                 pid,
                 session: entry.session,
                 offset: claim.offset,

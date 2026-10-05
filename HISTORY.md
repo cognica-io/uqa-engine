@@ -23,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Evaluate retrieval predicates in table UPDATE through their document support instead of the unsupported scalar-call path. Preserve boolean conditions, CTE scope, nested-write conflicts and lock-wait rechecks, and infer text query parameters for `text_match`.
+- Reclaim the cross-process row-change journal before the oldest live snapshot instead of retaining every update for the database lifetime. Preserve update chains, key reuse and logical change numbers across reclamation; release dead processes' retained history through operating-system liveness locks.
 - Preserve writes made by nested VOLATILE routines when INSERT, UPDATE, DELETE and MERGE publish prepared rows, including primary-key and partition movement. Make preceding UPDATE FROM rows visible to later callbacks, keep original RETURNING images, and restore enclosing command rows and exact-key caches through nested exception and savepoint rollback.
 - Include staged command rows in indexed UPDATE and DELETE candidates, including equality, range and NULL predicates; newer replacements and deletions mask stored index entries.
 - Preserve PostgreSQL SQLSTATE `53200` when a text-index build or analyzer rebuild exhausts its allowance, including GIN removal rebuilds, without duplicating the operation prefix. Keep typed cancellation and statement rollback through the same adapters.
@@ -36,7 +38,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Check immediate foreign keys after the statement writes its rows, and order referential actions with AFTER triggers in one statement queue. Preserve statement-trigger sharing and reject rows already modified by triggered commands with SQLSTATE `27000`; expose `pg_trigger_depth()`.
 - Finish unreferenced data-modifying CTEs after the main query in reverse definition order, defer their AFTER events to the complete statement, and preserve command-level repeated-row handling.
 - Validate SQL and PL/pgSQL routine bodies under `check_function_bodies`, check declared result types, and defer string-body analysis when validation is disabled. Preserve SQL-standard body validation and reopen of deferred bodies.
-- Avoid waiting on unrelated relation locks whose cross-process lock-byte hashes collide within one process.
+- Compare complete relation identities when coordinating locks within and between processes, preventing unrelated relations with colliding hashes from blocking each other or creating false deadlocks. Retain native slots through holder and waiter lifetimes and reject stale wait metadata when slots are reused.
 - Route `INSERT`, `UPDATE`, `DELETE` and `MERGE` through automatically updatable views onto an underlying view's `INSTEAD OF` trigger, count the rows a suppressed trigger lets through, and report non-updatable views with `view_query_is_auto_updatable`'s DETAIL and HINT.
 - Check `CREATE FUNCTION` and `CREATE PROCEDURE` attributes as PostgreSQL does (repeated and procedure-only attributes, `SET`, `COST`, `ROWS`, `SUPPORT`, `PARALLEL` and the language), and place new relations in the namespace and with the persistence `RangeVarGetCreationNamespace` and `RangeVarAdjustRelationPersistence` assign.
 - Select common types as `select_common_type` does for `IN` lists, `CASE` and same-category operands, cast OID aliases to `name`, `varchar` and `char` through their output functions, and draw every catalog OID from one database counter in creation order, unchanged by reopening.

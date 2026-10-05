@@ -32,7 +32,7 @@ impl RowLockManager {
         &self,
         table: &str,
         doc_id: DocId,
-        baseline: RowChangeBaseline,
+        baseline: &RowChangeBaseline,
     ) -> Result<PhysicalRowChangeTarget, SQLError> {
         let key = RowLockKey {
             table: self.table_key(table),

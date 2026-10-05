@@ -96,6 +96,7 @@ pub struct PhysicalEvalContext<'a> {
     function_hook: Option<&'a dyn EngineHook>,
     subquery_runner: Option<&'a dyn PhysicalSubqueryRunner>,
     physical_outer_row: Option<(&'a RowSchema, &'a PhysicalRow)>,
+    retrieval_predicate: Option<&'a super::context::RetrievalPredicate<'a>>,
 }
 
 impl<'a> PhysicalEvalContext<'a> {
@@ -108,6 +109,7 @@ impl<'a> PhysicalEvalContext<'a> {
             function_hook: None,
             subquery_runner: None,
             physical_outer_row: None,
+            retrieval_predicate: None,
         }
     }
 
@@ -120,11 +122,20 @@ impl<'a> PhysicalEvalContext<'a> {
             function_hook: None,
             subquery_runner: None,
             physical_outer_row: None,
+            retrieval_predicate: None,
         }
     }
 
     pub fn with_function_hook(mut self, hook: &'a dyn EngineHook) -> Self {
         self.function_hook = Some(hook);
+        self
+    }
+
+    pub(crate) fn with_retrieval_predicate(
+        mut self,
+        predicate: &'a super::context::RetrievalPredicate<'a>,
+    ) -> Self {
+        self.retrieval_predicate = Some(predicate);
         self
     }
 
@@ -182,6 +193,9 @@ pub fn eval_physical_scalar(
     );
     if let Some(hook) = context.function_hook {
         scalar_context = scalar_context.with_function_hook(hook);
+    }
+    if let Some(predicate) = context.retrieval_predicate {
+        scalar_context = scalar_context.with_retrieval_predicate(predicate);
     }
     if let Some(schema) = context.row_schema {
         scalar_context = scalar_context.with_row_schema(schema);

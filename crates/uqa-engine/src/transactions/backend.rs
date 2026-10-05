@@ -134,7 +134,7 @@ impl Engine {
             }
         };
         if !fixed_snapshot_already_set && (advance_statement_baseline || !versioned) {
-            stack[0].snapshot_change_baseline = baseline;
+            stack[0].snapshot_change_baseline = baseline.clone();
             self.update_statement_row_lock_baseline(baseline);
         }
         Ok(())
@@ -187,7 +187,7 @@ impl Engine {
         self.refresh_pinned_transaction_snapshot()
             .map_err(|error| Self::storage_tx_error("refresh serializable caches", &error))?;
         self.install_fixed_transaction_snapshot(stack, snapshot, &graph_snapshot)?;
-        stack[0].snapshot_change_baseline = baseline;
+        stack[0].snapshot_change_baseline = baseline.clone();
         stack[0].first_snapshot_set = true;
         self.update_statement_row_lock_baseline(baseline);
         Ok(())
