@@ -61,7 +61,10 @@ impl Transaction {
             }
             mutation += 1;
         }
-        let changes = PrivateRecordChanges::new(control.memory());
+        let changes = PrivateRecordChanges::with_revision_scope(
+            control.memory(),
+            persistence.private_revision_scope(),
+        );
         changes.apply_prepared(records, control)?;
         changes.inherit_retained_sources(&self.changes, control)?;
         control.check()?;

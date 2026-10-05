@@ -338,6 +338,11 @@ impl VersionedPersistence for SQLiteRecordStore {
     fn database_id(&self) -> DatabaseId {
         self.identity
     }
+    fn private_revision_scope(&self) -> Option<uqa_storage::mvcc::PrivateRevisionScope> {
+        self.native
+            .is_some()
+            .then_some(|key| Ok(native::NativeRecordIdentity::revision_scope(key)))
+    }
     fn graph_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::GraphRecordLayout> {
         match self.native.as_ref() {
             Some(namespace) => Some(namespace),

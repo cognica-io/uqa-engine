@@ -521,6 +521,16 @@ impl MergedRecordSnapshot {
         self.private.scan_keys(prefix, after, limit, control)
     }
 
+    /// Newest private revisions per provider-selected cache scope, or exact changed keys when the provider supplies no classifier. The summary shares this view's undo boundary and spills under the same allowance.
+    pub fn private_revision_scopes(
+        &self,
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<super::PrivateRecordKey>> {
+        self.private.revision_scopes(after, limit, control)
+    }
+
     pub fn visit_value(
         &self,
         key: &[u8],
