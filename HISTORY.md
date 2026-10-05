@@ -17,7 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Stream native SQLite private document and B-tree merges through retained spill entries instead of looking up each identity again. Key-only merged scans read metadata without loading private payloads, and stopped value scans do not load the next private payload.
+- Stream native SQLite private document and B-tree merges through retained spill entries, and reuse selected private readers for requested-ID projections in native SQLite and common Key/Value storage, including SQLite Key/Value and redb. Sparse requests seek spill blocks instead of scanning gaps; presence reads avoid private payloads, and stopped value callbacks do not load later payloads. Preserve input order, duplicates, fixed views, savepoint undo and callback reentry.
 - Use the default NEON ChaCha20 backend on supported ARM64 targets for encrypted temporary files and compressed SQLite containers, preserving ciphertext formats and key and stream-buffer zeroization.
 - Maintain native SQLite transaction cache revisions by changed record family and owner, so catalog refresh after a large write does not rescan every private row. Revision summaries spill under the same memory allowance and preserve savepoints and retained reads.
 - Default `search_path` to `"$user", public`, preserve its assigned text and empty paths, and make `Engine::set_search_path` return a `Result`. `QueryCancelled` now carries a `CancellationReason` instead of being a unit struct; see the [unreleased upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-changes-after-049).
