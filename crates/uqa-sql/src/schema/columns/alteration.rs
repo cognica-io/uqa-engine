@@ -60,13 +60,13 @@ fn described_columns(
         .map_err(|error| ddl_storage_error(action, error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
 }
-/// `ATExecColumnDefault` for `SET DEFAULT`: the column is checked before the default is analyzed against its type.
+/// `ATExecColumnDefault` for `SET DEFAULT`: the column is checked before the default is analyzed against its type. Returns whether a default remains; `SET DEFAULT NULL` leaves none.
 pub fn validate_column_default(
     context: &ColumnAlterAnalysisContext<'_>,
     table: &str,
     column: &str,
     default: &mut Expr,
-) -> Result<(), SQLError> {
+) -> Result<bool, SQLError> {
     let columns = described_columns(context, table, "ALTER COLUMN SET DEFAULT")?;
     super::validate_default_change(table, super::altered_column(table, &columns, column)?, true)?;
     let target = context
@@ -82,6 +82,7 @@ pub fn validate_column_default(
         },
         default,
         &target,
+        column,
     )
 }
 /// `ATExecColumnDefault` for `DROP DEFAULT`.

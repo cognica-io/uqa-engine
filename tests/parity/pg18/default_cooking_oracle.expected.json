@@ -1,0 +1,2085 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_1 (b int DEFAULT 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_2 (b int DEFAULT 'x' || 'y');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"b\" is of type integer but default expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_3 (b date DEFAULT 'nope');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"nope\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_4 (b int DEFAULT 1.5);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_4 DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT b FROM cko_4;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "b"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_4'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_5 (b int DEFAULT now());",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"b\" is of type integer but default expression is of type timestamp with time zone",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_6 (b int DEFAULT 'x'::text);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"b\" is of type integer but default expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_7 (b varchar(2) DEFAULT 'abc');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_7 DEFAULT VALUES;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22001",
+        "message": "value too long for type character varying(2)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_9 (b int[] DEFAULT '{1,x}');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_10 (b int DEFAULT (SELECT 1));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use subquery in DEFAULT expression",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_11 (b int DEFAULT sum(1));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42803",
+        "message": "aggregate functions are not allowed in DEFAULT expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_12 (b int DEFAULT row_number() OVER ());",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "window functions are not allowed in DEFAULT expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_13 (b int DEFAULT generate_series(1, 2));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in DEFAULT expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_14 (b int DEFAULT random());",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_15 (a int, g int GENERATED ALWAYS AS ('x') STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_16 (a int, g int GENERATED ALWAYS AS (a || 'x') STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"g\" is of type integer but default expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_17 (a int, g int GENERATED ALWAYS AS (now()) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_18 (a int, g int GENERATED ALWAYS AS (random()) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_19 (a int, g int GENERATED ALWAYS AS ((SELECT 1)) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use subquery in column generation expression",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_20 (a int, g int GENERATED ALWAYS AS (sum(a)) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42803",
+        "message": "aggregate functions are not allowed in column generation expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_21 (a int, g int GENERATED ALWAYS AS (row_number() OVER ()) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "window functions are not allowed in column generation expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_22 (a int, g int GENERATED ALWAYS AS (generate_series(1, a)) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in column generation expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_23 (a int, g int GENERATED ALWAYS AS (a) STORED, h int GENERATED ALWAYS AS (g) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "cannot use generated column \"g\" in column generation expression",
+        "detail": "A generated column cannot reference another generated column.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_24 (a int, g int GENERATED ALWAYS AS (nocol) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_25 (a int, g int GENERATED ALWAYS AS (1.5) STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_25 (a) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT g FROM cko_25;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_26 (a text, g varchar(2) GENERATED ALWAYS AS (a) STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_26 (a) VALUES ('abc');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22001",
+        "message": "value too long for type character varying(2)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_27 (b int DEFAULT 'x', c int DEFAULT 'y');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_28 (b int DEFAULT nofunc(), c int DEFAULT 'y');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_29 (b int DEFAULT 'x', c nosuchtype);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_30 (b int DEFAULT 'x') PARTITION BY LIST (nocol);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_31 (b int, c int DEFAULT b);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use column reference in DEFAULT expression",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_32 (b int DEFAULT '12');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_32'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "12"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_33 (b text DEFAULT 12);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_33'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "12"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_34 (b int DEFAULT '12'::text);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"b\" is of type integer but default expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_36 (b int DEFAULT NULL);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_36'::regclass;",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, atthasdef FROM pg_attribute WHERE attrelid = 'cko_36'::regclass AND attnum > 0;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "atthasdef"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "b",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_37 (b bool DEFAULT 'yes');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_37'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_38 (b int DEFAULT 2147483648);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_39 (b smallint DEFAULT 100000);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_40 (b int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ALTER COLUMN b SET DEFAULT 'y';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"y\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ADD COLUMN c int DEFAULT 'z';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ADD COLUMN d int GENERATED ALWAYS AS ('q') STORED;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"q\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ALTER COLUMN b SET DEFAULT now();",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"b\" is of type integer but default expression is of type timestamp with time zone",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ADD COLUMN e int DEFAULT 1.5;",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_40 (b) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT b, e FROM cko_40;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "b",
+            "e"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ALTER COLUMN b SET DEFAULT NULL;",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, atthasdef FROM pg_attribute WHERE attrelid = 'cko_40'::regclass AND attnum > 0 ORDER BY attnum;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "atthasdef"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "b",
+              "f"
+            ],
+            [
+              "e",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ALTER COLUMN b SET DEFAULT '5';",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_40'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "5"
+            ],
+            [
+              "1.5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ALTER COLUMN b SET DEFAULT 'abc'::text;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"b\" is of type integer but default expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ADD COLUMN f int DEFAULT generate_series(1, 2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in DEFAULT expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ADD COLUMN g int GENERATED ALWAYS AS (generate_series(1, 2)) STORED;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in column generation expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cko_40 ADD COLUMN h int GENERATED ALWAYS AS ('1') STORED;",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_40'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "5"
+            ],
+            [
+              "1.5"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_41 (a timestamp DEFAULT '2026-01-01 10:00'::timestamp, b int DEFAULT 12, c bool DEFAULT true, d text DEFAULT 'a', e numeric(5,2) DEFAULT 1.5, f date DEFAULT '2026-01-02', g int DEFAULT 1 + 2, h text DEFAULT 'x' || 'y', i int[] DEFAULT '{1,2}', j int DEFAULT '7', k varchar(3) DEFAULT 'ab', l timestamptz DEFAULT now(), m interval DEFAULT '1 day', n float8 DEFAULT 1.5, o int8 DEFAULT 5, p int2 DEFAULT 5, q bool DEFAULT 'yes', r uuid DEFAULT 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', s jsonb DEFAULT '{\"a\": 1}', t text DEFAULT NULL, u int DEFAULT NULL::int, v int DEFAULT (NULL));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_41'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 19"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'2026-01-01 10:00:00'::timestamp without time zone"
+            ],
+            [
+              "2",
+              "12"
+            ],
+            [
+              "3",
+              "true"
+            ],
+            [
+              "4",
+              "'a'::text"
+            ],
+            [
+              "5",
+              "1.5"
+            ],
+            [
+              "6",
+              "'2026-01-02'::date"
+            ],
+            [
+              "7",
+              "(1 + 2)"
+            ],
+            [
+              "8",
+              "('x'::text || 'y'::text)"
+            ],
+            [
+              "9",
+              "'{1,2}'::integer[]"
+            ],
+            [
+              "10",
+              "7"
+            ],
+            [
+              "11",
+              "'ab'::character varying"
+            ],
+            [
+              "12",
+              "now()"
+            ],
+            [
+              "13",
+              "'1 day'::interval"
+            ],
+            [
+              "14",
+              "1.5"
+            ],
+            [
+              "15",
+              "5"
+            ],
+            [
+              "16",
+              "5"
+            ],
+            [
+              "17",
+              "true"
+            ],
+            [
+              "18",
+              "'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid"
+            ],
+            [
+              "19",
+              "'{\"a\": 1}'::jsonb"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, atthasdef FROM pg_attribute WHERE attrelid = 'cko_41'::regclass AND attnum > 0 ORDER BY attnum;",
+      "command_tags": [
+        "SELECT 22"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "atthasdef"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "a",
+              "t"
+            ],
+            [
+              "b",
+              "t"
+            ],
+            [
+              "c",
+              "t"
+            ],
+            [
+              "d",
+              "t"
+            ],
+            [
+              "e",
+              "t"
+            ],
+            [
+              "f",
+              "t"
+            ],
+            [
+              "g",
+              "t"
+            ],
+            [
+              "h",
+              "t"
+            ],
+            [
+              "i",
+              "t"
+            ],
+            [
+              "j",
+              "t"
+            ],
+            [
+              "k",
+              "t"
+            ],
+            [
+              "l",
+              "t"
+            ],
+            [
+              "m",
+              "t"
+            ],
+            [
+              "n",
+              "t"
+            ],
+            [
+              "o",
+              "t"
+            ],
+            [
+              "p",
+              "t"
+            ],
+            [
+              "q",
+              "t"
+            ],
+            [
+              "r",
+              "t"
+            ],
+            [
+              "s",
+              "t"
+            ],
+            [
+              "t",
+              "f"
+            ],
+            [
+              "u",
+              "f"
+            ],
+            [
+              "v",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_41 DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, b, c, d, e, f, g, h, i, j, k, m, n, o, p, q, r, s, t, u, v FROM cko_41;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f",
+            "g",
+            "h",
+            "i",
+            "j",
+            "k",
+            "m",
+            "n",
+            "o",
+            "p",
+            "q",
+            "r",
+            "s",
+            "t",
+            "u",
+            "v"
+          ],
+          "type_oids": [
+            1114,
+            23,
+            16,
+            25,
+            1700,
+            1082,
+            23,
+            25,
+            1007,
+            23,
+            1043,
+            1186,
+            701,
+            20,
+            21,
+            16,
+            2950,
+            3802,
+            25,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2026-01-01 10:00:00",
+              "12",
+              "t",
+              "a",
+              "1.50",
+              "2026-01-02",
+              "3",
+              "xy",
+              "{1,2}",
+              "7",
+              "ab",
+              "1 day",
+              "1.5",
+              "5",
+              "5",
+              "t",
+              "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+              "{\"a\": 1}",
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_42 (a numeric DEFAULT '1.50', b float8 DEFAULT '1e3', c bigint DEFAULT '9');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_42'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "1.50"
+            ],
+            [
+              "2",
+              "'1000'::double precision"
+            ],
+            [
+              "3",
+              "'9'::bigint"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_43 (a int DEFAULT 'x'::int);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_44 (a int DEFAULT ('x')::int);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_45 (a varchar(2) DEFAULT 'abc'::varchar(2));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_45'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "'abc'::character varying(2)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_47 (a int DEFAULT '1' || '2');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"a\" is of type integer but default expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN cko_d1 AS int DEFAULT 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN cko_d2 AS int DEFAULT now();",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"cko_d2\" is of type integer but default expression is of type timestamp with time zone",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN cko_d3 AS int DEFAULT '12';",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typdefault FROM pg_type WHERE typname = 'cko_d3';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typdefault"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "12"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN cko_d4 AS int DEFAULT NULL;",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typdefault IS NULL FROM pg_type WHERE typname = 'cko_d4';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN cko_d5 AS int DEFAULT generate_series(1, 2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in DEFAULT expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN cko_d6 AS int DEFAULT 1.5;",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typdefault FROM pg_type WHERE typname = 'cko_d6';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typdefault"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_48 (a cko_d3, b cko_d3 DEFAULT 'y', c cko_d3 DEFAULT 7);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"y\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_49 (a cko_d3, c cko_d3 DEFAULT 7);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_49 DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, c FROM cko_49;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "c"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "12",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_49'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_50 (a int DEFAULT 'x', b int GENERATED ALWAYS AS ('y') STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_51 (a int GENERATED ALWAYS AS ('y') STORED, b int DEFAULT 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"y\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_52 (a int, g int GENERATED ALWAYS AS ('1') STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cko_52'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_52 (a) VALUES (0);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, g FROM cko_52;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "g"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "0",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SEQUENCE cko_seq;",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE ROLE cko_role;",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_60 (s regclass DEFAULT 'cko_seq'::regclass, t regclass DEFAULT 'cko_seq');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SEQUENCE cko_seq RENAME TO cko_seq2;",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_60 DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT s::text, t::text FROM cko_60;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s",
+            "t"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "cko_seq2",
+              "cko_seq2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_63 (s regrole DEFAULT 'cko_role');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "constant of the type regrole cannot be used here",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_64 (s regrole DEFAULT 'cko_role'::regrole);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "constant of the type regrole cannot be used here",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_65 (s regrole[] DEFAULT '{cko_role}'::regrole[], t regrole DEFAULT ('cko_role'::text)::regrole);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_65 DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT s::text, t::text FROM cko_65;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s",
+            "t"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{cko_role}",
+              "cko_role"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cko_66 (g regclass GENERATED ALWAYS AS ('cko_seq2') STORED, h regclass GENERATED ALWAYS AS ('cko_seq2'::regclass) STORED, x integer);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cko_66 (x) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SEQUENCE cko_seq2 RENAME TO cko_seq3;",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT g::text, h::text FROM cko_66;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "h"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "cko_seq3",
+              "cko_seq3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP ROLE cko_role;",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

@@ -49,18 +49,19 @@ pub fn prepare_domain_definition(
         ));
     }
     if let Some(default) = &mut definition.default {
-        super::defaults::validate_default_expression(context, default, &definition.base)?;
-        if let Expr::Literal(Value::Str(value)) = default {
-            let mut base = &definition.base;
-            while let ColumnType::Domain { base: parent, .. } = base {
-                base = parent;
-            }
-            crate::expr::cast_value_with_type_resolution(
-                &Value::Str(value.clone()),
-                None,
-                &base.without_type_modifiers().sql_name(),
-                Some(context.catalog),
-            )?;
+        // `DefineDomain` cooks the default against the base type and names the domain as the column.
+        let domain = definition
+            .name
+            .rsplit('.')
+            .next()
+            .unwrap_or(definition.name.as_str());
+        if !super::defaults::validate_default_expression(
+            context,
+            default,
+            &definition.base,
+            domain,
+        )? {
+            definition.default = None;
         }
     }
     constraints::assign_names(definition, schema_names)?;

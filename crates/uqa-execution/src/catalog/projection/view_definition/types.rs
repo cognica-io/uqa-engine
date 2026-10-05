@@ -36,17 +36,40 @@ impl Deparser<'_> {
         }
     }
 
-    /// A typed constant: an enum or enum-array constant shows its current label text and type, as `get_const_expr` labels a constant of a non-default type.
+    /// A typed constant, as `get_const_expr` prints a `Const`: a non-negative `integer`, a `numeric` written with a decimal point and a `boolean` print bare, an enum or enum-array constant shows its current label text, and every other constant prints its output text with its type.
     pub(super) fn typed_literal(&self, value: &Value, ty: &str) -> Result<String, SQLError> {
         let display = self.type_display(ty);
-        let enum_bearing = self
-            .resolved_type(ty)
-            .is_some_and(|resolved| uqa_sql::expr::enums::is_enum_bearing(&resolved));
-        if !enum_bearing {
+        let Some(resolved) = self.resolved_type(ty) else {
             return Ok(format!(
                 "({})::{display}",
                 super::expressions::literal(value)?
             ));
+        };
+        let enum_bearing = uqa_sql::expr::enums::is_enum_bearing(&resolved);
+        if !enum_bearing {
+            if matches!(value, Value::Null) {
+                return Ok(format!("NULL::{display}"));
+            }
+            let mut base = &resolved;
+            while let ColumnType::Domain { base: inner, .. } = base {
+                base = inner;
+            }
+            let bare = match (value, base) {
+                (Value::Int(number), ColumnType::Integer) => {
+                    (0..=i64::from(i32::MAX)).contains(number)
+                }
+                (Value::Decimal(number), ColumnType::Numeric { .. }) => {
+                    let text = number.to_sql_string();
+                    !text.starts_with('-') && text.contains('.')
+                }
+                (Value::Bool(_), ColumnType::Boolean) => true,
+                _ => false,
+            };
+            if bare {
+                return super::expressions::literal(value);
+            }
+            let text = uqa_sql::result::format_postgres_text(value, &resolved, None)?;
+            return Ok(format!("'{}'::{display}", text.replace('\'', "''")));
         }
         if matches!(value, Value::Null) {
             return Ok(format!("NULL::{display}"));

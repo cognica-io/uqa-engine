@@ -162,6 +162,7 @@
       "routines.function-procedure-drop-cascade-extended",
       "routines.attribute-checks",
       "ddl.create-table-analysis-order",
+      "ddl.default-cooking",
       "ddl.check-constraint-inheritance",
       "types.domain-declarations-and-coercion",
       "execution.prepared-parameter-contracts",
@@ -1150,6 +1151,14 @@
       "supported_version": "Unreleased: 42 PostgreSQL 18.4 statements on memory and SQLite engines cover common types selected by type category, preferred type and implicit casts for oid, the OID alias types and integers in VALUES, CASE with its ELSE result first, COALESCE, UNION, ARRAY and GREATEST, regproc with regprocedure and time with timetz, and IN lists in SELECT, INSERT, UPDATE and DELETE that compare at the common type or fall back to each item's = operator",
       "status": "partial",
       "open_issue": "The construct each select_common_type error names (VALUES, CASE, UNION, INTERSECT, EXCEPT, COALESCE, ARRAY, GREATEST, LEAST, JOIN/USING), coerce_to_common_type's 42846 could not convert type errors, and reg* literal input during analysis (an unknown role is reported before the types are matched) remain."
+    },
+    {
+      "id": "ddl.default-cooking",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, rows, SQLSTATEs, messages, DETAIL and HINT in tests/parity/pg18/default_cooking_oracle.expected.json; cookDefault, AddRelationNewConstraints and StoreAttrDefault in src/backend/catalog/heap.c; coerce_type and coerce_to_target_type in src/backend/parser/parse_coerce.c; DefineDomain in src/backend/commands/typecmds.c; ATExecColumnDefault in src/backend/commands/tablecmds.c; get_const_expr in src/backend/utils/adt/ruleutils.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::pg18_constraint_lifecycle::default_cooking",
+      "supported_version": "Unreleased: 114 PostgreSQL 18.4 statements on memory and SQLite engines cover defaults and generation expressions of CREATE TABLE, ADD COLUMN, SET DEFAULT and CREATE DOMAIN: unknown literals read by the type's input function without the type modifier and stored as constants, casts of literals read by the cast's type, OID alias constants (regclass) kept as constants the catalog binding of the stored expression resolves so that they follow renames, regrole constants rejected (0A000) while regrole[] constants and regrole values computed from text are stored, assignment casts required of typed expressions (42804 with PostgreSQL's hint), NULL constants storing no default, set-returning functions rejected (0A000), generation expression diagnostics with PostgreSQL's SQLSTATEs and the DETAIL for generated-column references, and constants printed as get_const_expr prints them",
+      "status": "partial",
+      "open_issue": "The special date and time input values (now, today, tomorrow, yesterday, epoch, infinity, allballs) are rejected by the input functions, so DEFAULT 'now' fails instead of storing the creation time; unknown literals inside expressions (a + '1') keep their unknown type in stored expressions; pg_type.typdefaultbin is NULL for domains; the numeric field overflow DETAIL; the operator resolution of 1 || 2 and -'1'; and OID alias input (regclass, regtype, regproc, regnamespace and their arrays) resolved when the stored expression is bound or evaluated instead of at analysis, so a missing relation in a regclass default reports XX000 at publication instead of 42P01, pg_get_expr prints a regclass constant as its OID instead of its name, regclass[] elements are not bound to relations, a regtype constant keeps the written name instead of the canonical one, and an ambiguous regproc name fails when a row takes the default instead of at CREATE TABLE remain."
     },
     {
       "id": "ddl.create-table-analysis-order",

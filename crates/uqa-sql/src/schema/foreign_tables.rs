@@ -104,7 +104,9 @@ impl ForeignSchemaContext<'_> {
                     default,
                     stored,
                 )?;
-                validate_default_expression(self, default, &column.ty)?;
+                if !validate_default_expression(self, default, &column.ty, &column.name)? {
+                    column.default = None;
+                }
             }
             if let Some(check) = &mut column.check {
                 prepare_foreign_table_sequence_references(
@@ -181,7 +183,8 @@ fn validate_default_expression(
     context: &ForeignSchemaContext<'_>,
     expression: &mut Expr,
     target: &ColumnType,
-) -> Result<(), SQLError> {
+    column: &str,
+) -> Result<bool, SQLError> {
     let binding = context.bindings.binding_scope()?;
     crate::schema::defaults::validate_default_expression(
         &SchemaBindingContext {
@@ -190,6 +193,7 @@ fn validate_default_expression(
         },
         expression,
         target,
+        column,
     )
 }
 fn validate_check_expression(

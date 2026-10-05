@@ -137,7 +137,14 @@ pub fn define_create_table_defaults(
     for index in 0..c.columns.len() {
         let column = &mut c.columns[index];
         if let Some(default) = &mut column.default {
-            super::super::defaults::validate_default_expression(&schema, default, &column.ty)?;
+            if !super::super::defaults::validate_default_expression(
+                &schema,
+                default,
+                &column.ty,
+                &column.name,
+            )? {
+                column.default = None;
+            }
         }
         super::super::generated::prepare_generated_column(
             &schema,

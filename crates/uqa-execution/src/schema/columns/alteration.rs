@@ -75,12 +75,13 @@ pub fn set_default<S: Clone + 'static>(
     name: &str,
     mut default: Expr,
 ) -> Result<(), SQLError> {
-    alteration::validate_column_default(&context.analysis, table, name, &mut default)?;
+    let retained =
+        alteration::validate_column_default(&context.analysis, table, name, &mut default)?;
     if !publish_property(
         context.transactions,
         table,
         name,
-        ColumnProperty::Default(Some(default)),
+        ColumnProperty::Default(retained.then_some(default)),
     )
     .map_err(|error| ddl_storage_error("ALTER COLUMN SET DEFAULT", error))?
     {

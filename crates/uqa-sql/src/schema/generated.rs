@@ -8,10 +8,7 @@
 
 use crate::ast::ForeignKey;
 use crate::ast::{ColumnDef, Expr, GeneratedColumnKind};
-use crate::{
-    assignment::conversion::convert_value_to_column_type, semantics::aggregates, ColumnType,
-    SQLError,
-};
+use crate::{semantics::aggregates, ColumnType, SQLError};
 
 pub(crate) mod eligibility;
 pub(super) mod typing;
@@ -59,17 +56,7 @@ pub fn prepare_generated_column(
     if generated.kind == GeneratedColumnKind::Virtual {
         validate_virtual_column_envelope(column, foreign_keys)?;
     }
-    let plan = crate::plan::ExpressionPlan::lower((*generated.expression).clone());
-    if !plan.subqueries.is_empty() {
-        return Err(SQLError::TypeMismatch(
-            "cannot use subquery in column generation expression".into(),
-        ));
-    }
-    if aggregates::contains_aggregate(engine, &plan.scalar) {
-        return Err(SQLError::TypeMismatch(
-            "aggregate functions are not allowed in column generation expressions".into(),
-        ));
-    }
+    check_generation_shape(engine, snapshot, &generated.expression)?;
     validate_generation_expression(qualifier, snapshot, &generated.expression)?;
     if generated.kind == GeneratedColumnKind::Virtual {
         virtual_security::check_virtual_host_functions(engine, &generated.expression)?;
@@ -89,15 +76,27 @@ pub fn prepare_generated_column(
         &prepared.expression,
         Some(&column.ty),
     )?;
-    if let typing::GenerationType::UnknownLiteral(value) = &expression_type {
-        convert_value_to_column_type(uqa_core::Value::Str(value.clone()), &column.ty)?;
+    if matches!(expression_type, typing::GenerationType::UnknownLiteral(_)) {
+        // The literal is read by the column type's input function and stored as a constant, as `cookDefault` coerces it.
+        super::defaults::cook_unknown_literal(
+            context,
+            &mut prepared.expression,
+            &column.ty,
+            false,
+        )?;
     } else if !typing::generation_type_assignable_to(&expression_type, &column.ty) {
-        return Err(SQLError::TypeMismatch(format!(
-            "column `{}` has type {} but generation expression has type {}",
-            column.name,
-            crate::catalog::type_metadata::column_type_name(&column.ty),
-            typing::generation_type_name(&expression_type)
-        )));
+        // `cookDefault` names a generation expression a default expression.
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42804".into(),
+            message: format!(
+                "column \"{}\" is of type {} but default expression is of type {}",
+                column.name,
+                column.ty.regtype_name(),
+                typing::generation_type_name(&expression_type)
+            ),
+            detail: None,
+            hint: Some("You will need to rewrite or cast the expression.".into()),
+        });
     }
     prepared.function_dependencies = function_dependencies;
     // The generation result is assigned to the column; its routines, user-defined types and enum constants are stored by identity as parse analysis stores them.
@@ -113,6 +112,53 @@ pub fn prepare_generated_column(
         snapshot,
         &mut prepared.expression,
     )?;
+    Ok(())
+}
+
+/// What a generation expression cannot contain, as `cookDefault` and parse analysis reject it: a subquery, an aggregate, a window function and a set-returning function. The table's columns type the calls the expression makes.
+fn check_generation_shape(
+    engine: &dyn super::SchemaExpressionCatalog,
+    columns: &[ColumnDef],
+    expression: &Expr,
+) -> Result<(), SQLError> {
+    let plan = crate::plan::ExpressionPlan::lower(expression.clone());
+    let schema = crate::RowSchema::with_types(
+        columns.iter().map(|column| column.name.clone()).collect(),
+        columns
+            .iter()
+            .map(|column| Some(column.ty.clone()))
+            .collect(),
+    );
+    if !plan.subqueries.is_empty() {
+        return Err(generation_error(
+            "0A000",
+            "cannot use subquery in column generation expression",
+        ));
+    }
+    if aggregates::contains_aggregate(engine, &plan.scalar) {
+        return Err(generation_error(
+            "42803",
+            "aggregate functions are not allowed in column generation expressions",
+        ));
+    }
+    if crate::semantics::windows::expr_has_window(&plan.scalar) {
+        return Err(generation_error(
+            "42P20",
+            "window functions are not allowed in column generation expressions",
+        ));
+    }
+    if crate::semantics::sets::validation::expression_may_return_set(
+        engine,
+        engine,
+        &plan.scalar,
+        &schema,
+        &[],
+    )? {
+        return Err(generation_error(
+            "0A000",
+            "set-returning functions are not allowed in column generation expressions",
+        ));
+    }
     Ok(())
 }
 
@@ -249,12 +295,16 @@ fn validate_generation_expression(
         Expr::InternalColumn(_) => Err(SQLError::Internal(
             "executor-only column reached generation expression validation".into(),
         )),
-        Expr::WindowCall { .. } => Err(SQLError::TypeMismatch(
-            "window functions are not allowed in column generation expressions".into(),
+        Expr::WindowCall { .. } => Err(generation_error(
+            "42P20",
+            "window functions are not allowed in column generation expressions",
         )),
-        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => Err(
-            SQLError::TypeMismatch("cannot use subquery in column generation expression".into()),
-        ),
+        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
+            Err(generation_error(
+                "0A000",
+                "cannot use subquery in column generation expression",
+            ))
+        }
         Expr::Literal(_) | Expr::TypedLiteral { .. } => Ok(()),
     }
 }
@@ -350,9 +400,21 @@ fn validate_generation_column_reference(columns: &[ColumnDef], name: &str) -> Re
         return Err(SQLError::UnknownColumn(name.to_string()));
     };
     if column.generated.is_some() {
-        return Err(SQLError::TypeMismatch(format!(
-            "cannot use generated column `{name}` in column generation expression"
-        )));
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42P17".into(),
+            message: format!(
+                "cannot use generated column \"{name}\" in column generation expression"
+            ),
+            detail: Some("A generated column cannot reference another generated column.".into()),
+            hint: None,
+        });
     }
     Ok(())
+}
+
+fn generation_error(sqlstate: &str, message: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: sqlstate.into(),
+        message: message.into(),
+    }
 }

@@ -38,14 +38,17 @@ pub fn bind_added_column(
 ) -> Result<(), SQLError> {
     if let Some(default) = &mut column.default {
         let binding = context.bindings.binding_scope()?;
-        crate::schema::defaults::validate_default_expression(
+        if !crate::schema::defaults::validate_default_expression(
             &SchemaBindingContext {
                 catalog: context.schema,
                 binding: &binding.context(),
             },
             default,
             &column.ty,
-        )?;
+            &column.name,
+        )? {
+            column.default = None;
+        }
     }
     let mut candidate_columns = context
         .foreign_keys
