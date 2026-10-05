@@ -416,15 +416,15 @@ fn build_pg_type_rows(
             "typnotnull".into(),
             bool_value(domain.definition.not_null.is_some()),
         );
-        entry.insert(
-            "typdefault".into(),
-            match domain.definition.default.as_ref().filter(|_| with_defaults) {
-                Some(default) => str_value(super::super::view_definition::stored_expression_text(
-                    catalog, resolution, default,
-                )?),
-                None => Value::Null,
-            },
-        );
+        // `typdefaultbin` is the stored default, which `pg_get_expr` prints; `typdefault` its text.
+        let default = match domain.definition.default.as_ref().filter(|_| with_defaults) {
+            Some(default) => str_value(super::super::view_definition::stored_expression_text(
+                catalog, resolution, default,
+            )?),
+            None => Value::Null,
+        };
+        entry.insert("typdefaultbin".into(), default.clone());
+        entry.insert("typdefault".into(), default);
         entry.insert(
             "typacl".into(),
             type_acl_value(catalog, domain.usage_acl.as_deref())?,

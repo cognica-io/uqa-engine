@@ -242,7 +242,7 @@ fn convert_catalog_array_elements(
 }
 
 mod production;
-pub use production::convert_value_to_column_type_with_control;
+pub use production::{convert_value_to_column_type_with_control, numeric_field_overflow};
 
 pub fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, SQLError> {
     let control = uqa_core::memory::ProductionControl::uncontrolled();

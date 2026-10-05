@@ -36,7 +36,8 @@ mod length;
 mod md5;
 mod operator_errors;
 pub use operator_errors::{
-    undefined_binary_operator, undefined_binary_operator_named, undefined_prefix_operator,
+    ambiguous_binary_operator, ambiguous_prefix_operator, undefined_binary_operator,
+    undefined_binary_operator_named, undefined_prefix_operator,
 };
 mod operators;
 mod overload_resolution;
@@ -54,7 +55,7 @@ pub use scalar_input::{
     scalar_operand_type_name_with_control,
 };
 pub use stored_constants::{
-    contains_unknown_literal, fold_stored_enum_constants, relabel_stored_oid_operands,
+    contains_unknown_literal, fold_stored_enum_constants, store_operand_coercions,
     stored_enum_constant,
 };
 mod string_binary;

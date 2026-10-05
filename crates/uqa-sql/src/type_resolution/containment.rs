@@ -58,10 +58,7 @@ pub(super) fn resolve_operator_type_with_control(
         },
         (Some(known), None) | (None, Some(known)) => supported_type(known),
         (None, None) => {
-            return Err(SQLError::Routine {
-                sqlstate: "42725".into(),
-                message: format!("operator is not unique: unknown {symbol} unknown"),
-            });
+            return Err(super::ambiguous_binary_operator(None, symbol, None));
         }
     };
     if compatible {

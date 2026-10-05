@@ -272,6 +272,15 @@ pub(crate) fn to_f64_with_control(v: &Value, control: &ProductionControl<'_>) ->
     super::floating::to_float_with_control(v, super::FloatWidth::DoublePrecision, control)
 }
 
+/// The error `numeric_in` reports for text it cannot read.
+#[must_use]
+pub fn invalid_numeric_input(text: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22P02".into(),
+        message: format!("invalid input syntax for type numeric: \"{text}\""),
+    }
+}
+
 pub(super) fn to_decimal(value: &Value) -> Result<DecimalValue> {
     to_decimal_with_control(value, &ProductionControl::uncontrolled())?
         .into_uncontrolled()
@@ -293,10 +302,8 @@ pub(super) fn to_decimal_with_control(
         Value::Float(number) => DecimalValue::from_f64_lossy_with_control(*number, control)?
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {value:?} to numeric"))),
         Value::Str(text) | Value::FixedChar(text) => {
-            DecimalValue::parse_with_control(text, control)?.ok_or_else(|| SQLError::Routine {
-                sqlstate: "22P02".into(),
-                message: format!("invalid input syntax for type numeric: \"{text}\""),
-            })
+            DecimalValue::parse_with_control(text, control)?
+                .ok_or_else(|| invalid_numeric_input(text))
         }
         other => Err(SQLError::TypeMismatch(format!(
             "expected number, got {other:?}"

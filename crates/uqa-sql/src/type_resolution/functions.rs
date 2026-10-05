@@ -189,10 +189,12 @@ pub(super) fn named_argument_value(expression: &ScalarExpr) -> &ScalarExpr {
     scalar_call_argument(expression).map_or(expression, |argument| argument.value)
 }
 
-fn concat_argument_type(other: Option<&ColumnType>) -> ColumnType {
+/// The operand type `||` selects for an `unknown` operand paired with `other`.
+pub(super) fn concat_argument_type(other: Option<&ColumnType>) -> ColumnType {
     match other {
         Some(array @ ColumnType::Array(_)) => array.clone(),
         Some(ColumnType::JsonB) => ColumnType::JsonB,
+        Some(ColumnType::Bytea) => ColumnType::Bytea,
         _ => ColumnType::Text,
     }
 }

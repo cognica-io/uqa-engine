@@ -46,6 +46,38 @@ pub fn undefined_prefix_operator(symbol: &str, operand: &str) -> SQLError {
     }
 }
 
+/// `oper_select_candidate` found more than one candidate for the operand types, as `'1' + '2'` does among the arithmetic operators.
+#[must_use]
+pub fn ambiguous_binary_operator(
+    left: Option<&ColumnType>,
+    symbol: &str,
+    right: Option<&ColumnType>,
+) -> SQLError {
+    ambiguous_operator(format!(
+        "operator is not unique: {} {symbol} {}",
+        operand_name(left),
+        operand_name(right)
+    ))
+}
+
+/// `oper_select_candidate` found more than one candidate for a prefix operator's operand, as `-'1'` does among the numeric and interval negations.
+#[must_use]
+pub fn ambiguous_prefix_operator(symbol: &str, operand: &str) -> SQLError {
+    ambiguous_operator(format!("operator is not unique: {symbol} {operand}"))
+}
+
+fn ambiguous_operator(message: String) -> SQLError {
+    SQLError::Diagnostic {
+        sqlstate: "42725".into(),
+        message,
+        detail: None,
+        hint: Some(
+            "Could not choose a best candidate operator. You might need to add explicit type casts."
+                .into(),
+        ),
+    }
+}
+
 fn operand_name(ty: Option<&ColumnType>) -> String {
     ty.map_or_else(|| "unknown".into(), ColumnType::display_name)
 }

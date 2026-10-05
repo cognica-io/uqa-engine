@@ -352,13 +352,11 @@ pub(super) fn read_unknown_literals<'a>(
     if super::catalog_input_type(target) {
         return Ok(());
     }
-    let target = base_type(target).without_type_modifiers();
+    // `coerce_type` hands the literal to the target type's input function, so the diagnostic is the input function's.
+    let target = base_type(target).without_type_modifiers().catalog_name();
     for expression in expressions {
         if let ScalarExpr::Literal(Value::Str(text)) = expression {
-            crate::assignment::conversion::convert_value_to_column_type(
-                Value::Str(text.clone()),
-                &target,
-            )?;
+            crate::expr::cast_value_from(&Value::Str(text.clone()), &target, None)?;
         }
     }
     Ok(())

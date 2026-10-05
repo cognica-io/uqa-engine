@@ -114,7 +114,9 @@ impl Preparation<'_> {
             ScalarExpr::UnaryMinus(inner) => {
                 let inner = self.expression(inner, input, subqueries)?;
                 if inner.ty.is_none() {
-                    return Err(error("42725", "operator is not unique: - unknown".into()));
+                    return Err(crate::type_resolution::ambiguous_prefix_operator(
+                        "-", "unknown",
+                    ));
                 }
                 self.known_type(expression, input, subqueries)?
             }

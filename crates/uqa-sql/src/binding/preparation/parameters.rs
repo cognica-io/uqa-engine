@@ -95,9 +95,10 @@ impl ParameterTypes {
         if let Some(text) = &expression.literal {
             // `coerce_to_common_type` reads an `unknown` constant with the selected type's input function, which reports what the type rejects; a type whose input function consults the catalog is read when the expression is bound to it.
             if !crate::type_resolution::catalog_input_type(&target) {
-                crate::assignment::conversion::convert_value_to_column_type(
-                    Value::Str(text.clone()),
-                    &target,
+                crate::expr::cast_value_from(
+                    &Value::Str(text.clone()),
+                    &target.catalog_name(),
+                    None,
                 )?;
             }
         }

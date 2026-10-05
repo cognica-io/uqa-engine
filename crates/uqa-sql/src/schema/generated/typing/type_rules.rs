@@ -308,11 +308,24 @@ pub(super) fn concat_result_type(
     right: &GenerationType,
 ) -> Result<GenerationType, SQLError> {
     use GenerationType as T;
+    // One operand of `text || anynonarray` must be text, or `unknown` read as text; an operator exists for no other pair of non-array types, `integer || integer` included.
+    let textual = |ty: &T| matches!(ty, T::Text | T::UnknownLiteral(_) | T::Null);
     match (left, right) {
         (T::Array(_), T::Array(_)) => common_type(left, right),
         (T::Array(_), _) => Ok(left.clone()),
         (_, T::Array(_)) => Ok(right.clone()),
-        (T::JsonB, T::JsonB) => Ok(T::JsonB),
+        // `jsonb || jsonb` and `bytea || bytea` match a typed operand exactly where `anynonarray || text` does not, so an `unknown` operand is read as the typed operand's type.
+        (T::JsonB, T::JsonB | T::UnknownLiteral(_) | T::Null)
+        | (T::UnknownLiteral(_) | T::Null, T::JsonB) => Ok(T::JsonB),
+        (T::Bytea, T::Bytea | T::UnknownLiteral(_) | T::Null)
+        | (T::UnknownLiteral(_) | T::Null, T::Bytea) => Ok(T::Bytea),
+        _ if !textual(left) && !textual(right) => {
+            Err(crate::type_resolution::undefined_binary_operator_named(
+                &super::generation_type_name(left),
+                "||",
+                &super::generation_type_name(right),
+            ))
+        }
         _ => Ok(T::Text),
     }
 }

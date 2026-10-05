@@ -163,7 +163,9 @@ pub fn cast_value_from_with_control(
                     .round_to_scale_with_control(scale, control)?
                     .ok_or_else(|| out_of_range("numeric"))?;
                 if !rounded.fits_precision_with_control(precision, scale, control)? {
-                    return Err(SQLError::Routine { sqlstate: "22003".into(), message: format!("numeric field overflow: A field with precision {precision}, scale {scale} cannot hold value {}", value.to_sql_string()) });
+                    return Err(crate::assignment::conversion::numeric_field_overflow(
+                        precision, scale,
+                    ));
                 }
                 rounded
             } else {

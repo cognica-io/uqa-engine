@@ -16,6 +16,7 @@ use uqa_core::{
 };
 mod arrays;
 mod comparison;
+mod concat;
 mod enums;
 mod helpers;
 
@@ -464,6 +465,7 @@ impl Binder<'_, '_> {
         }
         self.coerce_comparison_call(&mut call)?;
         self.coerce_compatible_array_call(&mut call)?;
+        self.coerce_concat_call(&mut call)?;
         self.bind_optional_calls(&mut call, &mut infer)?;
         self.bind_enum_call(&mut call)?;
         if helpers::is_pg_typeof(&call.name) && call.arguments.len() == 1 {
