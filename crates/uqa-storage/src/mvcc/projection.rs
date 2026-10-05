@@ -7,7 +7,7 @@
 //! Value and key-only projections share the same private/committed merge algorithm.
 
 use super::{
-    BorrowedRecord, CommittedRecordSnapshot, PreparedRecordWrite, RecordMetadata, VersionResult,
+    BorrowedRecord, CommittedRecordSnapshot, PrivateRecordEntry, RecordMetadata, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 
@@ -16,7 +16,11 @@ pub(super) type Visitor<'a, P> =
 
 pub(super) trait Projection: 'static {
     type Record<'a>: Copy;
-    fn private(write: &PreparedRecordWrite) -> Self::Record<'_>;
+    fn private(
+        entry: &PrivateRecordEntry<'_>,
+        control: &StorageReadControl,
+        visitor: &mut Visitor<'_, Self>,
+    ) -> VersionResult<bool>;
     fn visit(
         committed: &dyn CommittedRecordSnapshot,
         prefix: &[u8],
@@ -29,11 +33,19 @@ pub(super) trait Projection: 'static {
 pub(super) struct Values;
 impl Projection for Values {
     type Record<'a> = BorrowedRecord<'a>;
-    fn private(write: &PreparedRecordWrite) -> BorrowedRecord<'_> {
-        BorrowedRecord {
-            revision: write.expected(),
-            value: write.value(),
-        }
+    fn private(
+        entry: &PrivateRecordEntry<'_>,
+        control: &StorageReadControl,
+        visitor: &mut Visitor<'_, Self>,
+    ) -> VersionResult<bool> {
+        let write = entry.read(control)?;
+        visitor(
+            entry.key(),
+            BorrowedRecord {
+                revision: write.expected(),
+                value: write.value(),
+            },
+        )
     }
     fn visit(
         committed: &dyn CommittedRecordSnapshot,
@@ -49,11 +61,12 @@ impl Projection for Values {
 pub(super) struct Keys;
 impl Projection for Keys {
     type Record<'a> = RecordMetadata;
-    fn private(write: &PreparedRecordWrite) -> RecordMetadata {
-        RecordMetadata {
-            revision: write.expected(),
-            live: write.value().is_some(),
-        }
+    fn private(
+        entry: &PrivateRecordEntry<'_>,
+        _control: &StorageReadControl,
+        visitor: &mut Visitor<'_, Self>,
+    ) -> VersionResult<bool> {
+        visitor(entry.key(), entry.metadata())
     }
     fn visit(
         committed: &dyn CommittedRecordSnapshot,
