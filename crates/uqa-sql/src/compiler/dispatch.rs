@@ -16,10 +16,10 @@ use super::drop_alter::{compile_alter_table, compile_drop, compile_rename};
 use super::events::{compile_create_rule, compile_create_trigger};
 use super::merge::compile_merge;
 use super::relations::{
-    compile_create_foreign_server, compile_create_foreign_table, compile_create_schema,
-    compile_create_table_as, compile_create_view, compile_deallocate, compile_execute,
-    compile_prepare, compile_refresh_materialized_view, compile_top_level_select,
-    defer_create_foreign_table, defer_create_table,
+    compile_create_foreign_server, compile_create_schema, compile_create_table_as,
+    compile_create_view, compile_deallocate, compile_execute, compile_prepare,
+    compile_refresh_materialized_view, compile_top_level_select, defer_create_foreign_table,
+    defer_create_table,
 };
 use super::routines::{
     compile_alter_role, compile_alter_routine, compile_alter_routine_owner, compile_call,
@@ -129,37 +129,6 @@ pub fn resolve_deferred_create_table(
     Ok(table)
 }
 
-pub fn resolve_deferred_create_foreign_table(
-    deferred: &crate::ast::DeferredCreateForeignTable,
-) -> Result<crate::ast::CreateForeignTable> {
-    let parsed = pg_query::parse(&deferred.definition_sql)?;
-    let [raw] = parsed.protobuf.stmts.as_slice() else {
-        return Err(SQLError::Internal(
-            "deferred CREATE FOREIGN TABLE did not contain exactly one statement".into(),
-        ));
-    };
-    let node = raw
-        .stmt
-        .as_deref()
-        .and_then(|node| node.node.as_ref())
-        .ok_or_else(|| SQLError::Internal("deferred CREATE FOREIGN TABLE is empty".into()))?;
-    let NodeEnum::CreateForeignTableStmt(stmt) = node else {
-        return Err(SQLError::Internal(
-            "deferred CREATE FOREIGN TABLE changed statement kind".into(),
-        ));
-    };
-    let table = compile_create_foreign_table(stmt)?;
-    if !table.if_not_exists
-        || table.name != deferred.name
-        || table.server_name != deferred.server_name
-    {
-        return Err(SQLError::Internal(
-            "deferred CREATE FOREIGN TABLE changed target identity".into(),
-        ));
-    }
-    Ok(table)
-}
-
 fn compile_create_table_statement(statement: &pg_query::protobuf::CreateStmt) -> Result<Statement> {
     if statement.if_not_exists {
         defer_create_table(statement).map(Statement::CreateTableIfNotExists)
@@ -171,15 +140,7 @@ fn compile_create_table_statement(statement: &pg_query::protobuf::CreateStmt) ->
 fn compile_create_foreign_table_statement(
     statement: &pg_query::protobuf::CreateForeignTableStmt,
 ) -> Result<Statement> {
-    if statement
-        .base_stmt
-        .as_ref()
-        .is_some_and(|base| base.if_not_exists)
-    {
-        defer_create_foreign_table(statement).map(Statement::CreateForeignTableIfNotExists)
-    } else {
-        compile_create_foreign_table(statement).map(Statement::CreateForeignTable)
-    }
+    defer_create_foreign_table(statement).map(Statement::CreateForeignTableDefinition)
 }
 
 /// `ALTER TYPE | DOMAIN ... RENAME` changes a type object; other `RENAME` forms change relations, columns, constraints and routines.

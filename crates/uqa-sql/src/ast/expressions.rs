@@ -858,7 +858,7 @@ impl Statement {
             | Self::Deallocate { .. }
             | Self::CreateForeignServer(_)
             | Self::CreateForeignTable(_)
-            | Self::CreateForeignTableIfNotExists(_)
+            | Self::CreateForeignTableDefinition(_)
             | Self::DropFunction(_)
             | Self::AlterRoutine(_)
             | Self::AlterRoutineOwner(_)

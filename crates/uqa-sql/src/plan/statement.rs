@@ -430,8 +430,8 @@ impl UnifiedPlan {
             Statement::CreateForeignTable(value) => {
                 Self::Command(Box::new(CommandPlan::CreateForeignTable(value)))
             }
-            Statement::CreateForeignTableIfNotExists(value) => {
-                Self::Command(Box::new(CommandPlan::CreateForeignTableIfNotExists(value)))
+            Statement::CreateForeignTableDefinition(value) => {
+                Self::Command(Box::new(CommandPlan::CreateForeignTableDefinition(value)))
             }
             Statement::Merge(statement) => {
                 let mut subqueries = Vec::new();
@@ -597,7 +597,7 @@ impl CommandPlan {
             Self::Deallocate { .. } => "Deallocate",
             Self::CreateForeignServer(_) => "CreateForeignServer",
             Self::CreateForeignTable(_) => "CreateForeignTable",
-            Self::CreateForeignTableIfNotExists(_) => "CreateForeignTableIfNotExists",
+            Self::CreateForeignTableDefinition(_) => "CreateForeignTableDefinition",
             Self::AlterForeignTable(_) => "AlterForeignTable",
             Self::Merge(_) => "Merge",
             Self::CreateFunction(_) => "CreateFunction",

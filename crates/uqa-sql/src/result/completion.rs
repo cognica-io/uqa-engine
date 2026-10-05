@@ -160,7 +160,7 @@ pub fn command_tag_name(command: &CommandPlan) -> &'static str {
             }
         }
         CommandPlan::CreateForeignServer(_) => "CREATE SERVER",
-        CommandPlan::CreateForeignTable(_) | CommandPlan::CreateForeignTableIfNotExists(_) => {
+        CommandPlan::CreateForeignTable(_) | CommandPlan::CreateForeignTableDefinition(_) => {
             "CREATE FOREIGN TABLE"
         }
         CommandPlan::CreateFunction(statement) => {
