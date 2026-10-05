@@ -30,7 +30,7 @@ mod type_resolution;
 mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
-pub use preparation::infer_prepared_parameter_types;
+pub use preparation::{analyze_column_type_transform, infer_prepared_parameter_types};
 
 #[cfg(test)]
 mod tests;

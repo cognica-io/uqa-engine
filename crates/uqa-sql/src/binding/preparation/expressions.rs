@@ -78,6 +78,7 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
+        self.check_transform_subquery(expression)?;
         let ty = match expression {
             ScalarExpr::Param(index) => return self.parameters.reference(*index),
             ScalarExpr::Literal(Value::Null) => return Ok(ExpressionType::unknown()),
@@ -223,31 +224,121 @@ impl Preparation<'_> {
                 filter,
                 ..
             } => {
-                self.call(name, binding.as_ref(), args, input, subqueries)?;
+                let selected =
+                    self.call_binding(name, binding.as_ref(), args, input, subqueries)?;
                 for order in order_by {
                     self.expression(&order.expr, input, subqueries)?;
                 }
                 if let Some(filter) = filter {
                     self.require_boolean(filter, input, subqueries, "FILTER")?;
                 }
-                self.known_type(expression, input, subqueries)?
+                let ty = self.known_type(expression, input, subqueries)?;
+                self.check_transform_function(
+                    expression,
+                    selected.as_ref().or(binding.as_ref()),
+                    input,
+                )?;
+                ty
             }
             ScalarExpr::WindowCall {
                 name,
                 args,
                 spec,
                 filter,
-                ..
+                modifiers,
             } => {
                 self.call(name, None, args, input, subqueries)?;
                 if let Some(filter) = filter {
                     self.require_boolean(filter, input, subqueries, "FILTER")?;
                 }
+                self.check_transform_window(name, (args, filter.is_some(), *modifiers), input)?;
                 self.window_specification(spec, input, subqueries)?;
                 self.known_type(expression, input, subqueries)?
             }
             _ => self.known_type(expression, input, subqueries)?,
         })
+    }
+
+    fn check_transform_subquery(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
+        if self.transform_catalog.is_some()
+            && matches!(
+                expression,
+                ScalarExpr::ScalarSubquery(_)
+                    | ScalarExpr::Exists { .. }
+                    | ScalarExpr::InSubquery { .. }
+            )
+        {
+            return Err(error(
+                "0A000",
+                "cannot use subquery in transform expression".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn check_transform_window(
+        &self,
+        name: &str,
+        call: (&[ScalarExpr], bool, crate::ast::WindowCallModifiers),
+        input: &RowSchema,
+    ) -> Result<(), SQLError> {
+        if self.transform_catalog.is_none() {
+            return Ok(());
+        }
+        super::super::analysis::validate_window_function(
+            self.routines,
+            name,
+            call,
+            input,
+            &[],
+            self.routines,
+        )?;
+        Err(error(
+            "42P20",
+            "window functions are not allowed in transform expressions".into(),
+        ))
+    }
+
+    fn check_transform_function(
+        &self,
+        expression: &ScalarExpr,
+        selected: Option<&FunctionBinding>,
+        input: &RowSchema,
+    ) -> Result<(), SQLError> {
+        let Some(catalog) = self.transform_catalog else {
+            return Ok(());
+        };
+        let ScalarExpr::Func { name, args, .. } = expression else {
+            unreachable!("transform call context");
+        };
+        let scalar = selected
+            .map(|binding| self.routines.is_scalar_function_binding(binding))
+            .transpose()?
+            .unwrap_or(false);
+        if !scalar
+            && (crate::semantics::is_builtin_aggregate_call(name, selected)
+                || catalog.is_registered_aggregate(name))
+        {
+            return Err(error(
+                "42803",
+                "aggregate functions are not allowed in transform expressions".into(),
+            ));
+        }
+        if crate::semantics::sets::validation::function_may_return_set(
+            catalog,
+            catalog,
+            name,
+            selected,
+            args,
+            input,
+            &[],
+        )? {
+            return Err(error(
+                "0A000",
+                "set-returning functions are not allowed in transform expressions".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub(super) fn call(
@@ -258,6 +349,18 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
+        self.call_binding(name, binding, args, input, subqueries)
+            .map(|_| ())
+    }
+
+    fn call_binding(
+        &mut self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        args: &[ScalarExpr],
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<Option<FunctionBinding>, SQLError> {
         let arguments = crate::scalar_call_arguments(args)?;
         let mut observed = arguments
             .iter()
@@ -286,7 +389,7 @@ impl Preparation<'_> {
             for (value, target) in observed.iter_mut().zip(&selected.arguments) {
                 self.parameters.coerce_unknown(value, target)?;
             }
-            return Ok(());
+            return Ok(binding.cloned());
         }
         if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
             if name == "nullif" {
@@ -300,7 +403,7 @@ impl Preparation<'_> {
                     &mut observed,
                 )?;
             }
-            return Ok(());
+            return Ok(binding.cloned());
         }
         let (selected, positions) = if let Some(fixed) = crate::resolve_fixed_builtin_call(
             name,
@@ -318,7 +421,7 @@ impl Preparation<'_> {
                 None,
             )
         };
-        let targets = if let Some(selected) = selected {
+        let targets = if let Some(selected) = &selected {
             let types = selected
                 .binding
                 .invocation
@@ -352,6 +455,6 @@ impl Preparation<'_> {
                 self.parameters.coerce_unknown(value, target)?;
             }
         }
-        Ok(())
+        Ok(selected.map(|selected| selected.binding))
     }
 }

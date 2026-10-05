@@ -63,18 +63,15 @@ pub fn function_volatility_with_binding(
     binding: Option<&FunctionBinding>,
     argument_count: usize,
 ) -> FunctionVolatility {
+    let builtin = builtin_function_volatility(name, binding, argument_count);
     if matches!(
         binding.and_then(|binding| binding.dispatch),
         Some(crate::ast::FunctionDispatch::NumericOperator(_))
-    ) {
-        return FunctionVolatility::Immutable;
+    ) || builtin == FunctionVolatility::Volatile
+    {
+        return builtin;
     }
     let identity = name.to_ascii_lowercase();
-    let lower = builtin_function_dispatch_name(&identity);
-
-    if builtin_is_volatile(&lower) {
-        return FunctionVolatility::Volatile;
-    }
 
     // Registrations made through the original APIs retain the conservative
     // VOLATILE default. Explicit options let pure callbacks participate in
@@ -86,6 +83,25 @@ pub fn function_volatility_with_binding(
     if let Some(volatility) = sql_routine_volatility(catalog, &identity, binding) {
         return volatility;
     }
+    builtin
+}
+
+/// Classify an already selected built-in without consulting host or SQL routine registrations. Callers that have not resolved the routine must use the catalog-aware entry point instead.
+pub fn builtin_function_volatility(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    argument_count: usize,
+) -> FunctionVolatility {
+    if matches!(
+        binding.and_then(|binding| binding.dispatch),
+        Some(crate::ast::FunctionDispatch::NumericOperator(_))
+    ) {
+        return FunctionVolatility::Immutable;
+    }
+    let lower = builtin_function_dispatch_name(&name.to_ascii_lowercase());
+    if builtin_is_volatile(&lower) {
+        return FunctionVolatility::Volatile;
+    }
 
     // UQA retrieval/graph functions not listed above read the statement's
     // catalog snapshot.  Session/catalog introspection functions have the same
@@ -94,6 +110,21 @@ pub fn function_volatility_with_binding(
         || matches!(
             lower.as_str(),
             "current_schema"
+                | "concat"
+                | "concat_ws"
+                | "format"
+                | "pg_typeof"
+                | "typeof"
+                | "row_to_json"
+                | "to_json"
+                | "to_jsonb"
+                | "json_build_object"
+                | "jsonb_build_object"
+                | "json_build_array"
+                | "jsonb_build_array"
+                | "to_char"
+                | "to_date"
+                | "to_number"
                 | "now"
                 | "current_date"
                 | "current_time"
@@ -140,6 +171,8 @@ pub fn function_volatility_with_binding(
                 | "pg_has_role"
                 | "pg_get_userbyid"
                 | "has_database_privilege"
+                | "has_table_privilege"
+                | "has_column_privilege"
                 | "has_schema_privilege"
                 | "has_sequence_privilege"
                 | "has_function_privilege"
@@ -150,6 +183,17 @@ pub fn function_volatility_with_binding(
                 | "enum_range"
         )
         || (lower == "age" && argument_count == 1)
+        || (lower == "to_timestamp" && argument_count == 2)
+        || (matches!(lower.as_str(), "quote_literal" | "quote_nullable")
+            && binding.is_none_or(|binding| binding.argument_types.as_slice() != ["text"]))
+        || (matches!(lower.as_str(), "date_part" | "extract" | "date_trunc")
+            && argument_count == 2
+            && binding.is_none_or(|binding| {
+                binding
+                    .argument_types
+                    .iter()
+                    .any(|ty| matches!(ty.as_str(), "timestamptz" | "timestamp with time zone"))
+            }))
     {
         FunctionVolatility::Stable
     } else {
@@ -516,6 +560,44 @@ mod tests {
     }
     use crate::ast::{FrameExclusion, FrameMode};
     use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
+
+    #[test]
+    fn builtin_constants_preserve_postgresql_statement_and_session_inputs() {
+        // Checked against PostgreSQL 18.4 pg_proc.provolatile before enabling bound built-in constant folding.
+        for name in [
+            "concat",
+            "concat_ws",
+            "format",
+            "pg_typeof",
+            "row_to_json",
+            "to_json",
+            "to_jsonb",
+            "json_build_object",
+            "jsonb_build_array",
+            "to_char",
+            "to_date",
+            "to_number",
+            "has_table_privilege",
+            "has_column_privilege",
+        ] {
+            assert_eq!(
+                super::builtin_function_volatility(name, None, 2),
+                FunctionVolatility::Stable,
+                "{name}"
+            );
+        }
+        for name in ["repeat", "upper"] {
+            assert_eq!(
+                super::builtin_function_volatility(name, None, 2),
+                FunctionVolatility::Immutable,
+                "{name}"
+            );
+        }
+        assert_eq!(
+            super::builtin_function_volatility("nextval", None, 1),
+            FunctionVolatility::Volatile
+        );
+    }
 
     #[test]
     fn sequence_introspection_volatility_matches_postgresql() {
