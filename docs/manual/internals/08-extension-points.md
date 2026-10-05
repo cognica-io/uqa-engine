@@ -32,7 +32,7 @@ Aggregate registration can change whether an expression is projection or groupin
 
 An immutable function depends only on arguments. A stable function may observe statement context but remains stable during that statement. A volatile function may change per call. Any callback that may mutate engine-visible state must be volatile.
 
-Callbacks are shared by derived sessions and are not stored in the durable catalog. Register them before creating worker sessions or accepting queries. Do not hold engine registry locks while invoking callback code.
+Callbacks are shared by derived sessions and are not stored in the durable catalog. Register them before creating worker sessions or accepting queries. A Rust callback that refers back to its owning engine or a sibling session must capture a `Weak<Engine>` and upgrade it only for the invocation; capturing a strong `Arc<Engine>` forms a cycle through the shared callback registry and retains that session's database resources. Keep the session's strong owner in the host. Do not hold engine registry locks while invoking callback code.
 
 Host-language callbacks need a reverse call boundary in addition to the forward method dispatch used by a generated binding. Node.js must move callback execution from an engine worker back to the owning JavaScript thread, while browser WASM must re-enter JavaScript through Emscripten and retain callback and aggregate-state identities for the full registry lifetime. Without those lifecycle-safe bridges, registration would violate runtime thread ownership or leave dangling callback state, so forward binding generation alone cannot expose UDF callbacks correctly.
 

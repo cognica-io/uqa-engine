@@ -28,6 +28,68 @@ fn tags(file: &NativeLeaseFile, control: &StorageReadControl) -> Vec<u64> {
 }
 
 #[test]
+fn closing_transports_releases_registered_descriptors_without_another_open() {
+    let directory = tempfile::tempdir().unwrap();
+    let files: Vec<_> = (0..8)
+        .map(|id| {
+            NativeLeaseFile::open(&directory.path().join(format!("leases-{id}")), namespace(1))
+                .unwrap()
+        })
+        .collect();
+    let retained: Vec<_> = files
+        .iter()
+        .map(|file| Arc::downgrade(file.0.shared()))
+        .collect();
+    drop(files);
+    assert!(
+        retained.iter().all(|state| state.upgrade().is_none()),
+        "the process registry retained closed databases until another file opened"
+    );
+}
+
+#[test]
+fn the_final_lease_releases_its_registered_descriptor_after_transport_close() {
+    let directory = tempfile::tempdir().unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let file = NativeLeaseFile::open(&directory.path().join("leases"), namespace(1)).unwrap();
+    let state = Arc::downgrade(file.0.shared());
+    let admission = file.admit(&control).unwrap();
+    let lease = file.retain(31, &control).unwrap();
+    drop((admission, file));
+    assert!(state.upgrade().is_some(), "a live lease lost its file");
+    drop(lease);
+    assert!(
+        state.upgrade().is_none(),
+        "the final lease left its file registered"
+    );
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn concurrent_handle_release_closes_the_last_registered_descriptor() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = NativeLeaseFile::open(&directory.path().join("leases"), namespace(1)).unwrap();
+    let state = Arc::downgrade(file.0.shared());
+    let start = Arc::new(std::sync::Barrier::new(9));
+    let workers: Vec<_> = (0..8)
+        .map(|_| {
+            let file = file.clone();
+            let start = Arc::clone(&start);
+            std::thread::spawn(move || {
+                start.wait();
+                drop(file);
+            })
+        })
+        .collect();
+    drop(file);
+    start.wait();
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    assert!(state.upgrade().is_none());
+}
+
+#[test]
 fn path_aliases_share_one_descriptor_and_cannot_hide_live_leases() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir(directory.path().join("nested")).unwrap();

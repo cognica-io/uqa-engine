@@ -73,8 +73,10 @@ fn callback_catalog_refresh_can_resolve_a_private_sequence() {
             let engine = Arc::new(engine);
             let peer = Arc::new(peer);
             let callback_engine = Arc::downgrade(&engine);
+            let callback_peer = Arc::downgrade(&peer);
             engine
                 .register_scalar_function("publish_then_allocate", move |_: &[Value]| {
+                    let peer = callback_peer.upgrade().unwrap();
                     peer.sql("CREATE ROLE peer_role", &[])?;
                     let engine = callback_engine.upgrade().unwrap();
                     let result = engine.sql("SELECT nextval('private_ids') AS n", &[])?;
@@ -93,6 +95,12 @@ fn callback_catalog_refresh_can_resolve_a_private_sequence() {
                 .try_sequences_snapshot()
                 .unwrap()
                 .contains_key("public.private_ids"));
+            let retained = Arc::downgrade(&peer);
+            drop((engine, peer));
+            assert!(
+                retained.upgrade().is_none(),
+                "callback retained its sibling session"
+            );
         }
     }
 }
