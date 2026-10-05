@@ -94,10 +94,16 @@ impl ParameterTypes {
         let target = target.without_type_modifiers();
         if let Some(text) = &expression.literal {
             // `coerce_to_common_type` reads an `unknown` constant with the selected type's input function, which reports what the type rejects; a type whose input function consults the catalog is read when the expression is bound to it.
-            if !crate::type_resolution::catalog_input_type(&target) {
+            // Domain input first uses the base type; its enclosing coercion still applies the domain's modifiers and constraints.
+            let mut input_type = &target;
+            while let ColumnType::Domain { base, .. } = input_type {
+                input_type = base;
+            }
+            let input_type = input_type.without_type_modifiers();
+            if !crate::type_resolution::catalog_input_type(&input_type) {
                 crate::expr::cast_value_from(
                     &Value::Str(text.clone()),
-                    &target.catalog_name(),
+                    &input_type.catalog_name(),
                     None,
                 )?;
             }
