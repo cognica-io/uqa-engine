@@ -6,6 +6,64 @@
 
 use super::*;
 
+fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
+    ScalarExpr::Func {
+        name: name.into(),
+        binding: Some(FunctionBinding {
+            name: name.into(),
+            argument_types: Vec::new(),
+            builtin: true,
+            object_id: None,
+            dispatch: None,
+            invocation: None,
+            resolution_error: None,
+        }),
+        args,
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    }
+}
+
+#[test]
+fn folds_value_builtins_after_binding_without_evaluating_stateful_or_set_calls() {
+    let repeated = bound_call(
+        "repeat",
+        vec![
+            ScalarExpr::Literal(Value::Str("x".into())),
+            ScalarExpr::Literal(Value::Int(3)),
+        ],
+    );
+    let folded =
+        fold_literal_expression(repeated, uqa_execution::scalar::eval_constant_scalar).unwrap();
+    assert_eq!(literal_value(&folded), Some(&Value::Str("xxx".into())));
+
+    for name in [
+        "nextval",
+        "current_setting",
+        "concat",
+        "sum",
+        "pg_catalog.sum",
+        "generate_series",
+    ] {
+        let call = bound_call(name, vec![ScalarExpr::Literal(Value::Int(1))]);
+        let unchanged = fold_literal_expression(call.clone(), |_| {
+            panic!("stateful or set call must not execute during planning")
+        })
+        .unwrap();
+        assert_eq!(unchanged, call, "{name}");
+    }
+    let mut user_call = bound_call("repeat", vec![ScalarExpr::Literal(Value::Int(1))]);
+    if let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &mut user_call
+    {
+        binding.builtin = false;
+    }
+    assert!(!is_constant(&user_call));
+}
+
 #[test]
 fn constant_numeric_comparisons_match_postgresql_before_replacing_the_expression() {
     let oracle: serde_json::Value = serde_json::from_str(include_str!(concat!(

@@ -26,6 +26,14 @@ pub type OptimizerResult<T> = Result<T, OptimizerError>;
 /// Evaluate a planner-proven constant using the runtime selected by the caller.
 pub type ConstantEvaluator = fn(&ScalarExpr) -> Result<uqa_core::Value, uqa_sql::SQLError>;
 
+/// Plan an already analyzed scalar at its owning command's preparation boundary. This uses the same lazy conditional simplification and constant-error propagation as query planning.
+pub fn optimize_scalar_expression(
+    expression: &mut ScalarExpr,
+    config: &OptimizerConfig,
+) -> Result<(), uqa_sql::SQLError> {
+    super::optimize_scalar_slot(expression, config)
+}
+
 #[derive(Debug, Clone)]
 pub struct OptimizerConfig {
     pub enable_filter_pushdown: bool,
