@@ -300,7 +300,7 @@ enum WindowCallKind {
 }
 
 /// Validate a window call as `ParseFuncOrColumn` does: resolve the function by its arguments, which include a `WITHIN GROUP` call's ordering expressions, then reject what that kind of function cannot take. `call` holds the arguments, whether the call has `FILTER`, and its other aggregate modifiers.
-pub(super) fn validate_window_function(
+pub(in crate::binding) fn validate_window_function(
     routines: &dyn RoutineResolution,
     name: &str,
     (args, filtered, modifiers): (&[ScalarExpr], bool, crate::ast::WindowCallModifiers),

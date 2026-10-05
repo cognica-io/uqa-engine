@@ -8,6 +8,36 @@
 
 use super::*;
 
+#[test]
+fn builtin_aggregate_identity_distinguishes_qualification_and_scalar_overloads() {
+    let call = |name: &str, binding| ScalarExpr::Func {
+        name: name.into(),
+        binding,
+        args: vec![ScalarExpr::Literal(Value::Int(1))],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    for name in ["sum", "pg_catalog.sum", "PG_CATALOG.SUM"] {
+        assert!(is_builtin_aggregate(&call(name, None)), "{name}");
+    }
+    assert!(!is_builtin_aggregate(&call("public.sum", None)));
+    let mut binding = crate::ast::FunctionBinding {
+        object_id: Some([1; 16]),
+        name: "public.sum".into(),
+        argument_types: vec!["integer".into()],
+        builtin: false,
+        dispatch: None,
+        invocation: None,
+        resolution_error: None,
+    };
+    assert!(!is_builtin_aggregate(&call("sum", Some(binding.clone()))));
+    binding.object_id = None;
+    binding.name = "pg_catalog.sum".into();
+    binding.builtin = true;
+    assert!(is_builtin_aggregate(&call("sum", Some(binding))));
+}
+
 fn decimal(text: &str) -> Value {
     Value::Decimal(uqa_core::DecimalValue::parse(text).unwrap())
 }

@@ -136,31 +136,22 @@ fn is_pg_catalog_function(local: &str) -> bool {
 }
 
 pub fn is_builtin_aggregate(expr: &ScalarExpr) -> bool {
-    matches!(expr, ScalarExpr::Func { name, .. } if matches!(
-        name.to_ascii_lowercase().as_str(),
-        "count"
-            | "sum"
-            | "avg"
-            | "min"
-            | "max"
-            | "string_agg"
-            | "array_agg"
-            | "bool_and"
-            | "bool_or"
-            | "stddev"
-            | "stddev_samp"
-            | "stddev_pop"
-            | "variance"
-            | "var_samp"
-            | "var_pop"
-            | "percentile_cont"
-            | "percentile_disc"
-            | "mode"
-            | "json_agg"
-            | "jsonb_agg"
-            | "json_object_agg"
-            | "jsonb_object_agg"
-    ))
+    matches!(expr, ScalarExpr::Func { name, binding, .. } if is_builtin_aggregate_call(name, binding.as_ref()))
+}
+
+/// Classify the routine selected for a call, retaining qualified built-ins while allowing user scalar overloads with the same local name.
+pub fn is_builtin_aggregate_call(
+    name: &str,
+    binding: Option<&crate::ast::FunctionBinding>,
+) -> bool {
+    if binding.is_some_and(|binding| !binding.builtin || binding.dispatch.is_some()) {
+        return false;
+    }
+    let name = binding
+        .map_or(name, |binding| binding.name.as_str())
+        .to_ascii_lowercase();
+    let local = name.strip_prefix("pg_catalog.").unwrap_or(&name);
+    crate::ast::is_builtin_aggregate_function(local)
 }
 
 pub enum MultiFieldMatchShape<'a> {

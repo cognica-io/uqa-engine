@@ -34,9 +34,9 @@ mod traversal;
 
 pub use access_path::contains_retrieval;
 pub use api::{
-    optimize, optimize_with_aggregates, optimize_with_aggregates_and_statistics,
-    optimize_with_statistics, ConstantEvaluator, OptimizerConfig, OptimizerError, OptimizerResult,
-    SourceStatistics,
+    optimize, optimize_scalar_expression, optimize_with_aggregates,
+    optimize_with_aggregates_and_statistics, optimize_with_statistics, ConstantEvaluator,
+    OptimizerConfig, OptimizerError, OptimizerResult, SourceStatistics,
 };
 pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 

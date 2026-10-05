@@ -20,6 +20,7 @@ pub mod entry;
 pub mod identity;
 mod locking;
 mod recursion;
+mod type_changes;
 pub use context::*;
 use recursion::{materialize_recursive_action_names, run_recursive_alter_action};
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
@@ -102,14 +103,16 @@ pub fn run_alter_table<S: Clone + 'static>(
         qualifier,
         if_exists,
         recurse,
-        actions,
+        mut actions,
     } = stmt;
     context.constraints.access.ensure_table_owner(&table)?;
-    for mut action in actions {
+    let mut prepared_types = type_changes::prepare(context, &table, &qualifier, &mut actions)?;
+    for (position, mut action) in actions.into_iter().enumerate() {
         if !check_added_column_declaration(context, &table, &qualifier, &mut action)? {
             continue;
         }
         let column_checks = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
+        let prepared_type = prepared_types.remove(&position);
         run_recursive_alter_action(
             context,
             AlterTableStmt {
@@ -120,6 +123,9 @@ pub fn run_alter_table<S: Clone + 'static>(
                 actions: Vec::new(),
             },
             action,
+            prepared_type
+                .as_ref()
+                .and_then(|prepared| prepared.transform.as_ref()),
         )?;
         for mut action in column_checks {
             materialize_recursive_action_names(context, &table, recurse, &mut action)?;
@@ -133,6 +139,7 @@ pub fn run_alter_table<S: Clone + 'static>(
                     actions: Vec::new(),
                 },
                 action,
+                None,
             )?;
         }
     }
@@ -174,21 +181,12 @@ fn prepare_alter_action<S: Clone + 'static>(
     action: &mut AlterTableAction,
     mode: crate::row_locks::RelationLockMode,
 ) -> Result<Vec<AlterTableAction>, SQLError> {
-    match action {
-        AlterTableAction::AddColumn { column, .. } => {
-            column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
-                context.hierarchy.publication.types,
-                &column.ty,
-            )?;
-            prepare_added_column_sequence(context, table, recurse, column)?;
-        }
-        AlterTableAction::AlterColumnType { ty, .. } => {
-            *ty = uqa_sql::type_resolution::resolve_declared_column_type(
-                context.hierarchy.publication.types,
-                ty,
-            )?;
-        }
-        _ => {}
+    if let AlterTableAction::AddColumn { column, .. } = action {
+        column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
+            context.hierarchy.publication.types,
+            &column.ty,
+        )?;
+        prepare_added_column_sequence(context, table, recurse, column)?;
     }
     materialize_recursive_action_names(context, table, recurse, action)?;
     // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
@@ -226,6 +224,7 @@ fn run_alter_table_action<S: Clone + 'static>(
     action: AlterTableAction,
     recursing: bool,
     inherited_not_null_name: Option<String>,
+    type_transform: Option<&uqa_sql::schema::columns::type_transform::AnalyzedTypeTransform>,
 ) -> Result<(), SQLError> {
     if matches!(&action, AlterTableAction::AddKeyConstraint { .. }) {
         let persistence = context
@@ -546,7 +545,7 @@ fn run_alter_table_action<S: Clone + 'static>(
                 )?;
             }
         }
-        AlterTableAction::AlterColumnType { name, ty, using } => {
+        AlterTableAction::AlterColumnType { name, ty, .. } => {
             identity::retype_identity_sequence(context, &stmt.table, &name, &ty)?;
             crate::schema::columns::alteration::alter_type(
                 &context.columns,
@@ -554,7 +553,7 @@ fn run_alter_table_action<S: Clone + 'static>(
                 &stmt.qualifier,
                 &name,
                 &ty,
-                using.as_ref(),
+                type_transform,
             )?;
         }
         AlterTableAction::AddIdentity {

@@ -148,3 +148,7 @@ pub mod publication;
 pub mod alteration;
 
 pub mod removal_metadata;
+
+pub mod type_target;
+
+pub mod type_transform;

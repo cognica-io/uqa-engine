@@ -88,6 +88,27 @@ fn is_constant(expression: &ScalarExpr) -> bool {
             args,
             ..
         } if is_coalesce(name, binding.as_ref()) => args.iter().all(is_constant),
+        ScalarExpr::Func {
+            name,
+            binding: Some(binding),
+            args,
+            distinct: false,
+            order_by,
+            filter: None,
+        } if binding.builtin
+            && order_by.is_empty()
+            && !uqa_sql::semantics::is_builtin_aggregate(expression)
+            && !uqa_sql::semantics::sets::validation::builtin_returns_set(
+                &uqa_sql::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase()),
+            )
+            && uqa_sql::semantics::volatility::builtin_function_volatility(
+                name,
+                Some(binding),
+                args.len(),
+            ) == uqa_sql::ast::FunctionVolatility::Immutable =>
+        {
+            args.iter().all(is_constant)
+        }
         _ => false,
     }
 }
@@ -96,6 +117,12 @@ pub(super) fn fold_literal_expression(
     expression: ScalarExpr,
     evaluate: crate::optimizer::ConstantEvaluator,
 ) -> Result<ScalarExpr, SQLError> {
+    if matches!(&expression, ScalarExpr::Func { binding: Some(binding), .. }
+        if matches!(binding.dispatch, Some(uqa_sql::ast::FunctionDispatch::NamedArgument | uqa_sql::ast::FunctionDispatch::VariadicArgument)))
+    {
+        // Argument markers carry syntax for their enclosing call; only that call evaluates them as arguments.
+        return Ok(expression);
+    }
     if literal_value(&expression).is_some() || !is_constant(&expression) {
         return Ok(expression);
     }

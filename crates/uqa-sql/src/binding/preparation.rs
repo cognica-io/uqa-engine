@@ -33,6 +33,7 @@ pub fn infer_prepared_parameter_types(
         routines,
         scope: SchemaScope::for_analysis(ctes)?,
         parameters: ParameterTypes::new(declared),
+        transform_catalog: None,
     };
     match plan {
         UnifiedPlan::Query(query) => {
@@ -45,10 +46,29 @@ pub fn infer_prepared_parameter_types(
     analysis.parameters.finish()
 }
 
+/// Analyze a USING expression against the original table row type before the ALTER target or its new type is checked. Transform expressions admit no parameters or query-valued descendants and do not evaluate constants.
+pub fn analyze_column_type_transform(
+    catalog: &dyn crate::schema::SchemaExpressionCatalog,
+    expression: &crate::plan::ExpressionPlan,
+    input: &RowSchema,
+    binding: &BindingContext<'_>,
+) -> Result<Option<ColumnType>, SQLError> {
+    let mut analysis = Preparation {
+        routines: catalog,
+        scope: SchemaScope::for_analysis(binding)?,
+        parameters: ParameterTypes::new(&[]),
+        transform_catalog: Some(catalog),
+    };
+    analysis
+        .expression(&expression.scalar, input, &expression.subqueries)
+        .map(|expression| expression.ty)
+}
+
 struct Preparation<'a> {
     routines: &'a dyn RoutineResolution,
     scope: SchemaScope,
     parameters: ParameterTypes,
+    transform_catalog: Option<&'a dyn crate::schema::SchemaExpressionCatalog>,
 }
 
 struct QueryOutput {
