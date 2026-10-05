@@ -35,6 +35,7 @@ pub fn execute_plan<S: Clone + Send + Sync + 'static>(
     plan: UnifiedPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    let _transaction_clock = super::context::transaction_clock_scope(context.statements);
     let plan = context.planning.plan_for_execution(plan, params)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .execute(&plan)
@@ -47,6 +48,7 @@ pub fn execute_checked_plan<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     check: &dyn Fn(&AnalyzedResult) -> Result<(), SQLError>,
 ) -> Result<SQLResult, SQLError> {
+    let _transaction_clock = super::context::transaction_clock_scope(context.statements);
     let (plan, result) = context.planning.plan_with_result(plan, params)?;
     check(&result)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
@@ -59,6 +61,7 @@ pub fn execute_with_privilege_subject<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     privilege_subject: &RoleReference,
 ) -> Result<SQLResult, SQLError> {
+    let _transaction_clock = super::context::transaction_clock_scope(context.statements);
     let mut plan = UnifiedPlan::lower_with(statement, context.aggregates);
     mark_catalog_statement_relations_bound(&mut plan)?;
     let plan = context.planning.plan_for_execution(plan, params)?;
@@ -72,6 +75,7 @@ pub fn execute_optimized_command<S: Clone + Send + Sync + 'static>(
     command: &CommandPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    let _transaction_clock = super::context::transaction_clock_scope(statements);
     UnifiedPlanExecutor::new_nested(statements.statement_execution_context(), params)
         .execute(&UnifiedPlan::Command(Box::new(command.clone())))
 }

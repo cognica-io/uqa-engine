@@ -69,6 +69,7 @@ pub(super) fn evaluate(
         "regexp_count" => (4, "regexp_count takes 2-4 args"),
         "regexp_instr" => (7, "regexp_instr takes 2-7 args"),
         "regexp_like" => (3, "regexp_like takes 2-3 args"),
+        "regex_match_op" | "regex_imatch_op" => (2, "a regular expression match takes 2 args"),
         "regexp_substr" => (6, "regexp_substr takes 2-6 args"),
         _ => unreachable!("regular-expression family membership was checked"),
     };
@@ -83,8 +84,13 @@ pub(super) fn evaluate(
     match name {
         "regexp_count" => count(&input, &pattern, args, control),
         "regexp_instr" | "regexp_substr" => selected(name, &input, &pattern, args, control),
-        "regexp_like" => {
-            let flags = flags(args.get(2), control)?;
+        // `~*` is `regexp_like` with the `i` flag; `~` and `regexp_like` take the flags written.
+        "regexp_like" | "regex_match_op" | "regex_imatch_op" => {
+            let flags = if name == "regex_imatch_op" {
+                control.copy_text("i").map_err(SQLError::from)?
+            } else {
+                flags(args.get(2), control)?
+            };
             let regex = compile(&pattern, &flags, false, control)?;
             plain(Value::Bool(regex.is_match(&input)), control)
         }

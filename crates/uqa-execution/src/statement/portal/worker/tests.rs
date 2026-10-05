@@ -214,6 +214,7 @@ fn unopened_worker(directional: bool) -> Vec<SessionPortalWorkerResponse> {
     };
     run(
         &UnopenedQuery,
+        Some(313),
         &query,
         &[],
         directional,

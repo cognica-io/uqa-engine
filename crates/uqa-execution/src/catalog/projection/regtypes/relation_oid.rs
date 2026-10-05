@@ -37,7 +37,7 @@ pub fn regclass_input_oid(context: &CatalogContext<'_>, name: &str) -> Result<i6
     resolved_regclass_oid(context, &canonical, kind)
 }
 
-/// `to_regclass`: [`regclass_input_oid`] with the errors `regclassin` reports through its error context, a malformed number or name and a relation it does not find, as no relation.
+/// `to_regclass`: `regclass_input_oid` with the errors `regclassin` reports through its error context, a malformed number or name and a relation it does not find, as no relation.
 pub fn lookup_regclass_oid(
     context: &CatalogContext<'_>,
     name: &str,

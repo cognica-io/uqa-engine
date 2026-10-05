@@ -327,7 +327,12 @@ fn temporal_binary_result_type(
         (T::Date, T::SmallInteger | T::Integer, BinaryOp::Add | BinaryOp::Subtract)
         | (T::SmallInteger | T::Integer, T::Date, BinaryOp::Add) => Some(T::Date),
         (T::Date | T::Timestamp, T::Interval, BinaryOp::Add | BinaryOp::Subtract)
-        | (T::Interval, T::Date | T::Timestamp, BinaryOp::Add) => Some(T::Timestamp),
+        | (T::Interval, T::Date | T::Timestamp, BinaryOp::Add)
+        | (T::Date, T::Time, BinaryOp::Add)
+        | (T::Time, T::Date, BinaryOp::Add) => Some(T::Timestamp),
+        (T::Date, T::TimeTz, BinaryOp::Add) | (T::TimeTz, T::Date, BinaryOp::Add) => {
+            Some(T::TimestampTz)
+        }
         (T::TimestampTz, T::Interval, BinaryOp::Add | BinaryOp::Subtract)
         | (T::Interval, T::TimestampTz, BinaryOp::Add) => Some(T::TimestampTz),
         (T::Time, T::Interval, BinaryOp::Add | BinaryOp::Subtract)

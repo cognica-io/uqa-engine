@@ -1,0 +1,2694 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'now'::timestamp = now()::timestamp, 'now'::timestamptz = now(), 'now'::date = current_date, 'now'::time = localtime, 'now'::timetz = current_time;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'today'::date = current_date, 'tomorrow'::date - current_date, 'yesterday'::date - current_date, 'epoch'::date, 'epoch'::timestamp, 'epoch'::timestamptz;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "date",
+            "timestamp",
+            "timestamptz"
+          ],
+          "type_oids": [
+            16,
+            23,
+            23,
+            1082,
+            1114,
+            1184
+          ],
+          "rows": [
+            [
+              "t",
+              "1",
+              "-1",
+              "1970-01-01",
+              "1970-01-01 00:00:00",
+              "1970-01-01 00:00:00+00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'allballs'::time, 'allballs'::timetz, ' NOW '::date = current_date, 'Today'::timestamp = current_date::timestamp, 'today'::timestamptz = current_date::timestamptz;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "time",
+            "timetz",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            1083,
+            1266,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "00:00:00",
+              "00:00:00+00",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'yesterday 10:00'::timestamp = current_date::timestamp - interval '14 hours', 'tomorrow'::timestamptz = (current_date + 1)::timestamptz;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'today 10:00'::timestamp = current_date + time '10:00', 'tomorrow 10:00+02'::timestamptz = (current_date + 1 + time '08:00')::timestamptz;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'epoch'::timestamp + interval '1 day', 'epoch'::date + 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            1114,
+            1082
+          ],
+          "rows": [
+            [
+              "1970-01-02 00:00:00",
+              "1970-01-02"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'epoch'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type time: \"epoch\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'today'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type time: \"today\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'yesterday'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type time: \"yesterday\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'now'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"now\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'nowx'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"nowx\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'now 10:00'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"now 10:00\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'epoch 10:00'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"epoch 10:00\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'allballs'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"allballs\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE dn (t timestamp DEFAULT 'now', d date DEFAULT 'today', tt time DEFAULT 'allballs', tz timestamptz DEFAULT 'now', i int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO dn (i) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT t <= now()::timestamp, d = current_date, tt, tz <= now() FROM dn;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "tt",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            1083,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "00:00:00",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) ~ '^''\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(\\.\\d+)?''::timestamp without time zone$' FROM pg_attrdef WHERE adrelid = 'dn'::regclass AND adnum = 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) ~ '^''\\d{4}-\\d{2}-\\d{2}''::date$' FROM pg_attrdef WHERE adrelid = 'dn'::regclass AND adnum = 2;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'dn'::regclass AND adnum = 3;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "'00:00:00'::time without time zone"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) ~ '^''\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00''::timestamp with time zone$' FROM pg_attrdef WHERE adrelid = 'dn'::regclass AND adnum = 4;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cp (i interval DEFAULT '1 hour', b bytea DEFAULT 'x', ts timestamp DEFAULT '2024-01-01', d date DEFAULT '2024-01-01 10:00', t time DEFAULT '10:00', tz timestamptz DEFAULT '2024-01-01 10:00+02', n int DEFAULT 1, CHECK (i > '30 minutes'));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cp'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'01:00:00'::interval"
+            ],
+            [
+              "2",
+              "'\\x78'::bytea"
+            ],
+            [
+              "3",
+              "'2024-01-01 00:00:00'::timestamp without time zone"
+            ],
+            [
+              "4",
+              "'2024-01-01'::date"
+            ],
+            [
+              "5",
+              "'10:00:00'::time without time zone"
+            ],
+            [
+              "6",
+              "'2024-01-01 08:00:00+00'::timestamp with time zone"
+            ],
+            [
+              "7",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'cp'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK ((i > '00:30:00'::interval))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW cpv AS SELECT i + '1 hour' AS x, ts + '1 day' AS y FROM cp WHERE ts > '2024-01-01' AND t < '11:00';",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('cpv'::regclass);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT (i + '01:00:00'::interval) AS x,\n    (ts + '1 day'::interval) AS y\n   FROM cp\n  WHERE ((ts > '2024-01-01 00:00:00'::timestamp without time zone) AND (t < '11:00:00'::time without time zone));"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW cpw AS SELECT ts - '1 day' AS y FROM cp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"1 day\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cg (ts timestamp, d date, g timestamp GENERATED ALWAYS AS (ts + '1 day') STORED, h timestamp GENERATED ALWAYS AS (d + time '10:00') STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cg'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(ts + '1 day'::interval)"
+            ],
+            [
+              "(d + '10:00:00'::time without time zone)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cg (ts, d) VALUES ('2024-01-01 10:00', '2024-03-01');",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT g, h FROM cg;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "h"
+          ],
+          "type_oids": [
+            1114,
+            1114
+          ],
+          "rows": [
+            [
+              "2024-01-02 10:00:00",
+              "2024-03-01 10:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cgx (d date, g timestamp GENERATED ALWAYS AS (d + '1') STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: date + unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cgy (ts timestamp, g timestamp GENERATED ALWAYS AS (ts + 'x') STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-13-01'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-13-01\"",
+        "detail": null,
+        "hint": "Perhaps you need a different \"DateStyle\" setting."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-32'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-01-32\"",
+        "detail": null,
+        "hint": "Perhaps you need a different \"DateStyle\" setting."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-02-30'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-02-30\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-00-10'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-00-10\"",
+        "detail": null,
+        "hint": "Perhaps you need a different \"DateStyle\" setting."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '24-01-01'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"24-01-01\"",
+        "detail": null,
+        "hint": "Perhaps you need a different \"DateStyle\" setting."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-02-29'::date, '20240101'::date, '240101'::date, '01-02-2024'::date, '1-2-24'::date, '2024/01/02'::date, '2024.01.02'::date;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "date",
+            "date",
+            "date",
+            "date",
+            "date",
+            "date",
+            "date"
+          ],
+          "type_oids": [
+            1082,
+            1082,
+            1082,
+            1082,
+            1082,
+            1082,
+            1082
+          ],
+          "rows": [
+            [
+              "2024-02-29",
+              "2024-01-01",
+              "2024-01-01",
+              "2024-01-02",
+              "2024-01-02",
+              "2024-01-02",
+              "2024-01-02"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ' 2024-01-01 '::date, '2024-01-01, 10:00'::timestamp, '2024-01-01 10:00'::date, '2024-01-01 10:00'::time;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "date",
+            "timestamp",
+            "date",
+            "time"
+          ],
+          "type_oids": [
+            1082,
+            1114,
+            1082,
+            1083
+          ],
+          "rows": [
+            [
+              "2024-01-01",
+              "2024-01-01 10:00:00",
+              "2024-01-01",
+              "10:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ''::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '10:00:00'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"10:00:00\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1 day'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"1 day\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '25:00'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"25:00\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '10:60'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"10:60\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '10:00:60'::time;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "time"
+          ],
+          "type_oids": [
+            1083
+          ],
+          "rows": [
+            [
+              "10:01:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '10:00:61'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"10:00:61\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '24:00:00'::time;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "time"
+          ],
+          "type_oids": [
+            1083
+          ],
+          "rows": [
+            [
+              "24:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '24:00:01'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"24:00:01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '13:00 pm'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"13:00 pm\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01 10:00 PM'::timestamp, '10:00 am'::time, '12:00 am'::time, '12:30 pm'::time;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "timestamp",
+            "time",
+            "time",
+            "time"
+          ],
+          "type_oids": [
+            1114,
+            1083,
+            1083,
+            1083
+          ],
+          "rows": [
+            [
+              "2024-01-01 22:00:00",
+              "10:00:00",
+              "00:00:00",
+              "12:30:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01 10:00:00.1234567'::timestamp, '10:00:00.9999995'::time;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "timestamp",
+            "time"
+          ],
+          "type_oids": [
+            1114,
+            1083
+          ],
+          "rows": [
+            [
+              "2024-01-01 10:00:00.123457",
+              "10:00:01"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01 23:59:60'::timestamp;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "timestamp"
+          ],
+          "type_oids": [
+            1114
+          ],
+          "rows": [
+            [
+              "2024-01-02 00:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type time: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01'::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type time: \"2024-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::timetz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type time with time zone: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '10:00:00 x'::timetz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type time with time zone: \"10:00:00 x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '10:00:00+25'::timetz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22009",
+        "message": "time zone displacement out of range: \"10:00:00+25\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '10:00 utc'::timetz, '10:00 GMT'::timetz, '10:00+05:30'::timetz, '2024-01-01 10:00 Z'::timestamptz, '2024-01-01T10:00:00z'::timestamptz;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "timetz",
+            "timetz",
+            "timetz",
+            "timestamptz",
+            "timestamptz"
+          ],
+          "type_oids": [
+            1266,
+            1266,
+            1266,
+            1184,
+            1184
+          ],
+          "rows": [
+            [
+              "10:00:00+00",
+              "10:00:00+00",
+              "10:00:00+05:30",
+              "2024-01-01 10:00:00+00",
+              "2024-01-01 10:00:00+00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '10:00:00'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"10:00:00\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1 day'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"1 day\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01 25:00'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-01-01 25:00\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-02-30'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-02-30\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::timestamptz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp with time zone: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1 day'::timestamptz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp with time zone: \"1 day\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-13-01 10:00'::timestamptz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-13-01 10:00\"",
+        "detail": null,
+        "hint": "Perhaps you need a different \"DateStyle\" setting."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01 10:00:00+25'::timestamptz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22009",
+        "message": "time zone displacement out of range: \"2024-01-01 10:00:00+25\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01 10:00:00+16'::timestamptz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22009",
+        "message": "time zone displacement out of range: \"2024-01-01 10:00:00+16\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01 10:00:00 Nowhere/Zone'::timestamptz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "time zone \"nowhere/zone\" not recognized",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01 10:00:00+05 x'::timestamptz;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp with time zone: \"2024-01-01 10:00:00+05 x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01 10:00:00+05:30:15'::timestamptz, '2024-01-01 10:00:00+0530'::timestamptz, '2024-01-01 10:00:00+15:59'::timestamptz, '2024-01-01 10:00:00 +05'::timestamptz, '2024-01-01 10:00:00+05'::timestamp;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "timestamptz",
+            "timestamptz",
+            "timestamptz",
+            "timestamptz",
+            "timestamp"
+          ],
+          "type_oids": [
+            1184,
+            1184,
+            1184,
+            1184,
+            1114
+          ],
+          "rows": [
+            [
+              "2024-01-01 04:29:45+00",
+              "2024-01-01 04:30:00+00",
+              "2023-12-31 18:01:00+00",
+              "2024-01-01 05:00:00+00",
+              "2024-01-01 10:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '99999-01-01'::timestamp, '99999-01-01'::date;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "timestamp",
+            "date"
+          ],
+          "type_oids": [
+            1114,
+            1082
+          ],
+          "rows": [
+            [
+              "99999-01-01 00:00:00",
+              "99999-01-01"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '294277-01-01'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range: \"294277-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '5874898-01-01'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range: \"5874898-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ''::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '   '::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"   \"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ago'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"ago\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1 2'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"1 2\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1 dayx'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"1 dayx\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x day'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"x day\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1-13'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22015",
+        "message": "interval field value out of range: \"1-13\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1 1:60:00'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22015",
+        "message": "interval field value out of range: \"1 1:60:00\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1 1:00:61'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22015",
+        "message": "interval field value out of range: \"1 1:00:61\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1:60'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22015",
+        "message": "interval field value out of range: \"1:60\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '99999999999 days'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22015",
+        "message": "interval field value out of range: \"99999999999 days\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1 day 99999999999999999999 seconds'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22015",
+        "message": "interval field value out of range: \"1 day 99999999999999999999 seconds\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '999999999999 years'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22015",
+        "message": "interval field value out of range: \"999999999999 years\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1 1:00:60'::interval, '10:00:60'::interval, '1 day ago'::interval, '@ 1 day'::interval, '3 4:05:06.5'::interval, '1 day 25:00:00'::interval, '1 day 2 hours 3 minutes 4.5 seconds'::interval, '1.5 mons'::interval, '1 year -2 mons'::interval, '-1-2'::interval;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "interval",
+            "interval",
+            "interval",
+            "interval",
+            "interval",
+            "interval",
+            "interval",
+            "interval",
+            "interval",
+            "interval"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186,
+            1186,
+            1186,
+            1186,
+            1186,
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "1 day 01:01:00",
+              "10:01:00",
+              "-1 days",
+              "1 day",
+              "3 days 04:05:06.5",
+              "1 day 25:00:00",
+              "1 day 02:03:04.5",
+              "1 mon 15 days",
+              "10 mons",
+              "-1 years -2 mons"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day' + 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day' - 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type interval: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT timestamp '2024-01-01' - '1 day';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"1 day\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT date '2024-01-01' - '1 day';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"1 day\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT timestamp '2024-01-01' + '1 day', timestamp '2024-01-01' - '2023-12-31', time '10:00' + '1 hour', time '10:00' - '1 hour', date '2024-01-01' - '2023-12-01', timestamptz '2024-01-01 00:00+00' - '1 day';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type time: \"1 hour\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT time '10:00' + date '2024-01-01', date '2024-01-01' + time '10:00', timetz '10:00+02' + date '2024-01-01', date '2024-01-01' + timetz '10:00+02';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            1114,
+            1114,
+            1184,
+            1184
+          ],
+          "rows": [
+            [
+              "2024-01-01 10:00:00",
+              "2024-01-01 10:00:00",
+              "2024-01-01 08:00:00+00",
+              "2024-01-01 08:00:00+00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(time '10:00' + date '2024-01-01'), pg_typeof(date '2024-01-01' + timetz '10:00+02');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206,
+            2206
+          ],
+          "rows": [
+            [
+              "timestamp without time zone",
+              "timestamp with time zone"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1::time;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type integer to time without time zone",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1.5::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type numeric to timestamp without time zone",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT true::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type boolean to date",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type interval to timestamp without time zone",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT date '2024-01-01'::interval;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type date to interval",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT time '10:00'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type time without time zone to date",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::text::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '2024-01-01'::char(10)::date, '10:00'::varchar::time, '1 hour'::text::interval;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "date",
+            "time",
+            "interval"
+          ],
+          "type_oids": [
+            1082,
+            1083,
+            1186
+          ],
+          "rows": [
+            [
+              "2024-01-01",
+              "10:00:00",
+              "01:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '0001-01-01 BC'::date, '0001-01-01 BC'::timestamp, '0002-06-15 10:00 BC'::timestamptz, '2024-01-01 AD'::date, '0001-01-01'::date - 1, '0001-01-01'::timestamp - interval '1 second';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "date",
+            "timestamp",
+            "timestamptz",
+            "date",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            1082,
+            1114,
+            1184,
+            1082,
+            1082,
+            1114
+          ],
+          "rows": [
+            [
+              "0001-01-01 BC",
+              "0001-01-01 00:00:00 BC",
+              "0002-06-15 10:00:00+00 BC",
+              "2024-01-01",
+              "0001-12-31 BC",
+              "0001-12-31 23:59:59 BC"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '0000-01-01'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"0000-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '0000-01-01 BC'::timestamp;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"0000-01-01 BC\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE tc (t time(3) DEFAULT '10:00:00.1234'::time(3), b bytea DEFAULT 'x'::bytea, c int, d date, CHECK (b <> 'y'::bytea AND t < '11:00'::time(3) AND t <> time '12:00'), g timestamp GENERATED ALWAYS AS (d + time '10:00') STORED, g2 timestamp GENERATED ALWAYS AS (d + '10:00:00.5'::time(1)) STORED, g3 int GENERATED ALWAYS AS (c + '1'::int) STORED, g5 text GENERATED ALWAYS AS ('a'::text || c) STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'tc'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'10:00:00.1234'::time(3) without time zone"
+            ],
+            [
+              "2",
+              "'\\x78'::bytea"
+            ],
+            [
+              "5",
+              "(d + '10:00:00'::time without time zone)"
+            ],
+            [
+              "6",
+              "(d + '10:00:00.5'::time(1) without time zone)"
+            ],
+            [
+              "7",
+              "(c + 1)"
+            ],
+            [
+              "8",
+              "('a'::text || c)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'tc'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK (((b <> '\\x79'::bytea) AND (t < '11:00:00'::time(3) without time zone) AND (t <> '12:00:00'::time without time zone)))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW tcv AS SELECT 'x'::bytea AS a, time '10:00' AS b, '1 hour'::interval AS c, '2024-01-01'::date AS d, 'x'::text AS e, 1::bigint AS f, '1.5'::numeric AS g, 'x'::varchar(3) AS h, 't'::boolean AS i, '{1}'::int[] AS j, NULL::int AS k, '1'::int AS l, '-1'::int AS m, '2024-01-01 10:00+02'::timestamptz AS n, '2024-01-01 10:00'::timestamp(0) AS o FROM tc WHERE t > '09:00'::time(3) AND b <> 'z'::bytea;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('tcv'::regclass);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT '\\x78'::bytea AS a,\n    '10:00:00'::time without time zone AS b,\n    '01:00:00'::interval AS c,\n    '2024-01-01'::date AS d,\n    'x'::text AS e,\n    (1)::bigint AS f,\n    1.5 AS g,\n    'x'::character varying(3) AS h,\n    true AS i,\n    '{1}'::integer[] AS j,\n    NULL::integer AS k,\n    1 AS l,\n    '-1'::integer AS m,\n    '2024-01-01 08:00:00+00'::timestamp with time zone AS n,\n    '2024-01-01 10:00:00'::timestamp(0) without time zone AS o\n   FROM tc\n  WHERE ((t > '09:00:00'::time(3) without time zone) AND (b <> '\\x7a'::bytea));"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO tc (c, d) VALUES (1, '2024-03-01');",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT t, b, g, g2, g3, g5 FROM tc;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "t",
+            "b",
+            "g",
+            "g2",
+            "g3",
+            "g5"
+          ],
+          "type_oids": [
+            1083,
+            17,
+            1114,
+            1114,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "10:00:00.123",
+              "\\x78",
+              "2024-03-01 10:00:00",
+              "2024-03-01 10:00:00.5",
+              "2",
+              "a1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '99999-01-01'::timestamp, '99999-01-01'::date, '10000-12-31 23:59:59'::timestamptz;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "timestamp",
+            "date",
+            "timestamptz"
+          ],
+          "type_oids": [
+            1114,
+            1082,
+            1184
+          ],
+          "rows": [
+            [
+              "99999-01-01 00:00:00",
+              "99999-01-01",
+              "10000-12-31 23:59:59+00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rx (a text, b text);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rx VALUES ('abc', 'b'), ('xyz', 'B');",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a ~ 'b', a ~* 'B', a !~ 'b', a !~* 'B', a LIKE 'a%', regexp_like(a, 'b'), regexp_like(a, 'B', 'i') FROM rx ORDER BY a;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?",
+            "regexp_like",
+            "regexp_like"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ],
+            [
+              "f",
+              "f",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rxv AS SELECT a ~ b AS m, a ~* b AS mi, a !~ b AS nm, a !~* b AS nmi, a ~ 'x' AS c, regexp_like(a, b) AS f, regexp_like(a, b, 'i') AS fi FROM rx WHERE a ~ 'a' AND a !~* 'Q';",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rxv'::regclass);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT (a ~ b) AS m,\n    (a ~* b) AS mi,\n    (a !~ b) AS nm,\n    (a !~* b) AS nmi,\n    (a ~ 'x'::text) AS c,\n    regexp_like(a, b) AS f,\n    regexp_like(a, b, 'i'::text) AS fi\n   FROM rx\n  WHERE ((a ~ 'a'::text) AND (a !~* 'Q'::text));"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT m, mi, nm, nmi, c, f, fi FROM rxv ORDER BY c;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "mi",
+            "nm",
+            "nmi",
+            "c",
+            "f",
+            "fi"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '5874898-01-01'::date",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range: \"5874898-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '294277-01-01'::timestamp",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range: \"294277-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '294277-01-01'::timestamptz",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range: \"294277-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lower('[now,now]'::tsrange) = now()::timestamp AS lower_matches, upper('[now,now]'::tsrange) = now()::timestamp AS upper_matches",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lower_matches",
+            "upper_matches"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lower('[now,now]'::tstzrange) = now() AS lower_matches, upper('[now,now]'::tstzrange) = now() AS upper_matches",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lower_matches",
+            "upper_matches"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lower('[today,tomorrow)'::daterange) = current_date AS lower_matches, upper('[today,tomorrow)'::daterange) = current_date + 1 AS upper_matches",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lower_matches",
+            "upper_matches"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "COMMIT; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction",
+      "command_tags": [
+        "COMMIT",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "COMMIT AND CHAIN; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction",
+      "command_tags": [
+        "COMMIT",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK AND CHAIN; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "COMMIT; BEGIN; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction; ROLLBACK",
+      "command_tags": [
+        "COMMIT",
+        "BEGIN",
+        "SELECT 1",
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

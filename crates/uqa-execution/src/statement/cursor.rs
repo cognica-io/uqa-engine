@@ -30,6 +30,7 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
             error.into(),
         ));
     }
+    let _transaction_clock = super::context::transaction_clock_scope(context.statements);
     if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
         if let Some(plan) = context.cache.cached_optimized_sql_plan(sql) {
             if !context.statements.notification_subscriptions_required()

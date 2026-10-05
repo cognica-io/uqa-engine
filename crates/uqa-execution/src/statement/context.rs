@@ -66,6 +66,10 @@ pub struct StatementValidationContext<'a> {
 /// Capture live subsystem inputs only when a statement is ready to execute.
 pub trait StatementExecutionInputs<S: Clone + 'static> {
     fn statement_execution_context(&self) -> StatementExecutionContext<'_, S>;
+    /// The live transaction start, or the current message's start outside a transaction. `None` preserves the calling statement's clock without capturing execution inputs.
+    fn transaction_timestamp_micros(&self) -> Option<i64> {
+        None
+    }
     /// The session's `statement_timeout`, which a statement starts with; `None` lets a statement run without a limit. Reading it captures none of the statement's execution inputs.
     fn statement_timeout(&self) -> Option<std::time::Duration>;
     /// Read the live host policy without capturing the statement's catalog/execution inputs.
@@ -77,6 +81,14 @@ pub trait StatementExecutionInputs<S: Clone + 'static> {
     fn diagnostic_search_path(&self) -> Option<Vec<String>> {
         None
     }
+}
+
+pub(super) fn transaction_clock_scope<S: Clone + 'static>(
+    statements: &dyn StatementExecutionInputs<S>,
+) -> Option<uqa_sql::expr::TransactionClockScope> {
+    statements
+        .transaction_timestamp_micros()
+        .map(uqa_sql::expr::TransactionClockScope::enter)
 }
 
 pub trait StatementMutationInputs<S: Clone + 'static> {

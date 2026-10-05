@@ -71,9 +71,8 @@ pub(super) fn evaluate(
     let evaluate = match name {
         "regexp_match" | "regexp_matches" => query::captures,
         "regexp_replace" => replacement::evaluate,
-        "regexp_count" | "regexp_instr" | "regexp_like" | "regexp_substr" | "similar_to" => {
-            query::evaluate
-        }
+        "regexp_count" | "regexp_instr" | "regexp_like" | "regexp_substr" | "similar_to"
+        | "regex_match_op" | "regex_imatch_op" => query::evaluate,
         _ => return None,
     };
     Some(

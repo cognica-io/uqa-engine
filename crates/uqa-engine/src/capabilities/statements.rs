@@ -101,6 +101,10 @@ impl context::PhysicalExplainPlanning for Engine {
     }
 }
 impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
+    fn transaction_timestamp_micros(&self) -> Option<i64> {
+        Some(Engine::transaction_timestamp_micros(self))
+    }
+
     fn diagnostic_search_path(&self) -> Option<Vec<String>> {
         Some(self.session.state.read().search_path.clone())
     }

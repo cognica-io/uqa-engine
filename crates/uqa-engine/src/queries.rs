@@ -16,6 +16,8 @@ struct SQLExecutionScope<'a> {
     depth: &'a std::sync::atomic::AtomicUsize,
     statement_clock: &'a std::sync::atomic::AtomicI64,
     previous_clock: Option<i64>,
+    /// The transaction start the statement's input functions and `now()` read, entered for the outermost statement on the executing thread; a nested statement keeps its caller's.
+    _transaction_clock: Option<uqa_sql::expr::TransactionClockScope>,
 }
 
 impl<'a> SQLExecutionScope<'a> {
@@ -29,12 +31,16 @@ impl<'a> SQLExecutionScope<'a> {
                 std::sync::atomic::Ordering::Relaxed,
             )
         });
+        let transaction_clock = (!nested).then(|| {
+            uqa_sql::expr::TransactionClockScope::enter(engine.transaction_timestamp_micros())
+        });
         (
             Self {
                 engine,
                 depth,
                 statement_clock,
                 previous_clock,
+                _transaction_clock: transaction_clock,
             },
             nested,
         )

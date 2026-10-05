@@ -289,6 +289,11 @@ pub(super) fn infer_builtin_function(
             require_class(name, args, TypeClass::Text)?;
             GenerationType::Boolean
         }
+        "regex_match_op" | "regex_imatch_op" => {
+            require_arity(name, args, 2, 2)?;
+            require_class(name, args, TypeClass::Text)?;
+            GenerationType::Boolean
+        }
         "regexp_substr" => {
             require_arity(name, args, 2, 5)?;
             require_one(name, &args[0], TypeClass::Text)?;

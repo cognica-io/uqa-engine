@@ -95,7 +95,8 @@ pub(crate) use conversion::{tensor_items, vector_element, vector_items};
 pub use conversion::{
     value_to_tensor, value_to_tensor_with_control, value_to_vector, value_to_vector_with_control,
 };
-pub use current_time::clock_timestamp_micros;
+pub(crate) use current_time::transaction_timestamp_or_clock;
+pub use current_time::{clock_timestamp_micros, transaction_clock_micros, TransactionClockScope};
 pub use floating::{
     eval_float_arithmetic, eval_float_arithmetic_with_control, format_real, FloatWidth,
 };

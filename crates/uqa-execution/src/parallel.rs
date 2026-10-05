@@ -59,9 +59,10 @@ where
         });
     #[cfg(not(target_os = "emscripten"))]
     {
+        let clock = uqa_sql::expr::transaction_clock_micros();
         chunks
             .into_par_iter()
-            .map(worker)
+            .map(|chunk| under_transaction_clock(clock, || worker(chunk)))
             .reduce(Vec::new, |mut a, b| {
                 a.extend(b);
                 a
@@ -190,13 +191,24 @@ impl ParallelExecutor {
         }
         #[cfg(not(target_os = "emscripten"))]
         {
-            workers.par_iter().map(|w| w()).collect()
+            let clock = uqa_sql::expr::transaction_clock_micros();
+            workers
+                .par_iter()
+                .map(|w| under_transaction_clock(clock, w))
+                .collect()
         }
         #[cfg(target_os = "emscripten")]
         {
             workers.iter().map(|w| w()).collect()
         }
     }
+}
+
+/// Run `work` on a pool thread under the transaction clock of the thread that dispatched it, so the date and time input functions and `now()` read the statement's transaction start on every branch.
+#[cfg(not(target_os = "emscripten"))]
+fn under_transaction_clock<R>(clock: Option<i64>, work: impl FnOnce() -> R) -> R {
+    let _scope = clock.map(uqa_sql::expr::TransactionClockScope::enter);
+    work()
 }
 
 impl Default for ParallelExecutor {
