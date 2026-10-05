@@ -348,6 +348,7 @@ impl Deparser<'_> {
                         "invalid quantified operator operands".into(),
                     ));
                 };
+                // The array stands inside the parentheses `ANY` and `ALL` write, so it needs none of its own.
                 return Ok(self.parenthesize(format!(
                     "{} {operator} {} ({})",
                     self.operand(left, 80, false, scope, subqueries)?,
@@ -356,7 +357,7 @@ impl Deparser<'_> {
                     } else {
                         "ALL"
                     },
-                    self.operand(right, 80, true, scope, subqueries)?
+                    self.expression(right, scope, subqueries)?
                 )));
             }
             _ => {}

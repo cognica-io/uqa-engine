@@ -690,9 +690,6 @@ impl SchemaScope {
         super::stored_types::bind_scalar_type_identities(expression, &mut |name| {
             engine.resolve_type_name(name)
         })?;
-        if !crate::type_resolution::contains_unknown_literal(expression) {
-            return Ok(());
-        }
         let resolver = self.query_function_type_resolver_for_subqueries(
             engine,
             std::slice::from_ref(expression),
@@ -701,6 +698,11 @@ impl SchemaScope {
             params,
             outer,
         )?;
+        // A comparison on `oid` or one of its alias types takes the `oid` operators; the coercions binding adds to its operands are stored, as `PostgreSQL` stores the `RelabelType` nodes of an analyzed expression.
+        crate::type_resolution::relabel_stored_oid_operands(expression, schema, params, &resolver)?;
+        if !crate::type_resolution::contains_unknown_literal(expression) {
+            return Ok(());
+        }
         crate::type_resolution::fold_stored_enum_constants(expression, schema, params, &resolver)
             .map(drop)
     }

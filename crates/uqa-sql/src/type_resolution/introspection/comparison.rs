@@ -41,12 +41,12 @@ impl Binder<'_, '_> {
         {
             return Ok(None);
         }
-        let numeric = left_type
+        let coerced = left_type
             .as_deref()
             .into_iter()
             .chain(right_type.as_deref())
-            .any(|ty| numeric_type(base_type(ty)));
-        if !numeric && left_type.is_some() && right_type.is_some() {
+            .any(|ty| coerced_operand_type(base_type(ty)));
+        if !coerced && left_type.is_some() && right_type.is_some() {
             return Ok(None);
         }
         binary_operator_types_with_control(
@@ -205,6 +205,10 @@ impl Binder<'_, '_> {
             Some(ColumnType::Array(element)) => Some(element.clone_with_control(&self.control)?),
             Some(_) => return Ok(()),
         };
+        let element = element_type
+            .as_deref()
+            .map(|element| base_type(element).clone_with_control(&self.control))
+            .transpose()?;
         let Some(types) = self
             .semantic(self.operator_types(op, value, value_type, array, element_type))?
             .flatten()
@@ -212,7 +216,12 @@ impl Binder<'_, '_> {
             return Ok(());
         };
         self.operand_cast(value, &types[0])?;
-        if array_type.is_none() {
+        // An untyped array literal takes the array type of the selected operand; a typed array whose elements the operator does not declare, such as `regclass[]` against the `oid` operators, is relabeled to it. An `ARRAY[...]` constructor keeps its element type: a written cast of a constructor is pushed into its elements when it is analyzed, so a cast around the constructor would print as the written form.
+        let relabel = !matches!(array, ScalarExpr::Array(_))
+            && element
+                .as_deref()
+                .is_some_and(|element| *element != types[1]);
+        if array_type.is_none() || relabel {
             let array_target = ColumnType::array_with_control(
                 types[1].clone_with_control(&self.control)?,
                 &self.control,
@@ -254,7 +263,8 @@ fn unknown_input(expression: &ScalarExpr) -> bool {
     )
 }
 
-fn numeric_type(ty: &ColumnType) -> bool {
+/// Operand types whose comparisons record their coercions: the numeric types, which select among several operator signatures, and `oid` with its alias types, whose comparisons are the `oid` operators that an alias operand is relabeled to, as `PostgreSQL` relabels it.
+fn coerced_operand_type(ty: &ColumnType) -> bool {
     matches!(
         ty,
         ColumnType::SmallInteger
@@ -263,6 +273,13 @@ fn numeric_type(ty: &ColumnType) -> bool {
             | ColumnType::Real
             | ColumnType::DoublePrecision
             | ColumnType::Numeric { .. }
+            | ColumnType::Oid
+            | ColumnType::Regclass
+            | ColumnType::Regtype
+            | ColumnType::Regproc
+            | ColumnType::Regprocedure
+            | ColumnType::Regnamespace
+            | ColumnType::Regrole
     )
 }
 
