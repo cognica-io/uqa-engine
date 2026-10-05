@@ -132,6 +132,21 @@ impl crate::mutation::constraints::context::MutationRead for Fixture {
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         self.table_doc_ids(table)
     }
+    fn live_table_doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        crate::query::document_changes::VisibleDocumentIds {
+            source: self.backend.document_store(table).as_ref(),
+            changes: &crate::query::document_changes::DocumentChanges::default(),
+            control,
+        }
+        .page(after, limit, control, true)
+        .map_err(|error| SQLError::Internal(error.to_string()))
+    }
     fn get_document(&self, table: &str, id: DocId) -> Result<Option<Document>, SQLError> {
         self.backend
             .document_store(table)

@@ -20,6 +20,7 @@ use uqa_storage::StorageBackendResult;
 impl Engine {
     pub(crate) fn column_rewrite_context(&self) -> ColumnRewriteContext<'_> {
         ColumnRewriteContext {
+            cancellation: &self.runtime.cancellation,
             columns: self,
             reads: self,
             types: self,
@@ -44,6 +45,7 @@ impl Engine {
         &self,
     ) -> GeneratedRewriteContext<'_, StatementReadSnapshot> {
         GeneratedRewriteContext {
+            cancellation: &self.runtime.cancellation,
             keys: self.key_validation_context(),
             assignment: self.mutation_assignment_context(),
             storage: self,

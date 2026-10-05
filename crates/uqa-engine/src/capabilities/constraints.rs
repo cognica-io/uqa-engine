@@ -76,6 +76,26 @@ impl MutationRead for Engine {
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         Engine::live_table_doc_ids(self, table)
     }
+    fn live_table_doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        let state = self.require_table(table)?;
+        let changes = self.command_overlay_changes(table)?.unwrap_or_default();
+        let source = state.document_store.read();
+        uqa_execution::query::document_changes::VisibleDocumentIds {
+            source: source.as_ref(),
+            changes: &changes,
+            control,
+        }
+        .page(after, limit, control, true)
+        .map_err(|error| {
+            uqa_sql::catalog::errors::storage_error("column rewrite identity page", &error)
+        })
+    }
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
         Engine::get_live_document(self, table, doc_id)
     }

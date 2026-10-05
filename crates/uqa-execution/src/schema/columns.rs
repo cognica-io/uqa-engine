@@ -19,7 +19,6 @@ use uqa_sql::{
     schema::columns::type_transform::{assign_type_transform_value, AnalyzedTypeTransform},
     SQLError,
 };
-use uqa_storage::document_store::Document;
 /// Publish converted fields through the caller's storage and index update path.
 pub trait ColumnRewritePublication {
     fn update_fields(
@@ -31,6 +30,7 @@ pub trait ColumnRewritePublication {
     ) -> Result<bool, SQLError>;
 }
 pub struct ColumnRewriteContext<'a> {
+    pub cancellation: &'a uqa_core::CancellationToken,
     pub columns: &'a dyn AssignmentColumnCatalog,
     pub reads: &'a dyn MutationRead,
     pub types: &'a dyn AssignmentContext,
@@ -45,14 +45,22 @@ pub fn converted_column_rows<S: Clone + 'static>(
     source_ty: &ColumnType,
     target_ty: &ColumnType,
     transform: Option<&AnalyzedTypeTransform>,
-) -> Result<Vec<(DocId, Document)>, SQLError> {
+) -> Result<rows::RewriteRows, SQLError> {
     let rewrite = &context.rewrite;
-    let doc_ids = rewrite.reads.live_table_doc_ids(table)?;
-    let mut rows = Vec::with_capacity(doc_ids.len());
-    for doc_id in doc_ids {
-        let Some(mut doc) = rewrite.reads.get_document(table, doc_id)? else {
-            continue;
-        };
+    let allowance = context.generated.keys.constraints.memory.work_mem_bytes()?;
+    let memory = uqa_core::memory::MemoryBudget::new(allowance / 2);
+    let read_memory = uqa_core::memory::MemoryBudget::new(allowance - allowance / 2);
+    let control =
+        uqa_storage::read_control::StorageReadControl::new(&read_memory, rewrite.cancellation);
+    let mut original = rows::capture(rewrite.reads, table, &memory, &control)?;
+    let mut rows = rows::RewriteRows::new(&memory);
+    for position in 0..original.len() {
+        rewrite.cancellation.check()?;
+        let rows::RewriteRow {
+            original_id: doc_id,
+            document: mut doc,
+            ..
+        } = original.get(position)?;
         let converted = if let Some(transform) = transform {
             let value = crate::query::catalog_expression::eval_expression_plan_with_schema(
                 context.generated.assignment.expressions.expressions,
@@ -84,10 +92,12 @@ pub fn converted_column_rows<S: Clone + 'static>(
         if let Some(converted) = converted {
             doc.insert(column.to_string(), converted);
         }
-        rows.push((doc_id, doc));
+        rows.push(doc_id, doc)?;
     }
     Ok(rows)
 }
+
+pub mod rows;
 
 pub mod backfill;
 pub mod generated;
