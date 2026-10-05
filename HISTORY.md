@@ -11,10 +11,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Support PostgreSQL 18 configuration definitions, custom parameter placeholders, `set_config`, `SHOW ALL`, `client_min_messages` and startup values restored by `RESET`.
 - Implement `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `idle_session_timeout`, `transaction_timeout`, and the `pg_sleep` functions. Report the cancellation reason and preserve permanent session termination through `Engine::session_termination`.
 - Expose `Engine::set_query_memory_limit` for host-controlled query workspace limits below SQL `work_mem`'s 64 kB minimum.
+- Add enum types: `CREATE TYPE ... AS ENUM`, `ALTER TYPE ... ADD VALUE [IF NOT EXISTS] [BEFORE | AFTER]`, `RENAME VALUE` and `DROP TYPE`, `pg_type` and `pg_enum` projection with PostgreSQL's sort positions, unknown-literal input, text casts, comparisons, the `enum_*` routines, arrays and JSON output, the uncommitted-label rule (`55P04`), and enum partition keys; labels reach the Python, Node.js and WASM boundaries through the catalog.
+- Add standalone composite types: `CREATE TYPE ... AS (...)` with a generated array type, composite values as named records with position-wise coercion, `record_in` and `record_out`, field selection and assignment, nested composites and composite arrays, catalog and `information_schema` projections, and `DROP TYPE ... CASCADE` of an attribute's type.
+- Add the type object lifecycle: `ALTER TYPE | DOMAIN ... RENAME TO | SET SCHEMA | OWNER TO`, `GRANT | REVOKE USAGE ON TYPE | DOMAIN` with `typacl`, `has_type_privilege`, `aclexplode`, `pg_depend` and `pg_shdepend` derived from the catalog, `pg_get_constraintdef`, `pg_get_function_arguments`, `pg_get_function_identity_arguments`, `pg_get_function_result` and `pg_get_function_sqlbody`, and `DROP TYPE | DOMAIN` and `DROP ROLE` details in PostgreSQL's order.
 
 ### Changed
 
 - Default `search_path` to `"$user", public`, preserve its assigned text and empty paths, and make `Engine::set_search_path` return a `Result`. `QueryCancelled` now carries a `CancellationReason` instead of being a unit struct; see the [unreleased upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-changes-after-049).
+- Store type references by OID identity in routine signatures, casts, typed constants and view plans, and enum constants by label identity, so that names follow renames; deparse stored definitions through the catalog with search-path visibility; compile string-bodied routines at first use in each session, as PostgreSQL's function cache does.
+- Run `CREATE TABLE` in `DefineRelation`'s order: `MergeAttributes`, `transformColumnDefinition` and `PARTITION OF` column options with PostgreSQL's diagnostics and notices, CHECK constraints named and merged in written order, defaults and generation expressions cooked as `cookDefault` cooks them, and the OIDs of the relation, its defaults, constraints and indexes allocated where `heap_create_with_catalog` and `DefineRelation` allocate them.
 
 ### Fixed
 
@@ -30,6 +35,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Finish unreferenced data-modifying CTEs after the main query in reverse definition order, defer their AFTER events to the complete statement, and preserve command-level repeated-row handling.
 - Validate SQL and PL/pgSQL routine bodies under `check_function_bodies`, check declared result types, and defer string-body analysis when validation is disabled. Preserve SQL-standard body validation and reopen of deferred bodies.
 - Avoid waiting on unrelated relation locks whose cross-process lock-byte hashes collide within one process.
+- Route `INSERT`, `UPDATE`, `DELETE` and `MERGE` through automatically updatable views onto an underlying view's `INSTEAD OF` trigger, count the rows a suppressed trigger lets through, and report non-updatable views with `view_query_is_auto_updatable`'s DETAIL and HINT.
+- Check `CREATE FUNCTION` and `CREATE PROCEDURE` attributes as PostgreSQL does (repeated and procedure-only attributes, `SET`, `COST`, `ROWS`, `SUPPORT`, `PARALLEL` and the language), and place new relations in the namespace and with the persistence `RangeVarGetCreationNamespace` and `RangeVarAdjustRelationPersistence` assign.
+- Select common types as `select_common_type` does for `IN` lists, `CASE` and same-category operands, cast OID aliases to `name`, `varchar` and `char` through their output functions, and draw every catalog OID from one database counter in creation order, unchanged by reopening.
 
 ## [0.4.9] - 2026-10-03
 
