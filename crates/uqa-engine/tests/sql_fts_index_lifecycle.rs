@@ -26,6 +26,8 @@ mod initial_restore;
 mod new_rows;
 #[path = "sql_fts_index_lifecycle/occurrences.rs"]
 mod occurrences;
+#[path = "sql_fts_index_lifecycle/resource_errors.rs"]
+mod resource_errors;
 #[path = "sql_fts_index_lifecycle/rewrite_publication.rs"]
 mod rewrite_publication;
 

@@ -176,11 +176,6 @@ impl IndexCreationPublication for Engine {
         // Admit a deferred statement writer before changing physical storage. Initial restoration already owns its backend transaction and has no session frame to promote.
         self.prepare_explicit_transaction_writer()?;
         self.add_fts_field_with_analyzer_inner(table, column.to_string(), analyzer)
-            .map_err(|error| match self.runtime.cancellation.check() {
-                Err(cancelled) => SQLError::Cancelled(cancelled),
-                Ok(()) => SQLError::Internal(format!("add_fts_field: {error}")),
-            })?;
-        Ok(())
     }
     fn rebuild_vector_field(
         &self,

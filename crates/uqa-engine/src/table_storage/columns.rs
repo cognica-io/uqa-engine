@@ -337,10 +337,7 @@ impl Engine {
             }
         }
         let analyzer_binding = if from != to && t.fts_fields().iter().any(|field| field == from) {
-            Some(
-                self.current_field_analyzer_binding(&table_name, &t, from)
-                    .map_err(StorageBackendError::Other)?,
-            )
+            Some(self.current_field_analyzer_binding(&table_name, &t, from)?)
         } else {
             None
         };

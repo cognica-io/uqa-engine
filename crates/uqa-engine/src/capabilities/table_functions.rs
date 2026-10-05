@@ -55,11 +55,9 @@ impl AnalyzerTableFunctions for Engine {
         analyzer: &str,
         phase: &str,
     ) -> Result<(), SQLError> {
-        self.set_table_field_analyzer(table, field, analyzer, phase)
-            .map_err(|error| match self.runtime.cancellation.check() {
-                Err(cancelled) => SQLError::Cancelled(cancelled),
-                Ok(()) => SQLError::Unsupported(error),
-            })
+        self.with_implicit_transaction(|engine| {
+            engine.set_table_field_analyzer_inner(table, field, analyzer, phase)
+        })
     }
     fn fts_index_stats(&self, table: Option<&str>) -> Result<Vec<FtsIndexStat>, SQLError> {
         self.fts_index_stats_in_execution(table)
