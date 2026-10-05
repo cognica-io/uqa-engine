@@ -206,12 +206,10 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
             }
             if let Some(view) = catalog.view_resolved(&resolution, name)?.cloned() {
                 if view.kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
-                    if !view.populated {
-                        return Err(SQLError::Routine {
-                            sqlstate: "55000".into(),
-                            message: format!("materialized view \"{name}\" has not been populated"),
-                        });
-                    }
+                    uqa_sql::catalog::view::require_materialized_view_population(
+                        name,
+                        view.populated,
+                    )?;
                     let columns = view.definition.output_columns.unwrap_or_default();
                     let types = view.definition.materialized_column_types;
                     let rows = view.definition.materialized_rows;

@@ -24,6 +24,8 @@ mod catalog_function_dispatch;
 mod column_aliases;
 #[path = "sql_views/definitions.rs"]
 mod definitions;
+#[path = "sql_views/materialized_creation_order.rs"]
+mod materialized_creation_order;
 #[path = "sql_views/updatability_diagnostics.rs"]
 mod updatability_diagnostics;
 
@@ -533,50 +535,9 @@ fn declared_volatile_sql_function_is_not_hidden_by_view_cache() {
 #[test]
 fn view_sequence_literals_bind_to_creation_namespace_and_block_drop() {
     let engine = Engine::new();
-    exec(&engine, "CREATE SCHEMA s1");
-    exec(&engine, "CREATE SCHEMA s2");
-    exec(&engine, "CREATE SEQUENCE s1.ids START 10");
-    exec(&engine, "CREATE SEQUENCE s2.ids START 100");
-    exec(&engine, "SET search_path TO s1");
-    exec(
+    crate::pg18_oracle::verify(
         &engine,
-        "CREATE VIEW public.sequence_values AS
-         SELECT nextval('ids') AS next_value,
-                currval('ids') AS current_value,
-                setval('ids', 41) AS set_value",
-    );
-
-    let mut plan = engine.view("public.sequence_values").unwrap().unwrap();
-    let mut references = Vec::new();
-    plan.rewrite_scalar_expressions(&mut |expression| {
-        let uqa_execution::ScalarExpr::Func { name, args, .. } = expression else {
-            return;
-        };
-        if matches!(name.as_str(), "nextval" | "currval" | "setval") {
-            let Some(uqa_execution::ScalarExpr::Literal(Value::Str(reference))) = args.first()
-            else {
-                panic!("sequence function must retain a literal reference");
-            };
-            references.push(reference.clone());
-        }
-    });
-    assert_eq!(references, ["s1.ids", "s1.ids", "s1.ids"]);
-
-    exec(&engine, "SET search_path TO s2");
-    let result = exec(
-        &engine,
-        "SELECT next_value, current_value, set_value FROM public.sequence_values",
-    );
-    assert_eq!(result.rows[0]["next_value"], Value::Int(10));
-    assert_eq!(result.rows[0]["current_value"], Value::Int(10));
-    assert_eq!(result.rows[0]["set_value"], Value::Int(41));
-    assert_eq!(
-        exec(&engine, "SELECT nextval('s1.ids') AS value").rows[0]["value"],
-        Value::Int(42)
-    );
-    assert_eq!(
-        exec(&engine, "SELECT nextval('ids') AS value").rows[0]["value"],
-        Value::Int(100)
+        include_str!("../../../tests/parity/pg18/view_sequence_identity_oracle.expected.json"),
     );
 
     assert!(engine.drop_sequence("s2.ids").unwrap());

@@ -12,6 +12,26 @@ use crate::{
 };
 use std::collections::BTreeSet;
 
+/// `CreateTableAsRelExists` reports the written relation's unqualified name for both CTAS and materialized views.
+pub fn existing_create_as_target(
+    name: &str,
+    if_not_exists: bool,
+) -> Result<crate::SQLNotice, SQLError> {
+    let (_, relation) =
+        uqa_core::RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
+    if if_not_exists {
+        Ok(
+            crate::SQLNotice::notice(format!("relation \"{relation}\" already exists, skipping"))
+                .with_sqlstate("42P07"),
+        )
+    } else {
+        Err(SQLError::Routine {
+            sqlstate: "42P07".into(),
+            message: format!("relation \"{relation}\" already exists"),
+        })
+    }
+}
+
 /// `CheckAttributeNamesTypes`: no column may take a system column's name, and then no column may have a pseudo-type.
 pub fn validate_create_table_columns(table: &CreateTable) -> Result<(), SQLError> {
     validate_relation_column_names_and_types(&table.columns)
@@ -112,3 +132,6 @@ pub mod column_declarations;
 pub mod declaration;
 pub mod keys;
 pub mod not_nulls;
+
+#[cfg(test)]
+mod tests;
