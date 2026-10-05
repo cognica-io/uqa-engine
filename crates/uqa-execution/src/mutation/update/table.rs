@@ -311,6 +311,21 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             });
             let preselected =
                 !has_runtime_scope && stmt.predicate.is_some() && !predicate_is_volatile;
+            // Retrieval leaves must retain the command's input even if an earlier callback changes a later candidate. Scalar callbacks still run against the ordinary expression scope.
+            let retrieval_snapshot = stmt
+                .predicate
+                .as_ref()
+                .filter(|predicate| uqa_sql::semantics::contains_retrieval(predicate))
+                .map(|_| {
+                    read_context
+                        .query
+                        .generation
+                        .cloned()
+                        .map_or_else(|| read_context.snapshots.capture(), Ok)
+                })
+                .transpose()?;
+            let qualification =
+                crate::mutation::qualification::RowQualification::new(retrieval_snapshot);
             let candidates: Vec<(String, uqa_core::DocId)> = if preselected {
                 let filter = stmt.predicate.as_ref().ok_or_else(|| {
                     SQLError::Internal("UPDATE preselection is missing its predicate".into())
@@ -381,20 +396,14 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 )?;
                 if !preselected {
                     if let Some(filter) = stmt.predicate.as_ref() {
-                        if !uqa_sql::expr::truthy(
-                            &crate::mutation::expressions::eval_mutation_expr(
-                                read_context
-                                    .mutation
-                                    .preparation
-                                    .referential
-                                    .assignment
-                                    .expressions,
-                                &snapshot_ctes,
-                                filter,
-                                Some(&candidate_row),
-                                params,
-                            )?,
-                        ) {
+                        if !qualification.evaluate(
+                            read_context,
+                            &snapshot_ctes,
+                            filter,
+                            &candidate_row,
+                            (&storage_table, doc_id),
+                            params,
+                        )? {
                             continue;
                         }
                     }
@@ -458,20 +467,31 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 )?;
                 if recheck || preselected {
                     if let Some(filter) = stmt.predicate.as_ref() {
-                        if !uqa_sql::expr::truthy(
-                            &crate::mutation::expressions::eval_mutation_expr(
-                                read_context
-                                    .mutation
-                                    .preparation
-                                    .referential
-                                    .assignment
-                                    .expressions,
+                        let qualifies = if recheck {
+                            let refreshed = MutationStatementContext {
+                                query: context.query,
+                                mutation: read_context.mutation,
+                                snapshots: read_context.snapshots,
+                            };
+                            crate::mutation::qualification::RowQualification::new(None).evaluate(
+                                &refreshed,
                                 &snapshot_ctes,
                                 filter,
-                                Some(&target_row),
+                                &target_row,
+                                (&storage_table, doc_id),
                                 params,
-                            )?,
-                        ) {
+                            )?
+                        } else {
+                            qualification.evaluate(
+                                read_context,
+                                &snapshot_ctes,
+                                filter,
+                                &target_row,
+                                (&storage_table, doc_id),
+                                params,
+                            )?
+                        };
+                        if !qualifies {
                             continue;
                         }
                     }

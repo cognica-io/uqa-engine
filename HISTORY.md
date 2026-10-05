@@ -23,6 +23,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Evaluate retrieval predicates in table UPDATE through their document support instead of the unsupported scalar-call path. Preserve boolean conditions, CTE scope, nested-write conflicts and lock-wait rechecks, and infer text query parameters for `text_match`.
 - Reclaim the cross-process row-change journal before the oldest live snapshot instead of retaining every update for the database lifetime. Preserve update chains, key reuse and logical change numbers across reclamation; release dead processes' retained history through operating-system liveness locks.
 - Preserve writes made by nested VOLATILE routines when INSERT, UPDATE, DELETE and MERGE publish prepared rows, including primary-key and partition movement. Make preceding UPDATE FROM rows visible to later callbacks, keep original RETURNING images, and restore enclosing command rows and exact-key caches through nested exception and savepoint rollback.
 - Include staged command rows in indexed UPDATE and DELETE candidates, including equality, range and NULL predicates; newer replacements and deletions mask stored index entries.

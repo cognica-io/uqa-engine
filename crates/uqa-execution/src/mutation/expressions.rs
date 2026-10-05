@@ -22,6 +22,17 @@ pub fn eval_mutation_expr<S: Clone + 'static>(
     row: Option<&OwnedPhysicalRow>,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
+    eval_mutation_expr_with_retrieval(services, ctes, expression, row, params, None)
+}
+
+pub(crate) fn eval_mutation_expr_with_retrieval<S: Clone + 'static>(
+    services: MutationExpressionContext<'_, S>,
+    ctes: &CteScope<S>,
+    expression: &ScalarExpr,
+    row: Option<&OwnedPhysicalRow>,
+    params: &[SQLParam],
+    retrieval: Option<&crate::scalar::RetrievalPredicate<'_>>,
+) -> Result<Value, SQLError> {
     let hook = services.expressions.bind_scope(ctes.clone());
     let empty_schema = RowSchema::default();
     let schema = row.map_or(&empty_schema, |row| &row.schema);
@@ -34,10 +45,13 @@ pub fn eval_mutation_expr<S: Clone + 'static>(
     );
     if let Some(row) = row {
         let view = row.view();
-        let context = PhysicalEvalContext::from_row_lookup(&view, params)
+        let mut context = PhysicalEvalContext::from_row_lookup(&view, params)
             .with_function_hook(hook.as_ref())
             .with_subquery_runner(hook.as_ref())
             .with_physical_outer_row(&row.schema, &row.row);
+        if let Some(retrieval) = retrieval {
+            context = context.with_retrieval_predicate(retrieval);
+        }
         eval_physical_scalar(&expression, &ctes.scalar_subqueries, &context)
     } else {
         let context = PhysicalEvalContext::new(None, params)
