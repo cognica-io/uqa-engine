@@ -16,6 +16,8 @@ pub(super) struct ExpressionType {
     // SQL unknown literals and parameters accept context coercion. Native
     // callbacks with no declared result type stay unresolved until execution.
     coercible_unknown: bool,
+    /// The text of an `unknown` string literal, which the selected type's input function reads when a context coerces it.
+    literal: Option<String>,
 }
 
 impl ExpressionType {
@@ -24,6 +26,7 @@ impl ExpressionType {
             ty,
             occurrence: None,
             coercible_unknown: false,
+            literal: None,
         }
     }
 
@@ -32,6 +35,17 @@ impl ExpressionType {
             ty: None,
             occurrence: None,
             coercible_unknown: true,
+            literal: None,
+        }
+    }
+
+    /// A bare string literal, `unknown` until its context selects a type that reads it.
+    pub(super) fn unknown_literal(text: String) -> Self {
+        Self {
+            ty: None,
+            occurrence: None,
+            coercible_unknown: true,
+            literal: Some(text),
         }
     }
 
@@ -65,6 +79,7 @@ impl ParameterTypes {
             ty,
             occurrence: Some(occurrence),
             coercible_unknown: true,
+            literal: None,
         })
     }
 
@@ -77,6 +92,15 @@ impl ParameterTypes {
             return Ok(());
         }
         let target = target.without_type_modifiers();
+        if let Some(text) = &expression.literal {
+            // `coerce_to_common_type` reads an `unknown` constant with the selected type's input function, which reports what the type rejects; a type whose input function consults the catalog is read when the expression is bound to it.
+            if !crate::type_resolution::catalog_input_type(&target) {
+                crate::assignment::conversion::convert_value_to_column_type(
+                    Value::Str(text.clone()),
+                    &target,
+                )?;
+            }
+        }
         if let Some(occurrence) = expression.occurrence {
             let (index, observed) = &mut self.occurrences[occurrence];
             if self.types[*index].as_ref().is_some_and(|ty| *ty != target) {

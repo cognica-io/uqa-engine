@@ -99,13 +99,17 @@ pub fn values_types_in_scope(
         .bind_values_types(routines, rows, subqueries, schema, params, schema)
 }
 
+/// The common type of two columns of the construct `context`, as `select_common_type` chooses it over typed and `unknown` (`None`) inputs; two unknown inputs stay unknown for the caller to resolve.
 pub(super) fn merge_types(
+    context: crate::type_resolution::CommonTypeContext,
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,
 ) -> Result<Option<ColumnType>, SQLError> {
     match (left, right) {
         (None, None) => Ok(None),
         (Some(ty), None) | (None, Some(ty)) => Ok(Some(ty.clone())),
-        (Some(left), Some(right)) => crate::common_type(left, right).map(Some),
+        (Some(left), Some(right)) => {
+            crate::type_resolution::common_type_in(context, left, right).map(Some)
+        }
     }
 }

@@ -45,7 +45,11 @@ impl SchemaScope {
                             routines, expression, schema, subqueries, params, outer,
                         )?
                     };
-                types[position] = merge_types(types[position].as_ref(), candidate.as_ref())?;
+                types[position] = merge_types(
+                    crate::type_resolution::CommonTypeContext::Values,
+                    types[position].as_ref(),
+                    candidate.as_ref(),
+                )?;
             }
         }
         Ok(types

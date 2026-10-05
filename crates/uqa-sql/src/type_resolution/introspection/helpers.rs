@@ -133,6 +133,10 @@ impl Binder<'_, '_> {
         let mut saw_expression = false;
         for expression in expressions {
             saw_expression = true;
+            // `select_common_type` passes over `unknown` literals, which the selected type then reads.
+            if crate::type_resolution::is_unknown_literal(expression) {
+                continue;
+            }
             let Some(ty) = self.semantic(self.common_context(expression))? else {
                 return Ok(None);
             };
@@ -195,9 +199,46 @@ impl Binder<'_, '_> {
             *expression = folded;
             return Ok(());
         }
+        if let Some(folded) = self.read_unknown_literal(expression, &target)? {
+            *expression = folded;
+            return Ok(());
+        }
         // The cast is resolved again at evaluation, so a user-defined type is named by identity rather than by a search-path-dependent name.
         let ty = self.control.copy_text(&target.catalog_name())?;
         self.install_cast(expression, ty)
+    }
+
+    /// `coerce_to_common_type` reads an `unknown` string constant with the selected type's input function, which reports what the type rejects, and stores the typed constant. A type whose input function consults the catalog keeps the cast form that the binding of a stored expression resolves.
+    fn read_unknown_literal(
+        &mut self,
+        expression: &ScalarExpr,
+        target: &ColumnType,
+    ) -> Result<Option<ScalarExpr>, SQLError> {
+        let ScalarExpr::Literal(value @ Value::Str(_)) = expression else {
+            return Ok(None);
+        };
+        if crate::type_resolution::catalog_input_type(target) {
+            return Ok(None);
+        }
+        // Binding reports no semantic errors: a literal the type rejects keeps its cast, which analysis and evaluation report.
+        let value = match crate::assignment::conversion::convert_value_to_column_type(
+            value.clone(),
+            target,
+        ) {
+            Ok(value) => value,
+            Err(error) if self.strict_literals => return Err(error),
+            Err(_) => return Ok(None),
+        };
+        let memory = self.control.reserve(size_of::<ScalarExpr>())?;
+        *self.memory = self.control.combine(self.memory.take(), memory);
+        let ty = self.control.copy_text(&target.catalog_name())?;
+        let ty = self.retain(ty);
+        Ok(Some(ScalarExpr::TypedLiteral {
+            value,
+            ty,
+            bound_type: Some(target.clone()),
+            parameter_index: None,
+        }))
     }
 
     pub(super) fn wrap_declared(

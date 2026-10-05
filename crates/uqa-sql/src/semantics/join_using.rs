@@ -140,7 +140,11 @@ pub fn resolve_join_using(
         ) {
             (Some(left_type), Some(right_type)) => (
                 Some(crate::equality_operand_type(left_type, right_type)?),
-                Some(crate::common_type(left_type, right_type)?),
+                Some(crate::type_resolution::common_type_in(
+                    crate::type_resolution::CommonTypeContext::JoinUsing,
+                    left_type,
+                    right_type,
+                )?),
             ),
             _ => (None, None),
         };

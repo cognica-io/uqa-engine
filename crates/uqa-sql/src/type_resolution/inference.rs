@@ -104,7 +104,8 @@ pub(super) fn scalar_type_inner_with_control(
             }
             let mut element = None;
             for item in items {
-                element = common::merge_value_types(
+                element = common::merge_value_types_in(
+                    common::CommonTypeContext::Array,
                     element,
                     common::common_context_expression_type_with_control(
                         item, schema, params, resolver, control,
@@ -114,6 +115,7 @@ pub(super) fn scalar_type_inner_with_control(
             }
             let element =
                 element.map_or_else(|| ColumnType::Text.clone_with_control(control), Ok)?;
+            common::read_unknown_literals(items.iter(), &element)?;
             Ok(Some(ColumnType::array_with_control(element, control)?))
         }
         ScalarExpr::Row(items) => {
@@ -193,6 +195,10 @@ pub(super) fn scalar_type_inner_with_control(
                 .collect::<Vec<_>>();
             match common::select_common_input_type_with_control(&inputs, control)? {
                 Some(common) => {
+                    common::read_unknown_literals(
+                        std::iter::once(expr.as_ref()).chain(list.iter()),
+                        &common,
+                    )?;
                     operators::binary_result_type_with_control(
                         crate::ast::BinaryOp::Equal,
                         needle.as_deref(),
@@ -280,7 +286,30 @@ pub(super) fn scalar_type_inner_with_control(
             }
             let mut result = None;
             for ty in results {
-                result = common::merge_value_types(result, ty, control)?;
+                result = common::merge_value_types_in(
+                    common::CommonTypeContext::Case,
+                    result,
+                    ty,
+                    control,
+                )?;
+            }
+            // `select_common_type` resolves results that are all `unknown` literals to text.
+            if result.is_none()
+                && when
+                    .iter()
+                    .map(|(_, value)| value)
+                    .chain(else_branch.as_deref())
+                    .all(super::is_unknown_literal)
+            {
+                result = Some(ColumnType::Text.clone_with_control(control)?);
+            }
+            if let Some(result) = &result {
+                common::read_unknown_literals(
+                    when.iter()
+                        .map(|(_, value)| value)
+                        .chain(else_branch.as_deref()),
+                    result,
+                )?;
             }
             match result {
                 Some(result) => common::case::case_output_type_with_control(

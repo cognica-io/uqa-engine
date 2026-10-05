@@ -100,7 +100,10 @@ impl Preparation<'_> {
         }
         for (left, right) in left.types.iter_mut().zip(&mut right.types) {
             let mut values = [left.clone(), right.clone()];
-            let ty = self.common(&mut values)?;
+            let ty = self.common(
+                crate::type_resolution::CommonTypeContext::set_operation(kind),
+                &mut values,
+            )?;
             *left = ExpressionType::resolved(ty.clone());
             *right = ExpressionType::resolved(ty);
         }
@@ -247,7 +250,10 @@ impl Preparation<'_> {
         }
         let types = columns
             .iter_mut()
-            .map(|column| self.common(column).map(ExpressionType::resolved))
+            .map(|column| {
+                self.common(crate::type_resolution::CommonTypeContext::Values, column)
+                    .map(ExpressionType::resolved)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(QueryOutput {
             open: false,

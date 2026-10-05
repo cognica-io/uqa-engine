@@ -248,6 +248,7 @@ fn extension_type(
 }
 
 fn common_argument_type(
+    context: crate::type_resolution::CommonTypeContext,
     args: &[ScalarExpr],
     types: &[Option<ColumnType>],
     control: &ProductionControl<'_>,
@@ -262,11 +263,19 @@ fn common_argument_type(
             continue;
         }
         if let Some(ty) = ty {
-            result = Some(match &result {
-                Some(existing) => common_type_with_control(existing, ty, control)?,
-                None => ty.clone_with_control(control)?,
-            });
+            result = crate::type_resolution::common::merge_value_types_in(
+                context,
+                result,
+                Some(ty.clone_with_control(control)?),
+                control,
+            )?;
         }
+    }
+    if let Some(result) = &result {
+        crate::type_resolution::common::read_unknown_literals(
+            args.iter().map(named_argument_value),
+            result,
+        )?;
     }
     match result {
         Some(result) => Ok(Some(result)),
@@ -805,7 +814,13 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "jsonpath_match" | "array_overlap" | "st_within" | "st_dwithin" | "overlaps" => {
             inline(ColumnType::Boolean, control)
         }
-        "coalesce" | "greatest" | "least" => common_argument_type(args, &argument_types, control),
+        "coalesce" | "greatest" | "least" => common_argument_type(
+            crate::type_resolution::CommonTypeContext::function(name)
+                .unwrap_or(crate::type_resolution::CommonTypeContext::Coalesce),
+            args,
+            &argument_types,
+            control,
+        ),
         "concat_op" => concat_type(argument(0), argument(1), control),
         "ntile" | "position" | "strpos" | "ascii" | "width_bucket" | "regexp_count"
         | "regexp_instr" | "num_nulls" | "num_nonnulls" | "array_length" | "array_upper"

@@ -13,15 +13,19 @@ use crate::ast::{BinaryOp, FunctionBinding};
 use uqa_core::Value;
 
 impl Preparation<'_> {
+    /// The common type of the inputs of the construct `context`, as `select_common_type` chooses it, with the unknown inputs coerced to it.
     pub(super) fn common(
         &mut self,
+        context: crate::type_resolution::CommonTypeContext,
         values: &mut [ExpressionType],
     ) -> Result<Option<ColumnType>, SQLError> {
         let mut common = None;
         for value in values.iter() {
             if let Some(ty) = &value.ty {
                 common = Some(match common {
-                    Some(previous) => crate::common_type(&previous, ty)?,
+                    Some(previous) => {
+                        crate::type_resolution::common_type_in(context, &previous, ty)?
+                    }
                     None => ty.clone(),
                 });
             }
@@ -43,7 +47,7 @@ impl Preparation<'_> {
             .map(|value| value.ty.as_ref())
             .collect::<Vec<_>>();
         if crate::type_resolution::select_common_input_type(&types)?.is_some() {
-            self.common(values)?;
+            self.common(crate::type_resolution::CommonTypeContext::In, values)?;
             return Ok(());
         }
         let Some((needle, items)) = values.split_first_mut() else {
@@ -76,8 +80,9 @@ impl Preparation<'_> {
     ) -> Result<ExpressionType, SQLError> {
         let ty = match expression {
             ScalarExpr::Param(index) => return self.parameters.reference(*index),
-            ScalarExpr::Literal(Value::Null | Value::Str(_)) => {
-                return Ok(ExpressionType::unknown());
+            ScalarExpr::Literal(Value::Null) => return Ok(ExpressionType::unknown()),
+            ScalarExpr::Literal(Value::Str(text)) => {
+                return Ok(ExpressionType::unknown_literal(text.clone()));
             }
             ScalarExpr::Cast { expr, ty } => {
                 Some(self.cast_expression(expr, ty, input, subqueries)?)
@@ -118,7 +123,7 @@ impl Preparation<'_> {
                     .iter()
                     .map(|item| self.expression(item, input, subqueries))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.common(&mut items)?
+                self.common(crate::type_resolution::CommonTypeContext::Array, &mut items)?
                     .map(|element| ColumnType::Array(Box::new(element)))
             }
             ScalarExpr::Row(items) => {
@@ -287,7 +292,11 @@ impl Preparation<'_> {
                     self.binary(BinaryOp::Equal, left, right)?;
                 }
             } else {
-                self.common(&mut observed)?;
+                self.common(
+                    crate::type_resolution::CommonTypeContext::function(name)
+                        .unwrap_or(crate::type_resolution::CommonTypeContext::Coalesce),
+                    &mut observed,
+                )?;
             }
             return Ok(());
         }

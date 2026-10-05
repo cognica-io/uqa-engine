@@ -43,11 +43,12 @@ fn numeric_comparison_binding_retains_selected_casts_without_masking_exact_colum
     assert!(matches!(*lhs, ScalarExpr::Column(ref name) if name == "n"));
     assert!(matches!(*rhs, ScalarExpr::Literal(_)));
 
+    // `coerce_to_common_type` reads the `unknown` literal with the selected type's input function, so the operand is the numeric constant itself.
     let scalar = crate::bind_type_introspection(expression("'1' = 1.0"), &schema, &[]);
     let ScalarExpr::Binary { lhs, .. } = scalar else {
         panic!("binary comparison")
     };
-    assert!(matches!(*lhs, ScalarExpr::Cast { ref ty, .. } if ty == "numeric"));
+    assert!(matches!(*lhs, ScalarExpr::TypedLiteral { ref ty, .. } if ty == "numeric"));
 }
 
 #[test]
