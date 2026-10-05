@@ -29,7 +29,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Preserve foreign-server catalog identity, owning role and TYPE/VERSION metadata through transactions, refresh and reopen; prevent dangling owners after DROP ROLE, and match PostgreSQL server creation diagnostics and notices. Upgrade old rows once while preserving connection options; see the [upgrade guide](docs/manual/reference/10-upgrading.md#foreign-server-identities-and-owners).
+- Preserve foreign-server catalog identity, owning role and TYPE/VERSION metadata through transactions, refresh and reopen; prevent dangling owners after DROP ROLE, and match PostgreSQL server creation diagnostics and notices. Implement DROP SERVER ownership, IF EXISTS notices, RESTRICT/CASCADE dependency deletion and replacement revalidation after waits. Foreign tables retain their original server references through concurrent deletion and same-name recreation. Upgrade old rows once while preserving connection options; see the [upgrade guide](docs/manual/reference/10-upgrading.md#foreign-server-identities-and-owners).
+- Restore stored SQL-standard routine relation bindings without requiring the rollback caller to have access to their schemas, preserving the original statement error. New routine definitions retain their namespace permission checks.
 
 - Report PostgreSQL `22023` diagnostics for invalid NUMERIC precision, scale and modifier counts in declarations and casts; validate cast types even for NULL inputs, empty results and unselected CASE branches.
 - Preserve PostgreSQL foreign-table declaration order and diagnostics across type lookup, constraint attributes, forbidden keys and EXCLUDE. Retain table-level NOT NULL constraints and their names through transactions and reopen, keep namespace and IF NOT EXISTS checks ahead of definition analysis, and report PostgreSQL's unsupported-utility error in SQL-standard routine bodies while preserving quoted bodies.

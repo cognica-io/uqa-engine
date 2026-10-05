@@ -292,6 +292,8 @@ SQL can register foreign servers and foreign tables. Built-in native server type
 
 DuckDB server options include a database path, extensions, and S3 connection fields. Foreign table options select a DuckDB table or expression, or a Parquet, CSV, JSON, or NDJSON source with optional Hive partitioning. Arrow foreign tables select a file or stream IPC format.
 
+SQL deletion follows [DROP SERVER](../sql/02-ddl.md#foreign-servers-and-tables). Rust's `Engine::drop_foreign_server(name)` uses the same owner checks, server lifetime locks, RESTRICT dependency check and transaction boundary. It returns `Ok(false)` for a missing server, `Ok(true)` after deletion and the diagnostic text on failure. Use SQL `DROP SERVER name CASCADE` when dependent tables and their dependency closure should be removed too. Foreign table scans and memory loading use the table's captured server identity, so a same-name replacement cannot change the connection of an existing table.
+
 Availability depends on the target build. Validate server type and options at registration time, and never place long-lived secrets in SQL files or catalog options that are exported or logged.
 
 ## Extension lifecycle
