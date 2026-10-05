@@ -46,7 +46,19 @@ impl SequenceValueError {
         let sqlstate = match self {
             Self::Undefined(_) => "42P01",
             Self::MissingOid(_) => "XX000",
-            Self::WrongKind { .. } => "42809",
+            Self::WrongKind { name, kind } => {
+                let kinds = match kind {
+                    "index" => "indexes".into(),
+                    "partitioned index" => "partitioned indexes".into(),
+                    kind => format!("{kind}s"),
+                };
+                return SQLError::Diagnostic {
+                    sqlstate: "42809".into(),
+                    message: format!("cannot open relation \"{name}\""),
+                    detail: Some(format!("This operation is not supported for {kinds}.")),
+                    hint: None,
+                };
+            }
             Self::CurrvalUndefined(_) | Self::LastvalUndefined => "55000",
             Self::SetvalOutOfBounds { .. } => "22003",
             Self::Exhausted { .. } => "2200H",

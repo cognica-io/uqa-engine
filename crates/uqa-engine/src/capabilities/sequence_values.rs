@@ -115,6 +115,7 @@ impl Engine {
 
     pub(crate) fn sequence_value_context(&self) -> SequenceValueContext<'_> {
         SequenceValueContext {
+            catalog: self.catalog_execution(),
             locks: self,
             transactions: self,
             snapshots: self,

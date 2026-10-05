@@ -20,14 +20,6 @@ fn sequence_value_errors_keep_sqlstate_and_direct_api_diagnostics() {
             "relation \"missing\" does not exist",
         ),
         (
-            SequenceValueError::WrongKind {
-                name: "items".into(),
-                kind: "table",
-            },
-            "42809",
-            "cannot open relation \"items\": this operation is not supported for tables",
-        ),
-        (
             SequenceValueError::CurrvalUndefined("ids".into()),
             "55000",
             "currval of sequence \"ids\" is not yet defined in this session",
@@ -69,6 +61,43 @@ fn sequence_value_errors_keep_sqlstate_and_direct_api_diagnostics() {
         };
         assert_eq!(sqlstate, expected_code);
         assert_eq!(message, expected_message);
+    }
+}
+
+#[test]
+fn wrong_relation_kinds_use_the_postgresql_message_and_detail() {
+    for (kind, plural) in [
+        ("table", "tables"),
+        ("view", "views"),
+        ("index", "indexes"),
+        ("partitioned index", "partitioned indexes"),
+    ] {
+        let error = SequenceValueError::WrongKind {
+            name: "items".into(),
+            kind,
+        };
+        if kind == "table" {
+            assert_eq!(
+                error.to_string(),
+                "cannot open relation \"items\": this operation is not supported for tables"
+            );
+        }
+        let SQLError::Diagnostic {
+            sqlstate,
+            message,
+            detail,
+            hint,
+        } = error.into_sql_error()
+        else {
+            panic!("wrong relation kinds must preserve the PostgreSQL detail");
+        };
+        assert_eq!(sqlstate, "42809");
+        assert_eq!(message, "cannot open relation \"items\"");
+        assert_eq!(
+            detail.as_deref(),
+            Some(format!("This operation is not supported for {plural}.").as_str())
+        );
+        assert_eq!(hint, None);
     }
 }
 
