@@ -66,9 +66,10 @@ pub use cast_compatibility::{
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
-    common_context_expression_type, common_type, effective_overload_argument_type,
+    common_context_expression_type, common_type, common_type_in, effective_overload_argument_type,
     effective_overload_argument_type_with_params, function_call_argument_signature,
-    select_common_input_type, values_column_types, FunctionCallArgumentSignature,
+    select_common_input_type, values_column_types, CommonTypeContext,
+    FunctionCallArgumentSignature,
 };
 pub use equality::{
     equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,
@@ -277,6 +278,31 @@ pub fn scalar_type_with_resolver(
 /// A bare string or NULL literal, which `PostgreSQL` types as `unknown` until its context resolves it.
 pub fn is_unknown_literal(expression: &ScalarExpr) -> bool {
     matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null))
+}
+
+/// Whether a type's input function consults the catalog: the OID alias types and `aclitem` look names up, and an enum, a composite type, a record or a type known by name is read through its catalog definition. Analysis without the catalog leaves such a literal in the cast form that binding or evaluation reads, and reads every other literal with the type's input function.
+pub fn catalog_input_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Regproc
+        | ColumnType::Regprocedure
+        | ColumnType::Regclass
+        | ColumnType::Regnamespace
+        | ColumnType::Regrole
+        | ColumnType::Regtype
+        | ColumnType::AclItem
+        | ColumnType::PgNodeTree
+        | ColumnType::Named(_)
+        | ColumnType::Enum(_)
+        | ColumnType::Composite(_)
+        | ColumnType::Record
+        | ColumnType::AnyArray
+        | ColumnType::Vector(_)
+        | ColumnType::Tensor(_) => true,
+        ColumnType::Array(inner) | ColumnType::Domain { base: inner, .. } => {
+            catalog_input_type(inner)
+        }
+        _ => false,
+    }
 }
 
 /// The type of an assignment's source before coercion to its destination. A bare string or NULL literal has none: `transformAssignedExpr` and `transformAssignmentIndirection` convert it with the destination type's input function instead of checking a source type, so `'7'` assigns to an integer array element and `'abc'` fails as integer input.

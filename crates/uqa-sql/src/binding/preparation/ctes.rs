@@ -75,7 +75,10 @@ impl Preparation<'_> {
                     self.expression(&cycle.mark_value, &schema, &[])?,
                     self.expression(&cycle.mark_default, &schema, &[])?,
                 ];
-                self.common(&mut values)?;
+                self.common(
+                    crate::type_resolution::CommonTypeContext::Cycle,
+                    &mut values,
+                )?;
             }
             let schema =
                 extend_cte_generated_schema(self.routines, cte, schema, &self.parameters.values())?;

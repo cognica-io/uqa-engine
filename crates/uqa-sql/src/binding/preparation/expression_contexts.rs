@@ -105,7 +105,7 @@ impl Preparation<'_> {
         if let Some(other) = else_branch {
             values.insert(0, self.expression(other, input, subqueries)?);
         }
-        self.common(&mut values)
+        self.common(crate::type_resolution::CommonTypeContext::Case, &mut values)
     }
 
     pub(super) fn window_specification(

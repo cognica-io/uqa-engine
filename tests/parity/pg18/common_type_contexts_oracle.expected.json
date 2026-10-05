@@ -1,0 +1,1525 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 UNION SELECT '2026-01-01'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "UNION types integer and date cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 INTERSECT SELECT '2026-01-01'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "INTERSECT types integer and date cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 EXCEPT SELECT '2026-01-01'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "EXCEPT types integer and date cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "VALUES (1), ('2026-01-01'::date);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "VALUES types integer and date cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 1 ELSE '2026-01-01'::date END;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "CASE types date and integer cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT COALESCE(1, '2026-01-01'::date);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "COALESCE types integer and date cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ARRAY[1, '2026-01-01'::date];",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "ARRAY types integer and date cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT GREATEST(1, '2026-01-01'::date);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "GREATEST types integer and date cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT LEAST(1, '2026-01-01'::date);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "LEAST types integer and date cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 IN (1, '2026-01-01'::date);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer = date",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ct_a (k int, x int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ct_b (k date, y int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT * FROM ct_a JOIN ct_b USING (k);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer = date",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "VALUES ('int4'::regtype), ('ct_a'::regclass);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "VALUES could not convert type regclass to regtype",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 'int4'::regtype ELSE 'ct_a'::regclass END;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "CASE/WHEN could not convert type regtype to regclass",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(CASE WHEN random() < 2 THEN NULL END);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(COALESCE(NULL, NULL));",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(ARRAY[NULL, NULL]);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(GREATEST(NULL, NULL));",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(CASE WHEN true THEN 'a' ELSE 'b' END);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(COALESCE('a', 'b'));",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT NULL AS x UNION SELECT NULL) AS s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (VALUES (NULL), (NULL)) AS v(x);",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ],
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (VALUES ('a'), ('b')) AS v(x);",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ],
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 UNION SELECT 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 UNION SELECT '2';",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 1 ELSE 'x' END;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT COALESCE(1, 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ARRAY[1, 'x'];",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ct_c (z integer DEFAULT (CASE WHEN random() < 2 THEN NULL END));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"z\" is of type integer but default expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ct_d (z integer DEFAULT COALESCE(NULL, NULL));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"z\" is of type integer but default expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ct_e (z integer DEFAULT (CASE WHEN random() < 2 THEN 1 END));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(1 IN (NULL, NULL));",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "boolean"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1.5 UNION SELECT 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1.5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT 1.5 AS x UNION SELECT 1) AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "numeric"
+            ],
+            [
+              "numeric"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT 1::int2 AS x UNION SELECT 1::int8) AS s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "bigint"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT 'a'::varchar AS x UNION SELECT 'b'::text) AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "character varying"
+            ],
+            [
+              "character varying"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT 'a'::char(2) AS x UNION SELECT 'b'::varchar) AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "character"
+            ],
+            [
+              "character"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT '2026-01-01'::date AS x UNION SELECT now()) AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "timestamp with time zone"
+            ],
+            [
+              "timestamp with time zone"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT 'ct_a'::regclass AS x UNION SELECT 1::oid) AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "regclass"
+            ],
+            [
+              "regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT 1::oid AS x UNION SELECT 2) AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "oid"
+            ],
+            [
+              "oid"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 UNION SELECT true;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "UNION types integer and boolean cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 1 ELSE true END;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "CASE types boolean and integer cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT ARRAY[1] AS x UNION SELECT ARRAY[1.5]) AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "numeric[]"
+            ],
+            [
+              "numeric[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT x FROM (SELECT ARRAY[1] AS x UNION SELECT '{2}') AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            1007
+          ],
+          "rows": [
+            [
+              "{1}"
+            ],
+            [
+              "{2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT NULL AS x) AS s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT 'a' AS x) AS s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT NULL AS x UNION ALL SELECT 'a') AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ],
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE 1 WHEN '2026-01-01'::date THEN 1 END;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer = date",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT GREATEST(1, 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT LEAST(1, 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(GREATEST('a', 'b'));",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT COALESCE(1, '2');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "coalesce"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN false THEN 1 ELSE '2' END;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "case"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW ct_v AS SELECT CASE WHEN false THEN 1 ELSE '2' END AS a, COALESCE(1, '3') AS b, GREATEST(1, '4') AS c, CASE WHEN true THEN 1 ELSE NULL END AS d;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT 1 AS x UNION SELECT NULL) AS s;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "integer"
+            ],
+            [
+              "integer"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT x FROM (SELECT '1' AS x UNION SELECT 2) AS s ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 IN (1, 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 IN ('1', 2);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 UNION SELECT 1.5 UNION SELECT '2026-01-01'::date;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "UNION types numeric and date cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 1 WHEN false THEN 1.5 ELSE '2026-01-01'::date END;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "CASE types date and integer cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT x FROM (SELECT 1 AS x UNION SELECT NULL) AS s ORDER BY x;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT GREATEST(1, 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT LEAST('x', 1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT GREATEST(1, '7'), LEAST(1, '7');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "greatest",
+            "least"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 IN ('x', 2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x' IN (1, 2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (VALUES ('a'), (NULL)) AS v(x);",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ],
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "VALUES (1, 'a'), ('2', 'b');",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column1",
+            "column2"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ],
+            [
+              "2",
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "VALUES (1), ('x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT x FROM (SELECT '1' AS x INTERSECT SELECT 1) AS s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT x FROM (SELECT 1 AS x EXCEPT SELECT '2') AS s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 INTERSECT SELECT 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN '2026-01-01' ELSE '2026-01-02'::date END;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "case"
+          ],
+          "type_oids": [
+            1082
+          ],
+          "rows": [
+            [
+              "2026-01-01"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(CASE WHEN true THEN '2026-01-01' ELSE '2026-01-02'::date END);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "date"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT COALESCE('2026-01-01'::date, 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT COALESCE(NULL::date, '2026-01-02');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "coalesce"
+          ],
+          "type_oids": [
+            1082
+          ],
+          "rows": [
+            [
+              "2026-01-02"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) CYCLE n SET m TO 1 DEFAULT 'x' USING p SELECT n FROM r;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) CYCLE n SET m TO 1 DEFAULT '2026-01-01'::date USING p SELECT n FROM r;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "syntax error at or near \"::\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW ct_w AS SELECT CASE WHEN true THEN 'a' ELSE 'b' END AS a, COALESCE(NULL, NULL) AS b, ARRAY['x', 'y'] AS c, 1 IN (1, '2') AS d;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, b, c, d FROM ct_w;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "type_oids": [
+            25,
+            25,
+            1009,
+            16
+          ],
+          "rows": [
+            [
+              "a",
+              null,
+              "{x,y}",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

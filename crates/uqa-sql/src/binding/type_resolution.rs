@@ -20,11 +20,16 @@ pub(super) fn set_operation_output_schema(
     kind: SetOpKind,
     all: bool,
 ) -> Result<RowSchema, SQLError> {
+    // `select_common_type` resolves a column whose inputs are all `unknown` to text.
+    let context = crate::type_resolution::CommonTypeContext::set_operation(kind);
     let types = left
         .column_types()
         .iter()
         .zip(right.column_types())
-        .map(|(left, right)| merge_types(left.as_ref(), right.as_ref()))
+        .map(|(left, right)| {
+            merge_types(context, left.as_ref(), right.as_ref())
+                .map(|ty| ty.or(Some(ColumnType::Text)))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     if !matches!((kind, all), (SetOpKind::Union, true)) {
         for ty in types.iter().flatten() {

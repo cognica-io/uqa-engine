@@ -123,7 +123,7 @@ pub fn cook_constant(
             let cast_type = crate::expr::EngineHook::resolve_type_name(context.catalog, ty)
                 .map_err(SQLError::Internal)?
                 .map_or_else(|| ColumnType::from_sql_name(ty), Ok)?;
-            if catalog_input_type(&cast_type) {
+            if crate::type_resolution::catalog_input_type(&cast_type) {
                 // The cast is already the form the catalog binding of a stored expression resolves.
                 return Ok(true);
             }
@@ -134,23 +134,6 @@ pub fn cook_constant(
         _ => {}
     }
     Ok(true)
-}
-
-/// Whether a type's input function looks its text up in the catalog, as `regclassin` and the input functions of the other OID alias types do. A stored expression resolves such a constant when it is bound to the catalog, so cooking keeps the literal in the cast form that binding reads instead of reading it here.
-fn catalog_input_type(ty: &ColumnType) -> bool {
-    match ty {
-        ColumnType::Regproc
-        | ColumnType::Regprocedure
-        | ColumnType::Regclass
-        | ColumnType::Regnamespace
-        | ColumnType::Regrole
-        | ColumnType::Regtype
-        | ColumnType::AclItem => true,
-        ColumnType::Array(inner) | ColumnType::Domain { base: inner, .. } => {
-            catalog_input_type(inner)
-        }
-        _ => false,
-    }
 }
 
 /// Read an `unknown` literal with the input function of `target`, which reports what the type's input rejects, and store the typed constant. `coerce_type` passes the input function no type modifier, so a length or precision the column declares applies when a row is assigned, not here; the constant keeps the modifier only when `keep_modifier` says a cast wrote it.
@@ -174,7 +157,7 @@ pub(super) fn cook_unknown_literal(
     while let ColumnType::Domain { base: inner, .. } = base {
         base = inner;
     }
-    if catalog_input_type(base) {
+    if crate::type_resolution::catalog_input_type(base) {
         // The input function of an OID alias type resolves the name in the catalog, which the binding of the stored expression does; the literal takes the cast that binding resolves.
         let literal = std::mem::replace(expression, Expr::Literal(Value::Null));
         *expression = Expr::Cast {

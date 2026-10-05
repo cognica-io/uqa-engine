@@ -103,11 +103,26 @@ fn extend_cte_generated_schema_mode(
         reject_conflict(&cycle.mark_column, "cycle mark")?;
         reject_conflict(&cycle.path_column, "cycle path")?;
         let empty = RowSchema::default();
+        // `transformCycleClause` selects the mark's type as `select_common_type` does, an `unknown` literal taking the other value's type.
         let mark_type = match (
-            crate::scalar_type_with_resolver(&cycle.mark_value, &empty, params, routines)?,
-            crate::scalar_type_with_resolver(&cycle.mark_default, &empty, params, routines)?,
+            crate::type_resolution::common_context_expression_type(
+                &cycle.mark_value,
+                &empty,
+                params,
+                Some(routines),
+            )?,
+            crate::type_resolution::common_context_expression_type(
+                &cycle.mark_default,
+                &empty,
+                params,
+                Some(routines),
+            )?,
         ) {
-            (Some(left), Some(right)) => Some(crate::common_type(&left, &right)?),
+            (Some(left), Some(right)) => Some(crate::type_resolution::common_type_in(
+                crate::type_resolution::CommonTypeContext::Cycle,
+                &left,
+                &right,
+            )?),
             (left @ Some(_), None) | (None, left @ Some(_)) => left,
             (None, None) => None,
         };
