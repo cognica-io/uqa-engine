@@ -8,21 +8,21 @@
 
 use std::cell::RefCell;
 
-use uqa_core::{memory::MemoryBudget, DocId, ScoredEntry};
+use uqa_core::{memory::MemoryBudget, DocId};
 use uqa_sql::{SQLError, SQLParam, ScalarExpr};
-use uqa_storage::{
-    mvcc::{PrivateRecordChanges, PrivateRecordSnapshot, RecordWrite, VersionError},
-    read_control::StorageReadControl,
-};
+use uqa_storage::read_control::StorageReadControl;
 
 use super::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::{query::CteScope, OwnedPhysicalRow};
+
+mod support;
+use support::{contains, retain_support, DocumentSupport};
 
 struct Support {
     table: String,
     name: String,
     args: Vec<ScalarExpr>,
-    rows: PrivateRecordSnapshot,
+    rows: DocumentSupport,
 }
 
 #[derive(Default)]
@@ -123,46 +123,6 @@ impl<S: Clone + Send + Sync + 'static> RowQualification<S> {
         )
         .map(|value| uqa_sql::expr::truthy(&value))
     }
-}
-
-fn version(error: VersionError) -> SQLError {
-    crate::storage_errors::storage_error(
-        "retain mutation retrieval support",
-        &error.into_storage_error(),
-    )
-}
-
-fn retain_support(
-    mut entries: Vec<ScoredEntry>,
-    control: &StorageReadControl,
-) -> Result<PrivateRecordSnapshot, SQLError> {
-    entries.sort_unstable_by_key(|entry| entry.doc_id);
-    entries.dedup_by_key(|entry| entry.doc_id);
-    let records = PrivateRecordChanges::new(control.memory());
-    // The cache is discarded on failure, so each entry can use the private store's single-write path without retaining an atomic batch alongside its resident tree.
-    for entry in entries {
-        records
-            .apply(
-                &[RecordWrite {
-                    key: &entry.doc_id.to_be_bytes(),
-                    expected: None,
-                    value: Some(&[]),
-                }],
-                control,
-            )
-            .map_err(version)?;
-    }
-    records.snapshot().map_err(version)
-}
-
-fn contains(
-    rows: &PrivateRecordSnapshot,
-    doc_id: DocId,
-    control: &StorageReadControl,
-) -> Result<bool, SQLError> {
-    rows.get(&doc_id.to_be_bytes(), control)
-        .map(|row| row.is_some_and(|row| row.value().is_some()))
-        .map_err(version)
 }
 
 #[cfg(test)]

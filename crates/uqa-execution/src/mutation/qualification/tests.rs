@@ -5,25 +5,53 @@
 //
 
 use super::*;
-use uqa_core::Value;
+use uqa_core::{ScoredEntry, Value};
 
 #[test]
 fn retrieval_support_spills_without_using_scores_as_truth_values() {
     let control = StorageReadControl::with_limit(64 * 1024);
-    let entries = (0..4096)
+    let entries = (0..16384)
+        .map(|ordinal| ordinal * 3)
         .rev()
-        .chain([0, 4095])
+        .chain([0, 49149])
         .map(|doc_id| ScoredEntry {
             doc_id,
             score: if doc_id % 2 == 0 { 0.0 } else { -1.0 },
         })
         .collect();
     let rows = retain_support(entries, &control).unwrap();
-    for id in [0, 1, 2048, 4095] {
+    assert!(matches!(rows, DocumentSupport::Spilled { .. }));
+    for id in [0, 3, 6144, 12285, 49149] {
         assert!(contains(&rows, id, &control).unwrap());
     }
-    assert!(!contains(&rows, 4096, &control).unwrap());
-    assert!(!contains(&rows, u64::MAX, &control).unwrap());
+    for id in [1, 2, 49152, u64::MAX] {
+        assert!(!contains(&rows, id, &control).unwrap());
+    }
+    drop(rows);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn retrieval_leaves_share_one_allowance_and_release_their_resident_and_spilled_storage() {
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let rows = (0..3)
+        .map(|_| {
+            retain_support(
+                (0..4096)
+                    .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
+                    .collect(),
+                &control,
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(matches!(rows[0], DocumentSupport::Resident(_)));
+    assert!(matches!(rows[1], DocumentSupport::Spilled { .. }));
+    for support in &rows {
+        assert!(contains(support, 2048, &control).unwrap());
+        assert!(!contains(support, 4096, &control).unwrap());
+    }
+    assert!(control.memory().used() <= 64 * 1024);
     drop(rows);
     assert_eq!(control.memory().used(), 0);
 }
