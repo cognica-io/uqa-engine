@@ -17,6 +17,7 @@ impl NativeDocumentRead<'_> {
         ids: &[DocId],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> SQLiteResult<()> {
+        let mut selected = self.snapshot.view.selected(self.control);
         for page in ids.chunks(256) {
             self.snapshot.control.check()?;
             self.control.check()?;
@@ -26,7 +27,12 @@ impl NativeDocumentRead<'_> {
                 self.control.check()?;
                 let present = match presence.as_ref() {
                     Some(flags) => flags[position] != 0,
-                    None => self.contains(id)?,
+                    None => match self.selection_key(id)? {
+                        Some(key) => selected
+                            .metadata(&key, self.control)?
+                            .is_some_and(|record| record.live),
+                        None => false,
+                    },
                 };
                 // The fixed view and metadata page remain alive after the physical cursor closes.
                 let more = visitor(id, present, &[]);

@@ -36,44 +36,38 @@ impl NativeDocumentRead<'_> {
             identity.encode_key(&[ValueRef::Integer(id)], self.control)
         });
         let mut visited = 0;
+        let mut selected = self.snapshot.view.selected(self.control);
         while visited < ids.len() {
             let mut pending: Option<Decoded> = None;
-            self.snapshot
-                .view
-                .visit_values(&mut keys, self.control, &mut |key, record| {
-                    self.snapshot.control.check()?;
-                    self.control.check()?;
-                    let id = ids[visited];
-                    let row = if let Some(bytes) = record.and_then(|record| record.value) {
-                        let (_, row) = decode_record(key, bytes, self.control)?;
-                        Some(
-                            self.decode_body_with_projection(id, &row, Some(fields))
-                                .map_err(|error| VersionError::Storage(error.into()))?,
-                        )
-                    } else {
-                        None
-                    };
-                    if row.as_ref().is_some_and(|row| {
-                        fields.iter().any(|field| {
-                            row.fields
-                                .get(*field)
-                                .is_some_and(|value| controlled::marker(value).is_some())
-                        })
-                    }) {
-                        pending = row;
-                        return Ok(false);
-                    }
-                    let more = self
-                        .visit_point_fields(
-                            id,
-                            row.as_ref().map(|row| &row.fields),
-                            fields,
-                            visitor,
-                        )
-                        .map_err(|error| VersionError::Storage(error.into()))?;
-                    visited += 1;
-                    Ok(more)
-                })?;
+            selected.visit_values(&mut keys, self.control, &mut |key, record| {
+                self.snapshot.control.check()?;
+                self.control.check()?;
+                let id = ids[visited];
+                let row = if let Some(bytes) = record.and_then(|record| record.value) {
+                    let (_, row) = decode_record(key, bytes, self.control)?;
+                    Some(
+                        self.decode_body_with_projection(id, &row, Some(fields))
+                            .map_err(|error| VersionError::Storage(error.into()))?,
+                    )
+                } else {
+                    None
+                };
+                if row.as_ref().is_some_and(|row| {
+                    fields.iter().any(|field| {
+                        row.fields
+                            .get(*field)
+                            .is_some_and(|value| controlled::marker(value).is_some())
+                    })
+                }) {
+                    pending = row;
+                    return Ok(false);
+                }
+                let more = self
+                    .visit_point_fields(id, row.as_ref().map(|row| &row.fields), fields, visitor)
+                    .map_err(|error| VersionError::Storage(error.into()))?;
+                visited += 1;
+                Ok(more)
+            })?;
             let Some(row) = pending else {
                 break;
             };
