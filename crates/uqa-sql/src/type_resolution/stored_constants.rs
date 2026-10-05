@@ -41,8 +41,8 @@ pub fn fold_stored_enum_constants(
     transfer(expression, &bound, &mut EnumConstants { catalog })
 }
 
-/// Store the coercions to `oid` that binding adds to a comparison on `oid` or one of its alias types, as `PostgreSQL` stores the `RelabelType` nodes and coerced constants of an analyzed expression: an alias operand gains its cast to `oid`, an integer operand its cast to `oid`, an array operand its cast to `oid[]`, and an `unknown` literal becomes the `oid` constant the input function read. Returns whether anything changed.
-pub fn relabel_stored_oid_operands(
+/// Store the coercions binding adds to the operands of an operator, as `PostgreSQL` stores the `RelabelType` nodes and coerced constants of an analyzed expression: an `unknown` literal becomes the constant the selected operand type's input function read (`1` in `a + '1'`, `'16384'::oid` against a `regclass` column), an operand of `oid` or one of its alias types gains its cast to `oid`, and an array operand its cast to `oid[]`. Constants of the types whose input consults the catalog keep their cast, which the stored expression's binding resolves. Returns whether anything changed.
+pub fn store_operand_coercions(
     expression: &mut ScalarExpr,
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
@@ -54,7 +54,7 @@ pub fn relabel_stored_oid_operands(
         params,
         resolver,
     );
-    transfer(expression, &bound, &mut OidRelabels)
+    transfer(expression, &bound, &mut OperatorCoercions)
 }
 
 /// What a transfer takes from the bound copy of a stored expression.
@@ -86,21 +86,25 @@ impl Folding for EnumConstants<'_> {
     }
 }
 
-struct OidRelabels;
+struct OperatorCoercions;
 
-impl Folding for OidRelabels {
+impl Folding for OperatorCoercions {
     fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError> {
         let ScalarExpr::TypedLiteral {
             value,
-            bound_type: Some(ColumnType::Oid),
+            bound_type: Some(target),
             ..
         } = bound
         else {
             return Ok(false);
         };
+        // Enum constants are stored by label identity, and a catalog input type keeps its cast.
+        if is_enum_bearing(target) || super::catalog_input_type(target) {
+            return Ok(false);
+        }
         *stored = ScalarExpr::TypedLiteral {
             value: value.clone(),
-            ty: ColumnType::Oid.catalog_name(),
+            ty: target.catalog_name(),
             bound_type: None,
             parameter_index: None,
         };

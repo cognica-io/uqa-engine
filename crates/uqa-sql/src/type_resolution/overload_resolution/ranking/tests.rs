@@ -101,14 +101,46 @@ fn controlled_unknown_ranking_keeps_category_precedence_and_candidate_order() {
             false,
             vec![1, 2],
         ),
+        // A category conflict at the `unknown` position leaves the known argument's type to select the one candidate it reaches by implicit casts, as `func_select_candidate` selects `rk(numeric, numeric)` for `rk(1, 'x')`.
         (
             vec![
                 candidate(1, &["numeric", "numeric"]),
                 candidate(2, &["numeric", "boolean"]),
             ],
             vec![Some(ColumnType::Integer), None],
+            true,
+            vec![1],
+        ),
+        // `time + unknown` reaches `time + interval` through the implicit cast from `time` to `interval`, not `time + date`.
+        (
+            vec![
+                candidate(1, &["time", "date"]),
+                candidate(2, &["time", "interval"]),
+            ],
+            vec![Some(ColumnType::Time), None],
+            true,
+            vec![2],
+        ),
+        // Two `unknown` arguments leave no known type to assume, so the conflict stays ambiguous.
+        (
+            vec![
+                candidate(1, &["time", "date"]),
+                candidate(2, &["time", "interval"]),
+            ],
+            vec![None, None],
             false,
             vec![1, 2],
+        ),
+        // The `unknown` positions are settled over the whole candidate set before any candidate is stripped: `float8` is preferred at the first position and the string category wins the second, which no candidate satisfies together, so none is stripped and the call stays ambiguous.
+        (
+            vec![
+                candidate(1, &["int4", "text"]),
+                candidate(2, &["int8", "boolean"]),
+                candidate(3, &["float8", "boolean"]),
+            ],
+            vec![None, None],
+            true,
+            vec![1, 2, 3],
         ),
     ];
     for (mut candidates, types, expected, identities) in cases {

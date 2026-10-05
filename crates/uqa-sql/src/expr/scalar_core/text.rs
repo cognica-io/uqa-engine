@@ -232,6 +232,21 @@ fn concat(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
     if let Some(value) = crate::expr::json::json_concat_with_control(args, control)? {
         return Ok(value);
     }
+    // `bytea || bytea` joins the bytes; analysis reads an `unknown` operand as `bytea`, while `bytea || text` is `anytextcat`, which concatenates the output texts.
+    if args.iter().all(|arg| matches!(arg, Value::Bytes(_))) {
+        let mut output = ProductionVec::new(*control);
+        for value in args {
+            let Value::Bytes(bytes) = value else {
+                unreachable!("every argument is bytea");
+            };
+            output.reserve(bytes.len())?;
+            for byte in bytes {
+                output.push_copy(*byte)?;
+            }
+        }
+        let (output, memory) = output.finish()?.into_parts();
+        return Ok(control.finish(Value::Bytes(output), memory)?);
+    }
     let mut output = ProductionString::new(*control);
     for value in args {
         output.push_str(&value_to_string_with_control(value, control)?)?;

@@ -92,6 +92,8 @@ mod sql_literal_coercion;
 mod sql_nulls_order;
 #[path = "sql_offset_like.rs"]
 mod sql_offset_like;
+#[path = "queries/sql_operator_diagnostics.rs"]
+mod sql_operator_diagnostics;
 #[path = "queries/sql_partition_bounds.rs"]
 mod sql_partition_bounds;
 #[path = "sql_prepared.rs"]

@@ -11,6 +11,7 @@ use super::{
 };
 use crate::{ast::ColumnType, schema::ScalarTypeSchema, SQLError, SQLParam, ScalarExpr};
 use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::Value;
 
 #[expect(
     clippy::too_many_lines,
@@ -131,9 +132,8 @@ pub(super) fn scalar_type_inner_with_control(
             let right = common::common_context_expression_type_with_control(
                 rhs, schema, params, resolver, control,
             )?;
-            // A comparison's `unknown` literal is read by the input function of the operand type the selected operator declares, as `coerce_type` reads it when the operator is resolved: a `regclass` column compared with `'name'` reads the literal as `oid`.
-            if comparison_operator(*op)
-                && left.is_some() != right.is_some()
+            // An operator's `unknown` literal is read by the input function of the operand type the selected operator declares, as `coerce_type` reads it when the operator is resolved: a `regclass` column compared with `'name'` reads the literal as `oid`, and `1 + '1'` reads `'1'` as an integer.
+            if left.is_some() != right.is_some()
                 && left
                     .as_deref()
                     .into_iter()
@@ -163,6 +163,10 @@ pub(super) fn scalar_type_inner_with_control(
             )
         }
         ScalarExpr::UnaryMinus(inner) => {
+            // The negations of the numeric types and of interval all accept an `unknown` operand, so `-'1'` selects none of them, as `oper_select_candidate` reports.
+            if matches!(inner.as_ref(), ScalarExpr::Literal(Value::Str(_))) {
+                return Err(super::ambiguous_prefix_operator("-", "unknown"));
+            }
             scalar_type_inner_with_control(inner, schema, params, resolver, control)?
                 .map_or(Ok(None), |ty| {
                     operators::unary_minus_result_type_with_control(&ty, control).map(Some)
@@ -536,20 +540,6 @@ fn copy_type(
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
     ty.map(|ty| ty.clone_with_control(control).map_err(Into::into))
         .transpose()
-}
-
-/// The comparison operators, whose `unknown` operands are read as the selected operator's operand type.
-fn comparison_operator(op: crate::ast::BinaryOp) -> bool {
-    use crate::ast::BinaryOp;
-    matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    )
 }
 
 #[cfg(test)]

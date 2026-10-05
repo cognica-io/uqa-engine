@@ -698,8 +698,8 @@ impl SchemaScope {
             params,
             outer,
         )?;
-        // A comparison on `oid` or one of its alias types takes the `oid` operators; the coercions binding adds to its operands are stored, as `PostgreSQL` stores the `RelabelType` nodes of an analyzed expression.
-        crate::type_resolution::relabel_stored_oid_operands(expression, schema, params, &resolver)?;
+        // The coercions binding adds to an operator's operands, the constants it reads from `unknown` literals and the relabels of `oid` alias operands, are stored, as `PostgreSQL` stores them in an analyzed expression.
+        crate::type_resolution::store_operand_coercions(expression, schema, params, &resolver)?;
         if !crate::type_resolution::contains_unknown_literal(expression) {
             return Ok(());
         }

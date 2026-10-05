@@ -70,14 +70,7 @@ pub(super) fn named_binary_operator_types_with_control(
     )
     .map_err(|error| match error.sqlstate() {
         Some("53200" | "57014") => error,
-        Some("42725") => SQLError::Routine {
-            sqlstate: "42725".into(),
-            message: format!(
-                "operator is not unique: {} {name} {}",
-                left.map_or_else(|| "unknown".into(), ColumnType::sql_name),
-                right.map_or_else(|| "unknown".into(), ColumnType::sql_name)
-            ),
-        },
+        Some("42725") => super::super::ambiguous_binary_operator(left, name, right),
         _ => undefined_binary_operator(name, left, right),
     })?;
     result(

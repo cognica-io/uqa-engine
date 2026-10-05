@@ -12,9 +12,12 @@ use super::{
     RankedFunctionMatch,
 };
 use crate::{type_resolution::common::base_type, ColumnType};
-use uqa_core::{memory::ProductionControl, ValueRetentionError};
+use uqa_core::{
+    memory::{ProductionControl, ProductionVec},
+    ValueRetentionError,
+};
 
-/// Apply `PostgreSQL`'s candidate-ranking passes to candidates that already accept the call. Returns `false` when conflicting unknown categories make the call ambiguous before any later unknown position may narrow it.
+/// Apply `PostgreSQL`'s candidate-ranking passes to candidates that already accept the call. Returns `false` when conflicting `unknown` categories leave the call ambiguous and the known arguments' type selects no single candidate either.
 #[must_use]
 pub fn rank_function_matches<T: RankedFunctionMatch>(
     candidates: &mut Vec<T>,
@@ -89,54 +92,74 @@ pub(in crate::type_resolution) fn rank_function_matches_with_control<T: RankedFu
         Ok(candidate.preferred_matches() == most_preferred)
     })?;
 
-    for (index, actual) in argument_types.iter().enumerate() {
-        control.check()?;
-        if actual.is_some() || candidates.len() <= 1 {
-            continue;
-        }
-        let mut first_category = None;
-        let mut different_categories = false;
-        let mut string_category = false;
-        for candidate in candidates.iter() {
-            let category = category(&candidate.argument_types()[index], control)?;
-            string_category |= category == 'S';
-            different_categories |= first_category.is_some_and(|first| first != category);
-            first_category.get_or_insert(category);
-        }
-        let selected = if string_category {
-            'S'
-        } else if different_categories {
-            return Ok(false);
-        } else {
-            first_category.expect("unknown ranking has multiple candidates")
-        };
-        retain(candidates, control, |candidate| {
-            Ok(category(&candidate.argument_types()[index], control)? == selected)
-        })?;
-        let mut has_preferred = false;
-        for candidate in candidates.iter() {
-            if preferred(&candidate.argument_types()[index], control)? {
-                has_preferred = true;
-                break;
-            }
-        }
-        if has_preferred {
-            retain(candidates, control, |candidate| {
-                preferred(&candidate.argument_types()[index], control)
-            })?;
-        }
-    }
     if candidates.len() <= 1 {
         return Ok(true);
     }
+    // `func_select_candidate` settles the `unknown` positions together: each position takes the string category when any candidate accepts it, otherwise the one category every candidate agrees on; a disagreement leaves every position unresolved and skips the stripping, but not the heuristic after it.
+    let mut slots = ProductionVec::new(*control);
+    let mut resolved = true;
+    for (index, actual) in argument_types.iter().enumerate() {
+        control.check()?;
+        if actual.is_some() {
+            continue;
+        }
+        let mut slot: Option<(char, bool)> = None;
+        let mut conflict = false;
+        for candidate in candidates.iter() {
+            let name = &candidate.argument_types()[index];
+            let category = category(name, control)?;
+            let preferred = preferred(name, control)?;
+            match slot {
+                None => slot = Some((category, preferred)),
+                Some((current, has_preferred)) if current == category => {
+                    slot = Some((current, has_preferred || preferred));
+                }
+                Some(_) if category == 'S' => slot = Some(('S', preferred)),
+                Some(_) => conflict = true,
+            }
+        }
+        let slot = slot.expect("unknown ranking has multiple candidates");
+        if conflict && slot.0 != 'S' {
+            resolved = false;
+            break;
+        }
+        slots.push_copy((index, slot.0, slot.1))?;
+    }
+    if resolved {
+        let accepts = |candidate: &T| -> Result<bool, ValueRetentionError> {
+            for &(index, selected, has_preferred) in slots.iter() {
+                let name = &candidate.argument_types()[index];
+                if category(name, control)? != selected
+                    || (has_preferred && !preferred(name, control)?)
+                {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        };
+        let mut kept = 0;
+        for candidate in candidates.iter() {
+            if accepts(candidate)? {
+                kept += 1;
+            }
+        }
+        // A rule that rejects every candidate is skipped rather than applied.
+        if kept > 0 {
+            retain(candidates, control, accepts)?;
+        }
+        if candidates.len() == 1 {
+            return Ok(true);
+        }
+    }
+    // The last heuristic: when every known argument has one type, the `unknown` arguments are assumed to have it too, and a candidate every argument reaches by implicit cast is selected when it is the only one.
     let mut known = argument_types.iter().flatten();
     let Some(first) = known.next() else {
-        return Ok(true);
+        return Ok(resolved);
     };
     let identity = canonical_column_type_name_with_control(base_type(first), control)?;
     for ty in known {
         if *canonical_column_type_name_with_control(base_type(ty), control)? != *identity {
-            return Ok(true);
+            return Ok(resolved);
         }
     }
     retain(candidates, control, |candidate| {
@@ -145,7 +168,7 @@ pub(in crate::type_resolution) fn rank_function_matches_with_control<T: RankedFu
                 || routine_type_accepts_implicit_cast(&identity, &candidate.argument_types()[index])
         }))
     })?;
-    Ok(true)
+    Ok(resolved || candidates.len() == 1)
 }
 
 fn retain<T>(

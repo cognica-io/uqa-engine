@@ -89,9 +89,33 @@ pub(crate) fn function_projection_label(
     ) {
         return "?column?".into();
     }
-    crate::parse_regobject_name(name)
+    let name = crate::parse_regobject_name(name)
         .and_then(|mut names| names.pop())
-        .unwrap_or_else(|| name.to_string())
+        .unwrap_or_else(|| name.to_string());
+    if operator_call(&name) {
+        return "?column?".into();
+    }
+    name
+}
+
+/// The calls the parser lowers operator syntax to under names no `PostgreSQL` function has: `||`, `@@`, `@?`, `@>`, `<@`, `&&`, `?`, `?|`, `?&`, `#-`, `LIKE`, `ILIKE` and `SIMILAR TO`.
+fn operator_call(name: &str) -> bool {
+    matches!(
+        name,
+        "concat_op"
+            | "fts_match"
+            | "jsonpath_exists"
+            | "contains_op"
+            | "contained_by_op"
+            | "array_overlap"
+            | "json_has_key"
+            | "json_has_any_key"
+            | "json_has_all_keys"
+            | "json_delete_path"
+            | "like"
+            | "ilike"
+            | "similar_to"
+    )
 }
 
 pub fn expand_from_star_columns(

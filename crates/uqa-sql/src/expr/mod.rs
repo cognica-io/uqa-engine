@@ -88,8 +88,8 @@ use conversion::{
     to_i64,
 };
 pub use conversion::{
-    array_value_to_string, catalog_output_required, value_to_string, value_to_string_with_control,
-    vector_value_to_string,
+    array_value_to_string, catalog_output_required, invalid_numeric_input, value_to_string,
+    value_to_string_with_control, vector_value_to_string,
 };
 pub(crate) use conversion::{tensor_items, vector_element, vector_items};
 pub use conversion::{

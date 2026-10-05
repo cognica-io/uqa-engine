@@ -19,7 +19,10 @@ impl Binder<'_, '_> {
         left: &ScalarExpr,
         right: &ScalarExpr,
     ) -> Result<Option<Produced<[ColumnType; 3]>>, SQLError> {
-        if !is_comparison(op) {
+        // An arithmetic operator reads an `unknown` operand with the operand type it selects, as `make_op` coerces it; two typed operands keep their own types.
+        let reads_unknown_operand =
+            is_arithmetic(op) && unknown_input(left) != unknown_input(right);
+        if !is_comparison(op) && !reads_unknown_operand {
             return Ok(None);
         }
         let left_type = self.common_context(left)?;
@@ -241,6 +244,13 @@ fn is_comparison(op: BinaryOp) -> bool {
             | BinaryOp::LessEqual
             | BinaryOp::Greater
             | BinaryOp::GreaterEqual
+    )
+}
+
+fn is_arithmetic(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
     )
 }
 

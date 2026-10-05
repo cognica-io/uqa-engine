@@ -1,0 +1,1458 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE od (n numeric(3,1) DEFAULT 99.95, i int DEFAULT 1 + '1', j int DEFAULT -'1', k int DEFAULT ('1'::int + '2'), m numeric DEFAULT '1' + 1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: - unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE od (n numeric(3,1) DEFAULT 99.95, i int DEFAULT 1 + '1', k int DEFAULT ('1'::int + '2'), m numeric DEFAULT '1' + 1, t text DEFAULT 'a' || 1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'od'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "99.95"
+            ],
+            [
+              "2",
+              "(1 + 1)"
+            ],
+            [
+              "3",
+              "(1 + 2)"
+            ],
+            [
+              "4",
+              "(1 + 1)"
+            ],
+            [
+              "5",
+              "('a'::text || 1)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO od DEFAULT VALUES;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 3, scale 1 must round to an absolute value less than 10^2.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT n, i, k, m, t FROM od;",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "i",
+            "k",
+            "m",
+            "t"
+          ],
+          "type_oids": [
+            1700,
+            23,
+            23,
+            1700,
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO od (n) VALUES (123.4);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 3, scale 1 must round to an absolute value less than 10^2.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO od (n) VALUES (99.95);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 3, scale 1 must round to an absolute value less than 10^2.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO od (n) VALUES (99.94);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE od SET n = 1000;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 3, scale 1 must round to an absolute value less than 10^2.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 || 2;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer || integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 || 2 || 'a';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer || integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'a' || 1, 1 || 'a', 'a' || 'b', true || 'x', 'x' || now()::date::text = 'x' || current_date::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "a1",
+              "1a",
+              "ab",
+              "truex",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1.5 || 2;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: numeric || integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ARRAY[1] || 2, ARRAY[1] || ARRAY[2], 'x'::bytea || 'y'::bytea, '{\"a\":1}'::jsonb || '{\"b\":2}'::jsonb;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            1007,
+            1007,
+            17,
+            3802
+          ],
+          "rows": [
+            [
+              "{1,2}",
+              "{1,2}",
+              "\\x7879",
+              "{\"a\": 1, \"b\": 2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::bytea || 'y';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            17
+          ],
+          "rows": [
+            [
+              "\\x7879"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE odg (a int, b int, c text GENERATED ALWAYS AS (a || b) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer || integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE odg2 (a int, c text GENERATED ALWAYS AS (a || 'x') STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO odg2 (a) VALUES (7);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT c FROM odg2;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "7x"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT -'1';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: - unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(-'1')::text;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: - unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT -'1'::int, -'1.5'::numeric, - 1, pg_typeof(-interval '1 day')::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            23,
+            1700,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "-1",
+              "-1.5",
+              "-1",
+              "interval"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1' + '2';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1' * '2';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown * unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE odm (a int DEFAULT -'1');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: - unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE odp AS SELECT -'1';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: - unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE odq AS SELECT '1' + '2';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN oddom AS int DEFAULT 5;",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typdefault, typdefaultbin IS NOT NULL, pg_get_expr(typdefaultbin, 0) FROM pg_type WHERE typname = 'oddom';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typdefault",
+            "?column?",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "5",
+              "t",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN oddom2 AS int CHECK (VALUE > 0);",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typdefault, typdefaultbin FROM pg_type WHERE typname = 'oddom2';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typdefault",
+            "typdefaultbin"
+          ],
+          "type_oids": [
+            25,
+            194
+          ],
+          "rows": [
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN oddom3 AS text DEFAULT 'a' || 'b';",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typdefault, pg_get_expr(typdefaultbin, 0) FROM pg_type WHERE typname = 'oddom3';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typdefault",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "('a'::text || 'b'::text)",
+              "('a'::text || 'b'::text)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 123.456::numeric(5,2);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "numeric"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              "123.46"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1234.5::numeric(5,2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 5, scale 2 must round to an absolute value less than 10^3.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 12345::numeric(4,0);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 4, scale 0 must round to an absolute value less than 10^4.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 99.95::numeric(3,1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 3, scale 1 must round to an absolute value less than 10^2.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 0.5::numeric(1,1), 0.95::numeric(1,1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 1, scale 1 must round to an absolute value less than 1.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1.5::numeric(1,1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 1, scale 1 must round to an absolute value less than 1.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 12::numeric(2,-1), 1234::numeric(2,-1)::text;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 2, scale -1 must round to an absolute value less than 10^3.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 12345::numeric(2,-1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 2, scale -1 must round to an absolute value less than 10^3.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1234.5'::numeric(5,2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "numeric field overflow",
+        "detail": "A field with precision 5, scale 2 must round to an absolute value less than 10^3.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE odc (a int, n numeric(10,2) DEFAULT 1.5 + '0.5', b bigint DEFAULT '1' * 2, f float8 DEFAULT 1.5 + '1', t text DEFAULT 'a' || 1, s smallint DEFAULT 2 - '1', g int GENERATED ALWAYS AS (a + '1') STORED, h numeric GENERATED ALWAYS AS (a::numeric * '2.5') STORED, j jsonb DEFAULT '{}'::jsonb || '{\"a\":1}', arr int[] DEFAULT ARRAY[1] || '{2}', arr2 int[] DEFAULT '{1}' || ARRAY[2], bt bytea DEFAULT 'x'::bytea || 'y', tm time DEFAULT time '10:00' + '1 hour');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO odc (a) VALUES (1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, n, b, f, t, s, g, h, j, arr, arr2, bt, tm FROM odc;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "n",
+            "b",
+            "f",
+            "t",
+            "s",
+            "g",
+            "h",
+            "j",
+            "arr",
+            "arr2",
+            "bt",
+            "tm"
+          ],
+          "type_oids": [
+            23,
+            1700,
+            20,
+            701,
+            25,
+            21,
+            23,
+            1700,
+            3802,
+            1007,
+            1007,
+            17,
+            1083
+          ],
+          "rows": [
+            [
+              "1",
+              "2.00",
+              "2",
+              "2.5",
+              "a1",
+              "1",
+              "2",
+              "2.5",
+              "{\"a\": 1}",
+              "{1,2}",
+              "{1,2}",
+              "\\x7879",
+              "11:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'odc'::regclass AND adnum < 12 ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 10"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "(1.5 + 0.5)"
+            ],
+            [
+              "3",
+              "(1 * 2)"
+            ],
+            [
+              "4",
+              "(1.5 + '1'::numeric)"
+            ],
+            [
+              "5",
+              "('a'::text || 1)"
+            ],
+            [
+              "6",
+              "(2 - 1)"
+            ],
+            [
+              "7",
+              "(a + 1)"
+            ],
+            [
+              "8",
+              "((a)::numeric * 2.5)"
+            ],
+            [
+              "9",
+              "('{}'::jsonb || '{\"a\": 1}'::jsonb)"
+            ],
+            [
+              "10",
+              "(ARRAY[1] || '{2}'::integer[])"
+            ],
+            [
+              "11",
+              "('{1}'::integer[] || ARRAY[2])"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW odcv AS SELECT a + '1' AS x, a - '1' AS y, a * '2' AS z, a / '2' AS w, n + '1' AS nn, a::bigint + '1' AS bb, 1 + '1' AS c, '1' + 1 AS c2, 'x' || a AS tx, a || 'x' AS tx2, j || '{\"b\":2}' AS jj, arr || '{3}' AS aa FROM odc;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('odcv'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT a + 1 AS x,\n    a - 1 AS y,\n    a * 2 AS z,\n    a / 2 AS w,\n    n + '1'::numeric AS nn,\n    a::bigint + '1'::bigint AS bb,\n    1 + 1 AS c,\n    1 + 1 AS c2,\n    'x'::text || a AS tx,\n    a || 'x'::text AS tx2,\n    j || '{\"b\": 2}'::jsonb AS jj,\n    arr || '{3}'::integer[] AS aa\n   FROM odc;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT * FROM odcv;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y",
+            "z",
+            "w",
+            "nn",
+            "bb",
+            "c",
+            "c2",
+            "tx",
+            "tx2",
+            "jj",
+            "aa"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            1700,
+            20,
+            23,
+            23,
+            25,
+            25,
+            3802,
+            1007
+          ],
+          "rows": [
+            [
+              "2",
+              "0",
+              "2",
+              "0",
+              "3.00",
+              "2",
+              "2",
+              "2",
+              "x1",
+              "1x",
+              "{\"a\": 1, \"b\": 2}",
+              "{1,2,3}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE odc ADD CONSTRAINT odc_ck CHECK (a + '1' > 0 AND a > '0' AND n * '2' < 100.0);",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'odc'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK ((((a + 1) > 0) AND (a > 0) AND ((n * '2'::numeric) < 100.0)))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION odcf(x int) RETURNS int LANGUAGE sql RETURN x + '1';",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT odcf(2);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "odcf"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE odcp AS SELECT $1 + '1';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT time '10:00' + '1 hour';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            1083
+          ],
+          "rows": [
+            [
+              "11:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT timestamp '2024-01-01' + '1 day';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            1114
+          ],
+          "rows": [
+            [
+              "2024-01-02 00:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day' + '1 hour', interval '1 day' * '2', interval '1 day' / '2', '2' * interval '1 day';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "1 day 01:00:00",
+              "2 days",
+              "12:00:00",
+              "2 days"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT date '2024-01-01' + 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: date + unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT date '2024-01-01' - '2023-12-01';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "31"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 + 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1.5 + 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type numeric: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1::numeric = 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type numeric: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 2.5 * 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type numeric: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT true = 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type boolean: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1.5::float8 + 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type double precision: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1::int2 + 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type smallint: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1::int8 + 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type bigint: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 + '1'::text;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer + text",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1'::text + 1;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: text + integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::bytea || 'zz', 'x' || 'y'::bytea, 'x'::bytea || '\\x00';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            17,
+            17,
+            17
+          ],
+          "rows": [
+            [
+              "\\x787a7a",
+              "\\x7879",
+              "\\x7800"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::bytea || 'y'::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\\x78y"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::bytea || 1;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: bytea || integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 || 'x'::bytea;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer || bytea",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION odrk(a numeric, b numeric) RETURNS text LANGUAGE sql RETURN 'nn';",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION odrk(a numeric, b boolean) RETURNS text LANGUAGE sql RETURN 'nb';",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT odrk(1, 'x');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type numeric: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT odrk(1, '2');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "odrk"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "nn"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT odrk('1', '2');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "function odrk(unknown, unknown) is not unique",
+        "detail": null,
+        "hint": "Could not choose a best candidate function. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    }
+  ]
+}

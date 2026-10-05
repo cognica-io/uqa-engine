@@ -76,9 +76,8 @@ pub fn convert_value_to_column_type_with_control(
         ColumnType::Boolean => match &*value {
             Value::Bool(_) => Ok(value),
             Value::Str(text) => {
-                let boolean = parse_boolean_text(text).ok_or_else(|| {
-                    SQLError::TypeMismatch(format!("cannot cast `{text}` to boolean"))
-                })?;
+                let boolean = parse_boolean_text(text)
+                    .ok_or_else(|| crate::expr::invalid_boolean_input(text))?;
                 Ok(control.finish(Value::Bool(boolean), control.empty_reservation())?)
             }
             other => Err(SQLError::TypeMismatch(format!(
@@ -243,7 +242,7 @@ fn numeric_value(
         Value::Float(number) => DecimalValue::from_f64_lossy_with_control(*number, control)?
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {number:?} to numeric")))?,
         Value::Str(text) => DecimalValue::parse_with_control(text, control)?
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast `{text}` to numeric")))?,
+            .ok_or_else(|| crate::expr::invalid_numeric_input(text))?,
         other => {
             return Err(SQLError::TypeMismatch(format!(
                 "cannot cast {other:?} to numeric"
@@ -261,10 +260,7 @@ fn numeric_value(
     if let Some(precision) = precision {
         let scale = scale.unwrap_or(0);
         if !rounded.fits_precision_with_control(precision, scale, control)? {
-            return Err(SQLError::TypeMismatch(format!(
-                "numeric field overflow: value {} exceeds precision {precision}, scale {scale}",
-                rounded.to_sql_string()
-            )));
+            return Err(numeric_field_overflow(precision, scale));
         }
     }
     let (decimal, memory) = rounded.into_parts();
@@ -471,3 +467,22 @@ fn parse_boolean_text(text: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests;
+
+/// `apply_typmod`: a value that does not fit the declared precision reports `22003` with the magnitude the field admits, `10^(precision - scale)`, or `1` when the precision equals the scale.
+#[must_use]
+pub fn numeric_field_overflow(precision: u32, scale: i32) -> SQLError {
+    let maxdigits = i64::from(precision) - i64::from(scale);
+    SQLError::Diagnostic {
+        sqlstate: "22003".into(),
+        message: "numeric field overflow".into(),
+        detail: Some(format!(
+            "A field with precision {precision}, scale {scale} must round to an absolute value less than {}.",
+            if maxdigits == 0 {
+                "1".to_string()
+            } else {
+                format!("10^{maxdigits}")
+            }
+        )),
+        hint: None,
+    }
+}
