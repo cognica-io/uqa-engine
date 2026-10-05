@@ -135,3 +135,19 @@ fn existing_addresses_are_reserved_before_any_missing_identity_is_allocated() {
     assert!(materialize(&mut definition, &mut allocator).unwrap());
     assert_eq!(definition.checks[0].catalog_identity.unwrap().oid, 50_003);
 }
+
+#[test]
+fn legacy_domain_checks_are_validated_and_new_unvalidated_checks_round_trip() {
+    let mut definition = definition();
+    let mut legacy = serde_json::to_value(&definition).unwrap();
+    for check in legacy["checks"].as_array_mut().unwrap() {
+        check.as_object_mut().unwrap().remove("validated");
+    }
+    let restored: CreateDomain = serde_json::from_value(legacy).unwrap();
+    assert!(restored.checks.iter().all(|check| check.validated));
+    definition.checks[0].validated = false;
+    let restored: CreateDomain =
+        serde_json::from_value(serde_json::to_value(&definition).unwrap()).unwrap();
+    assert!(!restored.checks[0].validated);
+    assert!(restored.checks[1].validated);
+}

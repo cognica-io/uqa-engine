@@ -33,4 +33,30 @@ pub struct DomainCheck {
     #[serde(default)]
     pub catalog_identity: Option<ConstraintCatalogIdentity>,
     pub expression: Expr,
+    #[serde(default = "super::default_true")]
+    pub validated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlterDomain {
+    pub name: String,
+    pub action: AlterDomainAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AlterDomainAction {
+    AddCheck {
+        constraint: Box<DomainCheck>,
+    },
+    AddNotNull {
+        constraint: DomainNotNull,
+    },
+    DropConstraint {
+        name: String,
+        if_exists: bool,
+        cascade: bool,
+    },
+    ValidateConstraint {
+        name: String,
+    },
 }

@@ -977,3 +977,6 @@ mod regclass_input;
 mod table_creation_oids;
 #[path = "pg18_constraint_lifecycle/table_creation_order.rs"]
 mod table_creation_order;
+
+#[path = "pg18_constraint_lifecycle/domain_constraints.rs"]
+mod domain_constraints;

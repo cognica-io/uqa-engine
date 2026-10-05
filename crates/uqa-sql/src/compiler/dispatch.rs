@@ -272,6 +272,9 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateDomainStmt(stmt) => {
             super::domains::compile_create_domain(stmt).map(Statement::CreateDomain)
         }
+        NodeEnum::AlterDomainStmt(stmt) => {
+            super::domains::compile_alter_domain(stmt).map(Statement::AlterDomain)
+        }
         NodeEnum::CreateEnumStmt(stmt) => {
             super::enums::compile_create_enum(stmt).map(Statement::CreateEnum)
         }

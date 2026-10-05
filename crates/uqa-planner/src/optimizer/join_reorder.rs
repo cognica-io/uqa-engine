@@ -162,6 +162,7 @@ fn reorder_command_joins(
         | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
         | CommandPlan::CreateDomain(_)
+        | CommandPlan::AlterDomain(_)
         | CommandPlan::CreateEnum(_)
         | CommandPlan::CreateCompositeType(_)
         | CommandPlan::AlterEnum(_)

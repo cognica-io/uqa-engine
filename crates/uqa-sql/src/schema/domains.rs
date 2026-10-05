@@ -10,7 +10,7 @@ use super::SchemaBindingContext;
 use crate::assignment::domain::domain_error;
 use crate::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use crate::{
-    ast::{ColumnType, CreateDomain, Expr},
+    ast::{ColumnType, CreateDomain, DomainCheck, DomainNotNull, Expr},
     catalog::domain::DomainCatalog,
     RowSchema, SQLError,
 };
@@ -74,6 +74,36 @@ pub fn prepare_domain_definition(
     Ok(())
 }
 
+/// Name and bind only a newly added CHECK. Existing defaults and constraints already carry their catalog identities and must not be analyzed again in the ALTER statement's namespace.
+pub fn prepare_added_check(
+    context: &SchemaBindingContext<'_, '_>,
+    definition: &CreateDomain,
+    check: DomainCheck,
+    schema_names: &BTreeSet<String>,
+) -> Result<DomainCheck, SQLError> {
+    let mut named = definition.clone();
+    named.checks.push(check);
+    constraints::assign_names(&mut named, schema_names)?;
+    let mut check = named.checks.pop().expect("new domain CHECK");
+    bind_domain_check(context, &definition.base, &mut check.expression)?;
+    Ok(check)
+}
+
+/// Name a new NOT NULL constraint after the executor has resolved and locked its domain. An existing NOT NULL constraint is retained unchanged, as ALTER DOMAIN does even when the requested name differs.
+pub fn prepare_added_not_null(
+    definition: &CreateDomain,
+    constraint: DomainNotNull,
+    schema_names: &BTreeSet<String>,
+) -> Result<DomainNotNull, SQLError> {
+    if let Some(existing) = &definition.not_null {
+        return Ok(existing.clone());
+    }
+    let mut named = definition.clone();
+    named.not_null = Some(constraint);
+    constraints::assign_names(&mut named, schema_names)?;
+    Ok(named.not_null.expect("new domain NOT NULL"))
+}
+
 struct DomainValueResolver<'a>(&'a ColumnType);
 
 impl VariableResolver for DomainValueResolver<'_> {
@@ -108,42 +138,24 @@ fn bind_domain_check(
     base: &ColumnType,
     expression: &mut Expr,
 ) -> Result<(), SQLError> {
-    let typed = bind_expr(expression, &mut DomainValueResolver(base))?;
-    let plan = crate::plan::ExpressionPlan::lower(typed.clone());
-    if !plan.subqueries.is_empty() {
-        return Err(domain_error(
-            "0A000",
-            "cannot use subquery in check constraint",
-        ));
-    }
-    if crate::semantics::windows::expr_has_window(&plan.scalar) {
-        return Err(domain_error(
-            "42P20",
-            "window functions are not allowed in check constraints",
-        ));
-    }
-    if crate::semantics::aggregates::contains_aggregate(context.catalog, &plan.scalar) {
-        return Err(domain_error(
-            "42803",
-            "aggregate functions are not allowed in check constraints",
-        ));
-    }
-    let ty = crate::type_resolution::common_context_expression_type(
-        &plan.scalar,
-        &RowSchema::default(),
-        &[],
-        Some(context.catalog),
-    )?;
-    if let Some(ty) = ty {
-        if crate::expr::coercion_type_name(&ty) != "boolean" {
+    let plan = crate::plan::ExpressionPlan::lower(expression.clone());
+    let input = RowSchema::with_types(vec!["value".into()], vec![Some(base.clone())]);
+    let ty = crate::binding::analyze_domain_check(context.catalog, &plan, &input, context.binding)?;
+    if let Some(mut ty) = ty.as_ref() {
+        while let ColumnType::Domain { base, .. } = ty {
+            ty = base;
+        }
+        if *ty != ColumnType::Boolean {
             return Err(domain_error(
                 "42804",
                 format!(
                     "argument of CHECK must be type boolean, not type {}",
-                    ty.sql_name()
+                    ty.regtype_name()
                 ),
             ));
         }
+    } else if matches!(expression, Expr::Literal(Value::Null | Value::Str(_))) {
+        super::defaults::cook_unknown_literal(context, expression, &ColumnType::Boolean, false)?;
     } else {
         *expression = Expr::Cast {
             expr: Box::new(expression.clone()),
@@ -157,4 +169,8 @@ fn bind_domain_check(
 }
 
 pub mod constraints;
+pub mod dependencies;
 pub mod removal;
+
+#[cfg(test)]
+mod tests;

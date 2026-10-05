@@ -422,6 +422,7 @@ pub struct VacuumStmt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     CreateDomain(CreateDomain),
+    AlterDomain(AlterDomain),
     CreateEnum(CreateEnum),
     CreateCompositeType(CreateCompositeType),
     AlterEnum(AlterEnum),

@@ -30,6 +30,7 @@ mod type_resolution;
 mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
+pub(crate) use preparation::analyze_domain_check;
 pub use preparation::{analyze_column_type_transform, infer_prepared_parameter_types};
 
 #[cfg(test)]

@@ -727,6 +727,14 @@ impl Statement {
                 }
                 changed
             }
+            Self::AlterDomain(domain) => match &mut domain.action {
+                crate::ast::AlterDomainAction::AddCheck { constraint } => {
+                    constraint.expression.upgrade_legacy_serialized_dispatches()
+                }
+                crate::ast::AlterDomainAction::AddNotNull { .. }
+                | crate::ast::AlterDomainAction::DropConstraint { .. }
+                | crate::ast::AlterDomainAction::ValidateConstraint { .. } => false,
+            },
             Self::Insert(insert) => {
                 let mut changed = upgrade_ctes(&mut insert.with);
                 changed |= upgrade_targets(&mut insert.columns);

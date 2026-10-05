@@ -29,6 +29,8 @@ pub trait SchemaStatementInputs<S: Clone + 'static> {
         &self,
     ) -> crate::schema::table_alteration::entry::TableAlterEntryContext<'_, S>;
     fn domain_creation_context(&self) -> crate::schema::domains::DomainCreationContext<'_>;
+    fn domain_alter_context(&self)
+        -> crate::schema::domains::alteration::DomainAlterContext<'_, S>;
     fn enum_type_context(&self) -> crate::schema::enums::EnumTypeContext<'_>;
     fn composite_type_context(&self) -> crate::schema::composites::CompositeTypeContext<'_>;
     fn type_lifecycle_context(&self) -> crate::schema::types::TypeLifecycleContext<'_>;

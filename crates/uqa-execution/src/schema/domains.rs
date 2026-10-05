@@ -98,5 +98,7 @@ pub fn create_domain(
     Ok(())
 }
 
+pub mod alteration;
 pub mod dependencies;
 pub mod removal;
+mod validation;

@@ -89,6 +89,21 @@ pub struct ResolvedTypeObject {
     kind: ResolvedKind,
 }
 
+/// Resolve an `any_name` type-object target as identifiers, without interpreting SQL type aliases such as `integer`. The lookup uses quoted components while the ordinary resolver preserves namespace checks and diagnostics.
+pub fn resolve_named_type_object(
+    context: &TypeObjectBinding<'_>,
+    name: &str,
+) -> Result<ResolvedTypeObject, SQLError> {
+    let parts = crate::parse_regobject_name(name)
+        .ok_or_else(|| SQLError::Internal("type object target has no valid name".into()))?;
+    let lookup = parts
+        .iter()
+        .map(|part| format!("\"{}\"", part.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(".");
+    resolve_type_object(context, &lookup)
+}
+
 /// Resolve a type name as `typenameTypeId` does: a missing schema is 3F000 and a schema without USAGE is 42501 before the type lookup reports 42704.
 pub fn resolve_type_object(
     context: &TypeObjectBinding<'_>,
@@ -327,3 +342,6 @@ fn format_type(context: &TypeObjectBinding<'_>, oid: u32) -> Result<String, SQLE
         .map_err(SQLError::Internal)?
         .ok_or_else(|| SQLError::Internal(format!("type {oid} disappeared")))
 }
+
+#[cfg(test)]
+mod tests;

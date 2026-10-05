@@ -28,6 +28,12 @@ impl SchemaStatementInputs<StatementReadSnapshot> for Engine {
     fn domain_creation_context(&self) -> uqa_execution::schema::domains::DomainCreationContext<'_> {
         Engine::domain_creation_context(self)
     }
+    fn domain_alter_context(
+        &self,
+    ) -> uqa_execution::schema::domains::alteration::DomainAlterContext<'_, StatementReadSnapshot>
+    {
+        Engine::domain_alter_context(self)
+    }
     fn composite_type_context(
         &self,
     ) -> uqa_execution::schema::composites::CompositeTypeContext<'_> {

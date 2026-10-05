@@ -69,6 +69,7 @@ fn context(base: ColumnType) -> Context {
                     name: Some("accepted".into()),
                     catalog_identity: None,
                     expression: crate::ast::Expr::Literal(Value::Bool(true)),
+                    validated: true,
                 }],
             },
             array_name: None,

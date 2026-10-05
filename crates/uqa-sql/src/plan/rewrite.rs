@@ -359,6 +359,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
         | CommandPlan::CreateDomain(_)
+        | CommandPlan::AlterDomain(_)
         | CommandPlan::CreateEnum(_)
         | CommandPlan::CreateCompositeType(_)
         | CommandPlan::AlterEnum(_)

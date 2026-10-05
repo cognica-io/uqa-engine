@@ -6,13 +6,13 @@
 
 //! Domain type and constraint declarations.
 
-use pg_query::protobuf::{ConstrType, CreateDomainStmt};
+use pg_query::protobuf::{AlterDomainStmt, ConstrType, Constraint, CreateDomainStmt, DropBehavior};
 
 use super::{
     compile_expr, compile_pg_type_name, extract_string, render_relation_component, NodeEnum,
     Result, SQLError,
 };
-use crate::ast::{CreateDomain, DomainCheck, DomainNotNull};
+use crate::ast::{AlterDomain, AlterDomainAction, CreateDomain, DomainCheck, DomainNotNull};
 
 pub(super) fn compile_create_domain(statement: &CreateDomainStmt) -> Result<CreateDomain> {
     let name = qualified_name(&statement.domainname)?;
@@ -67,13 +67,7 @@ pub(super) fn compile_create_domain(statement: &CreateDomainStmt) -> Result<Crea
                 }
             }
             ConstrType::ConstrCheck => {
-                definition.checks.push(DomainCheck {
-                    name,
-                    catalog_identity: None,
-                    expression: compile_expr(constraint.raw_expr.as_ref().ok_or_else(|| {
-                        SQLError::Internal("domain check has no expression".into())
-                    })?)?,
-                });
+                definition.checks.push(compile_check(constraint)?);
             }
             other => {
                 return Err(SQLError::Unsupported(format!(
@@ -83,6 +77,65 @@ pub(super) fn compile_create_domain(statement: &CreateDomainStmt) -> Result<Crea
         }
     }
     Ok(definition)
+}
+
+pub(super) fn compile_alter_domain(statement: &AlterDomainStmt) -> Result<AlterDomain> {
+    let action = match statement.subtype.as_str() {
+        "C" => {
+            let Some(NodeEnum::Constraint(constraint)) =
+                statement.def.as_ref().and_then(|node| node.node.as_ref())
+            else {
+                return Err(SQLError::Internal("ALTER DOMAIN has no constraint".into()));
+            };
+            match constraint.contype() {
+                ConstrType::ConstrCheck => AlterDomainAction::AddCheck {
+                    constraint: Box::new(compile_check(constraint)?),
+                },
+                ConstrType::ConstrNotnull => AlterDomainAction::AddNotNull {
+                    constraint: DomainNotNull {
+                        name: (!constraint.conname.is_empty()).then(|| constraint.conname.clone()),
+                        catalog_identity: None,
+                    },
+                },
+                other => {
+                    return Err(SQLError::Unsupported(format!(
+                        "ALTER DOMAIN constraint {other:?}"
+                    )))
+                }
+            }
+        }
+        "X" => AlterDomainAction::DropConstraint {
+            name: statement.name.clone(),
+            if_exists: statement.missing_ok,
+            cascade: statement.behavior() == DropBehavior::DropCascade,
+        },
+        "V" => AlterDomainAction::ValidateConstraint {
+            name: statement.name.clone(),
+        },
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER DOMAIN action {other}"
+            )))
+        }
+    };
+    Ok(AlterDomain {
+        name: qualified_name(&statement.type_name)?,
+        action,
+    })
+}
+
+fn compile_check(constraint: &Constraint) -> Result<DomainCheck> {
+    Ok(DomainCheck {
+        name: (!constraint.conname.is_empty()).then(|| constraint.conname.clone()),
+        catalog_identity: None,
+        expression: compile_expr(
+            constraint
+                .raw_expr
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("domain check has no expression".into()))?,
+        )?,
+        validated: !constraint.skip_validation,
+    })
 }
 
 pub(super) fn qualified_name(nodes: &[pg_query::protobuf::Node]) -> Result<String> {

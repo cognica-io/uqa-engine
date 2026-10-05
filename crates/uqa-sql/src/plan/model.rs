@@ -644,6 +644,7 @@ pub enum CommandPlan {
     },
     CreateSequence(crate::ast::CreateSequence),
     CreateDomain(crate::ast::CreateDomain),
+    AlterDomain(crate::ast::AlterDomain),
     CreateEnum(crate::ast::CreateEnum),
     CreateCompositeType(crate::ast::CreateCompositeType),
     AlterEnum(crate::ast::AlterEnum),
