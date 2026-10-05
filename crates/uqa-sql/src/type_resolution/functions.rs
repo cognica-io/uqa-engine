@@ -75,7 +75,8 @@ pub fn builtin_function_argument_targets(
             }
         }
         "upper" | "lower" | "initcap" | "trim" | "btrim" | "ltrim" | "rtrim" | "analyze_text"
-        | "create_analyzer" | "drop_analyzer" | "set_table_analyzer" | "fts_index_stats" => {
+        | "create_analyzer" | "drop_analyzer" | "set_table_analyzer" | "fts_index_stats"
+        | "text_match" => {
             targets.fill(Some(ColumnType::Text));
         }
         "array_sort" if matches!(targets.len(), 2 | 3) => {

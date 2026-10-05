@@ -20,6 +20,7 @@ pub use call_arguments::{
     eval_call_arguments, scalar_call_argument, scalar_call_arguments,
     validate_scalar_call_arguments, ScalarCallArgument,
 };
+pub(crate) use context::RetrievalPredicate;
 pub use context::ScalarEvalContext;
 pub(crate) use evaluator::scalar_integer_binary_width;
 pub use evaluator::{eval_generated_scalar_with_control, eval_scalar};

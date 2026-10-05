@@ -87,6 +87,21 @@ fn assignment_context() -> BindingContext<'static> {
 }
 
 #[test]
+fn text_match_query_parameters_infer_text_across_read_and_mutation_commands() {
+    for sql in [
+        "SELECT id FROM assignment_target WHERE text_match(_all,$1)",
+        "UPDATE assignment_target SET id=id+1 WHERE text_match(_all,$1)",
+        "DELETE FROM assignment_target WHERE text_match(_all,$1)",
+    ] {
+        let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let types =
+            infer_prepared_parameter_types(&NoRoutines, &plan, &[None], &assignment_context())
+                .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        assert_eq!(types, vec![Some(ColumnType::Text)], "{sql}");
+    }
+}
+
+#[test]
 fn subscript_assignment_preparation_infers_bounds_and_element_or_slice_parameters() {
     for (sql, expected) in [
         ("UPDATE assignment_target SET value[$1]=$2", vec![ColumnType::Integer, ColumnType::Integer]),
