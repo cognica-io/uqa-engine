@@ -16,6 +16,8 @@ mod join_correctness;
 mod key_identity_reads;
 #[path = "manual_sql_examples.rs"]
 mod manual_sql_examples;
+#[path = "queries/nested_mutations.rs"]
+mod nested_mutations;
 #[path = "operator_tree_full_surface.rs"]
 mod operator_tree_full_surface;
 #[path = "operator_tree_pipeline.rs"]
