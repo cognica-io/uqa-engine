@@ -9,6 +9,7 @@
 use super::*;
 use crate::row_locks::cross_process::relation_wait_claim;
 
+mod exact_identities;
 mod lifecycle;
 mod peer;
 
@@ -27,7 +28,7 @@ fn held(coordinator: &FileLockCoordinator, mode: RelationLockMode) {
 }
 
 fn release(coordinator: &FileLockCoordinator, mode: RelationLockMode) {
-    coordinator.release(PARENT_SESSION, &relation_byte_claims(RELATION, mode));
+    coordinator.release_relation(PARENT_SESSION, RELATION, mode);
 }
 
 #[test]
@@ -42,7 +43,7 @@ fn sessions_of_one_process_are_admitted_and_their_holders_balance_in_all_eight_m
                 .try_relation_claim(PEER_SESSION, RELATION, right)
                 .unwrap()
                 .unwrap_or_else(|wait| panic!("{left:?}, {right:?}: {wait:?}"));
-            coordinator.release(PEER_SESSION, &relation_byte_claims(RELATION, right));
+            coordinator.release_relation(PEER_SESSION, RELATION, right);
         }
         release(&coordinator, left);
     }
@@ -67,7 +68,7 @@ fn all_eight_relation_modes_match_postgresql_across_processes() {
                     result,
                     format!(
                         "conflict {}",
-                        relation_mode_claim(RELATION, left, true).offset
+                        relation_mode_claim(coordinator.relation_slot(RELATION), left, true).offset
                     ),
                     "{left:?}, {right:?}"
                 );
@@ -97,7 +98,7 @@ fn mixed_self_acquisitions_and_failed_upgrades_preserve_foreign_conflicts() {
             peer.request(&format!("try {}", wanted as u8)),
             format!(
                 "conflict {}",
-                relation_mode_claim(RELATION, blocker, true).offset
+                relation_mode_claim(coordinator.relation_slot(RELATION), blocker, true).offset
             )
         );
     }
@@ -107,7 +108,7 @@ fn mixed_self_acquisitions_and_failed_upgrades_preserve_foreign_conflicts() {
         "granted"
     );
     let blocked = Err(RelationClaimWait::Conflict(relation_mode_claim(
-        RELATION,
+        coordinator.relation_slot(RELATION),
         RowExclusive,
         true,
     )));
@@ -122,7 +123,7 @@ fn mixed_self_acquisitions_and_failed_upgrades_preserve_foreign_conflicts() {
         peer.request(&format!("try {}", Share as u8)),
         format!(
             "conflict {}",
-            relation_mode_claim(RELATION, RowExclusive, true).offset
+            relation_mode_claim(coordinator.relation_slot(RELATION), RowExclusive, true).offset
         )
     );
     assert_eq!(
@@ -152,7 +153,7 @@ fn relation_upgrade_deadlock_follows_the_actual_conflicting_mode_across_processe
     else {
         panic!("competing ROW EXCLUSIVE must block SHARE");
     };
-    let wanted = relation_wait_claim(RELATION, Share);
+    let wanted = relation_wait_claim(coordinator.relation_slot(RELATION), Share);
     assert!(!coordinator.wait_cycle_reaches_session(PARENT_SESSION, wanted, &|_| None));
     assert_eq!(peer.request(&format!("wait {}", Share as u8)), "waiting");
     assert!(coordinator.wait_cycle_reaches_session(PARENT_SESSION, wanted, &|_| None));
@@ -181,7 +182,7 @@ fn a_second_conflicting_mode_can_close_a_foreign_cycle_while_the_first_holder_is
         peer.request(&format!("try {} 203", ShareUpdateExclusive as u8)),
         "granted"
     );
-    let wanted = relation_wait_claim(RELATION, Share);
+    let wanted = relation_wait_claim(coordinator.relation_slot(RELATION), Share);
     assert!(!coordinator.wait_cycle_reaches_session(PARENT_SESSION, wanted, &|_| None));
     assert_eq!(
         peer.request(&format!("wait {} 203", Exclusive as u8)),
@@ -233,7 +234,7 @@ fn relation_mode_offsets_do_not_overlap_row_pairs_or_exceed_supported_offsets() 
         assert!(last_mode > row_end);
         assert!(last_mode <= maximum);
     }
-    let claims = RelationLockMode::ALL.map(|mode| relation_mode_claim(RELATION, mode, false));
+    let claims = RelationLockMode::ALL.map(|mode| relation_mode_claim(7, mode, false));
     for pair in claims.windows(2) {
         assert_eq!(pair[1].offset, pair[0].offset + 1);
     }

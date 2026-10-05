@@ -54,10 +54,18 @@ impl RowLockManager {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn for_database_file(path: &std::path::Path) -> Self {
+        Self::for_database_file_with_key(path, None)
+    }
+
+    fn for_database_file_with_key(
+        path: &std::path::Path,
+        key: Option<uqa_storage::StorageEncryptionKey>,
+    ) -> Self {
         #[cfg(any(unix, windows))]
         {
-            let cross = match FileLockCoordinator::open(path) {
+            let cross = match FileLockCoordinator::open_with_key(path, key) {
                 Ok(coordinator) => CrossAttachment::Active(Arc::new(coordinator)),
                 Err(reason) => CrossAttachment::Unavailable(reason),
             };
@@ -65,7 +73,7 @@ impl RowLockManager {
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = path;
+            let _ = (path, key);
             Self::with_cross_attachment(None)
         }
     }
@@ -251,6 +259,7 @@ pub fn shared_provider_manager(
     shared_manager(
         identity,
         ManagerIdentity::Provider(Arc::as_ptr(provider).cast::<()>() as usize),
+        provider.auxiliary_encryption_key(),
     )
 }
 
@@ -261,12 +270,14 @@ pub fn shared_backend_manager(
     shared_manager(
         identity,
         ManagerIdentity::Provider(Arc::as_ptr(backend).cast::<()>() as usize),
+        backend.auxiliary_encryption_key(),
     )
 }
 
 fn shared_manager(
     identity: Option<uqa_storage::PersistentStorageIdentity>,
     fallback: ManagerIdentity,
+    key: Option<uqa_storage::StorageEncryptionKey>,
 ) -> Arc<RowLockManager> {
     let identity = identity.map_or(fallback, ManagerIdentity::Durable);
     let registry = DATABASE_MANAGERS.get_or_init(|| Mutex::new(HashMap::new()));
@@ -278,7 +289,7 @@ fn shared_manager(
     let manager = Arc::new_cyclic(|owner| {
         let mut manager = match &identity {
             ManagerIdentity::Durable(uqa_storage::PersistentStorageIdentity::File(path)) => {
-                RowLockManager::for_database_file(path)
+                RowLockManager::for_database_file_with_key(path, key)
             }
             _ => RowLockManager::new(),
         };
@@ -301,6 +312,7 @@ mod tests {
             shared_manager(
                 Some(uqa_storage::PersistentStorageIdentity::File(path.clone())),
                 ManagerIdentity::Provider(0),
+                None,
             )
         };
         let manager = open();

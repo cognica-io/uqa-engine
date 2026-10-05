@@ -26,6 +26,14 @@ impl Peer {
     }
 
     pub(super) fn start_for_relation(path: &std::path::Path, relation: &[u8]) -> Self {
+        Self::start_with_key(path, relation, None)
+    }
+
+    pub(super) fn start_encrypted(path: &std::path::Path, relation: &[u8], key: &str) -> Self {
+        Self::start_with_key(path, relation, Some(key))
+    }
+
+    fn start_with_key(path: &std::path::Path, relation: &[u8], key: Option<&str>) -> Self {
         let mut encoded = String::with_capacity(relation.len() * 2);
         for byte in relation {
             write!(&mut encoded, "{byte:02x}").unwrap();
@@ -40,6 +48,7 @@ impl Peer {
             ])
             .env("UQA_RELATION_LOCK_TEST_PATH", path)
             .env("UQA_RELATION_LOCK_TEST_IDENTITY", encoded)
+            .env("UQA_RELATION_LOCK_TEST_KEY", key.unwrap_or_default())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -109,13 +118,18 @@ fn respond(value: impl std::fmt::Display) {
 #[ignore = "subprocess entry point for native relation-lock owner tests"]
 fn relation_lock_peer() {
     let path = std::env::var_os("UQA_RELATION_LOCK_TEST_PATH").unwrap();
-    let coordinator = FileLockCoordinator::open(std::path::Path::new(&path)).unwrap();
+    let key = std::env::var("UQA_RELATION_LOCK_TEST_KEY")
+        .ok()
+        .filter(|key| !key.is_empty())
+        .map(|key| uqa_storage::StorageEncryptionKey::new(&key));
+    let coordinator = FileLockCoordinator::open_with_key(std::path::Path::new(&path), key).unwrap();
     let encoded = std::env::var("UQA_RELATION_LOCK_TEST_IDENTITY").unwrap();
     let relation = (0..encoded.len())
         .step_by(2)
         .map(|offset| u8::from_str_radix(&encoded[offset..offset + 2], 16).unwrap())
         .collect::<Vec<_>>();
     respond("ready");
+    let mut waiting = None;
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
         let mut command = line.split_whitespace();
@@ -127,26 +141,34 @@ fn relation_lock_peer() {
             .next()
             .map_or(PEER_SESSION, |session| session.parse().unwrap());
         match operation {
-            "try" => match coordinator
-                .try_relation_claim(session, &relation, mode.unwrap())
-                .unwrap()
-            {
-                Ok(()) => respond("granted"),
-                Err(RelationClaimWait::AdmissionBusy) => respond("admission busy"),
-                Err(RelationClaimWait::Conflict(claim)) => {
+            "try" => match coordinator.try_relation_claim(session, &relation, mode.unwrap()) {
+                Ok(Ok(())) => respond("granted"),
+                Ok(Err(RelationClaimWait::AdmissionBusy)) => respond("admission busy"),
+                Ok(Err(RelationClaimWait::Conflict(claim))) => {
                     respond(format!("conflict {}", claim.offset));
                 }
+                Err(error) => respond(format!("error {error}")),
             },
             "release" => {
-                coordinator.release(session, &relation_byte_claims(&relation, mode.unwrap()));
+                coordinator.release_relation(session, &relation, mode.unwrap());
                 respond("released");
             }
             "wait" => {
-                coordinator.register_wait(session, relation_wait_claim(&relation, mode.unwrap()));
+                coordinator.clear_wait(session);
+                waiting = Some(
+                    coordinator
+                        .pin_relation(&relation, &uqa_core::CancellationToken::new())
+                        .unwrap(),
+                );
+                coordinator.register_wait(
+                    session,
+                    relation_wait_claim(waiting.as_ref().unwrap().slot(), mode.unwrap()),
+                );
                 respond("waiting");
             }
             "clear" => {
                 coordinator.clear_wait(session);
+                waiting.take();
                 respond("cleared");
             }
             "admission" => {

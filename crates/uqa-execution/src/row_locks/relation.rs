@@ -6,10 +6,12 @@
 
 //! Relation-lock grants and acquisition lifecycle.
 
-use super::cross_process::{relation_wait_claim, RelationClaimWait};
+use super::cross_process::{
+    relation_wait_claim, FileLockCoordinator, RelationClaimWait, RelationIdentityLease,
+};
 use super::{
-    deadlock_detected, relation_byte_claims, relation_deadlock_exists, CrossAttachment,
-    CrossWaitGuard, LockTable, RowLockManager, SQLError, WAIT_SLICE,
+    deadlock_detected, relation_deadlock_exists, CrossAttachment, CrossWaitGuard, LockTable,
+    RowLockManager, SQLError, WAIT_SLICE,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -179,7 +181,7 @@ impl RowLockManager {
     ) {
         if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
             let relation = self.relation_bytes(table);
-            coordinator.release(session_id, &relation_byte_claims(&relation, mode));
+            coordinator.release_relation(session_id, &relation, mode);
         }
     }
 
@@ -230,6 +232,21 @@ impl RowLockManager {
         request: RelationRequest<'_>,
         wait: bool,
     ) -> Result<bool, SQLError> {
+        let coordinator = self.coordinator()?;
+        let relation = self.relation_bytes(request.table);
+        let mut identity = coordinator
+            .map(|coordinator| coordinator.pin_relation(&relation, request.cancel))
+            .transpose()?;
+        self.wait_for_relation(request, wait, coordinator, identity.as_mut())
+    }
+
+    fn wait_for_relation(
+        &self,
+        request: RelationRequest<'_>,
+        wait: bool,
+        coordinator: Option<&FileLockCoordinator>,
+        mut identity: Option<&mut RelationIdentityLease<'_>>,
+    ) -> Result<bool, SQLError> {
         let RelationRequest {
             session_id,
             table,
@@ -237,8 +254,8 @@ impl RowLockManager {
             mark,
             cancel,
         } = request;
-        let coordinator = self.coordinator()?;
-        let relation = self.relation_bytes(table);
+        let slot = identity.as_deref().map(RelationIdentityLease::slot);
+        let wanted = slot.map(|slot| relation_wait_claim(slot, mode));
         let cross_wait = CrossWaitGuard::new(self, coordinator, session_id);
         let mut wait_started = None;
         loop {
@@ -253,40 +270,42 @@ impl RowLockManager {
             }
             let contended_claim =
                 match try_grant_relation(&mut state, session_id, table, mode, mark) {
-                    RelationGrantAttempt::Conflict => {
-                        coordinator.map(|_| relation_wait_claim(&relation, mode))
-                    }
+                    RelationGrantAttempt::Conflict => wanted,
                     RelationGrantAttempt::AlreadyHeld => {
                         state.waiting_relations.remove(&session_id);
                         return Ok(true);
                     }
                     RelationGrantAttempt::Granted => {
-                        let foreign_conflict = match coordinator {
-                            Some(coordinator) => {
-                                match coordinator.try_relation_claim(session_id, &relation, mode) {
-                                    Ok(Ok(())) => None,
-                                    Ok(Err(RelationClaimWait::Conflict(_))) => {
-                                        Some(relation_wait_claim(&relation, mode))
-                                    }
-                                    Ok(Err(RelationClaimWait::AdmissionBusy)) => {
-                                        rollback_relation_grant(&mut state, session_id, table);
-                                        state.waiting_relations.remove(&session_id);
-                                        cross_wait.clear(&mut state);
-                                        self.wake.wait_for(&mut state, WAIT_SLICE);
-                                        continue;
-                                    }
-                                    Err(error) => {
-                                        rollback_relation_grant(&mut state, session_id, table);
-                                        drop(state);
-                                        self.wake.notify_all();
-                                        return Err(SQLError::Internal(error));
-                                    }
+                        let foreign_conflict = if let Some(coordinator) = coordinator {
+                            match coordinator.try_slot_claim(
+                                session_id,
+                                slot.expect("durable relation identity"),
+                                mode,
+                            ) {
+                                Ok(Ok(())) => None,
+                                Ok(Err(RelationClaimWait::Conflict(_))) => wanted,
+                                Ok(Err(RelationClaimWait::AdmissionBusy)) => {
+                                    rollback_relation_grant(&mut state, session_id, table);
+                                    state.waiting_relations.remove(&session_id);
+                                    cross_wait.clear(&mut state);
+                                    self.wake.wait_for(&mut state, WAIT_SLICE);
+                                    continue;
+                                }
+                                Err(error) => {
+                                    rollback_relation_grant(&mut state, session_id, table);
+                                    drop(state);
+                                    self.wake.notify_all();
+                                    return Err(SQLError::Internal(error));
                                 }
                             }
-                            None => None,
+                        } else {
+                            None
                         };
                         match foreign_conflict {
                             None => {
+                                if let Some(identity) = identity.as_mut() {
+                                    identity.retain();
+                                }
                                 state.waiting_relations.remove(&session_id);
                                 return Ok(true);
                             }

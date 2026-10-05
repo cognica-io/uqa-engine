@@ -39,8 +39,10 @@ impl FileLockCoordinator {
             state.claims.remove(&claim.offset);
         }
         if after != before {
-            // Downgrading or unlocking a held range cannot block; an I/O-level failure here would leave a stricter record lock in place, which is conservative rather than unsound.
-            let _ = self.apply_byte_mode(claim.offset, before, after);
+            // A failed unlock can leave a stricter native claim. Keep that relation identity pinned until the descriptor closes, so the slot cannot be reused for an unrelated relation.
+            if self.apply_byte_mode(claim.offset, before, after).is_err() {
+                Self::poison_relation_slot(state, claim.offset);
+            }
         }
     }
 

@@ -327,24 +327,17 @@ fn relation_deadlock_detection_includes_every_held_mode() {
 #[test]
 fn sessions_of_one_process_never_wait_for_a_relation_whose_lock_bytes_merely_collide() {
     use RelationLockMode::{AccessExclusive, AccessShare};
-    // Relations share the cross-process lock bytes by hash; find two tables that hash to the same bytes.
-    let mut slots = std::collections::HashMap::new();
-    let (held_name, requested_name) = (0_u32..)
-        .map(|index| format!("public.collision_{index}"))
-        .find_map(|name| {
-            let slot =
-                super::super::cross_process::relation_byte_claims(name.as_bytes(), AccessShare)[0]
-                    .offset;
-            slots
-                .insert(slot, name.clone())
-                .map(|earlier| (earlier, name))
-        })
-        .expect("colliding relation names");
+    // These two exact names have the same 20-bit hash in the former byte mapping.
+    let (held_name, requested_name) = ("public.collision_3158", "public.collision_7316");
+    assert_eq!(
+        super::super::cross_process::table_hash(held_name.as_bytes()) % (1 << 20),
+        super::super::cross_process::table_hash(requested_name.as_bytes()) % (1 << 20)
+    );
     let directory = tempfile::tempdir().unwrap();
     let manager = RowLockManager::for_database_file(&directory.path().join("collisions.db"));
     assert!(manager.has_cross_process_coordination());
-    let held = manager.table_key(&held_name);
-    let requested = manager.table_key(&requested_name);
+    let held = manager.table_key(held_name);
+    let requested = manager.table_key(requested_name);
     let cancel = uqa_core::CancellationToken::new();
     // A session idle in its transaction holds one table; another session of the process locks the other table at once.
     manager
