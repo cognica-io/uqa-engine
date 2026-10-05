@@ -82,11 +82,31 @@ impl HNSWIndex {
             ));
         }
         workspace::validate_mutations(self.dimensions, mutations, control)?;
+        self.prepare_delta_stream(control, |visit| {
+            for mutation in mutations {
+                visit(*mutation)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Replay evaluated mutations directly into a private candidate. A failed read, validation or allocation publishes no graph.
+    pub(crate) fn prepare_delta_stream(
+        &self,
+        control: &StorageReadControl,
+        replay: impl FnOnce(
+            &mut dyn FnMut(HNSWMutation<'_>) -> StorageBackendResult<()>,
+        ) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<Budgeted<HNSWGraphDelta>> {
         let _workspace = workspace::operation(self, control)?;
         let (mut candidate, memory) = self.snapshot_controlled(control)?.into_parts();
-        for mutation in mutations {
-            control.check()?;
-            match *mutation {
+        replay(&mut |mutation| {
+            workspace::validate_mutations(
+                self.dimensions,
+                std::slice::from_ref(&mutation),
+                control,
+            )?;
+            match mutation {
                 HNSWMutation::Replace { document, vectors } => {
                     candidate.replace_document_vectors(document, vectors, Some(control))?;
                 }
@@ -96,7 +116,9 @@ impl HNSWIndex {
                 }
                 HNSWMutation::Clear => candidate.clear()?,
             }
-        }
+            Ok(())
+        })?;
+        control.check()?;
         Ok(Budgeted::new(candidate.delta(control), memory))
     }
 

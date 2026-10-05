@@ -13,11 +13,10 @@ use crate::mvcc::{
     CommittedRecordSnapshot, PrivateRecordChanges, RecordWrite, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
-use uqa_core::memory::BudgetedVec;
 
 pub(in crate::mvcc) fn merge(
     key: &[u8],
-    operations: &[crate::mvcc::vector::Mutation<'_>],
+    operations: &crate::mvcc::vector::VectorOperations<'_>,
     changes: &PrivateRecordChanges,
     current: &dyn CommittedRecordSnapshot,
     layout: &dyn IVFRecordLayout,
@@ -29,12 +28,11 @@ pub(in crate::mvcc) fn merge(
         "missing current IVF definition",
     ))?;
     let header = layout.header(key, template, control)?;
-    let index = load::index(key, header, current, layout, control)?;
-    let mut inputs = BudgetedVec::new(control.memory());
-    for operation in operations {
-        inputs.push(operation.ivf())?;
-    }
-    let prepared = index.prepare(&inputs)?;
+    let mut prepared = load::index(key, header, current, layout, control)?;
+    operations.visit(control, |_, operation| {
+        prepared.apply_evaluated(operation.borrowed().ivf())?;
+        Ok(())
+    })?;
     let snapshot = prepared.header();
     let next = header
         .revision

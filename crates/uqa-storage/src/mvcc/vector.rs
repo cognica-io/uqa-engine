@@ -14,7 +14,7 @@ mod tests;
 
 use super::{commit::RecordWriteKind, VersionError, VersionResult};
 use crate::{hnsw_index::HNSWMutation, ivf_index::IVFMutation};
-pub(super) use effects::{OwnedVectorMutation, VectorEffects};
+pub(super) use effects::{OwnedVectorMutation, VectorEffects, VectorInputs, VectorOperations};
 pub(super) use resolve::resolve;
 use uqa_core::DocId;
 
