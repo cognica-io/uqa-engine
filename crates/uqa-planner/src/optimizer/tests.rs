@@ -150,6 +150,60 @@ fn selects_operator_tree_access_and_pushes_relational_limit() {
 }
 
 #[test]
+fn parameter_expression_operands_select_access_without_plan_time_evaluation() {
+    for predicate in [
+        "id = $1 + 1",
+        "$1 + 1 = id",
+        "$1 - 1 < id",
+        "id BETWEEN $1 - 1 AND $2 + 1",
+        "id IN ($1 + 1, $2 - 1)",
+        "id = CAST($1 + 1 AS bigint)",
+        "id = CASE WHEN $1 THEN $2 + 1 ELSE $3 / $4 END",
+    ] {
+        let plan = optimized(&format!("SELECT id FROM docs WHERE {predicate}"));
+        let block = query_block(&plan);
+        assert!(
+            matches!(
+                block.access,
+                AccessPathPlan::OperatorTree {
+                    score_limit_pushdown: false
+                }
+            ),
+            "{predicate}: {:?}",
+            block.access
+        );
+        let mut has_parameter = false;
+        block.r#where.as_ref().unwrap().visit(&mut |expression| {
+            has_parameter |= matches!(expression, ScalarExpr::Param(_));
+        });
+        assert!(
+            has_parameter,
+            "{predicate}: parameter was folded into the plan"
+        );
+    }
+}
+
+#[test]
+fn row_dependent_and_function_operands_keep_relational_access() {
+    for predicate in [
+        "id = other + $1",
+        "id + 1 = $1",
+        "id = random() + $1",
+        "id = abs($1)",
+        "id = (SELECT other FROM source_rows WHERE other = $1)",
+        "_doc_id = $1 + 1",
+        "_meta.doc_id = $1 + 1",
+    ] {
+        let plan = optimized(&format!("SELECT id FROM docs WHERE {predicate}"));
+        assert!(
+            matches!(query_block(&plan).access, AccessPathPlan::Row),
+            "{predicate}: {:?}",
+            query_block(&plan).access
+        );
+    }
+}
+
+#[test]
 fn fetch_with_ties_keeps_the_complete_retrieval_score_boundary() {
     let plan = optimized(
         "SELECT id FROM docs WHERE text_match(body, 'rust') ORDER BY _score DESC FETCH FIRST 5 ROWS WITH TIES",

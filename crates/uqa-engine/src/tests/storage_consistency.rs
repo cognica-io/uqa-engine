@@ -106,7 +106,7 @@ struct PortalSnapshotProbeStore {
     row_reads: Arc<std::sync::atomic::AtomicUsize>,
     doc_id_calls: Arc<std::sync::atomic::AtomicUsize>,
     catalog_was_unlocked: Arc<std::sync::atomic::AtomicBool>,
-    tables: Arc<parking_lot::RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
+    tables: std::sync::Weak<parking_lot::RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
 }
 
 impl PortalSnapshotProbeStore {
@@ -122,7 +122,7 @@ impl PortalSnapshotProbeStore {
             row_reads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             doc_id_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             catalog_was_unlocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            tables: Arc::clone(&engine.storage.tables),
+            tables: Arc::downgrade(&engine.storage.tables),
         }
     }
 }
@@ -219,7 +219,9 @@ impl DocumentStore for PortalSnapshotProbeStore {
         self.snapshot_calls
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.catalog_was_unlocked.store(
-            self.tables.try_write().is_some(),
+            self.tables
+                .upgrade()
+                .is_some_and(|tables| tables.try_write().is_some()),
             std::sync::atomic::Ordering::Relaxed,
         );
 
@@ -231,6 +233,69 @@ impl DocumentStore for PortalSnapshotProbeStore {
 
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn DocumentStore>> {
         Ok(Box::new(self.clone()))
+    }
+}
+
+#[test]
+fn parameter_expression_index_probes_do_not_enumerate_the_document_store() {
+    use std::sync::atomic::Ordering;
+    let engine = Engine::new();
+    engine.sql("CREATE TABLE parameter_index (id INTEGER, qty INTEGER); CREATE INDEX parameter_qty ON parameter_index (qty)", &[]).unwrap();
+    let rows = (1..=64)
+        .map(|qty| format!("({}, {qty})", qty * 10))
+        .collect::<Vec<_>>()
+        .join(", ");
+    engine
+        .sql(&format!("INSERT INTO parameter_index VALUES {rows}"), &[])
+        .unwrap();
+    engine
+        .sql("SELECT id FROM parameter_index WHERE qty = 1", &[])
+        .unwrap();
+    let probe = PortalSnapshotProbeStore::from_table(&engine, "parameter_index");
+    let enumerations = Arc::clone(&probe.doc_id_calls);
+    *engine
+        .table("parameter_index")
+        .unwrap()
+        .unwrap()
+        .document_store
+        .write() = Box::new(probe);
+    for parameter in [3, 31, 999] {
+        let result = engine
+            .sql(
+                "SELECT id FROM parameter_index WHERE qty = $1 + 1",
+                &[SQLParam::scalar(Value::Int(parameter))],
+            )
+            .unwrap();
+        let expected = if parameter == 999 {
+            vec![]
+        } else {
+            vec![Value::Int((parameter + 1) * 10)]
+        };
+        assert_eq!(
+            result
+                .rows
+                .iter()
+                .map(|row| row["id"].clone())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            enumerations.load(Ordering::Relaxed),
+            0,
+            "parameter lookup enumerated stored rows"
+        );
+    }
+    engine.sql("SET plan_cache_mode = force_generic_plan; PREPARE parameter_probe(integer) AS SELECT id FROM parameter_index WHERE qty = $1 + 1", &[]).unwrap();
+    for parameter in [7, 31] {
+        let result = engine
+            .sql(&format!("EXECUTE parameter_probe({parameter})"), &[])
+            .unwrap();
+        assert_eq!(result.rows[0]["id"], Value::Int((parameter + 1) * 10));
+        assert_eq!(
+            enumerations.load(Ordering::Relaxed),
+            0,
+            "generic plan enumerated stored rows"
+        );
     }
 }
 

@@ -111,8 +111,7 @@ fn scalar_operand(expression: &ScalarExpr) -> bool {
             qualifier != uqa_sql::semantics::META_QUALIFIER
                 && !uqa_sql::semantics::is_engine_pseudo_column(column)
         }
-        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => true,
-        _ => false,
+        _ => uqa_sql::semantics::mutation_inputs::expr_is_row_independent(expression),
     }
 }
 
