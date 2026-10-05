@@ -1,0 +1,22 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "Docker uqa-pg18-oracle-python:18.4, disposable uqa_view_sequence_identity_20261006",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py --rows --details --notices",
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "scope": "Creation-bound sequence identity, pg_depend, changed search_path, nextval/currval/setval and RESTRICT protection; no assertion about private plan literal representation."
+  },
+  "cases": [
+    {"sql":"SELECT version()","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["version"],"type_oids":[25],"rows":[["PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"]]}],"notices":[]},
+    {"sql":"CREATE SCHEMA s1; CREATE SCHEMA s2","command_tags":["CREATE SCHEMA","CREATE SCHEMA"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]},{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"CREATE SEQUENCE s1.ids START 10; CREATE SEQUENCE s2.ids START 100","command_tags":["CREATE SEQUENCE","CREATE SEQUENCE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]},{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SET search_path TO s1","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"CREATE VIEW public.sequence_values AS SELECT nextval('ids') AS next_value, currval('ids') AS current_value, setval('ids',41) AS set_value","command_tags":["CREATE VIEW"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SELECT d.refobjid='s1.ids'::regclass AS original_sequence FROM pg_depend d JOIN pg_rewrite r ON r.oid=d.objid WHERE d.classid=2618 AND r.ev_class='public.sequence_values'::regclass AND d.refclassid=1259 AND d.refobjid IN ('s1.ids'::regclass,'s2.ids'::regclass) AND d.deptype='n'","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["original_sequence"],"type_oids":[16],"rows":[["t"]]}],"notices":[]},
+    {"sql":"SET search_path TO s2","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SELECT next_value,current_value,set_value FROM public.sequence_values","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["next_value","current_value","set_value"],"type_oids":[20,20,20],"rows":[["10","10","41"]]}],"notices":[]},
+    {"sql":"SELECT nextval('s1.ids') AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[20],"rows":[["42"]]}],"notices":[]},
+    {"sql":"SELECT nextval('ids') AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[20],"rows":[["100"]]}],"notices":[]},
+    {"sql":"DROP SEQUENCE s1.ids","command_tags":[],"error":{"sqlstate":"2BP01","message":"cannot drop sequence s1.ids because other objects depend on it","detail":"view public.sequence_values depends on sequence s1.ids","hint":"Use DROP ... CASCADE to drop the dependent objects too."},"results":[],"notices":[]}
+  ]
+}
