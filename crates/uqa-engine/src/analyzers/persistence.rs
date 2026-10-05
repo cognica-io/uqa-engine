@@ -37,7 +37,7 @@ impl Engine {
         table_name: &str,
         table: &TableState,
         field: &str,
-    ) -> Result<FieldAnalyzerBinding, String> {
+    ) -> StorageBackendResult<FieldAnalyzerBinding> {
         if let Some(binding) = self
             .durable
             .table_field_analyzers
@@ -48,12 +48,8 @@ impl Engine {
         }
         let index = table.inverted_index.read();
         Ok(FieldAnalyzerBinding::unassigned(
-            index
-                .index_analyzer_revision(field)
-                .map_err(|error| error.to_string())?,
-            index
-                .search_analyzer_revision(field)
-                .map_err(|error| error.to_string())?,
+            index.index_analyzer_revision(field)?,
+            index.search_analyzer_revision(field)?,
         ))
     }
 
@@ -62,11 +58,10 @@ impl Engine {
         table: &str,
         field: &str,
         binding: &FieldAnalyzerBinding,
-    ) -> Result<(), String> {
-        let json = binding.to_json().map_err(|error| error.to_string())?;
+    ) -> StorageBackendResult<()> {
+        let json = binding.to_json()?;
         if self
-            .try_table(table)
-            .map_err(|error| error.to_string())?
+            .try_table(table)?
             .is_some_and(|table| table.persistence == RelationPersistence::Temporary)
         {
             return Ok(());
@@ -75,15 +70,13 @@ impl Engine {
             let name = binding
                 .last_assignment()
                 .map_or_else(String::new, |(name, _)| name);
-            catalog
-                .replace_table_field_analyzer_binding(
-                    table,
-                    field,
-                    binding.phase_name(),
-                    &name,
-                    &json,
-                )
-                .map_err(|error| format!("persist table analyzer `{table}`.`{field}`: {error}"))?;
+            catalog.replace_table_field_analyzer_binding(
+                table,
+                field,
+                binding.phase_name(),
+                &name,
+                &json,
+            )?;
         }
         Ok(())
     }
@@ -104,7 +97,7 @@ impl Engine {
             let table = self
                 .try_table(&table_name)?
                 .ok_or_else(|| corrupt("missing analyzer migration table"))?;
-            Self::rebuild_fts_index(&table).map_err(corrupt)?;
+            Self::rebuild_fts_index(&table)?;
             self.try_save_table_schema(&table_name, &table)?;
         }
         for (name, compiled) in names.pending {
@@ -116,8 +109,7 @@ impl Engine {
             )?;
         }
         for ((table, field), binding) in migrations.bindings {
-            self.persist_field_analyzer_binding(&table, &field, &binding)
-                .map_err(corrupt)?;
+            self.persist_field_analyzer_binding(&table, &field, &binding)?;
         }
         Ok(())
     }
@@ -235,17 +227,15 @@ impl Engine {
                 .map(|(_, name)| name.as_str())
         });
         let mut binding = if let Some(name) = explicit_base {
-            let revision = self.resolve_analyzer_revision(name).map_err(corrupt)?;
+            let revision = self.resolve_analyzer_revision(name)?;
             FieldAnalyzerBinding::unassigned(revision.clone(), revision)
         } else {
-            let binding = self
-                .current_field_analyzer_binding(table_name, table, field)
-                .map_err(corrupt)?;
+            let binding = self.current_field_analyzer_binding(table_name, table, field)?;
             *table.analyzer.write() = binding.index.compiled.descriptor().configuration()?;
             binding
         };
         for (phase, name) in old {
-            let compiled = self.resolve_analyzer_revision(&name).map_err(corrupt)?;
+            let compiled = self.resolve_analyzer_revision(&name)?;
             binding = binding.assigned(&name, compiled, phase, AnalyzerBindingOwner::Field);
         }
         if let Some(name) = gin_owner {
@@ -258,7 +248,7 @@ impl Engine {
                     "legacy GIN and field assignments have competing analyzer owners",
                 ));
             }
-            let compiled = self.resolve_analyzer_revision(name).map_err(corrupt)?;
+            let compiled = self.resolve_analyzer_revision(name)?;
             binding = binding.assigned(
                 name,
                 compiled,

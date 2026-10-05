@@ -187,17 +187,7 @@ fn drop_gin_index_side_effects(
         if !still_referenced {
             context
                 .publication
-                .drop_fts_field(&row.table_name, &field)
-                .map_err(|err| {
-                    if matches!(err, SQLError::Cancelled(_)) {
-                        return err;
-                    }
-                    SQLError::Internal(format!(
-                        "DROP INDEX `{}`: failed to remove FTS field `{}`.`{field}`: {err}",
-                        row.relation.qualified_name(),
-                        row.table_name
-                    ))
-                })?;
+                .drop_fts_field(&row.table_name, &field)?;
         }
     }
     Ok(())

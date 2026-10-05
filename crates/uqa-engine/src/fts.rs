@@ -9,7 +9,7 @@ use super::{
     TableState, Value,
 };
 use uqa_storage::inverted_index::DocumentTextSource;
-use uqa_storage::InvertedIndex;
+use uqa_storage::{InvertedIndex, StorageBackendResult};
 
 impl Engine {
     pub(crate) fn fts_fields_for_table(&self, name: &str) -> Result<Vec<FieldName>, SQLError> {
@@ -149,15 +149,11 @@ impl Engine {
     pub(crate) fn fts_source(
         t: &Arc<TableState>,
         cancellation: Option<&uqa_core::CancellationToken>,
-    ) -> Result<DocumentTextSource, String> {
+    ) -> StorageBackendResult<DocumentTextSource> {
         if let Some(cancellation) = cancellation {
-            cancellation.check().map_err(|error| error.to_string())?;
+            cancellation.check()?;
         }
-        let documents = t
-            .document_store
-            .read()
-            .snapshot()
-            .map_err(|error| error.to_string())?;
+        let documents = t.document_store.read().snapshot()?;
         Ok(DocumentTextSource::new(
             documents,
             t.fts_fields(),
@@ -165,23 +161,19 @@ impl Engine {
         ))
     }
 
-    pub(crate) fn rebuild_fts_index(t: &Arc<TableState>) -> Result<(), String> {
+    pub(crate) fn rebuild_fts_index(t: &Arc<TableState>) -> StorageBackendResult<()> {
         let mut source = Self::fts_source(t, None)?;
-        t.inverted_index
-            .write()
-            .try_rebuild_documents(&mut source)
-            .map_err(|error| error.to_string())
+        t.inverted_index.write().try_rebuild_documents(&mut source)
     }
 
     pub(crate) fn rebuild_fts_index_cancellable(
         t: &Arc<TableState>,
         cancellation: &uqa_core::CancellationToken,
-    ) -> Result<(), String> {
+    ) -> StorageBackendResult<()> {
         let mut source = Self::fts_source(t, Some(cancellation))?;
         t.inverted_index
             .write()
             .try_rebuild_documents_cancellable(&mut source, cancellation)
-            .map_err(|error| error.to_string())
     }
 
     pub fn add_document(
