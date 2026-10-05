@@ -27,13 +27,20 @@ fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
 
 #[test]
 fn folds_value_builtins_after_binding_without_evaluating_stateful_or_set_calls() {
-    let repeated = bound_call(
-        "repeat",
+    let mut repeated = bound_call(
+        "pg_catalog.repeat",
         vec![
             ScalarExpr::Literal(Value::Str("x".into())),
             ScalarExpr::Literal(Value::Int(3)),
         ],
     );
+    if let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &mut repeated
+    {
+        binding.argument_types = vec!["text".into(), "integer".into()];
+    }
     let folded =
         fold_literal_expression(repeated, uqa_execution::scalar::eval_constant_scalar).unwrap();
     assert_eq!(literal_value(&folded), Some(&Value::Str("xxx".into())));

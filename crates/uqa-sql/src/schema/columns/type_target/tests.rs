@@ -87,7 +87,7 @@ fn generated_using_precedes_inheritance_and_partition_checks() {
         let target =
             validate_type_target("typecheck_generated", &columns, name, false, false, None)
                 .unwrap();
-        assert!(std::ptr::eq(target, &columns[0]));
+        assert!(std::ptr::eq(target, std::ptr::from_ref(&columns[0])));
     }
 }
 
@@ -154,7 +154,7 @@ fn direct_and_expression_partition_keys_reject_each_referenced_column() {
         Some(&expression),
     )
     .unwrap();
-    assert!(std::ptr::eq(target, &columns[2]));
+    assert!(std::ptr::eq(target, std::ptr::from_ref(&columns[2])));
 }
 
 #[test]

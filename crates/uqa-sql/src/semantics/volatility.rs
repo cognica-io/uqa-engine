@@ -182,11 +182,24 @@ pub fn builtin_function_volatility(
                 | "enum_last"
                 | "enum_range"
         )
-        || (lower == "age" && argument_count == 1)
-        || (lower == "to_timestamp" && argument_count == 2)
-        || (matches!(lower.as_str(), "quote_literal" | "quote_nullable")
+        || builtin_overload_is_stable(&lower, binding, argument_count)
+    {
+        FunctionVolatility::Stable
+    } else {
+        FunctionVolatility::Immutable
+    }
+}
+
+fn builtin_overload_is_stable(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    argument_count: usize,
+) -> bool {
+    (name == "age" && argument_count == 1)
+        || (name == "to_timestamp" && argument_count == 2)
+        || (matches!(name, "quote_literal" | "quote_nullable")
             && binding.is_none_or(|binding| binding.argument_types.as_slice() != ["text"]))
-        || (matches!(lower.as_str(), "date_part" | "extract" | "date_trunc")
+        || (matches!(name, "date_part" | "extract" | "date_trunc")
             && argument_count == 2
             && binding.is_none_or(|binding| {
                 binding
@@ -194,11 +207,6 @@ pub fn builtin_function_volatility(
                     .iter()
                     .any(|ty| matches!(ty.as_str(), "timestamptz" | "timestamp with time zone"))
             }))
-    {
-        FunctionVolatility::Stable
-    } else {
-        FunctionVolatility::Immutable
-    }
 }
 
 // These built-ins mutate catalog/session state or derive a fresh value on every evaluation.

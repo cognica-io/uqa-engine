@@ -32,7 +32,7 @@ pub fn assign_type_transform_value(
     }
 }
 
-/// Fold assignment of a planned constant to the base type, including its typmod. PostgreSQL leaves domain membership checks for row execution; an array coercion containing a domain is itself nonconstant and remains entirely deferred.
+/// Fold assignment of a planned constant to the base type, including its typmod. `PostgreSQL` leaves domain membership checks for row execution; an array coercion containing a domain is itself nonconstant and remains entirely deferred.
 pub fn fold_type_transform_assignment(
     context: &dyn AssignmentContext,
     target: &ColumnType,
