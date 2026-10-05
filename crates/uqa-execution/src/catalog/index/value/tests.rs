@@ -228,3 +228,33 @@ fn changing_the_use_of_a_column_keeps_its_stored_values() {
     // A column already used as asked is returned as it is.
     assert!(carried.with_use("qty", true).is_carried());
 }
+
+#[test]
+fn raw_field_eligibility_survives_index_mutation_and_carried_conversion() {
+    let scalar_row = Value::Row(vec![Value::Int(1)]);
+    let record = Value::Record(vec![("x".into(), Value::Int(1))]);
+    let enumeration = Value::Enum(uqa_core::EnumValue::new(
+        10,
+        uqa_core::EnumLabelKey::from_bytes(vec![128]).unwrap(),
+    ));
+    for special in [record, enumeration] {
+        for wrap in [
+            (|value| value) as fn(Value) -> Value,
+            |value| Value::List(vec![value]),
+            |value| Value::Row(vec![value]),
+        ] {
+            let special = wrap(special.clone());
+            let values = [(1, scalar_row.clone()), (2, special.clone())];
+            let mut index = ColumnValueIndex::build_carried(values.clone().into_iter());
+            assert!(index.field_candidates(&scalar_row).is_none());
+            index = index.with_use("a", false);
+            assert!(index.field_candidates(&scalar_row).is_none());
+            index.clear();
+            index.insert(1, &scalar_row);
+            assert_eq!(ids(&index.field_candidates(&scalar_row).unwrap()), [1]);
+            assert!(index.field_candidates(&special).is_none());
+            index.insert(2, &special);
+            assert!(index.field_candidates(&scalar_row).is_none());
+        }
+    }
+}

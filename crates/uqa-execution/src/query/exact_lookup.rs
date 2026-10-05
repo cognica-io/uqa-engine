@@ -192,11 +192,55 @@ pub struct ExactLookup<'a> {
 impl ExactLookup<'_> {
     /// A field lookup preserves the document-store distinction between absent and explicitly NULL fields.
     pub fn find_field(&self, field: &str, value: &Value) -> Result<Option<DocId>, SQLError> {
-        self.scan(
-            &[field.to_string()],
-            std::slice::from_ref(value),
-            FieldPresence::Required,
-        )
+        self.find_field_with_index(field, value, |_, _| Ok(None))
+    }
+
+    /// The index reader must return exact candidates without evaluating stored
+    /// values, or decline the probe. Private rows mask stored identities before
+    /// field reads or comparisons. Field probes retain their relation observation.
+    pub fn find_field_with_index(
+        &self,
+        field: &str,
+        value: &Value,
+        scan: impl FnOnce(&str, &Value) -> Result<Option<PostingList>, SQLError>,
+    ) -> Result<Option<DocId>, SQLError> {
+        if let Some(read) = self.read {
+            read.observe_scan()?;
+        }
+        let columns = [field.to_string()];
+        let values = std::slice::from_ref(value);
+        if let Some(id) = self
+            .overlay
+            .find_match(&columns, values, FieldPresence::Required)?
+        {
+            return Ok(Some(id));
+        }
+        if self.overlay.is_empty()?
+            || !crate::catalog::index::value::field_is_index_safe(value)
+            || self.comparison_can_fail(&columns, values)
+        {
+            return self.scan_documents(&columns, values, FieldPresence::Required);
+        }
+        // Hydration may acquire the document guard, so select candidates first.
+        let Some(candidates) = scan(field, value)? else {
+            return self.scan_documents(&columns, values, FieldPresence::Required);
+        };
+        let documents = matches!(value, Value::Null).then(|| self.table.read_documents());
+        for entry in candidates.entries() {
+            if self.overlay.masks(entry.doc_id)? {
+                continue;
+            }
+            if let Some(documents) = &documents {
+                let actual = documents
+                    .get_field(entry.doc_id, field)
+                    .map_err(|error| storage_error("verify matching field", &error))?;
+                if actual != Some(Value::Null) {
+                    continue;
+                }
+            }
+            return Ok(Some(entry.doc_id));
+        }
+        Ok(None)
     }
 
     pub fn find_conflict(
@@ -311,13 +355,17 @@ impl ExactLookup<'_> {
         if let Some(id) = self.overlay.find_match(columns, values, presence)? {
             return Ok(Some(id));
         }
+        self.scan_documents(columns, values, presence)
+    }
+
+    fn scan_documents(
+        &self,
+        columns: &[String],
+        values: &[Value],
+        presence: FieldPresence,
+    ) -> Result<Option<DocId>, SQLError> {
         let documents = self.table.read_documents();
-        let comparison_can_fail = values.iter().any(uqa_sql::expr::value_comparison_can_fail)
-            || self.table.column_definitions().iter().any(|column| {
-                columns.contains(&column.name)
-                    && uqa_sql::expr::type_comparison_can_fail(&column.ty)
-            });
-        if self.overlay.is_empty()? && !comparison_can_fail {
+        if self.overlay.is_empty()? && !self.comparison_can_fail(columns, values) {
             return match presence {
                 FieldPresence::Required => documents.find_doc_id_by_field(&columns[0], &values[0]),
                 FieldPresence::MissingIsNull => documents.find_doc_id_by_fields(columns, values),
@@ -352,6 +400,14 @@ impl ExactLookup<'_> {
                 }
             }
         }
+    }
+
+    fn comparison_can_fail(&self, columns: &[String], values: &[Value]) -> bool {
+        values.iter().any(uqa_sql::expr::value_comparison_can_fail)
+            || self.table.column_definitions().iter().any(|column| {
+                columns.contains(&column.name)
+                    && uqa_sql::expr::type_comparison_can_fail(&column.ty)
+            })
     }
 }
 

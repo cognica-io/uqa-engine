@@ -5,8 +5,12 @@
 //
 
 use super::*;
+use crate::catalog::index::value::ColumnValueIndex;
+use parking_lot::Mutex;
 use parking_lot::{RwLock, RwLockReadGuard};
+use std::sync::Arc;
 use uqa_core::{Payload, PostingEntry};
+use uqa_storage::StorageBackendResult;
 use uqa_storage::{DocumentStore, MemoryDocumentStore};
 
 struct Table {
@@ -303,5 +307,255 @@ fn malformed_conflict_keys_do_not_read_an_index_or_document() {
                 .unwrap(),
             None
         );
+    }
+}
+
+/// An index-backed read may fetch individual fields, but must not enumerate or decode rows.
+struct FieldOnlyStore {
+    fields: BTreeMap<DocId, Value>,
+    reads: Arc<Mutex<Vec<DocId>>>,
+}
+
+impl DocumentStore for FieldOnlyStore {
+    fn get_field(&self, id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
+        assert_eq!(field, "a");
+        self.reads.lock().push(id);
+        Ok(self.fields.get(&id).cloned())
+    }
+    fn get_stored(&self, _: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+        panic!("field probe decoded a whole document")
+    }
+    fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
+        panic!("indexed field probe enumerated stored rows")
+    }
+    fn put_stored(&mut self, _: DocId, _: StoredDocument) -> StorageBackendResult<()> {
+        unreachable!()
+    }
+    fn delete(&mut self, _: DocId) -> StorageBackendResult<()> {
+        unreachable!()
+    }
+    fn clear(&mut self) -> StorageBackendResult<()> {
+        unreachable!()
+    }
+    fn len(&self) -> StorageBackendResult<usize> {
+        unreachable!()
+    }
+    fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        unreachable!()
+    }
+}
+
+#[test]
+fn indexed_field_reads_mask_candidates_without_reading_stored_rows() {
+    let reads = Arc::new(Mutex::new(Vec::new()));
+    let table = Table {
+        documents: RwLock::new(Box::new(FieldOnlyStore {
+            fields: BTreeMap::new(),
+            reads: reads.clone(),
+        })),
+    };
+    let index = ColumnValueIndex::build("a", (1..=4096).map(|id| (id, Value::Int(7))));
+    let mut overlay: BTreeMap<_, _> = (1..4096).map(|id| (id, None)).collect();
+    overlay.insert(
+        2,
+        Some(StoredDocument::new(BTreeMap::from([(
+            "a".into(),
+            Value::Int(8),
+        )]))),
+    );
+    let lookup = ExactLookup {
+        table: &table,
+        overlay: &overlay,
+        read: None,
+    };
+    for (value, expected) in [(7, Some(4096)), (8, Some(2)), (99, None)] {
+        assert_eq!(
+            lookup
+                .find_field_with_index("a", &Value::Int(value), |field, value| {
+                    assert_eq!(field, "a");
+                    assert!(
+                        table.documents.try_write().is_some(),
+                        "index hydration held the document guard"
+                    );
+                    Ok(index.field_candidates(value))
+                })
+                .unwrap(),
+            expected
+        );
+    }
+    assert!(reads.lock().is_empty());
+    overlay.insert(
+        5000,
+        Some(StoredDocument::new(BTreeMap::from([(
+            "a".into(),
+            Value::Int(7),
+        )]))),
+    );
+    assert_eq!(
+        ExactLookup {
+            table: &table,
+            overlay: &overlay,
+            read: None
+        }
+        .find_field_with_index("a", &Value::Int(7), |_, _| panic!(
+            "private match must win before index hydration"
+        ))
+        .unwrap(),
+        Some(5000)
+    );
+}
+
+#[test]
+fn unchanged_field_views_keep_direct_first_match_without_index_hydration() {
+    let table = Table::new([
+        (1, vec![("a", Value::Int(7))]),
+        (2, vec![("a", Value::Int(7))]),
+    ]);
+    assert_eq!(
+        ExactLookup {
+            table: &table,
+            overlay: &BTreeMap::new(),
+            read: None
+        }
+        .find_field_with_index("a", &Value::Int(7), |_, _| panic!(
+            "an unchanged view must keep its direct store lookup"
+        ))
+        .unwrap(),
+        Some(1)
+    );
+}
+
+#[test]
+fn indexed_null_field_reads_recheck_presence_only_after_masking() {
+    let reads = Arc::new(Mutex::new(Vec::new()));
+    let table = Table {
+        documents: RwLock::new(Box::new(FieldOnlyStore {
+            fields: BTreeMap::from([(1, Value::Null), (3, Value::Null)]),
+            reads: reads.clone(),
+        })),
+    };
+    let index = ColumnValueIndex::build("a", (1..=3).map(|id| (id, Value::Null)));
+    let overlay = BTreeMap::from([(1, None)]);
+    assert_eq!(
+        ExactLookup {
+            table: &table,
+            overlay: &overlay,
+            read: None
+        }
+        .find_field_with_index("a", &Value::Null, |_, value| Ok(
+            index.field_candidates(value)
+        ))
+        .unwrap(),
+        Some(3)
+    );
+    assert_eq!(*reads.lock(), [2, 3]);
+}
+
+#[test]
+fn indexed_field_fallback_masks_invalid_values_before_comparing_visible_rows() {
+    let invalid = Value::LegacyVector(
+        uqa_core::LegacyVectorValue::try_from_array(
+            uqa_core::LegacyVectorKind::Oid,
+            uqa_core::ArrayValue::with_lower_bounds(vec![], vec![]).unwrap(),
+        )
+        .unwrap(),
+    );
+    let valid = uqa_sql::expr::cast_value(&Value::Str("2".into()), "oidvector").unwrap();
+    let table = Table::new([
+        (1, vec![("a", invalid.clone())]),
+        (2, vec![("a", valid.clone())]),
+    ]);
+    let index =
+        ColumnValueIndex::build("a", [(1, invalid.clone()), (2, valid.clone())].into_iter());
+    let mut overlay = BTreeMap::from([(1, None)]);
+    assert_eq!(
+        ExactLookup {
+            table: &table,
+            overlay: &overlay,
+            read: None
+        }
+        .find_field_with_index("a", &valid, |_, value| Ok(index.field_candidates(value)))
+        .unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        ExactLookup {
+            table: &table,
+            overlay: &overlay,
+            read: None
+        }
+        .find_field_with_index("a", &invalid, |_, _| panic!(
+            "an invalid query must not hydrate an index"
+        ))
+        .unwrap_err()
+        .sqlstate(),
+        Some("42804")
+    );
+    overlay.remove(&1);
+    overlay.insert(3, None);
+    assert_eq!(
+        ExactLookup {
+            table: &table,
+            overlay: &overlay,
+            read: None
+        }
+        .find_field_with_index("a", &valid, |_, value| Ok(index.field_candidates(value)))
+        .unwrap_err()
+        .sqlstate(),
+        Some("42804")
+    );
+}
+
+#[test]
+fn indexed_raw_field_probes_preserve_typed_enum_errors_and_record_row_equality() {
+    let label = |oid| {
+        Value::Enum(uqa_core::EnumValue::new(
+            oid,
+            uqa_core::EnumLabelKey::from_bytes(vec![128]).unwrap(),
+        ))
+    };
+    let table = Table::new([(1, vec![("a", label(10))])]);
+    let index = ColumnValueIndex::build("a", [(1, label(10))].into_iter());
+    let overlay = BTreeMap::from([(2, None)]);
+    for value in [label(20), Value::Int(7)] {
+        assert!(ExactLookup {
+            table: &table,
+            overlay: &overlay,
+            read: None
+        }
+        .find_field_with_index("a", &value, |_, value| Ok(index.field_candidates(value)))
+        .unwrap_err()
+        .to_string()
+        .contains("enum comparison reached operands of different types"));
+    }
+    let record = Value::Record(vec![("x".into(), Value::Int(1))]);
+    let row = Value::Row(vec![Value::Int(1)]);
+    for wrap in [
+        (|value| value) as fn(Value) -> Value,
+        |value| Value::List(vec![value]),
+        |value| Value::Row(vec![value]),
+        |value| {
+            Value::Array(uqa_core::ArrayValue::with_lower_bounds(vec![value], vec![1]).unwrap())
+        },
+    ] {
+        for (stored, requested) in [(record.clone(), row.clone()), (row.clone(), record.clone())] {
+            let (stored, requested) = (wrap(stored), wrap(requested));
+            let table = Table::new([(1, vec![("a", stored.clone())])]);
+            let index = ColumnValueIndex::build("a", [(1, stored)].into_iter());
+            assert_eq!(
+                ExactLookup {
+                    table: &table,
+                    overlay: &overlay,
+                    read: None
+                }
+                .find_field_with_index(
+                    "a",
+                    &requested,
+                    |_, value| Ok(index.field_candidates(value))
+                )
+                .unwrap(),
+                Some(1)
+            );
+        }
     }
 }

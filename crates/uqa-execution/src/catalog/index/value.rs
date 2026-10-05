@@ -27,7 +27,7 @@ pub struct ColumnValueIndex {
     /// Set when any indexed key is temporal; disables acceleration
     /// because string-vs-temporal comparisons need parsing.
     has_temporal: bool,
-    has_fallible_comparison: bool,
+    comparison: comparison::StoredComparison,
     /// Set when any indexed key is a row value, whose null test inspects its fields; the null set cannot answer it, as `PostgreSQL` never indexes a row-type null test.
     has_row_values: bool,
 }
@@ -42,6 +42,13 @@ fn value_is_temporal(value: &Value) -> bool {
 
 fn value_is_nan(value: &Value) -> bool {
     matches!(value, Value::Float(f) if f.is_nan())
+}
+
+pub(crate) fn field_is_index_safe(value: &Value) -> bool {
+    !value_is_temporal(value)
+        && !value_is_nan(value)
+        && !comparison::field_needs_typed_comparison(value)
+        && !uqa_sql::expr::value_comparison_can_fail(value)
 }
 
 fn predicate_targets_are_index_safe(predicate: &Predicate) -> bool {
@@ -82,7 +89,7 @@ impl ColumnValueIndex {
             values: BTreeMap::new(),
             nulls: Vec::new(),
             has_temporal: false,
-            has_fallible_comparison: false,
+            comparison: comparison::StoredComparison::default(),
             has_row_values: false,
         };
         for (doc_id, value) in values {
@@ -101,7 +108,7 @@ impl ColumnValueIndex {
             values: values.collect(),
             nulls: Vec::new(),
             has_temporal: false,
-            has_fallible_comparison: false,
+            comparison: comparison::StoredComparison::default(),
             has_row_values: false,
         }
     }
@@ -126,7 +133,7 @@ impl ColumnValueIndex {
             value => {
                 self.has_temporal |= value_is_temporal(value);
                 self.has_row_values |= value_is_row(value);
-                self.has_fallible_comparison |= uqa_sql::expr::value_comparison_can_fail(value);
+                self.comparison.include(value);
                 index.insert(doc_id, value.clone());
             }
         }
@@ -146,7 +153,7 @@ impl ColumnValueIndex {
             value => {
                 self.has_temporal |= value_is_temporal(value);
                 self.has_row_values |= value_is_row(value);
-                self.has_fallible_comparison |= uqa_sql::expr::value_comparison_can_fail(value);
+                self.comparison.include(value);
                 index.insert(doc_id, value.clone());
             }
         }
@@ -175,7 +182,7 @@ impl ColumnValueIndex {
         self.values.clear();
         self.nulls.clear();
         self.has_temporal = false;
-        self.has_fallible_comparison = false;
+        self.comparison = comparison::StoredComparison::default();
         self.has_row_values = false;
     }
 
@@ -194,6 +201,24 @@ impl ColumnValueIndex {
             Predicate::NotEquals(_) => unreachable!("unsupported predicates return above"),
             predicate => Some(index.scan(predicate)),
         }
+    }
+
+    /// Exact field candidates without evaluating stored values. A declined probe
+    /// lets the caller mask private identities before any fallible comparison.
+    /// NULL candidates include absent fields, which the caller must recheck.
+    pub fn field_candidates(&self, value: &Value) -> Option<PostingList> {
+        if !field_is_index_safe(value) {
+            return None;
+        }
+        let predicate = if matches!(value, Value::Null) {
+            Predicate::IsNull
+        } else {
+            if self.comparison.field_needs_evaluation() {
+                return None;
+            }
+            Predicate::Equals(value.clone())
+        };
+        self.scan(&predicate)
     }
 
     pub fn estimate_cardinality(&self, predicate: &Predicate) -> Option<usize> {
@@ -218,7 +243,7 @@ impl ColumnValueIndex {
         if self.is_carried() {
             return Ok(None);
         }
-        if comparison::needs_sql_comparison(predicate, self.has_fallible_comparison) {
+        if comparison::needs_sql_comparison(predicate, self.comparison.can_fail()) {
             observe()?;
             let mut ids = Vec::new();
             for (&id, value) in &self.values {
@@ -238,7 +263,7 @@ impl ColumnValueIndex {
     pub fn supports(&self, predicate: &Predicate) -> bool {
         !self.is_carried()
             && predicate_targets_are_index_safe(predicate)
-            && !comparison::needs_sql_comparison(predicate, self.has_fallible_comparison)
+            && !comparison::needs_sql_comparison(predicate, self.comparison.can_fail())
             && !matches!(predicate, Predicate::NotEquals(_))
             && if matches!(predicate, Predicate::IsNull | Predicate::IsNotNull) {
                 !self.has_row_values
