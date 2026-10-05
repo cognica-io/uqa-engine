@@ -377,6 +377,9 @@ impl UnifiedPlan {
             Statement::CreateDomain(value) => {
                 Self::Command(Box::new(CommandPlan::CreateDomain(value)))
             }
+            Statement::AlterDomain(value) => {
+                Self::Command(Box::new(CommandPlan::AlterDomain(value)))
+            }
             Statement::AlterSequence(value) => {
                 Self::Command(Box::new(CommandPlan::AlterSequence(value)))
             }
@@ -581,6 +584,7 @@ impl CommandPlan {
             Self::CloseCursor { .. } => "CloseCursor",
             Self::CreateSequence(_) => "CreateSequence",
             Self::CreateDomain(_) => "CreateDomain",
+            Self::AlterDomain(_) => "AlterDomain",
             Self::CreateEnum(_) => "CreateEnum",
             Self::CreateCompositeType(_) => "CreateCompositeType",
             Self::AlterEnum(_) => "AlterEnum",

@@ -12,6 +12,39 @@ use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{ast::CreateDomain, catalog::domain::StoredDomain, SQLError};
 
 impl Engine {
+    pub(crate) fn domain_alter_context(
+        &self,
+    ) -> uqa_execution::schema::domains::alteration::DomainAlterContext<
+        '_,
+        crate::session::StatementReadSnapshot,
+    > {
+        use uqa_execution::schema::domains::alteration::{
+            DomainAlterContext, DomainValidationInputs,
+        };
+        DomainAlterContext {
+            types: self.type_lifecycle_context(),
+            bindings: self,
+            deletion: self,
+            validation: DomainValidationInputs {
+                catalog: self.catalog_execution(),
+                tables: self,
+                locks: self,
+                identities: self,
+                composites: self,
+                expressions: self,
+                cancellation: self.cancellation_token(),
+                plan_check: |expression| {
+                    uqa_planner::optimizer::optimize_scalar_expression(
+                        expression,
+                        &uqa_planner::OptimizerConfig::new(
+                            uqa_execution::scalar::eval_constant_scalar,
+                        ),
+                    )
+                },
+            },
+        }
+    }
+
     pub(crate) fn domain_creation_context(&self) -> DomainCreationContext<'_> {
         DomainCreationContext {
             creation: self.relation_creation_context(),
@@ -27,6 +60,40 @@ impl Engine {
             composites: self,
             changes: self,
         }
+    }
+}
+impl uqa_execution::schema::domains::alteration::DomainConstraintBinding for Engine {
+    fn bind_added_check(
+        &self,
+        definition: &CreateDomain,
+        check: uqa_sql::ast::DomainCheck,
+    ) -> Result<uqa_sql::ast::DomainCheck, SQLError> {
+        let scope = super::query_scope::new_for_catalog_binding(self);
+        let binding = uqa_execution::query::binding::binding_context(&scope)?;
+        let names = self
+            .schema_publication_context()
+            .constraint_names()
+            .automatic_names(&definition.name)?;
+        uqa_sql::schema::domains::prepare_added_check(
+            &uqa_sql::schema::SchemaBindingContext {
+                catalog: self,
+                binding: &binding,
+            },
+            definition,
+            check,
+            &names,
+        )
+    }
+    fn bind_added_not_null(
+        &self,
+        definition: &CreateDomain,
+        constraint: uqa_sql::ast::DomainNotNull,
+    ) -> Result<uqa_sql::ast::DomainNotNull, SQLError> {
+        let names = self
+            .schema_publication_context()
+            .constraint_names()
+            .automatic_names(&definition.name)?;
+        uqa_sql::schema::domains::prepare_added_not_null(definition, constraint, &names)
     }
 }
 impl DomainDeclarationBinding for Engine {
@@ -164,5 +231,16 @@ impl TypeObjectAuthority for Engine {
 impl DomainDropNotices for Engine {
     fn domain_drop_notice(&self, notice: uqa_sql::SQLNotice) {
         self.push_sql_notice(notice);
+    }
+}
+
+impl uqa_execution::schema::domains::alteration::DomainValidationTables for Engine {
+    fn latest_table_snapshot(
+        &self,
+        name: &str,
+    ) -> Result<std::sync::Arc<dyn uqa_execution::query::table_read::TableRead>, SQLError> {
+        let table = self.require_table(name)?;
+        self.detach_query_table(&table, &table, None)
+            .map(|table| table as std::sync::Arc<dyn uqa_execution::query::table_read::TableRead>)
     }
 }

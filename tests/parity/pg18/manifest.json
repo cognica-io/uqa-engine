@@ -54,7 +54,9 @@
     "enum_types": "tests/parity/pg18/enum_types_oracle.expected.json",
     "literal_coercion": "tests/parity/pg18/literal_coercion_oracle.expected.json",
     "partition_bounds": "tests/parity/pg18/partition_bounds_oracle.expected.json",
-    "failing_row_details": "tests/parity/pg18/failing_row_detail_oracle.expected.json"
+    "failing_row_details": "tests/parity/pg18/failing_row_detail_oracle.expected.json",
+    "domain_constraints": "tests/parity/pg18/alter_domain_constraints_oracle.expected.json",
+    "domain_constraint_snapshots": "tests/parity/pg18/domain_constraint_snapshots.expected.json"
   },
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
@@ -938,11 +940,11 @@
     },
     {
       "id": "types.domain-declarations-and-coercion",
-      "postgresql_reference": "tests/parity/pg18/domains_oracle.expected.json; PostgreSQL 18.4 CREATE DOMAIN, type conversion, PL/pgSQL declarations, and trigger semantics",
-      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_domains; cargo test -p uqa-engine --test integration sql_temporal_types",
-      "supported_version": "145 PostgreSQL 18.4 comparisons on memory and SQLite covering domain declarations, defaults, nested constraints, arrays, catalog identities and owners, assignment and cast semantics, quoted names, typed routine arguments and locals, record fields, trigger returns, implicit coercion effects, transactions, and persistence; temporal precision and interval modifiers retain their declared metadata",
+      "postgresql_reference": "tests/parity/pg18/domains_oracle.expected.json; PostgreSQL 18.4 CREATE DOMAIN, type conversion, PL/pgSQL declarations, and trigger semantics; tests/parity/pg18/alter_domain_constraints_oracle.expected.json; tests/parity/pg18/domain_constraint_snapshots.expected.json",
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_domains; cargo test -p uqa-engine --test integration sql_temporal_types; cargo test -p uqa-engine --test integration catalog::pg18_constraint_lifecycle::domain_constraints",
+      "supported_version": "145 PostgreSQL 18.4 comparisons on memory and SQLite covering domain declarations, defaults, nested constraints, arrays, catalog identities and owners, assignment and cast semantics, quoted names, typed routine arguments and locals, record fields, trigger returns, implicit coercion effects, transactions, and persistence; temporal precision and interval modifiers retain their declared metadata; ALTER DOMAIN ADD CHECK/NOT NULL, DROP CONSTRAINT, NOT VALID and VALIDATE retain identities, validate only selected constraints against dependent table/materialized rows, preserve rollback and reject stored containers as PostgreSQL does. The 140-statement PostgreSQL 18.4 oracle passes on all four providers with durable reopen, and four two-session latest-snapshot schedules pass on all three persistent providers in PR #402; volatile CHECK callbacks cannot add rows to their own validation scan.",
       "status": "partial",
-      "open_issue": "Complete domain lifecycle DDL, privileges, dependencies, constraint and catalog metadata, collation support, and the unmodified upstream domain matrix still require implementation and verification."
+      "open_issue": "Remaining domain lifecycle commands, complete privileges/dependencies/catalog metadata, collation support and the unmodified upstream domain matrix remain. Prepared input retention and precise reanalysis remain in the preserved #397 unit; #398 closes only after its unrelated-input-constant requirement is verified."
     },
     {
       "id": "execution.prepared-parameter-contracts",

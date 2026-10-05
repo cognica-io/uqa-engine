@@ -41,12 +41,34 @@ pub fn alter_type_object(
 }
 
 /// Serialize changes to one type until the owning transaction ends, then resolve the name again against the refreshed catalog.
-pub(super) fn lock_and_resolve(
+pub(crate) fn lock_and_resolve(
     context: &TypeLifecycleContext<'_>,
     name: &str,
 ) -> Result<ResolvedTypeObject, SQLError> {
+    lock_with_resolver(context, name, resolve_type_object)
+}
+
+pub(crate) fn lock_named_type(
+    context: &TypeLifecycleContext<'_>,
+    name: &str,
+) -> Result<ResolvedTypeObject, SQLError> {
+    lock_with_resolver(
+        context,
+        name,
+        uqa_sql::schema::type_objects::resolve_named_type_object,
+    )
+}
+
+fn lock_with_resolver(
+    context: &TypeLifecycleContext<'_>,
+    name: &str,
+    resolve: fn(
+        &uqa_sql::schema::domains::removal::TypeObjectBinding<'_>,
+        &str,
+    ) -> Result<ResolvedTypeObject, SQLError>,
+) -> Result<ResolvedTypeObject, SQLError> {
     loop {
-        let initial = resolve_type_object(&context.binding, name)?;
+        let initial = resolve(&context.binding, name)?;
         let guard = context.identities.locks.acquire_shared_catalog(
             SharedCatalogLock::Object {
                 class_id: CatalogOidClass::Type.class_id(),
@@ -55,7 +77,7 @@ pub(super) fn lock_and_resolve(
             RelationLockMode::AccessExclusive,
         )?;
         context.identities.locks.refresh_shared_catalog()?;
-        let current = resolve_type_object(&context.binding, name)?;
+        let current = resolve(&context.binding, name)?;
         if current.oid() == initial.oid() {
             guard.retain();
             return Ok(current);

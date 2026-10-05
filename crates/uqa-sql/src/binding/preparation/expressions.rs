@@ -78,8 +78,8 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
-        self.check_transform_subquery(expression)?;
-        if self.transform_catalog.is_some() {
+        self.check_schema_subquery(expression)?;
+        if self.schema_expression.is_some() {
             if let ScalarExpr::QualifiedColumn { qualifier, .. }
             | ScalarExpr::QualifiedStar(qualifier) = expression
             {
@@ -240,7 +240,7 @@ impl Preparation<'_> {
                 if let Some(filter) = filter {
                     self.require_boolean(filter, input, subqueries, "FILTER")?;
                 }
-                self.check_transform_window(name, (args, filter.is_some(), *modifiers), input)?;
+                self.check_schema_window(name, (args, filter.is_some(), *modifiers), input)?;
                 self.window_specification(spec, input, subqueries)?;
                 self.known_type(expression, input, subqueries)?
             }
@@ -288,7 +288,7 @@ impl Preparation<'_> {
             }
             None => self.known_type(expression, input, subqueries)?,
         };
-        self.check_transform_function(
+        self.check_schema_function(
             expression,
             selected
                 .as_ref()
@@ -297,23 +297,6 @@ impl Preparation<'_> {
             input,
         )?;
         Ok(ty)
-    }
-
-    fn check_transform_subquery(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
-        if self.transform_catalog.is_some()
-            && matches!(
-                expression,
-                ScalarExpr::ScalarSubquery(_)
-                    | ScalarExpr::Exists { .. }
-                    | ScalarExpr::InSubquery { .. }
-            )
-        {
-            return Err(error(
-                "0A000",
-                "cannot use subquery in transform expression".into(),
-            ));
-        }
-        Ok(())
     }
 
     fn check_selected_scalar_modifiers(
@@ -342,71 +325,6 @@ impl Preparation<'_> {
                 format!("{modifier} specified, but {name} is not an aggregate function"),
             ))
         })
-    }
-
-    fn check_transform_window(
-        &self,
-        name: &str,
-        call: (&[ScalarExpr], bool, crate::ast::WindowCallModifiers),
-        input: &RowSchema,
-    ) -> Result<(), SQLError> {
-        if self.transform_catalog.is_none() {
-            return Ok(());
-        }
-        super::super::analysis::validate_window_function(
-            self.routines,
-            name,
-            call,
-            input,
-            &[],
-            self.routines,
-        )?;
-        Err(error(
-            "42P20",
-            "window functions are not allowed in transform expressions".into(),
-        ))
-    }
-
-    fn check_transform_function(
-        &self,
-        expression: &ScalarExpr,
-        selected: Option<&FunctionBinding>,
-        input: &RowSchema,
-    ) -> Result<(), SQLError> {
-        let Some(catalog) = self.transform_catalog else {
-            return Ok(());
-        };
-        let ScalarExpr::Func { name, args, .. } = expression else {
-            unreachable!("transform call context");
-        };
-        let scalar = selected
-            .map(|binding| self.routines.is_scalar_function_binding(binding))
-            .transpose()?
-            .unwrap_or(false);
-        if !scalar
-            && (crate::semantics::is_builtin_aggregate_call(name, selected)
-                || catalog.is_registered_aggregate(name))
-        {
-            return Err(error(
-                "42803",
-                "aggregate functions are not allowed in transform expressions".into(),
-            ));
-        }
-        if crate::semantics::sets::validation::function_may_return_set(
-            catalog,
-            catalog,
-            name,
-            selected,
-            args,
-            input,
-            &[],
-        )? {
-            return Err(error(
-                "0A000",
-                "set-returning functions are not allowed in transform expressions".into(),
-            ));
-        }
-        Ok(())
     }
 
     pub(super) fn call(

@@ -12,6 +12,7 @@ mod expression_contexts;
 mod expressions;
 mod parameters;
 mod queries;
+mod schema_expressions;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -22,6 +23,7 @@ use crate::routines::RoutineResolution;
 use crate::ScalarExpr;
 use crate::{ColumnType, SQLError};
 use parameters::{error, ExpressionType, ParameterTypes};
+use schema_expressions::{SchemaExpressionContext, SchemaExpressionKind};
 
 pub fn infer_prepared_parameter_types(
     routines: &dyn RoutineResolution,
@@ -33,7 +35,7 @@ pub fn infer_prepared_parameter_types(
         routines,
         scope: SchemaScope::for_analysis(ctes)?,
         parameters: ParameterTypes::new(declared),
-        transform_catalog: None,
+        schema_expression: None,
     };
     match plan {
         UnifiedPlan::Query(query) => {
@@ -53,11 +55,43 @@ pub fn analyze_column_type_transform(
     input: &RowSchema,
     binding: &BindingContext<'_>,
 ) -> Result<Option<ColumnType>, SQLError> {
+    analyze_schema_expression(
+        catalog,
+        expression,
+        input,
+        binding,
+        SchemaExpressionKind::TypeTransform,
+    )
+}
+
+/// Analyze the new domain CHECK against VALUE's base type. This uses the same ordered expression analysis as ordinary SQL and rejects query, aggregate, window and set-valued expressions at their own analysis boundary.
+pub(crate) fn analyze_domain_check(
+    catalog: &dyn crate::schema::SchemaExpressionCatalog,
+    expression: &crate::plan::ExpressionPlan,
+    input: &RowSchema,
+    binding: &BindingContext<'_>,
+) -> Result<Option<ColumnType>, SQLError> {
+    analyze_schema_expression(
+        catalog,
+        expression,
+        input,
+        binding,
+        SchemaExpressionKind::DomainCheck,
+    )
+}
+
+fn analyze_schema_expression(
+    catalog: &dyn crate::schema::SchemaExpressionCatalog,
+    expression: &crate::plan::ExpressionPlan,
+    input: &RowSchema,
+    binding: &BindingContext<'_>,
+    kind: SchemaExpressionKind,
+) -> Result<Option<ColumnType>, SQLError> {
     let mut analysis = Preparation {
         routines: catalog,
         scope: SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::new(&[]),
-        transform_catalog: Some(catalog),
+        schema_expression: Some(SchemaExpressionContext { catalog, kind }),
     };
     analysis
         .expression(&expression.scalar, input, &expression.subqueries)
@@ -68,7 +102,7 @@ struct Preparation<'a> {
     routines: &'a dyn RoutineResolution,
     scope: SchemaScope,
     parameters: ParameterTypes,
-    transform_catalog: Option<&'a dyn crate::schema::SchemaExpressionCatalog>,
+    schema_expression: Option<SchemaExpressionContext<'a>>,
 }
 
 struct QueryOutput {

@@ -273,7 +273,10 @@ fn domain_constraint_definition(
                 &check.expression,
                 pretty,
             )
-            .map(|expression| Some(format!("CHECK ({expression})")));
+            .map(|expression| {
+                let validation = if check.validated { "" } else { " NOT VALID" };
+                Some(format!("CHECK ({expression}){validation}"))
+            });
         }
     }
     Ok(None)
@@ -284,17 +287,23 @@ pub fn domain_constraint_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow
     let mut rows = Vec::new();
     for domain in catalog.domains() {
         let namespace = namespace_oid(catalog, &domain.identity.schema);
-        let not_null = domain
-            .definition
-            .not_null
-            .iter()
-            .map(|constraint| (constraint.name.as_deref(), constraint.catalog_identity, "n"));
-        let checks = domain
-            .definition
-            .checks
-            .iter()
-            .map(|constraint| (constraint.name.as_deref(), constraint.catalog_identity, "c"));
-        for (name, identity, kind) in not_null.chain(checks) {
+        let not_null = domain.definition.not_null.iter().map(|constraint| {
+            (
+                constraint.name.as_deref(),
+                constraint.catalog_identity,
+                "n",
+                true,
+            )
+        });
+        let checks = domain.definition.checks.iter().map(|constraint| {
+            (
+                constraint.name.as_deref(),
+                constraint.catalog_identity,
+                "c",
+                constraint.validated,
+            )
+        });
+        for (name, identity, kind, validated) in not_null.chain(checks) {
             let (Some(name), Some(identity)) = (name, identity) else {
                 return Err(SQLError::Internal(format!(
                     "constraint of domain {} has no catalog identity",
@@ -309,7 +318,7 @@ pub fn domain_constraint_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow
                 ("condeferrable", bool_value(false)),
                 ("condeferred", bool_value(false)),
                 ("conenforced", bool_value(true)),
-                ("convalidated", bool_value(true)),
+                ("convalidated", bool_value(validated)),
                 ("conrelid", int_value(0)),
                 ("contypid", int_value(i64::from(domain.oid))),
                 ("conindid", int_value(0)),

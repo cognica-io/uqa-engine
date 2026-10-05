@@ -838,6 +838,13 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 )?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::AlterDomain(statement) => {
+                crate::schema::domains::alteration::alter_domain(
+                    &self.context.schemas.inputs.domain_alter_context(),
+                    statement.clone(),
+                )?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::CreateEnum(statement) => {
                 crate::schema::enums::create_enum(
                     &self.context.schemas.inputs.enum_type_context(),

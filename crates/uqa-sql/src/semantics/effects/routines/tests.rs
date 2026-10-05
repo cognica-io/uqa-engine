@@ -132,3 +132,28 @@ fn sequence_values_require_lock_scopes_without_reclassifying_read_only_effects()
         );
     }
 }
+
+#[test]
+fn domain_constraint_changes_remain_forbidden_in_read_only_transactions() {
+    let context = QueryEffectContext {
+        catalog: &Catalog,
+        optimizer_effects: |_| false,
+        graph_effects: |_| Ok(false),
+    };
+    for action in [
+        "ADD CHECK (VALUE > 0) NOT VALID",
+        "ADD CONSTRAINT required NOT NULL",
+        "DROP CONSTRAINT IF EXISTS positive",
+        "VALIDATE CONSTRAINT positive",
+    ] {
+        let statement = crate::compile(&format!("ALTER DOMAIN d {action}"))
+            .unwrap()
+            .remove(0);
+        let plan = UnifiedPlan::lower(statement);
+        assert_eq!(
+            super::super::read_only::forbidden_command(&context, &plan).unwrap(),
+            Some("ALTER DOMAIN"),
+            "{action}",
+        );
+    }
+}
