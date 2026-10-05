@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Implement PostgreSQL domain constraint addition, removal and validation, including NOT VALID checks, dependent stored values, catalog identities and transactional restoration across all storage providers.
 - Support PostgreSQL 18 configuration definitions, custom parameter placeholders, `set_config`, `SHOW ALL`, `client_min_messages` and startup values restored by `RESET`.
 - Implement `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `idle_session_timeout`, `transaction_timeout`, and the `pg_sleep` functions. Report the cancellation reason and preserve permanent session termination through `Engine::session_termination`.
 - Expose `Engine::set_query_memory_limit` for host-controlled query workspace limits below SQL `work_mem`'s 64 kB minimum.

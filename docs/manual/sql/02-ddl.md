@@ -98,6 +98,18 @@ INSERT INTO domain_orders VALUES (2, 5);
 SELECT id, amount FROM domain_orders ORDER BY id;
 ```
 
+`ALTER DOMAIN name ADD [CONSTRAINT constraint_name] CHECK (expression) [NOT VALID]`, `ADD [CONSTRAINT constraint_name] NOT NULL`, `DROP CONSTRAINT [IF EXISTS] constraint_name [CASCADE | RESTRICT]`, and `VALIDATE CONSTRAINT constraint_name` change domain constraints and return `ALTER DOMAIN` with no result rows. The domain owner may change its constraints; its type and existing constraint identities remain stable. A duplicate constraint name reports `42710`; a missing constraint reports `42704`, or a notice with `DROP CONSTRAINT IF EXISTS`.
+
+Adding a CHECK or NOT NULL constraint validates existing columns of the domain and its derived domains, including materialized views. Validation retains relation locks and reads the latest committed rows plus the transaction's own changes, even under REPEATABLE READ or SERIALIZABLE; ordinary queries keep their isolation snapshot. Failed validation reports `23514` for CHECK or `23502` for NOT NULL and rolls back the catalog change. A stored array or composite containing the domain prevents validation with `0A000`, including an empty table with such a column, as PostgreSQL 18 does.
+
+`NOT VALID` skips the existing-row scan and leaves `pg_constraint.convalidated` false while conversions into the domain immediately enforce the new CHECK. `VALIDATE CONSTRAINT` scans existing values and changes that flag only after success; it repeats the scan for an already validated CHECK and rejects a NOT NULL target with `42809`. Validation evaluates only the selected CHECK, preserving its normal function calls without rerunning older CHECKs. Each relation retains a snapshot before scanning, so rows inserted by a CHECK function into that relation are not scanned again during the same validation. Added CHECKs join the alphabetical evaluation order; adding NOT NULL to an already NOT NULL domain leaves the existing constraint unchanged. All changes participate in transaction and savepoint rollback and survive durable reopen.
+
+```sql execute
+ALTER DOMAIN positive_amount ADD CONSTRAINT amount_ceiling CHECK (VALUE <= 100) NOT VALID;
+ALTER DOMAIN positive_amount VALIDATE CONSTRAINT amount_ceiling;
+ALTER DOMAIN positive_amount DROP CONSTRAINT amount_ceiling;
+```
+
 `DROP DOMAIN [IF EXISTS] name [, ...] [CASCADE | RESTRICT]` removes domains after resolving every target and checking domain-owner or containing-schema-owner authority. Qualified names require schema `USAGE`; unqualified names skip inaccessible search-path schemas. `IF EXISTS` reports missing types or schemas as notices, while a non-domain type still reports `42809`. Missing domains report `42704`, missing schemas report `3F000`, and insufficient authority reports `42501`.
 
 RESTRICT is the default and reports `2BP01` when another object depends on a target. Explicitly naming both a base and its derived domain permits their joint deletion when no outside dependency remains. CASCADE removes derived domains, typed columns, generated columns, dependent views and SQL-standard routines, and indexes whose expressions or predicates require the domain. Defaults and CHECK constraints that require it are removed while their independent columns and domains survive. Column-dependent indexes are removed through the column lifecycle together with their owning PRIMARY KEY or UNIQUE constraints and referencing foreign keys. Direct removal of a constraint-owned index still reports `2BP01`. A table retains its unrelated columns and rows. SQL-standard query and INSERT, UPDATE, DELETE, and MERGE bodies retain column dependencies; routines reading only unrelated columns and string-literal SQL bodies survive column deletion.
