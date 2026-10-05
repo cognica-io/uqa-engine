@@ -21,8 +21,8 @@ impl MutationCommandState for Engine {
     fn begin_overlay(&self) {
         self.mutation_coordinator().begin_command_mutation_overlay();
     }
-    fn end_overlay(&self) {
-        self.mutation_coordinator().end_command_mutation_overlay();
+    fn end_overlay(&self) -> uqa_execution::mutation::overlay::CommandMutationOverlay {
+        self.mutation_coordinator().end_command_mutation_overlay()
     }
 }
 impl PointMutationStorage for Engine {

@@ -33,6 +33,8 @@ pub(crate) use staged::{StagedCursor, StagedRowsView};
 pub struct CommandStoredDocument {
     pub fields: RetainedDocumentFields,
     pub metadata: DocumentMetadata,
+    /// A nested command already published this version to transaction storage.
+    published: bool,
 }
 
 impl CommandStoredDocument {
@@ -44,6 +46,7 @@ impl CommandStoredDocument {
         Ok(Self {
             fields: RetainedDocumentFields::new(fields, control)?,
             metadata,
+            published: false,
         })
     }
 }
@@ -51,6 +54,14 @@ impl CommandStoredDocument {
 #[derive(Default)]
 pub struct CommandMutationOverlay {
     tables: Option<BudgetedMap<String, CommandTableOverlay>>,
+    has_publication: bool,
+}
+
+/// Immutable row roots at a transaction or savepoint boundary; cached exact keys are rebuilt after undo.
+#[derive(Clone, Default)]
+pub struct CommandOverlayCheckpoint {
+    tables: Vec<(String, StagedRows)>,
+    has_publication: bool,
 }
 
 struct CommandTableOverlay {
@@ -157,10 +168,24 @@ impl CommandMutationOverlay {
         document: Option<(Arc<Document>, DocumentMetadata)>,
         control: &StorageReadControl,
     ) -> Result<(), SQLError> {
+        self.stage_version(table, id, document, false, control)
+    }
+
+    fn stage_version(
+        &mut self,
+        table: &str,
+        id: DocId,
+        document: Option<(Arc<Document>, DocumentMetadata)>,
+        published: bool,
+        control: &StorageReadControl,
+    ) -> Result<(), SQLError> {
         let tables = self.bind(control)?;
         let document = document
             .map(|(fields, metadata)| {
-                CommandStoredDocument::new(fields, metadata, control).map_err(resource_error)
+                let mut row = CommandStoredDocument::new(fields, metadata, control)
+                    .map_err(resource_error)?;
+                row.published = published;
+                Ok::<_, SQLError>(row)
             })
             .transpose()?;
         if let Some(table) = tables.get_mut(table) {
@@ -289,6 +314,82 @@ impl CommandMutationOverlay {
 }
 
 impl CommandMutationOverlay {
+    pub fn checkpoint(&self) -> CommandOverlayCheckpoint {
+        CommandOverlayCheckpoint {
+            tables: self
+                .tables
+                .iter()
+                .flat_map(|tables| tables.iter())
+                .map(|(name, table)| (name.clone(), table.rows.clone()))
+                .collect(),
+            has_publication: self.has_publication,
+        }
+    }
+
+    pub fn restore(&mut self, checkpoint: &CommandOverlayCheckpoint) {
+        if let Some(tables) = self.tables.as_mut() {
+            tables.for_each_mut(|name, table| {
+                table.rows = checkpoint
+                    .tables
+                    .iter()
+                    .find(|(saved, _)| saved == name)
+                    .map_or_else(
+                        || {
+                            StagedRows::new(&StorageReadControl::new(
+                                table.rows.memory.budget(),
+                                &uqa_core::CancellationToken::new(),
+                            ))
+                        },
+                        |(_, rows)| rows.clone(),
+                    );
+                table.exact_indexes = BudgetedMap::new(table.exact_indexes.budget());
+                // Index ordinals remain monotone: restored runs can still contain entries of an earlier cached index.
+            });
+        }
+        self.has_publication = checkpoint.has_publication;
+    }
+
+    /// Replace every enclosing command's staged image after a nested command writes it. This keeps later callbacks and exact-key probes on the newest version.
+    pub fn published(
+        overlays: &mut [Self],
+        table: &str,
+        id: DocId,
+        document: Option<(Arc<Document>, DocumentMetadata)>,
+        control: &StorageReadControl,
+    ) -> Result<(), SQLError> {
+        for overlay in overlays {
+            if Self::stages(std::slice::from_ref(overlay), table, id, control)? {
+                overlay.stage_version(table, id, document.clone(), true, control)?;
+                overlay.has_publication = true;
+            }
+        }
+        Ok(())
+    }
+
+    /// Retain an ended command only when a nested command changed one of its staged rows.
+    pub fn published_rows(self) -> Option<Self> {
+        self.has_publication.then_some(self)
+    }
+
+    /// Whether writing an identity would overwrite a nested command's published row, including its deletion when `deleted_supersedes` holds.
+    pub fn was_published(
+        &self,
+        table: &str,
+        id: DocId,
+        deleted_supersedes: bool,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<bool, SQLError> {
+        let Some(table) = self.table(table) else {
+            return Ok(false);
+        };
+        let control = StorageReadControl::new(table.rows.memory.budget(), cancellation);
+        Ok(table
+            .rows
+            .get(id, &control)
+            .map_err(storage_error)?
+            .is_some_and(|row| row.map_or(deleted_supersedes, |row| row.published)))
+    }
+
     /// The visible rows `overlays` staged for `table` whose `fields` hold `values`, the newest command's first; a missing field holds null.
     pub fn matches(
         overlays: &mut [Self],

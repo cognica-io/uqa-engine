@@ -154,12 +154,12 @@ impl MutationCoordinator<'_> {
             .push(super::CommandMutationOverlay::default());
     }
 
-    pub(crate) fn end_command_mutation_overlay(&self) {
-        let removed = self.session.command_mutation_overlays.lock().pop();
-        debug_assert!(
-            removed.is_some(),
-            "command mutation overlay stack underflow"
-        );
+    pub(crate) fn end_command_mutation_overlay(&self) -> super::CommandMutationOverlay {
+        self.session
+            .command_mutation_overlays
+            .lock()
+            .pop()
+            .expect("command mutation overlay stack underflow")
     }
 
     pub(crate) fn register_schema(

@@ -340,6 +340,7 @@ pub(super) enum RuntimeParameterValue {
 impl SessionContext {
     pub(super) fn new(random_state: super::SessionRandomState) -> Self {
         let state = super::SessionStateSnapshot {
+            command_overlays: Vec::new(),
             graph_overlay: None,
             search_path: crate::session::default_search_path(),
             temporary_namespace: None,

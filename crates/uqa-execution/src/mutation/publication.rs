@@ -36,6 +36,7 @@ pub fn document_changes_text_index(
 
 #[derive(Default)]
 pub struct MutationPublicationBatch {
+    published: Vec<super::overlay::CommandMutationOverlay>,
     fts_tables: PreparedFtsTables,
     fts_identities: BTreeMap<String, BTreeSet<DocId>>,
     fts_document_count: usize,
@@ -44,6 +45,34 @@ pub struct MutationPublicationBatch {
 }
 
 impl MutationPublicationBatch {
+    pub fn with_published(
+        mut self,
+        published: Option<super::overlay::CommandMutationOverlay>,
+    ) -> Self {
+        self.published.extend(published);
+        self
+    }
+
+    fn was_published(
+        &self,
+        context: PublicationContext<'_>,
+        table: &str,
+        doc_id: DocId,
+        deleted_supersedes: bool,
+    ) -> Result<bool, SQLError> {
+        for overlay in self.published.iter().rev() {
+            if overlay.was_published(
+                table,
+                doc_id,
+                deleted_supersedes,
+                context.observations.serializable_cancellation(),
+            )? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// A batch that keeps the identity of every row its actions write when `record` holds.
     pub fn recording_writes(record: bool) -> Self {
         Self {
@@ -115,6 +144,9 @@ pub fn publish_prepared_mutation_action(
             doc_id,
             document,
         }) => {
+            if batch.was_published(context, &table, doc_id, true)? {
+                return context.deferrals.inserted(&table, doc_id);
+            }
             batch.before_document(context.text, &table, doc_id)?;
             let text_fields = context.text.text_fields(&table, &document)?;
             let vectors = document_vectors(context.catalog, &table, &document)?;
@@ -141,6 +173,9 @@ pub fn publish_prepared_mutation_action(
             apply_document_rewrite(context, &rewrite, Some(batch))?;
         }
         PreparedMutationAction::Delete(delete) => {
+            if batch.was_published(context, &delete.table, delete.doc_id, false)? {
+                return Ok(());
+            }
             if context.storage.can_defer_document_text(&delete.table)? {
                 batch.before_document(context.text, &delete.table, delete.doc_id)?;
                 observe_row_write(context.observations, &delete.table, delete.doc_id)?;
@@ -181,8 +216,22 @@ fn apply_document_rewrite(
     prepared: &PreparedDocumentRewrite,
     mut batch: Option<&mut MutationPublicationBatch>,
 ) -> Result<DocId, SQLError> {
+    let (destination_table, destination_doc_id) = prepared.destination.as_ref().map_or(
+        (
+            prepared.table.as_str(),
+            prepared.relocation.unwrap_or(prepared.doc_id),
+        ),
+        |(table, id)| (table.as_str(), *id),
+    );
+    let destination_published = batch.as_deref().map_or(Ok(false), |batch| {
+        batch.was_published(context, destination_table, destination_doc_id, true)
+    })?;
+    let source_replaced = batch.as_deref().map_or(Ok(false), |batch| {
+        batch.was_published(context, &prepared.table, prepared.doc_id, false)
+    })?;
+    let moves_row = prepared.destination.is_some() || destination_doc_id != prepared.doc_id;
     if prepared.partition_move_delete.is_some()
-        || prepared.destination.is_some()
+        || moves_row
         || (batch.is_some() && !context.storage.can_defer_document_text(&prepared.table)?)
     {
         if let Some(batch) = batch.take() {
@@ -190,86 +239,84 @@ fn apply_document_rewrite(
         }
     }
     if let Some(delete) = prepared.partition_move_delete.as_deref() {
-        apply_validated_prepared_document_delete(context, delete)?;
+        if !source_replaced {
+            apply_validated_prepared_document_delete(context, delete)?;
+        }
         return Ok(prepared.doc_id);
     }
-    if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
+    if moves_row {
+        return rewrite_to_identity(
+            context,
+            prepared,
+            (destination_table, destination_doc_id),
+            source_replaced,
+            destination_published,
+        );
+    }
+    if destination_published {
+        context.deferrals.rewritten(
+            &prepared.table,
+            prepared.doc_id,
+            Some(&prepared.old_document),
+            &prepared.new_document,
+        )?;
+    } else {
+        rewrite_at_identity(context, prepared, batch)?;
+    }
+    Ok(prepared.doc_id)
+}
+
+/// Publish the remaining parts of a key or partition move without deleting a nested reinsertion at its source or replacing a nested write at its destination.
+fn rewrite_to_identity(
+    context: PublicationContext<'_>,
+    prepared: &PreparedDocumentRewrite,
+    (destination_table, destination_doc_id): (&str, DocId),
+    source_replaced: bool,
+    destination_published: bool,
+) -> Result<DocId, SQLError> {
+    if !source_replaced {
         observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
-        observe_row_write(context.observations, destination_table, *destination_doc_id)?;
         context
             .storage
             .delete_document(&prepared.table, prepared.doc_id)?;
+    }
+    if !destination_published {
+        observe_row_write(context.observations, destination_table, destination_doc_id)?;
         context.storage.insert_document(
             destination_table,
-            *destination_doc_id,
+            destination_doc_id,
             prepared.new_document.clone(),
             document_vectors(context.catalog, destination_table, &prepared.new_document)?,
             InsertedIdentity::Vacant,
         )?;
-        context
-            .identifiers
-            .advance_next_id(destination_table, *destination_doc_id)
-            .map_err(|err| {
-                super::errors::identifier_storage_error("UPDATE partition movement", &err)
-            })?;
-        context.history.note_rewrite(
-            &prepared.table,
-            prepared.doc_id,
-            destination_table,
-            *destination_doc_id,
-        )?;
-        context.deferrals.rewritten(
-            destination_table,
-            *destination_doc_id,
-            None,
-            &prepared.new_document,
-        )?;
-        return Ok(*destination_doc_id);
     }
-    let rewritten_doc_id = match prepared.relocation {
-        // An integer primary key names the row's doc_id slot; keep that invariant when the key itself changes, or value -> doc_id lookups (the unique fast path and FOREIGN KEY validation) read the stale slot and miss the row. A key that names no slot moves the row out of the one its old key named, to the identity its rewrite generated.
-        Some(new_id) if new_id != prepared.doc_id => {
-            if let Some(batch) = batch {
-                batch.flush_fts(context.text)?;
-            }
-            observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
-            observe_row_write(context.observations, &prepared.table, new_id)?;
-            context
-                .storage
-                .delete_document(&prepared.table, prepared.doc_id)?;
-            context.storage.insert_document(
-                &prepared.table,
-                new_id,
-                prepared.new_document.clone(),
-                document_vectors(context.catalog, &prepared.table, &prepared.new_document)?,
-                InsertedIdentity::Vacant,
-            )?;
-            context
-                .identifiers
-                .advance_next_id(&prepared.table, new_id)
-                .map_err(|err| {
-                    super::errors::identifier_storage_error("UPDATE primary key", &err)
-                })?;
-            context.history.note_rewrite(
-                &prepared.table,
-                prepared.doc_id,
-                &prepared.table,
-                new_id,
-            )?;
-            context.deferrals.rewritten(
-                &prepared.table,
-                new_id,
-                Some(&prepared.old_document),
-                &prepared.new_document,
-            )?;
-            new_id
-        }
-        _ => {
-            rewrite_at_identity(context, prepared, batch)?;
-            prepared.doc_id
-        }
-    };
-    Ok(rewritten_doc_id)
+    let partition_move = prepared.destination.is_some();
+    context
+        .identifiers
+        .advance_next_id(destination_table, destination_doc_id)
+        .map_err(|err| {
+            super::errors::identifier_storage_error(
+                if partition_move {
+                    "UPDATE partition movement"
+                } else {
+                    "UPDATE primary key"
+                },
+                &err,
+            )
+        })?;
+    context.history.note_rewrite(
+        &prepared.table,
+        prepared.doc_id,
+        destination_table,
+        destination_doc_id,
+    )?;
+    context.deferrals.rewritten(
+        destination_table,
+        destination_doc_id,
+        (!partition_move).then_some(&prepared.old_document),
+        &prepared.new_document,
+    )?;
+    Ok(destination_doc_id)
 }
 
 fn rewrite_at_identity(

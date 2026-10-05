@@ -428,6 +428,7 @@ impl Engine {
         } else {
             self.note_row_inserted(&table_name, doc_id)?;
         }
+        self.publish_command_document(&table_name, doc_id)?;
         Ok(())
     }
 }
