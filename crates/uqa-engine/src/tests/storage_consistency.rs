@@ -401,6 +401,55 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
 }
 
 #[test]
+fn portal_temporal_inputs_keep_the_transaction_clock_through_fetch_and_hold() {
+    fn verify(engine: &Engine) {
+        let _caller_clock = uqa_sql::expr::TransactionClockScope::enter(17);
+        let started_at = 90_123_456_789;
+        let expected = Value::Temporal(uqa_core::TemporalValue::Timestamp { micros: started_at });
+        for (holdable, fetch_before_commit) in [(false, true), (true, false), (true, true)] {
+            engine.sql("BEGIN", &[]).unwrap();
+            engine.session.transactions.lock()[0].started_at_micros = started_at;
+            let hold = if holdable { "WITH HOLD" } else { "" };
+            engine
+                .sql(
+                    &format!("DECLARE temporal_clock SCROLL CURSOR {hold} FOR SELECT 'now'::text::timestamp AS input_clock, now()::timestamp AS transaction_clock FROM (VALUES (1), (2)) AS source(id)"),
+                    &[],
+                )
+                .unwrap();
+            let verify_rows = |result: &uqa_sql::SQLResult, count| {
+                assert_eq!(result.rows.len(), count);
+                for row in &result.rows {
+                    assert_eq!(row["input_clock"], expected);
+                    assert_eq!(row["transaction_clock"], expected);
+                }
+                assert_eq!(uqa_sql::expr::transaction_clock_micros(), Some(17));
+            };
+            if fetch_before_commit {
+                verify_rows(
+                    &engine.sql("FETCH NEXT FROM temporal_clock", &[]).unwrap(),
+                    1,
+                );
+            }
+            if holdable {
+                engine.sql("COMMIT", &[]).unwrap();
+            }
+            verify_rows(
+                &engine.sql("FETCH ALL FROM temporal_clock", &[]).unwrap(),
+                if fetch_before_commit { 1 } else { 2 },
+            );
+            engine.sql("CLOSE temporal_clock", &[]).unwrap();
+            if !holdable {
+                engine.sql("ROLLBACK", &[]).unwrap();
+            }
+        }
+    }
+
+    verify(&Engine::new());
+    let directory = tempfile::tempdir().unwrap();
+    verify(&Engine::open(&directory.path().join("portal-clocks.db")).unwrap());
+}
+
+#[test]
 fn sql_update_reports_stale_document_ids() {
     let eng = Engine::new();
     eng.sql(

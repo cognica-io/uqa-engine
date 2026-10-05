@@ -143,6 +143,7 @@ impl crate::query::consumer::QueryRowConsumer for SessionPortalRowConsumer {
 
 pub fn run<S: Clone + Send + Sync + 'static>(
     queries: &dyn StatementQueryContexts<S>,
+    transaction_timestamp_micros: Option<i64>,
     query: &QueryPlan,
     params: &[SQLParam],
     directional: bool,
@@ -168,6 +169,8 @@ pub fn run<S: Clone + Send + Sync + 'static>(
             }
         }
     };
+    let _transaction_clock =
+        transaction_timestamp_micros.map(uqa_sql::expr::TransactionClockScope::enter);
     let consumer = std::rc::Rc::new(SessionPortalRowConsumer {
         diagnostics: QueryDiagnostics::request_scope(diagnostics),
         requests: request_rx,

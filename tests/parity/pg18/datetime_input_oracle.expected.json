@@ -2257,6 +2257,438 @@
         }
       ],
       "notices": []
+    },
+    {
+      "sql": "SELECT '5874898-01-01'::date",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range: \"5874898-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '294277-01-01'::timestamp",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range: \"294277-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '294277-01-01'::timestamptz",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range: \"294277-01-01\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lower('[now,now]'::tsrange) = now()::timestamp AS lower_matches, upper('[now,now]'::tsrange) = now()::timestamp AS upper_matches",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lower_matches",
+            "upper_matches"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lower('[now,now]'::tstzrange) = now() AS lower_matches, upper('[now,now]'::tstzrange) = now() AS upper_matches",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lower_matches",
+            "upper_matches"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lower('[today,tomorrow)'::daterange) = current_date AS lower_matches, upper('[today,tomorrow)'::daterange) = current_date + 1 AS upper_matches",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lower_matches",
+            "upper_matches"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "COMMIT; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction",
+      "command_tags": [
+        "COMMIT",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "COMMIT AND CHAIN; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction",
+      "command_tags": [
+        "COMMIT",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK AND CHAIN; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "COMMIT; BEGIN; SELECT 'now'::timestamp = now()::timestamp AS same_clock, lower('[now,now]'::tstzrange) = now() AS same_range_clock, now() = statement_timestamp() AS new_transaction; ROLLBACK",
+      "command_tags": [
+        "COMMIT",
+        "BEGIN",
+        "SELECT 1",
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same_clock",
+            "same_range_clock",
+            "new_transaction"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
     }
   ]
 }

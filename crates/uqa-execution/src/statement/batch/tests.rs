@@ -37,6 +37,8 @@ struct Inputs {
     cancel_after_cache_lookup: bool,
     reject_snapshot: bool,
     requires_subscriptions: bool,
+    transaction_clock: Cell<Option<i64>>,
+    planning_clocks: RefCell<Vec<Option<i64>>>,
 }
 
 impl Inputs {
@@ -65,6 +67,10 @@ impl Inputs {
 }
 
 impl StatementExecutionInputs<()> for Inputs {
+    fn transaction_timestamp_micros(&self) -> Option<i64> {
+        self.transaction_clock.get()
+    }
+
     fn notification_subscriptions_required(&self) -> bool {
         self.requires_subscriptions
     }
@@ -137,6 +143,9 @@ impl ExecutablePlanOptimizer for Inputs {
             matches!(plan, UnifiedPlan::Command(command) if matches!(*command, uqa_sql::plan::CommandPlan::Delete(_)))
         );
         assert!(params.is_empty());
+        self.planning_clocks
+            .borrow_mut()
+            .push(uqa_sql::expr::transaction_clock_micros());
         self.record(format!("optimize.{}", self.snapshot.get()));
         Err(SQLError::Internal("injected planning failure".into()))
     }
@@ -350,6 +359,82 @@ fn consumer_failure_stops_later_transaction_completions() {
     assert_eq!(tags, ["COMMIT"]);
     assert_eq!(inputs.notices.len(), 1);
     inputs.assert_events(&["cache.lookup"]);
+}
+
+#[test]
+fn statements_refresh_transaction_clocks_and_restore_nested_and_failed_scopes() {
+    use uqa_sql::expr::{transaction_clock_micros, TransactionClockScope};
+
+    let _caller_clock = TransactionClockScope::enter(1);
+    let inputs = Inputs::default();
+    inputs.transaction_clock.set(Some(10));
+    let error = execute_simple_query(
+        &inputs.context(),
+        "COMMIT; DELETE FROM items",
+        &[],
+        false,
+        &mut |result| {
+            assert_eq!(result.command_tag.as_deref(), Some("COMMIT"));
+            assert_eq!(transaction_clock_micros(), Some(10));
+            inputs.transaction_clock.set(Some(20));
+            execute_nested(&inputs.context(), "ROLLBACK", &[])?;
+            assert_eq!(transaction_clock_micros(), Some(10));
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("injected planning failure"));
+    assert_eq!(&*inputs.planning_clocks.borrow(), &[Some(20)]);
+    assert_eq!(inputs.depth.get(), 0);
+    assert_eq!(transaction_clock_micros(), Some(1));
+}
+
+#[test]
+fn final_result_consumers_refresh_the_clock_and_restore_it_after_errors() {
+    use uqa_sql::expr::{transaction_clock_micros, TransactionClockScope};
+
+    let _caller_clock = TransactionClockScope::enter(1);
+    for reject_final_result in [false, true] {
+        let inputs = Inputs::default();
+        inputs.transaction_clock.set(Some(10));
+        let mut delivered = 0;
+        let result = execute_simple_query(
+            &inputs.context(),
+            "COMMIT; ROLLBACK",
+            &[],
+            false,
+            &mut |_| {
+                delivered += 1;
+                assert_eq!(transaction_clock_micros(), Some(delivered * 10));
+                inputs.transaction_clock.set(Some(20));
+                if reject_final_result && delivered == 2 {
+                    return Err(SQLError::Internal("consumer rejected final result".into()));
+                }
+                Ok(())
+            },
+        );
+        assert_eq!(delivered, 2);
+        if reject_final_result {
+            assert!(
+                matches!(result, Err(SQLError::Internal(message)) if message == "consumer rejected final result")
+            );
+        } else {
+            result.unwrap();
+        }
+        assert_eq!(transaction_clock_micros(), Some(1));
+    }
+}
+
+#[test]
+fn absent_transaction_clock_keeps_the_callers_clock_through_planning() {
+    use uqa_sql::expr::{transaction_clock_micros, TransactionClockScope};
+
+    let _caller_clock = TransactionClockScope::enter(7);
+    let inputs = Inputs::default();
+    let error = execute(&inputs.context(), "DELETE FROM items", &[]).unwrap_err();
+    assert!(error.to_string().contains("injected planning failure"));
+    assert_eq!(&*inputs.planning_clocks.borrow(), &[Some(7)]);
+    assert_eq!(transaction_clock_micros(), Some(7));
 }
 
 #[test]

@@ -21,6 +21,7 @@ pub(crate) fn start_session_portal_worker(
         let _statement_gate = engine.runtime.statement_gate.delegate_to_current_thread();
         uqa_execution::statement::portal::worker::run(
             &engine,
+            Some(engine.transaction_timestamp_micros()),
             &query,
             &params,
             directional,
