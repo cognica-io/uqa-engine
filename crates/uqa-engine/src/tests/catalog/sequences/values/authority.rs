@@ -267,10 +267,11 @@ fn direct_sequence_calls_inside_callbacks_keep_the_outer_statement_snapshot() {
             let peer = std::sync::Arc::new(peer);
             sql(&engine, "CREATE SEQUENCE callback_ids");
             let callback_engine = std::sync::Arc::downgrade(&engine);
-            let callback_peer = std::sync::Arc::clone(&peer);
+            let callback_peer = std::sync::Arc::downgrade(&peer);
             engine
                 .register_scalar_function("direct_sequence_value", move |_: &[Value]| {
                     let engine = callback_engine.upgrade().unwrap();
+                    let callback_peer = callback_peer.upgrade().unwrap();
                     callback_peer.sql("INSERT INTO t VALUES (2)", &[])?;
                     let value = engine.nextval("callback_ids").map_err(SQLError::Internal)?;
                     let rows = engine.sql("SELECT count(*) AS n FROM t", &[])?;
@@ -289,6 +290,12 @@ fn direct_sequence_calls_inside_callbacks_keep_the_outer_statement_snapshot() {
             );
             sql(&engine, "ROLLBACK");
             assert_eq!(peer.nextval("callback_ids").unwrap(), 2);
+            let retained = std::sync::Arc::downgrade(&peer);
+            drop((engine, peer));
+            assert!(
+                retained.upgrade().is_none(),
+                "callback retained its sibling session"
+            );
         }
     }
 }
