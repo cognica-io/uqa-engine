@@ -24,6 +24,62 @@ fn field(name: &str) -> Vec<u8> {
 }
 
 #[test]
+fn population_deletion_preview_does_not_admit_an_unused_origin_lookup() {
+    use crate::mvcc::MemoryVersionStore;
+    use std::sync::Arc;
+
+    let control = StorageReadControl::with_limit(128 << 10);
+    let store = MemoryVersionStore::new(control.memory());
+    let private = PrivateRecordChanges::new(control.memory());
+    let view = MergedRecordSnapshot::new(
+        Arc::new(store.snapshot().unwrap()),
+        private.snapshot().unwrap(),
+    );
+    let layout = KeyValueDiskANNPopulationRecords;
+    let prefix = layout.origin_prefix(&field("deleted"), &control).unwrap();
+    let mut writes = BudgetedVec::new(control.memory());
+    for document in 0..512_u64 {
+        let mut key = prefix.to_vec();
+        key.extend_from_slice(&document.to_be_bytes());
+        writes
+            .push(
+                PreparedRecordWrite::copy_bytes(&key, None, None, &control)
+                    .unwrap()
+                    .with_kind(RecordWriteKind::DiskANNOrigin),
+            )
+            .unwrap();
+    }
+    let prepared = PreparedRecordCommit::from_unique_owned(writes, &control).unwrap();
+    let _pressure = control
+        .memory()
+        .reserve(control.memory().limit() - control.memory().used() - 4096)
+        .unwrap();
+    assert!(PreparedLookup::new(&prepared, &control).is_err());
+    let generated = Reconciliation {
+        before: &view,
+        after: &view,
+        layout: &layout,
+        history: DatabaseId::from_bytes([9; 16]),
+        control: &control,
+        structural: None,
+    }
+    .run(&prepared, &[])
+    .unwrap();
+    assert!(generated.is_empty());
+    control.cancellation().cancel();
+    assert!(Reconciliation {
+        before: &view,
+        after: &view,
+        layout: &layout,
+        history: DatabaseId::from_bytes([9; 16]),
+        control: &control,
+        structural: None,
+    }
+    .run(&prepared, &[])
+    .is_err());
+}
+
+#[test]
 fn spilled_population_field_reads_seek_and_load_only_the_selected_origins() {
     const FIELDS: usize = 32;
     const DOCUMENTS: usize = 64;

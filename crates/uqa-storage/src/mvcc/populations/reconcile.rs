@@ -60,14 +60,6 @@ impl Reconciliation<'_> {
             }
             Ok(())
         })?;
-        // Final preparation already indexes these same writes for structural headers. Share that index; previews build it once for their evaluated batch.
-        let preview;
-        let indexed = if let Some(structural) = self.structural {
-            structural.writes()
-        } else {
-            preview = PreparedLookup::new(origins, control)?;
-            &preview
-        };
         let mut latest = BudgetedMap::new(control.memory());
         for operation in lifecycle {
             control.check()?;
@@ -95,6 +87,17 @@ impl Reconciliation<'_> {
                 }
             }
         }
+        if fields.is_empty() {
+            return output.prepare(control);
+        }
+        // Final preparation already indexes these same writes for structural headers. Share that index; previews with live origins build it once for their evaluated batch.
+        let preview;
+        let indexed = if let Some(structural) = self.structural {
+            structural.writes()
+        } else {
+            preview = PreparedLookup::new(origins, control)?;
+            &preview
+        };
         for (field, &dimensions) in &fields {
             let field = field.bytes();
             self.with_source(field, dimensions, self.after, &mut |current| {
