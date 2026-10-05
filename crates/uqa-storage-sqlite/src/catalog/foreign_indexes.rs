@@ -140,11 +140,7 @@ impl Catalog {
         from: &RelationIdentity,
         to: &RelationIdentity,
     ) -> Result<bool> {
-        if from.schema != to.schema {
-            return Err(SQLiteError::StorageBackend(
-                "moving a foreign table between schemas is not supported by the catalog".into(),
-            ));
-        }
+        // A move into another schema, which ALTER SCHEMA RENAME performs for every foreign table the schema holds, re-keys the same rows as a rename.
         if let Some(renamed) =
             self.rename_native_relation(RelationRecord::ForeignTable, from, to)?
         {

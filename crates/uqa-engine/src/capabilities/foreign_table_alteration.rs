@@ -23,7 +23,7 @@ use uqa_sql::SQLError;
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
-    fn foreign_table_alter_context(&self) -> ForeignTableAlterContext<'_> {
+    pub(crate) fn foreign_table_alter_context(&self) -> ForeignTableAlterContext<'_> {
         ForeignTableAlterContext {
             names: self,
             catalog: self,

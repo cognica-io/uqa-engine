@@ -11,6 +11,7 @@ pub mod locking;
 pub mod privileges;
 pub mod relation_names;
 pub mod removal;
+pub mod rename;
 pub mod restoration;
 pub mod type_names;
 

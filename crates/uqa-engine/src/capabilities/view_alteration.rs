@@ -18,7 +18,7 @@ use uqa_sql::{ast::RelationPersistence, SQLError};
 use uqa_storage::{StorageBackendResult, ViewRow};
 
 impl Engine {
-    fn view_alter_context(&self) -> ViewAlterContext<'_> {
+    pub(crate) fn view_alter_context(&self) -> ViewAlterContext<'_> {
         ViewAlterContext {
             names: self,
             catalog: self,

@@ -390,7 +390,8 @@ impl Engine {
         self.with_implicit_storage_transaction(|engine| engine.try_rename_table_inner(from, to))
     }
 
-    pub(super) fn try_rename_table_inner(
+    /// Rename or move a table inside the caller's storage transaction: `ALTER SCHEMA RENAME` moves every table of a schema this way, so the catalog is refreshed once the whole schema is consistent rather than after each table.
+    pub(crate) fn try_rename_table_inner(
         &self,
         from: &str,
         to: &str,

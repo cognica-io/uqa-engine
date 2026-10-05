@@ -36,9 +36,11 @@ pub fn schema_creation_target(
 }
 pub fn validate_schema_creation_name(name: &str) -> Result<(), SQLError> {
     if name.starts_with("pg_") {
-        return Err(SQLError::Routine {
+        return Err(SQLError::Diagnostic {
             sqlstate: "42939".into(),
             message: format!(r#"unacceptable schema name "{name}""#),
+            detail: Some(r#"The prefix "pg_" is reserved for system schemas."#.into()),
+            hint: None,
         });
     }
     Ok(())

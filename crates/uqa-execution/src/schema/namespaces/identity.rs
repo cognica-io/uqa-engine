@@ -49,16 +49,33 @@ pub(super) fn reserve_creation(
     context: &SchemaCreationContext<'_>,
     name: &str,
 ) -> Result<SchemaTupleIdentity, SQLError> {
-    context.tuples.catalog_write()?;
-    let name_guard = context.locks.acquire_shared_catalog(
+    reserve_namespace_tuple(
+        &context.tuples,
+        context.locks,
+        context.catalog,
+        context.schemas,
+        name,
+    )
+}
+
+/// Lock `name` and allocate a namespace OID for a row about to be created under it; `ALTER SCHEMA RENAME` holds its destination under such a tuple while the members move.
+pub(super) fn reserve_namespace_tuple(
+    tuples: &super::locking::SchemaLockContext<'_>,
+    locks: &dyn crate::row_locks::shared_objects::SharedObjectLockSession,
+    catalog: &dyn super::SchemaSecurityCatalog,
+    schemas: &dyn uqa_sql::catalog::security::schema_inquiry::SchemaPrivilegeCatalog,
+    name: &str,
+) -> Result<SchemaTupleIdentity, SQLError> {
+    tuples.catalog_write()?;
+    let name_guard = locks.acquire_shared_catalog(
         SharedCatalogLock::Name {
             class_id: SCHEMA_CATALOG_CLASS_ID,
             name,
         },
         RelationLockMode::AccessExclusive,
     )?;
-    context.locks.refresh_shared_catalog()?;
-    if context.catalog.schema_security(name).is_some() {
+    locks.refresh_shared_catalog()?;
+    if catalog.schema_security(name).is_some() {
         return Err(SQLError::Routine {
             sqlstate: "23505".into(),
             message:
@@ -68,10 +85,10 @@ pub(super) fn reserve_creation(
     }
     name_guard.retain();
     let oid = crate::catalog::identity::reserve_new_catalog_oid(
-        context.locks,
+        locks,
         SCHEMA_CATALOG_CLASS_ID,
         "schema",
-        |oid| Ok(namespace_oid_in_use(context.schemas, oid)),
+        |oid| Ok(namespace_oid_in_use(schemas, oid)),
     )?;
     new_tuple(oid).map_err(|error| SQLError::Internal(error.to_string()))
 }

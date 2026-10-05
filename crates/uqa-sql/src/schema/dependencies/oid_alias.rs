@@ -167,6 +167,38 @@ pub fn read_oid_alias_constants<C: OidAliasInput + ?Sized>(
     }
 }
 
+/// The first argument of `nextval`, `currval` or `setval` when it is an `unknown` literal: `coerce_type` reads it with `regclassin` for the `regclass` parameter, so the stored constant is the sequence's OID and prints as `'name'::regclass`.
+fn sequence_argument_mut(expression: &mut ScalarExpr) -> Option<&mut ScalarExpr> {
+    let ScalarExpr::Func { name, args, .. } = expression else {
+        return None;
+    };
+    if !is_sequence_function(name) {
+        return None;
+    }
+    args.first_mut()
+        .filter(|argument| matches!(argument, ScalarExpr::Literal(Value::Str(_))))
+}
+
+fn sequence_argument(expression: &ScalarExpr) -> Option<&str> {
+    let ScalarExpr::Func { name, args, .. } = expression else {
+        return None;
+    };
+    if !is_sequence_function(name) {
+        return None;
+    }
+    match args.first() {
+        Some(ScalarExpr::Literal(Value::Str(text))) => Some(text),
+        _ => None,
+    }
+}
+
+fn is_sequence_function(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let local = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    matches!(local, "nextval" | "currval" | "setval")
+        && (!lower.contains('.') || lower.starts_with("pg_catalog."))
+}
+
 /// [`read_oid_alias_constants`] for one scalar node. The first failure is kept and stops further reads. With `keep_relations`, a `regclass` cast is checked and left as written.
 fn read_scalar_constant<C: OidAliasInput + ?Sized>(
     catalog: &C,
@@ -175,6 +207,25 @@ fn read_scalar_constant<C: OidAliasInput + ?Sized>(
     failure: &mut Option<SQLError>,
 ) {
     if failure.is_some() {
+        return;
+    }
+    if let Some(argument) = sequence_argument_mut(expression) {
+        let ScalarExpr::Literal(Value::Str(text)) = &*argument else {
+            unreachable!("sequence argument is an unknown literal");
+        };
+        match read_constant(catalog, &ColumnType::Regclass, text, false) {
+            Ok(value) => {
+                if !keep_relations {
+                    *argument = ScalarExpr::TypedLiteral {
+                        value,
+                        ty: ColumnType::Regclass.catalog_name(),
+                        bound_type: Some(ColumnType::Regclass),
+                        parameter_index: None,
+                    };
+                }
+            }
+            Err(error) => *failure = Some(error),
+        }
         return;
     }
     let ScalarExpr::Cast { expr, ty } = expression else {
@@ -240,6 +291,12 @@ pub fn check_statement_oid_alias_constants<C: OidAliasInput + ?Sized>(
     plan.visit_scalar_expressions(&mut |root| {
         root.visit(&mut |expression| {
             if failure.is_some() {
+                return;
+            }
+            if let Some(text) = sequence_argument(expression) {
+                if let Err(error) = read_constant(catalog, &ColumnType::Regclass, text, false) {
+                    failure = Some(error);
+                }
                 return;
             }
             let ScalarExpr::Cast { expr, ty } = expression else {

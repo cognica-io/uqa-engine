@@ -96,6 +96,71 @@ pub fn rename_sql_routine(
     Ok(())
 }
 
+/// Move every overload registered under `registry_key` into `schema` while its schema is renamed: each keeps its signature, body and identity, and the definitions that call it are rewritten to the new name. The statement already checked the schema's ownership, so no routine ownership is required.
+pub fn relocate_sql_routines(
+    context: &RoutineRenameContext<'_>,
+    registry_key: &str,
+    schema: &str,
+) -> Result<(), SQLError> {
+    let identity = analysis::routine_rename_identity(registry_key)?;
+    let new_name = uqa_core::RelationIdentity::new(schema, &identity.name).qualified_name();
+    loop {
+        let registry = context.mutation.registry.routine_snapshot();
+        let Some(function) = registry
+            .get(registry_key)
+            .and_then(|overloads| overloads.first())
+            .cloned()
+        else {
+            return Ok(());
+        };
+        let signature = uqa_sql::routines::routine_signature_types(&function.def);
+        let object_id = function.def.object_id.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "routine `{registry_key}` has no catalog object identity"
+            ))
+        })?;
+        let target = RoutineRenameTarget {
+            old_name: registry_key.to_string(),
+            new_name: new_name.clone(),
+            position: 0,
+            binding: FunctionBinding {
+                object_id: Some(object_id),
+                name: registry_key.to_string(),
+                argument_types: signature,
+                builtin: false,
+                dispatch: None,
+                invocation: None,
+                resolution_error: None,
+            },
+        };
+        let renamed_registry = analysis::move_routine_registry_entry(registry, &target)?;
+        **context.mutation.registry.routines_write() = renamed_registry;
+        let rewritten_registry =
+            rewrite_routine_owned_dependency_identity(context, &target.binding, &target.new_name)?;
+        **context.mutation.registry.routines_write() = rewritten_registry.clone();
+        context
+            .dependents
+            .rewrite_schema_routine_identity(&target.binding, &target.new_name)
+            .map_err(|error| {
+                SQLError::Internal(format!("rewrite schema routine dependencies: {error}"))
+            })?;
+        context
+            .dependents
+            .rewrite_view_routine_identity(&target.binding, &target.new_name)
+            .map_err(|error| {
+                SQLError::Internal(format!("rewrite view routine dependencies: {error}"))
+            })?;
+        context
+            .dependents
+            .rewrite_event_routine_identity(&target.binding, &target.new_name)?;
+        context
+            .mutation
+            .publication
+            .persist_routine_definitions(&rewritten_registry)?;
+        context.mutation.changes.catalog_registry_changed();
+    }
+}
+
 fn resolve_routine_rename_target(
     context: &RoutineRenameContext<'_>,
     stmt: &RenameRoutineStmt,

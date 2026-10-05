@@ -14,6 +14,15 @@ pub type SchemaOwnerWrite<'a> = Box<
 pub trait SchemaOwnerTransactions {
     fn with_owner_write(&self, operation: SchemaOwnerWrite<'_>) -> Result<SQLResult, SQLError>;
 }
+pub type SchemaRenameWrite<'a> = Box<
+    dyn FnOnce(
+            &crate::schema::namespaces::rename::SchemaRenameContext<'_>,
+        ) -> Result<SQLResult, SQLError>
+        + 'a,
+>;
+pub trait SchemaRenameTransactions {
+    fn with_rename_write(&self, operation: SchemaRenameWrite<'_>) -> Result<SQLResult, SQLError>;
+}
 pub trait SchemaStatementInputs<S: Clone + 'static> {
     fn index_creation_context(&self) -> crate::schema::indexes::creation::IndexCreationContext<'_>;
     fn table_alter_entry_context(
@@ -49,5 +58,6 @@ pub struct SchemaStatements<'a, S: Clone + 'static> {
     pub sequence_creation: &'a dyn crate::schema::sequences::entry::SequenceCreationTransactions,
     pub sequence_alteration: &'a dyn crate::schema::sequences::entry::SequenceAlterTransactions,
     pub owners: &'a dyn SchemaOwnerTransactions,
+    pub renames: &'a dyn SchemaRenameTransactions,
     pub inputs: &'a dyn SchemaStatementInputs<S>,
 }

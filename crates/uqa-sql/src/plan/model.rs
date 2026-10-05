@@ -575,6 +575,10 @@ pub enum CommandPlan {
         name: String,
         new_owner: crate::ast::RoleSpecification,
     },
+    RenameSchema {
+        name: String,
+        new_name: String,
+    },
     Notify {
         channel: String,
         payload: String,

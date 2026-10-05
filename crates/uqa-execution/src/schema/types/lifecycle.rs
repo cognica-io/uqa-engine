@@ -111,6 +111,26 @@ fn set_schema(
     name: &str,
     schema: &str,
 ) -> Result<(), SQLError> {
+    move_to_schema(context, kind, name, schema, true)
+}
+
+/// Move a type into `schema` while its schema is renamed: the statement checked the schema's ownership, so the type's own owner is not consulted.
+pub fn relocate_type_object(
+    context: &TypeLifecycleContext<'_>,
+    kind: TypeObjectKind,
+    name: &str,
+    schema: &str,
+) -> Result<(), SQLError> {
+    move_to_schema(context, kind, name, schema, false)
+}
+
+fn move_to_schema(
+    context: &TypeLifecycleContext<'_>,
+    kind: TypeObjectKind,
+    name: &str,
+    schema: &str,
+    check_owner: bool,
+) -> Result<(), SQLError> {
     let resolved = lock_and_resolve(context, name)?;
     resolved.require_domain_keyword(&context.binding, kind)?;
     let temporary = context.creation.state.temporary_schema_name();
@@ -120,7 +140,9 @@ fn set_schema(
     } else {
         context.creation.creation_namespace(schema)?
     };
-    resolved.require_owner(&context.binding)?;
+    if check_owner {
+        resolved.require_owner(&context.binding)?;
+    }
     resolved.reject_array(&context.binding)?;
     // A table's row type fails after the destination's duplicate-name check, as AlterTypeNamespaceInternal orders them.
     if let Some(row_type) = resolved.row_type_identity() {

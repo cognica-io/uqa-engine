@@ -280,6 +280,9 @@ impl UnifiedPlan {
             Statement::AlterSchemaOwner { name, new_owner } => {
                 Self::Command(Box::new(CommandPlan::AlterSchemaOwner { name, new_owner }))
             }
+            Statement::RenameSchema { name, new_name } => {
+                Self::Command(Box::new(CommandPlan::RenameSchema { name, new_name }))
+            }
             Statement::Notify { channel, payload } => {
                 Self::Command(Box::new(CommandPlan::Notify { channel, payload }))
             }
@@ -556,6 +559,7 @@ impl CommandPlan {
             Self::RefreshMaterializedView { .. } => "RefreshMaterializedView",
             Self::CreateSchema { .. } => "CreateSchema",
             Self::AlterSchemaOwner { .. } => "AlterSchemaOwner",
+            Self::RenameSchema { .. } => "RenameSchema",
             Self::Notify { .. } => "Notify",
             Self::Listen { .. } => "Listen",
             Self::Unlisten { .. } => "Unlisten",

@@ -1,0 +1,974 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA rs_old;",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rs_old.t (a int DEFAULT 1, s regnamespace DEFAULT 'rs_old');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rs_old.t VALUES (1, 'rs_old');",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SEQUENCE rs_old.sq;",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rs_old.v AS SELECT a, nextval('rs_old.sq') AS n FROM rs_old.t;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION rs_old.f(x int) RETURNS int IMMUTABLE LANGUAGE sql RETURN x + 1;",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE rs_old.mood AS ENUM ('a', 'b');",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rs_old.u (m rs_old.mood, r regclass DEFAULT 'rs_old.t', c text GENERATED ALWAYS AS (rs_old.f(1)::text) STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE INDEX u_m_idx ON rs_old.u (m);",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON SCHEMA rs_old TO public;",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT oid = 'rs_old'::regnamespace AS same_oid, nspname FROM pg_namespace WHERE nspname = 'rs_old';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_oid",
+            "nspname"
+          ],
+          "type_oids": [
+            16,
+            19
+          ],
+          "rows": [
+            [
+              "t",
+              "rs_old"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rs_oid AS SELECT 'rs_old'::regnamespace::oid AS oid;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SCHEMA rs_old RENAME TO rs_new;",
+      "command_tags": [
+        "ALTER SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT nspname, oid = (SELECT oid FROM rs_oid) AS oid_kept FROM pg_namespace WHERE nspname IN ('rs_old', 'rs_new');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nspname",
+            "oid_kept"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "rs_new",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, s, s::oid = (SELECT oid FROM rs_oid) FROM rs_new.t;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "s",
+            "?column?"
+          ],
+          "type_oids": [
+            23,
+            4089,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "rs_new",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT * FROM rs_old.t;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rs_old.t\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rs_new.v'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT a,\n    nextval('rs_new.sq'::regclass) AS n\n   FROM rs_new.t;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rs_new.u'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "'rs_new.t'::regclass"
+            ],
+            [
+              "(rs_new.f(1))::text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'rs_new.f'::regproc::text, 'rs_new.t'::regclass::text, 'rs_new.mood'::regtype::text, 'rs_new'::regnamespace::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "text",
+            "text",
+            "text"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rs_new.f",
+              "rs_new.t",
+              "rs_new.mood",
+              "rs_new"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_schema_privilege('rs_new', 'USAGE');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "has_schema_privilege"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT n FROM rs_new.v;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rs_new.u (m) VALUES ('a');",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT m, r, c FROM rs_new.u;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "r",
+            "c"
+          ],
+          "type_oids": [
+            55280,
+            2205,
+            25
+          ],
+          "rows": [
+            [
+              "a",
+              "rs_new.t",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT schemaname, indexname FROM pg_indexes WHERE indexname = 'u_m_idx';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "schemaname",
+            "indexname"
+          ],
+          "type_oids": [
+            19,
+            19
+          ],
+          "rows": [
+            [
+              "rs_new",
+              "u_m_idx"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT rs_new.f(41);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "f"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SCHEMA rs_missing RENAME TO rs_x;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"rs_missing\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SCHEMA rs_new RENAME TO public;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P06",
+        "message": "schema \"public\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SCHEMA rs_new RENAME TO pg_mine;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42939",
+        "message": "unacceptable schema name \"pg_mine\"",
+        "detail": "The prefix \"pg_\" is reserved for system schemas.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SCHEMA rs_new RENAME TO rs_new;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P06",
+        "message": "schema \"rs_new\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA rs_old;",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET search_path = rs_new, public;",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a FROM t;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SCHEMA rs_new RENAME TO rs_final;",
+      "command_tags": [
+        "ALTER SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a FROM t;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"t\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT current_schema();",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_schema"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "public"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE ROLE rs_role;",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE rs_role;",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SCHEMA rs_final RENAME TO rs_denied;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of schema rs_final",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "RESET ROLE;",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'rs_%' ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "schema_name"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "rs_final"
+            ],
+            [
+              "rs_old"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'rs_%' ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nspname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "rs_final"
+            ],
+            [
+              "rs_old"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT relname, relnamespace::regnamespace::text FROM pg_class WHERE relnamespace = 'rs_final'::regnamespace ORDER BY 1;",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "relnamespace"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "sq",
+              "rs_final"
+            ],
+            [
+              "t",
+              "rs_final"
+            ],
+            [
+              "u",
+              "rs_final"
+            ],
+            [
+              "u_m_idx",
+              "rs_final"
+            ],
+            [
+              "v",
+              "rs_final"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT proname, pronamespace::regnamespace::text FROM pg_proc WHERE pronamespace = 'rs_final'::regnamespace;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "proname",
+            "pronamespace"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "f",
+              "rs_final"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typname, typnamespace::regnamespace::text FROM pg_type WHERE typnamespace = 'rs_final'::regnamespace AND typname = 'mood';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "typnamespace"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "mood",
+              "rs_final"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SCHEMA public RENAME TO pub2;",
+      "command_tags": [
+        "ALTER SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT current_schemas(false);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_schemas"
+          ],
+          "type_oids": [
+            1003
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SCHEMA pub2 RENAME TO public;",
+      "command_tags": [
+        "ALTER SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP SCHEMA rs_final CASCADE;",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "drop cascades to 6 other objects",
+          "detail": "drop cascades to table rs_final.t\ndrop cascades to sequence rs_final.sq\ndrop cascades to view rs_final.v\ndrop cascades to function rs_final.f(integer)\ndrop cascades to type rs_final.mood\ndrop cascades to table rs_final.u",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'rs_%' ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nspname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "rs_old"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

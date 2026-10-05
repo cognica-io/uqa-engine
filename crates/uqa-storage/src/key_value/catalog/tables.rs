@@ -145,11 +145,7 @@ impl KeyValueCatalog {
         if from_relation == to_relation {
             return Ok(());
         }
-        if from_relation.schema != to_relation.schema {
-            return Err(StorageBackendError::Other(
-                "moving a table between schemas is not supported by the catalog".into(),
-            ));
-        }
+        // A move into another schema, which ALTER SCHEMA RENAME performs for every table the schema holds, re-keys the same entries as a rename; the destination schema must already hold its row.
         let durable = self.store.identifier_allocator().is_some();
         self.store.with_mutation(&mut |read, batch| {
             relations::require_schema_exists(read, &to_relation)?;
