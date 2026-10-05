@@ -14,6 +14,50 @@ use super::{
 };
 
 impl FileLockCoordinator {
+    /// No relation owner survives an epoch boundary. Clear relation metadata before generation numbers restart, preserving unrelated row waits and claims.
+    pub(super) fn clear_relation_epoch_metadata(&self) -> Result<(), String> {
+        loop {
+            match self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, None, Some(true)) {
+                Ok(()) => break,
+                Err(error) if super::lock_would_block(&error) => {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => return Err(format!("admit relation metadata reset: {error}")),
+            }
+        }
+        let result =
+            (|| {
+                for index in 0..HOLDER_SLOT_COUNT {
+                    if self.read_holder_slot(index).is_some_and(|slot| {
+                        super::super::relation_slot_of_claim(slot.offset).is_some()
+                    }) {
+                        write_all_at(
+                            &self.file,
+                            &[0; HOLDER_SLOT_SIZE as usize],
+                            Self::holder_slot_offset(index),
+                        )
+                        .map_err(|error| format!("reset relation holder metadata: {error}"))?;
+                    }
+                }
+                for index in 0..WAIT_SLOT_COUNT {
+                    if self.read_slot(index).is_some_and(|slot| {
+                        super::super::relation_slot_of_claim(slot.offset).is_some()
+                    }) {
+                        write_all_at(
+                            &self.file,
+                            &[0; WAIT_SLOT_SIZE as usize],
+                            Self::slot_offset(index),
+                        )
+                        .map_err(|error| format!("reset relation wait metadata: {error}"))?;
+                    }
+                }
+                Ok(())
+            })();
+        let unlocked = self
+            .apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None)
+            .map_err(|error| format!("release relation metadata reset: {error}"));
+        result.and(unlocked)
+    }
     fn holder_slot_offset(index: u64) -> u64 {
         HOLDER_SLOT_BASE + index * HOLDER_SLOT_SIZE
     }
@@ -87,6 +131,7 @@ impl FileLockCoordinator {
                     session,
                     offset: claim.offset,
                     write: claim.write,
+                    generation: Self::local_relation_generation(state, claim.offset),
                 }),
             );
             state
@@ -170,13 +215,14 @@ impl FileLockCoordinator {
     /// Advertise what one session of this process is currently waiting for so other processes can walk the wait-for graph. Each waiting session owns its own slot; slot exhaustion degrades detection, never coordination.
     pub(in crate::row_locks) fn register_wait(&self, session: u64, claim: ByteClaim) {
         let pid = std::process::id();
+        let mut state = self.state.lock();
         let slot = WaitSlot {
             pid,
             session,
             offset: claim.offset,
             write: claim.write,
+            generation: Self::local_relation_generation(&state, claim.offset),
         };
-        let mut state = self.state.lock();
         self.acquire_slot_metadata_lock();
         self.publish_pending_holders(&mut state);
         if let Some(index) = state.wait_slots.get(&session).copied() {
@@ -221,13 +267,20 @@ impl FileLockCoordinator {
         local_wait: &dyn Fn(u64) -> Option<ByteClaim>,
     ) -> bool {
         let own_pid = std::process::id();
-        let mut pending = vec![(own_pid, session, wanted)];
+        let Some(generation) = self.current_relation_generation(wanted.offset) else {
+            return false;
+        };
+        let mut pending = vec![(own_pid, session, wanted, generation)];
         let mut seen_sessions = std::collections::HashSet::new();
-        while let Some((requester_pid, requester, current)) = pending.pop() {
+        while let Some((requester_pid, requester, current, generation)) = pending.pop() {
+            // A foreign waiter can exit and its slot can be reused during traversal. Carry its observed generation through the edge instead of following the new identity at that byte.
+            if self.current_relation_generation(current.offset) != Some(generation) {
+                continue;
+            }
             if !seen_sessions.insert((requester_pid, requester)) {
                 continue;
             }
-            for holder in self.local_holders_conflicting(current) {
+            for holder in self.local_holders_conflicting(current, generation) {
                 if requester_pid == own_pid && holder == requester {
                     continue;
                 }
@@ -235,17 +288,19 @@ impl FileLockCoordinator {
                     return true;
                 }
                 if let Some(next) = local_wait(holder) {
-                    pending.push((own_pid, holder, next));
+                    if let Some(generation) = self.current_relation_generation(next.offset) {
+                        pending.push((own_pid, holder, next, generation));
+                    }
                 }
             }
-            for holder in self.holder_sessions(current) {
+            for holder in self.holder_sessions(current, generation) {
                 if holder.pid == own_pid
                     || (holder.pid == requester_pid && holder.session == requester)
                 {
                     continue;
                 }
-                if let Some(wait) = self.wait_of(holder.pid, holder.session) {
-                    pending.push((holder.pid, holder.session, wait));
+                if let Some((wait, generation)) = self.wait_of(holder.pid, holder.session) {
+                    pending.push((holder.pid, holder.session, wait, generation));
                 }
             }
         }
@@ -253,8 +308,11 @@ impl FileLockCoordinator {
     }
 
     /// Local sessions holding a conflicting physical byte or relation mode.
-    fn local_holders_conflicting(&self, claim: ByteClaim) -> Vec<u64> {
+    fn local_holders_conflicting(&self, claim: ByteClaim, generation: u64) -> Vec<u64> {
         let state = self.state.lock();
+        if Self::local_relation_generation(&state, claim.offset) != generation {
+            return Vec::new();
+        }
         if row_claim_address(claim).is_some() {
             return state.rows.holders(claim);
         }
@@ -274,7 +332,7 @@ impl FileLockCoordinator {
         holders
     }
 
-    fn holder_sessions(&self, claim: ByteClaim) -> Vec<HolderSlot> {
+    fn holder_sessions(&self, claim: ByteClaim, generation: u64) -> Vec<HolderSlot> {
         if row_claim_address(claim).is_some() {
             return self.foreign_row_holders(claim);
         }
@@ -285,6 +343,7 @@ impl FileLockCoordinator {
                 if blocking
                     .clone()
                     .any(|claim| holder.offset == claim.offset && (holder.write || claim.write))
+                    && generation == holder.generation
                     && process_alive(holder.pid)
                 {
                     holders.push(holder);
@@ -294,14 +353,20 @@ impl FileLockCoordinator {
         holders
     }
 
-    fn wait_of(&self, pid: u32, session: u64) -> Option<ByteClaim> {
+    fn wait_of(&self, pid: u32, session: u64) -> Option<(ByteClaim, u64)> {
         for index in 0..WAIT_SLOT_COUNT {
             if let Some(slot) = self.read_slot(index) {
-                if slot.pid == pid && slot.session == session {
-                    return Some(ByteClaim {
-                        offset: slot.offset,
-                        write: slot.write,
-                    });
+                if slot.pid == pid
+                    && slot.session == session
+                    && self.current_relation_generation(slot.offset) == Some(slot.generation)
+                {
+                    return Some((
+                        ByteClaim {
+                            offset: slot.offset,
+                            write: slot.write,
+                        },
+                        slot.generation,
+                    ));
                 }
             }
         }
@@ -314,24 +379,30 @@ struct WaitSlot {
     session: u64,
     offset: u64,
     write: bool,
+    generation: u64,
 }
+
+#[cfg(test)]
+mod tests;
 
 pub(super) struct HolderSlot {
     pub(super) pid: u32,
     pub(super) session: u64,
     pub(super) offset: u64,
     pub(super) write: bool,
+    pub(super) generation: u64,
 }
 
 impl HolderSlot {
-    const MAGIC: u32 = 0x5551_484c;
+    const MAGIC: u32 = 0x5551_484d;
 
     fn encode(&self) -> [u8; HOLDER_SLOT_SIZE as usize] {
         let mut bytes = [0_u8; HOLDER_SLOT_SIZE as usize];
         bytes[0..4].copy_from_slice(&Self::MAGIC.to_be_bytes());
         bytes[4..8].copy_from_slice(&self.pid.to_be_bytes());
         bytes[8..16].copy_from_slice(&self.offset.to_be_bytes());
-        bytes[16] = u8::from(self.write);
+        bytes[16..24]
+            .copy_from_slice(&((self.generation << 1) | u64::from(self.write)).to_be_bytes());
         bytes[24..32].copy_from_slice(&self.session.to_be_bytes());
         bytes
     }
@@ -348,20 +419,22 @@ impl HolderSlot {
             pid,
             session: u64::from_be_bytes(bytes[24..32].try_into().ok()?),
             offset: u64::from_be_bytes(bytes[8..16].try_into().ok()?),
-            write: bytes[16] != 0,
+            write: bytes[23] & 1 != 0,
+            generation: u64::from_be_bytes(bytes[16..24].try_into().ok()?) >> 1,
         })
     }
 }
 
 impl WaitSlot {
-    const MAGIC: u32 = 0x5551_4c4b;
+    const MAGIC: u32 = 0x5551_4c4c;
 
     fn encode(&self) -> [u8; WAIT_SLOT_SIZE as usize] {
         let mut bytes = [0_u8; WAIT_SLOT_SIZE as usize];
         bytes[0..4].copy_from_slice(&Self::MAGIC.to_be_bytes());
         bytes[4..8].copy_from_slice(&self.pid.to_be_bytes());
         bytes[8..16].copy_from_slice(&self.offset.to_be_bytes());
-        bytes[16] = u8::from(self.write);
+        bytes[16..24]
+            .copy_from_slice(&((self.generation << 1) | u64::from(self.write)).to_be_bytes());
         bytes[24..32].copy_from_slice(&self.session.to_be_bytes());
         bytes
     }
@@ -378,7 +451,8 @@ impl WaitSlot {
             pid,
             session: u64::from_be_bytes(bytes[24..32].try_into().ok()?),
             offset: u64::from_be_bytes(bytes[8..16].try_into().ok()?),
-            write: bytes[16] != 0,
+            write: bytes[23] & 1 != 0,
+            generation: u64::from_be_bytes(bytes[16..24].try_into().ok()?) >> 1,
         })
     }
 }

@@ -40,8 +40,7 @@ use uqa_sql::ast::LockStrength;
 use uqa_sql::SQLError;
 
 use cross_process::{
-    change_gate_claim, relation_byte_claims, row_byte_claims, table_hash, ByteClaim,
-    FileLockCoordinator,
+    change_gate_claim, row_byte_claims, table_hash, ByteClaim, FileLockCoordinator,
 };
 pub use physical_changes::PhysicalRowChangeTarget;
 use physical_changes::{resolve_local_physical_change_target, LocalPhysicalRowChangeTarget};

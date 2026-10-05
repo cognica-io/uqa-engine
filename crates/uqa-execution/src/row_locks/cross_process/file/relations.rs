@@ -13,6 +13,8 @@ use super::{lock_would_block, CoordinatorState, FileLockCoordinator};
 
 const RELATION_ADMISSION_BYTE: u64 = 14;
 
+pub(super) mod identities;
+
 struct Admission<'a> {
     coordinator: &'a FileLockCoordinator,
     active: bool,
@@ -37,10 +39,10 @@ impl Drop for Admission<'_> {
 }
 
 impl FileLockCoordinator {
-    pub(in crate::row_locks) fn try_relation_claim(
+    pub(in crate::row_locks) fn try_slot_claim(
         &self,
         session: u64,
-        relation: &[u8],
+        relation: u64,
         mode: RelationLockMode,
     ) -> Result<Result<(), RelationClaimWait>, String> {
         let mut state = self.state.lock();
@@ -67,12 +69,12 @@ impl FileLockCoordinator {
         result
     }
 
-    /// Admit a relation mode against the holders in other processes. The lock manager has already granted the mode against every session of this process by the relation's exact identity, while relations share these bytes by hash, so a session of this process that holds a byte holds it for a relation of its own and never conflicts here.
+    /// Admit a relation mode against the holders in other processes. The caller retains the exact identity's slot across admission, holding and waiting; local session conflicts have already been checked by the lock manager.
     fn try_admitted_relation(
         &self,
         state: &mut CoordinatorState,
         session: u64,
-        relation: &[u8],
+        relation: u64,
         mode: RelationLockMode,
     ) -> Result<Result<(), RelationClaimWait>, String> {
         for held in RelationLockMode::ALL {
@@ -92,11 +94,32 @@ impl FileLockCoordinator {
                     Err(format!("probe relation-lock holders: {error}"))
                 };
             }
-            self.apply_byte_mode(claim.offset, Some(true), previous)
-                .map_err(|error| format!("restore relation-lock holder after probe: {error}"))?;
+            if let Err(error) = self.apply_byte_mode(claim.offset, Some(true), previous) {
+                Self::poison_relation_slot(state, claim.offset);
+                return Err(format!("restore relation-lock holder after probe: {error}"));
+            }
         }
         self.try_claim_in(state, session, &relation_byte_claims(relation, mode))
             .map(|claim| claim.map_err(RelationClaimWait::Conflict))
+    }
+}
+
+#[cfg(test)]
+impl FileLockCoordinator {
+    fn try_relation_claim(
+        &self,
+        session: u64,
+        relation: &[u8],
+        mode: RelationLockMode,
+    ) -> Result<Result<(), RelationClaimWait>, String> {
+        let Some(slot) = self.try_pin_relation(relation)? else {
+            return Ok(Err(RelationClaimWait::AdmissionBusy));
+        };
+        let result = self.try_slot_claim(session, slot, mode);
+        if !matches!(result, Ok(Ok(()))) {
+            self.unpin_relation(&mut self.state.lock(), relation);
+        }
+        result
     }
 }
 

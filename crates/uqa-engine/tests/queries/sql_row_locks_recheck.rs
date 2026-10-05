@@ -403,7 +403,7 @@ fn cross_process_wait_slot_observer_child() {
                 Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
                 Err(error) => panic!("failed to read the lock sidecar: {error}"),
             }
-            if u32::from_be_bytes(slot[0..4].try_into().unwrap()) == 0x5551_4c4b
+            if u32::from_be_bytes(slot[0..4].try_into().unwrap()) == 0x5551_4c4c
                 && u32::from_be_bytes(slot[4..8].try_into().unwrap()) == waiting_pid
             {
                 std::fs::write(ready, b"1").unwrap();
