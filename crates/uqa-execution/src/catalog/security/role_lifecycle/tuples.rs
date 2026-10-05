@@ -40,13 +40,17 @@ pub(super) fn prepare_drop(
     context: &RoleExecutionContext<'_>,
     bound: &RoleBinding,
 ) -> Result<RoleTuple, SQLError> {
-    let roles = context.analysis.roles.role_definitions();
-    let role = bound
-        .role_definition(&roles)
-        .ok_or_else(|| SQLError::Routine {
-            sqlstate: "XX000".into(),
-            message: format!("could not find tuple for role {}", bound.oid),
-        })?;
+    // Describing dependencies may refresh the same catalog. Retain the selected definition across that boundary and validate its tuple after the dependency checks.
+    let role = {
+        let roles = context.analysis.roles.role_definitions();
+        bound
+            .role_definition(&roles)
+            .cloned()
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "XX000".into(),
+                message: format!("could not find tuple for role {}", bound.oid),
+            })?
+    };
     // `checkSharedDependencies`, once the memberships that name the role are gone.
     if let Some(detail) = context
         .dependencies
@@ -74,5 +78,5 @@ pub(super) fn prepare_drop(
             ),
         });
     }
-    RoleTuple::bind(role)
+    RoleTuple::bind(&role)
 }
