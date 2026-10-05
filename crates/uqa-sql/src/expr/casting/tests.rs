@@ -19,6 +19,22 @@ fn array_literal_rejects_postgresql_unrepresentable_upper_bound() {
 use uqa_core::DecimalValue;
 
 #[test]
+fn temporal_input_range_errors_name_the_postgresql_input_type() {
+    for (target, input, name) in [
+        ("date", "5874898-01-01", "date"),
+        ("timestamp", "294277-01-01", "timestamp"),
+        ("timestamptz", "294277-01-01", "timestamp"),
+    ] {
+        let error = cast_value(&Value::Str(input.into()), target).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22008"));
+        assert_eq!(
+            error.to_string(),
+            format!("{name} out of range: \"{input}\"")
+        );
+    }
+}
+
+#[test]
 fn void_casts_are_limited_to_postgresql_string_categories() {
     assert_eq!(
         cast_value_from(&Value::Str("ignored".into()), "void", Some("text")).unwrap(),

@@ -286,7 +286,14 @@ fn input_error(error: TemporalInputError, ty: &str, text: &str) -> SQLError {
             format!("date/time field value out of range: \"{text}\""),
             date_style.then(|| "Perhaps you need a different \"DateStyle\" setting.".to_string()),
         ),
-        TemporalInputError::OutOfRange => ("22008", format!("{ty} out of range: \"{text}\""), None),
+        TemporalInputError::OutOfRange => {
+            let name = if ty == "timestamp with time zone" {
+                "timestamp"
+            } else {
+                ty
+            };
+            ("22008", format!("{name} out of range: \"{text}\""), None)
+        }
         TemporalInputError::ZoneDisplacement => (
             "22009",
             format!("time zone displacement out of range: \"{text}\""),

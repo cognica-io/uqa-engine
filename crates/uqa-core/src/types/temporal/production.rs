@@ -20,14 +20,29 @@ impl TemporalValue {
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        match self {
-            Self::Date { .. } => Self::parse_date_with_control(input, control),
-            Self::Time { .. } => Self::parse_time_with_control(input, control),
-            Self::TimeTz { .. } => Self::parse_time_tz_with_control(input, control),
-            Self::Timestamp { .. } => Self::parse_timestamp_with_control(input, control),
-            Self::TimestampTz { .. } => Self::parse_timestamp_tz_with_control(input, control),
-            Self::Interval { .. } => Self::parse_interval_with_control(input, control),
+        self.parse_same_kind_at_with_control(input, wall_clock_micros(), control)
+    }
+
+    /// Parse this temporal family using the caller's Unix-microsecond clock for special input values.
+    pub fn parse_same_kind_at_with_control(
+        &self,
+        input: &str,
+        now_micros: i64,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Self>, ValueRetentionError> {
+        Ok(match self {
+            Self::Date { .. } => Self::date_input_with_control(input, now_micros, control)?,
+            Self::Time { .. } => Self::time_input_with_control(input, now_micros, control)?,
+            Self::TimeTz { .. } => Self::time_tz_input_with_control(input, now_micros, control)?,
+            Self::Timestamp { .. } => {
+                Self::timestamp_input_with_control(input, now_micros, control)?
+            }
+            Self::TimestampTz { .. } => {
+                Self::timestamp_tz_input_with_control(input, now_micros, control)?
+            }
+            Self::Interval { .. } => Self::interval_input_with_control(input, control)?,
         }
+        .ok())
     }
 
     pub fn parse_date_with_control(

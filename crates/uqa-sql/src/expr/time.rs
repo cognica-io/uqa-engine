@@ -350,15 +350,18 @@ pub(super) fn coerce_temporal_with_control(
     match v {
         Value::Temporal(t) => Ok(t.clone()),
         Value::Str(s) => {
+            let now_micros = crate::expr::transaction_timestamp_or_clock();
             for parse in [
-                TemporalValue::parse_timestamp_with_control,
-                TemporalValue::parse_date_with_control,
-                TemporalValue::parse_time_with_control,
-                TemporalValue::parse_interval_with_control,
+                TemporalValue::timestamp_input_with_control,
+                TemporalValue::date_input_with_control,
+                TemporalValue::time_input_with_control,
             ] {
-                if let Some(value) = parse(s, control)? {
+                if let Ok(value) = parse(s, now_micros, control)? {
                     return Ok(value);
                 }
+            }
+            if let Some(value) = TemporalValue::parse_interval_with_control(s, control)? {
+                return Ok(value);
             }
             Err(SQLError::TypeMismatch(format!(
                 "cannot parse timestamp {s:?}"

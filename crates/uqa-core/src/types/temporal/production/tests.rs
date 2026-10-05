@@ -77,6 +77,47 @@ fn temporal_quota_and_both_cancellation_scopes_leave_no_scratch() {
 }
 
 #[test]
+fn same_kind_input_uses_the_supplied_clock_and_retains_cancellation() {
+    let budget = MemoryBudget::new(4096);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let kinds = [
+        TemporalValue::Date { days: 1 },
+        TemporalValue::Time {
+            micros: 3_723_456_789,
+        },
+        TemporalValue::TimeTz {
+            micros: 3_723_456_789,
+            offset_minutes: 0,
+        },
+        TemporalValue::Timestamp {
+            micros: 90_123_456_789,
+        },
+        TemporalValue::TimestampTz {
+            micros: 90_123_456_789,
+        },
+    ];
+    for expected in &kinds {
+        assert_eq!(
+            expected
+                .parse_same_kind_at_with_control("now", 90_123_456_789, &control)
+                .unwrap(),
+            Some(expected.clone())
+        );
+        assert_eq!(budget.used(), 0);
+    }
+    original.cancel();
+    for kind in &kinds {
+        assert!(matches!(
+            kind.parse_same_kind_at_with_control("now", 90_123_456_789, &control),
+            Err(ValueRetentionError::Cancelled(_))
+        ));
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn same_kind_parser_preserves_each_temporal_variant_and_cancellation() {
     let fixtures = [
         (TemporalValue::Date { days: 0 }, "2024-02-29"),

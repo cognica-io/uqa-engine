@@ -329,16 +329,31 @@ fn parse_bound(
             Value::Decimal(value)
         }
         RangeSubtype::Date => Value::Temporal(
-            TemporalValue::parse_date_with_control(&text, control)?
-                .ok_or_else(|| range_subtype_error(&text, "date"))?,
+            TemporalValue::date_input_with_control(
+                &text,
+                crate::expr::transaction_timestamp_or_clock(),
+                control,
+            )?
+            .ok()
+            .ok_or_else(|| range_subtype_error(&text, "date"))?,
         ),
         RangeSubtype::Timestamp => Value::Temporal(
-            TemporalValue::parse_timestamp_with_control(&text, control)?
-                .ok_or_else(|| range_subtype_error(&text, "timestamp without time zone"))?,
+            TemporalValue::timestamp_input_with_control(
+                &text,
+                crate::expr::transaction_timestamp_or_clock(),
+                control,
+            )?
+            .ok()
+            .ok_or_else(|| range_subtype_error(&text, "timestamp without time zone"))?,
         ),
         RangeSubtype::TimestampTz => Value::Temporal(
-            TemporalValue::parse_timestamp_tz_with_control(&text, control)?
-                .ok_or_else(|| range_subtype_error(&text, "timestamp with time zone"))?,
+            TemporalValue::timestamp_tz_input_with_control(
+                &text,
+                crate::expr::transaction_timestamp_or_clock(),
+                control,
+            )?
+            .ok()
+            .ok_or_else(|| range_subtype_error(&text, "timestamp with time zone"))?,
         ),
     };
     Ok(control.finish(Some(value), memory)?)

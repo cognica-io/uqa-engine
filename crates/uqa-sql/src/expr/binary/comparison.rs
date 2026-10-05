@@ -72,8 +72,12 @@ pub fn values_equal_nullable_with_control(
     let equal = match (a, b) {
         (Value::Null, _) | (_, Value::Null) => None,
         (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => Some(
-            x.parse_same_kind_with_control(y, control)?
-                .is_some_and(|parsed| x.cmp(&parsed).is_eq()),
+            x.parse_same_kind_at_with_control(
+                y,
+                crate::expr::transaction_timestamp_or_clock(),
+                control,
+            )?
+            .is_some_and(|parsed| x.cmp(&parsed).is_eq()),
         ),
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(y), Value::FixedChar(x)) => {
             Some(compare_fixed_text(x, y, control)?.is_eq())
@@ -140,11 +144,19 @@ pub fn compare_nullable_with_control(
             Ok(Some(compare_fixed_text(x, y, control)?))
         }
         (Value::Temporal(x), Value::Str(y)) => x
-            .parse_same_kind_with_control(y, control)?
+            .parse_same_kind_at_with_control(
+                y,
+                crate::expr::transaction_timestamp_or_clock(),
+                control,
+            )?
             .map(|parsed| Some(x.cmp(&parsed)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
         (Value::Str(x), Value::Temporal(y)) => y
-            .parse_same_kind_with_control(x, control)?
+            .parse_same_kind_at_with_control(
+                x,
+                crate::expr::transaction_timestamp_or_clock(),
+                control,
+            )?
             .map(|parsed| Some(parsed.cmp(y)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
         // Ordering is lexicographic; reaching NULL before a definite comparison leaves it unknown.
