@@ -129,6 +129,26 @@ fn output_for_cast<'a>(
     Ok(None)
 }
 
+/// Array output borrows the input and retains both intermediate labels and final text under the caller's production budget.
+fn enum_array_output(
+    value: &Value,
+    source_ty: Option<&str>,
+    target_ty: &str,
+    target: &ColumnType,
+    engine: &dyn EngineHook,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>> {
+    if !matches!(value, Value::Array(_))
+        || !is_string_type(target)
+        || !super::super::enums::contains_enum_carrier(value)
+    {
+        return Ok(None);
+    }
+    let text_array = ColumnType::Array(Box::new(ColumnType::Text));
+    let labels = cast_catalog_array(value, source_ty, &text_array, engine, control)?;
+    cast_value_from_with_control(&labels, target_ty, Some("text[]"), control).map(Some)
+}
+
 /// Resolve catalog inputs at their external handoff, then admit SQL-owned names, element conversions and output before constructing them.
 pub fn cast_value_with_type_resolution_with_control(
     value: &Value,
@@ -172,6 +192,11 @@ pub fn cast_value_with_type_resolution_with_control(
         )? {
             return Ok(control.retain_external_value(value)?);
         }
+        if let Some(output) =
+            enum_array_output(value, source_ty, target_ty, target, engine, control)?
+        {
+            return Ok(output);
+        }
         if let Some((output, output_source)) = output_for_cast(
             engine,
             value,
@@ -188,7 +213,13 @@ pub fn cast_value_with_type_resolution_with_control(
             );
         }
         control.check()?;
-        if matches!(target, ColumnType::Array(_)) && requires_catalog_array_cast(target) {
+        if matches!(target, ColumnType::Array(_))
+            && (requires_catalog_array_cast(target)
+                || super::super::enums::contains_enum_carrier(value)
+                || resolved_source_type
+                    .as_ref()
+                    .is_some_and(super::super::enums::is_enum_bearing))
+        {
             return cast_catalog_array(value, source_ty, target, engine, control);
         }
     }
