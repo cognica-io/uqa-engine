@@ -10,6 +10,8 @@ mod cache;
 mod cursor;
 mod entry;
 mod filter;
+#[cfg(test)]
+pub(in crate::mvcc) mod read_counts;
 mod reader;
 #[cfg(test)]
 mod tests;
@@ -191,6 +193,8 @@ impl SpilledRun {
         location: ValueLocation,
         control: &StorageReadControl,
     ) -> VersionResult<Arc<BudgetedVec<u8>>> {
+        #[cfg(test)]
+        read_counts::value();
         let mut value = BudgetedVec::new(control.memory());
         if let Some((chunk, begin)) = self.value_chunk(location, control)? {
             value.extend_from_slice(&chunk[begin..begin + location.len as usize])?;
