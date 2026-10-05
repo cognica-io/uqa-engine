@@ -6,6 +6,7 @@
 
 mod origin;
 mod refresh;
+mod requirements;
 mod serializable;
 #[cfg(test)]
 mod tests;
@@ -14,7 +15,7 @@ use std::sync::Arc;
 
 use uqa_core::memory::BudgetedVec;
 
-use crate::mvcc::commit::{RecordRequirement, RecordWriteKind};
+use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::graph::OwnedGraphMutation;
 use crate::mvcc::key::RecordKey;
 use crate::mvcc::populations::OwnedPopulationMutation;
@@ -27,6 +28,7 @@ use crate::mvcc::{
 };
 use crate::read_control::StorageReadControl;
 use crate::{StorageBackendError, StorageSavepointId};
+use requirements::Requirements;
 
 struct Savepoint {
     name: BudgetedVec<u8>,
@@ -54,7 +56,7 @@ pub(super) struct Transaction {
     graph: BudgetedVec<OwnedGraphMutation>,
     vector: VectorInputs,
     populations: BudgetedVec<OwnedPopulationMutation>,
-    requirements: BudgetedVec<RecordRequirement>,
+    requirements: Requirements,
     outcome: Option<CommitErrorOutcome>,
     savepoints: BudgetedVec<Savepoint>,
     serializable: Option<super::SerializableReadContext>,
@@ -100,7 +102,7 @@ impl Transaction {
             graph: BudgetedVec::new(control.memory()),
             vector: VectorInputs::new(control.memory()),
             populations: BudgetedVec::new(control.memory()),
-            requirements: BudgetedVec::new(control.memory()),
+            requirements: Requirements::new(control.memory()),
             outcome: None,
             savepoints: BudgetedVec::new(control.memory()),
             serializable: None,
@@ -205,6 +207,8 @@ impl Transaction {
             return self.write_shared_record(key, Some(value), RecordWriteKind::Canonical, control);
         }
         self.writable()?;
+        // An unused-key promise does not read the prior revision. If the caller broke that promise, a later requirement must still detect the inconsistent private condition.
+        self.requirements.invalidate_view(key.bytes());
         let write = PreparedRecordWrite::from_shared(key.clone(), None, Some(value.clone()))
             .with_kind(RecordWriteKind::Canonical);
         self.changes.apply_owned(&[write], control)
@@ -304,68 +308,6 @@ impl Transaction {
         Ok(())
     }
 
-    pub(super) fn require_unchanged(
-        &mut self,
-        key: &[u8],
-        control: &StorageReadControl,
-    ) -> VersionResult<()> {
-        self.writable()?;
-        control.check()?;
-        let expected = self
-            .view()?
-            .metadata(key, control)?
-            .and_then(|record| record.revision);
-        for requirement in self.requirements.iter() {
-            control.cancellation().check()?;
-            if requirement.key.bytes() == key {
-                return if requirement.expected == expected {
-                    Ok(())
-                } else {
-                    Err(VersionError::InvalidEncoding(
-                        "record requirements disagree",
-                    ))
-                };
-            }
-        }
-        self.requirements.push(RecordRequirement {
-            key: RecordKey::new(key, control.memory())?,
-            expected,
-        })?;
-        Ok(())
-    }
-
-    pub(super) fn require_observed(
-        &mut self,
-        key: &RecordKey,
-        expected: CommitSequence,
-        control: &StorageReadControl,
-    ) -> VersionResult<()> {
-        self.writable()?;
-        control.check()?;
-        if self.changes.write_kind(key.bytes(), control)?.is_some() {
-            return Err(VersionError::InvalidEncoding(
-                "observed metadata already has a private replacement",
-            ));
-        }
-        for requirement in self.requirements.iter() {
-            control.check()?;
-            if requirement.key.bytes() == key.bytes() {
-                return if requirement.expected == Some(expected) {
-                    Ok(())
-                } else {
-                    Err(VersionError::InvalidEncoding(
-                        "observed metadata preconditions disagree",
-                    ))
-                };
-            }
-        }
-        self.requirements.push(RecordRequirement {
-            key: key.clone(),
-            expected: Some(expected),
-        })?;
-        Ok(())
-    }
-
     pub(super) fn write_observed(
         &mut self,
         key: &RecordKey,
@@ -457,7 +399,7 @@ impl Transaction {
             truncate_retained(&mut self.graph, graph_position);
             self.vector = vector;
             truncate_retained(&mut self.populations, population_position);
-            truncate_retained(&mut self.requirements, requirement_position);
+            self.requirements.truncate(requirement_position);
             self.notification = notification;
         }
         self.changes.release_savepoint(id)?;
@@ -545,10 +487,8 @@ impl Transaction {
             &mut self.populations,
             self.savepoints[position].population_position,
         );
-        truncate_retained(
-            &mut self.requirements,
-            self.savepoints[position].requirement_position,
-        );
+        self.requirements
+            .truncate(self.savepoints[position].requirement_position);
         self.savepoints.truncate(position + 1);
         Ok(())
     }

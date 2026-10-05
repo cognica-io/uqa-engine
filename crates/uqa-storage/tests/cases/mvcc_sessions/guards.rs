@@ -294,3 +294,37 @@ fn requirement_only_commit_does_not_rewrite_definitions_and_undo_keeps_prior_rea
     assert!(a.commit_transaction().is_err());
     a.rollback_transaction().unwrap();
 }
+
+#[test]
+fn repeated_requirements_keep_conflicts_after_successful_and_failed_refresh() {
+    for existing in [false, true] {
+        let persistence = Persistence::new();
+        let a = persistence.session(1 << 20);
+        let b = persistence.session(1 << 20);
+        if existing {
+            a.put(b"endpoint", b"original").unwrap();
+        }
+        a.begin_transaction().unwrap();
+        a.with_mutation(&mut |_, batch| batch.require_unchanged(b"endpoint"))
+            .unwrap();
+        a.put(b"endpoint", b"own replacement").unwrap();
+        b.put(b"unrelated", b"committed").unwrap();
+        a.refresh_transaction_snapshot(a.retention_control().cancellation())
+            .unwrap();
+        for _ in 0..16 {
+            a.with_mutation(&mut |_, batch| batch.require_unchanged(b"endpoint"))
+                .unwrap();
+        }
+        b.put(b"endpoint", b"peer replacement").unwrap();
+        assert!(a
+            .refresh_transaction_snapshot(a.retention_control().cancellation())
+            .unwrap_err()
+            .to_string()
+            .contains("dependency"));
+        a.with_mutation(&mut |_, batch| batch.require_unchanged(b"endpoint"))
+            .unwrap();
+        assert!(a.commit_transaction().is_err());
+        a.rollback_transaction().unwrap();
+        assert_eq!(b.get(b"endpoint").unwrap().unwrap(), b"peer replacement");
+    }
+}
