@@ -199,19 +199,13 @@ fn should_skip_existing_create_table_as<S: Clone>(
     if !context.namespace.relation_exists(name)? {
         return Ok(false);
     }
-    let (_, relation) = uqa_core::RelationIdentity::parse_reference(execution.name)
-        .map_err(SQLError::Unsupported)?;
-    if execution.if_not_exists {
-        context.notices.push(
-            uqa_sql::SQLNotice::notice(format!("relation \"{relation}\" already exists, skipping"))
-                .with_sqlstate("42P07"),
-        );
-        return Ok(true);
-    }
-    Err(SQLError::Routine {
-        sqlstate: "42P07".into(),
-        message: format!("relation \"{relation}\" already exists"),
-    })
+    context
+        .notices
+        .push(uqa_sql::schema::table_creation::existing_create_as_target(
+            execution.name,
+            execution.if_not_exists,
+        )?);
+    Ok(true)
 }
 
 fn create_table_as_relation(

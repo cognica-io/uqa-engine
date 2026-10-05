@@ -6,6 +6,21 @@
 
 use crate::{RowSchema, SQLError};
 
+/// Scanning an unpopulated materialized view fails even if the query would read no rows.
+pub fn require_materialized_view_population(name: &str, populated: bool) -> Result<(), SQLError> {
+    if populated {
+        return Ok(());
+    }
+    let (_, relation) =
+        uqa_core::RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
+    Err(SQLError::Diagnostic {
+        sqlstate: "55000".into(),
+        message: format!("materialized view \"{relation}\" has not been populated"),
+        detail: None,
+        hint: Some("Use the REFRESH MATERIALIZED VIEW command.".into()),
+    })
+}
+
 pub fn create_view_output_columns(
     schema: &RowSchema,
     declared: &[String],

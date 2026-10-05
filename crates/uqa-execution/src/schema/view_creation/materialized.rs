@@ -18,7 +18,9 @@ use crate::row_locks::{
 };
 use uqa_core::RelationIdentity;
 use uqa_sql::{
-    catalog::view::{create_view_output_columns, validate_view_column_types},
+    schema::table_creation::{
+        create_table_as_columns, existing_create_as_target, validate_create_table_as_columns,
+    },
     SQLError,
 };
 
@@ -57,26 +59,24 @@ fn materialized_rows(
         .collect()
 }
 
-fn bind_materialized_view_target(
+fn skip_existing_materialized_view(
     context: &ViewCreationContext<'_>,
     name: &str,
     if_not_exists: bool,
-) -> Result<Option<String>, SQLError> {
+) -> Result<bool, SQLError> {
     let resolved = context.namespace.resolve_persistent_name(name)?;
-    if let Some(kind) = context
+    if context
         .names
         .relation_kind_at(&resolved)
         .map_err(|error| SQLError::Internal(format!("resolve relation `{resolved}`: {error}")))?
+        .is_some()
     {
-        if if_not_exists {
-            return Ok(None);
-        }
-        return Err(SQLError::Routine {
-            sqlstate: "42P07".into(),
-            message: format!("relation \"{resolved}\" already exists as {kind}"),
-        });
+        context
+            .notices
+            .push(existing_create_as_target(name, if_not_exists)?);
+        return Ok(true);
     }
-    context.namespace.persistent_relation_name(name).map(Some)
+    Ok(false)
 }
 
 pub fn register_materialized_view_plan(
@@ -107,18 +107,18 @@ pub fn register_materialized_view_plan(
         let query_schema = context.bindings.bind_routines(&mut plan, params)?;
         context.bindings.bind_type_identities(&mut plan)?;
         reject_regrole_constants(context, &mut plan)?;
-        let output_columns = create_view_output_columns(&query_schema, column_names)?;
-        // BuildDescForRelation requires USAGE on every column's type before CheckAttributeNamesTypes rejects system column names and pseudo-types.
-        for ty in query_schema.column_types().iter().flatten() {
-            context.routines.require_type_usage(ty)?;
-        }
-        for column in &output_columns {
-            uqa_sql::schema::columns::validate_postgres_column_name(column)?;
-        }
-        validate_view_column_types(&query_schema, &output_columns)?;
-        let Some(name) = bind_materialized_view_target(context, name, if_not_exists)? else {
+        // PostgreSQL analyzes the source before CreateTableAsRelExists, then builds the column list before DefineRelation checks schema CREATE and column validity.
+        if skip_existing_materialized_view(context, name, if_not_exists)? {
             return Ok(None);
-        };
+        }
+        let columns = create_table_as_columns(&query_schema, column_names)?;
+        // Re-resolve the original name and authority after namespace waits; skipped targets never retain a namespace dependency.
+        let name = context.namespace.persistent_relation_name(name)?;
+        validate_create_table_as_columns(context.routines, &columns)?;
+        let output_columns = columns
+            .into_iter()
+            .map(|column| column.name)
+            .collect::<Vec<_>>();
         context.namespace.retain_owner(&owner)?;
         context.namespace.ensure_create(&name)?;
         context.namespace.reserve_row_type_name(&name)?;
