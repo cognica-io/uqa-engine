@@ -34,7 +34,7 @@ fn owner(row: &[ValueRef<'_>]) -> Result<NativeRecordOwner> {
 }
 
 impl NativeSnapshot {
-    pub(super) fn sequence_named(
+    pub(in crate::catalog::native) fn sequence_named(
         &self,
         relation: &RelationIdentity,
     ) -> Result<Option<NativeRecordOwner>> {

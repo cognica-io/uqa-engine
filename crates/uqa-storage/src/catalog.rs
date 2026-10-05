@@ -22,6 +22,7 @@ pub mod graph_identifiers;
 pub mod graph_observations;
 pub(crate) mod graph_snapshot;
 mod identity;
+mod record_revisions;
 mod relation;
 pub mod relation_acl;
 mod relation_security;
@@ -35,6 +36,7 @@ pub use graph_access::{
     GraphEntityFilter, GraphEntityKind, GraphEntitySelector, MAX_GRAPH_ID_PAGE,
 };
 pub use identity::new_nonzero_catalog_identity;
+pub use record_revisions::{CatalogRecordRef, CatalogRecordRevision};
 pub use relation::RelationIdentity;
 pub use relation_security::{BoundRelationSecurity, LegacyRelationSecurity, RelationSecurityRow};
 pub use sequence_security::{BoundSequenceSecurity, LegacySequenceSecurity, SequenceSecurityRow};
@@ -288,6 +290,14 @@ pub trait CatalogFacade: Send + Sync {
     /// Read transactional cache generations without loading schemas or column
     /// statistics. Providers without change tracking use conservative reloads.
     fn cache_revisions(&self) -> StorageBackendResult<Option<CatalogCacheRevisions>> {
+        Ok(None)
+    }
+
+    /// Read selected catalog-record identities from one committed/private boundary, in request order and without loading table data. An outer `None` means this provider has no exact record tracking; an inner `None` means the selected record is absent. Callers must not interpret unavailable tracking as an unchanged object.
+    fn record_revisions(
+        &self,
+        _records: &[CatalogRecordRef<'_>],
+    ) -> StorageBackendResult<Option<Vec<Option<CatalogRecordRevision>>>> {
         Ok(None)
     }
 
