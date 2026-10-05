@@ -4,7 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::key_value::{KeyValueRead, KeyValueReadRevision};
+use crate::key_value::{
+    KeyPresenceVisitor, KeyValuePointVisitor, KeyValueRead, KeyValueReadKeyIterator,
+    KeyValueReadRevision,
+};
 use crate::mvcc::{DatabaseId, VersionError};
 use crate::mvcc::{MergedRecordSnapshot, VersionResult};
 use crate::read_control::{KeyReadVisitor, KeyValueReadVisitor, StorageReadControl};
@@ -136,6 +139,43 @@ impl KeyValueRead for RecordRead<'_> {
                 visit(record.and_then(|record| record.value)).map_err(Into::into)
             })
             .map_err(VersionError::into_storage_error)
+    }
+
+    fn visit_values(
+        &self,
+        keys: &mut KeyValueReadKeyIterator<'_>,
+        visit: &mut KeyValuePointVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        let mut keys = keys.map(|key| key.map_err(VersionError::from));
+        self.view
+            .visit_values(&mut keys, self.control, &mut |key, record| {
+                visit(key, record.and_then(|record| record.value)).map_err(Into::into)
+            })
+            .map_err(VersionError::into_storage_error)
+    }
+
+    fn visit_key_presence(
+        &self,
+        keys: &mut KeyValueReadKeyIterator<'_>,
+        visit: &mut KeyPresenceVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        let mut selected = self.view.selected(self.control);
+        loop {
+            self.control.check()?;
+            let Some(key) = keys.next() else {
+                return Ok(());
+            };
+            let key = key?;
+            let present = selected
+                .metadata(&key, self.control)
+                .map_err(VersionError::into_storage_error)?
+                .is_some_and(|record| record.live);
+            let more = visit(&key, present)?;
+            self.control.check()?;
+            if !more {
+                return Ok(());
+            }
+        }
     }
 
     fn visit_value_bounded(
@@ -280,6 +320,20 @@ impl KeyValueRead for RetainedRecordRead {
         visit: &mut KeyValueReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
         self.read().visit_prefix(prefix, visit)
+    }
+    fn visit_values(
+        &self,
+        keys: &mut KeyValueReadKeyIterator<'_>,
+        visit: &mut KeyValuePointVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.read().visit_values(keys, visit)
+    }
+    fn visit_key_presence(
+        &self,
+        keys: &mut KeyValueReadKeyIterator<'_>,
+        visit: &mut KeyPresenceVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.read().visit_key_presence(keys, visit)
     }
     fn visit_value_budgeted(
         &self,

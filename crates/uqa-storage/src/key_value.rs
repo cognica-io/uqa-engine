@@ -54,8 +54,8 @@ pub(crate) mod occurrence_records;
 pub use occurrence_records::KeyValueOccurrenceRecords;
 mod view;
 pub use view::{
-    KeyValueMutation, KeyValueRead, KeyValueReadRevision, KeyValueReadScope,
-    KeyValueVersionedMutation,
+    KeyPresenceVisitor, KeyValueMutation, KeyValuePointVisitor, KeyValueRead,
+    KeyValueReadKeyIterator, KeyValueReadRevision, KeyValueReadScope, KeyValueVersionedMutation,
 };
 
 const TAG_METADATA: u8 = b'm';

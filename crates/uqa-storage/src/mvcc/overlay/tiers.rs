@@ -43,6 +43,7 @@ struct RunHead {
 
 /// Visits the changes of a private root in key order: its memory tier first, then its runs from newest to oldest, so that only the newest change of each key is returned.
 pub(super) struct TieredCursor<'a> {
+    records: Option<&'a super::Records>,
     memtable: Option<Peekable<BudgetedSharedMapIter<'a, RecordKey, Change>>>,
     runs: Vec<RunHead>,
 }
@@ -63,9 +64,35 @@ impl<'a> TieredCursor<'a> {
             heads.push(RunHead { cursor, head });
         }
         Ok(Self {
+            records,
             memtable,
             runs: heads,
         })
+    }
+
+    /// Continue at or beyond this key without decoding every intervening change. Heads already beyond the bound retain their decoded entry and readers.
+    pub(super) fn seek_to(
+        &mut self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<TieredChange<'a>>> {
+        control.check()?;
+        if self
+            .memtable
+            .as_mut()
+            .and_then(Peekable::peek)
+            .is_some_and(|(current, _)| current.bytes() < key)
+        {
+            self.memtable = self
+                .records
+                .map(|records| records.range_from::<[u8]>(Bound::Included(key)).peekable());
+        }
+        for run in &mut self.runs {
+            if run.head.as_ref().is_some_and(|head| head.key.bytes() < key) {
+                run.head = run.cursor.seek_to(key, control)?;
+            }
+        }
+        self.next(control)
     }
 
     /// The next key's newest change, or `None` after the last key.

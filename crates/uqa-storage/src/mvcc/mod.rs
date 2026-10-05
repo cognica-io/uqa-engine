@@ -107,7 +107,8 @@ pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{
     retain_record_snapshot, BorrowedRecord, CommittedRecordSnapshot, MergedRecordSnapshot,
     RecordKeyIterator, RecordKeyVisitor, RecordMetadata, RecordPointVisitor, RecordScanVisitor,
-    RecordValueVisitor, ScannedVisibleRecord, VisibleRecord, VisibleRecordRevision,
+    RecordValueVisitor, ScannedVisibleRecord, SelectedRecordRead, VisibleRecord,
+    VisibleRecordRevision,
 };
 
 mod maintenance;
