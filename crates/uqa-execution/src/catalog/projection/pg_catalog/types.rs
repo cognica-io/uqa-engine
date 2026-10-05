@@ -444,6 +444,7 @@ fn build_pg_type_rows(
         types.push(array);
     }
     types.extend(super::composites::composite_type_rows(catalog)?);
+    types.extend(super::row_types::relation_type_rows(catalog));
     for definition in catalog.enums() {
         let ty = definition.column_type();
         let owner = int_value(definition.owner.oid);

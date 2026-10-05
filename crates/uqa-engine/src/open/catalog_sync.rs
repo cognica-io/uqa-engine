@@ -34,6 +34,7 @@ impl Engine {
             on_commit: table.on_commit,
             hierarchy: table.hierarchy.read().clone(),
             catalog_oids: table.recorded_catalog_oids(),
+            row_type_array_name: table.row_type_array_name.read().clone(),
         };
         let security = table.security();
         serde_json::to_vec(&(

@@ -100,6 +100,7 @@ fn view(kind: StoredViewKind) -> StoredView {
         definition: crate::catalog::stored_view::StoredViewDefinition {
             object_id: [1; 16],
             catalog_oids: None,
+            row_type_array_name: None,
             query: *query,
             output_columns: Some(vec!["allowed".into(), "hidden".into()]),
             persistence: RelationPersistence::Permanent,

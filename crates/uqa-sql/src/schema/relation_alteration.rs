@@ -81,7 +81,10 @@ pub fn view_alter_target(
     statement: &AlterViewStmt,
     notice: &mut dyn FnMut(&str),
 ) -> Result<Option<RelationAlterTarget>, SQLError> {
-    let resolution = if matches!(statement.action, AlterViewAction::RenameTo(_)) {
+    let resolution = if matches!(
+        statement.action,
+        AlterViewAction::RenameTo(_) | AlterViewAction::SetSchema(_)
+    ) {
         resolve_relation_rename_source(resolution, &statement.name, statement.if_exists, notice)?
     } else {
         resolution.into_found()
@@ -103,7 +106,10 @@ pub fn foreign_table_alter_target(
     statement: &AlterForeignTableStmt,
     notice: &mut dyn FnMut(&str),
 ) -> Result<Option<RelationAlterTarget>, SQLError> {
-    let resolution = if matches!(statement.action, AlterForeignTableAction::RenameTo(_)) {
+    let resolution = if matches!(
+        statement.action,
+        AlterForeignTableAction::RenameTo(_) | AlterForeignTableAction::SetSchema(_)
+    ) {
         let Some((canonical, kind)) = resolve_relation_rename_source(
             resolution,
             &statement.name,
@@ -186,3 +192,5 @@ pub fn set_view_options(options: &mut Vec<(String, String)>, changes: &[(String,
 pub fn reset_view_options(options: &mut Vec<(String, String)>, names: &[String]) {
     options.retain(|(current, _)| !names.contains(current));
 }
+
+pub mod relocation;

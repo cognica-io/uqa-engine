@@ -20,6 +20,7 @@ use uqa_storage::{StorageBackendResult, ViewRow};
 impl Engine {
     pub(crate) fn view_alter_context(&self) -> ViewAlterContext<'_> {
         ViewAlterContext {
+            schema_moves: self.relation_schema_context(),
             names: self,
             catalog: self,
             authority: self.table_privilege_context(),

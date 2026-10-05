@@ -182,6 +182,7 @@ impl Engine {
         let key_constraints = t.key_constraints.read().clone();
         let hierarchy = t.hierarchy.read().clone();
         let columns_declared = *t.columns_declared.read();
+        let row_type_array_name = t.row_type_array_name.read().clone();
         Ok(uqa_sql::ast::TableConstraintSet {
             columns_declared: Some(columns_declared),
             persistence: t.persistence,
@@ -191,6 +192,7 @@ impl Engine {
             key_constraints,
             hierarchy,
             catalog_oids: t.recorded_catalog_oids(),
+            row_type_array_name,
         })
     }
 

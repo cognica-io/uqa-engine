@@ -181,7 +181,10 @@ fn register_view_plan_inner(
         })?;
         (object_id, Some(allocate_view_oids(context, &relation)?))
     };
-    let view = StoredView {
+    let row_type_array_name = existing_view
+        .as_ref()
+        .and_then(|view| view.row_type_array_name.clone());
+    let mut view = StoredView {
         security: existing_view.as_ref().map_or_else(
             || uqa_sql::catalog::security::BoundTableSecurity::owner(owner.identity()),
             |view| view.security.clone(),
@@ -197,6 +200,7 @@ fn register_view_plan_inner(
             materialized_column_types: Vec::new(),
             populated: true,
             catalog_oids,
+            row_type_array_name,
         },
     };
     uqa_sql::semantics::view_rewrite::validate_view_definition_check_option(
@@ -206,6 +210,11 @@ fn register_view_plan_inner(
     )?;
     if existing_view.is_none() {
         context.namespace.reserve_row_type_name(&name)?;
+        view.row_type_array_name = Some(crate::schema::types::arrays::reserve_array_name(
+            &context.namespace,
+            &relation.schema,
+            &relation.name,
+        )?);
     }
     publication::publish_regular_view(context.publication, context.changes, relation, view, &name)?;
     Ok(())

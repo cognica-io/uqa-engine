@@ -182,6 +182,9 @@ impl Engine {
             persistence: metadata.persistence,
             on_commit: metadata.on_commit,
             catalog_oids: metadata.recorded_catalog_oids(),
+            row_type_array_name: crate::state::CatalogCell::from_snapshot(
+                metadata.row_type_array_name.snapshot(),
+            ),
         })
     }
 }

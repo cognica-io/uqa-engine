@@ -17,6 +17,7 @@ mod index_registry;
 mod relations;
 mod roles;
 mod routines;
+mod row_type_arrays;
 mod schemas;
 mod sequences;
 mod table_alteration;

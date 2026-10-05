@@ -15,6 +15,21 @@ use uqa_sql::schema::domains::removal::TypeObjectBinding;
 use uqa_sql::SQLError;
 
 impl Engine {
+    pub(crate) fn relation_array_context(
+        &self,
+    ) -> uqa_execution::schema::types::relation_arrays::RelationArrayContext<'_> {
+        uqa_execution::schema::types::relation_arrays::RelationArrayContext {
+            catalog: self,
+            tables: self,
+            views: self,
+            foreign: self,
+            foreign_publication: self,
+            storage: self.storage.catalog.as_deref(),
+            changes: self,
+            relations: self,
+            locks: self,
+        }
+    }
     pub(crate) fn type_lifecycle_context(&self) -> TypeLifecycleContext<'_> {
         TypeLifecycleContext {
             creation: self.relation_creation_context(),

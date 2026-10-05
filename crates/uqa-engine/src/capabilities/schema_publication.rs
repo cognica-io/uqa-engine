@@ -96,6 +96,7 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             persistence: self.state.persistence,
             on_commit: self.state.on_commit,
             catalog_oids: self.state.recorded_catalog_oids(),
+            row_type_array_name: self.state.row_type_array_name.read().clone(),
         }
     }
     fn publish_expressions(&self, columns: &[ColumnDef], checks: &[uqa_sql::ast::TableCheck]) {
@@ -121,10 +122,12 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             on_commit: self.state.on_commit,
             hierarchy: self.state.hierarchy.read().clone(),
             catalog_oids: self.state.recorded_catalog_oids(),
+            row_type_array_name: self.state.row_type_array_name.read().clone(),
             ..TableConstraintSet::default()
         }
     }
     fn publish_constraints(&self, columns: Vec<ColumnDef>, constraints: TableConstraintSet) {
+        *self.state.row_type_array_name.write() = constraints.row_type_array_name;
         *self.state.columns.write() = columns;
         *self.state.table_checks.write() = constraints.checks;
         *self.state.foreign_keys.write() = constraints.foreign_keys;
@@ -154,6 +157,7 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             key_constraints: self.state.key_constraints.read().clone(),
             hierarchy: self.state.hierarchy.read().clone(),
             catalog_oids: self.state.recorded_catalog_oids(),
+            row_type_array_name: self.state.row_type_array_name.read().clone(),
         }
     }
     fn columns_declared(&self) -> bool {
@@ -180,6 +184,7 @@ impl TableSchemaState for SchemaTableBinding<'_> {
         columns: Vec<ColumnDef>,
         constraints: TableConstraintSet,
     ) {
+        *self.state.row_type_array_name.write() = constraints.row_type_array_name;
         *self.state.columns_declared.write() = columns_declared;
         *self.state.columns.write() = columns;
         *self.state.table_checks.write() = constraints.checks;

@@ -391,6 +391,25 @@ impl Engine {
         self.with_implicit_storage_transaction(|engine| engine.try_rename_table_inner(from, to))
     }
 
+    fn reserve_table_array_rename(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<Option<String>> {
+        let state = self
+            .require_table(&from.qualified_name())
+            .map_err(|error| StorageBackendError::backend("ALTER TABLE array type", error))?;
+        let recorded_array = state.row_type_array_name.read().clone();
+        uqa_execution::schema::types::relation_arrays::rename(
+            &self.relation_creation_context(),
+            from,
+            to,
+            recorded_array.as_deref(),
+            state.relation_oids().array_type,
+        )
+        .map_err(|error| StorageBackendError::backend("ALTER TABLE array type", error))
+    }
+
     /// Rename or move a table inside the caller's storage transaction: `ALTER SCHEMA RENAME` moves every table of a schema this way, so the catalog is refreshed once the whole schema is consistent rather than after each table.
     pub(crate) fn try_rename_table_inner(
         &self,
@@ -425,9 +444,7 @@ impl Engine {
                 "relation `{to}` already exists as {kind}"
             )));
         }
-        self.relation_creation_context()
-            .reserve_row_type_name(&to)
-            .map_err(|error| StorageBackendError::backend("ALTER TABLE name", error))?;
+        let array_name = self.reserve_table_array_rename(&from_relation, &to_relation)?;
         let persist_catalog = {
             let tables = self.storage.tables.read();
             if !tables.contains_key(&from_relation) || tables.contains_key(&to_relation) {
@@ -453,6 +470,7 @@ impl Engine {
         };
         tables.insert(to_relation.clone(), state.clone());
         drop(tables);
+        *state.row_type_array_name.write() = array_name;
         self.rewrite_relation_rename_dependents(&from_relation, &to_relation)?;
         self.rename_catalog_index_table_refs(&from, &to);
         {
@@ -487,6 +505,7 @@ impl Engine {
         self.refresh_value_indexes_for_table(&to)?;
         self.rename_constraint_transaction_relation(&from_relation, &to_relation);
         self.note_prepared_table_change(&state);
+        self.clear_regtype_output_cache();
         Ok(true)
     }
 }

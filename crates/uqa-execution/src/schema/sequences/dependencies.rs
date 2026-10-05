@@ -81,6 +81,15 @@ pub fn rewrite_view_sequence_references(
     to: &str,
 ) -> StorageBackendResult<()> {
     context.views.synchronize_catalog()?;
+    rewrite_loaded_view_sequence_references(context, from, to)
+}
+
+/// Rewrite the already synchronized catalog while a locked relocation is being published.
+pub(super) fn rewrite_loaded_view_sequence_references(
+    context: &ViewSequenceRewriteContext<'_>,
+    from: &RelationIdentity,
+    to: &str,
+) -> StorageBackendResult<()> {
     let mut rewritten_views = Vec::new();
     let views = context.views.view_definitions();
     for (relation, stored) in views.iter() {

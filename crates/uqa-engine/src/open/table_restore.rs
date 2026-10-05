@@ -15,6 +15,33 @@ use crate::{VectorIndexOpenMode, VectorIndexSpec};
 use uqa_execution::schema::indexes::constraint_names::KeyConstraintNames;
 
 impl Engine {
+    /// Restore and complete relation array metadata inside the caller's initial catalog transaction.
+    pub(super) fn restore_initial_catalog(
+        &mut self,
+        catalog: &dyn CatalogFacade,
+        backend: &dyn PersistentStorageBackend,
+    ) -> StorageBackendResult<()> {
+        self.restore_from_catalog(
+            catalog,
+            backend,
+            super::CatalogRestoreMode::InitialMigration,
+        )?;
+        let upgraded = uqa_execution::schema::types::relation_arrays::restoration::upgrade(
+            catalog,
+            &self.restored_catalog_read_view(),
+            &self.session_execution_view().relation_name_resolution(),
+            &mut || {
+                uqa_execution::row_locks::shared_objects::SharedObjectLockSession::next_catalog_oid(
+                    self,
+                )
+            },
+        )?;
+        if upgraded {
+            self.restore_from_catalog(catalog, backend, super::CatalogRestoreMode::LoadOnly)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn restore_from_catalog(
         &mut self,
         catalog: &dyn CatalogFacade,
@@ -60,6 +87,9 @@ impl Engine {
         }
         self.restore_graphs_from_catalog(catalog)?;
         self.restore_engine_registries_from_catalog(catalog, mode)?;
+        uqa_execution::schema::types::relation_arrays::restoration::validate(
+            &self.restored_catalog_read_view(),
+        )?;
         Ok(())
     }
 
@@ -223,6 +253,7 @@ impl Engine {
             persistence: constraints.persistence,
             on_commit: constraints.on_commit,
             catalog_oids: constraints.catalog_oids,
+            row_type_array_name: crate::state::CatalogCell::new(constraints.row_type_array_name),
         }))
     }
 }

@@ -155,6 +155,11 @@ pub fn register_materialized_view_plan(
                 materialized_column_types,
                 populated: !with_no_data,
                 catalog_oids: Some(catalog_oids),
+                row_type_array_name: Some(crate::schema::types::arrays::reserve_array_name(
+                    &context.namespace,
+                    &relation.schema,
+                    &relation.name,
+                )?),
             },
         };
         publication::publish_materialized_view(

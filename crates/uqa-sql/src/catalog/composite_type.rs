@@ -17,8 +17,6 @@ use super::roles::{identity::RoleSubject, RoleDefinition};
 use crate::ast::{ColumnType, CompositeTypeReference, ObjectAclEntry};
 use crate::expr::composites::{CompositeAttribute, CompositeTypeDescriptor};
 
-const MAX_TYPE_NAME_BYTES: usize = 63;
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StoredCompositeAttribute {
@@ -136,8 +134,7 @@ pub fn validate_composite_registry(
         if definition.identity.schema.is_empty()
             || definition.identity.name.is_empty()
             || definition.identity.qualified_name() != *name
-            || definition.array_name.is_empty()
-            || definition.array_name.len() > MAX_TYPE_NAME_BYTES
+            || !super::array_type_names::valid_type_name(&definition.array_name)
         {
             return Err(format!("inconsistent composite name for `{name}`"));
         }

@@ -5,6 +5,7 @@
 //
 
 //! Shared relation rename publication and role-transfer authorization boundaries.
+pub mod relocation;
 use crate::catalog::security::roles::{
     locking::{RoleBinding, RoleLockContext},
     RoleCatalogGuards,

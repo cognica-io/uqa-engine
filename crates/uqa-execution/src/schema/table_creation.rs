@@ -262,6 +262,7 @@ fn publish_catalog_state(
         hierarchy: table.hierarchy.clone(),
         // The created relation's state carries its OIDs; publication records them.
         catalog_oids: None,
+        row_type_array_name: None,
     };
     context
         .schema_transactions

@@ -218,6 +218,15 @@ impl CreationRelationGuards for Fixture {
     }
 }
 impl RelationCreationRuntime for Fixture {
+    fn relation_array_name(&self, _relation: &RelationIdentity, _array_oid: u32) -> Option<String> {
+        None
+    }
+    fn displace_generated_array(&self, _identity: &RelationIdentity) -> Result<bool, SQLError> {
+        Ok(false)
+    }
+    fn displace_relation_array(&self, _identity: &RelationIdentity) -> Result<bool, SQLError> {
+        Ok(false)
+    }
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()> {
         self.refresh("catalog")
     }

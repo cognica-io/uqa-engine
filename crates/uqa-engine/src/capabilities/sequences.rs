@@ -324,7 +324,6 @@ impl Engine {
             views: self.view_sequence_rewrite_context(),
             state: self,
             catalog: self,
-            refresh: self,
             events: self.event_catalog_context(),
             changes: self,
         }

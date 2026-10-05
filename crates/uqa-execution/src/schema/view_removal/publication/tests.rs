@@ -42,6 +42,7 @@ impl Fixture {
                     definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
                         object_id: [7; 16],
                         catalog_oids: None,
+                        row_type_array_name: None,
                         query: *query,
                         output_columns: Some(vec!["value".into()]),
                         persistence: if temporary {

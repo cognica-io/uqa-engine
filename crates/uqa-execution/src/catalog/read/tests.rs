@@ -17,6 +17,7 @@ fn catalog() -> CatalogReadView {
         snapshot.tables.insert(
             RelationIdentity::new(schema, "pg_class"),
             CatalogTableSnapshot {
+                row_type_array_name: None,
                 object_id: [1; 16],
                 catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
                     uqa_sql::catalog::relation_oids::RelationOidKind::Table,

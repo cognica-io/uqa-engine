@@ -24,6 +24,17 @@ impl RelationCreationContext<'_> {
     /// Row-bearing relations reserve both namespaces. Type preflight precedes either wait so concurrent collisions remain uniqueness violations.
     pub fn reserve_row_type_name(&self, name: &str) -> Result<(), SQLError> {
         let identity = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
+        if creation::type_name_in_use(self.relations, &identity) {
+            self.runtime.displace_generated_array(&identity)?;
+        }
+        creation::ensure_type_name_available(self.relations, &identity)?;
+        self.reserve_name(name)?;
+        self.reserve_type_destination(&identity)
+    }
+
+    /// Moving an existing row type to another schema preserves both names; unlike creation or rename, it cannot displace a generated array at the destination.
+    pub fn reserve_row_type_relocation(&self, name: &str) -> Result<(), SQLError> {
+        let identity = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
         creation::ensure_type_name_available(self.relations, &identity)?;
         self.reserve_name(name)?;
         self.reserve_type_destination(&identity)

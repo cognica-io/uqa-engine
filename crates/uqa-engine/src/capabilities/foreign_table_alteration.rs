@@ -25,6 +25,7 @@ use uqa_storage::StorageBackendResult;
 impl Engine {
     pub(crate) fn foreign_table_alter_context(&self) -> ForeignTableAlterContext<'_> {
         ForeignTableAlterContext {
+            schema_moves: self.relation_schema_context(),
             names: self,
             catalog: self,
             authority: self.table_privilege_context(),
@@ -74,6 +75,13 @@ impl ForeignTableOwnerWriter for Engine {
     }
 }
 impl ForeignTableAlterPublication for Engine {
+    fn persist_definition(
+        &self,
+        relation: &RelationIdentity,
+        table: &StoredForeignTable,
+    ) -> StorageBackendResult<()> {
+        uqa_execution::schema::publication::dependencies::ForeignSchemaPublication::persist_foreign_table(self, relation, table)
+    }
     fn persist_rename(
         &self,
         from: &RelationIdentity,

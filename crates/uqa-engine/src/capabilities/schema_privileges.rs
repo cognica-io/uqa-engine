@@ -119,12 +119,17 @@ impl<T, G: std::ops::Deref<Target = BTreeMap<RelationIdentity, T>>> CreationRela
 }
 impl CreationRelationGuards for Engine {
     fn named_type_exists(&self, identity: &RelationIdentity) -> bool {
-        uqa_execution::catalog::projection::named_type_exists(
+        let user_type = uqa_execution::catalog::projection::named_type_exists(
             self.durable.domains.read().values(),
             self.durable.enums.read().values(),
             self.durable.composites.read().values(),
             identity,
-        )
+        );
+        user_type
+            || uqa_execution::schema::types::relation_arrays::type_name_exists(
+                &self.restored_catalog_read_view(),
+                identity,
+            )
     }
     fn tables(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CreationNamesGuard(self.storage.tables.read()))
@@ -156,6 +161,28 @@ impl<G: std::ops::Deref<Target = uqa_execution::catalog::composite_type::Composi
     }
 }
 impl RelationCreationRuntime for Engine {
+    fn relation_array_name(&self, relation: &RelationIdentity, array_oid: u32) -> Option<String> {
+        uqa_execution::schema::types::relation_arrays::current_array_name(
+            &self.restored_catalog_read_view(),
+            relation,
+            array_oid,
+        )
+    }
+    fn displace_generated_array(&self, identity: &RelationIdentity) -> Result<bool, SQLError> {
+        let context = self.type_lifecycle_context();
+        uqa_execution::schema::types::arrays::displace_array_type(
+            &context.creation,
+            context.registries,
+            identity,
+        )
+    }
+    fn displace_relation_array(&self, identity: &RelationIdentity) -> Result<bool, SQLError> {
+        uqa_execution::schema::types::relation_arrays::displace(
+            self.relation_array_context(),
+            &self.relation_creation_context(),
+            identity,
+        )
+    }
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()> {
         Engine::synchronize_catalog_registries(self)
     }

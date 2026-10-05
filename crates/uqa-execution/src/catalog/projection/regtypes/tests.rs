@@ -36,25 +36,17 @@ fn legacy_vector_array_type_lookup_uses_the_array_identity() {
             },
         );
     }
+    let resolve = |name: &str, dimensions| {
+        type_in_schema(&catalog, "pg_catalog", name)
+            .and_then(|(oid, entry)| type_oid_for_dimensions(oid, entry, dimensions))
+    };
     for (name, scalar, array) in [("int2vector", 22, 1006), ("oidvector", 30, 1013)] {
-        assert_eq!(
-            type_oid_in_schema(&catalog, "pg_catalog", name, 0),
-            Some(scalar)
-        );
+        assert_eq!(resolve(name, 0), Some(scalar));
         for dimensions in [1, 2] {
-            assert_eq!(
-                type_oid_in_schema(&catalog, "pg_catalog", name, dimensions),
-                Some(array)
-            );
-            assert_eq!(
-                type_oid_in_schema(&catalog, "pg_catalog", &format!("_{name}"), dimensions),
-                None
-            );
+            assert_eq!(resolve(name, dimensions), Some(array));
+            assert_eq!(resolve(&format!("_{name}"), dimensions), None);
         }
-        assert_eq!(
-            type_oid_in_schema(&catalog, "pg_catalog", &format!("_{name}"), 0),
-            Some(array)
-        );
+        assert_eq!(resolve(&format!("_{name}"), 0), Some(array));
     }
 }
 

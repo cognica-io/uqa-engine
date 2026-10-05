@@ -485,11 +485,8 @@ impl Engine {
                 let cache_revisions = restore_catalog.cache_revisions()?;
                 restore_backend.migrate_inverted_index_storage()?;
                 Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
-                engine.restore_from_catalog(
-                    restore_catalog.as_ref(),
-                    restore_backend.as_ref(),
-                    super::CatalogRestoreMode::InitialMigration,
-                )?;
+                engine
+                    .restore_initial_catalog(restore_catalog.as_ref(), restore_backend.as_ref())?;
                 uqa_execution::catalog::value_restoration::normalize_legacy_vectors(
                     restore_catalog.as_ref(),
                     restore_backend.as_ref(),

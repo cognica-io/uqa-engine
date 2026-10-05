@@ -104,6 +104,7 @@ fn restore_view(
                     materialized_column_types: Vec::new(),
                     populated: true,
                     catalog_oids: None,
+                    row_type_array_name: None,
                 },
                 true,
             ),

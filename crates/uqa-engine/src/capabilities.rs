@@ -270,6 +270,7 @@ impl Engine {
                 let snapshot = CatalogTableSnapshot {
                     object_id: table.object_id(),
                     catalog_oids: table.relation_oids(),
+                    row_type_array_name: table.row_type_array_name.read().clone(),
                     security: table.security.snapshot(),
                     columns: table.columns.snapshot(),
                     columns_declared: *table.columns_declared.read(),

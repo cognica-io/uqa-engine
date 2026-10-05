@@ -82,10 +82,18 @@ impl IndexRegistryChange {
         previous: &CatalogIndexRow,
         renamed: CatalogIndexRow,
     ) -> StorageBackendResult<()> {
-        context.publication.erase_index(previous)?;
-        context.publication.persist_index(&renamed)?;
-        context.publication.forget_index(&previous.relation);
-        context.publication.publish_index(renamed);
+        Self::rename_with_publication(context.publication, previous, renamed)
+    }
+
+    pub(super) fn rename_with_publication(
+        publication: &dyn IndexRegistryPublication,
+        previous: &CatalogIndexRow,
+        renamed: CatalogIndexRow,
+    ) -> StorageBackendResult<()> {
+        publication.erase_index(previous)?;
+        publication.persist_index(&renamed)?;
+        publication.forget_index(&previous.relation);
+        publication.publish_index(renamed);
         Ok(())
     }
 

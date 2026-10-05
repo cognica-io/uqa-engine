@@ -27,6 +27,17 @@ use uqa_sql::{
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
+    pub(crate) fn relation_schema_context(
+        &self,
+    ) -> uqa_execution::schema::relation_alteration::relocation::RelationSchemaContext<'_> {
+        uqa_execution::schema::relation_alteration::relocation::RelationSchemaContext {
+            creation: self.relation_creation_context(),
+            names: self,
+            locks: self,
+            indexes: self.index_registry_context(),
+            sequences: self.sequence_lifecycle_context(),
+        }
+    }
     pub(crate) fn schema_rename_context(&self) -> SchemaRenameContext<'_> {
         SchemaRenameContext {
             tuples: self.schema_lock_context(),
@@ -46,44 +57,20 @@ impl Engine {
         }
     }
 
-    /// An index lives in its table's schema: after the table moved, its index rows take the new schema under their own names.
-    fn relocate_catalog_indexes(
+    /// Retain index identities and namespace destinations before their table moves.
+    fn prepare_catalog_index_relocation(
         &self,
         from: &RelationIdentity,
         to: &RelationIdentity,
-    ) -> Result<(), SQLError> {
-        let table_name = to.qualified_name();
-        let mut rows = self.durable.catalog_indexes.write();
-        let moved: Vec<RelationIdentity> = rows
-            .iter()
-            .filter(|(relation, row)| {
-                relation.schema == from.schema && row.table_name == table_name
-            })
-            .map(|(relation, _)| relation.clone())
-            .collect();
-        for relation in moved {
-            let Some(mut row) = rows.remove(&relation) else {
-                continue;
-            };
-            let target = RelationIdentity::new(&to.schema, &relation.name);
-            row.relation = target.clone();
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                catalog.drop_catalog_index(&relation).map_err(|error| {
-                    SQLError::Internal(format!(
-                        "move index `{}` with its table: {error}",
-                        relation.qualified_name()
-                    ))
-                })?;
-                catalog.save_catalog_index_row(&row).map_err(|error| {
-                    SQLError::Internal(format!(
-                        "store index `{}` in schema `{}`: {error}",
-                        relation.name, to.schema
-                    ))
-                })?;
-            }
-            rows.insert(target, row);
-        }
-        Ok(())
+    ) -> Result<uqa_execution::schema::indexes::relocation::PreparedIndexRelocations, SQLError>
+    {
+        uqa_execution::schema::indexes::relocation::prepare_table_indexes(
+            &self.index_registry_context(),
+            &self.relation_creation_context(),
+            self,
+            from,
+            to,
+        )
     }
 }
 
@@ -202,19 +189,20 @@ impl SchemaMemberRelocation for Engine {
         let to = RelationIdentity::new(schema, &relation.identity.name);
         match relation.kind {
             SchemaRelationKind::Table => {
-                let moved =
-                    self.try_rename_table(&from, &to.qualified_name())
-                        .map_err(|error| {
-                            SQLError::Internal(format!(
-                                "move table `{from}` to schema `{schema}`: {error}"
-                            ))
-                        })?;
+                let indexes = self.prepare_catalog_index_relocation(&relation.identity, &to)?;
+                let moved = self
+                    .try_rename_table_inner(&from, &to.qualified_name())
+                    .map_err(|error| {
+                        SQLError::Internal(format!(
+                            "move table `{from}` to schema `{schema}`: {error}"
+                        ))
+                    })?;
                 if !moved {
                     return Err(SQLError::Internal(format!(
                         "table `{from}` disappeared while its schema was renamed"
                     )));
                 }
-                self.relocate_catalog_indexes(&relation.identity, &to)
+                indexes.publish(self)
             }
             SchemaRelationKind::View => uqa_execution::schema::view_alteration::relocate_view(
                 &self.view_alter_context(),

@@ -251,6 +251,7 @@ fn occupied(oid: i64) -> CatalogReadView {
             name: "hidden_schema.peer".into(),
             object_id: [90; 16],
             catalog_oids: None,
+            row_type_array_name: None,
             server_name: "memory".into(),
             columns,
             checks: Vec::new(),

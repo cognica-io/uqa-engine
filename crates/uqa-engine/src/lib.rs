@@ -590,6 +590,7 @@ struct TableDataSnapshot {
     foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
     key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
     hierarchy: uqa_sql::ast::TableHierarchy,
+    row_type_array_name: Option<String>,
     doc_count_cache: u64,
     doc_count_dirty: bool,
 }
@@ -650,6 +651,7 @@ pub(crate) struct TableState {
     on_commit: uqa_sql::ast::OnCommitAction,
     /// The public OIDs allocated when the table was created; `None` for a table created before OIDs were recorded, which derives them from its identity.
     catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
+    row_type_array_name: state::CatalogCell<Option<String>>,
 }
 
 impl TableState {

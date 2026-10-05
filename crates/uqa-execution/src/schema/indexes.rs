@@ -174,6 +174,7 @@ pub mod constraint_names;
 pub mod creation;
 #[cfg(test)]
 mod declaration_tests;
+pub mod relocation;
 pub mod renaming;
 
 pub mod registration;

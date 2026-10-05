@@ -18,6 +18,7 @@ pub struct StoredForeignTable {
     pub object_id: [u8; 16],
     /// The public OIDs allocated when the foreign table was created; `None` for one created before OIDs were recorded.
     pub catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
+    pub row_type_array_name: Option<String>,
     pub server_name: String,
     pub columns: Vec<ColumnDef>,
     pub checks: Vec<TableCheck>,
@@ -31,6 +32,8 @@ struct PersistedForeignTableSchema {
     object_id: [u8; 16],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    row_type_array_name: Option<String>,
     columns: Vec<ColumnDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     checks: Vec<TableCheck>,
@@ -51,7 +54,7 @@ impl StoredForeignTable {
         schema_json: &str,
     ) -> StorageBackendResult<(Self, bool)> {
         let schema = serde_json::from_str::<ForeignTableSchemaFormat>(schema_json)?;
-        let (object_id, catalog_oids, columns, checks, legacy) = match schema {
+        let (object_id, catalog_oids, row_type_array_name, columns, checks, legacy) = match schema {
             ForeignTableSchemaFormat::Current(schema) => {
                 if schema.version != FOREIGN_TABLE_SCHEMA_VERSION {
                     return Err(StorageBackendError::Other(format!(
@@ -71,18 +74,22 @@ impl StoredForeignTable {
                 (
                     schema.object_id,
                     schema.catalog_oids,
+                    schema.row_type_array_name,
                     schema.columns,
                     schema.checks,
                     false,
                 )
             }
-            ForeignTableSchemaFormat::Legacy(columns) => ([0; 16], None, columns, Vec::new(), true),
+            ForeignTableSchemaFormat::Legacy(columns) => {
+                ([0; 16], None, None, columns, Vec::new(), true)
+            }
         };
         Ok((
             Self {
                 name,
                 object_id,
                 catalog_oids,
+                row_type_array_name,
                 server_name,
                 columns,
                 checks,
@@ -107,6 +114,7 @@ impl StoredForeignTable {
             version: FOREIGN_TABLE_SCHEMA_VERSION,
             object_id: self.object_id,
             catalog_oids: self.catalog_oids,
+            row_type_array_name: self.row_type_array_name.clone(),
             columns: self.columns.clone(),
             checks: self.checks.clone(),
         })

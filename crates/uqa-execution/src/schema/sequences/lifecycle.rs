@@ -5,12 +5,9 @@
 //
 
 //! Execute a sequence rename or schema move and publish every stored reference in order.
-use super::{
-    creation::SequenceCreationNamespace,
-    dependencies::{
-        rewrite_sequence_schema_dependencies, rewrite_view_sequence_references,
-        ViewSequenceRewriteContext,
-    },
+use super::dependencies::{
+    rewrite_loaded_view_sequence_references, rewrite_sequence_schema_dependencies,
+    ViewSequenceRewriteContext,
 };
 use crate::schema::{
     events::EventCatalogContext,
@@ -43,18 +40,20 @@ pub struct SequenceLifecycleContext<'a> {
     pub views: ViewSequenceRewriteContext<'a>,
     pub state: &'a dyn SequenceStateRename,
     pub catalog: &'a dyn SequenceRenameCatalog,
-    pub refresh: &'a dyn SequenceCreationNamespace,
     pub events: EventCatalogContext<'a>,
     pub changes: &'a dyn CatalogPublicationChanges,
 }
 pub fn alter_sequence_lifecycle(
     context: &SequenceLifecycleContext<'_>,
-    source_name: &str,
+    _source_name: &str,
     source: &RelationIdentity,
     persistence: RelationPersistence,
     alter: &AlterSequence,
 ) -> Result<(), SQLError> {
     analysis::validate_sequence_lifecycle_shape(alter)?;
+    context.views.views.synchronize_catalog().map_err(|error| {
+        uqa_sql::catalog::errors::storage_error("sequence relocation catalog", &error)
+    })?;
     let mut target =
         analysis::sequence_lifecycle_target(context.analysis, source, &alter.lifecycle)?;
     if matches!(
@@ -74,6 +73,18 @@ pub fn alter_sequence_lifecycle(
     }
     let target_name = target.qualified_name();
     context.creation.reserve_name(&target_name)?;
+    publish_relocation(context, source, &target, persistence)
+}
+
+/// Publish a destination whose relation and namespace locks the caller already retained. This also serves sequences moving with their owning table, whose ownership must not be cleared to pass the standalone ALTER SEQUENCE check.
+pub(crate) fn publish_relocation(
+    context: &SequenceLifecycleContext<'_>,
+    source: &RelationIdentity,
+    target: &RelationIdentity,
+    persistence: RelationPersistence,
+) -> Result<(), SQLError> {
+    let source_name = source.qualified_name();
+    let target_name = target.qualified_name();
     rewrite_sequence_schema_dependencies(&context.schemas, source, &target_name).map_err(
         |error| {
             SQLError::Internal(format!(
@@ -81,36 +92,30 @@ pub fn alter_sequence_lifecycle(
             ))
         },
     )?;
-    rewrite_view_sequence_references(&context.views, source, &target_name).map_err(|error| {
-        SQLError::Internal(format!(
-            "rewrite view dependencies for sequence `{source_name}`: {error}"
-        ))
-    })?;
-    if persistence == RelationPersistence::Temporary {
-        context.state.move_state(source, &target)?;
-    } else if context.catalog.has_catalog() {
-        if !context
+    rewrite_loaded_view_sequence_references(&context.views, source, &target_name).map_err(
+        |error| {
+            SQLError::Internal(format!(
+                "rewrite view dependencies for sequence `{source_name}`: {error}"
+            ))
+        },
+    )?;
+    if persistence != RelationPersistence::Temporary
+        && context.catalog.has_catalog()
+        && !context
             .catalog
-            .rename_sequence_row(source_name, &target_name)
+            .rename_sequence_row(&source_name, &target_name)
             .map_err(|error| {
                 SQLError::Internal(format!(
                     "persist sequence rename `{source_name}` to `{target_name}`: {error}"
                 ))
             })?
-        {
-            return Err(SQLError::Internal(format!(
-                "sequence `{source_name}` disappeared during rename"
-            )));
-        }
-        context.refresh.refresh_sequences().map_err(|error| {
-            SQLError::Internal(format!(
-                "refresh sequence `{target_name}` after rename: {error}"
-            ))
-        })?;
-    } else {
-        context.state.move_state(source, &target)?;
+    {
+        return Err(SQLError::Internal(format!(
+            "sequence `{source_name}` disappeared during rename"
+        )));
     }
-    crate::schema::events::rename_relation_events(&context.events, source, &target).map_err(
+    context.state.move_state(source, target)?;
+    crate::schema::events::rename_relation_events(&context.events, source, target).map_err(
         |error| {
             SQLError::Internal(format!(
                 "rewrite rule dependencies for sequence `{source_name}`: {error}"
