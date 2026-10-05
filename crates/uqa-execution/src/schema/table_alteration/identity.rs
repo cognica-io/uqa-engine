@@ -382,7 +382,34 @@ fn alter_identity_sequence(
     Ok(())
 }
 
-/// Change the type of an identity column's sequence with the column's own type change, as `PostgreSQL` issues `ALTER SEQUENCE ... AS` for it first. A partition's column draws from its parent's sequence, which the parent's change already retyped.
+/// Validate the identity sequence's type before column checks, as `PostgreSQL` prepares `ALTER SEQUENCE ... AS` first. The caller skips partitions, whose columns draw from their parent's sequence.
+pub(super) fn validate_identity_type(
+    context: &IdentityAlterContext<'_>,
+    column: &ColumnDef,
+    ty: &uqa_sql::ast::ColumnType,
+) -> Result<(), SQLError> {
+    let Some(name) = identity_sequence(column) else {
+        return Ok(());
+    };
+    let relation = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
+    let state = context
+        .definitions
+        .catalog
+        .state(&relation)?
+        .ok_or_else(|| SQLError::Internal(format!("identity sequence `{name}` disappeared")))?;
+    uqa_sql::schema::sequences::declaration::alter_declared_sequence(
+        &SequenceDeclaration {
+            data_type: Some(ty.clone()),
+            ..SequenceDeclaration::default()
+        },
+        &state.definition(),
+        state.current,
+        true,
+    )?;
+    Ok(())
+}
+
+/// Publish the previously validated sequence type in the table's definition transaction.
 pub(super) fn retype_identity_sequence<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     table: &str,

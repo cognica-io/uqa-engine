@@ -10,15 +10,13 @@ use crate::mutation::publication::DocumentVectors;
 use std::collections::BTreeMap;
 use uqa_core::{DocId, Value};
 use uqa_sql::assignment::{
-    columns::{AssignmentColumnCatalog, ColumnCatalogError},
-    conversion::{
-        convert_declared_value_to_column_type, convert_value_to_column_type_with_context,
-    },
+    columns::AssignmentColumnCatalog, conversion::convert_declared_value_to_column_type,
     AssignmentContext,
 };
 use uqa_sql::semantics::partition::PartitionExpressions;
 use uqa_sql::{
-    ast::{ColumnType, Expr},
+    ast::ColumnType,
+    schema::columns::type_transform::{assign_type_transform_value, AnalyzedTypeTransform},
     SQLError,
 };
 use uqa_storage::document_store::Document;
@@ -39,60 +37,43 @@ pub struct ColumnRewriteContext<'a> {
     pub expressions: &'a dyn PartitionExpressions,
     pub writes: &'a dyn ColumnRewritePublication,
 }
-fn ddl_storage_error(action: &str, error: ColumnCatalogError) -> SQLError {
-    uqa_sql::catalog::errors::storage_error(action, error.as_ref())
-}
 /// The rows of `table` with `column` converted from `source_ty` to `target_ty`, by its `USING` expression when the type change has one. A type change rewrites the table with them; their constraints are checked before they replace the stored rows.
-pub fn converted_column_rows(
-    context: &ColumnRewriteContext<'_>,
+pub fn converted_column_rows<S: Clone + 'static>(
+    context: &alteration::ColumnAlterContext<'_, S>,
     table: &str,
     column: &str,
     source_ty: &ColumnType,
     target_ty: &ColumnType,
-    using: Option<&Expr>,
+    transform: Option<&AnalyzedTypeTransform>,
 ) -> Result<Vec<(DocId, Document)>, SQLError> {
-    let definitions = context
-        .columns
-        .try_describe_table(table)
-        .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let schema = crate::RowSchema::with_types(
-        definitions
-            .iter()
-            .map(|definition| definition.name.clone())
-            .collect(),
-        definitions
-            .iter()
-            .map(|definition| {
-                Some(if definition.name == column {
-                    source_ty.clone()
-                } else {
-                    definition.ty.clone()
-                })
-            })
-            .collect(),
-    );
-    let doc_ids = context.reads.live_table_doc_ids(table)?;
+    let rewrite = &context.rewrite;
+    let doc_ids = rewrite.reads.live_table_doc_ids(table)?;
     let mut rows = Vec::with_capacity(doc_ids.len());
     for doc_id in doc_ids {
-        let Some(mut doc) = context.reads.get_document(table, doc_id)? else {
+        let Some(mut doc) = rewrite.reads.get_document(table, doc_id)? else {
             continue;
         };
-        let converted = if let Some(expression) = using {
-            let value = context
-                .expressions
-                .evaluate_row(expression, &doc, &schema, &[])?;
-            Some(convert_value_to_column_type_with_context(
-                context.types,
+        let converted = if let Some(transform) = transform {
+            let value = crate::query::catalog_expression::eval_expression_plan_with_schema(
+                context.generated.assignment.expressions.expressions,
+                crate::query::CteScope::default(),
+                transform.plan.clone(),
+                &doc,
+                transform.row_schema(),
+                &[],
+            )?;
+            Some(assign_type_transform_value(
+                rewrite.types,
                 value,
                 target_ty,
+                transform.source_type.as_ref(),
             )?)
         } else {
             doc.get(column)
                 .cloned()
                 .map(|value| {
                     convert_declared_value_to_column_type(
-                        context.types,
+                        rewrite.types,
                         value,
                         source_ty,
                         target_ty,

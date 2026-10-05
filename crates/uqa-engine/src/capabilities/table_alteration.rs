@@ -54,6 +54,12 @@ impl Engine {
             constraints: self.constraint_alter_context(),
             addition: self.column_addition_context(),
             columns: self.column_alter_context(),
+            plan_type_transform: |expression| {
+                uqa_planner::optimizer::optimize_scalar_expression(
+                    expression,
+                    &uqa_planner::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+                )
+            },
             removal: self.column_removal_context(),
             identities: uqa_execution::schema::table_alteration::identity::IdentityAlterContext {
                 definitions: self.sequence_definition_context(),

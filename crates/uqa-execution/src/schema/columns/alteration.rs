@@ -193,7 +193,7 @@ pub fn alter_type<S: Clone + 'static>(
     qualifier: &str,
     name: &str,
     ty: &ColumnType,
-    using: Option<&Expr>,
+    transform: Option<&uqa_sql::schema::columns::type_transform::AnalyzedTypeTransform>,
 ) -> Result<(), SQLError> {
     let target_generated_kind =
         alteration::analyze_column_type(&context.analysis, table, qualifier, name, ty)?;
@@ -221,7 +221,7 @@ pub fn alter_type<S: Clone + 'static>(
     publish_property(context.transactions, table, name, ColumnProperty::Type(ty))
         .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
     if target_generated_kind.is_none() {
-        let rows = super::converted_column_rows(&context.rewrite, table, name, &old_ty, ty, using)?;
+        let rows = super::converted_column_rows(context, table, name, &old_ty, ty, transform)?;
         let mut changed =
             super::generated::stored_generated_columns(context.generated.keys.constraints, table)?;
         changed.push(name.to_string());
