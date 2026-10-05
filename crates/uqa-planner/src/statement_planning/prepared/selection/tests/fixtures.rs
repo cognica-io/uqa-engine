@@ -87,3 +87,8 @@ pub(super) fn binding_context() -> uqa_sql::binding::context::BindingContext<'st
         scalar_subqueries: &[],
     }
 }
+impl uqa_sql::schema::dependencies::regclass::RegclassInput for NoRoutines {
+    fn resolve_regclass_input(&self, _: &str) -> Result<Option<i64>, uqa_sql::SQLError> {
+        Ok(None)
+    }
+}

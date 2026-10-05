@@ -132,6 +132,113 @@ impl ScalarExpr {
         Ok(())
     }
 
+    /// Visit a window call's arguments, `FILTER` condition, partition and ordering keys, and frame offsets mutably.
+    fn visit_window_mut(
+        args: &mut [Self],
+        filter: Option<&mut Self>,
+        spec: &mut super::ScalarWindowSpec,
+        visitor: &mut impl FnMut(&mut Self),
+    ) {
+        for expression in args
+            .iter_mut()
+            .chain(filter)
+            .chain(&mut spec.partition_by)
+            .chain(spec.order_by.iter_mut().map(|order| &mut order.expr))
+        {
+            expression.visit_mut(visitor);
+        }
+        for bound in spec
+            .frame
+            .iter_mut()
+            .flat_map(|frame| [&mut frame.start, &mut frame.end])
+        {
+            if let ScalarFrameBound::Preceding(expression)
+            | ScalarFrameBound::Following(expression) = bound
+            {
+                expression.visit_mut(visitor);
+            }
+        }
+    }
+
+    /// Visit this expression and every nested scalar expression mutably in pre-order: a node is visited before its children, so the children of a node the visitor replaces are those of the replacement.
+    pub fn visit_mut(&mut self, visitor: &mut impl FnMut(&mut Self)) {
+        visitor(self);
+        match self {
+            Self::And(parts) | Self::Or(parts) | Self::Array(parts) | Self::Row(parts) => {
+                for part in parts {
+                    part.visit_mut(visitor);
+                }
+            }
+            Self::Not(inner)
+            | Self::UnaryMinus(inner)
+            | Self::Cast { expr: inner, .. }
+            | Self::IsNull { expr: inner, .. }
+            | Self::InSubquery { expr: inner, .. } => inner.visit_mut(visitor),
+            Self::Binary { lhs, rhs, .. } => {
+                lhs.visit_mut(visitor);
+                rhs.visit_mut(visitor);
+            }
+            Self::Between { expr, low, high } => {
+                expr.visit_mut(visitor);
+                low.visit_mut(visitor);
+                high.visit_mut(visitor);
+            }
+            Self::InList { expr, list, .. } => {
+                expr.visit_mut(visitor);
+                for part in list {
+                    part.visit_mut(visitor);
+                }
+            }
+            Self::Func {
+                args,
+                order_by,
+                filter,
+                ..
+            } => {
+                for argument in args {
+                    argument.visit_mut(visitor);
+                }
+                for order in order_by {
+                    order.expr.visit_mut(visitor);
+                }
+                if let Some(filter) = filter {
+                    filter.visit_mut(visitor);
+                }
+            }
+            Self::WindowCall {
+                args, spec, filter, ..
+            } => Self::visit_window_mut(args, filter.as_deref_mut(), spec, visitor),
+            Self::Case {
+                base,
+                when,
+                else_branch,
+            } => {
+                if let Some(base) = base {
+                    base.visit_mut(visitor);
+                }
+                for (condition, result) in when {
+                    condition.visit_mut(visitor);
+                    result.visit_mut(visitor);
+                }
+                if let Some(else_branch) = else_branch {
+                    else_branch.visit_mut(visitor);
+                }
+            }
+            Self::Default
+            | Self::Star
+            | Self::QualifiedStar(_)
+            | Self::Column(_)
+            | Self::Position(_)
+            | Self::InternalColumn(_)
+            | Self::QualifiedColumn { .. }
+            | Self::Literal(_)
+            | Self::TypedLiteral { .. }
+            | Self::Param(_)
+            | Self::ScalarSubquery(_)
+            | Self::Exists { .. } => {}
+        }
+    }
+
     /// Collect every column needed to evaluate this expression. Returns `false` when evaluation needs row shape or a relational child that a projected field scan cannot provide.
     pub fn collect_columns(&self, output: &mut std::collections::BTreeSet<String>) -> bool {
         match self.try_visit_columns(&mut |name| {
@@ -577,6 +684,54 @@ mod tests {
         assert!(visited_parameter);
         assert!(expression.contains_window());
         assert!(expression.contains_parameter());
+    }
+
+    #[test]
+    fn mutable_visits_rewrite_nested_expressions() {
+        let literal = || ScalarExpr::Literal(Value::Str("t".into()));
+        let mut expression = ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Case {
+                base: None,
+                when: vec![(
+                    literal(),
+                    ScalarExpr::Cast {
+                        expr: Box::new(literal()),
+                        ty: "regclass".into(),
+                    },
+                )],
+                else_branch: Some(Box::new(ScalarExpr::WindowCall {
+                    name: "sum".into(),
+                    args: vec![literal()],
+                    spec: super::super::ScalarWindowSpec {
+                        partition_by: Vec::new(),
+                        order_by: Vec::new(),
+                        frame: Some(super::super::ScalarWindowFrame {
+                            mode: FrameMode::Rows,
+                            start: ScalarFrameBound::Preceding(Box::new(literal())),
+                            end: ScalarFrameBound::CurrentRow,
+                            between: true,
+                            exclusion: FrameExclusion::NoOthers,
+                        }),
+                    },
+                    filter: Some(Box::new(literal())),
+                    modifiers: crate::ast::WindowCallModifiers::default(),
+                })),
+            }),
+            ty: "text".into(),
+        };
+        let mut rewritten = 0;
+        expression.visit_mut(&mut |part| {
+            if matches!(part, ScalarExpr::Literal(Value::Str(_))) {
+                *part = ScalarExpr::Literal(Value::Int(1));
+                rewritten += 1;
+            }
+        });
+        assert_eq!(rewritten, 5);
+        let mut remaining = 0;
+        expression.visit(&mut |part| {
+            remaining += usize::from(matches!(part, ScalarExpr::Literal(Value::Str(_))));
+        });
+        assert_eq!(remaining, 0);
     }
 
     #[test]

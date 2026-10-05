@@ -25,6 +25,7 @@ impl Engine {
             types: self,
             routines: self,
             scopes: self,
+            regclasses: self,
         }
     }
 

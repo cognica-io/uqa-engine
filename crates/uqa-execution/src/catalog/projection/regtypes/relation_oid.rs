@@ -7,31 +7,50 @@
 //! Relation OID resolution for SQL names and already-bound dependency identities.
 
 use super::{
-    catalog_index_relations, numeric_regobject_oid, qualified_name, relation_name, CatalogContext,
-    NumericRegobjectOid, SQLError,
+    catalog_index_relations, parse_dash_or_oid, qualified_name, qualified_name_list, relation_name,
+    CatalogContext, SQLError,
 };
 
-pub fn lookup_regclass_oid(
-    context: &CatalogContext<'_>,
-    name: &str,
-) -> Result<Option<i64>, SQLError> {
-    match numeric_regobject_oid(name) {
-        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
-        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
-        NumericRegobjectOid::NotNumeric => {}
+/// `regclassin`: `-` and a string of digits are OIDs, and any other string is a relation name, possibly schema-qualified, that the search path resolves. A name `SplitIdentifierString` rejects is `42602`, and a relation the lookup does not find, whether its schema or the relation is missing, is `42P01` naming the parsed components as `NameListToString` joins them.
+pub fn regclass_input_oid(context: &CatalogContext<'_>, name: &str) -> Result<i64, SQLError> {
+    if let Some(oid) = parse_dash_or_oid(name)? {
+        return Ok(oid);
     }
-    let Some(names) = uqa_sql::parse_regobject_name(name) else {
-        return Ok(None);
-    };
+    let names = uqa_sql::parse_regobject_name(name).ok_or_else(|| SQLError::Routine {
+        sqlstate: "42602".into(),
+        message: "invalid name syntax".into(),
+    })?;
     let (schema, local) = relation_name(&names)?;
     let reference = schema.map_or_else(
         || uqa_sql::expr::quote_ident(local),
         |schema| qualified_name(schema, local),
     );
     let Some((canonical, kind)) = context.try_resolve_visible_relation_kind(&reference)? else {
-        return Ok(None);
+        return Err(SQLError::Routine {
+            sqlstate: "42P01".into(),
+            message: format!(
+                "relation \"{}\" does not exist",
+                qualified_name_list(&names)
+            ),
+        });
     };
     resolved_regclass_oid(context, &canonical, kind)
+}
+
+/// `to_regclass`: [`regclass_input_oid`] with the errors `regclassin` reports through its error context, a malformed number or name and a relation it does not find, as no relation.
+pub fn lookup_regclass_oid(
+    context: &CatalogContext<'_>,
+    name: &str,
+) -> Result<Option<i64>, SQLError> {
+    match regclass_input_oid(context, name) {
+        Ok(oid) => Ok(Some(oid)),
+        Err(SQLError::Routine { sqlstate, .. })
+            if matches!(sqlstate.as_str(), "22P02" | "22003" | "42602" | "42P01") =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub fn resolve_bound_regclass_oid(
@@ -41,16 +60,16 @@ pub fn resolve_bound_regclass_oid(
     let Some((canonical, kind)) = context.resolve_bound_relation_kind(name)?.into_found() else {
         return Ok(None);
     };
-    resolved_regclass_oid(context, &canonical, kind)
+    resolved_regclass_oid(context, &canonical, kind).map(Some)
 }
 
 fn resolved_regclass_oid(
     context: &CatalogContext<'_>,
     canonical: &str,
     kind: &str,
-) -> Result<Option<i64>, SQLError> {
+) -> Result<i64, SQLError> {
     if let Some(relation) = uqa_sql::catalog::SystemRelation::from_qualified_name(canonical) {
-        return Ok(Some(relation.oid()));
+        return Ok(relation.oid());
     }
     if kind == "sequence" {
         let object_id = context
@@ -61,9 +80,7 @@ fn resolved_regclass_oid(
                     "resolved sequence `{canonical}` has no object identity"
                 ))
             })?;
-        return Ok(Some(
-            context.catalog_read_view().sequence_catalog_oid(&object_id),
-        ));
+        return Ok(context.catalog_read_view().sequence_catalog_oid(&object_id));
     }
     if kind == "index" {
         let relation =
@@ -79,11 +96,10 @@ fn resolved_regclass_oid(
                     "resolved index `{canonical}` has no catalog relation"
                 ))
             })?;
-        return Ok(Some(index.oid()));
+        return Ok(index.oid());
     }
     if kind == "table" {
         return super::super::table_relation_oid(context, canonical)
-            .map(Some)
             .map_err(|error| SQLError::Internal(error.to_string()));
     }
     let relation =
@@ -100,8 +116,7 @@ fn resolved_regclass_oid(
                 SQLError::Internal(format!(
                     "resolved view `{canonical}` has no catalog definition"
                 ))
-            })
-            .map(Some),
+            }),
         "foreign table" => context
             .catalog_read_view()
             .snapshot()
@@ -113,15 +128,14 @@ fn resolved_regclass_oid(
                 SQLError::Internal(format!(
                     "resolved foreign table `{canonical}` has no catalog definition"
                 ))
-            })
-            .map(Some),
+            }),
         "composite type" => context
             .catalog_read_view()
             .snapshot()
             .definitions
             .composites
             .get(canonical)
-            .map(|definition| Some(i64::from(definition.relation_oid)))
+            .map(|definition| i64::from(definition.relation_oid))
             .ok_or_else(|| {
                 SQLError::Internal(format!(
                     "resolved composite type `{canonical}` has no catalog definition"

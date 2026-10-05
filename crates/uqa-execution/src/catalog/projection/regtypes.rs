@@ -77,11 +77,28 @@ fn numeric_regobject_oid(input: &str) -> NumericRegobjectOid {
     }
 }
 
+/// `parseDashOrOid`: `-` is the invalid OID and a string of digits is an OID `oidin` reads, which reports `22P02` for digits `strtoul` cannot read as one number and `22003` for a value past `uint32`; any other string is a name.
+fn parse_dash_or_oid(input: &str) -> Result<Option<i64>, SQLError> {
+    match numeric_regobject_oid(input) {
+        NumericRegobjectOid::Valid(oid) => Ok(Some(oid)),
+        NumericRegobjectOid::InvalidSyntax => Err(SQLError::Routine {
+            sqlstate: "22P02".into(),
+            message: format!("invalid input syntax for type oid: \"{input}\""),
+        }),
+        NumericRegobjectOid::OutOfRange => Err(SQLError::Routine {
+            sqlstate: "22003".into(),
+            message: format!("value \"{input}\" is out of range for type oid"),
+        }),
+        NumericRegobjectOid::NotNumeric => Ok(None),
+    }
+}
+
+/// `regclassin` for a direct cast: the relation's OID, or the error the input function reports.
 pub fn resolve_regclass_oid(
     context: &CatalogContext<'_>,
     name: &str,
 ) -> Result<Option<i64>, SQLError> {
-    lookup_regclass_oid(context, name)
+    relation_oid::regclass_input_oid(context, name).map(Some)
 }
 
 pub fn resolve_regclass_kind_by_oid(
@@ -238,24 +255,11 @@ pub fn resolve_regproc_input_oid(
         sqlstate: sqlstate.into(),
         message,
     };
-    if name == "-" {
-        return Ok(0);
-    }
-    match numeric_regobject_oid(name) {
-        NumericRegobjectOid::Valid(oid) => return Ok(oid),
-        NumericRegobjectOid::InvalidSyntax => {
-            return Err(input_error(
-                "22P02",
-                format!("invalid input syntax for type oid: \"{name}\""),
-            ))
-        }
-        NumericRegobjectOid::OutOfRange => {
-            return Err(input_error("22003", "OID out of range".into()))
-        }
-        NumericRegobjectOid::NotNumeric => {}
+    if let Some(oid) = parse_dash_or_oid(name)? {
+        return Ok(oid);
     }
     let names = uqa_sql::parse_regobject_name(name)
-        .ok_or_else(|| input_error("42602", format!("invalid name syntax: \"{name}\"")))?;
+        .ok_or_else(|| input_error("42602", "invalid name syntax".into()))?;
     let (schema, local) = object_name(&names)?;
     let catalog = regtype_output_catalog(context)?;
     let namespace_oid = |schema: &str| {
@@ -329,21 +333,8 @@ pub fn resolve_regnamespace_oid(
     context: &CatalogContext<'_>,
     input: &str,
 ) -> Result<Option<i64>, SQLError> {
-    match numeric_regobject_oid(input) {
-        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
-        NumericRegobjectOid::InvalidSyntax => {
-            return Err(SQLError::Routine {
-                sqlstate: "22P02".into(),
-                message: format!("invalid input syntax for type oid: \"{input}\""),
-            });
-        }
-        NumericRegobjectOid::OutOfRange => {
-            return Err(SQLError::Routine {
-                sqlstate: "22003".into(),
-                message: format!("value \"{input}\" is out of range for type oid"),
-            });
-        }
-        NumericRegobjectOid::NotNumeric => {}
+    if let Some(oid) = parse_dash_or_oid(input)? {
+        return Ok(Some(oid));
     }
     let names = uqa_sql::parse_regobject_name(input).ok_or_else(|| SQLError::Routine {
         sqlstate: "42602".into(),
@@ -371,10 +362,8 @@ pub fn resolve_regtype_oid(
     context: &CatalogContext<'_>,
     name: &str,
 ) -> Result<Option<i64>, SQLError> {
-    match numeric_regobject_oid(name) {
-        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
-        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
-        NumericRegobjectOid::NotNumeric => {}
+    if let Some(oid) = parse_dash_or_oid(name)? {
+        return Ok(Some(oid));
     }
     let Some(parsed) = uqa_sql::parse_regtype_name(name)? else {
         return Ok(None);
@@ -389,21 +378,8 @@ enum ParsedRegroleInput {
 }
 
 fn parse_regrole_input(input: &str) -> Result<ParsedRegroleInput, SQLError> {
-    match numeric_regobject_oid(input) {
-        NumericRegobjectOid::Valid(oid) => return Ok(ParsedRegroleInput::Oid(oid)),
-        NumericRegobjectOid::InvalidSyntax => {
-            return Err(SQLError::Routine {
-                sqlstate: "22P02".into(),
-                message: format!("invalid input syntax for type oid: \"{input}\""),
-            });
-        }
-        NumericRegobjectOid::OutOfRange => {
-            return Err(SQLError::Routine {
-                sqlstate: "22003".into(),
-                message: format!("value \"{input}\" is out of range for type oid"),
-            });
-        }
-        NumericRegobjectOid::NotNumeric => {}
+    if let Some(oid) = parse_dash_or_oid(input)? {
+        return Ok(ParsedRegroleInput::Oid(oid));
     }
     let names = uqa_sql::parse_regobject_name(input).ok_or_else(|| SQLError::Routine {
         sqlstate: "42602".into(),
@@ -457,7 +433,11 @@ pub fn resolve_regobject_oid(
         ColumnType::Regnamespace => lookup_regnamespace_oid(context, name),
         ColumnType::Regrole => lookup_regrole_oid(context, name),
         ColumnType::Regtype => match resolve_regtype_oid(context, name) {
-            Err(SQLError::Routine { sqlstate, .. }) if sqlstate == "3F000" => Ok(None),
+            Err(SQLError::Routine { sqlstate, .. })
+                if matches!(sqlstate.as_str(), "3F000" | "22P02" | "22003") =>
+            {
+                Ok(None)
+            }
             result => result,
         },
         _ => Err(SQLError::Internal(format!(

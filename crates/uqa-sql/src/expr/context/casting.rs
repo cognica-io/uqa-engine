@@ -369,10 +369,15 @@ fn resolve_regobject_input(
     })
 }
 
+/// Whether an array cast needs the catalog for its elements: domains, enums, composites and the OID alias types whose input functions read catalog names. `regrole[]` has its own path above.
 fn requires_catalog_array_cast(ty: &ColumnType) -> bool {
     match ty {
         ColumnType::Domain { .. }
         | ColumnType::Regtype
+        | ColumnType::Regclass
+        | ColumnType::Regproc
+        | ColumnType::Regprocedure
+        | ColumnType::Regnamespace
         | ColumnType::Enum(_)
         | ColumnType::Composite(_) => true,
         ColumnType::Array(element) => requires_catalog_array_cast(element),

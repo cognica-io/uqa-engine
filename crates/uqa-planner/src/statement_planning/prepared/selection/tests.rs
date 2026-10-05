@@ -59,6 +59,7 @@ impl Inputs {
                 types: &NoRoutines,
                 routines: &NoRoutines,
                 scopes: self,
+                regclasses: &NoRoutines,
             },
             optimization: self,
         }

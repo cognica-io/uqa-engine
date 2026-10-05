@@ -18,6 +18,8 @@ pub struct PreparedDefinitionContext<'a> {
     pub types: &'a dyn FunctionTypeResolver,
     pub routines: &'a dyn RoutineResolution,
     pub scopes: &'a dyn StatementAnalysisScopes,
+    /// The catalog `regclassin` reads relation names from when the statement is analyzed.
+    pub regclasses: &'a dyn crate::schema::dependencies::regclass::RegclassInput,
 }
 
 pub struct PreparedDefinition {
@@ -41,6 +43,11 @@ pub fn analyze_definition(
             &scope.binding_context()?,
         )
     })?;
+    // Parse analysis reads a `regclass` constant's relation name when the statement is prepared, so a name no relation has is reported here; `EXECUTE` resolves the names again, as `PostgreSQL` analyzes the statement anew once a relation they name changes.
+    crate::schema::dependencies::regclass::check_regclass_constants_in_statement(
+        context.regclasses,
+        &mut logical_plan,
+    )?;
     let result_schema = analyze_result_schema(context, &logical_plan, &parameter_types)?;
     Ok(PreparedDefinition {
         logical_plan,

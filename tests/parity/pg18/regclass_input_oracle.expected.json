@@ -1,0 +1,1950 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA rca;",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SEQUENCE rca.s1;",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_t (a regclass DEFAULT 'rca.s1', b regclass DEFAULT 'rca.s1'::regclass, c regclass[] DEFAULT '{rca.s1}');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rc_t'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'rca.s1'::regclass"
+            ],
+            [
+              "2",
+              "'rca.s1'::regclass"
+            ],
+            [
+              "3",
+              "'{rca.s1}'::regclass[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_u (a regclass DEFAULT 'rc_missing');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_missing\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_v (a regclass DEFAULT 'rc_missing'::regclass);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_missing\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rc_t ALTER COLUMN a SET DEFAULT 'rc_missing';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_missing\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_x (a regclass CHECK (coalesce(a, 'rca.s1'::regclass) IS NOT NULL), g regclass GENERATED ALWAYS AS ('rca.s1') STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'rc_x'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK ((COALESCE(a, 'rca.s1'::regclass) IS NOT NULL))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rc_x'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "'rca.s1'::regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_y (a regclass CHECK (coalesce(a, 'rc_missing'::regclass) IS NOT NULL));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_missing\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_z (g regclass GENERATED ALWAYS AS ('rc_missing') STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_missing\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER SEQUENCE rca.s1 RENAME TO s2;",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rc_t'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'rca.s2'::regclass"
+            ],
+            [
+              "2",
+              "'rca.s2'::regclass"
+            ],
+            [
+              "3",
+              "'{rca.s2}'::regclass[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'rc_x'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK ((COALESCE(a, 'rca.s2'::regclass) IS NOT NULL))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rc_x'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "'rca.s2'::regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rc_t DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text, b::text, c::text, a::oid = b::oid AS same FROM rc_t;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "rca.s2",
+              "rca.s2",
+              "{rca.s2}",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rc_x (a) VALUES ('rc_t');",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text, g::text FROM rc_x;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "g"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rc_t",
+              "rca.s2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP SEQUENCE rca.s2;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence rca.s2 because other objects depend on it",
+        "detail": "default value for column a of table rc_t depends on sequence rca.s2\ndefault value for column b of table rc_t depends on sequence rca.s2\ncolumn g of table rc_x depends on sequence rca.s2\nconstraint rc_x_a_check on table rc_x depends on sequence rca.s2",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rc_bad AS SELECT 'rca.s2'::regclass AS r;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rc_view AS SELECT 'rc_t'::regclass AS r, '{rc_t}'::regclass[] AS rs, 'rc_t'::regclass::text AS rt;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rc_view'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT 'rc_t'::regclass AS r,\n    '{rc_t}'::regclass[] AS rs,\n    'rc_t'::regclass::text AS rt;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rc_t RENAME TO rc_t2;",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rc_view'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT 'rc_t2'::regclass AS r,\n    '{rc_t2}'::regclass[] AS rs,\n    'rc_t2'::regclass::text AS rt;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT r::text, rs::text, rt FROM rc_view;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "rs",
+            "rt"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rc_t2",
+              "{rc_t2}",
+              "rc_t2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'rc_t2'::regclass::oid = (SELECT oid FROM pg_class WHERE relname = 'rc_t2') AS resolved;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "resolved"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'public.rc_t2'::regclass::text, '\"rc_t2\"'::regclass::text, ' rc_t2 '::regclass::text, 'RC_T2'::regclass::text, 'public . rc_t2'::regclass::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "text",
+            "text",
+            "text",
+            "text"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rc_t2",
+              "rc_t2",
+              "rc_t2",
+              "rc_t2",
+              "rc_t2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'rc_missing'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_missing\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA rcb;",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rcb.hidden (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_vis (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_d (a regclass DEFAULT 'rcb.hidden', b regclass DEFAULT '99999', c regclass[] DEFAULT '{rc_vis,NULL,rcb.hidden}', d regclass DEFAULT 'pg_class');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rc_d'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'rcb.hidden'::regclass"
+            ],
+            [
+              "2",
+              "'99999'::regclass"
+            ],
+            [
+              "3",
+              "'{rc_vis,NULL,rcb.hidden}'::regclass[]"
+            ],
+            [
+              "4",
+              "'pg_class'::regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rc_d DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text, b::text, c::text, d::text FROM rc_d;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rcb.hidden",
+              "99999",
+              "{rc_vis,NULL,rcb.hidden}",
+              "pg_class"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rc_d ADD COLUMN e regclass DEFAULT 'rc_vis';",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rc_d ADD COLUMN f regclass DEFAULT 'rc_absent';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_absent\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rc_d ADD CONSTRAINT rc_d_chk CHECK (coalesce(a, 'rc_vis'::regclass) IS NOT NULL);",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rc_d ADD CONSTRAINT rc_d_chk2 CHECK (coalesce(a, 'rc_absent'::regclass) IS NOT NULL);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_absent\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'rc_d'::regclass ORDER BY conname;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "rc_d_chk",
+              "CHECK ((COALESCE(a, 'rc_vis'::regclass) IS NOT NULL))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rc_vis RENAME TO rc_vis2;",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rc_d'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'rcb.hidden'::regclass"
+            ],
+            [
+              "2",
+              "'99999'::regclass"
+            ],
+            [
+              "3",
+              "'{rc_vis2,NULL,rcb.hidden}'::regclass[]"
+            ],
+            [
+              "4",
+              "'pg_class'::regclass"
+            ],
+            [
+              "5",
+              "'rc_vis2'::regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'rc_d'::regclass ORDER BY conname;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "rc_d_chk",
+              "CHECK ((COALESCE(a, 'rc_vis2'::regclass) IS NOT NULL))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text, b::text, c::text, d::text, e::text FROM rc_d;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rcb.hidden",
+              "99999",
+              "{rc_vis2,NULL,rcb.hidden}",
+              "pg_class",
+              "rc_vis2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '99999'::regclass::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "99999"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '  99999 '::regclass::oid;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"99999\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'rcb.hidden'::regclass::text, '{rcb.hidden,rc_vis2}'::regclass[]::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "text"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rcb.hidden",
+              "{rcb.hidden,rc_vis2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{rc_absent}'::regclass[];",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_absent\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'rcb.absent'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rcb.absent\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'absent.rc_vis2'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"absent.rc_vis2\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rc_dv AS SELECT a, coalesce(a, 'rcb.hidden'::regclass) AS h FROM rc_d;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rc_dv'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT a,\n    COALESCE(a, 'rcb.hidden'::regclass) AS h\n   FROM rc_d;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rcb.hidden RENAME TO shown;",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rc_dv'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT a,\n    COALESCE(a, 'rcb.shown'::regclass) AS h\n   FROM rc_d;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text, h::text FROM rc_dv;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "h"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rcb.shown",
+              "rcb.shown"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN rc_dom AS regclass DEFAULT 'rc_vis2';",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_e (a rc_dom);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rc_e DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text FROM rc_e;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "rc_vis2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN rc_dom2 AS regclass DEFAULT 'rc_absent';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_absent\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE rc_p AS SELECT 'rc_vis2'::regclass::text;",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "EXECUTE rc_p;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "rc_vis2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE rc_q AS SELECT 'rc_absent'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_absent\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE rc_q2 AS SELECT 1 WHERE 'rc_absent'::regclass::text = 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_absent\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rc_vis2 RENAME TO rc_vis3;",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "EXECUTE rc_p;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_vis2\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rc_f (a regclass DEFAULT lower('rc_vis3')::regclass);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rc_f DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text FROM rc_f;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "rc_vis3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rc_f'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(lower('rc_vis3'::text))::regclass"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '\"RC_VIS3\"'::regclass::text;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"RC_VIS3\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ' RC_ABSENT '::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"rc_absent\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '\"RC_absent\"'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"RC_absent\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ''::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid name syntax",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '  '::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid name syntax",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '-'::regclass::text, '-'::regclass::oid;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "oid"
+          ],
+          "type_oids": [
+            25,
+            26
+          ],
+          "rows": [
+            [
+              "-",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{-}'::regclass[]::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{-}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{rc_vis3,NULL}'::regclass[]::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{rc_vis3,NULL}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'a.b.c.d'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "improper relation name (too many dotted names): a.b.c.d",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION rc_fn(int) RETURNS int LANGUAGE sql AS 'SELECT $1';",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'a b'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid name syntax",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '\"abc'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid name syntax",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'rc_vis3.'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid name syntax",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '.rc_vis3'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid name syntax",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT to_regclass('a b'), to_regclass('nosuch.rc_vis3'), to_regclass(''), to_regclass('rc_vis3')::text, to_regclass('99999999999'), to_regclass('08');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "to_regclass",
+            "to_regclass",
+            "to_regclass",
+            "to_regclass",
+            "to_regclass",
+            "to_regclass"
+          ],
+          "type_oids": [
+            2205,
+            2205,
+            2205,
+            25,
+            2205,
+            2205
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              null,
+              "rc_vis3",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{rc_fn}'::regproc[]::text, '{rc_fn(int)}'::regprocedure[]::text, '{public}'::regnamespace[]::text, '{int4}'::regtype[]::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "text",
+            "text",
+            "text"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{rc_fn}",
+              "{rc_fn(integer)}",
+              "{public}",
+              "{integer}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{nosuch}'::regproc[];",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{nosuch}'::regnamespace[];",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{rc_vis3, \"RC_VIS3\"}'::regclass[];",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regclass"
+          ],
+          "type_oids": [
+            2210
+          ],
+          "rows": [
+            [
+              "{rc_vis3,rc_vis3}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'a b'::regproc;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid name syntax",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '010'::regclass::oid, '4294967295'::regclass::oid;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "oid"
+          ],
+          "type_oids": [
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "8",
+              "4294967295"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '08'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"08\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '99999999999'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"99999999999\" is out of range for type oid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT to_regclass('010')::oid, to_regclass('a.b.c.d');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "improper relation name (too many dotted names): a.b.c.d",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '-1'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"-1\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '+1'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"+1\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '\"My Schema\".rc_vis3'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"My Schema.rc_vis3\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'public.\"RC_VIS3\"'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"public.RC_VIS3\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'pg_catalog.rc_vis3'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"pg_catalog.rc_vis3\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '99999999999'::regproc;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"99999999999\" is out of range for type oid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '08'::regproc;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"08\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '99999999999'::regtype;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"99999999999\" is out of range for type oid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '99999999999'::regnamespace;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"99999999999\" is out of range for type oid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '99999999999'::regrole;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"99999999999\" is out of range for type oid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '010'::regnamespace::oid, '010'::regrole::oid, '010'::regproc::oid, '010'::regtype::oid;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "oid",
+            "oid",
+            "oid"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "8",
+              "8",
+              "8",
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

@@ -37,6 +37,65 @@ impl Deparser<'_> {
     }
 
     /// A typed constant, as `get_const_expr` prints a `Const`: a non-negative `integer`, a `numeric` written with a decimal point and a `boolean` print bare, an enum or enum-array constant shows its current label text, and every other constant prints its output text with its type.
+    /// `regclassout` for a stored `regclass` constant: the relation's name, schema-qualified when the search path does not reach it, and each element's name for a `regclass[]` constant. An OID no relation holds prints as the OID, as `regclassout` prints it.
+    fn regclass_constant(
+        &self,
+        value: &Value,
+        ty: &ColumnType,
+    ) -> Result<Option<String>, SQLError> {
+        match (value, ty) {
+            (Value::Int(oid), ColumnType::Regclass) => self.relation_constant_name(*oid),
+            (Value::Array(array), ColumnType::Array(element))
+                if matches!(element.as_ref(), ColumnType::Regclass) =>
+            {
+                let mut names = Vec::with_capacity(array.elements().len());
+                for element in array.elements() {
+                    match element {
+                        Value::Null => names.push(Value::Null),
+                        Value::Int(oid) => match self.relation_constant_name(*oid)? {
+                            Some(name) => names.push(Value::Str(name)),
+                            None => return Ok(None),
+                        },
+                        _ => return Ok(None),
+                    }
+                }
+                let Some(names) = array.with_elements(names) else {
+                    return Ok(None);
+                };
+                uqa_sql::result::format_postgres_text(
+                    &Value::Array(names),
+                    &ColumnType::Array(Box::new(ColumnType::Text)),
+                    None,
+                )
+                .map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// The name of the relation holding `oid` as `regclassout` prints it: unqualified when the search path reaches it, schema-qualified otherwise.
+    fn relation_constant_name(&self, oid: i64) -> Result<Option<String>, SQLError> {
+        let Some(identity) = crate::catalog::projection::pg_catalog::relation_identity_for_oid(
+            self.catalog,
+            &self.dynamic,
+            oid,
+        )?
+        else {
+            return Ok(None);
+        };
+        let local = uqa_sql::expr::quote_ident(&identity.name);
+        let visible = self
+            .catalog
+            .relation_kind_resolution(&self.dynamic, &local)?
+            .into_found()
+            .is_some_and(|(visible, _)| visible == identity.qualified_name());
+        Ok(Some(if visible {
+            local
+        } else {
+            format!("{}.{local}", uqa_sql::expr::quote_ident(&identity.schema))
+        }))
+    }
+
     pub(super) fn typed_literal(&self, value: &Value, ty: &str) -> Result<String, SQLError> {
         let display = self.type_display(ty);
         let Some(resolved) = self.resolved_type(ty) else {
@@ -53,6 +112,9 @@ impl Deparser<'_> {
             let mut base = &resolved;
             while let ColumnType::Domain { base: inner, .. } = base {
                 base = inner;
+            }
+            if let Some(text) = self.regclass_constant(value, base)? {
+                return Ok(format!("'{}'::{display}", text.replace('\'', "''")));
             }
             let bare = match (value, base) {
                 (Value::Int(number), ColumnType::Integer) => {

@@ -153,6 +153,10 @@ fn register_view_plan_inner(
         .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
     let query_schema = context.bindings.bind_routines(&mut plan, params)?;
     context.bindings.bind_type_identities(&mut plan)?;
+    uqa_sql::schema::dependencies::regclass::read_regclass_constants_in_plan(
+        context.regclasses,
+        &mut plan,
+    )?;
     reject_regrole_constants(context, &mut plan)?;
     let output_columns = create_view_output_columns(&query_schema, column_names)?;
     // DefineVirtualRelation describes every column with BuildDescForRelation, a replaced view as well, which requires USAGE on its type before CheckAttributeNamesTypes rejects a pseudo-type.

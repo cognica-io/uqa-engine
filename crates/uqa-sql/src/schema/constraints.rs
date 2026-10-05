@@ -77,6 +77,8 @@ pub fn validate_check_expression(
     columns: &[ColumnDef],
     expression: &mut Expr,
 ) -> Result<(), SQLError> {
+    // `cookConstraint` reads the relations a CHECK names as `regclass` constants when the constraint is defined.
+    super::dependencies::regclass::read_regclass_constants(context.catalog, expression)?;
     let bound = bind_expr(
         expression,
         &mut CheckConditionTypeResolver {
