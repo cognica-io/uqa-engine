@@ -531,6 +531,16 @@ impl MergedRecordSnapshot {
         self.private.revision_scopes(after, limit, control)
     }
 
+    /// Stream private entries on this command boundary without repeated key lookups. Providers can merge their committed rows with each entry's metadata or requested payload.
+    pub fn private_cursor(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        control: &StorageReadControl,
+    ) -> VersionResult<super::PrivateRecordCursor<'_>> {
+        self.private.cursor(prefix, after, control)
+    }
+
     pub fn visit_value(
         &self,
         key: &[u8],

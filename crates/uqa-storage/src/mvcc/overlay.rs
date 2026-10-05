@@ -19,6 +19,8 @@ use crate::StorageSavepointId;
 use super::key::RecordKey;
 use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWrite, VersionError, VersionResult};
 
+mod cursor;
+pub use cursor::{PrivateRecordCursor, PrivateRecordEntry};
 mod retained;
 mod scopes;
 pub use scopes::PrivateRevisionScope;
@@ -598,27 +600,8 @@ impl PrivateRecordSnapshot {
         if limit == 0 {
             return Ok(());
         }
-        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        let mut changes = TieredCursor::new(
-            Some(&self.records),
-            &self.runs,
-            std::ops::Bound::Included(start),
-            control,
-        )?;
-        let mut next_private = || -> VersionResult<Option<PreparedRecordWrite>> {
-            while let Some(change) = changes.next(control)? {
-                control.cancellation().check()?;
-                if !change.key().starts_with(prefix) {
-                    return Ok(None);
-                }
-                if after.is_some_and(|after| change.key() <= after) {
-                    continue;
-                }
-                return change.write(control).map(Some);
-            }
-            Ok(None)
-        };
-        let mut pending = next_private()?;
+        let mut changes = self.cursor(prefix, after, control)?;
+        let mut pending = changes.next(control)?;
         let mut count = 0;
         let mut running = true;
         let mut emit = |key: &[u8], record: P::Record<'_>| -> VersionResult<bool> {
@@ -629,27 +612,31 @@ impl PrivateRecordSnapshot {
             Ok(more && count < limit)
         };
         P::visit(committed, prefix, after, control, &mut |key, record| {
-            while let Some(write) = pending.as_ref().filter(|write| write.key() < key) {
-                running = emit(write.key(), P::private(write))?;
+            while let Some(entry) = pending.as_ref().filter(|entry| entry.key() < key) {
+                running = P::private(entry, control, &mut emit)?;
                 if !running {
                     return Ok(false);
                 }
-                pending = next_private()?;
+                pending = changes.next(control)?;
             }
-            if let Some(write) = pending.as_ref().filter(|write| write.key() == key) {
-                running = emit(key, P::private(write))?;
-                pending = next_private()?;
+            if let Some(entry) = pending.as_ref().filter(|entry| entry.key() == key) {
+                running = P::private(entry, control, &mut emit)?;
+                if running {
+                    pending = changes.next(control)?;
+                }
             } else {
                 running = emit(key, record)?;
             }
             Ok(running)
         })?;
         while running {
-            let Some(write) = pending.as_ref() else {
+            let Some(entry) = pending.as_ref() else {
                 break;
             };
-            running = emit(write.key(), P::private(write))?;
-            pending = next_private()?;
+            running = P::private(entry, control, &mut emit)?;
+            if running {
+                pending = changes.next(control)?;
+            }
         }
         Ok(())
     }

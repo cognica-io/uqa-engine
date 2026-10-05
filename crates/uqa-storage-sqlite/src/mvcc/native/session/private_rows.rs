@@ -6,30 +6,26 @@
 
 //! The session's private records of one native family and owner under a key prefix that a document identity completes, in document order, for a read of the stored rows to merge.
 //!
-//! A native key encodes its components after the owner prefix, and an integer component in signed order, so the private records under a prefix whose last missing component is the document identity are already in document order. The session's overlay holds their values in memory.
+//! A native key encodes its components after the owner prefix, and an integer component in signed order, so the private records under a prefix whose last missing component is the document identity are already in document order. Each selected entry retains its resident value or spill location until the row is requested.
 
 use rusqlite::types::ValueRef;
 use uqa_core::memory::BudgetedVec;
-use uqa_storage::mvcc::{MergedRecordSnapshot, PrivateRecordKey, VersionError, VersionResult};
+use uqa_storage::mvcc::{
+    MergedRecordSnapshot, PrivateRecordCursor, PrivateRecordEntry, VersionError, VersionResult,
+};
 use uqa_storage::read_control::StorageReadControl;
 
 use super::super::{decode_record, NativeRecordIdentity};
 use crate::connection::Result;
 
-/// Private keys are read in pages of this many, so a transaction that changed many rows of the table holds one page of keys at a time.
-const PAGE: usize = 64;
-
 /// A cursor over the private records of one family and owner under one key prefix.
 pub(crate) struct PrivateRows<'a> {
-    view: &'a MergedRecordSnapshot,
-    prefix: BudgetedVec<u8>,
+    cursor: PrivateRecordCursor<'a>,
+    current: Option<PrivateRecordEntry<'a>>,
     /// The position of the document identity among the key's components, after the prefix's.
     id_position: usize,
     control: &'a StorageReadControl,
-    keys: BudgetedVec<PrivateRecordKey>,
-    /// The document of each key in `keys`.
-    ids: BudgetedVec<i64>,
-    position: usize,
+    id: Option<i64>,
 }
 
 impl<'a> PrivateRows<'a> {
@@ -51,42 +47,28 @@ impl<'a> PrivateRows<'a> {
             })
             .transpose()?;
         let mut rows = Self {
-            view,
-            prefix,
+            cursor: view.private_cursor(&prefix, after.as_deref(), control)?,
+            current: None,
             id_position: components.len(),
             control,
-            keys: BudgetedVec::new(control.memory()),
-            ids: BudgetedVec::new(control.memory()),
-            position: 0,
+            id: None,
         };
-        rows.load(after.as_deref())?;
+        rows.advance()?;
         Ok(rows)
     }
 
     /// The document of the current record, or `None` after the last one.
     pub(crate) fn peek(&self) -> Option<i64> {
-        self.ids.get(self.position).copied()
+        self.id
     }
 
     pub(crate) fn advance(&mut self) -> VersionResult<()> {
-        self.position += 1;
-        if self.position == PAGE {
-            let mut last = BudgetedVec::new(self.control.memory());
-            last.extend_from_slice(self.keys[PAGE - 1].key())?;
-            self.load(Some(&last))?;
-        }
-        Ok(())
-    }
-
-    fn load(&mut self, after: Option<&[u8]>) -> VersionResult<()> {
-        self.keys = self
-            .view
-            .private_keys(&self.prefix, after, PAGE, self.control)?;
-        self.ids.clear();
-        for key in self.keys.iter() {
+        self.id = None;
+        self.current = self.cursor.next(self.control)?;
+        if let Some(entry) = &self.current {
             let mut id = None;
             NativeRecordIdentity::visit_key_components(
-                key.key(),
+                entry.key(),
                 self.control,
                 |position, value| {
                     if position == self.id_position {
@@ -99,11 +81,10 @@ impl<'a> PrivateRows<'a> {
                     Ok(())
                 },
             )?;
-            self.ids.push(id.ok_or(VersionError::InvalidEncoding(
+            self.id = Some(id.ok_or(VersionError::InvalidEncoding(
                 "native document key lacks its identity",
-            ))?)?;
+            ))?);
         }
-        self.position = 0;
         Ok(())
     }
 
@@ -112,30 +93,28 @@ impl<'a> PrivateRows<'a> {
         &self,
         visit: &mut dyn FnMut(&[ValueRef<'_>]) -> Result<bool>,
     ) -> VersionResult<Option<bool>> {
-        let key = self.keys[self.position].key();
-        let mut visited = None;
-        self.view.visit_value(key, self.control, &mut |record| {
-            let Some(bytes) = record.and_then(|record| record.value) else {
-                return Ok(());
-            };
-            let (_, row) = decode_record(key, bytes, self.control)?;
-            visited = Some(visit(&row).map_err(|error| VersionError::Storage(error.into()))?);
-            Ok(())
-        })?;
-        Ok(visited)
+        let entry = self.current.as_ref().expect("a current private row");
+        let write = entry.read(self.control)?;
+        let Some(bytes) = write.value() else {
+            return Ok(None);
+        };
+        let (_, row) = decode_record(entry.key(), bytes, self.control)?;
+        let result = visit(&row).map_err(|error| VersionError::Storage(error.into()))?;
+        self.control.check()?;
+        Ok(Some(result))
     }
 
     /// Whether the current record holds a row, which a deletion does not.
     pub(crate) fn live(&self) -> VersionResult<bool> {
-        let mut live = false;
-        self.view.visit_value(
-            self.keys[self.position].key(),
-            self.control,
-            &mut |record| {
-                live = record.is_some_and(|record| record.value.is_some());
-                Ok(())
-            },
-        )?;
-        Ok(live)
+        self.control.check()?;
+        Ok(self
+            .current
+            .as_ref()
+            .expect("a current private row")
+            .metadata()
+            .live)
     }
 }
+
+#[cfg(test)]
+mod tests;
