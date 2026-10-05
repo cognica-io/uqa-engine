@@ -19,6 +19,8 @@ use uqa_sql::ast::{ColumnDef, ColumnType};
 
 #[path = "sql_foreign_ddl/declarations.rs"]
 mod declarations;
+#[path = "sql_foreign_ddl/servers.rs"]
+mod servers;
 
 fn row(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
     pairs
@@ -225,7 +227,11 @@ fn unsupported_fdw_type_rejected() {
             &[],
         )
         .unwrap_err();
-    assert!(format!("{err:?}").contains("Unsupported FDW type"));
+    assert_eq!(err.sqlstate(), Some("42704"));
+    assert_eq!(
+        err.to_string(),
+        "foreign-data wrapper \"mongo_fdw\" does not exist"
+    );
 }
 
 #[test]

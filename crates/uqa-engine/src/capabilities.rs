@@ -288,6 +288,7 @@ impl Engine {
             definitions: CatalogDefinitionSnapshot {
                 sequence_persistence: durable.sequence_persistence.clone(),
                 foreign_tables: durable.foreign_tables.clone(),
+                foreign_servers: durable.foreign_servers.clone(),
                 sql_user_functions: durable.sql_user_functions.clone(),
                 role_memberships: durable.role_memberships.clone(),
 

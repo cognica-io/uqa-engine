@@ -254,6 +254,8 @@ pub(super) fn compile_create_foreign_server(
     Ok(CreateForeignServer {
         name: stmt.servername.clone(),
         fdw_type: stmt.fdwname.clone(),
+        server_type: (!stmt.servertype.is_empty()).then(|| stmt.servertype.clone()),
+        version: (!stmt.version.is_empty()).then(|| stmt.version.clone()),
         options: collect_def_elem_options(&stmt.options)?,
         if_not_exists: stmt.if_not_exists,
     })

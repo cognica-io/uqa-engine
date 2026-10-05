@@ -98,6 +98,8 @@ pub use uqa_sql::catalog::resolution::RelationResolution;
 pub struct CatalogDefinitionSnapshot {
     pub sequence_persistence: Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub foreign_tables: Arc<BTreeMap<RelationIdentity, foreign::StoredForeignTable>>,
+    pub foreign_servers:
+        Arc<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
     pub sql_user_functions: Arc<BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>>>,
     pub role_memberships: Arc<
         BTreeMap<

@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_storage::StorageBackendResult;
 pub trait ForeignLookupState {
-    fn query_servers(&self) -> Option<&BTreeMap<String, uqa_fdw::ForeignServer>>;
+    fn query_servers(
+        &self,
+    ) -> Option<&BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>;
     fn query_tables(&self) -> Option<&BTreeMap<RelationIdentity, StoredForeignTable>>;
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()>;
     fn relation_lookup_candidates(&self, name: &str)
@@ -33,12 +35,16 @@ impl ForeignLookupContext<'_> {
     }
     pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
         if let Some(snapshot) = self.state.query_servers() {
-            return Ok(snapshot.get(name).cloned());
+            return Ok(snapshot.get(name).map(super::servers::fdw_definition));
         }
         self.state
             .synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        Ok(self.registry.servers().get(name).cloned())
+        Ok(self
+            .registry
+            .servers()
+            .get(name)
+            .map(super::servers::fdw_definition))
     }
     pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
         if let Some(snapshot) = self.state.query_tables() {

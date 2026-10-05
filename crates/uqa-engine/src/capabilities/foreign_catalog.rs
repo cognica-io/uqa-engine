@@ -33,7 +33,9 @@ impl Engine {
     }
 }
 impl ForeignLookupState for Engine {
-    fn query_servers(&self) -> Option<&BTreeMap<String, uqa_fdw::ForeignServer>> {
+    fn query_servers(
+        &self,
+    ) -> Option<&BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>> {
         self.query_catalog_snapshot
             .as_ref()
             .map(|snapshot| snapshot.foreign_servers.as_ref())

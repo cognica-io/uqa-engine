@@ -25,11 +25,15 @@ use uqa_sql::{
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 pub mod entry;
+mod servers;
 pub use crate::catalog::foreign::reads::{
     ForeignRegistryReads, ForeignSecurityRead, ForeignServersRead, ForeignTablesRead,
 };
-pub type ForeignServersWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<String, uqa_fdw::ForeignServer>> + 'a>;
+pub type ForeignServersWrite<'a> = Box<
+    dyn DerefMut<
+            Target = BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
+        > + 'a,
+>;
 pub trait ForeignCreationRegistry: ForeignRegistryReads {
     fn servers_write(&self) -> ForeignServersWrite<'_>;
 }
@@ -57,48 +61,6 @@ struct ForeignTableCreationTarget {
     if_not_exists: bool,
 }
 impl ForeignCreationContext<'_> {
-    pub fn register_foreign_server_inner(
-        &self,
-        name: String,
-        fdw_type: &str,
-        options: Vec<(String, String)>,
-        if_not_exists: bool,
-    ) -> std::result::Result<(), String> {
-        self.namespace
-            .synchronize_catalog_registries()
-            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        let mut servers = self.registry.servers_write();
-        if servers.contains_key(&name) {
-            if if_not_exists {
-                return Ok(());
-            }
-            return Err(format!("Foreign server `{name}` already exists"));
-        }
-        if !matches!(fdw_type, "duckdb_fdw" | "arrow_fdw" | "memory_fdw") {
-            return Err(format!("Unsupported FDW type: `{fdw_type}`"));
-        }
-        let mut opt_map: std::collections::BTreeMap<String, String> =
-            std::collections::BTreeMap::new();
-        for (k, v) in options {
-            opt_map.insert(k, v);
-        }
-        let server = uqa_fdw::ForeignServer {
-            name: name.clone(),
-            fdw_type: fdw_type.to_string(),
-            options: opt_map.clone(),
-        };
-        if let Some(catalog) = self.catalog {
-            let options_json = serde_json::to_string(&opt_map)
-                .map_err(|err| format!("serialize foreign server `{name}`: {err}"))?;
-            catalog
-                .save_foreign_server(&name, fdw_type, &options_json)
-                .map_err(|err| format!("persist foreign server `{name}`: {err}"))?;
-        }
-        servers.insert(name, server);
-        drop(servers);
-        self.changes.catalog_registry_changed();
-        Ok(())
-    }
     /// Resolve the new foreign table's name. `IF NOT EXISTS` skips an existing relation before the columns are described, but `heap_create_with_catalog` reports the collision only after `BuildDescForRelation` accepted them, so an early preflight passes it on.
     fn preflight_foreign_table_creation(
         &self,

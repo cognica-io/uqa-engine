@@ -22,7 +22,7 @@ pub struct ForeignRestoreContext<'a> {
 }
 
 pub struct RestoredForeignCatalog {
-    pub servers: BTreeMap<String, uqa_fdw::ForeignServer>,
+    pub servers: BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
     pub tables: BTreeMap<RelationIdentity, super::StoredForeignTable>,
     pub security: BTreeMap<RelationIdentity, BoundTableSecurity>,
 }
@@ -32,7 +32,9 @@ pub fn restore(
     catalog: &dyn CatalogFacade,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredForeignCatalog> {
-    let servers = restore_servers(catalog)?;
+    let restored_servers =
+        super::servers::restore(catalog, &context.roles.role_definitions(), allow_migration)?;
+    let servers = &restored_servers.definitions;
     let mut migrations = Vec::new();
     let mut tables = BTreeMap::new();
     let mut securities = BTreeMap::new();
@@ -108,30 +110,13 @@ pub fn restore(
         tables.insert(row.relation.clone(), table);
         securities.insert(row.relation, security);
     }
+    restored_servers.persist_migrations(catalog)?;
     for row in migrations {
         catalog.save_foreign_table(&row)?;
     }
     Ok(RestoredForeignCatalog {
-        servers,
+        servers: restored_servers.definitions,
         tables,
         security: securities,
     })
-}
-
-fn restore_servers(
-    catalog: &dyn CatalogFacade,
-) -> StorageBackendResult<BTreeMap<String, uqa_fdw::ForeignServer>> {
-    let mut servers = BTreeMap::new();
-    for (name, fdw_type, options_json) in catalog.load_foreign_servers()? {
-        let options: BTreeMap<String, String> = serde_json::from_str(&options_json)?;
-        servers.insert(
-            name.clone(),
-            uqa_fdw::ForeignServer {
-                name,
-                fdw_type,
-                options,
-            },
-        );
-    }
-    Ok(servers)
 }
