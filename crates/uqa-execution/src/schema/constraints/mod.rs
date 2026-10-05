@@ -35,6 +35,8 @@ pub trait ConstraintModes {
     fn forget(&self, identity: &ConstraintIdentity);
 }
 pub struct ConstraintAlterContext<'a> {
+    pub deferred_rows: crate::schema::columns::rows::RewriteDeferral,
+    pub pending_foreign_keys: deferred::DeferredForeignKeys,
     pub deletion: &'a dyn crate::schema::deletion::CatalogRemovalInputs,
     pub catalog: &'a dyn HierarchyCatalog,
     pub relations: &'a dyn ConstraintRelations,
@@ -54,6 +56,7 @@ fn ddl_storage_error(action: &str, error: StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
 }
 pub mod checks;
+pub mod deferred;
 pub mod drop;
 mod inheritance;
 mod lifecycle;

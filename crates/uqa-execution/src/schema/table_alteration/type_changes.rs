@@ -9,7 +9,7 @@
 use super::{ddl_storage_error, identity, TableAlterContext};
 use std::collections::BTreeMap;
 use uqa_sql::{
-    ast::{AlterTableAction, ColumnDef, Expr, GeneratedColumnKind},
+    ast::{AlterTableAction, ColumnDef, ColumnType, Expr, GeneratedColumnKind},
     schema::{
         columns::{
             type_target::validate_type_target,
@@ -26,13 +26,29 @@ use uqa_sql::{
 /// A prepared transform is retained even for an empty table; expression errors belong to preparation, independently of row count.
 pub(super) struct PreparedTypeChange {
     pub transform: Option<AnalyzedTypeTransform>,
+    pub original_type: ColumnType,
 }
+
+mod hierarchy;
+mod rewrite;
+mod source;
+pub(super) use rewrite::TypeRewrites;
 
 pub(super) fn prepare<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     table: &str,
     qualifier: &str,
     actions: &mut [AlterTableAction],
+) -> Result<BTreeMap<usize, PreparedTypeChange>, SQLError> {
+    prepare_relation(context, table, qualifier, actions, false)
+}
+
+fn prepare_relation<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    table: &str,
+    qualifier: &str,
+    actions: &mut [AlterTableAction],
+    recursing: bool,
 ) -> Result<BTreeMap<usize, PreparedTypeChange>, SQLError> {
     let mut prepared = BTreeMap::new();
     if !actions
@@ -86,7 +102,7 @@ pub(super) fn prepare<S: Clone + 'static>(
             )?;
             identity::validate_identity_type(&context.identities, column, ty)?;
         }
-        let inherited = inherited_column(context, &hierarchy.parents, name)?;
+        let inherited = !recursing && inherited_column(context, &hierarchy.parents, name)?;
         let column = validate_type_target(
             table,
             &columns,
@@ -117,7 +133,13 @@ pub(super) fn prepare<S: Clone + 'static>(
                 fold_type_transform_assignment(context.columns.rewrite.types, ty, transform)?;
             }
         }
-        prepared.insert(position, PreparedTypeChange { transform });
+        prepared.insert(
+            position,
+            PreparedTypeChange {
+                transform,
+                original_type: column.ty.clone(),
+            },
+        );
     }
     Ok(prepared)
 }

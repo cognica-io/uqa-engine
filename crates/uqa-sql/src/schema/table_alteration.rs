@@ -131,5 +131,6 @@ pub fn materialize_recursive_action_names(
     Ok(())
 }
 
+pub mod ordering;
 pub mod syntax;
 pub mod targets;

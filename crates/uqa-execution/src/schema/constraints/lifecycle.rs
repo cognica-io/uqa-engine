@@ -356,7 +356,9 @@ fn validate_referenced_partition(
             .lock_catalog
             .table_name(derived.partition)
             .ok_or_else(|| SQLError::Internal("referenced partition disappeared".into()))?;
-        crate::schema::validation::validate_foreign_key_rows(context.rows, table, name, &scoped)?;
+        super::partition_foreign_keys::PartitionForeignKeyTables::validate_rows(
+            context, table, name, &scoped,
+        )?;
     }
     let entries = foreign_key
         .derived_mut(columns, constraints)
@@ -388,7 +390,12 @@ fn validate_foreign_key(
             "cannot validate NOT ENFORCED constraint",
         ));
     }
-    crate::schema::validation::validate_foreign_key_rows(context.rows, table, name, foreign_key)?;
+    super::partition_foreign_keys::PartitionForeignKeyTables::validate_rows(
+        context,
+        table,
+        name,
+        foreign_key,
+    )?;
     if is_partitioned(context, table)? {
         super::partition_foreign_keys::validate_partition_foreign_keys(
             context,
@@ -406,6 +413,9 @@ pub fn validate_not_null_rows(
     table: &str,
     column: &str,
 ) -> Result<(), SQLError> {
+    if context.deferred_rows.is_deferred() {
+        return Ok(());
+    }
     crate::schema::validation::validate_not_null_rows(context.rows.reads, table, column)
 }
 
@@ -415,6 +425,9 @@ fn validate_check_rows(
     name: &str,
     expression: &uqa_sql::ast::Expr,
 ) -> Result<(), SQLError> {
+    if context.deferred_rows.is_deferred() {
+        return Ok(());
+    }
     crate::schema::validation::validate_check_rows(
         &crate::schema::validation::CheckValidationContext {
             columns: context.foreign_keys.columns,
@@ -542,7 +555,7 @@ pub fn add_key_constraint(
         constraints: context.rows,
     };
     let partitions = partition_keys(context, table)?;
-    if partition.is_none() {
+    if !context.deferred_rows.is_deferred() && partition.is_none() {
         crate::schema::keys::validate_key_index_rows(&validation, table, &constraint)?;
     }
     context
@@ -576,14 +589,19 @@ pub fn add_key_constraint(
                         state.table
                     ))
                 })?;
-            crate::schema::keys::validate_key_index_rows(&validation, &state.table, &copy)?;
+            if !context.deferred_rows.is_deferred() {
+                crate::schema::keys::validate_key_index_rows(&validation, &state.table, &copy)?;
+            }
             built.push((state.table.as_str(), copy));
         }
     }
-    if partition.is_none() {
+    if !context.deferred_rows.is_deferred() && partition.is_none() {
         crate::schema::keys::validate_primary_key_rows(&validation, table, &constraint)?;
     }
-    for (leaf, copy) in &built {
+    for (leaf, copy) in built
+        .iter()
+        .filter(|_| !context.deferred_rows.is_deferred())
+    {
         crate::schema::keys::validate_primary_key_rows(&validation, leaf, copy)?;
     }
     Ok(())

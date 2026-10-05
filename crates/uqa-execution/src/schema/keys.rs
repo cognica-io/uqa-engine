@@ -6,10 +6,10 @@
 
 //! Verify newly declared keys and generated replacement rows against visible physical data.
 use super::hierarchy::HierarchyCatalog;
+use super::{columns::rows::RewriteRows, indexes::IndexBuildKeys};
 use crate::mutation::constraints::context::ConstraintContext;
 use uqa_core::Value;
 use uqa_sql::SQLError;
-use uqa_storage::document_store::Document;
 pub struct KeyValidationContext<'a> {
     pub catalog: &'a dyn HierarchyCatalog,
     pub constraints: ConstraintContext<'a>,
@@ -21,8 +21,9 @@ fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> S
 pub fn validate_key_constraint_rows(
     context: &KeyValidationContext<'_>,
     table: &str,
-    rows: &[(uqa_core::DocId, Document)],
+    rows: &mut RewriteRows,
 ) -> Result<(), SQLError> {
+    rows.spill()?;
     for constraint in context
         .catalog
         .try_key_constraints(table)
@@ -31,8 +32,12 @@ pub fn validate_key_constraint_rows(
         if constraint.without_overlaps {
             continue;
         }
-        let mut seen = std::collections::BTreeSet::new();
-        for (_, document) in rows {
+        let mut keys = IndexBuildKeys::new(
+            constraint.columns.len(),
+            context.constraints.memory.work_mem_bytes()?,
+        );
+        for position in 0..rows.len() {
+            let document = rows.get(position)?.document;
             let values = constraint
                 .columns
                 .iter()
@@ -54,10 +59,10 @@ pub fn validate_key_constraint_rows(
             {
                 continue;
             }
-            if seen.contains(&values) {
-                return Err(duplicated_key(context, table, &constraint, &values)?);
-            }
-            seen.insert(values);
+            keys.push(values)?;
+        }
+        if let Some(values) = keys.first_duplicate(true, constraint.nulls_not_distinct)? {
+            return Err(duplicated_key(context, table, &constraint, &values)?);
         }
     }
     Ok(())

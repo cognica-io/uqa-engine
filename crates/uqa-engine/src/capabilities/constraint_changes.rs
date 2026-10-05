@@ -6,8 +6,10 @@
 
 //! Bind constraint execution to transaction modes, relation permissions, and catalog state.
 use crate::Engine;
+use uqa_execution::schema::columns::rows::RewriteDeferral;
 use uqa_execution::schema::constraints::{
-    ConstraintAlterAccess, ConstraintAlterContext, ConstraintModes, ConstraintRelations,
+    deferred::DeferredForeignKeys, ConstraintAlterAccess, ConstraintAlterContext, ConstraintModes,
+    ConstraintRelations,
 };
 use uqa_sql::{
     ast::{ForeignKey, TableHierarchy},
@@ -37,6 +39,8 @@ impl Engine {
     pub(crate) fn constraint_alter_context(&self) -> ConstraintAlterContext<'_> {
         let runtime = self.query_runtime_view();
         ConstraintAlterContext {
+            deferred_rows: RewriteDeferral::default(),
+            pending_foreign_keys: DeferredForeignKeys::default(),
             deletion: self,
             catalog: self,
             relations: self,

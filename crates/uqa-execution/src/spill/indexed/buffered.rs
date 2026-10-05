@@ -22,10 +22,13 @@ pub(crate) struct BufferedIndexedSpill {
 
 impl BufferedIndexedSpill {
     pub(crate) fn new(schema: RowSchema, budget_bytes: usize) -> Self {
-        let memory = MemoryBudget::new(budget_bytes);
+        Self::with_memory(schema, &MemoryBudget::new(budget_bytes))
+    }
+
+    pub(crate) fn with_memory(schema: RowSchema, memory: &MemoryBudget) -> Self {
         Self {
             schema,
-            rows: BudgetedVec::new(&memory),
+            rows: BudgetedVec::new(memory),
             payload: memory.empty_reservation(),
             disk: None,
         }
@@ -75,6 +78,26 @@ impl BufferedIndexedSpill {
             .push(record)
             .map_err(|error| spill_error(error.to_string()))?;
         self.payload.absorb(memory);
+        Ok(())
+    }
+
+    pub(crate) fn memory(&self) -> &MemoryBudget {
+        self.rows.budget()
+    }
+
+    /// Release the resident prefix only after its complete disk representation exists.
+    pub(crate) fn spill(&mut self) -> ExecResult<()> {
+        if self.disk.is_some() || self.rows.is_empty() {
+            return Ok(());
+        }
+        let mut disk = IndexedSpill::new(self.schema.clone())?;
+        for record in self.rows.iter() {
+            disk.push_encoded(record)?;
+        }
+        let memory = self.rows.budget().clone();
+        self.rows = BudgetedVec::new(&memory);
+        self.payload = memory.empty_reservation();
+        self.disk = Some(disk);
         Ok(())
     }
 

@@ -5,6 +5,7 @@
 //
 
 //! Rewrite a table's rows as `ATRewriteTable` does: recompute generated columns, check the new rows, remap physical primary keys, and validate the foreign keys involved.
+use super::rows::RewriteRows;
 use crate::mutation::{
     assignment::MutationAssignmentContext, constraints::context::ConstraintContext,
     publication::MutationStorage,
@@ -12,11 +13,12 @@ use crate::mutation::{
 use crate::schema::keys::KeyValidationContext;
 use uqa_core::DocId;
 use uqa_sql::SQLError;
-use uqa_storage::{document_store::Document, StorageBackendResult};
+use uqa_storage::StorageBackendResult;
 pub trait GeneratedRewriteState {
     fn advance_next_id(&self, table: &str, id: DocId) -> StorageBackendResult<()>;
 }
 pub struct GeneratedRewriteContext<'a, S: Clone + 'static> {
+    pub cancellation: &'a uqa_core::CancellationToken,
     pub keys: KeyValidationContext<'a>,
     pub assignment: MutationAssignmentContext<'a, S>,
     pub storage: &'a dyn MutationStorage,
@@ -29,24 +31,29 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
     table: &str,
     rewrite_physical_rows: bool,
 ) -> Result<(), SQLError> {
-    let doc_ids = context.keys.constraints.reads.live_table_doc_ids(table)?;
-    let mut rows = Vec::with_capacity(doc_ids.len());
-    for doc_id in &doc_ids {
-        let Some(mut document) = context
-            .keys
-            .constraints
-            .reads
-            .get_document(table, *doc_id)?
-        else {
-            continue;
-        };
+    let allowance = context.keys.constraints.memory.work_mem_bytes()?;
+    let memory = uqa_core::memory::MemoryBudget::new(allowance / 2);
+    let read_memory = uqa_core::memory::MemoryBudget::new(allowance - allowance / 2);
+    let control =
+        uqa_storage::read_control::StorageReadControl::new(&read_memory, context.cancellation);
+    let mut original =
+        super::rows::capture(context.keys.constraints.reads, table, &memory, &control)?;
+    let mut rows = RewriteRows::new(&memory);
+    for position in 0..original.len() {
+        context.cancellation.check()?;
+        let super::rows::RewriteRow {
+            original_id: doc_id,
+            mut document,
+            ..
+        } = original.get(position)?;
         crate::mutation::assignment::refresh_stored_generated_columns(
             context.assignment,
             table,
             &mut document,
         )?;
-        rows.push((*doc_id, document));
+        rows.push(doc_id, document)?;
     }
+    drop(original);
     let changed = stored_generated_columns(context.keys.constraints, table)?;
     rewrite_table_rows(context, table, rows, rewrite_physical_rows, &changed)
 }
@@ -55,22 +62,20 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
 pub fn rewrite_table_rows<S: Clone + 'static>(
     context: &GeneratedRewriteContext<'_, S>,
     table: &str,
-    rows: Vec<(DocId, Document)>,
+    mut rows: RewriteRows,
     write: bool,
     changed: &[String],
 ) -> Result<(), SQLError> {
-    for (_, document) in &rows {
+    for position in 0..rows.len() {
+        context.cancellation.check()?;
+        let row = rows.get(position)?;
         crate::mutation::constraints::validate_rewritten_row(
             context.keys.constraints,
             table,
-            document,
+            &row.document,
         )?;
     }
-    super::super::keys::validate_key_constraint_rows(&context.keys, table, &rows)?;
-    if write {
-        publish_rewritten_rows(context, table, rows)?;
-        super::super::keys::validate_temporal_key_rows(&context.keys, table)?;
-    }
+    publish_validated_rows(context, table, rows, write)?;
     crate::schema::validation::validate_rewritten_foreign_keys(
         context.keys.constraints,
         table,
@@ -78,14 +83,34 @@ pub fn rewrite_table_rows<S: Clone + 'static>(
     )
 }
 
+/// Publish rows whose row-local checks have already run in conversion order, then verify the cross-row keys.
+pub(in crate::schema) fn publish_validated_rows<S: Clone + 'static>(
+    context: &GeneratedRewriteContext<'_, S>,
+    table: &str,
+    mut rows: RewriteRows,
+    write: bool,
+) -> Result<(), SQLError> {
+    super::super::keys::validate_key_constraint_rows(&context.keys, table, &mut rows)?;
+    if write {
+        publish_rewritten_rows(context, table, rows)?;
+        super::super::keys::validate_temporal_key_rows(&context.keys, table)?;
+    }
+    Ok(())
+}
+
 fn publish_rewritten_rows<S: Clone + 'static>(
     context: &GeneratedRewriteContext<'_, S>,
     table: &str,
-    rows: Vec<(DocId, Document)>,
+    mut rows: RewriteRows,
 ) -> Result<(), SQLError> {
-    let mut replacements = Vec::with_capacity(rows.len());
-    let mut remaps_primary_key = false;
-    for (old_doc_id, document) in rows {
+    let mut replacements = RewriteRows::new(rows.memory());
+    for position in 0..rows.len() {
+        context.cancellation.check()?;
+        let super::rows::RewriteRow {
+            original_id: old_doc_id,
+            document,
+            ..
+        } = rows.get(position)?;
         let new_doc_id = crate::mutation::identity::key_relocation(
             context.keys.constraints.catalog,
             context.identifiers,
@@ -94,15 +119,19 @@ fn publish_rewritten_rows<S: Clone + 'static>(
             &document,
         )?
         .unwrap_or(old_doc_id);
-        remaps_primary_key |= new_doc_id != old_doc_id;
-        replacements.push((old_doc_id, new_doc_id, document));
+        replacements.push_replacement(old_doc_id, new_doc_id, document)?;
     }
-    if remaps_primary_key {
-        for (old_doc_id, _, _) in &replacements {
-            context.storage.delete_document(table, *old_doc_id)?;
-        }
-    }
-    for (old_doc_id, new_doc_id, document) in replacements {
+    drop(rows);
+    // A rewrite replaces the heap captured at its start. Self-modifying callbacks cannot leave additional old-heap rows beside that replacement.
+    replacements.spill()?;
+    remove_replaced_rows(context, table, replacements.memory())?;
+    for position in 0..replacements.len() {
+        context.cancellation.check()?;
+        let super::rows::RewriteRow {
+            original_id: old_doc_id,
+            target_id: new_doc_id,
+            document,
+        } = replacements.get(position)?;
         let vectors = crate::mutation::vectors::document_vectors(
             context.keys.constraints.catalog,
             table,
@@ -110,20 +139,12 @@ fn publish_rewritten_rows<S: Clone + 'static>(
         )?;
         context.storage.insert_document(
             table,
-            if remaps_primary_key {
-                new_doc_id
-            } else {
-                old_doc_id
-            },
+            new_doc_id,
             document,
             vectors,
-            if remaps_primary_key {
-                crate::mutation::publication::InsertedIdentity::Vacant
-            } else {
-                crate::mutation::publication::InsertedIdentity::Unknown
-            },
+            crate::mutation::publication::InsertedIdentity::Vacant,
         )?;
-        if remaps_primary_key {
+        if new_doc_id != old_doc_id {
             context
                 .state
                 .advance_next_id(table, new_doc_id)
@@ -136,6 +157,33 @@ fn publish_rewritten_rows<S: Clone + 'static>(
         }
     }
     Ok(())
+}
+
+fn remove_replaced_rows<S: Clone + 'static>(
+    context: &GeneratedRewriteContext<'_, S>,
+    table: &str,
+    memory: &uqa_core::memory::MemoryBudget,
+) -> Result<(), SQLError> {
+    let control = uqa_storage::read_control::StorageReadControl::new(memory, context.cancellation);
+    let limit = (memory.available() / (4 * std::mem::size_of::<DocId>()))
+        .clamp(1, crate::DEFAULT_BATCH_SIZE);
+    let mut after = None;
+    loop {
+        context.cancellation.check()?;
+        let ids = context
+            .keys
+            .constraints
+            .reads
+            .live_table_doc_id_page(table, after, limit, &control)?;
+        let Some(last) = ids.last().copied() else {
+            return Ok(());
+        };
+        after = Some(last);
+        for id in ids.iter().copied() {
+            context.cancellation.check()?;
+            context.storage.delete_document(table, id)?;
+        }
+    }
 }
 
 /// The stored generated columns of `table`, whose values a rewrite of the table recomputes.

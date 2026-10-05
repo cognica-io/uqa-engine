@@ -169,6 +169,7 @@ pub(super) fn validate_partition_index_rows(
 
 mod binding;
 pub(crate) mod build_keys;
+pub(crate) use build_keys::IndexBuildKeys;
 pub mod constraint_names;
 pub mod creation;
 #[cfg(test)]

@@ -37,6 +37,9 @@ pub trait PartitionForeignKeyTables {
     fn schema_constraint_names(&self, table: &str) -> Result<BTreeSet<String>, SQLError>;
     fn partitions(&self) -> PartitionContext<'_>;
     fn rows(&self) -> ConstraintContext<'_>;
+    fn validate_rows(&self, table: &str, name: &str, key: &ForeignKey) -> Result<(), SQLError> {
+        crate::schema::validation::validate_foreign_key_rows(self.rows(), table, name, key)
+    }
 }
 
 impl PartitionForeignKeyTables for ConstraintAlterContext<'_> {
@@ -67,6 +70,13 @@ impl PartitionForeignKeyTables for ConstraintAlterContext<'_> {
     }
     fn rows(&self) -> ConstraintContext<'_> {
         self.rows
+    }
+    fn validate_rows(&self, table: &str, name: &str, key: &ForeignKey) -> Result<(), SQLError> {
+        if self.deferred_rows.is_deferred() {
+            self.pending_foreign_keys.retain(table, name, key);
+            return Ok(());
+        }
+        crate::schema::validation::validate_foreign_key_rows(self.rows, table, name, key)
     }
 }
 
@@ -229,12 +239,7 @@ fn validate_rows(
                 "partition `{table}` holds no copy of its parent's foreign key"
             ))
         })?;
-    crate::schema::validation::validate_foreign_key_rows(
-        tables.rows(),
-        table,
-        key.name.as_deref().unwrap_or_default(),
-        &key,
-    )
+    tables.validate_rows(table, key.name.as_deref().unwrap_or_default(), &key)
 }
 
 /// Give every partition below `table` the foreign key `key` that `table` now holds, parents before their partitions in partition order. The validation of `key` validates the copies and attached foreign keys that are not valid, as `ADD FOREIGN KEY` validates the rows of every leaf partition unless the foreign key is `NOT VALID`.

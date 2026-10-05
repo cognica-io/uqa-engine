@@ -201,7 +201,7 @@ pub fn validate_drop_expression(
 pub fn analyze_column_type(
     context: &ColumnAlterAnalysisContext<'_>,
     table: &str,
-    qualifier: &str,
+    _qualifier: &str,
     name: &str,
     ty: &ColumnType,
 ) -> Result<Option<GeneratedColumnKind>, SQLError> {
@@ -236,6 +236,16 @@ pub fn analyze_column_type(
             return Err(SQLError::TypeMismatch(format!("cannot alter type of column `{name}` because generated column(s) `{}` depend on it", dependents.join("`, `"))));
         }
     }
+    Ok(target_generated_kind)
+}
+
+/// Rebind the dependent declarations after every column type has changed. A foreign key can refer to another column changed by the same ALTER statement.
+pub fn validate_column_type_constraints(
+    context: &ColumnAlterAnalysisContext<'_>,
+    table: &str,
+    qualifier: &str,
+) -> Result<(), SQLError> {
+    let mut candidate_columns = described_columns(context, table, "ALTER COLUMN TYPE")?;
     let key_constraints = context
         .keys
         .try_key_constraints(table)
@@ -261,5 +271,5 @@ pub fn analyze_column_type(
         &mut candidate_columns,
         &foreign_keys,
     )?;
-    Ok(target_generated_kind)
+    Ok(())
 }

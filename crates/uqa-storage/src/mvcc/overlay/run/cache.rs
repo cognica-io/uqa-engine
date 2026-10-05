@@ -51,6 +51,18 @@ impl RunCache {
             .map(|(_, bytes)| Arc::clone(bytes))
     }
 
+    /// A reader changing blocks no longer needs the cache's ownership of the previous block. Other active readers retain their own shared bytes.
+    pub(super) fn discard_other_block(&self, index: usize) {
+        let mut cached = self.cached.lock();
+        if cached
+            .block
+            .as_ref()
+            .is_some_and(|(previous, _)| *previous != index)
+        {
+            cached.block = None;
+        }
+    }
+
     pub(super) fn keep_block(&self, index: usize, bytes: &Arc<BudgetedVec<u8>>) {
         let mut cached = self.cached.lock();
         if cached.readers != 0 {
@@ -59,8 +71,15 @@ impl RunCache {
     }
 
     pub(super) fn chunk(&self, start: u64) -> Option<Arc<BudgetedVec<u8>>> {
-        self.cached
-            .lock()
+        let mut cached = self.cached.lock();
+        if cached
+            .chunk
+            .as_ref()
+            .is_some_and(|(previous, _)| *previous != start)
+        {
+            cached.chunk = None;
+        }
+        cached
             .chunk
             .as_ref()
             .filter(|(cached, _)| *cached == start)

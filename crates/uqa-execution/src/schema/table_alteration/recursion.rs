@@ -10,17 +10,14 @@ use super::{
     TableAlterContext,
 };
 use std::collections::BTreeSet;
-use uqa_sql::schema::columns::type_transform::AnalyzedTypeTransform;
 
-struct RecursionState<'a> {
+struct RecursionState {
     visiting: BTreeSet<String>,
-    type_transform: Option<&'a AnalyzedTypeTransform>,
 }
 pub(super) fn run_recursive_alter_action<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     stmt: AlterTableStmt,
     action: AlterTableAction,
-    type_transform: Option<&AnalyzedTypeTransform>,
 ) -> Result<(), SQLError> {
     run_alter_action_branch(
         context,
@@ -30,7 +27,6 @@ pub(super) fn run_recursive_alter_action<S: Clone + 'static>(
         None,
         &mut RecursionState {
             visiting: BTreeSet::new(),
-            type_transform,
         },
     )
 }
@@ -41,7 +37,7 @@ fn run_alter_action_branch<S: Clone + 'static>(
     mut action: AlterTableAction,
     recursing: bool,
     inherited_not_null_name: Option<String>,
-    state: &mut RecursionState<'_>,
+    state: &mut RecursionState,
 ) -> Result<(), SQLError> {
     let table = stmt.table.clone();
     if !state.visiting.insert(table.clone()) {
@@ -73,7 +69,6 @@ fn run_alter_action_branch<S: Clone + 'static>(
         action.clone(),
         recursing,
         inherited_not_null_name,
-        state.type_transform,
     )?;
     let child_not_null_name = if let AlterTableAction::SetNotNull { name } = &action {
         context

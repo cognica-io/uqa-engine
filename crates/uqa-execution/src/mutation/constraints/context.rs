@@ -20,7 +20,16 @@ pub use uqa_sql::semantics::constraint_catalog::ConstraintCatalog;
 pub trait MutationRead {
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
+    fn live_table_doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>;
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError>;
+    /// Read the stored fields without materializing expressions from the current descriptor; a retained rewrite supplies its original descriptor.
+    fn raw_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError>;
     /// The changes of `table` that the active command overlays and this transaction's fixed-snapshot reads hold above its storage view, without copying them.
     fn command_overlay_changes(
         &self,

@@ -19,6 +19,26 @@ use uqa_execution::schema::{
 };
 use uqa_sql::{ast::EventEnableMode, SQLError, SQLResult};
 use uqa_storage::StorageBackendResult;
+
+impl uqa_execution::schema::columns::rows::changes::RewriteRowChanges for Engine {
+    fn storage_generation(&self, table: &str) -> Result<[u8; 16], SQLError> {
+        Ok(self.require_table(table)?.storage_generation())
+    }
+
+    fn visit_changes(
+        &self,
+        visit: &mut dyn FnMut(
+            &[uqa_execution::row_locks::publication::TransactionRowChange],
+        ) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        let frames = self.session.transactions.lock();
+        for frame in frames.iter() {
+            visit(&frame.row_changes)?;
+        }
+        Ok(())
+    }
+}
+
 impl Engine {
     pub(crate) fn table_alter_binding_context(&self) -> TableAlterBindingContext<'_> {
         TableAlterBindingContext {
@@ -48,6 +68,7 @@ impl Engine {
     }
     pub(crate) fn table_alter_context(&self) -> TableAlterContext<'_, StatementReadSnapshot> {
         TableAlterContext {
+            row_changes: self,
             binding: self.table_alter_binding_context(),
             ownership: self.table_ownership_context(),
             hierarchy: self.hierarchy_execution_context(),

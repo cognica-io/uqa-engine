@@ -35,6 +35,7 @@ pub trait ColumnIndexChanges {
     ) -> StorageBackendResult<bool>;
 }
 pub struct ColumnAlterContext<'a, S: Clone + 'static> {
+    pub deferred_rows: super::rows::RewriteDeferral,
     pub analysis: ColumnAlterAnalysisContext<'a>,
     pub fields: &'a dyn ColumnAdditionState,
     pub indexes: &'a dyn ColumnIndexChanges,
@@ -160,6 +161,12 @@ pub fn set_expression<S: Clone + 'static>(
         ColumnProperty::Generated(Some(generated)),
     )
     .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?;
+    if context.deferred_rows.is_deferred() {
+        if kind == GeneratedColumnKind::Stored {
+            context.deferred_rows.require_physical_rewrite(table, name);
+        }
+        return Ok(());
+    }
     super::generated::validate_and_rewrite_generated_rows(
         &context.generated,
         table,
@@ -187,14 +194,13 @@ pub fn drop_expression<S: Clone + 'static>(
     .map_err(|error| ddl_storage_error("ALTER COLUMN DROP EXPRESSION", error))?;
     Ok(None)
 }
-pub fn alter_type<S: Clone + 'static>(
+pub fn begin_type_change<S: Clone + 'static>(
     context: &ColumnAlterContext<'_, S>,
     table: &str,
     qualifier: &str,
     name: &str,
     ty: &ColumnType,
-    transform: Option<&uqa_sql::schema::columns::type_transform::AnalyzedTypeTransform>,
-) -> Result<(), SQLError> {
+) -> Result<Option<GeneratedColumnKind>, SQLError> {
     let target_generated_kind =
         alteration::analyze_column_type(&context.analysis, table, qualifier, name, ty)?;
     let old_ty = context
@@ -220,13 +226,17 @@ pub fn alter_type<S: Clone + 'static>(
     }
     publish_property(context.transactions, table, name, ColumnProperty::Type(ty))
         .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
-    if target_generated_kind.is_none() {
-        let rows = super::converted_column_rows(context, table, name, &old_ty, ty, transform)?;
-        let mut changed =
-            super::generated::stored_generated_columns(context.generated.keys.constraints, table)?;
-        changed.push(name.to_string());
-        super::generated::rewrite_table_rows(&context.generated, table, rows, true, &changed)?;
-    }
+    Ok(target_generated_kind)
+}
+
+/// Finish physical index maintenance after the complete row rewrite.
+pub fn finish_type_change<S: Clone + 'static>(
+    context: &ColumnAlterContext<'_, S>,
+    table: &str,
+    name: &str,
+    ty: &ColumnType,
+    target_generated_kind: Option<GeneratedColumnKind>,
+) -> Result<(), SQLError> {
     match ty {
         ColumnType::Text if target_generated_kind != Some(GeneratedColumnKind::Virtual) => {
             context.fields.add_text_field(table, name.to_string())?;
@@ -238,13 +248,6 @@ pub fn alter_type<S: Clone + 'static>(
                 .map_err(|error| ddl_storage_error("ALTER TABLE ALTER COLUMN", error))?;
         }
         _ => {}
-    }
-    if let Some(kind) = target_generated_kind {
-        super::generated::validate_and_rewrite_generated_rows(
-            &context.generated,
-            table,
-            kind == GeneratedColumnKind::Stored,
-        )?;
     }
     context
         .fields

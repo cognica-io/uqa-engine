@@ -138,8 +138,9 @@ fn merge(
     let entries = runs.iter().map(|run| run.len()).sum();
     let entry_bytes = runs.iter().map(|run| run.entry_bytes()).sum();
     let set = RunSet(Some(StrongArc::new(runs.to_vec())));
-    let mut cursor = TieredCursor::new(None, &set, Bound::Unbounded, control)?;
+    // Reader admission must see the writer's retained workspace before it divides the remaining allowance among runs.
     let mut writer = SpilledRunWriter::new(entries, entry_bytes, memory)?;
+    let mut cursor = TieredCursor::new(None, &set, Bound::Unbounded, control)?;
     while let Some(change) = cursor.next(control)? {
         let TieredChange::Spilled { entry, run } = &change else {
             return Err(crate::mvcc::VersionError::InvalidEncoding(
@@ -152,3 +153,6 @@ fn merge(
         .finish()?
         .expect("merging nonempty runs yields a nonempty run"))
 }
+
+#[cfg(test)]
+mod tests;

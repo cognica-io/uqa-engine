@@ -132,6 +132,18 @@ impl MemoryBudget {
         self.0.used.load(Ordering::Relaxed)
     }
 
+    /// Currently unreserved bytes under this limit and every ancestor limit. This is a sizing hint; concurrent owners can consume it before a reservation succeeds.
+    pub fn available(&self) -> usize {
+        self.allowances()
+            .map(|allowance| {
+                allowance
+                    .limit
+                    .saturating_sub(allowance.used.load(Ordering::Relaxed))
+            })
+            .min()
+            .expect("a budget has its own allowance")
+    }
+
     pub fn shares_allowance(&self, other: &Self) -> bool {
         StrongArc::ptr_eq(&self.0, &other.0)
     }

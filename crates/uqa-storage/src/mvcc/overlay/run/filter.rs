@@ -18,15 +18,22 @@ pub(super) struct KeyFilter {
 }
 
 impl KeyFilter {
-    /// A filter for `keys` keys, or `None` when the allowance cannot hold it: the run is then read for every lookup, which is slower but exact.
+    /// A filter for `keys` keys, or `None` when it would occupy more than a quarter of the available workspace needed by the run index and readers. Omitting it makes lookups slower but exact.
     pub(super) fn with_capacity(keys: u64, memory: &MemoryBudget) -> Option<Self> {
         let bits = keys
             .checked_mul(BITS_PER_KEY)?
             .max(64)
             .checked_next_multiple_of(64)?;
         let words = usize::try_from(bits / 64).ok()?;
+        let maximum = memory.available() / 4;
+        if words.checked_mul(size_of::<u64>())? > maximum {
+            return None;
+        }
         let mut storage = BudgetedVec::new(memory);
         storage.reserve(words).ok()?;
+        if storage.capacity().checked_mul(size_of::<u64>())? > maximum {
+            return None;
+        }
         for _ in 0..words {
             storage.push(0).ok()?;
         }
@@ -73,4 +80,29 @@ fn hash(key: &[u8], seed: u64) -> u64 {
     state ^= state >> 33;
     state = state.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
     state ^ (state >> 33)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_filter_leaves_shared_ancestor_workspace_for_the_run_consumer() {
+        let memory = MemoryBudget::new(64 << 10);
+        let retained = memory.reserve(48 << 10).unwrap();
+        let reader = memory.child(256 << 10);
+        assert!(KeyFilter::with_capacity(8_192, &reader).is_none());
+        assert_eq!(memory.used(), retained.bytes());
+
+        let mut filter = KeyFilter::with_capacity(128, &reader).unwrap();
+        for key in 0_u64..128 {
+            filter.insert(&key.to_be_bytes());
+        }
+        for key in 0_u64..128 {
+            assert!(filter.may_contain(&key.to_be_bytes()));
+        }
+        assert!(reader.used() <= (16 << 10) / 4);
+        drop((filter, retained));
+        assert_eq!(memory.used(), 0);
+    }
 }

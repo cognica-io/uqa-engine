@@ -22,6 +22,7 @@ pub(in crate::mvcc) struct RunCursor {
     block: Option<EntryReader>,
     start: Option<(Vec<u8>, bool)>,
     reader: Option<RunCacheReader>,
+    block_limit: usize,
 }
 
 impl RunCursor {
@@ -38,7 +39,14 @@ impl RunCursor {
             next_block,
             block: None,
             start,
+            block_limit: usize::MAX,
         }
+    }
+
+    /// Bound this reader's block admission when it shares one consumer allowance with other runs.
+    pub(in crate::mvcc) fn with_block_limit(mut self, bytes: usize) -> Self {
+        self.block_limit = bytes;
+        self
     }
 
     /// The run this cursor reads.
@@ -80,7 +88,12 @@ impl RunCursor {
                     self.reader = None;
                     return Ok(None);
                 }
-                self.block = Some(EntryReader::new(&self.run, self.next_block, control)?);
+                self.block = Some(EntryReader::with_block_limit(
+                    &self.run,
+                    self.next_block,
+                    self.block_limit,
+                    control,
+                )?);
                 self.next_block += 1;
             }
             let entry =

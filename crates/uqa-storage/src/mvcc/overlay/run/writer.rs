@@ -8,7 +8,7 @@
 
 use std::io::Write;
 
-use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation};
+use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::key::RecordKey;
@@ -29,15 +29,19 @@ const MAX_BLOCKS: u64 = 4096;
 
 struct BufferedFile {
     file: TemporaryFile,
-    buffer: Vec<u8>,
+    buffer: BudgetedVec<u8>,
+    flush_bytes: usize,
     written: u64,
 }
 
 impl BufferedFile {
-    fn new() -> VersionResult<Self> {
+    fn new(memory: &MemoryBudget, flush_bytes: usize) -> VersionResult<Self> {
+        let mut buffer = BudgetedVec::new(memory);
+        buffer.reserve(flush_bytes)?;
         Ok(Self {
             file: TemporaryFile::new().map_err(spill_error)?,
-            buffer: Vec::new(),
+            buffer,
+            flush_bytes,
             written: 0,
         })
     }
@@ -48,10 +52,10 @@ impl BufferedFile {
 
     fn append(&mut self, mut bytes: &[u8]) -> VersionResult<()> {
         while !bytes.is_empty() {
-            let count = bytes.len().min(FLUSH_BYTES - self.buffer.len());
-            self.buffer.extend_from_slice(&bytes[..count]);
+            let count = bytes.len().min(self.flush_bytes - self.buffer.len());
+            self.buffer.extend_from_slice(&bytes[..count])?;
             bytes = &bytes[count..];
-            if self.buffer.len() == FLUSH_BYTES {
+            if self.buffer.len() == self.flush_bytes {
                 self.flush()?;
             }
         }
@@ -81,7 +85,6 @@ pub(in crate::mvcc) struct SpilledRunWriter {
     len: u64,
     kinds: u16,
     memory: MemoryBudget,
-    _staging: MemoryReservation,
 }
 
 impl SpilledRunWriter {
@@ -93,11 +96,11 @@ impl SpilledRunWriter {
     ) -> VersionResult<Self> {
         let encoded = key_bytes
             .saturating_add(entries.saturating_mul(entry::encoded_len(0, true, true) as u64));
-        // The two staging buffers are this writer's scratch space.
-        let staging = memory.reserve(2 * FLUSH_BYTES)?;
+        // Keep the resident input intact until publication and leave half the available workspace for the run index and merge readers.
+        let flush_bytes = (memory.available() / 4).clamp(1, FLUSH_BYTES);
         Ok(Self {
-            entries: BufferedFile::new()?,
-            values: BufferedFile::new()?,
+            entries: BufferedFile::new(memory, flush_bytes)?,
+            values: BufferedFile::new(memory, flush_bytes)?,
             encoded: Vec::new(),
             blocks: BudgetedVec::new(memory),
             block_bytes: (encoded / MAX_BLOCKS).max(MIN_BLOCK_BYTES),
@@ -106,7 +109,6 @@ impl SpilledRunWriter {
             len: 0,
             kinds: 0,
             memory: memory.clone(),
-            _staging: staging,
         })
     }
 

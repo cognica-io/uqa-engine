@@ -15,6 +15,8 @@ use uqa_storage::{
     StorageBackendError, StorageBackendResult, StoredDocument,
 };
 
+mod visible;
+pub use visible::VisibleDocumentIds;
 mod desired;
 mod identities;
 mod layers;
