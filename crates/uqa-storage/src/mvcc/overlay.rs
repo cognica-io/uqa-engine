@@ -20,6 +20,9 @@ use super::key::RecordKey;
 use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWrite, VersionError, VersionResult};
 
 mod retained;
+mod scopes;
+pub use scopes::PrivateRevisionScope;
+use scopes::RevisionScopes;
 pub(in crate::mvcc) mod run;
 mod run_set;
 mod tiers;
@@ -95,6 +98,7 @@ struct Savepoint {
     resident: usize,
     runs: RunSet,
     sources: RetainedSources,
+    scopes: Option<RevisionScopes>,
     revision: Option<PrivateRecordRevision>,
 }
 
@@ -105,6 +109,7 @@ struct State {
     resident: usize,
     runs: RunSet,
     sources: Sources,
+    scopes: Option<RevisionScopes>,
     revision: Option<PrivateRecordRevision>,
     savepoints: BudgetedVec<Savepoint>,
 }
@@ -194,6 +199,7 @@ impl PrivateRecordChanges {
                     resident: state.resident,
                     runs: state.runs.clone(),
                     sources: state.sources.clone(),
+                    scopes: state.scopes.as_ref().map(RevisionScopes::fork),
                     revision: state.revision,
                     savepoints: BudgetedVec::new(state.records.budget()),
                 }),
@@ -218,6 +224,13 @@ impl PrivateRecordChanges {
     }
 
     pub fn new(memory: &MemoryBudget) -> Self {
+        Self::with_revision_scope(memory, None)
+    }
+
+    pub(in crate::mvcc) fn with_revision_scope(
+        memory: &MemoryBudget,
+        scope: Option<PrivateRevisionScope>,
+    ) -> Self {
         Self {
             owner: StrongArc::new(Owner {
                 state: Mutex::new(State {
@@ -225,6 +238,7 @@ impl PrivateRecordChanges {
                     resident: 0,
                     runs: RunSet::empty(),
                     sources: Sources::new(memory),
+                    scopes: scope.map(|scope| RevisionScopes::new(memory, scope)),
                     revision: None,
                     savepoints: BudgetedVec::new(memory),
                 }),
@@ -256,7 +270,6 @@ impl PrivateRecordChanges {
             return Ok(());
         }
         let mut state = self.owner.state.lock();
-        let mut incoming = 0_usize;
         for (index, write) in writes.iter().enumerate() {
             control.cancellation().check()?;
             if let Some(previous) = state.change(write.key(), control)? {
@@ -268,16 +281,21 @@ impl PrivateRecordChanges {
                     });
                 }
             }
-            incoming = incoming.saturating_add(resident_bytes(write));
         }
         state.make_room(control)?;
         let identity = PrivateRecordRevision::allocate()?;
+        let scopes = state
+            .scopes
+            .as_ref()
+            .map(|scopes| scopes.with_writes(writes, identity, control))
+            .transpose()?;
         let invalidates_source = writes
             .iter()
             .any(|write| state.sources.get(write.key()).is_some_and(Option::is_some));
         if writes.len() == 1 && !invalidates_source {
             let write = &writes[0];
             control.cancellation().check()?;
+            let resident = replaced_resident(&state.records, state.resident, write);
             state.records.try_insert(
                 write.shared_key(),
                 Change {
@@ -285,14 +303,17 @@ impl PrivateRecordChanges {
                     identity,
                 },
             )?;
-            state.resident = state.resident.saturating_add(incoming);
+            state.resident = resident;
+            state.scopes = scopes;
             state.revision = Some(identity);
             return Ok(());
         }
         let mut records = state.records.clone();
         let mut sources = state.sources.clone();
+        let mut resident = state.resident;
         for write in writes {
             control.cancellation().check()?;
+            resident = replaced_resident(&records, resident, write);
             records.try_insert(
                 write.shared_key(),
                 Change {
@@ -308,7 +329,8 @@ impl PrivateRecordChanges {
         // Candidate roots own every reservation before this single atomic publication.
         state.records = records;
         state.sources = sources;
-        state.resident = state.resident.saturating_add(incoming);
+        state.scopes = scopes;
+        state.resident = resident;
         state.revision = Some(identity);
         Ok(())
     }
@@ -341,6 +363,11 @@ impl PrivateRecordChanges {
             records: state.records.clone(),
             runs: state.runs.clone(),
             sources: state.sources.snapshot(),
+            scopes: state
+                .scopes
+                .as_ref()
+                .map(RevisionScopes::snapshot)
+                .transpose()?,
             revision: state.revision,
             _memory: memory,
         })
@@ -352,6 +379,7 @@ impl PrivateRecordChanges {
         let resident = state.resident;
         let runs = state.runs.clone();
         let sources = state.sources.snapshot();
+        let scopes = state.scopes.as_ref().map(RevisionScopes::fork);
         let revision = state.revision;
         state.savepoints.push(Savepoint {
             id,
@@ -359,6 +387,7 @@ impl PrivateRecordChanges {
             resident,
             runs,
             sources,
+            scopes,
             revision,
         })?;
         Ok(())
@@ -381,6 +410,10 @@ impl PrivateRecordChanges {
         state.runs = state.savepoints[position].runs.clone();
         let sources = state.savepoints[position].sources.clone();
         state.sources.restore(&sources);
+        state.scopes = state.savepoints[position]
+            .scopes
+            .as_ref()
+            .map(RevisionScopes::fork);
         state.revision = state.savepoints[position].revision;
         state.truncate_savepoints(position + 1);
         Ok(())
@@ -393,6 +426,7 @@ impl PrivateRecordChanges {
         state.resident = 0;
         state.runs = RunSet::empty();
         state.sources = Sources::new(&memory);
+        state.scopes = state.scopes.as_ref().map(RevisionScopes::empty);
         state.revision = None;
         state.truncate_savepoints(0);
         Ok(())
@@ -445,6 +479,7 @@ pub struct PrivateRecordSnapshot {
     records: Records,
     runs: RunSet,
     sources: RetainedSources,
+    scopes: Option<Box<PrivateRecordSnapshot>>,
     revision: Option<PrivateRecordRevision>,
     _memory: MemoryReservation,
 }
@@ -500,6 +535,11 @@ impl PrivateRecordSnapshot {
             records: self.records.clone(),
             runs: self.runs.clone(),
             sources: self.sources.clone(),
+            scopes: self
+                .scopes
+                .as_ref()
+                .map(|scopes| scopes.try_clone().map(Box::new))
+                .transpose()?,
             revision: self.revision,
             _memory: memory,
         })
@@ -712,6 +752,15 @@ fn resident_bytes(write: &PreparedRecordWrite) -> usize {
         .len()
         .saturating_add(write.value().map_or(0, <[u8]>::len))
         .saturating_add(CHANGE_OVERHEAD)
+}
+
+fn replaced_resident(records: &Records, resident: usize, write: &PreparedRecordWrite) -> usize {
+    let previous = records
+        .get(write.key())
+        .map_or(0, |change| resident_bytes(&change.write));
+    resident
+        .saturating_sub(previous)
+        .saturating_add(resident_bytes(write))
 }
 
 #[cfg(test)]

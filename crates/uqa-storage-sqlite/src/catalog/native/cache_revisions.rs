@@ -59,8 +59,7 @@ impl NativeSnapshot {
         let mut retained = BudgetedVec::<MemoryReservation>::new(self.control.memory());
         let mut after = BudgetedVec::new(self.control.memory());
         loop {
-            let page = self.view.private_keys(
-                &[],
+            let page = self.view.private_revision_scopes(
                 (!after.is_empty()).then_some(&*after),
                 64,
                 &self.control,
@@ -69,6 +68,8 @@ impl NativeSnapshot {
             after.clear();
             after.extend_from_slice(last.key())?;
             for change in page.iter() {
+                #[cfg(test)]
+                tests::visited();
                 let generation = PRIVATE
                     .checked_add(change.revision().as_u64())
                     .ok_or(VersionError::PrivateRevisionExhausted)?;
@@ -287,3 +288,6 @@ fn string(value: ValueRef<'_>) -> Result<&str> {
         .as_str()
         .map_err(|_| invalid("invalid native cache name"))
 }
+
+#[cfg(test)]
+mod tests;

@@ -46,6 +46,36 @@ pub struct NativeRecordIdentity {
 }
 
 impl NativeRecordIdentity {
+    /// Families with named or entity-specific invalidation retain their complete key. All other relevant families aggregate by their validated owner header; family IDs separate these scopes from complete keys of other families.
+    pub(crate) fn revision_scope(key: &[u8]) -> Option<&[u8]> {
+        use NativeRecordFamily as Family;
+
+        let Ok(identity) = Self::decode(key) else {
+            // Preserve malformed raw records for the existing read/publication validator.
+            return Some(key);
+        };
+        match identity.family {
+            family if family.is_standalone_graph() => return None,
+            Family::TableOwners
+            | Family::OccurrenceGuards
+            | Family::VectorGuards
+            | Family::GraphLookups
+            | Family::GraphPathPairs
+            | Family::GraphPathIndexState => return None,
+            Family::Metadata
+            | Family::NamedGraphs
+            | Family::GraphMembership
+            | Family::GraphVertices
+            | Family::GraphEdges => return Some(key),
+            _ => {}
+        }
+        let owner_bytes = match identity.owner {
+            NativeRecordOwner::Database(_) => 16,
+            NativeRecordOwner::Object { .. } => 32,
+        };
+        Some(&key[..PREFIX.len() + 2 + 1 + owner_bytes])
+    }
+
     /// Address every retained generation of one object without scanning other object payloads.
     pub(crate) fn object_prefix(
         family: NativeRecordFamily,

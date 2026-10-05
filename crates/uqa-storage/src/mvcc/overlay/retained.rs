@@ -44,9 +44,14 @@ impl PrivateRecordChanges {
                 actual: previous.expected(),
             });
         }
-        let incoming = super::resident_bytes(&write);
         state.make_room(control)?;
+        let resident = super::replaced_resident(&state.records, state.resident, &write);
         let identity = PrivateRecordRevision::allocate()?;
+        let scopes = state
+            .scopes
+            .as_ref()
+            .map(|scopes| scopes.with_writes(std::slice::from_ref(&write), identity, control))
+            .transpose()?;
         let key = write.shared_key();
         let records = state
             .records
@@ -55,7 +60,8 @@ impl PrivateRecordChanges {
         control.check()?;
         state.records = records;
         state.sources = sources;
-        state.resident = state.resident.saturating_add(incoming);
+        state.scopes = scopes;
+        state.resident = resident;
         state.revision = Some(identity);
         Ok(())
     }
