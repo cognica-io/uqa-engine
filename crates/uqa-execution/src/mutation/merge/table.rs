@@ -886,7 +886,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                     }
                 }
             }
-            drop(overlay);
+            let published = overlay.finish();
             let prepared_actions = prepared_actions
                 .into_shared(action_schema)
                 .map_err(crate::physical::physical_exec_error)?;
@@ -907,7 +907,8 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             let prepared_reader = prepared_actions
                 .read_rows()
                 .map_err(crate::physical::physical_exec_error)?;
-            let mut publication = statement_end::publication_batch(&statement_commands);
+            let mut publication =
+                statement_end::publication_batch(&statement_commands).with_published(published);
             for prepared in prepared_reader {
                 let prepared = prepared.map_err(crate::physical::physical_exec_error)?;
                 let action = decode_prepared_mutation_action_row(prepared)?;

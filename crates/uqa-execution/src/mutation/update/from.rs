@@ -7,12 +7,11 @@
 //! Joined UPDATE execution using independent read and write statement generations.
 use crate::mutation::statement::context::MutationStatementContext;
 use crate::mutation::{
-    assignment::{validate_view_checks, MutationAssignmentTarget, ViewCheckContext},
+    assignment::MutationAssignmentTarget,
     candidate::{MutationRewriteCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     command_scope::MutationOverlayScope,
     prepared::PreparedMutationAction,
-    returning::{DmlReturningShape, ReturningProjectionRow},
-    row_images::{MutationRowImage, MutationRowImages},
+    returning::DmlReturningShape,
     rows::join_rows as dml_join_rows,
     statement_end,
     triggers::queue::StatementEvent,
@@ -70,6 +69,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         .rules
         .rules_for(&target, uqa_sql::ast::RuleEvent::Update)?;
     let has_update_rules = !update_rules.is_empty();
+    let has_any_update_rules = has_update_rules || !stmt.view_rule_relations.is_empty();
     let view_original_query = !stmt.view_rule_relations.iter().try_fold(
         false,
         |suppressed, relation| -> Result<bool, SQLError> {
@@ -143,6 +143,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     };
     let overlay = MutationOverlayScope::new(context.mutation.state);
     let mut pending_updates = Vec::new();
+    let mut prepared_updates = Vec::new();
     let mut locked_ids = std::collections::BTreeSet::new();
     for (storage_table, doc_id) in target_rows {
         cancel.check()?;
@@ -307,17 +308,39 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                 }
             }
         }
-        pending_updates.push(MutationRewriteCandidate {
-            identity: PhysicalDocumentIdentity {
-                table: storage_table,
-                doc_id,
-            },
-            old_document: original_doc,
-            proposed_document: doc,
-            context: source_context,
-        });
+        if has_any_update_rules {
+            pending_updates.push(MutationRewriteCandidate {
+                identity: PhysicalDocumentIdentity {
+                    table: storage_table,
+                    doc_id,
+                },
+                old_document: original_doc,
+                proposed_document: doc,
+                context: source_context,
+            });
+        } else if let Some(prepared) = super::prepare_update_row(
+            context.mutation.preparation,
+            stmt,
+            params,
+            &snapshot_ctes,
+            statement,
+            &storage_table,
+            doc_id,
+            original_doc,
+            doc,
+            Some(&source_context),
+        )? {
+            if let Some(returning) = prepared.returning {
+                returning_rows.push(returning);
+            }
+            affected += u64::from(prepared.affected);
+            prepared_updates.push((
+                PreparedMutationAction::Rewrite(prepared.rewrite),
+                prepared.after_row_events,
+            ));
+        }
     }
-    drop(overlay);
+    let qualified_published = overlay.finish();
     let rule_rows = pending_updates
         .iter()
         .map(|candidate| crate::mutation::rules::RuleRowImage {
@@ -415,129 +438,39 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         )?;
     }
     let overlay = MutationOverlayScope::new(context.mutation.state);
-    let mut prepared_updates = Vec::new();
     let mut events = crate::mutation::events::MutationEventQueue::default();
     for (index, candidate) in pending_updates.into_iter().enumerate() {
         if view_rule_batches.suppresses(index) || base_rule_suppressed[index] {
             continue;
         }
-        let Some(triggered_document) = crate::mutation::triggers::fire_before_row_triggers(
-            &context.mutation.preparation.referential.triggers,
-            &candidate.identity.table,
-            uqa_sql::ast::TriggerEvent::Update,
-            candidate.identity.doc_id,
-            Some(&candidate.old_document),
-            Some(&candidate.proposed_document),
-            &assigned_columns,
-        )?
-        else {
-            continue;
-        };
-        let Some(route) = crate::mutation::referential::prepare_partition_update_route(
-            &context.mutation.preparation.referential,
-            statement,
-            &candidate.identity.table,
-            candidate.identity.doc_id,
-            &candidate.old_document,
-            triggered_document,
-            &target,
+        if let Some(prepared) = super::prepare_update_row(
+            context.mutation.preparation,
+            stmt,
             params,
-            stmt.include_descendants,
-        )?
-        else {
-            continue;
-        };
-        let mut prepared = crate::mutation::referential::prepare_routed_document_rewrite(
-            &context.mutation.preparation.referential,
+            &snapshot_ctes,
+            statement,
             &candidate.identity.table,
             candidate.identity.doc_id,
             candidate.old_document,
-            route,
-        )?;
-        let row_affected = !prepared.is_partition_move_delete();
-        let primary_key_doc_id = prepared.relocation;
-        let rewritten_doc_id = prepared
-            .destination
-            .as_ref()
-            .map(|(_, doc_id)| *doc_id)
-            .or(primary_key_doc_id)
-            .unwrap_or(prepared.doc_id);
-        let rewritten_storage_table = prepared
-            .destination
-            .as_ref()
-            .map_or_else(|| prepared.table.clone(), |(table, _)| table.clone());
-        crate::mutation::constraints::validate_key_constraints_with_previous(
-            context.mutation.preparation.referential.constraints,
-            &rewritten_storage_table,
-            &prepared.new_document,
-            (rewritten_storage_table == prepared.table).then_some(prepared.doc_id),
-            (rewritten_storage_table == prepared.table).then_some(&prepared.old_document),
-        )?;
-        validate_view_checks(ViewCheckContext {
-            services: context.mutation.preparation.referential.assignment,
-            constraints: context.mutation.preparation.referential.constraints,
-            statement,
-            table: &stmt.table,
-            storage_table: &rewritten_storage_table,
-            target_qualifier: &stmt.target_qualifier,
-            doc_id: rewritten_doc_id,
-            document: &prepared.new_document,
-            checks: &stmt.view_checks,
-            params,
-            scope: &snapshot_ctes,
-        })?;
-        let old_metadata = crate::mutation::rows::existing_tuple_metadata(
-            context.mutation.preparation.referential.assignment.rows,
-            &prepared.table,
-            prepared.doc_id,
-        )?;
-        let new_metadata = crate::mutation::rows::new_tuple_metadata(
-            context.mutation.preparation.referential.assignment.rows,
-        )?;
-        let mut after_row_events = Vec::new();
-        let rewritten_doc_id = crate::mutation::staging::stage_prepared_document_rewrite(
-            context.mutation.preparation.staging,
-            &mut prepared,
-            params,
-            statement,
-            Some(&assigned_columns),
-            &mut after_row_events,
-        )?;
-        if row_affected && !stmt.returning.is_empty() {
-            returning_rows.push(crate::mutation::returning::build_returning_row(
-                context.mutation.preparation.returning,
-                ReturningProjectionRow {
-                    table: &target,
-                    target_qualifier: &stmt.target_qualifier,
-                    images: MutationRowImages {
-                        old: Some(MutationRowImage {
-                            storage_table: prepared.table.clone(),
-                            doc_id: prepared.doc_id,
-                            document: &prepared.old_document,
-                            metadata: old_metadata,
-                        }),
-                        new: Some(MutationRowImage {
-                            storage_table: rewritten_storage_table,
-                            doc_id: rewritten_doc_id,
-                            document: &prepared.new_document,
-                            metadata: new_metadata,
-                        }),
-                    },
-                    aliases: &stmt.returning_aliases,
-                    context: Some(&candidate.context),
-                },
-                &stmt.returning,
-                params,
-                &snapshot_ctes,
-            )?);
+            candidate.proposed_document,
+            Some(&candidate.context),
+        )? {
+            if let Some(returning) = prepared.returning {
+                returning_rows.push(returning);
+            }
+            affected += u64::from(prepared.affected);
+            prepared_updates.push((
+                PreparedMutationAction::Rewrite(prepared.rewrite),
+                prepared.after_row_events,
+            ));
         }
-        affected += u64::from(row_affected);
-        prepared_updates.push((PreparedMutationAction::Rewrite(prepared), after_row_events));
     }
-    drop(overlay);
+    let published = overlay.finish();
     if !prepared_updates.is_empty() {
         context.mutation.state.prepare_writer()?;
-        let mut publication = statement_end::publication_batch(statement_commands);
+        let mut publication = statement_end::publication_batch(statement_commands)
+            .with_published(qualified_published)
+            .with_published(published);
         for (action, after_rows) in prepared_updates {
             crate::mutation::publication::publish_prepared_mutation_action(
                 context.mutation.publication,

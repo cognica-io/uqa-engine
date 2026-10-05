@@ -148,10 +148,11 @@ pub(super) fn run_referential_action<S: Clone + 'static>(
         stage_referential_rewrite(context.preparation.staging, &mut rewrite, &[], &mut events)?;
         prepared.push(PreparedMutationAction::Rewrite(rewrite));
     }
-    drop(overlay);
+    let published = overlay.finish();
     if !prepared.is_empty() {
         context.state.prepare_writer()?;
-        let mut publication = crate::mutation::statement_end::action_publication_batch();
+        let mut publication =
+            crate::mutation::statement_end::action_publication_batch().with_published(published);
         for action in prepared {
             publish_prepared_mutation_action(
                 context.publication,

@@ -43,6 +43,7 @@ pub fn prepare_update_row<S: Clone + 'static>(
     doc_id: uqa_core::DocId,
     original_document: Document,
     document: Document,
+    source_context: Option<&crate::OwnedPhysicalRow>,
 ) -> Result<Option<PreparedUpdateRow>, SQLError> {
     let Some(triggered_document) = fire_before_row_triggers(
         &context.referential.triggers,
@@ -147,7 +148,7 @@ pub fn prepare_update_row<S: Clone + 'static>(
                     }),
                 },
                 aliases: &stmt.returning_aliases,
-                context: None,
+                context: source_context,
             },
             &stmt.returning,
             params,

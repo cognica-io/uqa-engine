@@ -331,7 +331,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         has_prepared_auto_identity,
                         supplied_identities,
                     } = consumer.take_prepared()?;
-                    drop(overlay);
+                    let published = overlay.finish();
                     if has_prepared_effect || has_prepared_auto_identity {
                         mutation.state.prepare_writer()?;
                         persist_auto_increment_identity(
@@ -347,7 +347,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     let apply_reader = prepared_rows
                         .read_rows()
                         .map_err(crate::physical::physical_exec_error)?;
-                    let mut publication = statement_end::publication_batch(&statement_commands);
+                    let mut publication = statement_end::publication_batch(&statement_commands)
+                        .with_published(published);
                     let mut known_new = KnownNewInserts::new(
                         preparation.referential.constraints.catalog,
                         &id_column,
@@ -771,7 +772,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     prepared_conflicts.push(staged.prepared);
                 }
             }
-            drop(overlay);
+            let published = overlay.finish();
             if has_prepared_effect || has_prepared_auto_identity {
                 mutation.state.prepare_writer()?;
                 persist_auto_increment_identity(
@@ -787,7 +788,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 supplied_identities.note(target_table, prepared);
             }
             let observed = supplied_identities.observe(mutation.publication.storage)?;
-            let mut publication = statement_end::publication_batch(&statement_commands);
+            let mut publication =
+                statement_end::publication_batch(&statement_commands).with_published(published);
             let mut known_new = KnownNewInserts::new(
                 preparation.referential.constraints.catalog,
                 &id_column,
@@ -805,9 +807,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     &observed,
                     mutation.publication.identifiers,
                 )?;
-                let document = Arc::try_unwrap(document).map_err(|_| {
-                    SQLError::Internal("INSERT command overlay retained a staged document".into())
-                })?;
+                let document = Arc::unwrap_or_clone(document);
                 apply_validated_prepared_insert(
                     mutation.publication,
                     &target_table,

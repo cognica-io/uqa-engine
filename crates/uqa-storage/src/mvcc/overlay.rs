@@ -184,6 +184,23 @@ pub struct PrivateRecordChanges {
 }
 
 impl PrivateRecordChanges {
+    /// An independent writable owner over the same evaluated roots. Later writes and savepoint operations do not change the original owner; unchanged records and spill runs keep their existing allocation leases.
+    pub fn fork(&self) -> Self {
+        let state = self.owner.state.lock();
+        Self {
+            owner: StrongArc::new(Owner {
+                state: Mutex::new(State {
+                    records: state.records.clone(),
+                    resident: state.resident,
+                    runs: state.runs.clone(),
+                    sources: state.sources.clone(),
+                    revision: state.revision,
+                    savepoints: BudgetedVec::new(state.records.budget()),
+                }),
+            }),
+        }
+    }
+
     pub(super) fn share_owner(&self) -> Self {
         Self {
             owner: StrongArc::clone(&self.owner),

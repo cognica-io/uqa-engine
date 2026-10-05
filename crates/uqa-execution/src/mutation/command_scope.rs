@@ -12,7 +12,7 @@ use uqa_sql::SQLError;
 pub trait MutationCommandState {
     fn prepare_writer(&self) -> Result<(), SQLError>;
     fn begin_overlay(&self);
-    fn end_overlay(&self);
+    fn end_overlay(&self) -> super::overlay::CommandMutationOverlay;
 }
 /// Capture catalog, namespace, trigger transition, and privilege state for a command.
 pub trait CommandScopeSource<S: Clone> {
@@ -23,17 +23,27 @@ pub trait CommandScopeSource<S: Clone> {
     ) -> Result<CteScope<S>, SQLError>;
 }
 pub struct MutationOverlayScope<'a> {
-    state: &'a dyn MutationCommandState,
+    state: Option<&'a dyn MutationCommandState>,
 }
 impl<'a> MutationOverlayScope<'a> {
     pub fn new(state: &'a dyn MutationCommandState) -> Self {
         state.begin_overlay();
-        Self { state }
+        Self { state: Some(state) }
+    }
+
+    pub fn finish(mut self) -> Option<super::overlay::CommandMutationOverlay> {
+        self.state
+            .take()
+            .expect("an active command overlay")
+            .end_overlay()
+            .published_rows()
     }
 }
 impl Drop for MutationOverlayScope<'_> {
     fn drop(&mut self) {
-        self.state.end_overlay();
+        if let Some(state) = self.state.take() {
+            state.end_overlay();
+        }
     }
 }
 

@@ -27,6 +27,7 @@ const RESIDENT_DIVISOR: usize = 16;
 /// The memory tier of staged rows.
 pub(super) type MemoryRows = BudgetedSharedMap<DocId, StagedRow>;
 
+#[derive(Clone)]
 pub(super) struct StagedRows {
     pub(super) memory: MemoryRows,
     /// The estimated bytes the memory tier holds, which decide when it spills.

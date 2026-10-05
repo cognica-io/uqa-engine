@@ -195,11 +195,28 @@ impl Engine {
     pub(super) fn snapshot_session_state(&self) -> SessionStateSnapshot {
         let mut snapshot = self.session.state.read().clone();
         snapshot.portal_names = self.session.portals.lock().keys().cloned().collect();
+        snapshot.command_overlays = self
+            .session
+            .command_mutation_overlays
+            .lock()
+            .iter()
+            .map(uqa_execution::mutation::overlay::CommandMutationOverlay::checkpoint)
+            .collect();
         snapshot
     }
 
     pub(super) fn restore_session_state(&self, snapshot: &SessionStateSnapshot) {
         let mut restored = snapshot.clone();
+        for (overlay, checkpoint) in self
+            .session
+            .command_mutation_overlays
+            .lock()
+            .iter_mut()
+            .zip(&snapshot.command_overlays)
+        {
+            overlay.restore(checkpoint);
+        }
+        restored.command_overlays.clear();
         let mut current = self.session.state.write();
         // Sequence DDL can restore an old object and its session value, while
         // DISCARD SEQUENCES must remain effective across every rollback boundary.
