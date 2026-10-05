@@ -9,7 +9,9 @@
 use std::sync::Arc;
 
 use crate::mvcc::commit::RecordWriteKind;
-use crate::mvcc::{CommitSequence, PreparedRecordWrite, PrivateRecordRevision, VersionResult};
+use crate::mvcc::{
+    CommitSequence, PreparedRecordWrite, PrivateRecordRevision, RecordMetadata, VersionResult,
+};
 use crate::read_control::StorageReadControl;
 
 use super::super::run::{RunEntry, SpilledRun};
@@ -44,6 +46,16 @@ impl TieredChange<'_> {
         match self {
             Self::Resident(change) => change.write.expected(),
             Self::Spilled { entry, .. } => entry.expected,
+        }
+    }
+
+    pub(in crate::mvcc::overlay) fn metadata(&self) -> RecordMetadata {
+        RecordMetadata {
+            revision: self.expected(),
+            live: match self {
+                Self::Resident(change) => change.write.value().is_some(),
+                Self::Spilled { entry, .. } => entry.value.is_some(),
+            },
         }
     }
 

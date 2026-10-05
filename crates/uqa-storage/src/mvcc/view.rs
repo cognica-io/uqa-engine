@@ -613,11 +613,8 @@ impl MergedRecordSnapshot {
         key: &[u8],
         control: &StorageReadControl,
     ) -> VersionResult<Option<RecordMetadata>> {
-        if let Some(write) = self.private.get(key, control)? {
-            return Ok(Some(RecordMetadata {
-                revision: write.expected(),
-                live: write.value().is_some(),
-            }));
+        if let Some(metadata) = self.private.metadata(key, control)? {
+            return Ok(Some(metadata));
         }
         self.committed.metadata(key, control)
     }

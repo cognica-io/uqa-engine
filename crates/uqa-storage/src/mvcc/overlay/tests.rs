@@ -82,6 +82,58 @@ fn spilled_runs(changes: &PrivateRecordChanges) -> usize {
     changes.owner.state.lock().runs.len()
 }
 
+#[test]
+fn metadata_reads_skip_spilled_values_and_preserve_live_deleted_and_shadowed_revisions() {
+    use super::run::read_counts;
+    use crate::mvcc::{MemoryVersionStore, MergedRecordSnapshot, RecordMetadata};
+
+    let control = StorageReadControl::with_limit(512 << 10);
+    let changes = PrivateRecordChanges::new(control.memory());
+    let mut model = Model::new();
+    for id in 0..32 {
+        stage(
+            &changes,
+            &mut model,
+            id,
+            (id != 1).then(|| "x".repeat(64 << 10)),
+            &control,
+        );
+    }
+    assert!(spilled_runs(&changes) > 0);
+    let store = MemoryVersionStore::new(&MemoryBudget::new(1 << 20));
+    let committed = std::sync::Arc::new(store.snapshot().unwrap());
+    let captured = MergedRecordSnapshot::new(committed.clone(), changes.snapshot().unwrap());
+    let read = StorageReadControl::with_limit(4 << 10);
+    read_counts::take();
+    for (id, live) in [(0, true), (1, false), (31, true)] {
+        assert_eq!(
+            captured.metadata(&key(id), &read).unwrap(),
+            Some(RecordMetadata {
+                revision: expected(id),
+                live
+            })
+        );
+    }
+    assert!(captured.metadata(b"missing", &read).unwrap().is_none());
+    let counts = read_counts::take();
+    assert!(
+        counts.entries > 0,
+        "metadata must have reached the spilled entry file"
+    );
+    assert_eq!(counts.values, 0, "metadata must not read the value file");
+    assert!(
+        captured.get(&key(0), &read).is_err(),
+        "the payload exceeds this read allowance"
+    );
+    stage(&changes, &mut model, 0, None, &control);
+    stage(&changes, &mut model, 1, Some("new".into()), &control);
+    let current = MergedRecordSnapshot::new(committed, changes.snapshot().unwrap());
+    assert!(!current.metadata(&key(0), &read).unwrap().unwrap().live);
+    assert!(current.metadata(&key(1), &read).unwrap().unwrap().live);
+    assert!(captured.metadata(&key(0), &read).unwrap().unwrap().live);
+    assert!(!captured.metadata(&key(1), &read).unwrap().unwrap().live);
+}
+
 /// Every read of `snapshot` agrees with `model`.
 fn assert_matches(snapshot: &PrivateRecordSnapshot, model: &Model, control: &StorageReadControl) {
     for (key, (expected, value)) in model {

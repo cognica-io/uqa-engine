@@ -614,6 +614,16 @@ impl PrivateRecordSnapshot {
         Ok(())
     }
 
+    /// Select the original revision and presence from the entry without reading a spilled value.
+    pub(super) fn metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<super::RecordMetadata>> {
+        control.cancellation().check()?;
+        Ok(tiers::lookup(&self.records, &self.runs, key, control)?.map(|change| change.metadata()))
+    }
+
     pub fn get(
         &self,
         key: &[u8],
