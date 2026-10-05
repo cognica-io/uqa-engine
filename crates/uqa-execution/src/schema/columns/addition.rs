@@ -220,7 +220,7 @@ fn define_column_keys<S: Clone + 'static>(
 }
 
 /// Whether `table` already has the column `col_name`, which `IF NOT EXISTS` skips and an addition without it fails on.
-fn column_exists<S: Clone + 'static>(
+pub(in crate::schema) fn column_exists<S: Clone + 'static>(
     context: &ColumnAdditionContext<'_, S>,
     table: &str,
     col_name: &str,

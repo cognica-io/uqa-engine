@@ -25,23 +25,24 @@ use recursion::{materialize_recursive_action_names, run_recursive_alter_action};
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
 }
-/// `ATExecAddColumn` transforms an added column once it knows the column is new, as `ATParseTransformCmd` does: the column's type and then its clauses, as `transformColumnDefinition` checks them for the relation the statement found.
+/// `ATExecAddColumn` checks the partition and column name before transforming the declaration. An existing ordinary column with `IF NOT EXISTS` skips its type and clauses entirely.
 fn check_added_column_declaration<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     table: &str,
     qualifier: &str,
     action: &mut AlterTableAction,
-) -> Result<(), SQLError> {
+) -> Result<bool, SQLError> {
     use uqa_sql::schema::table_creation::column_declarations::{
         check_column_declaration, check_serial_array, ColumnDeclarationTarget,
     };
     let AlterTableAction::AddColumn {
         column,
         declaration,
+        if_not_exists,
         ..
     } = action
     else {
-        return Ok(());
+        return Ok(true);
     };
     let hierarchy = context
         .hierarchy
@@ -51,6 +52,28 @@ fn check_added_column_declaration<S: Clone + 'static>(
         .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
     let partitioned = hierarchy.partition_spec.is_some();
     let partition = hierarchy.is_partition();
+    if partition {
+        return Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: "cannot add column to a partition".into(),
+        });
+    }
+    uqa_sql::schema::columns::validate_postgres_column_name(&column.name)?;
+    if crate::schema::columns::addition::column_exists(
+        &context.addition,
+        table,
+        &column.name,
+        *if_not_exists,
+    )? {
+        context.constraints.notices.push(
+            uqa_sql::SQLNotice::notice(format!(
+                "column \"{}\" of relation \"{qualifier}\" already exists, skipping",
+                column.name
+            ))
+            .with_sqlstate("42701"),
+        );
+        return Ok(false);
+    }
     check_serial_array(declaration)?;
     column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
         context.hierarchy.partitions.types,
@@ -66,7 +89,7 @@ fn check_added_column_declaration<S: Clone + 'static>(
             "ALTER TABLE: DEFERRABLE PRIMARY KEY and UNIQUE constraints are not supported".into(),
         ));
     }
-    Ok(())
+    Ok(true)
 }
 
 pub fn run_alter_table<S: Clone + 'static>(
@@ -83,29 +106,9 @@ pub fn run_alter_table<S: Clone + 'static>(
     } = stmt;
     context.constraints.access.ensure_table_owner(&table)?;
     for mut action in actions {
-        if let AlterTableAction::AddColumn {
-            column,
-            if_not_exists: true,
-            ..
-        } = &action
-        {
-            if context
-                .addition
-                .state
-                .has_column(&table, &column.name)
-                .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
-            {
-                context.constraints.notices.push(
-                    uqa_sql::SQLNotice::notice(format!(
-                        "column \"{}\" of relation \"{qualifier}\" already exists, skipping",
-                        column.name
-                    ))
-                    .with_sqlstate("42701"),
-                );
-                continue;
-            }
+        if !check_added_column_declaration(context, &table, &qualifier, &mut action)? {
+            continue;
         }
-        check_added_column_declaration(context, &table, &qualifier, &mut action)?;
         let column_checks = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
         run_recursive_alter_action(
             context,
