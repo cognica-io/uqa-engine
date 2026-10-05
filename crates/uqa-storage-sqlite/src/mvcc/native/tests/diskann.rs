@@ -9,6 +9,70 @@ use uqa_storage::mvcc::{PreparedRecordCommit, RecordWrite, VersionedPersistence}
 use super::{materialization::with, persistence::connection, *};
 use crate::SQLiteRecordStore;
 
+#[test]
+fn population_origin_prefix_selects_one_native_owner_and_field() {
+    use uqa_storage::diskann_index::format::{DiskANNCanonicalOrigin, DiskANNVectorVersion};
+    use uqa_storage::mvcc::{DiskANNPopulationRecordLayout, StorageTransactionId};
+
+    let control = StorageReadControl::with_limit(128 << 10);
+    let database = DatabaseId::from_bytes([5; 16]);
+    let layout = NativeRecordNamespace(database);
+    let origin = DiskANNCanonicalOrigin::new(
+        DiskANNVectorVersion::new(StorageTransactionId::new(database, 1).unwrap(), 1).unwrap(),
+        3,
+        1,
+    )
+    .unwrap()
+    .encode();
+    let owners = [
+        owner(),
+        NativeRecordOwner::Object {
+            identity: [4; 16],
+            generation: [7; 16],
+        },
+    ];
+    let mut records = Vec::new();
+    for owner in owners {
+        for field in [b"a".as_slice(), b"aa", b"a\0"] {
+            for document in [0, 7, i64::MAX] {
+                records.push(
+                    NativeRecord::encode(
+                        NativeRecordFamily::VectorOrigins,
+                        owner,
+                        &[
+                            ValueRef::Text(b"public.table"),
+                            ValueRef::Text(field),
+                            ValueRef::Integer(document),
+                            ValueRef::Blob(&origin),
+                        ],
+                        &control,
+                    )
+                    .unwrap(),
+                );
+            }
+        }
+    }
+    for record in &records {
+        let decoded = layout.origin(record.key(), record.row(), &control).unwrap();
+        let prefix = layout.origin_prefix(&decoded.field, &control).unwrap();
+        let selected: Vec<_> = records
+            .iter()
+            .filter(|candidate| candidate.key().starts_with(&prefix))
+            .collect();
+        assert_eq!(selected.len(), 3);
+        for selected in selected {
+            assert_eq!(
+                layout
+                    .origin(selected.key(), selected.row(), &control)
+                    .unwrap()
+                    .field
+                    .as_ref(),
+                decoded.field.as_ref()
+            );
+        }
+    }
+}
+
 pub(in crate::mvcc::native) fn remove_empty_table(
     sqlite: &rusqlite::Connection,
 ) -> crate::Result<()> {

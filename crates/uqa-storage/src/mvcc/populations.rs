@@ -44,6 +44,13 @@ pub trait DiskANNPopulationRecordLayout: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<DiskANNPopulationOrigin>;
 
+    /// Select origin records for this exact canonical field, excluding neighboring field identities.
+    fn origin_prefix(
+        &self,
+        field: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>>;
+
     /// Resolve a raw invalidation's owning field without requiring an existing origin value.
     fn origin_header_prefix(
         &self,

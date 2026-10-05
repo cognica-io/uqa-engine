@@ -7,6 +7,8 @@
 //! The same exact population transformation serves private mutation previews, command refresh and publication.
 
 mod invalidation;
+#[cfg(test)]
+mod tests;
 
 use super::{
     DiskANNPopulationHeader, DiskANNPopulationOrigin, DiskANNPopulationRecordLayout,
@@ -14,8 +16,10 @@ use super::{
 };
 use crate::diskann_index::{pages::DiskANNOriginReader, DiskANNPopulationState, DiskANNQueryRead};
 use crate::mvcc::{
-    commit::RecordWriteKind, key::RecordKey, DatabaseId, MergedRecordSnapshot,
-    PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges, VersionError, VersionResult,
+    commit::{PreparedLookup, RecordWriteKind},
+    key::RecordKey,
+    DatabaseId, MergedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite,
+    PrivateRecordChanges, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 use uqa_core::memory::{BudgetedMap, BudgetedVec};
@@ -43,7 +47,7 @@ impl Reconciliation<'_> {
         let output = PrivateRecordChanges::new(control.memory());
         // Only distinct field identities remain resident. Replay the sealed origin records one at a time; neither canonical vectors nor all decoded origins are retained here.
         let mut fields = BudgetedMap::<RecordKey, u32>::new(control.memory());
-        self.visit_origins(origins, None, &mut |origin| {
+        self.visit_origins(origins, &mut |origin| {
             if let Some(dimensions) = fields.get(&*origin.field) {
                 if *dimensions != origin.origin.dimensions() {
                     return Err(invalid("population inputs disagree on field dimensions"));
@@ -56,6 +60,14 @@ impl Reconciliation<'_> {
             }
             Ok(())
         })?;
+        // Final preparation already indexes these same writes for structural headers. Share that index; previews build it once for their evaluated batch.
+        let preview;
+        let indexed = if let Some(structural) = self.structural {
+            structural.writes()
+        } else {
+            preview = PreparedLookup::new(origins, control)?;
+            &preview
+        };
         let mut latest = BudgetedMap::new(control.memory());
         for operation in lifecycle {
             control.check()?;
@@ -86,7 +98,7 @@ impl Reconciliation<'_> {
         for (field, &dimensions) in &fields {
             let field = field.bytes();
             self.with_source(field, dimensions, self.after, &mut |current| {
-                self.visit_origins(origins, Some(field), &mut |change| {
+                visit_field_origins(self.layout, indexed, field, control, &mut |change| {
                     if current.document_origin(change.document, control)? != Some(change.origin) {
                         return Err(invalid(
                             "population input differs from complete canonical replacement",
@@ -106,7 +118,7 @@ impl Reconciliation<'_> {
                         "population header belongs to another canonical field",
                     ));
                 }
-                self.replace(&output, key, template, &header, origins)
+                self.replace(&output, key, template, &header, indexed)
             })?;
         }
         control.check()?;
@@ -159,7 +171,7 @@ impl Reconciliation<'_> {
         key: &[u8],
         template: &[u8],
         header: &DiskANNPopulationHeader,
-        origins: &PreparedRecordCommit,
+        origins: &PreparedLookup<'_>,
     ) -> VersionResult<()> {
         let control = self.control;
         let mut state = header.state;
@@ -168,39 +180,45 @@ impl Reconciliation<'_> {
             state.dimensions(),
             self.before,
             &mut |previous| {
-                self.visit_origins(origins, Some(&header.field), &mut |change| {
-                    let origin = previous.document_origin(change.document, control)?;
-                    let witness_key = self.layout.witness_key(key, change.document, control)?;
-                    let witness = self.before.get(&witness_key, control)?;
-                    let bytes = witness.as_ref().and_then(|row| row.value());
-                    let previous = match (origin, bytes) {
-                        (Some(origin), Some(bytes)) => Some((
-                            origin,
-                            self.layout.witness(
-                                &witness_key,
-                                bytes,
-                                state,
-                                change.document,
+                visit_field_origins(
+                    self.layout,
+                    origins,
+                    &header.field,
+                    control,
+                    &mut |change| {
+                        let origin = previous.document_origin(change.document, control)?;
+                        let witness_key = self.layout.witness_key(key, change.document, control)?;
+                        let witness = self.before.get(&witness_key, control)?;
+                        let bytes = witness.as_ref().and_then(|row| row.value());
+                        let previous = match (origin, bytes) {
+                            (Some(origin), Some(bytes)) => Some((
                                 origin,
-                                control,
-                            )?,
-                        )),
-                        (None, None) => None,
-                        _ => {
-                            return Err(invalid(
-                                "population witness is missing or has no current origin",
-                            ))
-                        }
-                    };
-                    let (next, witness) =
-                        state.replaced(change.document, previous, change.origin)?;
-                    let bytes =
-                        self.layout
-                            .encode_witness(&witness_key, template, witness, control)?;
-                    self.put(output, &witness_key, Some(&bytes))?;
-                    state = next;
-                    Ok(())
-                })
+                                self.layout.witness(
+                                    &witness_key,
+                                    bytes,
+                                    state,
+                                    change.document,
+                                    origin,
+                                    control,
+                                )?,
+                            )),
+                            (None, None) => None,
+                            _ => {
+                                return Err(invalid(
+                                    "population witness is missing or has no current origin",
+                                ))
+                            }
+                        };
+                        let (next, witness) =
+                            state.replaced(change.document, previous, change.origin)?;
+                        let bytes =
+                            self.layout
+                                .encode_witness(&witness_key, template, witness, control)?;
+                        self.put(output, &witness_key, Some(&bytes))?;
+                        state = next;
+                        Ok(())
+                    },
+                )
             },
         )?;
         let bytes = self.layout.encode_header(key, template, state, control)?;
@@ -210,7 +228,6 @@ impl Reconciliation<'_> {
     fn visit_origins(
         &self,
         origins: &PreparedRecordCommit,
-        field: Option<&[u8]>,
         visit: &mut dyn FnMut(&DiskANNPopulationOrigin) -> VersionResult<()>,
     ) -> VersionResult<()> {
         let mut writes = origins.writes();
@@ -219,9 +236,7 @@ impl Reconciliation<'_> {
         {
             if let Some(value) = write.value() {
                 let origin = self.layout.origin(write.key(), value, self.control)?;
-                if field.is_none_or(|field| field == &*origin.field) {
-                    visit(&origin)?;
-                }
+                visit(&origin)?;
             }
         }
         self.control.check()?;
@@ -292,6 +307,33 @@ impl Reconciliation<'_> {
         self.control.check()?;
         Ok(())
     }
+}
+
+fn visit_field_origins(
+    layout: &dyn DiskANNPopulationRecordLayout,
+    origins: &PreparedLookup<'_>,
+    field: &[u8],
+    control: &StorageReadControl,
+    visit: &mut dyn FnMut(&DiskANNPopulationOrigin) -> VersionResult<()>,
+) -> VersionResult<()> {
+    let prefix = layout.origin_prefix(field, control)?;
+    origins.visit_prefix_with_kind(
+        &prefix,
+        RecordWriteKind::DiskANNOrigin,
+        control,
+        &mut |write| {
+            if let Some(value) = write.value() {
+                let origin = layout.origin(write.key(), value, control)?;
+                if &*origin.field != field {
+                    return Err(invalid("origin range includes another canonical field"));
+                }
+                visit(&origin)?;
+            }
+            Ok(true)
+        },
+    )?;
+    control.check()?;
+    Ok(())
 }
 
 fn visit(

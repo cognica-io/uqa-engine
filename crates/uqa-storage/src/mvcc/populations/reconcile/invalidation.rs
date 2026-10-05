@@ -18,11 +18,8 @@ impl Reconciliation<'_> {
         lifecycle: &PopulationLifecycle<'_>,
     ) -> VersionResult<()> {
         let mut writes = origins.writes();
-        while let Some(write) = writes.next_with_kind(
-            crate::mvcc::commit::RecordWriteKind::DiskANNOrigin,
-            self.control,
-        )? {
-            if write.value().is_some() {
+        while let Some(write) = writes.next_metadata(self.control)? {
+            if write.kind() != crate::mvcc::commit::RecordWriteKind::DiskANNOrigin || write.live() {
                 continue;
             }
             self.control.check()?;
