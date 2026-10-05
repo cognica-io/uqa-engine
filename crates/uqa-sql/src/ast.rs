@@ -625,8 +625,9 @@ pub enum Statement {
     CreateForeignServer(CreateForeignServer),
     /// `CREATE FOREIGN TABLE name (...) SERVER server OPTIONS (...)`.
     CreateForeignTable(CreateForeignTable),
-    /// `CREATE FOREIGN TABLE IF NOT EXISTS` retains its raw-parser declaration until execution can check the shared relation namespace.
-    CreateForeignTableIfNotExists(DeferredCreateForeignTable),
+    /// A SQL foreign-table definition retains its original declaration until execution checks its creation namespace.
+    #[serde(alias = "CreateForeignTableIfNotExists")]
+    CreateForeignTableDefinition(DeferredCreateForeignTable),
     /// `MERGE INTO target USING source ON cond WHEN MATCHED THEN ...
     /// WHEN NOT MATCHED THEN ...`. SQL:2003 conditional UPSERT.
     Merge(MergeStmt),
@@ -752,16 +753,22 @@ pub struct CreateForeignTable {
     pub columns: Vec<ColumnDef>,
     #[serde(default)]
     pub checks: Vec<TableCheck>,
+    /// Written NOT NULL declarations, including column clauses, retained until CHECK analysis succeeds. Older lowered definitions already encode these constraints in their columns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_null_declarations: Option<Vec<NotNullDeclaration>>,
     pub options: Vec<(String, String)>,
     pub if_not_exists: bool,
 }
 
-/// A syntactically valid `CREATE FOREIGN TABLE IF NOT EXISTS` whose definition must be analyzed only when its target name is free.
+/// A syntactically valid `CREATE FOREIGN TABLE` whose definition is analyzed after its creation namespace, skipping an existing target only when requested.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeferredCreateForeignTable {
     pub name: String,
     pub server_name: String,
     pub definition_sql: String,
+    /// Older deferred definitions always came from `IF NOT EXISTS`.
+    #[serde(default = "default_true")]
+    pub if_not_exists: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -269,30 +269,6 @@ pub(super) fn compile_create_foreign_table(
         .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without base".into()))?;
     validate_create_table_envelope(base, "CREATE FOREIGN TABLE")?;
     let table = super::compile_create_table(base)?;
-    if !table.key_constraints.is_empty() {
-        let kind = if table
-            .key_constraints
-            .iter()
-            .any(|constraint| constraint.kind == crate::ast::TableKeyConstraintKind::PrimaryKey)
-        {
-            "primary key"
-        } else {
-            "unique"
-        };
-        return Err(SQLError::Unsupported(format!(
-            "{kind} constraints are not supported on foreign tables"
-        )));
-    }
-    if !table.foreign_keys.is_empty()
-        || table
-            .columns
-            .iter()
-            .any(|column| column.references.is_some())
-    {
-        return Err(SQLError::Unsupported(
-            "foreign key constraints are not supported on foreign tables".into(),
-        ));
-    }
     if !table.hierarchy.parents.is_empty()
         || table.hierarchy.partition_spec.is_some()
         || table.hierarchy.partition_bound.is_some()
@@ -301,11 +277,13 @@ pub(super) fn compile_create_foreign_table(
             "foreign-table inheritance and partitioning are not supported".into(),
         ));
     }
+    let not_null_declarations = super::foreign_tables::not_null_declarations(&table)?;
     Ok(CreateForeignTable {
         name: table.name,
         server_name: stmt.servername.clone(),
         columns: table.columns,
         checks: table.checks,
+        not_null_declarations: Some(not_null_declarations),
         options: collect_def_elem_options(&stmt.options)?,
         if_not_exists: base.if_not_exists,
     })
@@ -339,6 +317,7 @@ pub(super) fn defer_create_foreign_table(
         name,
         server_name: stmt.servername.clone(),
         definition_sql,
+        if_not_exists: base.if_not_exists,
     })
 }
 

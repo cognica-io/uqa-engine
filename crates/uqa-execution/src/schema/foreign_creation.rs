@@ -180,47 +180,55 @@ impl ForeignCreationContext<'_> {
         options: Vec<(String, String)>,
         if_not_exists: bool,
     ) -> Result<(), uqa_sql::SQLError> {
-        if !if_not_exists {
-            validate_foreign_table_schema_envelope(&columns)?;
+        self.register_foreign_table_statement(uqa_sql::ast::CreateForeignTable {
+            name: name.to_string(),
+            server_name,
+            columns,
+            checks,
+            not_null_declarations: None,
+            options,
+            if_not_exists,
+        })
+    }
+    pub fn register_foreign_table_statement(
+        &self,
+        statement: uqa_sql::ast::CreateForeignTable,
+    ) -> Result<(), SQLError> {
+        if !statement.if_not_exists {
+            validate_foreign_table_schema_envelope(&statement.columns)?;
         }
         let owner = self.creation.bind_owner()?;
         let Some((_, relation)) =
-            self.preflight_foreign_table_creation(name, if_not_exists, false)?
+            self.preflight_foreign_table_creation(&statement.name, statement.if_not_exists, false)?
         else {
             return Ok(());
         };
-        if if_not_exists {
-            validate_foreign_table_schema_envelope(&columns)?;
+        if statement.if_not_exists {
+            validate_foreign_table_schema_envelope(&statement.columns)?;
         }
         self.register_foreign_table_after_preflight(
             ForeignTableCreationTarget {
                 relation,
                 owner,
-                if_not_exists,
+                if_not_exists: statement.if_not_exists,
             },
-            server_name,
-            columns,
-            checks,
-            options,
+            statement,
         )
     }
     fn register_foreign_table_after_preflight(
         &self,
         target: ForeignTableCreationTarget,
-        server_name: String,
-        mut columns: Vec<uqa_sql::ast::ColumnDef>,
-        mut checks: Vec<uqa_sql::ast::TableCheck>,
-        options: Vec<(String, String)>,
+        mut statement: uqa_sql::ast::CreateForeignTable,
     ) -> Result<(), uqa_sql::SQLError> {
         let name = target.relation.qualified_name();
         let name = name.as_str();
-        for column in &mut columns {
+        for column in &mut statement.columns {
             column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
                 self.schema.types,
                 &column.ty,
             )?;
         }
-        for column in &columns {
+        for column in &statement.columns {
             self.schema.types.require_type_usage(&column.ty)?;
         }
         self.creation.retain_owner(&target.owner)?;
@@ -233,37 +241,18 @@ impl ForeignCreationContext<'_> {
             &self.sequences,
             "CREATE FOREIGN TABLE",
             name,
-            &mut columns,
+            &mut statement.columns,
             uqa_sql::ast::RelationPersistence::Permanent,
         )?;
-        // `DefineRelation` allocates the relation's OIDs before those of its constraints.
-        let catalog_oids = self
-            .identities
-            .allocator(crate::catalog::identity::allocate_catalog_object_id)
-            .allocate_relation_oids(
-                uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
-                &RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?,
-            )?;
-        self.schema.prepare_foreign_table_schema(
-            name,
-            &mut columns,
-            &mut checks,
-            &mut self
-                .identities
-                .allocator(crate::catalog::identity::allocate_catalog_object_id),
-            &crate::schema::constraints::names::name_scope(
-                &self.identities.catalog.current_catalog_snapshot(),
-                &RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?,
-            ),
-        )?;
-        self.ensure_foreign_server_exists(&server_name)?;
+        let catalog_oids = self.prepare_foreign_table_definition(&relation, &mut statement)?;
+        self.ensure_foreign_server_exists(&statement.server_name)?;
         self.creation.reserve_row_type_name(name)?;
         let object_id = (self.allocate_identity)().map_err(|error| {
             uqa_sql::SQLError::Internal(format!(
                 "allocate foreign table `{name}` object identity: {error}"
             ))
         })?;
-        let owner_columns = columns.clone();
+        let owner_columns = statement.columns.clone();
         let table = StoredForeignTable {
             name: name.to_string(),
             object_id,
@@ -273,10 +262,10 @@ impl ForeignCreationContext<'_> {
                 &relation.schema,
                 &relation.name,
             )?),
-            server_name,
-            columns,
-            checks,
-            options: options.into_iter().collect(),
+            server_name: statement.server_name,
+            columns: statement.columns,
+            checks: statement.checks,
+            options: statement.options.into_iter().collect(),
         };
         let security = BoundTableSecurity::owner(target.owner.identity());
         let mut tables = self.publication.tables_write();
@@ -313,6 +302,40 @@ impl ForeignCreationContext<'_> {
             .prepared_catalog_changed(PreparedCatalogChange::Relation(catalog_oids.relation));
         Ok(())
     }
+    fn prepare_foreign_table_definition(
+        &self,
+        relation: &RelationIdentity,
+        statement: &mut uqa_sql::ast::CreateForeignTable,
+    ) -> Result<uqa_sql::catalog::relation_oids::RelationCatalogOids, SQLError> {
+        // `DefineRelation` allocates the relation's OIDs before those of its constraints.
+        let catalog_oids = self
+            .identities
+            .allocator(crate::catalog::identity::allocate_catalog_object_id)
+            .allocate_relation_oids(
+                uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
+                relation,
+            )?;
+        let not_nulls = statement.not_null_declarations.take().map(|declarations| {
+            uqa_sql::schema::foreign_tables::ForeignTableNotNulls {
+                relation_oid: catalog_oids.relation,
+                declarations,
+            }
+        });
+        self.schema.prepare_foreign_table_schema(
+            &relation.qualified_name(),
+            &mut statement.columns,
+            &mut statement.checks,
+            &mut self
+                .identities
+                .allocator(crate::catalog::identity::allocate_catalog_object_id),
+            &crate::schema::constraints::names::name_scope(
+                &self.identities.catalog.current_catalog_snapshot(),
+                relation,
+            ),
+            not_nulls,
+        )?;
+        Ok(catalog_oids)
+    }
     pub fn drop_foreign_server_inner(&self, name: &str) -> Result<bool, String> {
         self.namespace
             .synchronize_catalog_registries()
@@ -348,22 +371,20 @@ impl ForeignCreationContext<'_> {
     ) -> Result<(), SQLError> {
         let owner = self.creation.bind_owner()?;
         let Some((_, relation)) =
-            self.preflight_foreign_table_creation(&deferred.name, true, false)?
+            self.preflight_foreign_table_creation(&deferred.name, deferred.if_not_exists, false)?
         else {
             return Ok(());
         };
-        let statement = uqa_sql::resolve_deferred_create_foreign_table(&deferred)?;
+        let statement =
+            uqa_sql::resolve_deferred_create_foreign_table(&deferred, self.schema.types)?;
         validate_foreign_table_schema_envelope(&statement.columns)?;
         self.register_foreign_table_after_preflight(
             ForeignTableCreationTarget {
                 relation,
                 owner,
-                if_not_exists: true,
+                if_not_exists: deferred.if_not_exists,
             },
-            statement.server_name,
-            statement.columns,
-            statement.checks,
-            statement.options,
+            statement,
         )
     }
 }

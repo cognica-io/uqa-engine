@@ -25,6 +25,12 @@ pub struct ForeignSchemaContext<'a> {
     pub sequences: &'a dyn StoredSequenceNames,
 }
 
+/// SQL declarations still to be stored after the new foreign table's CHECK constraints.
+pub struct ForeignTableNotNulls {
+    pub relation_oid: u32,
+    pub declarations: Vec<crate::ast::NotNullDeclaration>,
+}
+
 pub fn validate_foreign_table_schema_envelope(columns: &[ColumnDef]) -> Result<(), SQLError> {
     let mut names = std::collections::BTreeSet::new();
     for column in columns {
@@ -62,8 +68,34 @@ impl ForeignSchemaContext<'_> {
         checks: &mut Vec<TableCheck>,
         allocate: &mut CatalogIdentityAllocator<'_>,
         names: &crate::schema::constraint_metadata::ConstraintNameScope,
+        not_nulls: Option<ForeignTableNotNulls>,
     ) -> Result<(), SQLError> {
-        self.prepare_foreign_table_schema_inner(table_name, columns, checks, false, allocate, names)
+        if not_nulls.is_some() {
+            for column in columns.iter_mut() {
+                column.not_null = false;
+                column.not_null_name = None;
+                column.not_null_identity = None;
+            }
+        }
+        self.prepare_foreign_table_schema_inner(
+            table_name, columns, checks, false, allocate, names,
+        )?;
+        if let Some(not_nulls) = not_nulls {
+            let relation =
+                RelationIdentity::from_legacy_name(table_name).map_err(SQLError::Internal)?;
+            crate::schema::table_creation::not_nulls::define_foreign_not_null_constraints(
+                crate::schema::table_creation::not_nulls::ForeignNotNullContext {
+                    relation: &relation,
+                    relation_oid: not_nulls.relation_oid,
+                    checks,
+                    names,
+                },
+                columns,
+                not_nulls.declarations,
+                allocate,
+            )?;
+        }
+        Ok(())
     }
     pub fn prepare_stored_foreign_table_schema(
         &self,

@@ -30,6 +30,7 @@ mod domains;
 mod drop_alter;
 mod enums;
 mod events;
+mod foreign_tables;
 mod hierarchy;
 mod locking;
 mod merge;
@@ -44,9 +45,9 @@ mod type_lifecycle;
 mod types;
 
 pub use dispatch::{
-    compile, parse_statements, plan_only_for_test, resolve_deferred_create_foreign_table,
-    resolve_deferred_create_table, ParsedStatement,
+    compile, parse_statements, plan_only_for_test, resolve_deferred_create_table, ParsedStatement,
 };
+pub use foreign_tables::resolve_deferred_create_foreign_table;
 pub use types::{
     parse_regobject_name, parse_regprocedure_name, parse_regtype_name, ParsedRegprocedureName,
     ParsedRegtypeName,

@@ -907,7 +907,7 @@ fn relation_if_not_exists_defers_definition_analysis_until_execution() {
     assert_eq!(resolved.name, "fresh_items");
     assert_eq!(resolved.columns.len(), 1);
 
-    let Statement::CreateForeignTableIfNotExists(table) = first(
+    let Statement::CreateForeignTableDefinition(table) = first(
         "CREATE FOREIGN TABLE IF NOT EXISTS app.external_items (id integer PRIMARY KEY) SERVER missing_server",
     ) else {
         panic!("expected deferred CREATE FOREIGN TABLE IF NOT EXISTS");
@@ -917,7 +917,7 @@ fn relation_if_not_exists_defers_definition_analysis_until_execution() {
     assert!(table
         .definition_sql
         .starts_with("CREATE FOREIGN TABLE IF NOT EXISTS"));
-    let error = resolve_deferred_create_foreign_table(&table)
+    let error = foreign_tables::resolve(&table)
         .expect_err("an absent target must analyze foreign-table constraints");
     assert_eq!(error.sqlstate(), Some("0A000"));
     assert!(error

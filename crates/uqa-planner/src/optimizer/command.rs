@@ -195,7 +195,7 @@ pub(super) fn optimize_command(
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
-        | CommandPlan::CreateForeignTableIfNotExists(_)
+        | CommandPlan::CreateForeignTableDefinition(_)
         | CommandPlan::CreateFunction(_)
         | CommandPlan::DropFunction(_)
         | CommandPlan::AlterRoutine(_)

@@ -75,6 +75,7 @@ fn bind_sql_standard_body_relations(
     };
     let mut changed = false;
     for statement in statements {
+        super::compilation::validate_sql_standard_statement(statement)?;
         changed |= bind_stored_statement_relations(
             context.relations,
             statement,

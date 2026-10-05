@@ -29,6 +29,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Report PostgreSQL `22023` diagnostics for invalid NUMERIC precision, scale and modifier counts in declarations and casts; validate cast types even for NULL inputs, empty results and unselected CASE branches.
+- Preserve PostgreSQL foreign-table declaration order and diagnostics across type lookup, constraint attributes, forbidden keys and EXCLUDE. Retain table-level NOT NULL constraints and their names through transactions and reopen, keep namespace and IF NOT EXISTS checks ahead of definition analysis, and report PostgreSQL's unsupported-utility error in SQL-standard routine bodies while preserving quoted bodies.
 - Expose relation row types and generated arrays through `pg_type`, `regtype` and `format_type`, preserving catalog identities, generated names and search-path shadowing across rename, schema movement, rollback and reopen. Move indexes and owned sequences with their table. Reject extra dimensions on generated array names with PostgreSQL's `42704` error.
 - Evaluate multi-column type rewrites from original typed rows and propagate changes once through inheritance and partition hierarchies. Preserve dropped-column inputs, generated values, callback effects, constraints, indexes and rollback across all storage providers; spill retained rows and callback identities under the statement allowance.
 - Preserve prepared input constants and reanalyze original syntax after changes to selected catalog dependencies or the effective namespace. Match PostgreSQL's DDL rollback behavior, identical routine replacement, enum label identity and sequence OID diagnostics; refresh domain checks without rereading unrelated inputs.

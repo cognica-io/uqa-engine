@@ -678,7 +678,8 @@ pub enum CommandPlan {
     },
     CreateForeignServer(crate::ast::CreateForeignServer),
     CreateForeignTable(crate::ast::CreateForeignTable),
-    CreateForeignTableIfNotExists(crate::ast::DeferredCreateForeignTable),
+    #[serde(alias = "CreateForeignTableIfNotExists")]
+    CreateForeignTableDefinition(crate::ast::DeferredCreateForeignTable),
     AlterForeignTable(crate::ast::AlterForeignTableStmt),
     Merge(Box<MergePlan>),
     CreateFunction(Box<crate::ast::CreateFunction>),

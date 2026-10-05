@@ -57,3 +57,13 @@ pub fn register_deferred_foreign_table(
         context.register_deferred_foreign_table(deferred)
     }))
 }
+
+/// Publish an already analyzed SQL definition while retaining its written NOT NULL declarations.
+pub fn register_foreign_table_statement(
+    transactions: &dyn ForeignCreationTransactions,
+    statement: uqa_sql::ast::CreateForeignTable,
+) -> Result<(), SQLError> {
+    transactions.with_foreign_table_write(Box::new(move |context| {
+        context.register_foreign_table_statement(statement)
+    }))
+}

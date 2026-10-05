@@ -205,6 +205,55 @@ fn merge_declarations(
     Ok(kept)
 }
 
+/// The namespace and CHECK constraints already held when a foreign table's NOT NULL constraints are stored.
+pub struct ForeignNotNullContext<'a> {
+    pub relation: &'a uqa_core::RelationIdentity,
+    pub relation_oid: u32,
+    pub checks: &'a [crate::ast::TableCheck],
+    pub names: &'a crate::schema::constraint_metadata::ConstraintNameScope,
+}
+
+/// Store foreign-table declarations with the same target, merge, name and identity rules as ordinary tables. Foreign tables have no inherited constraints or supported keys.
+pub fn define_foreign_not_null_constraints(
+    context: ForeignNotNullContext<'_>,
+    columns: &mut [ColumnDef],
+    declarations: Vec<NotNullDeclaration>,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> Result<(), SQLError> {
+    let declared = merge_declarations(columns, &context.relation.name, declarations)?;
+    let held = columns
+        .iter()
+        .filter_map(|column| column.check_name.clone().filter(|_| column.check.is_some()))
+        .chain(context.checks.iter().filter_map(|check| check.name.clone()))
+        .chain(context.names.events.iter().cloned())
+        .collect();
+    let mut names = Names {
+        relation: context.relation.name.clone(),
+        relation_oid: context.relation_oid,
+        held,
+        used: context.names.schema.clone(),
+        chosen: BTreeSet::new(),
+    };
+    names.used.extend(names.held.iter().cloned());
+    for (index, declaration) in declared {
+        let name = match declaration.name {
+            Some(name) => names.given(name, allocate)?,
+            None => names.choose(&declaration.column)?,
+        };
+        store(
+            &mut columns[index],
+            name,
+            Locality {
+                is_local: true,
+                no_inherit: declaration.no_inherit,
+                explicit: declaration.explicit,
+            },
+            allocate,
+        )?;
+    }
+    Ok(())
+}
+
 /// The constraints the relation holds when its NOT NULL constraints are created: its CHECK constraints, inherited and declared, and the keys and foreign keys a partition clones.
 fn held_constraint_names(
     table: &CreateTable,
@@ -328,3 +377,6 @@ fn error(sqlstate: &str, message: String) -> SQLError {
         message,
     }
 }
+
+#[cfg(test)]
+mod tests;

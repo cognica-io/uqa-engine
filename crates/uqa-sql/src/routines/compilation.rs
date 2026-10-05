@@ -228,6 +228,9 @@ pub fn lower_sql_routine_statement(
     mut statement: Statement,
     lowering: SQLRoutineLowering,
 ) -> Result<UnifiedPlan, SQLError> {
+    if lowering.bind_catalog_dependencies {
+        validate_sql_standard_statement(&statement)?;
+    }
     if lowering.bind_catalog_dependencies && !lowering.preserve_target_expressions {
         super::merge_columns::normalize_stored_merge_target_columns(context.merge, &mut statement)?;
     }
@@ -267,6 +270,19 @@ pub fn lower_sql_routine_statement(
     Ok(plan)
 }
 
+/// A foreign-table utility is analyzed when it executes and cannot be retained as an analyzed SQL-standard body. Quoted source bodies keep their separate execution-time path.
+pub(super) fn validate_sql_standard_statement(statement: &Statement) -> Result<(), SQLError> {
+    if matches!(
+        statement,
+        Statement::CreateForeignTable(_) | Statement::CreateForeignTableDefinition(_)
+    ) {
+        return Err(SQLError::Unsupported(
+            "CREATE FOREIGN TABLE is not yet supported in unquoted SQL function body".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// A session's compilation of a source body keeps the types it resolved, as its analyzed plan holds type OIDs that renaming an enum does not invalidate. A domain coercion records the domain as a plan dependency, so a changed domain is resolved again, and relations and routines are resolved when the plan runs.
 fn bind_session_plan_types(
     context: &RoutineCompilationContext<'_>,
@@ -282,3 +298,6 @@ fn bind_session_plan_types(
         Ok(resolved.filter(|_| !domain))
     })
 }
+
+#[cfg(test)]
+mod tests;

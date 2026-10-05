@@ -347,14 +347,9 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         &self,
         statement: &CreateForeignTable,
     ) -> Result<SQLResult, SQLError> {
-        crate::schema::foreign_creation::entry::register_foreign_table_with_checks(
+        crate::schema::foreign_creation::entry::register_foreign_table_statement(
             self.context.foreign,
-            statement.name.clone(),
-            statement.server_name.clone(),
-            statement.columns.clone(),
-            statement.checks.clone(),
-            statement.options.clone(),
-            statement.if_not_exists,
+            statement.clone(),
         )?;
         Ok(SQLResult::empty())
     }
@@ -922,7 +917,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             CommandPlan::CreateForeignTable(statement) => {
                 self.execute_create_foreign_table(statement)
             }
-            CommandPlan::CreateForeignTableIfNotExists(statement) => {
+            CommandPlan::CreateForeignTableDefinition(statement) => {
                 crate::schema::foreign_creation::entry::register_deferred_foreign_table(
                     self.context.foreign,
                     statement.clone(),

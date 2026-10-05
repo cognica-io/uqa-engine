@@ -35,8 +35,34 @@ pub fn check_column_declaration(
     target: ColumnDeclarationTarget<'_>,
 ) -> Result<bool, SQLError> {
     let deferrable_key = check_constraint_attributes(&declaration.clauses)?;
-    ClauseConflicts::new(declaration, column, target).check()?;
+    ClauseConflicts::new(declaration, column, target, false).check()?;
     Ok(deferrable_key)
+}
+
+/// The same ordered checks for a foreign-table column. Unsupported keys are reported at their clause, after attribute placement and any preceding conflicts.
+pub fn check_foreign_column_declaration(
+    declaration: &ColumnDeclaration,
+    column: &str,
+    table: &str,
+) -> Result<(), SQLError> {
+    check_constraint_attributes(&declaration.clauses)?;
+    ClauseConflicts::new(
+        declaration,
+        column,
+        ColumnDeclarationTarget {
+            table,
+            partitioned: false,
+            partition: false,
+        },
+        true,
+    )
+    .check()
+}
+
+pub(crate) fn foreign_table_constraint_error(kind: &str) -> SQLError {
+    SQLError::Unsupported(format!(
+        "{kind} constraints are not supported on foreign tables"
+    ))
 }
 
 /// `transformConstraintAttrs`: DEFERRABLE, NOT DEFERRABLE, INITIALLY DEFERRED and INITIALLY IMMEDIATE follow a PRIMARY KEY, UNIQUE or REFERENCES clause, ENFORCED and NOT ENFORCED a CHECK or REFERENCES clause, each at most once.
@@ -148,15 +174,21 @@ struct SeenClauses {
     generated: bool,
 }
 
+struct SeenNotNull<'a> {
+    name: Option<&'a str>,
+    no_inherit: bool,
+}
+
 /// The state `transformColumnDefinition` keeps while it reads a column's clauses.
 struct ClauseConflicts<'a> {
     declaration: &'a ColumnDeclaration,
     column: &'a str,
     target: ColumnDeclarationTarget<'a>,
+    foreign: bool,
     need_not_null: bool,
     disallow_no_inherit: bool,
     nullability: Nullability,
-    not_null: Option<&'a ColumnClause>,
+    not_null: Option<SeenNotNull<'a>>,
     seen: SeenClauses,
 }
 
@@ -165,6 +197,7 @@ impl<'a> ClauseConflicts<'a> {
         declaration: &'a ColumnDeclaration,
         column: &'a str,
         target: ColumnDeclarationTarget<'a>,
+        foreign: bool,
     ) -> Self {
         // A SERIAL column and a column with an identity or a primary key need a not-null constraint that NO INHERIT cannot describe.
         let disallow_no_inherit = declaration.serial
@@ -178,6 +211,7 @@ impl<'a> ClauseConflicts<'a> {
             declaration,
             column,
             target,
+            foreign,
             need_not_null: declaration.serial,
             disallow_no_inherit,
             nullability: Nullability::Unspecified,
@@ -238,7 +272,16 @@ impl<'a> ClauseConflicts<'a> {
                 if self.nullability == Nullability::Null {
                     return Err(self.conflicting_nullability());
                 }
+                if self.foreign {
+                    return Err(foreign_table_constraint_error("primary key"));
+                }
                 self.need_not_null = true;
+            }
+            ColumnClauseKind::Unique if self.foreign => {
+                return Err(foreign_table_constraint_error("unique"));
+            }
+            ColumnClauseKind::ForeignKey if self.foreign => {
+                return Err(foreign_table_constraint_error("foreign key"));
             }
             _ => {}
         }
@@ -261,9 +304,12 @@ impl<'a> ClauseConflicts<'a> {
         if self.nullability != Nullability::NotNull {
             self.nullability = Nullability::NotNull;
             self.need_not_null = false;
-            self.not_null = Some(clause);
-        } else if let Some(previous) = self.not_null {
-            if let (Some(previous_name), Some(name)) = (&previous.name, &clause.name) {
+            self.not_null = Some(SeenNotNull {
+                name: clause.name.as_deref(),
+                no_inherit: clause.no_inherit,
+            });
+        } else if let Some(previous) = &mut self.not_null {
+            if let (Some(previous_name), Some(name)) = (previous.name, clause.name.as_deref()) {
                 if previous_name != name {
                     return Err(error(
                         "XX000",
@@ -275,6 +321,9 @@ impl<'a> ClauseConflicts<'a> {
             }
             if previous.no_inherit != clause.no_inherit {
                 return Err(self.conflicting_no_inherit());
+            }
+            if previous.name.is_none() {
+                previous.name = clause.name.as_deref();
             }
         }
         Ok(())

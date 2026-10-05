@@ -82,7 +82,7 @@ The result is `16777216`, `16777216`, and `16777217`, respectively. The [compati
 
 ## Exact decimal
 
-`NUMERIC` and `DECIMAL` enforce declared precision and scale. Declarations accept precision from 1 through 1000 and scale from -1000 through 1000. A value whose rounded magnitude does not fit the declared precision reports `22003` `numeric field overflow` with PostgreSQL's DETAIL, `A field with precision 3, scale 1 must round to an absolute value less than 10^2.`, in casts, `INSERT` and `UPDATE` alike. Unconstrained finite values support up to 131,072 digits before the decimal point and 16,383 fractional digits. Decimal storage and comparisons preserve their exact base-10 value, including values beyond binary floating-point precision.
+`NUMERIC` and `DECIMAL` enforce declared precision and scale. Declarations and casts accept precision from 1 through 1000 and scale from -1000 through 1000. Invalid precision, scale or modifier count reports PostgreSQL's `22023` diagnostic during type analysis, even for NULL inputs, empty results or an unselected CASE branch. A value whose rounded magnitude does not fit the declared precision reports `22003` `numeric field overflow` with PostgreSQL's DETAIL, `A field with precision 3, scale 1 must round to an absolute value less than 10^2.`, in casts, `INSERT` and `UPDATE` alike. Unconstrained finite values support up to 131,072 digits before the decimal point and 16,383 fractional digits. Decimal storage and comparisons preserve their exact base-10 value, including values beyond binary floating-point precision.
 
 ```sql
 CREATE TABLE invoices (
