@@ -44,14 +44,18 @@ fn spilled_population_field_reads_seek_and_load_only_the_selected_origins() {
     .unwrap();
     for field in &fields {
         let prefix = layout.origin_prefix(field, &control).unwrap();
-        for document in 0..DOCUMENTS as u64 {
+        for document in 0..=DOCUMENTS as u64 {
             let mut key = prefix.to_vec();
             key.extend_from_slice(&document.to_be_bytes());
             writer
                 .push(
                     &key,
                     None,
-                    RecordWriteKind::DiskANNOrigin,
+                    if document == DOCUMENTS as u64 {
+                        RecordWriteKind::Canonical
+                    } else {
+                        RecordWriteKind::DiskANNOrigin
+                    },
                     PrivateRecordRevision::for_tests(),
                     Some(&origin.encode()),
                     &control,

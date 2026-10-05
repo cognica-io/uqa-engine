@@ -317,8 +317,11 @@ fn visit_field_origins(
     visit: &mut dyn FnMut(&DiskANNPopulationOrigin) -> VersionResult<()>,
 ) -> VersionResult<()> {
     let prefix = layout.origin_prefix(field, control)?;
-    origins.visit_prefix(&prefix, control, &mut |write| {
-        if write.kind() == RecordWriteKind::DiskANNOrigin {
+    origins.visit_prefix_with_kind(
+        &prefix,
+        RecordWriteKind::DiskANNOrigin,
+        control,
+        &mut |write| {
             if let Some(value) = write.value() {
                 let origin = layout.origin(write.key(), value, control)?;
                 if &*origin.field != field {
@@ -326,9 +329,9 @@ fn visit_field_origins(
                 }
                 visit(&origin)?;
             }
-        }
-        Ok(true)
-    })?;
+            Ok(true)
+        },
+    )?;
     control.check()?;
     Ok(())
 }
