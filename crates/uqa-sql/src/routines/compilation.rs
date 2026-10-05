@@ -23,7 +23,10 @@ use crate::{
             StoredRelationCatalog,
         },
     },
-    catalog::regrole_dependencies::{StoredRegroleConstants, StoredRegroleResolver},
+    catalog::{
+        regrole_dependencies::{StoredRegroleConstants, StoredRegroleResolver},
+        resolution::RelationLookupMode,
+    },
     plan::UnifiedPlan,
     plpgsql::PlpgsqlCatalog,
     type_resolution::canonical_routine_type_name,
@@ -252,6 +255,11 @@ pub fn lower_sql_routine_statement(
                 stored_relations::bind_stored_query_relations(
                     &StoredQueryBindingContext {
                         relations: context.relations,
+                        lookup_mode: if lowering.persisted_definition {
+                            RelationLookupMode::Bound
+                        } else {
+                            RelationLookupMode::Dynamic
+                        },
                         sequences: context.sequences,
                         temporary_schema: &namespace.temporary_schema,
                         transition_relations: &namespace.transition_relations,

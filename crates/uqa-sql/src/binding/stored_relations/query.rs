@@ -9,6 +9,7 @@
 use super::StoredRelationCatalog;
 use crate::{
     binding::view_dependencies::{bind_query_plan_relations, bind_query_plan_sequence_references},
+    catalog::resolution::RelationLookupMode,
     plan::QueryPlan,
     SQLError,
 };
@@ -26,6 +27,7 @@ pub struct StoredQueryNamespace {
 }
 pub struct StoredQueryBindingContext<'a> {
     pub relations: &'a dyn StoredRelationCatalog,
+    pub lookup_mode: RelationLookupMode,
     pub sequences: &'a dyn StoredQuerySequences,
     pub temporary_schema: &'a str,
     pub transition_relations: &'a BTreeSet<String>,
@@ -52,11 +54,13 @@ pub fn bind_stored_query_relations(
 ) -> Result<bool, SQLError> {
     let mut uses_temporary_relation = false;
     bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
-        if let Some(canonical) = catalog
-            .relations
-            .resolve_age_label_relation_name(reference)?
-        {
-            return Ok(canonical);
+        if catalog.lookup_mode == RelationLookupMode::Dynamic {
+            if let Some(canonical) = catalog
+                .relations
+                .resolve_age_label_relation_name(reference)?
+            {
+                return Ok(canonical);
+            }
         }
         if RelationIdentity::parse_reference(reference)
             .ok()
@@ -72,17 +76,18 @@ pub fn bind_stored_query_relations(
             }
             return Ok(reference.to_string());
         }
-        let resolved = if loaded_catalog {
-            catalog
+        let resolved = match (catalog.lookup_mode, loaded_catalog) {
+            (RelationLookupMode::Bound, _) => {
+                catalog.relations.resolve_bound_relation_kind(reference)?
+            }
+            (RelationLookupMode::Dynamic, true) => catalog
                 .relations
-                .resolve_loaded_visible_relation_kind(reference)?
-                .into_found()
-        } else {
-            catalog
-                .relations
-                .resolve_visible_relation_kind(reference)?
-                .into_found()
-        };
+                .resolve_loaded_visible_relation_kind(reference)?,
+            (RelationLookupMode::Dynamic, false) => {
+                catalog.relations.resolve_visible_relation_kind(reference)?
+            }
+        }
+        .into_found();
         match resolved {
             Some((canonical, "table" | "view" | "materialized view" | "foreign table")) => {
                 uses_temporary_relation |= RelationIdentity::from_legacy_name(&canonical)
@@ -123,3 +128,6 @@ pub(super) fn composite_relation_error(canonical: &str) -> SQLError {
     }
     .error()
 }
+
+#[cfg(test)]
+mod tests;

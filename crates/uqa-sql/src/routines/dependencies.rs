@@ -79,7 +79,10 @@ fn bind_sql_standard_body_relations(
         changed |= bind_stored_statement_relations(
             context.relations,
             statement,
-            RelationLookupMode::Dynamic,
+            match mode {
+                RoutineCompilationMode::Definition => RelationLookupMode::Dynamic,
+                RoutineCompilationMode::Persisted => RelationLookupMode::Bound,
+            },
             matches!(mode, RoutineCompilationMode::Persisted),
             "SQL routine body",
         )?;

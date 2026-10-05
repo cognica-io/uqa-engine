@@ -67,6 +67,7 @@ impl Engine {
         analysis::bind_stored_query_relations(
             &StoredQueryBindingContext {
                 relations: self,
+                lookup_mode: uqa_sql::catalog::resolution::RelationLookupMode::Dynamic,
                 sequences: self,
                 temporary_schema: &temporary_schema,
                 transition_relations: &transition_relations,

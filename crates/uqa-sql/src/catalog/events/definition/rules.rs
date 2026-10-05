@@ -352,6 +352,7 @@ impl EventAnalysisContext<'_> {
         crate::binding::stored_relations::bind_stored_query_relations(
             &crate::binding::stored_relations::StoredQueryBindingContext {
                 relations: self.relations,
+                lookup_mode: RelationLookupMode::Dynamic,
                 sequences: self.sequences,
                 temporary_schema: &namespace.temporary_schema,
                 transition_relations: &namespace.transition_relations,
