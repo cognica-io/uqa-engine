@@ -10,6 +10,66 @@ use crate::{physical::physical_exec_error, spill::BufferedIndexedSpill, Physical
 use uqa_core::{memory::MemoryBudget, DocId, Value};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
+pub mod changes;
+
+/// A statement-local scope postpones physical checks until the complete replacement rows exist.
+#[derive(Default)]
+pub struct RewriteDeferral {
+    active: std::cell::Cell<bool>,
+    physical:
+        std::cell::RefCell<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>>,
+}
+
+impl RewriteDeferral {
+    pub fn is_deferred(&self) -> bool {
+        self.active.get()
+    }
+
+    pub fn defer(&self) -> RewriteDeferralGuard<'_> {
+        RewriteDeferralGuard {
+            state: self,
+            previous: self.active.replace(true),
+            physical: self.physical.take(),
+        }
+    }
+
+    pub(in crate::schema) fn require_physical_rewrite(&self, table: &str, column: &str) {
+        self.physical
+            .borrow_mut()
+            .entry(table.to_string())
+            .or_default()
+            .insert(column.to_string());
+    }
+
+    pub(in crate::schema) fn needs_physical_rewrite(&self, table: &str) -> bool {
+        self.physical.borrow().contains_key(table)
+    }
+
+    pub(in crate::schema) fn physical_columns(&self, table: &str) -> Vec<String> {
+        self.physical
+            .borrow()
+            .get(table)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect()
+    }
+}
+
+pub struct RewriteDeferralGuard<'a> {
+    state: &'a RewriteDeferral,
+    previous: bool,
+    physical: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+}
+
+impl Drop for RewriteDeferralGuard<'_> {
+    fn drop(&mut self) {
+        self.state.active.set(self.previous);
+        self.state
+            .physical
+            .replace(std::mem::take(&mut self.physical));
+    }
+}
 
 pub struct RewriteRow {
     pub original_id: DocId,

@@ -14,6 +14,7 @@ use uqa_sql::{
     SQLError,
 };
 use uqa_storage::StorageBackendResult;
+pub mod deferred;
 
 pub trait ColumnAdditionState {
     fn has_column(&self, table: &str, column: &str) -> StorageBackendResult<bool>;
@@ -33,6 +34,7 @@ pub trait ColumnAdditionState {
     fn persist_schema(&self, table: &str) -> StorageBackendResult<bool>;
 }
 pub struct ColumnAdditionContext<'a, S: Clone + 'static> {
+    pub pending_rows: deferred::AddedColumnRows,
     pub analysis: AddedColumnAnalysisContext<'a>,
     pub namespace: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub sequences: crate::schema::sequences::implicit::ImplicitSequenceContext<'a>,
@@ -141,7 +143,7 @@ pub fn add_column<S: Clone + 'static>(
         identity_sequence.as_deref(),
         column_not_null,
     )?;
-    if adds_keys {
+    if adds_keys && !context.pending_rows.deferral.is_deferred() {
         validate_column_key_rows(context, table, &col_name)?;
     }
     context
@@ -287,6 +289,15 @@ fn initialize_column_rows<S: Clone + 'static>(
     column_not_null: bool,
 ) -> Result<(), SQLError> {
     if let Some(kind) = generated_kind {
+        if context.pending_rows.deferral.is_deferred() {
+            if kind == GeneratedColumnKind::Stored {
+                context
+                    .pending_rows
+                    .deferral
+                    .require_physical_rewrite(table, col_name);
+            }
+            return Ok(());
+        }
         super::generated::validate_and_rewrite_generated_rows(
             &context.generated,
             table,
@@ -309,6 +320,11 @@ fn initialize_column_rows<S: Clone + 'static>(
                     )
                 })?,
         };
+        if context.pending_rows.deferral.is_deferred() {
+            return context
+                .pending_rows
+                .retain(&context.backfill, table, col_name, default_expr);
+        }
         let missing_value = super::backfill::backfill_added_column(
             &context.backfill,
             table,

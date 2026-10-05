@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Execute table alterations in declaration order and propagate inheritable actions through child relations.
+//! Schedule ALTER categories, preserve written order within them, and propagate inheritable actions through child relations.
 use crate::schema::constraints::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
     drop::drop_constraint, set_not_null_constraint, table_constraint_state, validate_constraint,
@@ -106,13 +106,40 @@ pub fn run_alter_table<S: Clone + 'static>(
         mut actions,
     } = stmt;
     context.constraints.access.ensure_table_owner(&table)?;
-    let mut prepared_types = type_changes::prepare(context, &table, &qualifier, &mut actions)?;
-    for (position, mut action) in actions.into_iter().enumerate() {
+    let prepared_types = type_changes::prepare(context, &table, &qualifier, &mut actions)?;
+    let mut rewrites = type_changes::TypeRewrites::capture(
+        context,
+        &table,
+        recurse,
+        mode,
+        &actions,
+        prepared_types,
+    )?;
+    let _deferred = rewrites.as_ref().map(|_| {
+        (
+            context.addition.pending_rows.deferral.defer(),
+            context.columns.deferred_rows.defer(),
+            context.constraints.deferred_rows.defer(),
+        )
+    });
+    let mut actions = actions.into_iter().enumerate().collect::<Vec<_>>();
+    if rewrites.is_some() {
+        actions.sort_by_key(|(_, action)| {
+            uqa_sql::schema::table_alteration::ordering::execution_order(action)
+        });
+    }
+    for (position, mut action) in actions {
+        if let AlterTableAction::AlterColumnType { name, ty, .. } = &action {
+            rewrites
+                .as_mut()
+                .ok_or_else(|| SQLError::Internal("type change has no original rows".into()))?
+                .apply(context, position, name, ty)?;
+            continue;
+        }
         if !check_added_column_declaration(context, &table, &qualifier, &mut action)? {
             continue;
         }
         let column_checks = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
-        let prepared_type = prepared_types.remove(&position);
         run_recursive_alter_action(
             context,
             AlterTableStmt {
@@ -123,9 +150,6 @@ pub fn run_alter_table<S: Clone + 'static>(
                 actions: Vec::new(),
             },
             action,
-            prepared_type
-                .as_ref()
-                .and_then(|prepared| prepared.transform.as_ref()),
         )?;
         for mut action in column_checks {
             materialize_recursive_action_names(context, &table, recurse, &mut action)?;
@@ -139,9 +163,11 @@ pub fn run_alter_table<S: Clone + 'static>(
                     actions: Vec::new(),
                 },
                 action,
-                None,
             )?;
         }
+    }
+    if let Some(rewrites) = rewrites {
+        rewrites.finish(context)?;
     }
     Ok(SQLResult::empty())
 }
@@ -224,7 +250,6 @@ fn run_alter_table_action<S: Clone + 'static>(
     action: AlterTableAction,
     recursing: bool,
     inherited_not_null_name: Option<String>,
-    type_transform: Option<&uqa_sql::schema::columns::type_transform::AnalyzedTypeTransform>,
 ) -> Result<(), SQLError> {
     if matches!(&action, AlterTableAction::AddKeyConstraint { .. }) {
         let persistence = context
@@ -545,16 +570,10 @@ fn run_alter_table_action<S: Clone + 'static>(
                 )?;
             }
         }
-        AlterTableAction::AlterColumnType { name, ty, .. } => {
-            identity::retype_identity_sequence(context, &stmt.table, &name, &ty)?;
-            crate::schema::columns::alteration::alter_type(
-                &context.columns,
-                &stmt.table,
-                &stmt.qualifier,
-                &name,
-                &ty,
-                type_transform,
-            )?;
+        AlterTableAction::AlterColumnType { .. } => {
+            return Err(SQLError::Internal(
+                "type change bypassed its original-row queue".into(),
+            ));
         }
         AlterTableAction::AddIdentity {
             name,

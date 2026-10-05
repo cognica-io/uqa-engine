@@ -99,6 +99,9 @@ impl MutationRead for Engine {
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
         Engine::get_live_document(self, table, doc_id)
     }
+    fn raw_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
+        Engine::get_raw_live_document(self, table, doc_id)
+    }
     fn command_overlay_changes(
         &self,
         table: &str,

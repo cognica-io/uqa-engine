@@ -88,6 +88,16 @@ impl Engine {
         self.materialized_document_from_state(table, &state, doc_id)
     }
 
+    pub(crate) fn get_raw_live_document(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<Option<Document>, SQLError> {
+        let state = self.require_table(table)?;
+        self.raw_command_visible_document(table, &state, doc_id)
+            .map(|document| document.map(uqa_storage::StoredDocument::into_fields))
+    }
+
     pub(crate) fn get_query_document(
         &self,
         table: &str,

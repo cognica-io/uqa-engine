@@ -75,16 +75,27 @@ pub fn rewrite_table_rows<S: Clone + 'static>(
             &row.document,
         )?;
     }
-    super::super::keys::validate_key_constraint_rows(&context.keys, table, &mut rows)?;
-    if write {
-        publish_rewritten_rows(context, table, rows)?;
-        super::super::keys::validate_temporal_key_rows(&context.keys, table)?;
-    }
+    publish_validated_rows(context, table, rows, write)?;
     crate::schema::validation::validate_rewritten_foreign_keys(
         context.keys.constraints,
         table,
         changed,
     )
+}
+
+/// Publish rows whose row-local checks have already run in conversion order, then verify the cross-row keys.
+pub(in crate::schema) fn publish_validated_rows<S: Clone + 'static>(
+    context: &GeneratedRewriteContext<'_, S>,
+    table: &str,
+    mut rows: RewriteRows,
+    write: bool,
+) -> Result<(), SQLError> {
+    super::super::keys::validate_key_constraint_rows(&context.keys, table, &mut rows)?;
+    if write {
+        publish_rewritten_rows(context, table, rows)?;
+        super::super::keys::validate_temporal_key_rows(&context.keys, table)?;
+    }
+    Ok(())
 }
 
 fn publish_rewritten_rows<S: Clone + 'static>(
@@ -93,8 +104,8 @@ fn publish_rewritten_rows<S: Clone + 'static>(
     mut rows: RewriteRows,
 ) -> Result<(), SQLError> {
     let mut replacements = RewriteRows::new(rows.memory());
-    let mut remaps_primary_key = false;
     for position in 0..rows.len() {
+        context.cancellation.check()?;
         let super::rows::RewriteRow {
             original_id: old_doc_id,
             document,
@@ -108,17 +119,12 @@ fn publish_rewritten_rows<S: Clone + 'static>(
             &document,
         )?
         .unwrap_or(old_doc_id);
-        remaps_primary_key |= new_doc_id != old_doc_id;
         replacements.push_replacement(old_doc_id, new_doc_id, document)?;
     }
     drop(rows);
-    if remaps_primary_key {
-        for position in 0..replacements.len() {
-            context
-                .storage
-                .delete_document(table, replacements.get(position)?.original_id)?;
-        }
-    }
+    // A rewrite replaces the heap captured at its start. Self-modifying callbacks cannot leave additional old-heap rows beside that replacement.
+    replacements.spill()?;
+    remove_replaced_rows(context, table, replacements.memory())?;
     for position in 0..replacements.len() {
         context.cancellation.check()?;
         let super::rows::RewriteRow {
@@ -133,20 +139,12 @@ fn publish_rewritten_rows<S: Clone + 'static>(
         )?;
         context.storage.insert_document(
             table,
-            if remaps_primary_key {
-                new_doc_id
-            } else {
-                old_doc_id
-            },
+            new_doc_id,
             document,
             vectors,
-            if remaps_primary_key {
-                crate::mutation::publication::InsertedIdentity::Vacant
-            } else {
-                crate::mutation::publication::InsertedIdentity::Unknown
-            },
+            crate::mutation::publication::InsertedIdentity::Vacant,
         )?;
-        if remaps_primary_key {
+        if new_doc_id != old_doc_id {
             context
                 .state
                 .advance_next_id(table, new_doc_id)
@@ -159,6 +157,33 @@ fn publish_rewritten_rows<S: Clone + 'static>(
         }
     }
     Ok(())
+}
+
+fn remove_replaced_rows<S: Clone + 'static>(
+    context: &GeneratedRewriteContext<'_, S>,
+    table: &str,
+    memory: &uqa_core::memory::MemoryBudget,
+) -> Result<(), SQLError> {
+    let control = uqa_storage::read_control::StorageReadControl::new(memory, context.cancellation);
+    let limit = (memory.available() / (4 * std::mem::size_of::<DocId>()))
+        .clamp(1, crate::DEFAULT_BATCH_SIZE);
+    let mut after = None;
+    loop {
+        context.cancellation.check()?;
+        let ids = context
+            .keys
+            .constraints
+            .reads
+            .live_table_doc_id_page(table, after, limit, &control)?;
+        let Some(last) = ids.last().copied() else {
+            return Ok(());
+        };
+        after = Some(last);
+        for id in ids.iter().copied() {
+            context.cancellation.check()?;
+            context.storage.delete_document(table, id)?;
+        }
+    }
 }
 
 /// The stored generated columns of `table`, whose values a rewrite of the table recomputes.

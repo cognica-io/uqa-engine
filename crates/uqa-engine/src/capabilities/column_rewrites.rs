@@ -9,8 +9,10 @@ use crate::{session::StatementReadSnapshot, Engine};
 use uqa_core::DocId;
 use uqa_execution::schema::{
     columns::{
+        addition::deferred::AddedColumnRows,
         backfill::{ColumnBackfillContext, ColumnBackfillState},
         generated::{GeneratedRewriteContext, GeneratedRewriteState},
+        rows::RewriteDeferral,
         ColumnRewriteContext,
     },
     keys::KeyValidationContext,
@@ -77,6 +79,7 @@ impl Engine {
     ) -> uqa_execution::schema::columns::addition::ColumnAdditionContext<'_, StatementReadSnapshot>
     {
         uqa_execution::schema::columns::addition::ColumnAdditionContext {
+            pending_rows: AddedColumnRows::default(),
             analysis: uqa_sql::schema::columns::addition::AddedColumnAnalysisContext {
                 keys: self,
                 schema: self,
@@ -161,6 +164,7 @@ impl Engine {
     ) -> uqa_execution::schema::columns::alteration::ColumnAlterContext<'_, StatementReadSnapshot>
     {
         uqa_execution::schema::columns::alteration::ColumnAlterContext {
+            deferred_rows: RewriteDeferral::default(),
             analysis: uqa_sql::schema::columns::alteration::ColumnAlterAnalysisContext {
                 columns: self,
                 keys: self,

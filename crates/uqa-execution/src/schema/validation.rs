@@ -59,7 +59,13 @@ pub fn validate_foreign_key_rows(
                 .is_some()
         };
         if !parent_exists {
-            return Err(foreign_key_violation(table, name));
+            return Err(crate::mutation::constraints::referencing_row_violation(
+                context,
+                table,
+                name,
+                foreign_key,
+                &document,
+            )?);
         }
     }
     Ok(())
@@ -122,14 +128,6 @@ pub fn validate_rewritten_foreign_keys(
         }
     }
     Ok(())
-}
-
-fn foreign_key_violation(table: &str, name: &str) -> SQLError {
-    let table = uqa_sql::semantics::foreign_keys::foreign_key_relation_name(table);
-    constraint_error(
-        "23503",
-        format!("insert or update on table \"{table}\" violates foreign key constraint \"{name}\""),
-    )
 }
 
 pub fn validate_not_null_rows(

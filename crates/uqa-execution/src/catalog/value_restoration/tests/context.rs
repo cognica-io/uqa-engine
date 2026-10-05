@@ -153,6 +153,9 @@ impl crate::mutation::constraints::context::MutationRead for Fixture {
             .get(id)
             .map_err(|error| SQLError::Internal(error.to_string()))
     }
+    fn raw_document(&self, table: &str, id: DocId) -> Result<Option<Document>, SQLError> {
+        self.get_document(table, id)
+    }
     fn command_overlay_changes(
         &self,
         _: &str,

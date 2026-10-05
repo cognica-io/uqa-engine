@@ -959,6 +959,8 @@ mod catalog_lifecycle;
 mod column_declarations;
 #[path = "pg18_constraint_lifecycle/column_type_analysis.rs"]
 mod column_type_analysis;
+#[path = "pg18_constraint_lifecycle/column_type_rewrite.rs"]
+mod column_type_rewrite;
 #[path = "pg18_constraint_lifecycle/default_cooking.rs"]
 mod default_cooking;
 #[path = "pg18_constraint_lifecycle/merge_attributes.rs"]

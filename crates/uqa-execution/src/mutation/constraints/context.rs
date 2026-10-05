@@ -28,6 +28,8 @@ pub trait MutationRead {
         control: &uqa_storage::read_control::StorageReadControl,
     ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>;
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError>;
+    /// Read the stored fields without materializing expressions from the current descriptor; a retained rewrite supplies its original descriptor.
+    fn raw_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError>;
     /// The changes of `table` that the active command overlays and this transaction's fixed-snapshot reads hold above its storage view, without copying them.
     fn command_overlay_changes(
         &self,

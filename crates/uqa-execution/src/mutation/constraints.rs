@@ -263,9 +263,10 @@ fn validate_existing_row_foreign_keys(
 }
 
 /// `insert or update on table "fk" violates foreign key constraint "c"` with the key that is missing from the referenced table, unless the current role may not read its columns.
-fn referencing_row_violation(
+pub(crate) fn referencing_row_violation(
     context: ConstraintContext<'_>,
     table: &str,
+    name: &str,
     fk: &ForeignKey,
     document: &Document,
 ) -> Result<SQLError, SQLError> {
@@ -288,7 +289,7 @@ fn referencing_row_violation(
         message: format!(
             "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
             foreign_key_relation_name(table),
-            fk.name.as_deref().unwrap_or("<unnamed>")
+            name
         ),
         detail: Some(match key {
             Some(key) => format!("{key} is not present in table \"{referenced}\"."),
@@ -310,7 +311,13 @@ pub(crate) fn require_foreign_key_parent(
         let (covered, parent_ids) =
             period_foreign_key_coverage(context, fk, &lookup.values, &[], None)?;
         if !covered {
-            return Err(referencing_row_violation(context, table, fk, document)?);
+            return Err(referencing_row_violation(
+                context,
+                table,
+                fk.name.as_deref().unwrap_or("<unnamed>"),
+                fk,
+                document,
+            )?);
         }
         for parent in parent_ids {
             let _target = lock_mutation_target(
@@ -326,7 +333,13 @@ pub(crate) fn require_foreign_key_parent(
     if lock_foreign_key_parent(context, table, fk, lookup)? {
         Ok(())
     } else {
-        Err(referencing_row_violation(context, table, fk, document)?)
+        Err(referencing_row_violation(
+            context,
+            table,
+            fk.name.as_deref().unwrap_or("<unnamed>"),
+            fk,
+            document,
+        )?)
     }
 }
 
