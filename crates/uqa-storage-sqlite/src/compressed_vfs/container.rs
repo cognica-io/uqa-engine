@@ -12,7 +12,7 @@ use super::{
     keys_from_key, parse_header, scan_committed_records, usize_to_u64,
     verify_header_authentication, Aead, AuthenticatedChunkRecord, BTreeMap, BTreeSet, ChunkEntry,
     ContainerFile, File, HeaderMetadata, OpenOptions, OpenOptionsEntry, PathBuf, Payload, Read,
-    SQLiteCompressedContainerAnchor, Seek, SeekFrom, Write, XNonce, AEAD_TAG_LEN, AUTH_TAG_LEN,
+    SQLiteCompressedContainerAnchor, Seek, SeekFrom, Write, AEAD_TAG_LEN, AUTH_TAG_LEN,
     CHUNK_AUTHENTICATED, CHUNK_COMMIT, CHUNK_COMPRESSED, CHUNK_ENCRYPTED, COMMIT_CHUNK_ID,
     ENTRY_SIZE, FILE_ID_LEN, FLAG_ENCRYPTED, HEADER_SIZE, NONCE_LEN, SALT_LEN,
 };
@@ -419,7 +419,7 @@ impl ContainerFile {
             stored = keys
                 .cipher
                 .encrypt(
-                    XNonce::from_slice(&nonce),
+                    (&nonce).into(),
                     Payload {
                         msg: &stored,
                         aad: &aad,
@@ -563,7 +563,7 @@ impl ContainerFile {
             payload = keys
                 .cipher
                 .decrypt(
-                    XNonce::from_slice(&entry.nonce),
+                    (&entry.nonce).into(),
                     Payload {
                         msg: &payload,
                         aad: &aad,

@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chacha20poly1305::{
-    aead::{AeadInPlace, KeyInit},
-    XChaCha20Poly1305, XNonce,
+    aead::{AeadInOut, KeyInit},
+    XChaCha20Poly1305,
 };
+use cipher::zeroize::Zeroize;
 use parking_lot::Mutex;
 
 const BLOCK_BYTES: usize = 16 * 1024;
@@ -81,7 +82,7 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
         let mut key = [0_u8; 32];
         getrandom::fill(&mut key).map_err(|error| io::Error::other(error.to_string()))?;
         let cipher = XChaCha20Poly1305::new((&key).into());
-        key.fill(0);
+        key.zeroize();
         let path = Arc::new(file.path().to_path_buf());
         Ok(Self {
             owner: Arc::new(Mutex::new(Owner {
@@ -237,10 +238,10 @@ impl<const BYTES: usize> Owner<BYTES> {
             file.read_exact(&mut tag)?;
             file.read_exact(&mut plaintext[..populated])?;
             self.cipher
-                .decrypt_in_place_detached(
-                    XNonce::from_slice(&nonce),
+                .decrypt_inout_detached(
+                    (&nonce).into(),
                     &block_aad(block, length),
-                    &mut plaintext[..populated],
+                    (&mut plaintext[..populated]).into(),
                     (&tag).into(),
                 )
                 .map_err(|_| {
@@ -270,10 +271,10 @@ impl<const BYTES: usize> Owner<BYTES> {
         let length = u16::try_from(populated).expect("temporary blocks are at most 16 KiB");
         let tag = self
             .cipher
-            .encrypt_in_place_detached(
-                XNonce::from_slice(&nonce),
+            .encrypt_inout_detached(
+                (&nonce).into(),
                 &block_aad(block, length),
-                &mut ciphertext[..populated],
+                (&mut ciphertext[..populated]).into(),
             )
             .map_err(|_| io::Error::other("temporary file encryption failed"))?;
         // The complete replacement reaches the inactive slot before its one-byte publication marker. Failed short writes leave the authoritative slot unchanged, including the prefix retained by append rollback.

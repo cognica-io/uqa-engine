@@ -70,11 +70,12 @@ impl Transaction {
         read_only: bool,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
-        Ok(Self::at_snapshot(
-            persistence.snapshot(control)?,
-            read_only,
-            control,
-        ))
+        let mut transaction = Self::at_snapshot(persistence.snapshot(control)?, read_only, control);
+        transaction.changes = PrivateRecordChanges::with_revision_scope(
+            control.memory(),
+            persistence.private_revision_scope(),
+        );
+        Ok(transaction)
     }
 
     /// The commit monitor value and sequence of this transaction's committed snapshot, when its provider has a monitor.

@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod compatibility;
 mod failures;
 
 #[test]

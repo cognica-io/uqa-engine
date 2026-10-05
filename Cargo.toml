@@ -104,7 +104,9 @@ num-traits = "0.2"
 rusqlite = { version = "0.39", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 argon2 = { version = "0.5", default-features = false }
-chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc", "zeroize"] }
+# Preserve stream-buffer zeroization as well as the AEAD key and cipher state.
+cipher = { version = "0.5", default-features = false, features = ["zeroize"] }
 hmac = { version = "0.12", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 crc32fast = "1.4"

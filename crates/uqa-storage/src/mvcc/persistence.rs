@@ -186,6 +186,11 @@ pub trait VersionedPersistence: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<super::IdentifierAllocation>;
 
+    /// Optional private cache-revision grouping. Wrappers should forward the provider selection; absence preserves the exact per-record scan. The classifier belongs to the physical key owner and must not read mutable state.
+    fn private_revision_scope(&self) -> Option<super::PrivateRevisionScope> {
+        None
+    }
+
     fn graph_record_layout(&self) -> Option<&dyn super::GraphRecordLayout> {
         None
     }

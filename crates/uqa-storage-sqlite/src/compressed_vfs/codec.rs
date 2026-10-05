@@ -6,6 +6,8 @@
 
 //! Chunk compression, bounded decompression, and authenticated encryption.
 
+use cipher::zeroize::Zeroize;
+
 use super::{
     allocate_payload, invalid_data, Argon2, Block, ContainerKeys, KeyInit, Read,
     SQLiteCompressionCodec, SQLiteCompressionOptions, XChaCha20Poly1305, SALT_LEN,
@@ -22,7 +24,7 @@ pub(super) fn keys_from_key(key: &str, salt: &[u8; SALT_LEN]) -> std::io::Result
         .map_err(|_| invalid_data("failed to initialize compressed container cipher"))?;
     let mut mac_key = [0_u8; 32];
     mac_key.copy_from_slice(&derived[32..]);
-    derived.fill(0);
+    derived.zeroize();
     Ok(ContainerKeys { cipher, mac_key })
 }
 
