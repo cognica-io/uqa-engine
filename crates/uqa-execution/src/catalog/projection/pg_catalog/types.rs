@@ -20,13 +20,29 @@ use super::super::helpers::type_metadata::{
     PgTypeRoutineOids,
 };
 
+pub fn build_pg_type(
+    catalog: &CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
+    build_pg_type_rows(catalog, resolution, true)
+}
+
+/// The `pg_type` rows with `typdefault` left NULL, for the `reg*` output catalog: printing a domain default may print a `reg*` constant, whose output function reads that catalog.
+pub fn build_pg_type_without_defaults(
+    catalog: &CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
+    build_pg_type_rows(catalog, resolution, false)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "preserves catalog column and OID order"
 )]
-pub fn build_pg_type(
+fn build_pg_type_rows(
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
+    with_defaults: bool,
 ) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
     let catalog_types = [
         (ColumnType::Boolean, "B", true, "b"),
@@ -402,7 +418,7 @@ pub fn build_pg_type(
         );
         entry.insert(
             "typdefault".into(),
-            match domain.definition.default.as_ref() {
+            match domain.definition.default.as_ref().filter(|_| with_defaults) {
                 Some(default) => str_value(super::super::view_definition::stored_expression_text(
                     catalog, resolution, default,
                 )?),

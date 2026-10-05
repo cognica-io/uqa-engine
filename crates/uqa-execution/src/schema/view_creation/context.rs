@@ -56,8 +56,8 @@ pub struct ViewCreationContext<'a> {
     pub bindings: &'a dyn ViewPlanBinding,
     pub routines: &'a dyn RoutineResolution,
     pub regroles: &'a dyn StoredRegroleResolver,
-    /// Resolves the relations the query's `regclass` constants name, as `regclassin` resolves them when the view is defined.
-    pub regclasses: &'a dyn uqa_sql::schema::dependencies::regclass::RegclassInput,
+    /// Resolves the objects the query's `reg*` constants name, as their input functions resolve them when the view is defined.
+    pub aliases: &'a dyn uqa_sql::schema::dependencies::oid_alias::OidAliasInput,
     pub rewrite: ViewRewriteContext<'a>,
     pub queries: &'a dyn TableAsQuerySource,
     pub query_owners: &'a dyn ViewQueryOwners,

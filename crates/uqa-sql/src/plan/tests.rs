@@ -247,4 +247,44 @@ fn query_scalar_rewriter_visits_every_node_once() {
     assert!(visits.values().all(|visits| *visits == 1), "{visits:?}");
 }
 
+/// The string literals numbered `m1`, `m2`, ... that a plan's scalar expressions carry, in order, reached through the read-only plan traversal and the pre-order expression visit.
+fn visited_markers(plan: &UnifiedPlan) -> Vec<u32> {
+    let mut markers = std::collections::BTreeSet::new();
+    plan.visit_scalar_expressions(&mut |root| {
+        root.visit(&mut |expression| {
+            if let ScalarExpr::Literal(uqa_core::Value::Str(text)) = expression {
+                if let Some(number) = text.strip_prefix('m') {
+                    markers.insert(number.parse::<u32>().expect("marker number"));
+                }
+            }
+        });
+    });
+    markers.into_iter().collect()
+}
+
+#[test]
+fn read_only_visits_reach_every_expression_of_a_query() {
+    let plan = one(
+        "WITH c AS (SELECT 'm1' AS x FROM t WHERE 'm2' IS NOT NULL) \
+         (SELECT 'm3', (SELECT 'm4' FROM t) FROM c JOIN (SELECT 'm5' FROM t) AS d ON 'm6' = 'm7' \
+          WHERE EXISTS (SELECT 'm8') GROUP BY 'm9' HAVING 'm10' IS NULL ORDER BY 'm11' LIMIT length('m12')) \
+         UNION SELECT 'm13' FROM (VALUES ('m14')) AS v, generate_series(1, length('m15')) AS g \
+         ORDER BY 1 LIMIT length('m16') OFFSET length('m17')",
+    );
+    assert_eq!(visited_markers(&plan), (1..=17).collect::<Vec<_>>());
+}
+
+#[test]
+fn read_only_visits_reach_every_expression_of_a_command() {
+    let plan = one(
+        "WITH c AS (SELECT 'm1') INSERT INTO t (a) SELECT 'm2' FROM s WHERE 'm3' IS NULL \
+         ON CONFLICT (a) WHERE 'm4' IS NULL DO UPDATE SET a = 'm5' WHERE 'm6' IS NULL RETURNING 'm7'",
+    );
+    assert_eq!(visited_markers(&plan), (1..=7).collect::<Vec<_>>());
+    let plan = one(
+        "UPDATE t SET a = 'm1' FROM (SELECT 'm2' AS b) AS s JOIN u ON 'm3' = 'm4' WHERE 'm5' IS NULL RETURNING 'm6'",
+    );
+    assert_eq!(visited_markers(&plan), (1..=6).collect::<Vec<_>>());
+}
+
 mod assignment_targets;

@@ -30,6 +30,7 @@ mod query;
 mod rewrite;
 mod scalar;
 mod statement;
+mod visit;
 
 pub use model::*;
 pub use rewrite::rewrite_scalar_expression;

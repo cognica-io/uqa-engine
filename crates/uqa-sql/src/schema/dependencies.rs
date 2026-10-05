@@ -128,6 +128,7 @@ pub fn schema_expr_references_column(expression: &crate::ast::Expr, column: &str
     result.is_err() || referenced
 }
 
+pub mod oid_alias;
 pub mod regclass;
 pub mod registration;
 pub mod rewrites;

@@ -51,13 +51,29 @@ pub fn routine_oid_in_use(
         .any(|name| stable_oid("proc", name) == oid))
 }
 
+pub fn build_pg_proc(
+    catalog: &CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    build_pg_proc_rows(catalog, resolution, true)
+}
+
+/// The `pg_proc` rows with `proargdefaults` left NULL, for the `reg*` output catalog: printing an argument default may print a `reg*` constant, whose output function reads that catalog.
+pub fn build_pg_proc_without_defaults(
+    catalog: &CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    build_pg_proc_rows(catalog, resolution, false)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "preserves catalog column and OID order"
 )]
-pub fn build_pg_proc(
+fn build_pg_proc_rows(
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
+    with_defaults: bool,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
@@ -214,6 +230,7 @@ pub fn build_pg_proc(
             .count();
         let argument_defaults = input_params
             .iter()
+            .filter(|_| with_defaults)
             .filter_map(|parameter| parameter.default.as_ref())
             .map(|default| {
                 super::view_definition::stored_expression_text(catalog, resolution, default)

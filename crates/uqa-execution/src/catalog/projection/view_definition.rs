@@ -152,6 +152,7 @@ pub fn view_definition(
         standalone: false,
         indent: true,
         routine: None,
+        aliases: std::cell::OnceCell::new(),
     };
     let mut rendered = deparser.query(
         &view.query,
@@ -177,6 +178,8 @@ struct Deparser<'a> {
     indent: bool,
     /// The routine whose SQL-standard body is printed, whose parameters print by name.
     routine: Option<RoutineNamespace>,
+    /// The output of `regtype`, `regproc`, `regprocedure` and `regnamespace` constants, built when the first one is printed.
+    aliases: std::cell::OnceCell<crate::catalog::projection::regtypes::AliasConstantOutput>,
 }
 
 #[derive(Clone)]
@@ -344,6 +347,7 @@ pub fn stored_expression_definition(
         standalone: true,
         indent: true,
         routine: None,
+        aliases: std::cell::OnceCell::new(),
     };
     let expression = uqa_sql::plan::ExpressionPlan::lower(expression.clone());
     deparser.expression(
@@ -373,6 +377,7 @@ pub fn stored_domain_expression_definition(
         standalone: true,
         indent: true,
         routine: None,
+        aliases: std::cell::OnceCell::new(),
     };
     let scope = Scope {
         columns: vec![Column {
@@ -413,6 +418,7 @@ pub fn routine_body_definition(
         standalone: false,
         indent: atomic,
         routine: Some(RoutineNamespace::new(def)?),
+        aliases: std::cell::OnceCell::new(),
     };
     // The body's queries sit below the routine's namespace, so their column references always carry a relation name.
     let scope = Scope {
@@ -556,6 +562,7 @@ fn event_deparser<'a>(
         standalone: false,
         indent: true,
         routine: None,
+        aliases: std::cell::OnceCell::new(),
     }
 }
 

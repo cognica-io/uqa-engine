@@ -44,6 +44,7 @@ pub fn query_references(
         standalone: false,
         indent: true,
         routine: None,
+        aliases: std::cell::OnceCell::new(),
     };
     let mut references = QueryReferences::default();
     deparser.reference_query(query, &Scope::default(), &mut references)?;

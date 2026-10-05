@@ -40,7 +40,7 @@ impl Engine {
             bindings: self,
             routines: self,
             regroles: self,
-            regclasses: self,
+            aliases: self,
             rewrite: self.view_rewrite_context(),
             queries: self,
             query_owners: self,

@@ -64,8 +64,8 @@ pub fn validate_default_expression(
     if !cook_constant(context, expression, target)? {
         return Ok(false);
     }
-    // `regclassin` reads a relation name when the default is defined, so a missing relation is reported here and the stored constant follows a rename.
-    crate::schema::dependencies::regclass::read_regclass_constants(context.catalog, expression)?;
+    // The `reg*` input functions read an OID alias constant's name when the default is defined, so a missing object is reported here and the stored constant follows a rename.
+    crate::schema::dependencies::oid_alias::read_oid_alias_constants(context.catalog, expression)?;
     // The cooked expression has the type `coerce_to_target_type` checks: a literal the column type read is of that type.
     let cooked = crate::plan::ExpressionPlan::lower(expression.clone());
     let source = crate::type_resolution::scalar_type_with_resolver(

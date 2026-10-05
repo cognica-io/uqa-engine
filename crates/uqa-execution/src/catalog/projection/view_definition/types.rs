@@ -36,23 +36,16 @@ impl Deparser<'_> {
         }
     }
 
-    /// A typed constant, as `get_const_expr` prints a `Const`: a non-negative `integer`, a `numeric` written with a decimal point and a `boolean` print bare, an enum or enum-array constant shows its current label text, and every other constant prints its output text with its type.
-    /// `regclassout` for a stored `regclass` constant: the relation's name, schema-qualified when the search path does not reach it, and each element's name for a `regclass[]` constant. An OID no relation holds prints as the OID, as `regclassout` prints it.
-    fn regclass_constant(
-        &self,
-        value: &Value,
-        ty: &ColumnType,
-    ) -> Result<Option<String>, SQLError> {
+    /// The output function of a stored OID alias constant, as `get_const_expr` prints a `Const` of `regclass`, `regtype`, `regproc`, `regprocedure` or `regnamespace`: the object's name, schema-qualified when the search path does not reach it, and each element's name for an array constant. An OID no object holds prints as the OID, as the output functions print it.
+    fn alias_constant(&self, value: &Value, ty: &ColumnType) -> Result<Option<String>, SQLError> {
         match (value, ty) {
-            (Value::Int(oid), ColumnType::Regclass) => self.relation_constant_name(*oid),
-            (Value::Array(array), ColumnType::Array(element))
-                if matches!(element.as_ref(), ColumnType::Regclass) =>
-            {
+            (Value::Int(oid), element) if is_oid_alias(element) => self.alias_name(element, *oid),
+            (Value::Array(array), ColumnType::Array(element)) if is_oid_alias(element) => {
                 let mut names = Vec::with_capacity(array.elements().len());
-                for element in array.elements() {
-                    match element {
+                for item in array.elements() {
+                    match item {
                         Value::Null => names.push(Value::Null),
-                        Value::Int(oid) => match self.relation_constant_name(*oid)? {
+                        Value::Int(oid) => match self.alias_name(element, *oid)? {
                             Some(name) => names.push(Value::Str(name)),
                             None => return Ok(None),
                         },
@@ -71,6 +64,28 @@ impl Deparser<'_> {
             }
             _ => Ok(None),
         }
+    }
+
+    /// The name of the object holding `oid` as the alias type's output function prints it.
+    fn alias_name(&self, ty: &ColumnType, oid: i64) -> Result<Option<String>, SQLError> {
+        if matches!(ty, ColumnType::Regclass) {
+            return self.relation_constant_name(oid);
+        }
+        Ok(self.alias_output()?.text(ty, oid))
+    }
+
+    /// The output of the non-relation alias types, built from the catalog view and the session's name resolution when first needed.
+    fn alias_output(
+        &self,
+    ) -> Result<&crate::catalog::projection::regtypes::AliasConstantOutput, SQLError> {
+        if let Some(output) = self.aliases.get() {
+            return Ok(output);
+        }
+        let output = crate::catalog::projection::regtypes::AliasConstantOutput::build(
+            self.catalog,
+            &self.dynamic,
+        )?;
+        Ok(self.aliases.get_or_init(|| output))
     }
 
     /// The name of the relation holding `oid` as `regclassout` prints it: unqualified when the search path reaches it, schema-qualified otherwise.
@@ -96,6 +111,7 @@ impl Deparser<'_> {
         }))
     }
 
+    /// A typed constant, as `get_const_expr` prints a `Const`: a non-negative `integer`, a `numeric` written with a decimal point and a `boolean` print bare, an enum or enum-array constant shows its current label text, and every other constant prints its output text with its type.
     pub(super) fn typed_literal(&self, value: &Value, ty: &str) -> Result<String, SQLError> {
         let display = self.type_display(ty);
         let Some(resolved) = self.resolved_type(ty) else {
@@ -113,7 +129,7 @@ impl Deparser<'_> {
             while let ColumnType::Domain { base: inner, .. } = base {
                 base = inner;
             }
-            if let Some(text) = self.regclass_constant(value, base)? {
+            if let Some(text) = self.alias_constant(value, base)? {
                 return Ok(format!("'{}'::{display}", text.replace('\'', "''")));
             }
             let bare = match (value, base) {
@@ -225,4 +241,16 @@ impl Deparser<'_> {
             .collect::<Result<Vec<_>, _>>()
             .map(|items| items.join(", "))
     }
+}
+
+/// Whether `ty` is an OID alias type whose constants print through the object's name.
+fn is_oid_alias(ty: &ColumnType) -> bool {
+    matches!(
+        ty,
+        ColumnType::Regclass
+            | ColumnType::Regtype
+            | ColumnType::Regproc
+            | ColumnType::Regprocedure
+            | ColumnType::Regnamespace
+    )
 }
