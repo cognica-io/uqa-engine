@@ -5,7 +5,7 @@
 //
 
 use std::sync::Arc;
-use uqa_core::memory::BudgetedVec;
+use uqa_core::memory::{Budgeted, BudgetedVec};
 
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::graph::OwnedGraphMutation;
@@ -36,7 +36,7 @@ enum Operation {
     OccurrenceReset(BudgetedVec<u8>),
     Fence(BudgetedVec<u8>),
     Graph(OwnedGraphMutation),
-    VectorInput(OwnedVectorMutation),
+    VectorInput(Budgeted<OwnedVectorMutation>),
     Population(OwnedPopulationMutation),
     VectorFence(IndexKind, BudgetedVec<u8>),
     /// A canonical record at a key that never had one.
@@ -185,12 +185,12 @@ impl<'a> Batch<'a> {
                 Operation::Population(mutation) => transaction.population_mutation(mutation)?,
                 Operation::VectorInput(mutation) => {
                     let guard = mutation.kind.layout(&*self.store.persistence)?.key(
-                        mutation.metadata.bytes(),
+                        &mutation.metadata,
                         Key::Document(mutation.document),
                         control,
                     )?;
                     transaction.fence_record(&guard, control)?;
-                    transaction.vector_mutation(mutation)?;
+                    transaction.vector_mutation(mutation, control)?;
                 }
                 Operation::VectorFence(kind, prefix) => {
                     self.fence_vector_structures(transaction, *kind, prefix)?;

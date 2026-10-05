@@ -4,44 +4,32 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Verify that the journal describes the canonical tensors actually being published.
+//! Verify the final input of each document against canonical tensors without retaining the journal in memory.
 
-use super::super::{layout::Layout, Key, Mutation};
+use super::super::{layout::Layout, Key, VectorOperations};
 use crate::{
     mvcc::{
         commit::{PreparedLookup, RecordWriteKind},
         CommittedRecordSnapshot, VersionError, VersionResult,
     },
     read_control::StorageReadControl,
+    spill_map::Map,
 };
-use uqa_core::{memory::BudgetedVec, DocId};
 
 pub(super) fn validate(
     metadata: &[u8],
-    operations: &[Mutation<'_>],
+    operations: &VectorOperations<'_>,
     writes: &PreparedLookup<'_>,
     base: &dyn CommittedRecordSnapshot,
     layout: Layout<'_>,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
     let invalid = || VersionError::InvalidEncoding("vector inputs disagree with canonical tensors");
-    let mut ordered = BudgetedVec::new(control.memory());
-    for (position, operation) in operations.iter().enumerate() {
-        control.cancellation().check()?;
-        let (document, vectors): (DocId, &[Vec<f32>]) = match operation {
-            Mutation::Replace { document, vectors } => (*document, vectors),
-            Mutation::Delete(document) => (*document, &[]),
-        };
-        ordered.push((document, position, vectors))?;
-    }
-    ordered.sort_unstable_by_key(|(document, position, _)| (*document, *position));
-    let latest = |document| {
-        let end = ordered.partition_point(|(id, _, _)| *id <= document);
-        end.checked_sub(1)
-            .and_then(|i| ordered.get(i))
-            .filter(|(id, _, _)| *id == document)
-            .map(|(_, _, vectors)| *vectors)
-    };
+    let mut latest = Map::<u64>::new(control.memory(), control.memory().limit() / 64);
+    operations.visit(control, |position, operation| {
+        latest.insert(u128::from(operation.document), position, Some(control))?;
+        Ok(())
+    })?;
     let prefix = layout.key(metadata, Key::Vectors, control)?;
     let mut count = 0;
     writes.visit_prefix(&prefix, control, &mut |write| {
@@ -50,7 +38,9 @@ pub(super) fn validate(
             return Err(invalid());
         }
         let (document, ordinal) = layout.vector_id(key, control)?;
-        let expected = latest(document).ok_or_else(invalid)?;
+        let position = latest.get(u128::from(document))?.ok_or_else(invalid)?;
+        let input = operations.get(*position)?;
+        let expected = input.vectors();
         match write.value() {
             Some(value) => {
                 let expected = expected.get(ordinal as usize).ok_or_else(invalid)?;
@@ -71,28 +61,30 @@ pub(super) fn validate(
         Ok(true)
     })?;
     let mut required = 0_usize;
-    for (position, (document, _, vectors)) in ordered.iter().enumerate() {
-        control.cancellation().check()?;
-        if ordered
-            .get(position + 1)
-            .is_none_or(|(next, _, _)| next != document)
-        {
-            required = required.checked_add(vectors.len()).ok_or_else(invalid)?;
-        }
+    for entry in latest.iter() {
+        control.check()?;
+        let (_, position) = entry?;
+        let input = operations.get(*position)?;
+        required = required
+            .checked_add(input.vectors().len())
+            .ok_or_else(invalid)?;
     }
     if count != required {
         return Err(invalid());
     }
-    // Deleted tail rows must be in the sealed write set, even when their payloads were not needed by the mutation.
+    // Deleted tail rows must remain in the sealed write set, even when the mutation did not need their payloads.
     base.visit_keys(&prefix, None, usize::MAX, control, &mut |key, record| {
         if record.live {
             let (document, ordinal) = layout.vector_id(key, control)?;
-            if latest(document).is_some_and(|vectors| ordinal as usize >= vectors.len())
-                && writes
-                    .get(key, control)?
-                    .is_none_or(|write| write.value().is_some())
-            {
-                return Err(invalid());
+            if let Some(position) = latest.get(u128::from(document))? {
+                let input = operations.get(*position)?;
+                if ordinal as usize >= input.vectors().len()
+                    && writes
+                        .get(key, control)?
+                        .is_none_or(|write| write.value().is_some())
+                {
+                    return Err(invalid());
+                }
             }
         }
         Ok(true)

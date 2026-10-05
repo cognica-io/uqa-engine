@@ -6,11 +6,16 @@
 
 //! Streamed IVF preparation keeps canonical payloads in bounded, spilling ordered roots.
 
+mod canonical;
 mod mutation;
+mod read;
 mod record;
 #[cfg(test)]
 mod tests;
 mod training;
+
+pub(crate) use canonical::IVFCanonicalBuilder;
+pub(crate) use read::IVFReadIndex;
 
 use super::{math::l2_normalize, state::StoredVector, IVFMetadataSnapshot, IVFMutation, IVFState};
 use crate::{
@@ -169,13 +174,21 @@ impl IVFPreparedMetadata {
 
     pub fn prepare(mut self, mutations: &[IVFMutation<'_>]) -> StorageBackendResult<Self> {
         for mutation in mutations {
-            self.control.check()?;
-            self.apply(*mutation)?;
-            if self.snapshot.state == IVFState::Stale {
-                self.train()?;
-            }
+            self.apply_evaluated(*mutation)?;
         }
         Ok(self)
+    }
+
+    pub(crate) fn apply_evaluated(
+        &mut self,
+        mutation: IVFMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        self.apply(mutation)?;
+        if self.snapshot.state == IVFState::Stale {
+            self.train()?;
+        }
+        Ok(())
     }
 
     pub fn assignments(
@@ -190,6 +203,43 @@ impl IVFPreparedMetadata {
                 Ok((_, vector)) => vector
                     .centroid
                     .map(|centroid| Ok((vector.doc_id, vector.vector_ordinal, centroid))),
+            }
+        })
+    }
+
+    pub(crate) fn document_assignments(
+        &self,
+        document: DocId,
+    ) -> impl Iterator<Item = StorageBackendResult<(u32, usize)>> + '_ {
+        let mut after = key(document, 0).checked_sub(1);
+        let mut done = false;
+        std::iter::from_fn(move || {
+            if done {
+                return None;
+            }
+            let next = (|| {
+                self.control.check()?;
+                let Some((found, vector)) = self.vectors.next(after)? else {
+                    return Ok(None);
+                };
+                if vector.doc_id != document {
+                    return Ok(None);
+                }
+                after = Some(found);
+                Ok(vector
+                    .centroid
+                    .map(|centroid| (vector.vector_ordinal, centroid)))
+            })();
+            match next {
+                Ok(Some(assignment)) => Some(Ok(assignment)),
+                Ok(None) => {
+                    done = true;
+                    None
+                }
+                Err(error) => {
+                    done = true;
+                    Some(Err(error))
+                }
             }
         })
     }

@@ -6,6 +6,7 @@
 
 //! Bounded preparation of evaluated IVF changes, independent of provider row encodings.
 
+#[cfg(test)]
 mod canonical;
 
 use uqa_core::{
@@ -203,10 +204,6 @@ impl IVFIndex {
             }
         }
         candidate.metadata_controlled(control)
-    }
-
-    pub(crate) fn centroids_match(&self, snapshot: &IVFMetadataSnapshot) -> bool {
-        *self.centroids.lock() == snapshot.centroids
     }
 
     fn metadata_controlled(

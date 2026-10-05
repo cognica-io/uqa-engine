@@ -218,3 +218,6 @@ where
 {
     expect(actual == expected, contract)
 }
+
+mod vector_spill;
+pub use vector_spill::verify_vector_transaction_spill;

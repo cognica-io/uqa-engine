@@ -9,18 +9,17 @@
 mod load;
 use crate::mvcc::vector::{
     resolve::{bytes, replace},
-    Mutation,
+    VectorOperations,
 };
 use crate::mvcc::{
     CommittedRecordSnapshot, HNSWRecordKey as Key, HNSWRecordLayout, HNSWRecordValue as Value,
     PrivateRecordChanges, RecordWrite, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
-use uqa_core::memory::BudgetedVec;
 
 pub(in crate::mvcc) fn merge(
     key: &[u8],
-    operations: &[Mutation<'_>],
+    operations: &VectorOperations<'_>,
     changes: &PrivateRecordChanges,
     current: &dyn CommittedRecordSnapshot,
     layout: &dyn HNSWRecordLayout,
@@ -32,12 +31,14 @@ pub(in crate::mvcc) fn merge(
     ))?;
     let header = layout.header(key, template, control)?;
     let index = load::index(key, header, current, layout, control)?;
-    let mut inputs = BudgetedVec::new(control.memory());
-    for operation in operations {
-        control.cancellation().check()?;
-        inputs.push(operation.hnsw())?;
-    }
-    let delta = index.prepare_delta_changes(&inputs, control)?;
+    let delta = index.prepare_delta_stream(control, |visit| {
+        operations
+            .visit(control, |_, operation| {
+                visit(operation.borrowed().hnsw())?;
+                Ok(())
+            })
+            .map_err(VersionError::into_storage_error)
+    })?;
     let revision = header
         .revision
         .map(|revision| {

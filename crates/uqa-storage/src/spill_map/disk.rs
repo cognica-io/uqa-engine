@@ -162,6 +162,13 @@ impl Map {
         })
     }
 
+    pub(super) fn contains_key(&self, key: u128) -> StorageBackendResult<bool> {
+        if self.root == 0 {
+            return Ok(false);
+        }
+        Ok(self.file.lock().leaf(self.root, key)?.1.key == key)
+    }
+
     pub(super) fn get<V: Record>(
         &self,
         key: u128,
@@ -202,6 +209,25 @@ impl Map {
         after: Option<u128>,
         memory: &MemoryBudget,
     ) -> StorageBackendResult<Option<(u128, Budgeted<V>)>> {
+        self.visit_next(after, memory, |file, header| {
+            Ok((header.key, file.value(header, memory)?))
+        })
+    }
+
+    pub(super) fn next_key(
+        &self,
+        after: Option<u128>,
+        memory: &MemoryBudget,
+    ) -> StorageBackendResult<Option<u128>> {
+        self.visit_next(after, memory, |_, header| Ok(header.key))
+    }
+
+    fn visit_next<T>(
+        &self,
+        after: Option<u128>,
+        memory: &MemoryBudget,
+        visit: impl FnOnce(&mut Pages, Header) -> StorageBackendResult<T>,
+    ) -> StorageBackendResult<Option<T>> {
         if self.root == 0 {
             return Ok(None);
         }
@@ -214,7 +240,7 @@ impl Map {
             let header = file.header(offset)?;
             if header.bit == LEAF {
                 if after.is_none_or(|key| header.key > key) {
-                    return Ok(Some((header.key, file.value(header, memory)?)));
+                    return visit(&mut file, header).map(Some);
                 }
             } else {
                 // Every child shares this prefix. Skip a complete subtree if its greatest possible key is already behind the cursor.

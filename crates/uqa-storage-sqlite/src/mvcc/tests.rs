@@ -20,6 +20,7 @@ mod receipts;
 mod reclamation;
 mod runs;
 mod unused;
+mod vector_spill;
 
 #[test]
 fn bounded_value_reads_preserve_sqlite_record_limits_and_retained_versions() {

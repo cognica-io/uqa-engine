@@ -26,6 +26,7 @@ mod state;
 mod training;
 
 pub use prepare::IVFMutation;
+pub(crate) use spill::{IVFCanonicalBuilder, IVFReadIndex};
 pub use spill::{IVFPreparedMetadata, IVFRestoreBuilder};
 pub use state::IVFMetadataSnapshot;
 pub use state::{IVFIndex, IVFState};

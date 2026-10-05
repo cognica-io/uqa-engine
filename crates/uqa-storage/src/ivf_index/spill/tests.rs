@@ -218,3 +218,121 @@ fn restore(
     }
     builder.finish().unwrap()
 }
+
+#[test]
+fn bounded_canonical_creation_and_selected_probes_match_resident_ivf() {
+    use crate::vector_index::VectorRead;
+    let params = IVFIndexParams {
+        nlist: 3,
+        nprobe: 1,
+        train_threshold: 16,
+    };
+    let control = StorageReadControl::with_limit(128 << 10);
+    let mut builder = IVFCanonicalBuilder::new(128, params, &control).unwrap();
+    let mut expected = IVFIndex::with_params(128, 3, 1, 16);
+    for document in 0..400 {
+        // The threshold crosses inside document 5. Training must wait for its final ordinal.
+        let values: Vec<_> = (0..3)
+            .map(|ordinal| {
+                let mut vector = vec![0.0; 128];
+                vector[(document as usize + ordinal) % 128] = 1.0;
+                vector[127] = -0.0;
+                vector[126] = f32::from_bits(1);
+                vector
+            })
+            .collect();
+        expected.add_many(document, values.clone()).unwrap();
+        for (ordinal, vector) in values.iter().enumerate() {
+            builder.vector(document, ordinal as u32, vector).unwrap();
+        }
+    }
+    let candidate = builder.finish().unwrap();
+    assert!(candidate.vectors.is_spilled());
+    let metadata = expected.metadata_snapshot();
+    assert_eq!(candidate.header().centroids, metadata.centroids);
+    assert_eq!(candidate.header().trained_size, 18);
+    assert_eq!(
+        candidate
+            .assignments()
+            .collect::<StorageBackendResult<Vec<_>>>()
+            .unwrap(),
+        metadata.assignments
+    );
+    let reader = IVFReadIndex::new(candidate).unwrap();
+    assert!(reader.contains_document(0).unwrap());
+    assert!(!reader.contains_document(1000).unwrap());
+    for position in [0, 1, 63, 125] {
+        let mut query = vec![0.0; 128];
+        query[position] = 1.0;
+        assert_eq!(
+            reader.search_knn(&query, 7).unwrap(),
+            expected.search_knn(&query, 7).unwrap()
+        );
+        assert_eq!(
+            reader.search_threshold(&query, 0.99).unwrap(),
+            expected.search_threshold(&query, 0.99).unwrap()
+        );
+    }
+    let metadata_only = StorageReadControl::with_limit(2048);
+    assert_eq!(
+        reader.next_document_after(None, &metadata_only).unwrap(),
+        Some(0)
+    );
+    assert_eq!(reader.document_vector_count(0, &metadata_only).unwrap(), 3);
+    assert!(reader.read_vector(0, 0, &metadata_only).is_err());
+    let raw = reader.read_vector(0, 0, &control).unwrap().unwrap();
+    assert_eq!(raw[127].to_bits(), (-0.0_f32).to_bits());
+    assert_eq!(raw[126].to_bits(), 1);
+    drop((raw, reader));
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(metadata_only.memory().used(), 0);
+}
+
+#[test]
+fn bounded_ivf_scores_preserve_zero_and_overflow_observations() {
+    let params = IVFIndexParams {
+        nlist: 3,
+        nprobe: 3,
+        train_threshold: 3,
+    };
+    let control = StorageReadControl::with_limit(128 << 10);
+    let mut expected = IVFIndex::with_params(2, 3, 3, 3);
+    let mut builder = IVFCanonicalBuilder::new(2, params, &control).unwrap();
+    let tensors = [
+        vec![vec![0.0, -0.0], vec![-0.0, 0.0]],
+        vec![vec![f32::MAX, f32::MAX], vec![1.0, 0.0]],
+        vec![vec![f32::from_bits(1), 0.0], vec![-1.0, -0.0]],
+        vec![vec![-f32::MAX, f32::MAX]],
+    ];
+    for (document, values) in tensors.iter().enumerate() {
+        expected.add_many(document as u64, values.clone()).unwrap();
+        for (ordinal, vector) in values.iter().enumerate() {
+            builder
+                .vector(document as u64, ordinal as u32, vector)
+                .unwrap();
+        }
+    }
+    let mut candidate = builder.finish().unwrap();
+    candidate.vectors.spill(Some(&control)).unwrap();
+    let reader = IVFReadIndex::new(candidate).unwrap();
+    assert!(reader.contains_document(0).unwrap());
+    assert!(!reader.contains_document(1000).unwrap());
+    let bits = |postings: uqa_core::PostingList| {
+        postings
+            .iter()
+            .map(|entry| (entry.doc_id, entry.payload.score.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    for query in [[1.0, 0.0], [f32::MAX, f32::MAX], [0.0, -0.0]] {
+        assert_eq!(
+            bits(reader.search_knn(&query, 4).unwrap()),
+            bits(expected.search_knn(&query, 4).unwrap())
+        );
+        for threshold in [-1.0, 0.0, 1.0] {
+            assert_eq!(
+                bits(reader.search_threshold(&query, threshold).unwrap()),
+                bits(expected.search_threshold(&query, threshold).unwrap())
+            );
+        }
+    }
+}

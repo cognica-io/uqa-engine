@@ -18,7 +18,7 @@ use crate::mvcc::commit::{RecordRequirement, RecordWriteKind};
 use crate::mvcc::graph::OwnedGraphMutation;
 use crate::mvcc::key::RecordKey;
 use crate::mvcc::populations::OwnedPopulationMutation;
-use crate::mvcc::vector::OwnedVectorMutation;
+use crate::mvcc::vector::{OwnedVectorMutation, VectorInputs};
 use crate::mvcc::{
     CommitErrorOutcome, CommitFailure, CommitSequence, CommitStatus, CommittedRecordSnapshot,
     MergedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges,
@@ -32,7 +32,7 @@ struct Savepoint {
     name: BudgetedVec<u8>,
     id: StorageSavepointId,
     graph_position: usize,
-    vector_position: usize,
+    vector: VectorInputs,
     population_position: usize,
     requirement_position: usize,
     committed: Arc<dyn CommittedRecordSnapshot>,
@@ -52,7 +52,7 @@ pub(super) struct Transaction {
     prepared: Option<PreparedRecordCommit>,
     materialized: Option<PreparedRecordCommit>,
     graph: BudgetedVec<OwnedGraphMutation>,
-    vector: BudgetedVec<OwnedVectorMutation>,
+    vector: VectorInputs,
     populations: BudgetedVec<OwnedPopulationMutation>,
     requirements: BudgetedVec<RecordRequirement>,
     outcome: Option<CommitErrorOutcome>,
@@ -98,7 +98,7 @@ impl Transaction {
             prepared: None,
             materialized: None,
             graph: BudgetedVec::new(control.memory()),
-            vector: BudgetedVec::new(control.memory()),
+            vector: VectorInputs::new(control.memory()),
             populations: BudgetedVec::new(control.memory()),
             requirements: BudgetedVec::new(control.memory()),
             outcome: None,
@@ -379,9 +379,13 @@ impl Transaction {
         self.changes.apply_owned(&[write], control)
     }
 
-    pub(super) fn vector_mutation(&mut self, mutation: &OwnedVectorMutation) -> VersionResult<()> {
+    pub(super) fn vector_mutation(
+        &mut self,
+        mutation: &OwnedVectorMutation,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
         self.writable()?;
-        self.vector.push(mutation.clone())?;
+        self.vector.push(mutation, control)?;
         Ok(())
     }
 
@@ -443,7 +447,7 @@ impl Transaction {
         let id = StorageSavepointId::allocate();
         self.changes.savepoint(id)?;
         let graph_position = self.graph.len();
-        let vector_position = self.vector.len();
+        let vector = self.vector.clone();
         let population_position = self.populations.len();
         let requirement_position = self.requirements.len();
         let notification = self.notification.clone();
@@ -451,7 +455,7 @@ impl Transaction {
         if !matches!(&result, Ok(Ok(_))) {
             self.changes.rollback_to_savepoint(id)?;
             truncate_retained(&mut self.graph, graph_position);
-            truncate_retained(&mut self.vector, vector_position);
+            self.vector = vector;
             truncate_retained(&mut self.populations, population_position);
             truncate_retained(&mut self.requirements, requirement_position);
             self.notification = notification;
@@ -478,7 +482,7 @@ impl Transaction {
             name: owned,
             id,
             graph_position: self.graph.len(),
-            vector_position: self.vector.len(),
+            vector: self.vector.clone(),
             population_position: self.populations.len(),
             requirement_position: self.requirements.len(),
             committed: Arc::clone(&self.committed),
@@ -536,7 +540,7 @@ impl Transaction {
         self.committed = Arc::clone(&savepoint.committed);
         self.notification.clone_from(&savepoint.notification);
         truncate_retained(&mut self.graph, self.savepoints[position].graph_position);
-        truncate_retained(&mut self.vector, self.savepoints[position].vector_position);
+        self.vector = self.savepoints[position].vector.clone();
         truncate_retained(
             &mut self.populations,
             self.savepoints[position].population_position,
