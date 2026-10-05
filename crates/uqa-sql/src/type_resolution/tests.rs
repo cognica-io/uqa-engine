@@ -35,6 +35,7 @@ fn typed_scalar_parameters_preserve_declared_width_domain_and_text_identity() {
         schema: "public".into(),
         name: "positive_int".into(),
         oid: 90_001,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     };
     for (ty, value) in [
@@ -213,12 +214,14 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
         schema: "public".into(),
         name: "json_document".into(),
         oid: 99_997,
+        array_oid: None,
         base: Box::new(ColumnType::Json),
     };
     let boolean_domain = ColumnType::Domain {
         schema: "public".into(),
         name: "boolean_flag".into(),
         oid: 99_996,
+        array_oid: None,
         base: Box::new(ColumnType::Boolean),
     };
     assert_eq!(
@@ -639,6 +642,7 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
                 schema: "public".into(),
                 name: "integer_array_domain".into(),
                 oid: 99_999,
+                array_oid: None,
                 base: Box::new(ColumnType::Array(Box::new(ColumnType::Integer))),
             }),
         ],
@@ -824,6 +828,7 @@ fn text_cast_binding_preserves_only_legacy_vector_identity() {
                 schema: "public".into(),
                 name: "text_domain".into(),
                 oid: 99_998,
+                array_oid: None,
                 base: Box::new(ColumnType::Text),
             }),
             Some(ColumnType::OidVector),

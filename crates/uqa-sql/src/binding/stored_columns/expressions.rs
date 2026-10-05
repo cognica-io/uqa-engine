@@ -12,6 +12,54 @@ use crate::SQLError;
 use super::{same_identifier, ColumnBindingContext, ColumnScope, StoredColumnBinder};
 
 impl StoredColumnBinder<'_> {
+    /// An unqualified name binds to the innermost scope that provides it; a name that no scope provides is recorded as unresolved.
+    fn bind_column_reference(&mut self, expression: &mut Expr, scopes: &[ColumnScope]) {
+        let Expr::Column(name) = expression else {
+            return;
+        };
+        let stored_name = name.clone();
+        let Some(matches) = scopes
+            .iter()
+            .map(|scope| scope.unqualified(&stored_name))
+            .find(|matches| !matches.is_empty())
+        else {
+            self.unresolved.push((None, stored_name));
+            return;
+        };
+        for column in &matches {
+            self.dependencies
+                .extend(column.dependencies.iter().cloned());
+        }
+        if let [column] = matches.as_slice() {
+            *expression = column.reference.clone();
+        }
+    }
+
+    /// A qualified name binds to the innermost scope with that qualifier; a qualifier that no scope provides is recorded as unresolved.
+    fn bind_qualified_column_reference(
+        &mut self,
+        qualifier: &str,
+        column: &mut String,
+        scopes: &[ColumnScope],
+    ) {
+        let Some(columns) = scopes.iter().find_map(|scope| scope.qualified(qualifier)) else {
+            self.unresolved
+                .push((Some(qualifier.to_string()), column.clone()));
+            return;
+        };
+        let matches = columns
+            .iter()
+            .filter(|candidate| same_identifier(&candidate.name, column))
+            .collect::<Vec<_>>();
+        for candidate in &matches {
+            self.dependencies
+                .extend(candidate.dependencies.iter().cloned());
+        }
+        if let [candidate] = matches.as_slice() {
+            column.clone_from(&candidate.current_name);
+        }
+    }
+
     pub(super) fn bind_expr(
         &mut self,
         expression: &mut Expr,
@@ -19,44 +67,12 @@ impl StoredColumnBinder<'_> {
         context: &ColumnBindingContext,
     ) -> Result<(), SQLError> {
         match expression {
-            Expr::Column(name) => {
-                let stored_name = name.clone();
-                let Some(matches) = scopes
-                    .iter()
-                    .map(|scope| scope.unqualified(&stored_name))
-                    .find(|matches| !matches.is_empty())
-                else {
-                    return Ok(());
-                };
-                for column in &matches {
-                    self.dependencies
-                        .extend(column.dependencies.iter().cloned());
-                }
-                if let [column] = matches.as_slice() {
-                    *expression = column.reference.clone();
-                }
+            Expr::Column(_) => {
+                self.bind_column_reference(expression, scopes);
                 Ok(())
             }
             Expr::QualifiedColumn { qualifier, column } => {
-                let qualifier_name = qualifier.clone();
-                let stored_column = column.clone();
-                let Some(columns) = scopes
-                    .iter()
-                    .find_map(|scope| scope.qualified(&qualifier_name))
-                else {
-                    return Ok(());
-                };
-                let matches = columns
-                    .iter()
-                    .filter(|candidate| same_identifier(&candidate.name, &stored_column))
-                    .collect::<Vec<_>>();
-                for candidate in &matches {
-                    self.dependencies
-                        .extend(candidate.dependencies.iter().cloned());
-                }
-                if let [candidate] = matches.as_slice() {
-                    column.clone_from(&candidate.current_name);
-                }
+                self.bind_qualified_column_reference(qualifier, column, scopes);
                 Ok(())
             }
             Expr::Func {
@@ -88,8 +104,14 @@ impl StoredColumnBinder<'_> {
                 }
                 Ok(())
             }
-            Expr::WindowCall { args, spec, .. } => {
-                self.bind_window_parts(args, spec, scopes, context)
+            Expr::WindowCall {
+                args, spec, filter, ..
+            } => {
+                self.bind_window_parts(args, spec, scopes, context)?;
+                if let Some(filter) = filter {
+                    self.bind_expr(filter, scopes, context)?;
+                }
+                Ok(())
             }
             Expr::Case {
                 base,

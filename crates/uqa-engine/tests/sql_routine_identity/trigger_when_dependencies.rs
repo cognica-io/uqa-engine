@@ -84,7 +84,7 @@ fn trigger_when_conditions_keep_exact_routine_dependencies() {
     assert_eq!(
         engine.take_sql_notices(),
         vec![uqa_engine::SQLNotice::notice(
-            "drop cascades to trigger trigger_when_guard on table public.trigger_when_rows"
+            "drop cascades to trigger trigger_when_guard on table trigger_when_rows"
         )]
     );
     assert_eq!(

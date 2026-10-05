@@ -61,8 +61,12 @@ fn virtual_generated_calls_preserve_postgresql_error_fields() {
             let mut source = columns(&format!(
                 "CREATE TABLE t(v integer, g integer GENERATED ALWAYS AS ({expression}){kind})"
             ));
+            let binding = crate::binding::fixture::empty_binding_context();
             let error = crate::schema::generated::prepare_generated_columns(
-                &Catalog,
+                &crate::schema::SchemaBindingContext {
+                    catalog: &Catalog,
+                    binding: &binding,
+                },
                 "t",
                 &mut source,
                 &[],
@@ -98,9 +102,17 @@ fn generated_column_owner_rejects_the_query_shapes_excluded_from_retention() {
             expression: Box::new(query.projections.remove(0).expr),
             function_dependencies: Vec::new(),
         });
-        let error =
-            crate::schema::generated::prepare_generated_columns(&Catalog, "t", &mut source, &[])
-                .unwrap_err();
+        let binding = crate::binding::fixture::empty_binding_context();
+        let error = crate::schema::generated::prepare_generated_columns(
+            &crate::schema::SchemaBindingContext {
+                catalog: &Catalog,
+                binding: &binding,
+            },
+            "t",
+            &mut source,
+            &[],
+        )
+        .unwrap_err();
         assert!(
             error.to_string().contains("cannot use subquery"),
             "{sql}: {error}"

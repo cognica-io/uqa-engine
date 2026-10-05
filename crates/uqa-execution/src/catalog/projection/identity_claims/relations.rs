@@ -8,7 +8,7 @@
 
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::RelationIdentity;
-use uqa_sql::{catalog::oids::stable_object_oid, SQLError};
+use uqa_sql::SQLError;
 
 pub(crate) struct RelationClaim {
     pub relation: RelationIdentity,
@@ -55,7 +55,7 @@ fn collect_relation_claims(
         append(
             relation,
             table.object_id,
-            stable_object_oid("relation", &table.object_id),
+            i64::from(table.catalog_oids.relation),
         );
     }
     for (relation, view) in definitions.views.iter() {
@@ -76,7 +76,10 @@ fn collect_relation_claims(
         append(
             relation,
             *object_id,
-            stable_object_oid("relation", object_id),
+            crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
+                &definitions.sequence_catalog_oids,
+                object_id,
+            ),
         );
     }
     let indexes = if legacy {
@@ -96,18 +99,34 @@ fn collect_relation_claims(
         });
     }
     for graph in crate::catalog::graph::graph_catalog_entries(catalog)? {
-        for (kind, name) in std::iter::once(("S", "_label_id_seq".to_string())).chain(
-            graph.labels.iter().flat_map(|label| {
-                [
-                    ("r", label.name.clone()),
-                    ("S", format!("{}_id_seq", label.name)),
-                ]
-            }),
-        ) {
+        // A graph's relations hold the OIDs it recorded, or for a graph or label created before OIDs were recorded the ones their names derive.
+        let recorded = catalog.graph_catalog_oids(&graph.name);
+        let derived =
+            |kind, name: &str| uqa_sql::catalog::oids::relation_oid(kind, &graph.name, name);
+        claims.push(RelationClaim {
+            relation: RelationIdentity::new(&graph.name, "_label_id_seq"),
+            object_id: None,
+            oid: recorded.map_or_else(
+                || derived("S", "_label_id_seq"),
+                |oids| i64::from(oids.label_sequence),
+            ),
+        });
+        for label in &graph.labels {
+            let label_oids = recorded.and_then(|oids| oids.labels.get(&label.id));
+            let sequence = format!("{}_id_seq", label.name);
             claims.push(RelationClaim {
-                relation: RelationIdentity::new(&graph.name, &name),
+                relation: RelationIdentity::new(&graph.name, &label.name),
                 object_id: None,
-                oid: uqa_sql::catalog::oids::relation_oid(kind, &graph.name, &name),
+                oid: label_oids.map_or_else(
+                    || derived("r", &label.name),
+                    |oids| i64::from(oids.relation.relation),
+                ),
+            });
+            claims.push(RelationClaim {
+                relation: RelationIdentity::new(&graph.name, &sequence),
+                object_id: None,
+                oid: label_oids
+                    .map_or_else(|| derived("S", &sequence), |oids| i64::from(oids.sequence)),
             });
         }
     }

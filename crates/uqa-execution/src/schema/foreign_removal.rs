@@ -4,24 +4,20 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Foreign table removal, owned-sequence preflight, and durable publication inside the caller's transaction.
-use crate::catalog::{
-    foreign::lookup::ForeignLookupContext,
-    sequence_introspection::{ownership, SequenceIntrospectionCatalog},
-};
+//! Remove a foreign table's own state and publish the removal inside the caller's transaction.
+use crate::catalog::foreign::lookup::ForeignLookupContext;
 use crate::schema::{
     events::context::EventLifecycleContext, foreign_table_alteration::ForeignTableAlterPublication,
     publication::dependencies::CatalogPublicationChanges,
 };
 use uqa_core::RelationIdentity;
-use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
+use uqa_storage::CatalogFacade;
 pub struct ForeignTableRemovalContext<'a> {
     pub lookup: ForeignLookupContext<'a>,
     pub publication: &'a dyn ForeignTableAlterPublication,
     pub catalog: Option<&'a dyn CatalogFacade>,
     pub changes: &'a dyn CatalogPublicationChanges,
     pub events: EventLifecycleContext<'a>,
-    pub owners: &'a dyn SequenceIntrospectionCatalog,
 }
 impl ForeignTableRemovalContext<'_> {
     pub fn drop_foreign_table_inner(&self, name: &str) -> Result<bool, String> {
@@ -64,24 +60,5 @@ impl ForeignTableRemovalContext<'_> {
             self.changes.catalog_registry_changed();
         }
         Ok(removed)
-    }
-    pub fn foreign_table_owned_sequence_names(
-        &self,
-        table_names: &[String],
-    ) -> StorageBackendResult<std::collections::BTreeSet<String>> {
-        let mut table_object_ids = std::collections::BTreeSet::new();
-        let tables = self.lookup.registry.tables();
-        for table_name in table_names {
-            let relation = RelationIdentity::from_legacy_name(table_name)
-                .map_err(StorageBackendError::Other)?;
-            let table = tables.get(&relation).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "foreign table `{table_name}` disappeared while resolving owned sequences"
-                ))
-            })?;
-            table_object_ids.insert(table.object_id);
-        }
-        drop(tables);
-        ownership::sequence_names_owned_by_tables(self.owners, &table_object_ids)
     }
 }

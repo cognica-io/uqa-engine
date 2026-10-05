@@ -101,7 +101,20 @@ fn malformed_sort_and_window_flags_are_rejected() {
     };
     assert!(matches!(
         compile_window_frame(&exclusion_frame),
-        Err(SQLError::Unsupported(message)) if message.contains("EXCLUDE")
+        Ok(Some(crate::ast::WindowFrame {
+            exclusion: crate::ast::FrameExclusion::CurrentRow,
+            between: false,
+            ..
+        }))
+    ));
+
+    let conflicting_exclusions = pg_query::protobuf::WindowDef {
+        frame_options: 0x000_0001 | 0x000_0004 | 0x000_0020 | 0x000_0400 | 0x000_8000 | 0x001_0000,
+        ..Default::default()
+    };
+    assert!(matches!(
+        compile_window_frame(&conflicting_exclusions),
+        Err(SQLError::Internal(message)) if message.contains("at most one exclusion")
     ));
 }
 
@@ -111,14 +124,6 @@ fn unsupported_expression_shapes_fail_instead_of_losing_semantics() {
         (
             "SELECT 2 > ANY (SELECT value FROM values_table)",
             "ANY subquery operator",
-        ),
-        (
-            "SELECT count(*) FILTER (WHERE true) OVER ()",
-            "aggregate modifiers",
-        ),
-        (
-            "SELECT sum(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW EXCLUDE CURRENT ROW) FROM values_table",
-            "EXCLUDE",
         ),
         ("SELECT 1 ORDER BY 1 USING >", "USING operators"),
     ] {

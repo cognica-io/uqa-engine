@@ -8,21 +8,21 @@
 
 use super::{
     catalog::RoutineMutationContext,
-    compilation::{compile_persisted_sql_function, StoredRoutineCompilationContext},
+    compilation::{persisted_routine_body, StoredRoutineCompilationContext},
 };
 use crate::schema::{
     namespaces::NamespaceCatalogRefresh, relation_alteration::RoleTargetSchemaAccess,
 };
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::{
-    ast::{FunctionBinding, FunctionBody, RenameRoutineStmt},
+    ast::{FunctionBinding, RenameRoutineStmt},
     catalog::roles::role_inherits,
     routines::{
         declaration::resolve_routine_identity_types,
         lifecycle::{
             binding::resolve_sql_routine_alter_target,
-            ensure_routine_owner_as,
             rename::{self as analysis, RoutineRenameTarget},
+            require_routine_ownership,
         },
         SQLUserFunction,
     },
@@ -125,8 +125,10 @@ fn resolve_routine_rename_target(
     let current_user = context.mutation.names.current_role();
     let roles = context.mutation.roles.role_definitions();
     let memberships = context.mutation.roles.role_memberships();
-    ensure_routine_owner_as(
-        &function.def,
+    // `AlterObjectRename_internal` names the routine as a function, by its catalog name.
+    require_routine_ownership(
+        "function",
+        &uqa_sql::routines::routine_local_name(&function.def.name)?,
         role_inherits(
             &roles,
             &memberships,
@@ -164,14 +166,8 @@ fn rewrite_routine_owned_dependency_identity(
             let changed =
                 analysis::rewrite_routine_owned_dependency_identity(&mut def, target, new_name)?;
             if changed {
-                // A rename rewrites parameter defaults and SQL-standard bodies; a body given as a string keeps its text and what it compiled to.
-                let compiled = match &def.body {
-                    FunctionBody::Statements(_) => {
-                        compile_persisted_sql_function(&context.compilation, &def)?
-                    }
-                    FunctionBody::Source(_) => function.compiled.clone(),
-                };
-                next_overloads.push(Arc::new(SQLUserFunction { def, compiled }));
+                let body = persisted_routine_body(&context.compilation, &def)?;
+                next_overloads.push(Arc::new(SQLUserFunction::new(def, body)));
             } else {
                 next_overloads.push(function);
             }

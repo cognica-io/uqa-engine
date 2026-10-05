@@ -27,11 +27,13 @@ pub mod context;
 use context::{stored_view_schema, ViewRewriteContext};
 
 mod correlation;
+mod layer_privileges;
 mod returning;
 mod rewrite_insert;
 mod rewrite_merge;
 mod rewrite_update_delete;
 pub mod rule_inputs;
+mod updatability;
 mod validation;
 
 use correlation::{
@@ -42,6 +44,7 @@ use correlation::{
     validate_delete_expressions, validate_insert_expressions, validate_merge_expressions,
     validate_update_expressions, CorrelatedDmlContext,
 };
+use layer_privileges::LayerPrivileges;
 use returning::{
     add_check_option, bind_unqualified_source_positions, combine_view_predicate, dml_target_width,
     finalize_source_returning, instead_of_trigger_definition, preserve_view_rule_returning,
@@ -52,12 +55,14 @@ pub use rewrite_insert::rewrite_insert_to_base;
 pub use rewrite_merge::rewrite_merge_to_base;
 pub use rewrite_update_delete::{rewrite_delete_to_base, rewrite_update_to_base};
 pub use rule_inputs::rule_input_requirements;
+pub use updatability::NotUpdatableReason;
+use updatability::{view_not_updatable, ColumnRestriction, ColumnWrite, ViewCommand};
 use validation::{
-    duplicate_assignment, duplicate_insert_column, layer_column, merge_action_capability_error,
-    validate_direct_view_rule_path, validate_insert_targets, validate_mapped_columns,
-    validate_merge_targets, validate_public_delete_contract, validate_public_insert_contract,
+    duplicate_assignment, duplicate_insert_column, layer_column, validate_direct_view_rule_path,
+    validate_insert_targets, validate_mapped_columns, validate_merge_targets,
+    validate_public_delete_contract, validate_public_insert_contract,
     validate_public_update_contract, validate_public_view_targets, validate_update_targets,
-    validate_view_expression, writable_column, ExpressionScope,
+    validate_view_expression, validate_writable_columns, writable_column, ExpressionScope,
 };
 pub use validation::{merge_view_target_path, MergeViewTargetPath};
 pub use validation::{validate_public_merge_contract, validate_public_merge_targets};
@@ -118,6 +123,43 @@ impl AutomaticViewLayer {
             .get(column)
             .map_or(column, String::as_str)
     }
+
+    /// Whether a column of the view is a column of its base relation, which INSERT and UPDATE need and DELETE does not.
+    pub fn has_writable_column(&self) -> bool {
+        self.columns
+            .iter()
+            .any(|column| column.writable_source_column.is_some())
+    }
+
+    /// Why `column`, which is not a column of the base relation, cannot be written, as `view_col_is_auto_updatable` reports it.
+    fn column_restriction(&self, column: &ViewColumn) -> ColumnRestriction {
+        let name = match &column.expression {
+            ScalarExpr::Column(name) => Some(name),
+            ScalarExpr::QualifiedColumn { qualifier, column }
+                if source_qualifier_matches(
+                    qualifier,
+                    &self.source_qualifier,
+                    &self.source_name,
+                ) =>
+            {
+                Some(column)
+            }
+            _ => None,
+        };
+        if name.is_some_and(|name| {
+            crate::schema::columns::POSTGRES_SYSTEM_COLUMNS.contains(&name.as_str())
+        }) {
+            ColumnRestriction::SystemColumn
+        } else {
+            ColumnRestriction::Computed
+        }
+    }
+}
+
+/// What `view_query_is_auto_updatable` finds in a view's own query, short of its test for an updatable column, which depends on the command.
+pub enum ViewQueryShape {
+    Updatable(Box<AutomaticViewLayer>),
+    NotUpdatable(NotUpdatableReason),
 }
 
 pub use crate::catalog::view::ViewMutationCapabilities;
@@ -137,28 +179,6 @@ pub struct ViewUpdatability {
 fn display_relation(name: &str) -> String {
     RelationIdentity::from_legacy_name(name)
         .map_or_else(|_| name.to_string(), |relation| relation.name)
-}
-
-fn not_automatically_updatable(view: &str, operation: &str) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "55000".into(),
-        message: format!(
-            "cannot {} view \"{}\": the view is not automatically updatable",
-            operation.to_ascii_lowercase(),
-            display_relation(view)
-        ),
-    }
-}
-
-fn non_writable_column(view: &str, column: &str, operation: &str) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "0A000".into(),
-        message: format!(
-            "cannot {} column \"{column}\" of view \"{}\"",
-            operation.to_ascii_lowercase(),
-            display_relation(view)
-        ),
-    }
 }
 
 pub fn relation_columns(
@@ -233,6 +253,17 @@ pub fn automatic_view_layer(
     services: ViewRewriteContext<'_>,
     name: &str,
 ) -> Result<Option<AutomaticViewLayer>, SQLError> {
+    Ok(match view_query_shape(services, name)? {
+        Some(ViewQueryShape::Updatable(layer)) => Some(*layer),
+        Some(ViewQueryShape::NotUpdatable(_)) | None => None,
+    })
+}
+
+/// The shape of the query of view `name`, or `None` when `name` names no regular view.
+pub fn view_query_shape(
+    services: ViewRewriteContext<'_>,
+    name: &str,
+) -> Result<Option<ViewQueryShape>, SQLError> {
     let Some(canonical_name) = services
         .catalog
         .try_resolve_view_name(name)
@@ -244,59 +275,135 @@ pub fn automatic_view_layer(
         .catalog
         .view_definition(&canonical_name)?
         .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-    automatic_view_layer_from_definition(services, &canonical_name, &definition)
+    if definition.kind != StoredViewKind::View {
+        return Ok(None);
+    }
+    view_query_shape_from_definition(services, &canonical_name, &definition).map(Some)
+}
+
+/// The catalog name of view `name`.
+fn canonical_view_name(services: ViewRewriteContext<'_>, name: &str) -> Result<String, SQLError> {
+    services
+        .catalog
+        .try_resolve_view_name(name)
+        .map_err(|error| SQLError::Internal(format!("resolve DML view `{name}`: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
+}
+
+/// The layer of view `view` that `command` is rewritten through, or the error `rewriteTargetView` reports when the view's query does not allow the rewrite.
+fn rewritable_layer(
+    services: ViewRewriteContext<'_>,
+    view: &str,
+    command: ViewCommand,
+) -> Result<AutomaticViewLayer, SQLError> {
+    match view_query_shape(services, view)? {
+        Some(ViewQueryShape::Updatable(layer)) => Ok(*layer),
+        Some(ViewQueryShape::NotUpdatable(reason)) => {
+            Err(view_not_updatable(view, command, reason))
+        }
+        None => Err(SQLError::UnknownTable(view.to_string())),
+    }
+}
+
+/// The next layer the rewrite of `command` passes through at view `view`: the first layer, checked already, while `initial` holds it; `None` where an unconditional INSTEAD rule of a view that cannot be rewritten handles the command. As `RewriteQuery` does, conditional INSTEAD rules without an unconditional one are rejected before the view's query is examined.
+fn next_rewritten_layer(
+    services: ViewRewriteContext<'_>,
+    view: &str,
+    initial: &mut Option<AutomaticViewLayer>,
+    rewrite_suppressed: bool,
+    event: crate::ast::RuleEvent,
+    command: ViewCommand,
+) -> Result<Option<AutomaticViewLayer>, SQLError> {
+    if let Some(layer) = initial.take() {
+        return Ok(Some(layer));
+    }
+    if !rewrite_suppressed {
+        validate_direct_view_rule_path(services, view, event, command)?;
+    }
+    match view_query_shape(services, view)? {
+        Some(ViewQueryShape::Updatable(layer)) => Ok(Some(*layer)),
+        shape => {
+            if active_unconditional_instead_rule(services, view, event)? {
+                return Ok(None);
+            }
+            Err(match shape {
+                Some(ViewQueryShape::NotUpdatable(reason)) => {
+                    view_not_updatable(view, command, reason)
+                }
+                _ => SQLError::UnknownTable(view.to_string()),
+            })
+        }
+    }
+}
+
+/// The reason `view_query_is_auto_updatable` finds first in the clauses of a query block, before it looks at the block's target list and source.
+fn query_block_restriction(
+    services: ViewRewriteContext<'_>,
+    query: &QueryPlan,
+    block: &crate::plan::QueryBlockPlan,
+) -> Option<NotUpdatableReason> {
+    if block.distinct || !block.distinct_on.is_empty() {
+        Some(NotUpdatableReason::Distinct)
+    } else if !block.group_by.is_empty() || !block.grouping_sets.is_empty() || block.group_distinct
+    {
+        Some(NotUpdatableReason::GroupBy)
+    } else if block.having.is_some() {
+        Some(NotUpdatableReason::Having)
+    } else if !query.ctes.is_empty() {
+        Some(NotUpdatableReason::With)
+    } else if block.limit.is_some() || block.offset.is_some() || block.with_ties {
+        Some(NotUpdatableReason::LimitOffset)
+    } else if matches!(block.compute, ComputePlan::Aggregate)
+        || (matches!(block.compute, ComputePlan::Window)
+            && crate::semantics::aggregates::has_aggregate(
+                &|name: &str| services.catalog.is_registered_aggregate(name),
+                &block.projections,
+            ))
+    {
+        Some(NotUpdatableReason::Aggregate)
+    } else if matches!(block.compute, ComputePlan::Window) {
+        Some(NotUpdatableReason::Window)
+    } else {
+        None
+    }
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "preserves view qualifier and row identity"
 )]
-fn automatic_view_layer_from_definition(
+fn view_query_shape_from_definition(
     services: ViewRewriteContext<'_>,
     canonical_name: &str,
     definition: &StoredView,
-) -> Result<Option<AutomaticViewLayer>, SQLError> {
-    if definition.kind != StoredViewKind::View || !definition.query.ctes.is_empty() {
-        return Ok(None);
-    }
-    let RelationalPlan::QueryBlock(block) = &definition.query.root else {
-        return Ok(None);
+) -> Result<ViewQueryShape, SQLError> {
+    let block = match &definition.query.root {
+        RelationalPlan::QueryBlock(block) => block,
+        RelationalPlan::SetOp { .. } => {
+            return Ok(ViewQueryShape::NotUpdatable(
+                NotUpdatableReason::SetOperation,
+            ))
+        }
+        RelationalPlan::Values { .. } => {
+            return Ok(ViewQueryShape::NotUpdatable(
+                NotUpdatableReason::NotSingleRelation,
+            ))
+        }
     };
-    if !matches!(block.compute, ComputePlan::Project)
-        || !block.group_by.is_empty()
-        || !block.grouping_sets.is_empty()
-        || block.group_distinct
-        || block.having.is_some()
-        || block.limit.is_some()
-        || block.with_ties
-        || block.offset.is_some()
-        || block.distinct
-        || !block.distinct_on.is_empty()
-        || !block.locking.is_empty()
-    {
-        return Ok(None);
+    if let Some(reason) = query_block_restriction(services, &definition.query, block) {
+        return Ok(ViewQueryShape::NotUpdatable(reason));
     }
-    let Some(
-        source_plan @ SourcePlan::Table {
-            name: source_name,
-            qualifier,
-            alias,
-            column_aliases,
-            include_descendants,
-            ..
-        },
-    ) = block.from.as_ref()
-    else {
-        return Ok(None);
-    };
     let analysis_scope = services.catalog.binding_scope()?;
-    let source_schema = crate::semantics::view_rewrite::context::analyze_source_plan_schema(
-        services,
-        source_plan,
-        &[],
-        &analysis_scope,
-        None,
-    )?;
+    let source_schema = match block.from.as_ref() {
+        Some(source) => crate::semantics::view_rewrite::context::analyze_source_plan_schema(
+            services,
+            source,
+            &[],
+            &analysis_scope,
+            None,
+        )?,
+        None => RowSchema::default(),
+    };
     let resolver = crate::binding::scoped_types::BindingTypeResolver {
         routines: services.catalog,
         scope: &analysis_scope,
@@ -309,8 +416,29 @@ fn automatic_view_layer_from_definition(
             &source_schema,
             &[],
         )? {
-            return Ok(None);
+            return Ok(ViewQueryShape::NotUpdatable(
+                NotUpdatableReason::SetReturning,
+            ));
         }
+    }
+    // The base relation must be one table or view; a materialized view is neither.
+    let Some(SourcePlan::Table {
+        name: source_name,
+        qualifier,
+        alias,
+        column_aliases,
+        include_descendants,
+        ..
+    }) = block.from.as_ref()
+    else {
+        return Ok(ViewQueryShape::NotUpdatable(
+            NotUpdatableReason::NotSingleRelation,
+        ));
+    };
+    if services.catalog.target_view_kind(source_name)? == Some(StoredViewKind::Materialized) {
+        return Ok(ViewQueryShape::NotUpdatable(
+            NotUpdatableReason::NotSingleRelation,
+        ));
     }
     let source_qualifier = alias.as_deref().unwrap_or(qualifier).to_string();
     let source_columns = relation_columns(services, source_name)?;
@@ -375,7 +503,7 @@ fn automatic_view_layer_from_definition(
             expression,
         })
         .collect();
-    Ok(Some(AutomaticViewLayer {
+    Ok(ViewQueryShape::Updatable(Box::new(AutomaticViewLayer {
         canonical_name: canonical_name.to_string(),
         source_name: source_name.clone(),
         source_qualifier,
@@ -386,7 +514,7 @@ fn automatic_view_layer_from_definition(
         predicate: block.r#where.clone(),
         subqueries: block.subqueries.clone(),
         check_option: ViewCheckOption::from_options(&definition.options),
-    }))
+    })))
 }
 
 mod layer_rewrite;
@@ -586,18 +714,16 @@ pub fn validate_view_definition_check_option(
     if ViewCheckOption::from_options(&definition.options) == ViewCheckOption::None {
         return Ok(());
     }
-    let updatable =
-        automatic_view_layer_from_definition(services, name, definition)?.is_some_and(|layer| {
-            layer
-                .columns
-                .iter()
-                .any(|column| column.writable_source_column.is_some())
-        });
-    if updatable {
-        return Ok(());
-    }
-    Err(SQLError::Routine {
+    // `DefineView` reports why the view is not automatically updatable as the hint.
+    let reason = match view_query_shape_from_definition(services, name, definition)? {
+        ViewQueryShape::Updatable(layer) if layer.has_writable_column() => return Ok(()),
+        ViewQueryShape::Updatable(_) => NotUpdatableReason::NoUpdatableColumns,
+        ViewQueryShape::NotUpdatable(reason) => reason,
+    };
+    Err(SQLError::Diagnostic {
         sqlstate: "0A000".into(),
         message: "WITH CHECK OPTION is supported only on automatically updatable views".into(),
+        detail: None,
+        hint: Some(reason.detail().into()),
     })
 }

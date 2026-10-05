@@ -7,8 +7,8 @@
 //! CHECK definition merging at CREATE and ALTER inheritance boundaries.
 
 use crate::ast::{ColumnDef, ColumnType, Expr, TableCheck};
+use crate::SQLError;
 use crate::ScalarExpr;
-use crate::{ast::CreateTable, SQLError};
 use uqa_core::Value;
 
 pub fn bind_parent_check_columns(parent: &str, expr: &mut Expr) -> Result<(), SQLError> {
@@ -103,93 +103,29 @@ pub fn validate_check_merge(
     Ok(())
 }
 
-/// Merge bound CHECK expressions after the complete CREATE row type has been validated. Anonymous local constraints remain independent and receive names at publication.
-pub fn merge_create_checks(table: &mut CreateTable) -> Result<(), SQLError> {
-    let relation =
-        uqa_core::RelationIdentity::from_legacy_name(&table.name).map_err(SQLError::Internal)?;
-    let mut local_names = std::collections::BTreeSet::new();
-    for name in table
-        .columns
-        .iter()
-        .filter_map(|column| column.check_name.as_ref())
-        .chain(
-            table
-                .checks
-                .iter()
-                .filter(|check| check.is_local)
-                .filter_map(|check| check.name.as_ref()),
-        )
-    {
-        if !local_names.insert(name) {
-            return Err(duplicate_check(&relation.name, name));
-        }
-    }
-    if table.hierarchy.parents.is_empty() {
+/// `MergeCheckConstraint`: a parent's CHECK joins the constraints the new table inherits, merging with an earlier parent's CHECK of the same name when their expressions match, an enforced copy making the merged constraint enforced.
+pub fn merge_inherited_check(
+    inherited: &mut Vec<TableCheck>,
+    check: TableCheck,
+    columns: &[ColumnDef],
+) -> Result<(), SQLError> {
+    let Some(existing) = inherited
+        .iter_mut()
+        .find(|existing| existing.name.is_some() && existing.name == check.name)
+    else {
+        inherited.push(check);
         return Ok(());
+    };
+    if !same_check_expression(&existing.expr, &check.expr, columns)? {
+        return Err(error(
+            "42710",
+            format!(
+                "check constraint name \"{}\" appears multiple times but with different expressions",
+                check.name.as_deref().unwrap_or("<unnamed>")
+            ),
+        ));
     }
-    let check_columns = table.columns.clone();
-    let mut inherited: Vec<TableCheck> = Vec::new();
-    let mut local = Vec::new();
-    for check in std::mem::take(&mut table.checks) {
-        if check.is_local {
-            local.push(check);
-        } else if let Some(existing) = inherited
-            .iter_mut()
-            .find(|existing| existing.name == check.name)
-        {
-            if !same_check_expression(&existing.expr, &check.expr, &check_columns)? {
-                return Err(error("42710", format!("check constraint name \"{}\" appears multiple times but with different expressions", check.name.as_deref().unwrap_or("<unnamed>"))));
-            }
-            existing.enforced |= check.enforced;
-            existing.validated = existing.enforced;
-        } else {
-            inherited.push(check);
-        }
-    }
-    for column in &mut table.columns {
-        let Some((expr, name)) = column.check.as_ref().zip(column.check_name.as_ref()) else {
-            continue;
-        };
-        let Some(index) = inherited
-            .iter()
-            .position(|check| check.name.as_ref() == Some(name))
-        else {
-            continue;
-        };
-        let incoming = TableCheck {
-            catalog_oid: column.check_catalog_oid,
-            name: Some(name.clone()),
-            object_id: column.check_object_id,
-            is_local: true,
-            expr: expr.clone(),
-            enforced: column.check_enforced,
-            validated: column.check_validated,
-            no_inherit: column.check_no_inherit,
-            partition_constraint: None,
-        };
-        validate_check_merge(&relation.name, &inherited[index], &incoming, &check_columns)?;
-        inherited.remove(index);
-        column.check_is_local = !table.hierarchy.is_partition();
-    }
-    for mut check in local {
-        if let Some(index) = inherited
-            .iter()
-            .position(|existing| existing.name.is_some() && existing.name == check.name)
-        {
-            let existing = &inherited[index];
-            if existing.is_local {
-                return Err(duplicate_check(
-                    &relation.name,
-                    check.name.as_deref().unwrap_or("<unnamed>"),
-                ));
-            }
-            validate_check_merge(&relation.name, existing, &check, &check_columns)?;
-            check.is_local = !table.hierarchy.is_partition();
-            inherited[index] = check;
-        } else {
-            inherited.push(check);
-        }
-    }
-    table.checks = inherited;
+    existing.enforced |= check.enforced;
+    existing.validated = existing.enforced;
     Ok(())
 }

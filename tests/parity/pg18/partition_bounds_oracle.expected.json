@@ -1,0 +1,2003 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE d_list (d date, v integer) PARTITION BY LIST (d)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE d_list_a PARTITION OF d_list FOR VALUES IN ('2024-01-01', '2024-02-01'::date, '2024-03-01'::timestamp)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE d_list_b PARTITION OF d_list FOR VALUES IN ('2024-02-01')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "partition \"d_list_b\" would overlap partition \"d_list_a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE d_list_c PARTITION OF d_list FOR VALUES IN ('not a date')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"not a date\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE d_list_d PARTITION OF d_list FOR VALUES IN (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "specified value cannot be cast to type date for column \"d\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO d_list VALUES ('2024-03-01', 1), ('2024-01-01', 2)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO d_list VALUES ('2024-04-01', 3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"d_list\" found for row",
+        "detail": "Partition key of the failing row contains (d) = (2024-04-01).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, d, v FROM d_list ORDER BY v",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "d",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            1082,
+            23
+          ],
+          "rows": [
+            [
+              "d_list_a",
+              "2024-03-01",
+              "1"
+            ],
+            [
+              "d_list_a",
+              "2024-01-01",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(relpartbound, oid) AS bound FROM pg_class WHERE relname = 'd_list_a'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bound"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "FOR VALUES IN ('2024-01-01', '2024-02-01', '2024-03-01')"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE i_list (i integer) PARTITION BY LIST (i)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE i_list_a PARTITION OF i_list FOR VALUES IN (-1, 2.4, '3', 1 + 1, NULL)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE i_list_b PARTITION OF i_list FOR VALUES IN ('x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_c PARTITION OF i_list FOR VALUES IN (2147483648)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "integer out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_d PARTITION OF i_list FOR VALUES IN ((SELECT 1))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use subquery in partition bound",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_e PARTITION OF i_list FOR VALUES IN (i)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use column reference in partition bound expression",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_f PARTITION OF i_list FOR VALUES IN (length('abcd'), abs(-5))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE i_list_g PARTITION OF i_list FOR VALUES IN (3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "partition \"i_list_g\" would overlap partition \"i_list_a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_h PARTITION OF i_list FOR VALUES IN (count(*))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42803",
+        "message": "aggregate functions are not allowed in partition bound",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound FROM pg_class c WHERE c.relname LIKE 'i_list_%' ORDER BY c.relname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "bound"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "i_list_a",
+              "FOR VALUES IN ('-1', 2, 3, NULL)"
+            ],
+            [
+              "i_list_f",
+              "FOR VALUES IN (4, 5)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO i_list VALUES (-1), (2), (3), (NULL), (4), (5)",
+      "command_tags": [
+        "INSERT 0 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO i_list VALUES (6)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"i_list\" found for row",
+        "detail": "Partition key of the failing row contains (i) = (6).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, i FROM i_list ORDER BY i NULLS LAST",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "i"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "i_list_a",
+              "-1"
+            ],
+            [
+              "i_list_a",
+              "2"
+            ],
+            [
+              "i_list_a",
+              "3"
+            ],
+            [
+              "i_list_f",
+              "4"
+            ],
+            [
+              "i_list_f",
+              "5"
+            ],
+            [
+              "i_list_a",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE n_range (n numeric, v integer) PARTITION BY RANGE (n)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE n_range_a PARTITION OF n_range FOR VALUES FROM (-1.5) TO (2)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE n_range_b PARTITION OF n_range FOR VALUES FROM (2) TO ('10.25')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE n_range_c PARTITION OF n_range FOR VALUES FROM (5) TO (20)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "partition \"n_range_c\" would overlap partition \"n_range_b\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE n_range_d PARTITION OF n_range FOR VALUES FROM (30) TO (30)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "empty range bound specified for partition \"n_range_d\"",
+        "detail": "Specified lower bound ('30') is greater than or equal to upper bound ('30').",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE n_range_e PARTITION OF n_range FOR VALUES FROM (40) TO (35)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "empty range bound specified for partition \"n_range_e\"",
+        "detail": "Specified lower bound ('40') is greater than or equal to upper bound ('35').",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE n_range_f PARTITION OF n_range FOR VALUES FROM (MAXVALUE) TO (MAXVALUE)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "empty range bound specified for partition \"n_range_f\"",
+        "detail": "Specified lower bound (MAXVALUE) is greater than or equal to upper bound (MAXVALUE).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound FROM pg_class c WHERE c.relname LIKE 'n_range_%' ORDER BY c.relname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "bound"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "n_range_a",
+              "FOR VALUES FROM ('-1.5') TO ('2')"
+            ],
+            [
+              "n_range_b",
+              "FOR VALUES FROM ('2') TO (10.25)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO n_range VALUES (-1.5, 1), (1.999, 2), (2, 3), (10.2499, 4)",
+      "command_tags": [
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO n_range VALUES (10.25, 5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"n_range\" found for row",
+        "detail": "Partition key of the failing row contains (n) = (10.25).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO n_range VALUES (NULL, 6)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"n_range\" found for row",
+        "detail": "Partition key of the failing row contains (n) = (null).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, n, v FROM n_range ORDER BY v",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "n",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            1700,
+            23
+          ],
+          "rows": [
+            [
+              "n_range_a",
+              "-1.5",
+              "1"
+            ],
+            [
+              "n_range_a",
+              "1.999",
+              "2"
+            ],
+            [
+              "n_range_b",
+              "2",
+              "3"
+            ],
+            [
+              "n_range_b",
+              "10.2499",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE b_list (b boolean) PARTITION BY LIST (b)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE b_list_a PARTITION OF b_list FOR VALUES IN (true, 'f')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(relpartbound, oid) AS bound FROM pg_class WHERE relname = 'b_list_a'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bound"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "FOR VALUES IN (true, false)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE t_list (t text) PARTITION BY LIST (t)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE t_list_a PARTITION OF t_list FOR VALUES IN ('a', 'it''s', 1)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE t_list_default PARTITION OF t_list DEFAULT",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE t_list_default_2 PARTITION OF t_list DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "partition \"t_list_default_2\" conflicts with existing default partition \"t_list_default\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO t_list VALUES ('zz')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE t_list_zz PARTITION OF t_list FOR VALUES IN ('zz')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "updated partition constraint for default partition \"t_list_default\" would be violated by some row",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound FROM pg_class c WHERE c.relname LIKE 't_list_%' ORDER BY c.relname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "bound"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "t_list_a",
+              "FOR VALUES IN ('a', 'it''s', '1')"
+            ],
+            [
+              "t_list_default",
+              "DEFAULT"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, t FROM t_list ORDER BY t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "t"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "t_list_default",
+              "zz"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE r_multi (a integer, b text) PARTITION BY RANGE (a, b)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE r_multi_1 PARTITION OF r_multi FOR VALUES FROM (1, 'a') TO (1, MAXVALUE)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE r_multi_2 PARTITION OF r_multi FOR VALUES FROM (MINVALUE, 'x') TO (1, 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "every bound following MINVALUE must also be MINVALUE",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE r_multi_3 PARTITION OF r_multi FOR VALUES FROM (1, MAXVALUE) TO (2, 'b')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO r_multi VALUES (1, 'b'), (1, 'zzz'), (2, 'a')",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO r_multi VALUES (0, 'q')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"r_multi\" found for row",
+        "detail": "Partition key of the failing row contains (a, b) = (0, q).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, a, b FROM r_multi ORDER BY a, b",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            25,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "r_multi_1",
+              "1",
+              "b"
+            ],
+            [
+              "r_multi_1",
+              "1",
+              "zzz"
+            ],
+            [
+              "r_multi_3",
+              "2",
+              "a"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound FROM pg_class c WHERE c.relname LIKE 'r_multi_%' ORDER BY c.relname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "bound"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "r_multi_1",
+              "FOR VALUES FROM (1, 'a') TO (1, MAXVALUE)"
+            ],
+            [
+              "r_multi_3",
+              "FOR VALUES FROM (1, MAXVALUE) TO (2, 'b')"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE h_int (i integer) PARTITION BY HASH (i)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE h_int_0 PARTITION OF h_int FOR VALUES WITH (MODULUS 4, REMAINDER 0)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE h_int_bad PARTITION OF h_int FOR VALUES WITH (MODULUS 3, REMAINDER 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "every hash partition modulus must be a factor of the next larger modulus",
+        "detail": "The new modulus 3 is not a factor of 4, the modulus of existing partition \"h_int_0\".",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE h_int_bad_2 PARTITION OF h_int FOR VALUES WITH (MODULUS 8, REMAINDER 2)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE h_int_overlap PARTITION OF h_int FOR VALUES WITH (MODULUS 2, REMAINDER 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "partition \"h_int_overlap\" would overlap partition \"h_int_0\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE SCHEMA other",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE other.p (i integer) PARTITION BY LIST (i)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE other.p1 PARTITION OF other.p FOR VALUES IN (1)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE other.p2 PARTITION OF other.p FOR VALUES IN (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "partition \"p2\" would overlap partition \"p1\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO other.p VALUES (5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"p\" found for row",
+        "detail": "Partition key of the failing row contains (i) = (5).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO other.p1 VALUES (5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"p1\" violates partition constraint",
+        "detail": "Failing row contains (5).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE k_expr (t text) PARTITION BY LIST ((t::date))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "functions in partition key expression must be marked IMMUTABLE",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE k_expr_2 (d date) PARTITION BY LIST ((d::text))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "functions in partition key expression must be marked IMMUTABLE",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE k_expr_3 (d date) PARTITION BY LIST ((random() > 0.5))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "functions in partition key expression must be marked IMMUTABLE",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE k_expr_4 (i integer) PARTITION BY LIST ((i + 1))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_expr_4_a PARTITION OF k_expr_4 FOR VALUES IN (2)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO k_expr_4 VALUES (1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO k_expr_4 VALUES (2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"k_expr_4\" found for row",
+        "detail": "Partition key of the failing row contains ((i + 1)) = (3).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_r PARTITION OF i_list FOR VALUES FROM (10) TO (20)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "invalid bound specification for a list partition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE n_range_l PARTITION OF n_range FOR VALUES IN (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "invalid bound specification for a range partition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE h_int_l PARTITION OF h_int FOR VALUES IN (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "invalid bound specification for a hash partition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE h_int_d PARTITION OF h_int DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "a hash-partitioned table may not have a default partition",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE r_multi_w PARTITION OF r_multi FOR VALUES FROM (5) TO (6, 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "FROM must specify exactly one value per partitioning column",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE r_multi_x PARTITION OF r_multi FOR VALUES FROM (5, 'a') TO (6)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "TO must specify exactly one value per partitioning column",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE r_multi_y PARTITION OF r_multi FOR VALUES FROM (MINVALUE, MAXVALUE) TO (0, 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "every bound following MINVALUE must also be MINVALUE",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE r_multi_z PARTITION OF r_multi FOR VALUES FROM (7, 'a') TO (MAXVALUE, 'b')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "every bound following MAXVALUE must also be MAXVALUE",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE h_int_m PARTITION OF h_int FOR VALUES WITH (MODULUS 0, REMAINDER 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "modulus for hash partition must be an integer value greater than zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE h_int_n PARTITION OF h_int FOR VALUES WITH (MODULUS 2, REMAINDER 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "remainder for hash partition must be less than modulus",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE n_range_null PARTITION OF n_range FOR VALUES FROM (NULL) TO (100)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "cannot specify NULL in range bound",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_w PARTITION OF i_list FOR VALUES IN (sum(1) OVER ())",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "window functions are not allowed in partition bound",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_s PARTITION OF i_list FOR VALUES IN (generate_series(7, 8))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in partition bound",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_c2 PARTITION OF i_list FOR VALUES IN (count(i))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use column reference in partition bound expression",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_nested PARTITION OF i_list FOR VALUES IN (abs((SELECT 1)))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use subquery in partition bound",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE i_list_random PARTITION OF i_list FOR VALUES IN (floor(random() * 0)::integer + 100)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(relpartbound, oid) AS bound FROM pg_class WHERE relname = 'i_list_random'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bound"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "FOR VALUES IN (100)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_small (s smallint) PARTITION BY LIST (s)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_small_a PARTITION OF k_small FOR VALUES IN (1, -2)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_big (b bigint) PARTITION BY LIST (b)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_big_a PARTITION OF k_big FOR VALUES IN (1, -2, 9000000000)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_float (f double precision) PARTITION BY LIST (f)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_float_a PARTITION OF k_float FOR VALUES IN (1.5, -2, 'NaN', 'Infinity')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_real (r real) PARTITION BY RANGE (r)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_real_a PARTITION OF k_real FOR VALUES FROM (0.1) TO (2.5)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_numeric (n numeric) PARTITION BY LIST (n)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_numeric_a PARTITION OF k_numeric FOR VALUES IN (1.50, 2, -3.5, 'NaN', 1e3)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_text (t text, v varchar(5), c char(3), n name) PARTITION BY LIST (c)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_text_a PARTITION OF k_text FOR VALUES IN ('ab', 'abc ', 'a''b')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_text_b PARTITION OF k_text FOR VALUES IN ('abcd')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22001",
+        "message": "value too long for type character(3)",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE k_varchar (v varchar(3)) PARTITION BY LIST (v)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_varchar_a PARTITION OF k_varchar FOR VALUES IN ('abcd')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22001",
+        "message": "value too long for type character varying(3)",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE k_varchar_b PARTITION OF k_varchar FOR VALUES IN ('abc', 'x\\y')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_bytea (b bytea) PARTITION BY LIST (b)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_bytea_a PARTITION OF k_bytea FOR VALUES IN ('\\x0102', 'abc')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_uuid (u uuid) PARTITION BY LIST (u)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_uuid_a PARTITION OF k_uuid FOR VALUES IN ('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_ts (t timestamp, tz timestamptz, i interval) PARTITION BY RANGE (t)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_ts_a PARTITION OF k_ts FOR VALUES FROM ('2024-01-01 10:00') TO ('2024-01-02'::date)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_interval (i interval) PARTITION BY LIST (i)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_interval_a PARTITION OF k_interval FOR VALUES IN ('1 day', '2 hours 30 minutes')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_bool (b boolean) PARTITION BY LIST (b)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE k_bool_a PARTITION OF k_bool FOR VALUES IN ('yes')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound FROM pg_class c WHERE c.relname LIKE 'k\\_%\\_a' OR c.relname = 'k_varchar_b' ORDER BY c.relname",
+      "command_tags": [
+        "SELECT 13"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "bound"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "k_big_a",
+              "FOR VALUES IN ('1', '-2', '9000000000')"
+            ],
+            [
+              "k_bool_a",
+              "FOR VALUES IN (true)"
+            ],
+            [
+              "k_bytea_a",
+              "FOR VALUES IN ('\\x0102', '\\x616263')"
+            ],
+            [
+              "k_expr_4_a",
+              "FOR VALUES IN (2)"
+            ],
+            [
+              "k_float_a",
+              "FOR VALUES IN ('1.5', '-2', 'NaN', 'Infinity')"
+            ],
+            [
+              "k_interval_a",
+              "FOR VALUES IN ('1 day', '02:30:00')"
+            ],
+            [
+              "k_numeric_a",
+              "FOR VALUES IN (1.50, '2', '-3.5', 'NaN', '1000')"
+            ],
+            [
+              "k_real_a",
+              "FOR VALUES FROM ('0.1') TO ('2.5')"
+            ],
+            [
+              "k_small_a",
+              "FOR VALUES IN ('1', '-2')"
+            ],
+            [
+              "k_text_a",
+              "FOR VALUES IN ('ab ', 'abc', 'a''b')"
+            ],
+            [
+              "k_ts_a",
+              "FOR VALUES FROM ('2024-01-01 10:00:00') TO ('2024-01-02 00:00:00')"
+            ],
+            [
+              "k_uuid_a",
+              "FOR VALUES IN ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11')"
+            ],
+            [
+              "k_varchar_b",
+              "FOR VALUES IN ('abc', 'x\\y')"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE a_list (i integer) PARTITION BY LIST (i)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE a_list_one PARTITION OF a_list FOR VALUES IN (1)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE a_detached (i integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE a_list ATTACH PARTITION a_detached FOR VALUES IN ('x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE a_list ATTACH PARTITION a_detached FOR VALUES IN ('2024-01-01'::date)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "specified value cannot be cast to type integer for column \"i\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE a_list ATTACH PARTITION a_detached FOR VALUES IN (2, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "partition \"a_detached\" would overlap partition \"a_list_one\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO a_detached VALUES (5)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE a_list ATTACH PARTITION a_detached FOR VALUES IN (2, 3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "partition constraint of relation \"a_detached\" is violated by some row",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DELETE FROM a_detached",
+      "command_tags": [
+        "DELETE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE a_list ATTACH PARTITION a_detached FOR VALUES IN ('2', 3.2)",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound FROM pg_class c WHERE c.relname LIKE 'a\\_%' ORDER BY c.relname",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "bound"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "a_detached",
+              "FOR VALUES IN (2, 3)"
+            ],
+            [
+              "a_list",
+              null
+            ],
+            [
+              "a_list_one",
+              "FOR VALUES IN (1)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO a_list VALUES (1), (2), (3)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, i FROM a_list ORDER BY i",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "i"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "a_list_one",
+              "1"
+            ],
+            [
+              "a_detached",
+              "2"
+            ],
+            [
+              "a_detached",
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE k_small, k_big, k_float, k_real, k_numeric, k_text, k_varchar, k_bytea, k_uuid, k_ts, k_interval, k_bool, a_list",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE d_list, i_list, n_range, b_list, t_list, r_multi, h_int, other.p, k_expr_4",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA other",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

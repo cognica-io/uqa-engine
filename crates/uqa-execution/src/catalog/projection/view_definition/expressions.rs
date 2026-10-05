@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 
 use crate::{ScalarFrameBound, ScalarWindowSpec};
 use uqa_core::Value;
-use uqa_sql::ast::{BinaryOp, Expr, FrameMode, FunctionBinding, FunctionDispatch};
+use uqa_sql::ast::{BinaryOp, Expr, FunctionBinding, FunctionDispatch};
 use uqa_sql::ir::ScalarExpr;
 use uqa_sql::plan::QueryPlan;
 
@@ -24,9 +24,9 @@ impl Deparser<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
         match expression {
-            ScalarExpr::Column(name) => Ok(scope.column(None, name)),
+            ScalarExpr::Column(name) => Ok(self.column_reference(None, name, scope)),
             ScalarExpr::QualifiedColumn { qualifier, column } => {
-                Ok(scope.column(Some(qualifier), column))
+                Ok(self.column_reference(Some(qualifier), column, scope))
             }
             ScalarExpr::Position(index) => scope
                 .columns
@@ -42,10 +42,8 @@ impl Deparser<'_> {
                 "executor-only column reached view SQL reconstruction".into(),
             )),
             ScalarExpr::Literal(value) => literal(value),
-            ScalarExpr::TypedLiteral { value, ty, .. } => {
-                Ok(format!("({})::{ty}", literal(value)?))
-            }
-            ScalarExpr::Param(index) => Ok(format!("${index}")),
+            ScalarExpr::TypedLiteral { value, ty, .. } => self.typed_literal(value, ty),
+            ScalarExpr::Param(index) => Ok(self.parameter(*index, scope)),
             ScalarExpr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, scope, subqueries),
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {
                 let operator = if matches!(expression, ScalarExpr::And(_)) {
@@ -88,11 +86,13 @@ impl Deparser<'_> {
             )),
             ScalarExpr::Cast { expr, ty } => self.cast(expr, ty, scope, subqueries),
             ScalarExpr::Func { .. } => self.aggregate(expression, scope, subqueries),
-            ScalarExpr::WindowCall { name, args, spec } => Ok(format!(
-                "{} OVER ({})",
-                self.function(name, None, args, scope, subqueries)?,
-                self.window(spec, scope, subqueries)?
-            )),
+            ScalarExpr::WindowCall {
+                name,
+                args,
+                spec,
+                filter,
+                ..
+            } => self.window_call(name, args, (filter.as_deref(), spec), scope, subqueries),
             ScalarExpr::Case {
                 base,
                 when,
@@ -237,13 +237,17 @@ impl Deparser<'_> {
         self.query(query, &scope.child(), None)
     }
 
-    fn cast(
+    pub(super) fn cast(
         &self,
         expr: &ScalarExpr,
         ty: &str,
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
+        if let Some(rendered) = self.coercion(expr, ty, scope, subqueries)? {
+            return Ok(rendered);
+        }
+        let display = self.type_display(ty);
         let ty = type_name(ty);
         if let ScalarExpr::Literal(value) = expr {
             if matches!(value, Value::Str(_))
@@ -257,7 +261,7 @@ impl Deparser<'_> {
                     return literal(&converted);
                 }
                 return Ok(format!(
-                    "{}::{ty}",
+                    "{}::{display}",
                     uqa_sql::render::expression_sql(&Expr::Literal(value.clone()))?
                 ));
             }
@@ -266,17 +270,21 @@ impl Deparser<'_> {
             }
             if matches!(value, Value::Str(_) | Value::Null) {
                 let value = uqa_sql::render::expression_sql(&Expr::Literal(value.clone()))?;
-                return Ok(format!("{value}::{ty}"));
+                return Ok(format!("{value}::{display}"));
             }
         }
         let value = self.expression(expr, scope, subqueries)?;
+        // A row constructor coerced to a named type is one `RowExpr`, which prints its type after the row.
+        if matches!(expr, ScalarExpr::Row(_)) {
+            return Ok(format!("{value}::{display}"));
+        }
         if self.pretty {
             Ok(format!(
-                "{}::{ty}",
+                "{}::{display}",
                 self.operand(expr, 80, false, scope, subqueries)?
             ))
         } else {
-            Ok(format!("({value})::{ty}"))
+            Ok(format!("({value})::{display}"))
         }
     }
 
@@ -293,6 +301,9 @@ impl Deparser<'_> {
         ) = binding.and_then(|binding| binding.dispatch)
         {
             return self.array_subscripts(dispatch, args, scope, subqueries);
+        }
+        if binding.and_then(|binding| binding.dispatch) == Some(FunctionDispatch::FieldSelect) {
+            return self.field_selection(args, scope, subqueries);
         }
         if let Some(uqa_sql::ast::FunctionDispatch::NumericOperator(operator)) =
             binding.and_then(|binding| binding.dispatch)
@@ -317,6 +328,38 @@ impl Deparser<'_> {
                 }
             };
             return Ok(self.parenthesize(text));
+        }
+        match binding.and_then(|binding| binding.dispatch) {
+            // `get_rule_expr` prints a `DistinctExpr` as an operator.
+            Some(FunctionDispatch::IsDistinct) => {
+                let [left, right] = args else {
+                    return Err(SQLError::Internal("invalid distinct operands".into()));
+                };
+                return Ok(self.parenthesize(format!(
+                    "{} IS DISTINCT FROM {}",
+                    self.operand(left, 40, false, scope, subqueries)?,
+                    self.operand(right, 40, true, scope, subqueries)?
+                )));
+            }
+            // A `ScalarArrayOpExpr`: the operator, then `ANY` or `ALL` over the parenthesized array.
+            Some(dispatch @ (FunctionDispatch::AnyOperator | FunctionDispatch::AllOperator)) => {
+                let [left, right, ScalarExpr::Literal(Value::Str(operator))] = args else {
+                    return Err(SQLError::Internal(
+                        "invalid quantified operator operands".into(),
+                    ));
+                };
+                return Ok(self.parenthesize(format!(
+                    "{} {operator} {} ({})",
+                    self.operand(left, 80, false, scope, subqueries)?,
+                    if dispatch == FunctionDispatch::AnyOperator {
+                        "ANY"
+                    } else {
+                        "ALL"
+                    },
+                    self.operand(right, 80, true, scope, subqueries)?
+                )));
+            }
+            _ => {}
         }
         if let [left, right] = args {
             if let Some((operator, precedence)) = binary_function_operator(name) {
@@ -464,7 +507,11 @@ impl Deparser<'_> {
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
-        let indent = " ".repeat(if scope.standalone {
+        if !self.indent {
+            return self.inline_case(base, when, otherwise, scope, subqueries);
+        }
+        // A standalone expression starts at indentation level zero; query clauses indent their expressions one level.
+        let indent = " ".repeat(if self.standalone {
             scope.indent
         } else {
             scope.indent + 8
@@ -493,6 +540,62 @@ impl Deparser<'_> {
         }
         write!(rendered, "\n{indent}END").expect("writing to a String cannot fail");
         Ok(rendered)
+    }
+
+    /// `CASE` as `get_rule_expr` prints it without `PRETTYFLAG_INDENT`, on one line.
+    fn inline_case(
+        &self,
+        base: Option<&ScalarExpr>,
+        when: &[(ScalarExpr, ScalarExpr)],
+        otherwise: Option<&ScalarExpr>,
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let mut rendered = String::from("CASE");
+        if let Some(base) = base {
+            rendered.push(' ');
+            rendered.push_str(&self.expression(base, scope, subqueries)?);
+        }
+        for (condition, value) in when {
+            write!(
+                rendered,
+                " WHEN {} THEN {}",
+                self.expression(condition, scope, subqueries)?,
+                self.expression(value, scope, subqueries)?
+            )
+            .expect("writing to a String cannot fail");
+        }
+        if let Some(otherwise) = otherwise {
+            write!(
+                rendered,
+                " ELSE {}",
+                self.expression(otherwise, scope, subqueries)?
+            )
+            .expect("writing to a String cannot fail");
+        }
+        rendered.push_str(" END");
+        Ok(rendered)
+    }
+
+    /// A window call as `get_windowfunc_expr` prints it: the call, its `FILTER`, and `OVER` with the window.
+    fn window_call(
+        &self,
+        name: &str,
+        args: &[ScalarExpr],
+        (filter, spec): (Option<&ScalarExpr>, &ScalarWindowSpec),
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let filter = filter
+            .map(|filter| self.expression(filter, scope, subqueries))
+            .transpose()?
+            .map(|filter| format!(" FILTER (WHERE {filter})"))
+            .unwrap_or_default();
+        Ok(format!(
+            "{}{filter} OVER ({})",
+            self.function(name, None, args, scope, subqueries)?,
+            self.window(spec, scope, subqueries)?
+        ))
     }
 
     fn window(
@@ -525,15 +628,12 @@ impl Deparser<'_> {
             parts.push(format!("ORDER BY {}", order.join(", ")));
         }
         if let Some(frame) = &spec.frame {
-            let mode = match frame.mode {
-                FrameMode::Rows => "ROWS",
-                FrameMode::Range => "RANGE",
-                FrameMode::Groups => "GROUPS",
-            };
-            parts.push(format!(
-                "{mode} BETWEEN {} AND {}",
-                self.frame_bound(&frame.start, scope, subqueries)?,
-                self.frame_bound(&frame.end, scope, subqueries)?
+            parts.push(uqa_sql::render::frame_clause_sql(
+                frame.mode,
+                &self.frame_bound(&frame.start, scope, subqueries)?,
+                &self.frame_bound(&frame.end, scope, subqueries)?,
+                frame.between,
+                frame.exclusion,
             ));
         }
         Ok(parts.join(" "))
@@ -559,7 +659,7 @@ impl Deparser<'_> {
     }
 }
 
-fn literal(value: &Value) -> Result<String, SQLError> {
+pub(super) fn literal(value: &Value) -> Result<String, SQLError> {
     match value {
         Value::Str(value) => Ok(format!("'{}'::text", value.replace('\'', "''"))),
         Value::Int(value) if i32::try_from(*value).is_err() => Ok(format!("'{value}'::bigint")),
@@ -603,7 +703,7 @@ fn literal_has_type(value: &Value, ty: &str) -> bool {
     }
 }
 
-fn type_name(ty: &str) -> String {
+pub(super) fn type_name(ty: &str) -> String {
     match ty.to_ascii_lowercase().as_str() {
         "int" | "int4" => "integer".into(),
         "int8" => "bigint".into(),
@@ -632,6 +732,25 @@ fn precedence(expression: &ScalarExpr) -> u8 {
             };
             numeric_operator_precedence(operator)
         }
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if binding.dispatch == Some(uqa_sql::ast::FunctionDispatch::IsDistinct) => 40,
+        // `isSimpleNode` never counts a `ScalarArrayOpExpr` as simple, so it keeps its parentheses as any operand.
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if matches!(
+            binding.dispatch,
+            Some(
+                uqa_sql::ast::FunctionDispatch::AnyOperator
+                    | uqa_sql::ast::FunctionDispatch::AllOperator
+            )
+        ) =>
+        {
+            0
+        }
+        ScalarExpr::InList { list, .. } if list.len() > 1 => 0,
         ScalarExpr::Or(_) => 10,
         ScalarExpr::And(_) | ScalarExpr::Between { .. } => 20,
         ScalarExpr::Not(_) => 30,

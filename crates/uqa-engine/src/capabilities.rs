@@ -88,7 +88,7 @@ impl SessionExecutionView<'_> {
         RelationNameResolution {
             search_path: crate::session::effective_search_path(&state),
             temporary_schema: self.temporary_schema_name(),
-            temporary_namespace_allocated: state.temporary_namespace_allocated,
+            temporary_namespace_allocated: state.temporary_namespace.is_some(),
             current_user: RoleReference::Bound(state.authorization.current().clone()),
             lookup_mode: RelationLookupMode::Dynamic,
         }
@@ -228,14 +228,16 @@ impl Engine {
             || self.storage.tables.read().clone(),
             |tables| (**tables).clone(),
         );
-        self.with_sequence_positions(Self::catalog_read_view_from(&durable, table_sources))
+        self.with_sequence_positions(self.catalog_read_view_from(&durable, table_sources))
     }
 
     pub(crate) fn restored_catalog_read_view(&self) -> CatalogReadView {
-        self.with_sequence_positions(Self::catalog_read_view_from(
-            &self.durable.snapshot(),
-            self.storage.tables.read().clone(),
-        ))
+        self.with_sequence_positions(
+            self.catalog_read_view_from(
+                &self.durable.snapshot(),
+                self.storage.tables.read().clone(),
+            ),
+        )
     }
 
     fn with_sequence_positions(&self, view: CatalogReadView) -> CatalogReadView {
@@ -255,6 +257,7 @@ impl Engine {
     }
 
     fn catalog_read_view_from(
+        &self,
         durable: &DurableCatalogSnapshot,
         table_sources: BTreeMap<super::RelationIdentity, Arc<super::TableState>>,
     ) -> CatalogReadView {
@@ -263,6 +266,7 @@ impl Engine {
             .map(|(relation, table)| {
                 let snapshot = CatalogTableSnapshot {
                     object_id: table.object_id(),
+                    catalog_oids: table.relation_oids(),
                     security: table.security.snapshot(),
                     columns: table.columns.snapshot(),
                     columns_declared: *table.columns_declared.read(),
@@ -284,6 +288,8 @@ impl Engine {
                 role_memberships: durable.role_memberships.clone(),
 
                 domains: durable.domains.clone(),
+                enums: durable.enums.clone(),
+                composites: durable.composites.clone(),
                 graphs: durable.graphs.clone(),
                 views: durable.views.clone(),
                 catalog_indexes: durable.catalog_indexes.clone(),
@@ -291,6 +297,8 @@ impl Engine {
                 schemas: durable.schemas.clone(),
                 sequences: durable.sequences.clone(),
                 sequence_object_ids: durable.sequence_object_ids.clone(),
+                sequence_catalog_oids: durable.sequence_catalog_oids.clone(),
+                graph_catalog_oids: durable.graph_catalog_oids.clone(),
                 sequence_security: durable.sequence_security.clone(),
                 foreign_table_security: durable.foreign_table_security.clone(),
                 system_relation_security: durable.system_relation_security.clone(),
@@ -298,6 +306,12 @@ impl Engine {
                 triggers: durable.triggers.clone(),
                 rules: durable.rules.clone(),
             },
+            temporary_namespace: self.temporary_namespace_oids().map(|oids| {
+                uqa_sql::catalog::temporary_namespace::TemporaryNamespace {
+                    schema: self.temporary_schema_name(),
+                    oids,
+                }
+            }),
         })
     }
 
@@ -466,8 +480,13 @@ mod view_alteration;
 mod view_creation;
 mod view_restoration;
 
+mod composites;
 mod domains;
+mod enums;
 mod namespaces;
+
+mod object_removal;
+mod type_lifecycle;
 
 mod index_routines;
 mod view_dependencies;

@@ -20,7 +20,7 @@ use crate::{
     ast::{AlterRoleStmt, RoleAttribute, RoleSpecification},
     SQLError,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub trait RoleNotices {
     fn notice(&self, notice: crate::SQLNotice);
@@ -265,27 +265,6 @@ fn require_role_drop_authority(
     } else {
         Err(insufficient_privilege("permission denied to drop role"))
     }
-}
-
-pub fn ensure_no_grantor_dependencies(
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    identities: &BTreeSet<RoleIdentity>,
-) -> Result<(), SQLError> {
-    for membership in memberships.values() {
-        if identities.contains(&membership.grantor.identity())
-            && !identities.contains(&membership.role.identity())
-            && !identities.contains(&membership.member.identity())
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "2BP01".into(),
-                message: format!(
-                    "role \"{}\" cannot be dropped because some objects depend on it: privileges for membership of role {} in role {}",
-                    membership.grantor.name, membership.member.name, membership.role.name
-                ),
-            });
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

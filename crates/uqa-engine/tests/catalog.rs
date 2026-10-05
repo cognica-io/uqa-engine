@@ -6,18 +6,34 @@
 
 //! Consolidated catalog, DDL, and mutation integration tests.
 
+#[path = "catalog/alter_column_diagnostics.rs"]
+mod alter_column_diagnostics;
 #[path = "catalog/analyzer_revisions.rs"]
 mod analyzer_revisions;
 #[path = "catalog/capability_boundaries.rs"]
 mod capability_boundaries;
+#[path = "catalog/catalog_dependencies.rs"]
+mod catalog_dependencies;
+#[path = "catalog/catalog_oid_order.rs"]
+mod catalog_oid_order;
 #[path = "catalog/configuration_parameters.rs"]
 mod configuration_parameters;
 #[path = "catalog/constraint_violation_reports.rs"]
 mod constraint_violation_reports;
 #[path = "catalog/diagnostic_fields.rs"]
 mod diagnostic_fields;
+#[path = "catalog/drop_dependencies.rs"]
+mod drop_dependencies;
+#[path = "catalog/event_definitions.rs"]
+mod event_definitions;
+#[path = "catalog/function_sqlbody.rs"]
+mod function_sqlbody;
+#[path = "catalog/legacy_type_names.rs"]
+mod legacy_type_names;
 #[path = "catalog/pg18_constraint_lifecycle.rs"]
 mod pg18_constraint_lifecycle;
+#[path = "catalog/relation_creation_namespaces.rs"]
+mod relation_creation_namespaces;
 #[path = "sql_analyze_persistence.rs"]
 mod sql_analyze_persistence;
 #[path = "sql_analyzer_ddl.rs"]
@@ -86,6 +102,8 @@ mod sql_update_from_delete_using;
 mod sql_value_index;
 #[path = "sql_views.rs"]
 mod sql_views;
+#[path = "catalog/temporary_namespace_oids.rs"]
+mod temporary_namespace_oids;
 
 #[path = "catalog/sql_schema_authorization.rs"]
 mod sql_schema_authorization;

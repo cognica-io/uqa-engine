@@ -159,18 +159,7 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
         )));
     }
     if let Some(over) = f.over.as_ref() {
-        if f.agg_filter.is_some() || !f.agg_order.is_empty() || f.agg_distinct || f.agg_within_group
-        {
-            return Err(SQLError::Unsupported(format!(
-                "window call `{raw_name}` uses aggregate modifiers not represented by WindowCall"
-            )));
-        }
-        let spec = compile_window_spec(over)?;
-        return Ok(Expr::WindowCall {
-            name: raw_name,
-            args,
-            spec,
-        });
+        return compile_window_call(raw_name, args, f, over);
     }
     // Translate the aggregate's ORDER BY clauses (e.g.
     // `string_agg(name, ',' ORDER BY name)`) into typed `OrderBy`
@@ -208,6 +197,47 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
         distinct: f.agg_distinct,
         order_by: agg_order,
         filter: agg_filter,
+    })
+}
+
+/// A function call with `OVER`: a call written with `WITHIN GROUP` is resolved with its ordering expressions after its direct arguments, and the aggregate modifiers are kept for analysis to reject as `ParseFuncOrColumn` does.
+fn compile_window_call(
+    name: String,
+    mut args: Vec<Expr>,
+    f: &pg_query::protobuf::FuncCall,
+    over: &pg_query::protobuf::WindowDef,
+) -> Result<Expr> {
+    if f.agg_within_group {
+        for sort_node in &f.agg_order {
+            let Some(NodeEnum::SortBy(sort)) = sort_node.node.as_ref() else {
+                return Err(SQLError::Internal(format!(
+                    "WITHIN GROUP expected SortBy, got {:?}",
+                    sort_node.node
+                )));
+            };
+            let expression = sort
+                .node
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("WITHIN GROUP SortBy without expr".into()))?;
+            args.push(compile_expr(expression)?);
+        }
+    }
+    let filter = f
+        .agg_filter
+        .as_ref()
+        .map(|filter| compile_expr(filter).map(Box::new))
+        .transpose()?;
+    let spec = compile_window_spec(over)?;
+    Ok(Expr::WindowCall {
+        name,
+        args,
+        spec,
+        filter,
+        modifiers: crate::ast::WindowCallModifiers {
+            distinct: f.agg_distinct,
+            ordered: !f.agg_within_group && !f.agg_order.is_empty(),
+            within_group: f.agg_within_group,
+        },
     })
 }
 

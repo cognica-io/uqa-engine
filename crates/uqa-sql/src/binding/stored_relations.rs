@@ -67,6 +67,9 @@ fn bind_catalog_relation_reference(
             canonical,
             "table" | "view" | "materialized view" | "foreign table" | "sequence",
         ) => canonical,
+        RelationResolution::Found(canonical, "composite type") => {
+            return Err(query::composite_relation_error(&canonical));
+        }
         RelationResolution::Found(canonical, kind) => {
             return Err(SQLError::Routine {
                 sqlstate: "42809".into(),

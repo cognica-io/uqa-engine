@@ -20,6 +20,10 @@ use uqa_storage::CatalogIndexRow;
 fn table(hierarchy: TableHierarchy) -> CatalogTableSnapshot {
     CatalogTableSnapshot {
         object_id: [1; 16],
+        catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
+            uqa_sql::catalog::relation_oids::RelationOidKind::Table,
+            &[1; 16],
+        ),
         security: Arc::new(BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
         )),
@@ -72,6 +76,7 @@ fn selection_preserves_declared_identity_and_standalone_expression_predicate_and
             object_id: [2; 16],
             oid: 50001,
         }),
+        index_identity: None,
         name: Some("declared".into()),
         kind: TableKeyConstraintKind::PrimaryKey,
         columns: vec!["value".into()],

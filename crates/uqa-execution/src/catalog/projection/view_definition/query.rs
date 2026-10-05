@@ -8,6 +8,7 @@
 
 use std::fmt::Write as _;
 
+use uqa_core::Value;
 use uqa_sql::ast::{CteMaterialization, LockWait, NullsOrder, SetOpKind};
 use uqa_sql::ir::ScalarExpr;
 use uqa_sql::plan::{OrderPlan, QueryBlockPlan, QueryPlan, RelationalPlan};
@@ -23,18 +24,33 @@ impl Deparser<'_> {
         names: Option<&[String]>,
     ) -> Result<String, SQLError> {
         let mut scope = parent.clone();
+        let rendered =
+            self.with_clause(&query.ctes, &mut scope, root_has_range_table(&query.root))?;
+        Ok(rendered + &self.query_root(&query.root, &scope, names)?)
+    }
+
+    /// `get_with_clause`: each `WITH` query sees the range table of the statement it belongs to (`statement_range_table`), and `scope` learns the names it defines.
+    pub fn with_clause(
+        &self,
+        ctes: &[uqa_sql::plan::CtePlan],
+        scope: &mut Scope,
+        statement_range_table: bool,
+    ) -> Result<String, SQLError> {
         let mut rendered = String::new();
-        if query.ctes.iter().any(|cte| cte.recursive) {
-            for cte in &query.ctes {
+        if ctes.iter().any(|cte| cte.recursive) {
+            for cte in ctes {
                 scope.ctes.insert(cte.name.clone(), cte_columns(cte)?);
             }
         }
-        for (index, cte) in query.ctes.iter().enumerate() {
+        for (index, cte) in ctes.iter().enumerate() {
             if index == 0 {
-                rendered.push_str(if query.ctes.iter().any(|cte| cte.recursive) {
-                    " WITH RECURSIVE "
+                if self.indent {
+                    rendered.push(' ');
+                }
+                rendered.push_str(if ctes.iter().any(|cte| cte.recursive) {
+                    "WITH RECURSIVE "
                 } else {
-                    " WITH "
+                    "WITH "
                 });
             } else {
                 rendered.push_str(", ");
@@ -50,23 +66,31 @@ impl Deparser<'_> {
                 CteMaterialization::NotMaterialized => rendered.push_str("NOT MATERIALIZED "),
                 CteMaterialization::Default => {}
             }
-            let child = scope.child();
-            write!(
-                rendered,
-                "(\n{}{}\n{})",
-                " ".repeat(child.indent),
-                self.query(view_cte_query(cte)?, &child, None)?,
-                " ".repeat(child.indent)
-            )
+            let mut child = scope.named_child();
+            child.range_table |= statement_range_table;
+            let body = self.query(view_cte_query(cte)?, &child, None)?;
+            if self.indent {
+                write!(
+                    rendered,
+                    "(\n{}{body}\n{})",
+                    " ".repeat(child.indent),
+                    " ".repeat(child.indent)
+                )
+            } else {
+                write!(rendered, "({body})")
+            }
             .expect("writing to a String cannot fail");
-            self.cte_search_cycle(&mut rendered, cte, &scope)?;
+            self.cte_search_cycle(&mut rendered, cte, scope)?;
             scope.ctes.insert(cte.name.clone(), cte_columns(cte)?);
         }
-        if !query.ctes.is_empty() {
-            rendered.push('\n');
-            rendered.push_str(&" ".repeat(scope.indent));
+        if !ctes.is_empty() {
+            if self.indent {
+                rendered.push('\n');
+                rendered.push_str(&" ".repeat(scope.indent));
+            } else {
+                rendered.push(' ');
+            }
         }
-        rendered.push_str(&self.query_root(&query.root, &scope, names)?);
         Ok(rendered)
     }
 
@@ -79,7 +103,13 @@ impl Deparser<'_> {
         Ok(match root {
             RelationalPlan::QueryBlock(block) => self.query_block(block, scope, names)?,
             RelationalPlan::Values { rows, subqueries } => {
-                format!(" VALUES {}", self.values(rows, scope, subqueries)?)
+                let mut scope = scope.clone();
+                scope.range_table = true;
+                format!(
+                    "{}VALUES {}",
+                    if self.indent { " " } else { "" },
+                    self.values(rows, &scope, subqueries)?
+                )
             }
             RelationalPlan::SetOp {
                 kind,
@@ -94,19 +124,27 @@ impl Deparser<'_> {
             } => {
                 let mut member = scope.clone();
                 member.nested = true;
+                // The set operation's own range table holds its members.
+                member.range_table = true;
                 let left_sql = self.set_member(left, &member, names)?;
+                // The output column names of the right member do not matter.
+                member.column_names_visible = false;
                 let right_sql = self.set_member(right, &member, None)?;
                 let keyword = match kind {
                     SetOpKind::Union => "UNION",
                     SetOpKind::Intersect => "INTERSECT",
                     SetOpKind::Except => "EXCEPT",
                 };
-                let mut rendered = format!(
-                    "{left_sql}\n{}{keyword}{}\n{}{right_sql}",
-                    " ".repeat(scope.indent),
-                    if *all { " ALL" } else { "" },
-                    " ".repeat(scope.indent)
-                );
+                let all = if *all { " ALL" } else { "" };
+                let mut rendered = if self.indent {
+                    format!(
+                        "{left_sql}\n{}{keyword}{all}\n{}{right_sql}",
+                        " ".repeat(scope.indent),
+                        " ".repeat(scope.indent)
+                    )
+                } else {
+                    format!("{left_sql} {keyword}{all} {right_sql}")
+                };
                 let columns = names.map_or_else(|| query_columns(left), <[String]>::to_vec);
                 let order = order_by
                     .iter()
@@ -174,7 +212,8 @@ impl Deparser<'_> {
                 .from
                 .as_ref()
                 .is_some_and(|source| source_count(source) > 1);
-        let mut rendered = String::from(" SELECT");
+        scope.range_table |= block.from.is_some();
+        let mut rendered = String::from(if self.indent { " SELECT" } else { "SELECT" });
         if !block.distinct_on.is_empty() {
             write!(
                 rendered,
@@ -185,27 +224,15 @@ impl Deparser<'_> {
         } else if block.distinct {
             rendered.push_str(" DISTINCT");
         }
-        for (index, projection) in block.projections.iter().enumerate() {
-            let mut expression = self.expression(&projection.expr, &scope, &block.subqueries)?;
-            let name = names
-                .and_then(|names| names.get(index))
-                .cloned()
-                .or_else(|| projection.alias.clone())
-                .unwrap_or_else(|| expression_name(&projection.expr));
-            let natural_column = match &projection.expr {
-                ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. } => {
-                    Some(column.as_str())
-                }
-                _ => None,
-            };
-            if natural_column != Some(name.as_str()) {
-                write!(expression, " AS {}", quote_ident(&name))
-                    .expect("writing to a String cannot fail");
-            }
-            self.projection(&mut rendered, &expression, index, scope.indent);
-        }
+        self.target_list(
+            &mut rendered,
+            &super::statements::expand_stars(&block.projections, &scope),
+            names,
+            &scope,
+            &block.subqueries,
+        )?;
         if let Some(source) = &block.from {
-            clause(
+            self.clause(
                 &mut rendered,
                 "   FROM ",
                 &self.source(source, &scope, &block.subqueries)?,
@@ -213,7 +240,7 @@ impl Deparser<'_> {
             );
         }
         if let Some(predicate) = &block.r#where {
-            clause(
+            self.clause(
                 &mut rendered,
                 "  WHERE ",
                 &self.expression(predicate, &scope, &block.subqueries)?,
@@ -240,12 +267,63 @@ impl Deparser<'_> {
                 LockWait::NoWait => " NOWAIT",
                 LockWait::SkipLocked => " SKIP LOCKED",
             });
-            clause(&mut rendered, "  ", &lock, scope.indent);
+            self.clause(&mut rendered, "  ", &lock, scope.indent);
         }
         Ok(rendered)
     }
 
+    /// `get_target_list`: each output column, named with `AS` unless a plain column reference already carries its name, or unless this level's names are not visible and the name is `FigureColname`'s `?column?`.
+    pub fn target_list(
+        &self,
+        rendered: &mut String,
+        projections: &[uqa_sql::plan::ProjectionPlan],
+        names: Option<&[String]>,
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<(), SQLError> {
+        for (index, projection) in projections.iter().enumerate() {
+            let mut expression = match &projection.expr {
+                ScalarExpr::Literal(Value::Str(text)) if scope.unknown_outputs => {
+                    format!("'{}'", text.replace('\'', "''"))
+                }
+                expression => self.expression(expression, scope, subqueries)?,
+            };
+            let name = names
+                .and_then(|names| names.get(index))
+                .cloned()
+                .or_else(|| projection.alias.clone())
+                .unwrap_or_else(|| expression_name(&projection.expr));
+            let own_name = match &projection.expr {
+                ScalarExpr::Column(column)
+                    if self.parameter_reference(None, column, scope).is_none() =>
+                {
+                    Some(column.as_str())
+                }
+                ScalarExpr::QualifiedColumn { qualifier, column }
+                    if self
+                        .parameter_reference(Some(qualifier), column, scope)
+                        .is_none() =>
+                {
+                    Some(column.as_str())
+                }
+                _ if scope.column_names_visible => None,
+                _ => Some("?column?"),
+            };
+            if own_name != Some(name.as_str()) {
+                write!(expression, " AS {}", quote_ident(&name))
+                    .expect("writing to a String cannot fail");
+            }
+            self.projection(rendered, &expression, index, scope.indent);
+        }
+        Ok(())
+    }
+
     fn projection(&self, rendered: &mut String, expression: &str, index: usize, indent: usize) {
+        if !self.indent {
+            rendered.push_str(if index == 0 { " " } else { ", " });
+            rendered.push_str(expression);
+            return;
+        }
         if expression.starts_with('\n') {
             if index > 0 {
                 rendered.push(',');
@@ -298,7 +376,7 @@ impl Deparser<'_> {
             format!("GROUPING SETS ({})", sets.join(", "))
         };
         if !grouping.is_empty() {
-            clause(
+            self.clause(
                 rendered,
                 if block.group_distinct {
                     "  GROUP BY DISTINCT "
@@ -310,7 +388,7 @@ impl Deparser<'_> {
             );
         }
         if let Some(having) = &block.having {
-            clause(
+            self.clause(
                 rendered,
                 " HAVING ",
                 &self.expression(having, scope, &block.subqueries)?,
@@ -343,7 +421,7 @@ impl Deparser<'_> {
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            clause(
+            self.clause(
                 &mut rendered,
                 "  ORDER BY ",
                 &order.join(", "),
@@ -351,7 +429,7 @@ impl Deparser<'_> {
             );
         }
         if let Some(offset) = offset {
-            clause(
+            self.clause(
                 &mut rendered,
                 " OFFSET ",
                 &self.expression(offset, scope, subqueries)?,
@@ -361,14 +439,14 @@ impl Deparser<'_> {
         if let Some(limit) = limit {
             let limit = self.expression(limit, scope, subqueries)?;
             if with_ties {
-                clause(
+                self.clause(
                     &mut rendered,
                     " FETCH FIRST (",
                     &format!("{limit}) ROWS WITH TIES"),
                     scope.indent,
                 );
             } else {
-                clause(&mut rendered, " LIMIT ", &limit, scope.indent);
+                self.clause(&mut rendered, " LIMIT ", &limit, scope.indent);
             }
         }
         Ok(rendered)
@@ -468,9 +546,25 @@ fn cte_columns(cte: &uqa_sql::plan::CtePlan) -> Result<Vec<String>, SQLError> {
     Ok(columns)
 }
 
-fn clause(rendered: &mut String, keyword: &str, body: &str, indent: usize) {
-    rendered.push('\n');
-    rendered.push_str(&" ".repeat(indent));
-    rendered.push_str(keyword);
-    rendered.push_str(body);
+impl Deparser<'_> {
+    /// `appendContextKeyword`: a clause starts a new line indented by the keyword's column, or follows on the same line without `PRETTYFLAG_INDENT`.
+    pub fn clause(&self, rendered: &mut String, keyword: &str, body: &str, indent: usize) {
+        if self.indent {
+            rendered.push('\n');
+            rendered.push_str(&" ".repeat(indent));
+            rendered.push_str(keyword);
+        } else {
+            rendered.push(' ');
+            rendered.push_str(keyword.trim_start());
+        }
+        rendered.push_str(body);
+    }
+}
+
+/// Whether a query's own range table has entries: its `FROM` items, the members of a set operation, or a `VALUES` list.
+fn root_has_range_table(root: &RelationalPlan) -> bool {
+    match root {
+        RelationalPlan::QueryBlock(block) => block.from.is_some(),
+        RelationalPlan::SetOp { .. } | RelationalPlan::Values { .. } => true,
+    }
 }

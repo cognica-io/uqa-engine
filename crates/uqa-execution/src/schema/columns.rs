@@ -115,4 +115,6 @@ pub mod addition;
 
 pub mod alteration;
 
+pub mod deletion;
+
 pub mod removal;

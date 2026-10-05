@@ -17,15 +17,9 @@ impl SequenceRemovalInputs for Engine {
 impl Engine {
     pub(crate) fn sequence_removal_context(&self) -> SequenceRemovalContext<'_> {
         SequenceRemovalContext {
-            locks: self,
-            names: self,
-            relations: self,
             publication: self,
             privileges: self.sequence_privilege_inquiry(),
             dependencies: self.sequence_dependency_context(),
-            routines: self.routine_removal_context(),
-            views: self.view_removal_context(),
-            events: self.event_lifecycle_context(),
         }
     }
     pub fn drop_sequence(&self, name: &str) -> Result<bool, String> {
@@ -60,15 +54,27 @@ impl SequenceRemovalPublication for Engine {
         let removed = if temporary {
             self.durable.sequences.read().contains_key(&relation)
         } else if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog
+            let removed = catalog
                 .drop_sequence_row(name)
-                .map_err(|err| format!("persist sequence catalog: {err}"))?
+                .map_err(|err| format!("persist sequence catalog: {err}"))?;
+            if removed {
+                uqa_execution::catalog::sequence::catalog_oids::forget(
+                    catalog.as_ref(),
+                    &object_id,
+                )
+                .map_err(|err| format!("persist sequence catalog OID: {err}"))?;
+            }
+            removed
         } else {
             self.durable.sequences.read().contains_key(&relation)
         };
         if removed {
             self.durable.sequences.write().remove(&relation);
             self.durable.sequence_object_ids.write().remove(&relation);
+            self.durable
+                .sequence_catalog_oids
+                .write()
+                .remove(&object_id);
             self.durable.sequence_persistence.write().remove(&relation);
             self.durable.sequence_security.write().remove(&relation);
             let mut session = self.session.state.write();

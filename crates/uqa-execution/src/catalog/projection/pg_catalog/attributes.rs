@@ -13,7 +13,6 @@ use uqa_sql::{ResultRow, SQLError};
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 
-use super::super::expression_text::default_expr_text;
 use super::super::helpers::information_schema_types::array_dimension_count;
 use super::super::helpers::oids::{split_schema_name, stable_oid};
 use super::super::helpers::rows::{
@@ -25,7 +24,6 @@ use super::super::helpers::type_metadata::{
 };
 use super::super::helpers::views::view_columns_for;
 use super::table_relation_oid_from;
-use uqa_sql::expr::value_to_text;
 
 #[expect(
     clippy::too_many_lines,
@@ -173,7 +171,7 @@ pub fn build_pg_attribute(
         }
     }
     for (_, _, object_id, _) in catalog.sequences()? {
-        let relid = crate::catalog::projection::sequence_relation_oid(object_id);
+        let relid = catalog.sequence_catalog_oid(&object_id);
         for (idx, column) in sequence_attribute_columns().iter().enumerate() {
             out.push(pg_attribute_row(
                 relid,
@@ -182,6 +180,7 @@ pub fn build_pg_attribute(
             ));
         }
     }
+    out.extend(super::composites::composite_attribute_rows(catalog));
     out.extend(index_attributes(catalog, resolution)?);
     out.extend(super::super::ag_catalog::age_pg_attribute_rows(catalog)?);
     Ok(out)
@@ -196,14 +195,19 @@ fn sequence_attribute_columns() -> [SQLColumnDef; 3] {
 }
 
 fn sequence_attribute_column(name: &str, ty: ColumnType) -> SQLColumnDef {
+    attribute_column(name, ty, true)
+}
+
+/// A column that has only a name, a type and its nullability, as the attributes of sequences and composite types have.
+pub(super) fn attribute_column(name: &str, ty: ColumnType, not_null: bool) -> SQLColumnDef {
     SQLColumnDef {
         name: name.into(),
         ty,
         object_id: None,
         missing_value: None,
         primary_key: false,
-        not_null: true,
-        not_null_explicit: true,
+        not_null,
+        not_null_explicit: not_null,
         not_null_name: None,
         not_null_identity: None,
         not_null_validated: true,
@@ -221,6 +225,7 @@ fn sequence_attribute_column(name: &str, ty: ColumnType) -> SQLColumnDef {
         check_is_local: true,
         check_object_id: None,
         check_catalog_oid: None,
+        default_catalog_oid: None,
         references: None,
     }
 }
@@ -236,7 +241,7 @@ pub fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> ResultRo
         ("attrelid", int_value(relid)),
         ("attname", str_value(col.name.clone())),
         ("atttypid", int_value(pg_type_oid(&col.ty))),
-        ("attstattarget", int_value(-1)),
+        ("attstattarget", Value::Null),
         ("attlen", int_value(pg_type_len(&col.ty))),
         ("attnum", int_value(attnum)),
         ("attndims", int_value(array_dimension_count(&col.ty))),
@@ -303,11 +308,19 @@ pub fn build_pg_attrdef(
             .table(resolution, &table_name)?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?
             .columns;
-        append_pg_attrdef_rows(&mut out, &table_name, &table, relid, columns)?;
+        append_pg_attrdef_rows(
+            (catalog, resolution),
+            &mut out,
+            &table_name,
+            &table,
+            relid,
+            columns,
+        )?;
     }
     for (table_name, table) in catalog.foreign_tables() {
         let (_, local_name) = split_schema_name(&table_name)?;
         append_pg_attrdef_rows(
+            (catalog, resolution),
             &mut out,
             &table_name,
             &local_name,
@@ -318,7 +331,16 @@ pub fn build_pg_attrdef(
     Ok(out)
 }
 
+/// The `pg_attrdef` OID of a column's default or generation expression: the recorded one, or for an expression set before OIDs were recorded, the one derived from the qualified names of its table and column.
+pub fn attrdef_catalog_oid(table_name: &str, column: &SQLColumnDef) -> i64 {
+    column
+        .default_catalog_oid
+        .unwrap_or_else(|| stable_oid("attrdef", &format!("{table_name}.{}", column.name)))
+}
+
+/// `adbin` holds the expression as `pg_get_expr` prints it for the relation.
 fn append_pg_attrdef_rows(
+    (catalog, resolution): (&CatalogReadView, &RelationNameResolution),
     out: &mut Vec<ResultRow>,
     table_name: &str,
     local_table_name: &str,
@@ -335,16 +357,18 @@ fn append_pg_attrdef_rows(
         }
         let default = if legacy_auto_increment {
             format!("nextval('{}_{}_seq')", local_table_name, col.name)
-        } else if let Some(generated) = &col.generated {
-            super::super::expression_text::schema_expr_text(&generated.expression)
+        } else if let Some(expression) = col
+            .generated
+            .as_ref()
+            .map(|generated| generated.expression.as_ref())
+            .or(col.default.as_ref())
+        {
+            super::super::view_definition::stored_expression_text(catalog, resolution, expression)?
         } else {
-            value_to_text(&default_expr_text(col.default.as_ref()))
+            continue;
         };
         out.push(row([
-            (
-                "oid",
-                int_value(stable_oid("attrdef", &format!("{table_name}.{}", col.name))),
-            ),
+            ("oid", int_value(attrdef_catalog_oid(table_name, col))),
             ("adrelid", int_value(relid)),
             (
                 "adnum",

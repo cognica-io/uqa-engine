@@ -37,6 +37,7 @@ impl Engine {
     pub(crate) fn constraint_alter_context(&self) -> ConstraintAlterContext<'_> {
         let runtime = self.query_runtime_view();
         ConstraintAlterContext {
+            deletion: self,
             catalog: self,
             relations: self,
             access: self,

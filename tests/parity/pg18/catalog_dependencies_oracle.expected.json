@@ -1,0 +1,4166 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE dep_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE dep_user",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA other",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE other.feeling AS ENUM ('sad', 'ok', 'happy')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN other.posint2 AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN good_mood AS other.feeling CHECK (VALUE <> 'sad')",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE lt (id integer PRIMARY KEY, m other.feeling DEFAULT 'ok', ms other.feeling[], p other.posint2, g good_mood, gs good_mood[], c other.feeling CONSTRAINT lt_c_check CHECK (c <> 'happy'), gen integer GENERATED ALWAYS AS (CASE WHEN m = 'ok' THEN 1 ELSE 0 END) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE INDEX lt_partial_idx ON lt (id) WHERE m <> 'sad'",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE INDEX lt_cast_idx ON lt ((p::integer))",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW lv AS SELECT id, m, m = 'ok' AS is_ok, 'happy'::other.feeling AS top, p::integer AS p_int, NULL::other.posint2 AS np FROM lt WHERE m <> 'sad'",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION lt_next(x other.feeling) RETURNS other.feeling LANGUAGE sql AS $$ SELECT enum_larger(x, 'ok') $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION lt_double(x other.posint2) RETURNS other.posint2 LANGUAGE sql IMMUTABLE AS $$ SELECT (x * 2)::other.posint2 $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION lt_atomic(x other.feeling) RETURNS boolean LANGUAGE sql RETURN x = 'ok'::other.feeling",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION lt_count() RETURNS bigint LANGUAGE sql BEGIN ATOMIC SELECT count(*) FROM lt WHERE p > 0; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE lt_seq OWNED BY lt.id",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE lt_child (extra integer) INHERITS (lt)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE other.feeling OWNER TO dep_owner",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER DOMAIN other.posint2 OWNER TO dep_owner",
+      "command_tags": [
+        "ALTER DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE other.feeling TO dep_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT USAGE ON SCHEMA other TO dep_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT SELECT (id) ON lt TO dep_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT classid::regclass AS catalog, pg_describe_object(classid, objid, objsubid) AS object, refclassid::regclass AS referenced_catalog, pg_describe_object(refclassid, refobjid, refobjsubid) AS referenced, deptype FROM pg_depend WHERE objid >= 16384 AND (refobjid >= 16384 OR refclassid = 'pg_namespace'::regclass) AND pg_describe_object(classid, objid, objsubid) NOT LIKE '%pg_toast%' AND pg_describe_object(classid, objid, objsubid) NOT LIKE 'trigger RI\\_ConstraintTrigger%' ORDER BY pg_describe_object(classid, objid, objsubid)::bytea, pg_describe_object(refclassid, refobjid, refobjsubid)::bytea, deptype",
+      "command_tags": [
+        "SELECT 77"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "catalog",
+            "object",
+            "referenced_catalog",
+            "referenced",
+            "deptype"
+          ],
+          "type_oids": [
+            2205,
+            25,
+            2205,
+            25,
+            18
+          ],
+          "rows": [
+            [
+              "pg_class",
+              "column c of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column c of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column g of table lt",
+              "pg_type",
+              "type good_mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column g of table lt_child",
+              "pg_type",
+              "type good_mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column gs of table lt",
+              "pg_type",
+              "type good_mood[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column gs of table lt_child",
+              "pg_type",
+              "type good_mood[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of view lv",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column ms of table lt",
+              "pg_type",
+              "type other.feeling[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column ms of table lt_child",
+              "pg_type",
+              "type other.feeling[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column np of view lv",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column p of table lt",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column p of table lt_child",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column top of view lv",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint good_mood_check",
+              "pg_type",
+              "type good_mood",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint good_mood_check",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_class",
+              "column c of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_class",
+              "column c of table lt",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_class",
+              "column c of table lt_child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_class",
+              "column c of table lt_child",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_id_not_null on table lt",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_id_not_null on table lt_child",
+              "pg_class",
+              "column id of table lt_child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_pkey on table lt",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint posint2_check",
+              "pg_type",
+              "type other.posint2",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_class",
+              "column gen of table lt",
+              "i"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_class",
+              "column m of table lt",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_class",
+              "column gen of table lt_child",
+              "i"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_class",
+              "column m of table lt_child",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt",
+              "pg_class",
+              "column m of table lt",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt_child",
+              "pg_class",
+              "column m of table lt_child",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_count()",
+              "pg_class",
+              "column p of table lt",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_count()",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_double(other.posint2)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_double(other.posint2)",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_next(other.feeling)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_next(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "index lt_cast_idx",
+              "pg_class",
+              "column p of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_cast_idx",
+              "pg_class",
+              "table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_class",
+              "column m of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "index lt_pkey",
+              "pg_constraint",
+              "constraint lt_pkey on table lt",
+              "i"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "column id of table lt",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "column m of table lt",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "column p of table lt",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "view lv",
+              "i"
+            ],
+            [
+              "pg_class",
+              "sequence lt_seq",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "sequence lt_seq",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt_child",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt_child",
+              "pg_class",
+              "table lt",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood[]",
+              "pg_type",
+              "type good_mood",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt",
+              "pg_class",
+              "table lt",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt[]",
+              "pg_type",
+              "type lt",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt_child",
+              "pg_class",
+              "table lt_child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt_child[]",
+              "pg_type",
+              "type lt_child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lv",
+              "pg_class",
+              "view lv",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lv[]",
+              "pg_type",
+              "type lv",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type other.feeling",
+              "pg_namespace",
+              "schema other",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type other.feeling[]",
+              "pg_type",
+              "type other.feeling",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type other.posint2",
+              "pg_namespace",
+              "schema other",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type other.posint2[]",
+              "pg_type",
+              "type other.posint2",
+              "i"
+            ],
+            [
+              "pg_class",
+              "view lv",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT classid::regclass AS catalog, pg_describe_object(classid, objid, objsubid) AS object, pg_describe_object(refclassid, refobjid, 0) AS role, deptype FROM pg_shdepend WHERE dbid IN (0, (SELECT oid FROM pg_database WHERE datname = current_database())) AND refclassid = 'pg_authid'::regclass AND pg_describe_object(refclassid, refobjid, 0) LIKE 'role dep\\_%' ORDER BY pg_describe_object(classid, objid, objsubid)::bytea, pg_describe_object(refclassid, refobjid, 0)::bytea, deptype",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "catalog",
+            "object",
+            "role",
+            "deptype"
+          ],
+          "type_oids": [
+            2205,
+            25,
+            25,
+            18
+          ],
+          "rows": [
+            [
+              "pg_class",
+              "column id of table lt",
+              "role dep_user",
+              "a"
+            ],
+            [
+              "pg_namespace",
+              "schema other",
+              "role dep_user",
+              "a"
+            ],
+            [
+              "pg_type",
+              "type other.feeling",
+              "role dep_owner",
+              "o"
+            ],
+            [
+              "pg_type",
+              "type other.feeling",
+              "role dep_user",
+              "a"
+            ],
+            [
+              "pg_type",
+              "type other.posint2",
+              "role dep_owner",
+              "o"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE other.feeling",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type other.feeling because other objects depend on it",
+        "detail": "column ms of table lt depends on type other.feeling[]\ncolumn ms of table lt_child depends on type other.feeling[]\ntype good_mood depends on type other.feeling\ncolumn gs of table lt depends on type good_mood[]\ncolumn gs of table lt_child depends on type good_mood[]\ncolumn g of table lt depends on type good_mood\ncolumn g of table lt_child depends on type good_mood\ncolumn c of table lt depends on type other.feeling\ncolumn m of table lt depends on type other.feeling\ncolumn gen of table lt depends on type other.feeling\nview lv depends on type other.feeling\nfunction lt_next(other.feeling) depends on type other.feeling\nfunction lt_atomic(other.feeling) depends on type other.feeling\ncolumn c of table lt_child depends on type other.feeling\ncolumn m of table lt_child depends on type other.feeling\ncolumn gen of table lt_child depends on type other.feeling",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN other.posint2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type other.posint2 because other objects depend on it",
+        "detail": "column p of table lt depends on type other.posint2\nfunction lt_count() depends on column p of table lt\nview lv depends on type other.posint2\nfunction lt_double(other.posint2) depends on type other.posint2\ncolumn p of table lt_child depends on type other.posint2",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN good_mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type good_mood because other objects depend on it",
+        "detail": "column gs of table lt depends on type good_mood[]\ncolumn gs of table lt_child depends on type good_mood[]\ncolumn g of table lt depends on type good_mood\ncolumn g of table lt_child depends on type good_mood",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP ROLE dep_owner",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "role \"dep_owner\" cannot be dropped because some objects depend on it",
+        "detail": "owner of type other.feeling\nowner of type other.posint2",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP ROLE dep_user",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "role \"dep_user\" cannot be dropped because some objects depend on it",
+        "detail": "privileges for schema other\nprivileges for type other.feeling\nprivileges for column id of table lt",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE lt",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type lt because table lt requires it",
+        "detail": null,
+        "hint": "You can drop table lt instead."
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE other._feeling",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type other.feeling[] because type other.feeling requires it",
+        "detail": null,
+        "hint": "You can drop type other.feeling instead."
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TYPE mood AS ENUM ('sad', 'ok')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN pos AS integer DEFAULT 1 CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE ids",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION twice(x integer DEFAULT 2) RETURNS integer LANGUAGE sql IMMUTABLE RETURN x * 2",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE parent (id integer DEFAULT nextval('ids') PRIMARY KEY, label text UNIQUE, score integer DEFAULT twice(1), feeling mood)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE child (id integer PRIMARY KEY, parent_id integer REFERENCES parent (id), amount pos)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE measure (at date NOT NULL, value integer) PARTITION BY RANGE (at)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE measure_2026 PARTITION OF measure FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE INDEX measure_at_idx ON measure (at)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER parent_audit BEFORE INSERT ON parent FOR EACH ROW WHEN (NEW.feeling <> 'sad') EXECUTE FUNCTION audit()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE parent_notify AS ON UPDATE TO parent DO ALSO NOTIFY parent_changed",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE audit_log (at date, note text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE parent_log AS ON INSERT TO parent DO ALSO INSERT INTO audit_log (note) VALUES (new.label)",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW doubled AS SELECT id, twice(score) AS twice_score FROM parent",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE MATERIALIZED VIEW moods AS SELECT feeling FROM parent",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE typed_default (m mood DEFAULT 'ok', p pos)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT classid::regclass AS catalog, pg_describe_object(classid, objid, objsubid) AS object, refclassid::regclass AS referenced_catalog, pg_describe_object(refclassid, refobjid, refobjsubid) AS referenced, deptype FROM pg_depend WHERE objid >= 16384 AND (refobjid >= 16384 OR refclassid = 'pg_namespace'::regclass) AND pg_describe_object(classid, objid, objsubid) NOT LIKE '%pg_toast%' AND pg_describe_object(classid, objid, objsubid) NOT LIKE 'trigger RI\\_ConstraintTrigger%' ORDER BY pg_describe_object(classid, objid, objsubid)::bytea, pg_describe_object(refclassid, refobjid, refobjsubid)::bytea, deptype",
+      "command_tags": [
+        "SELECT 153"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "catalog",
+            "object",
+            "referenced_catalog",
+            "referenced",
+            "deptype"
+          ],
+          "type_oids": [
+            2205,
+            25,
+            2205,
+            25,
+            18
+          ],
+          "rows": [
+            [
+              "pg_class",
+              "column amount of table child",
+              "pg_type",
+              "type pos",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column at of table measure",
+              "pg_class",
+              "table measure",
+              "i"
+            ],
+            [
+              "pg_class",
+              "column c of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column c of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column feeling of materialized view moods",
+              "pg_type",
+              "type mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column feeling of table parent",
+              "pg_type",
+              "type mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column g of table lt",
+              "pg_type",
+              "type good_mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column g of table lt_child",
+              "pg_type",
+              "type good_mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column gs of table lt",
+              "pg_type",
+              "type good_mood[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column gs of table lt_child",
+              "pg_type",
+              "type good_mood[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of table typed_default",
+              "pg_type",
+              "type mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of view lv",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column ms of table lt",
+              "pg_type",
+              "type other.feeling[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column ms of table lt_child",
+              "pg_type",
+              "type other.feeling[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column np of view lv",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column p of table lt",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column p of table lt_child",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column p of table typed_default",
+              "pg_type",
+              "type pos",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column top of view lv",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_id_not_null on table child",
+              "pg_class",
+              "column id of table child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_parent_id_fkey on table child",
+              "pg_class",
+              "column id of table parent",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_parent_id_fkey on table child",
+              "pg_class",
+              "column parent_id of table child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_parent_id_fkey on table child",
+              "pg_class",
+              "index parent_pkey",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_pkey on table child",
+              "pg_class",
+              "column id of table child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint good_mood_check",
+              "pg_type",
+              "type good_mood",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint good_mood_check",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_class",
+              "column c of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_class",
+              "column c of table lt",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_class",
+              "column c of table lt_child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_class",
+              "column c of table lt_child",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_id_not_null on table lt",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_id_not_null on table lt_child",
+              "pg_class",
+              "column id of table lt_child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_pkey on table lt",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint measure_at_not_null on table measure",
+              "pg_class",
+              "column at of table measure",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint measure_at_not_null on table measure_2026",
+              "pg_class",
+              "column at of table measure_2026",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint parent_id_not_null on table parent",
+              "pg_class",
+              "column id of table parent",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint parent_label_key on table parent",
+              "pg_class",
+              "column label of table parent",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint parent_pkey on table parent",
+              "pg_class",
+              "column id of table parent",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint pos_check",
+              "pg_type",
+              "type pos",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint posint2_check",
+              "pg_type",
+              "type other.posint2",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_class",
+              "column gen of table lt",
+              "i"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_class",
+              "column m of table lt",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_class",
+              "column gen of table lt_child",
+              "i"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_class",
+              "column m of table lt_child",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column id of table parent",
+              "pg_class",
+              "column id of table parent",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column id of table parent",
+              "pg_class",
+              "sequence ids",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt",
+              "pg_class",
+              "column m of table lt",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt_child",
+              "pg_class",
+              "column m of table lt_child",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table typed_default",
+              "pg_class",
+              "column m of table typed_default",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table typed_default",
+              "pg_type",
+              "type mood",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column score of table parent",
+              "pg_class",
+              "column score of table parent",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column score of table parent",
+              "pg_proc",
+              "function twice(integer)",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function audit()",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_count()",
+              "pg_class",
+              "column p of table lt",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_count()",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_double(other.posint2)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_double(other.posint2)",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_next(other.feeling)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_next(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function twice(integer)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "index child_pkey",
+              "pg_constraint",
+              "constraint child_pkey on table child",
+              "i"
+            ],
+            [
+              "pg_class",
+              "index lt_cast_idx",
+              "pg_class",
+              "column p of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_cast_idx",
+              "pg_class",
+              "table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_class",
+              "column m of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "index lt_pkey",
+              "pg_constraint",
+              "constraint lt_pkey on table lt",
+              "i"
+            ],
+            [
+              "pg_class",
+              "index measure_2026_at_idx",
+              "pg_class",
+              "column at of table measure_2026",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index measure_2026_at_idx",
+              "pg_class",
+              "index measure_at_idx",
+              "P"
+            ],
+            [
+              "pg_class",
+              "index measure_2026_at_idx",
+              "pg_class",
+              "table measure_2026",
+              "S"
+            ],
+            [
+              "pg_class",
+              "index measure_at_idx",
+              "pg_class",
+              "column at of table measure",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index parent_label_key",
+              "pg_constraint",
+              "constraint parent_label_key on table parent",
+              "i"
+            ],
+            [
+              "pg_class",
+              "index parent_pkey",
+              "pg_constraint",
+              "constraint parent_pkey on table parent",
+              "i"
+            ],
+            [
+              "pg_class",
+              "materialized view moods",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on materialized view moods",
+              "pg_class",
+              "column feeling of table parent",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on materialized view moods",
+              "pg_class",
+              "materialized view moods",
+              "i"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view doubled",
+              "pg_class",
+              "column id of table parent",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view doubled",
+              "pg_class",
+              "column score of table parent",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view doubled",
+              "pg_proc",
+              "function twice(integer)",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view doubled",
+              "pg_class",
+              "view doubled",
+              "i"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "column id of table lt",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "column m of table lt",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "column p of table lt",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "view lv",
+              "i"
+            ],
+            [
+              "pg_rewrite",
+              "rule parent_log on table parent",
+              "pg_class",
+              "column label of table parent",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule parent_log on table parent",
+              "pg_class",
+              "column note of table audit_log",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule parent_log on table parent",
+              "pg_class",
+              "table parent",
+              "a"
+            ],
+            [
+              "pg_rewrite",
+              "rule parent_notify on table parent",
+              "pg_class",
+              "table parent",
+              "a"
+            ],
+            [
+              "pg_class",
+              "sequence ids",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "sequence lt_seq",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "sequence lt_seq",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table audit_log",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table child",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt_child",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt_child",
+              "pg_class",
+              "table lt",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table measure",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table measure_2026",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table measure_2026",
+              "pg_class",
+              "table measure",
+              "a"
+            ],
+            [
+              "pg_class",
+              "table parent",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table typed_default",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_trigger",
+              "trigger parent_audit on table parent",
+              "pg_class",
+              "column feeling of table parent",
+              "n"
+            ],
+            [
+              "pg_trigger",
+              "trigger parent_audit on table parent",
+              "pg_proc",
+              "function audit()",
+              "n"
+            ],
+            [
+              "pg_trigger",
+              "trigger parent_audit on table parent",
+              "pg_class",
+              "table parent",
+              "a"
+            ],
+            [
+              "pg_trigger",
+              "trigger parent_audit on table parent",
+              "pg_type",
+              "type mood",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type audit_log",
+              "pg_class",
+              "table audit_log",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type audit_log[]",
+              "pg_type",
+              "type audit_log",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type child",
+              "pg_class",
+              "table child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type child[]",
+              "pg_type",
+              "type child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type doubled",
+              "pg_class",
+              "view doubled",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type doubled[]",
+              "pg_type",
+              "type doubled",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type good_mood",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood[]",
+              "pg_type",
+              "type good_mood",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt",
+              "pg_class",
+              "table lt",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt[]",
+              "pg_type",
+              "type lt",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt_child",
+              "pg_class",
+              "table lt_child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt_child[]",
+              "pg_type",
+              "type lt_child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lv",
+              "pg_class",
+              "view lv",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lv[]",
+              "pg_type",
+              "type lv",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type measure",
+              "pg_class",
+              "table measure",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type measure[]",
+              "pg_type",
+              "type measure",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type measure_2026",
+              "pg_class",
+              "table measure_2026",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type measure_2026[]",
+              "pg_type",
+              "type measure_2026",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type mood",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type mood[]",
+              "pg_type",
+              "type mood",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type moods",
+              "pg_class",
+              "materialized view moods",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type moods[]",
+              "pg_type",
+              "type moods",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type other.feeling",
+              "pg_namespace",
+              "schema other",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type other.feeling[]",
+              "pg_type",
+              "type other.feeling",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type other.posint2",
+              "pg_namespace",
+              "schema other",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type other.posint2[]",
+              "pg_type",
+              "type other.posint2",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type parent",
+              "pg_class",
+              "table parent",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type parent[]",
+              "pg_type",
+              "type parent",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type pos",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type pos[]",
+              "pg_type",
+              "type pos",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type typed_default",
+              "pg_class",
+              "table typed_default",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type typed_default[]",
+              "pg_type",
+              "type typed_default",
+              "i"
+            ],
+            [
+              "pg_class",
+              "view doubled",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "view lv",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN pos",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type pos because other objects depend on it",
+        "detail": "column amount of table child depends on type pos\ncolumn p of table typed_default depends on type pos",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_describe_object(0, 0, 0) IS NULL AS pinned_placeholder, pg_describe_object('pg_class'::regclass, 'pg_class'::regclass, 0) AS catalog, pg_describe_object('pg_class'::regclass, 'pg_class'::regclass, 1) AS catalog_column, pg_describe_object('pg_class'::regclass, 'pg_class'::regclass, 999) IS NULL AS missing_column, pg_describe_object('pg_namespace'::regclass, 'pg_catalog'::regnamespace, 0) AS schema, pg_describe_object('pg_type'::regclass, 'integer'::regtype, 0) AS type, pg_describe_object('pg_proc'::regclass, 'pg_get_ruledef(oid)'::regprocedure, 0) AS function, pg_describe_object('pg_language'::regclass, 14, 0) AS language, pg_describe_object('pg_class'::regclass, 4000000000::oid, 0) IS NULL AS missing_relation",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pinned_placeholder",
+            "catalog",
+            "catalog_column",
+            "missing_column",
+            "schema",
+            "type",
+            "function",
+            "language",
+            "missing_relation"
+          ],
+          "type_oids": [
+            16,
+            25,
+            25,
+            16,
+            25,
+            25,
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "table pg_class",
+              "column oid of table pg_class",
+              "t",
+              "schema pg_catalog",
+              "type integer",
+              "function pg_get_ruledef(oid)",
+              "language sql",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_describe_object(1259, 'lt'::regclass, 2) AS column_name, pg_describe_object('pg_attrdef'::regclass, (SELECT oid FROM pg_attrdef WHERE adrelid = 'lt'::regclass AND adnum = 2), 0) AS column_default",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column_name",
+            "column_default"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "column m of table lt",
+              "default value for column m of table lt"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_describe_object(12345, 1, 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "unsupported object class: 12345",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_describe_object(NULL, 1, 0) IS NULL AS null_class",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "null_class"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE mood CASCADE",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT attname FROM pg_attribute WHERE attrelid = 'typed_default'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "p"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS moods_views FROM pg_class WHERE relname = 'moods'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "moods_views"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT classid::regclass AS catalog, pg_describe_object(classid, objid, objsubid) AS object, refclassid::regclass AS referenced_catalog, pg_describe_object(refclassid, refobjid, refobjsubid) AS referenced, deptype FROM pg_depend WHERE objid >= 16384 AND (refobjid >= 16384 OR refclassid = 'pg_namespace'::regclass) AND pg_describe_object(classid, objid, objsubid) NOT LIKE '%pg_toast%' AND pg_describe_object(classid, objid, objsubid) NOT LIKE 'trigger RI\\_ConstraintTrigger%' ORDER BY pg_describe_object(classid, objid, objsubid)::bytea, pg_describe_object(refclassid, refobjid, refobjsubid)::bytea, deptype",
+      "command_tags": [
+        "SELECT 137"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "catalog",
+            "object",
+            "referenced_catalog",
+            "referenced",
+            "deptype"
+          ],
+          "type_oids": [
+            2205,
+            25,
+            2205,
+            25,
+            18
+          ],
+          "rows": [
+            [
+              "pg_class",
+              "column amount of table child",
+              "pg_type",
+              "type pos",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column at of table measure",
+              "pg_class",
+              "table measure",
+              "i"
+            ],
+            [
+              "pg_class",
+              "column c of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column c of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column g of table lt",
+              "pg_type",
+              "type good_mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column g of table lt_child",
+              "pg_type",
+              "type good_mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column gs of table lt",
+              "pg_type",
+              "type good_mood[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column gs of table lt_child",
+              "pg_type",
+              "type good_mood[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of view lv",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column ms of table lt",
+              "pg_type",
+              "type other.feeling[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column ms of table lt_child",
+              "pg_type",
+              "type other.feeling[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column np of view lv",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column p of table lt",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column p of table lt_child",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column p of table typed_default",
+              "pg_type",
+              "type pos",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column top of view lv",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_id_not_null on table child",
+              "pg_class",
+              "column id of table child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_parent_id_fkey on table child",
+              "pg_class",
+              "column id of table parent",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_parent_id_fkey on table child",
+              "pg_class",
+              "column parent_id of table child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_parent_id_fkey on table child",
+              "pg_class",
+              "index parent_pkey",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint child_pkey on table child",
+              "pg_class",
+              "column id of table child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint good_mood_check",
+              "pg_type",
+              "type good_mood",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint good_mood_check",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_class",
+              "column c of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_class",
+              "column c of table lt",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_class",
+              "column c of table lt_child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_class",
+              "column c of table lt_child",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_id_not_null on table lt",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_id_not_null on table lt_child",
+              "pg_class",
+              "column id of table lt_child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_pkey on table lt",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint measure_at_not_null on table measure",
+              "pg_class",
+              "column at of table measure",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint measure_at_not_null on table measure_2026",
+              "pg_class",
+              "column at of table measure_2026",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint parent_id_not_null on table parent",
+              "pg_class",
+              "column id of table parent",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint parent_label_key on table parent",
+              "pg_class",
+              "column label of table parent",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint parent_pkey on table parent",
+              "pg_class",
+              "column id of table parent",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint pos_check",
+              "pg_type",
+              "type pos",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint posint2_check",
+              "pg_type",
+              "type other.posint2",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_class",
+              "column gen of table lt",
+              "i"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_class",
+              "column m of table lt",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_class",
+              "column gen of table lt_child",
+              "i"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_class",
+              "column m of table lt_child",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column id of table parent",
+              "pg_class",
+              "column id of table parent",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column id of table parent",
+              "pg_class",
+              "sequence ids",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt",
+              "pg_class",
+              "column m of table lt",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt_child",
+              "pg_class",
+              "column m of table lt_child",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column score of table parent",
+              "pg_class",
+              "column score of table parent",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column score of table parent",
+              "pg_proc",
+              "function twice(integer)",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function audit()",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_count()",
+              "pg_class",
+              "column p of table lt",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_count()",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_double(other.posint2)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_double(other.posint2)",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_next(other.feeling)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_next(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function twice(integer)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "index child_pkey",
+              "pg_constraint",
+              "constraint child_pkey on table child",
+              "i"
+            ],
+            [
+              "pg_class",
+              "index lt_cast_idx",
+              "pg_class",
+              "column p of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_cast_idx",
+              "pg_class",
+              "table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_class",
+              "column m of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "index lt_pkey",
+              "pg_constraint",
+              "constraint lt_pkey on table lt",
+              "i"
+            ],
+            [
+              "pg_class",
+              "index measure_2026_at_idx",
+              "pg_class",
+              "column at of table measure_2026",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index measure_2026_at_idx",
+              "pg_class",
+              "index measure_at_idx",
+              "P"
+            ],
+            [
+              "pg_class",
+              "index measure_2026_at_idx",
+              "pg_class",
+              "table measure_2026",
+              "S"
+            ],
+            [
+              "pg_class",
+              "index measure_at_idx",
+              "pg_class",
+              "column at of table measure",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index parent_label_key",
+              "pg_constraint",
+              "constraint parent_label_key on table parent",
+              "i"
+            ],
+            [
+              "pg_class",
+              "index parent_pkey",
+              "pg_constraint",
+              "constraint parent_pkey on table parent",
+              "i"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view doubled",
+              "pg_class",
+              "column id of table parent",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view doubled",
+              "pg_class",
+              "column score of table parent",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view doubled",
+              "pg_proc",
+              "function twice(integer)",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view doubled",
+              "pg_class",
+              "view doubled",
+              "i"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "column id of table lt",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "column m of table lt",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "column p of table lt",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_type",
+              "type other.posint2",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule _RETURN on view lv",
+              "pg_class",
+              "view lv",
+              "i"
+            ],
+            [
+              "pg_rewrite",
+              "rule parent_log on table parent",
+              "pg_class",
+              "column label of table parent",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule parent_log on table parent",
+              "pg_class",
+              "column note of table audit_log",
+              "n"
+            ],
+            [
+              "pg_rewrite",
+              "rule parent_log on table parent",
+              "pg_class",
+              "table parent",
+              "a"
+            ],
+            [
+              "pg_rewrite",
+              "rule parent_notify on table parent",
+              "pg_class",
+              "table parent",
+              "a"
+            ],
+            [
+              "pg_class",
+              "sequence ids",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "sequence lt_seq",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "sequence lt_seq",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table audit_log",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table child",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt_child",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt_child",
+              "pg_class",
+              "table lt",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table measure",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table measure_2026",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table measure_2026",
+              "pg_class",
+              "table measure",
+              "a"
+            ],
+            [
+              "pg_class",
+              "table parent",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table typed_default",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type audit_log",
+              "pg_class",
+              "table audit_log",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type audit_log[]",
+              "pg_type",
+              "type audit_log",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type child",
+              "pg_class",
+              "table child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type child[]",
+              "pg_type",
+              "type child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type doubled",
+              "pg_class",
+              "view doubled",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type doubled[]",
+              "pg_type",
+              "type doubled",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type good_mood",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood[]",
+              "pg_type",
+              "type good_mood",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt",
+              "pg_class",
+              "table lt",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt[]",
+              "pg_type",
+              "type lt",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt_child",
+              "pg_class",
+              "table lt_child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt_child[]",
+              "pg_type",
+              "type lt_child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lv",
+              "pg_class",
+              "view lv",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lv[]",
+              "pg_type",
+              "type lv",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type measure",
+              "pg_class",
+              "table measure",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type measure[]",
+              "pg_type",
+              "type measure",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type measure_2026",
+              "pg_class",
+              "table measure_2026",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type measure_2026[]",
+              "pg_type",
+              "type measure_2026",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type other.feeling",
+              "pg_namespace",
+              "schema other",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type other.feeling[]",
+              "pg_type",
+              "type other.feeling",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type other.posint2",
+              "pg_namespace",
+              "schema other",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type other.posint2[]",
+              "pg_type",
+              "type other.posint2",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type parent",
+              "pg_class",
+              "table parent",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type parent[]",
+              "pg_type",
+              "type parent",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type pos",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type pos[]",
+              "pg_type",
+              "type pos",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type typed_default",
+              "pg_class",
+              "table typed_default",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type typed_default[]",
+              "pg_type",
+              "type typed_default",
+              "i"
+            ],
+            [
+              "pg_class",
+              "view doubled",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "view lv",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE parent CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE typed_default, audit_log, child, measure",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION audit(), twice(integer)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE ids",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN pos",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN other.posint2 CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT attname FROM pg_attribute WHERE attrelid = 'lt'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "id"
+            ],
+            [
+              "m"
+            ],
+            [
+              "ms"
+            ],
+            [
+              "g"
+            ],
+            [
+              "gs"
+            ],
+            [
+              "c"
+            ],
+            [
+              "gen"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT proname FROM pg_proc WHERE proname LIKE 'lt\\_%' ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "proname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "lt_atomic"
+            ],
+            [
+              "lt_next"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT classid::regclass AS catalog, pg_describe_object(classid, objid, objsubid) AS object, refclassid::regclass AS referenced_catalog, pg_describe_object(refclassid, refobjid, refobjsubid) AS referenced, deptype FROM pg_depend WHERE objid >= 16384 AND (refobjid >= 16384 OR refclassid = 'pg_namespace'::regclass) AND pg_describe_object(classid, objid, objsubid) NOT LIKE '%pg_toast%' AND pg_describe_object(classid, objid, objsubid) NOT LIKE 'trigger RI\\_ConstraintTrigger%' ORDER BY pg_describe_object(classid, objid, objsubid)::bytea, pg_describe_object(refclassid, refobjid, refobjsubid)::bytea, deptype",
+      "command_tags": [
+        "SELECT 54"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "catalog",
+            "object",
+            "referenced_catalog",
+            "referenced",
+            "deptype"
+          ],
+          "type_oids": [
+            2205,
+            25,
+            2205,
+            25,
+            18
+          ],
+          "rows": [
+            [
+              "pg_class",
+              "column c of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column c of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column g of table lt",
+              "pg_type",
+              "type good_mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column g of table lt_child",
+              "pg_type",
+              "type good_mood",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column gs of table lt",
+              "pg_type",
+              "type good_mood[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column gs of table lt_child",
+              "pg_type",
+              "type good_mood[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column m of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column ms of table lt",
+              "pg_type",
+              "type other.feeling[]",
+              "n"
+            ],
+            [
+              "pg_class",
+              "column ms of table lt_child",
+              "pg_type",
+              "type other.feeling[]",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint good_mood_check",
+              "pg_type",
+              "type good_mood",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint good_mood_check",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_class",
+              "column c of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_class",
+              "column c of table lt",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_class",
+              "column c of table lt_child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_class",
+              "column c of table lt_child",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_c_check on table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_id_not_null on table lt",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_id_not_null on table lt_child",
+              "pg_class",
+              "column id of table lt_child",
+              "a"
+            ],
+            [
+              "pg_constraint",
+              "constraint lt_pkey on table lt",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_class",
+              "column gen of table lt",
+              "i"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_class",
+              "column m of table lt",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_class",
+              "column gen of table lt_child",
+              "i"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_class",
+              "column m of table lt_child",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column gen of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt",
+              "pg_class",
+              "column m of table lt",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt_child",
+              "pg_class",
+              "column m of table lt_child",
+              "a"
+            ],
+            [
+              "pg_attrdef",
+              "default value for column m of table lt_child",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_atomic(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_next(other.feeling)",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_proc",
+              "function lt_next(other.feeling)",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_class",
+              "column m of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "index lt_partial_idx",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_class",
+              "index lt_pkey",
+              "pg_constraint",
+              "constraint lt_pkey on table lt",
+              "i"
+            ],
+            [
+              "pg_class",
+              "sequence lt_seq",
+              "pg_class",
+              "column id of table lt",
+              "a"
+            ],
+            [
+              "pg_class",
+              "sequence lt_seq",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt_child",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_class",
+              "table lt_child",
+              "pg_class",
+              "table lt",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood",
+              "pg_namespace",
+              "schema public",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood",
+              "pg_type",
+              "type other.feeling",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type good_mood[]",
+              "pg_type",
+              "type good_mood",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt",
+              "pg_class",
+              "table lt",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt[]",
+              "pg_type",
+              "type lt",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt_child",
+              "pg_class",
+              "table lt_child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type lt_child[]",
+              "pg_type",
+              "type lt_child",
+              "i"
+            ],
+            [
+              "pg_type",
+              "type other.feeling",
+              "pg_namespace",
+              "schema other",
+              "n"
+            ],
+            [
+              "pg_type",
+              "type other.feeling[]",
+              "pg_type",
+              "type other.feeling",
+              "i"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION lt_next(other.feeling), lt_atomic(other.feeling)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE lt_child",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE lt",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN good_mood",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA other CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE dep_owner",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE dep_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

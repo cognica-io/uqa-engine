@@ -90,7 +90,15 @@ pub(crate) fn read_error(error: JsonReadError) -> StorageBackendError {
         JsonReadError::InvalidJson => invalid_json("invalid persisted document JSON"),
         JsonReadError::Memory(error) => StorageBackendError::Memory(error),
         JsonReadError::Cancelled(error) => StorageBackendError::Cancelled(error),
+        error @ JsonReadError::Malformed { .. } => malformed_value(&error),
     }
+}
+
+/// A persisted document holding a malformed tagged carrier is corrupt persisted JSON with a specific reason.
+pub(crate) fn malformed_value(error: &dyn std::fmt::Display) -> StorageBackendError {
+    StorageBackendError::Serde(<serde_json::Error as serde::de::Error>::custom(format!(
+        "invalid persisted document JSON: {error}"
+    )))
 }
 
 fn other_error(message: &str) -> StorageBackendError {

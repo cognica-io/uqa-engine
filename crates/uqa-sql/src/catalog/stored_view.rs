@@ -38,6 +38,22 @@ pub struct StoredViewDefinition {
     pub materialized_column_types: Vec<Option<crate::ast::ColumnType>>,
     #[serde(default = "default_view_populated")]
     pub populated: bool,
+    /// The view's public OIDs, allocated when it was created; replacement keeps them. Views created before OIDs were recorded derive them from their identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_oids: Option<super::relation_oids::RelationCatalogOids>,
+}
+
+impl StoredViewDefinition {
+    /// The view's public OIDs: the recorded ones, or those its identity derives.
+    #[must_use]
+    pub fn relation_oids(&self) -> super::relation_oids::RelationCatalogOids {
+        self.catalog_oids.unwrap_or_else(|| {
+            super::relation_oids::RelationCatalogOids::legacy(
+                super::relation_oids::RelationOidKind::View,
+                &self.object_id,
+            )
+        })
+    }
 }
 
 use super::view::StoredViewKind;

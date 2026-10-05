@@ -234,7 +234,8 @@ pub(crate) fn value_type_with_control(
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
     let scalar = match value {
-        Value::Null | Value::Map(_) => None,
+        // A runtime enum carrier knows only its type OID; declared expression types supply the enum's identity.
+        Value::Null | Value::Map(_) | Value::Enum(_) => None,
         Value::Void => Some(ColumnType::Void),
         Value::Row(_) | Value::Record(_) => Some(ColumnType::Record),
         Value::Bool(_) => Some(ColumnType::Boolean),
@@ -360,6 +361,58 @@ pub fn common_type(left: &ColumnType, right: &ColumnType) -> Result<ColumnType, 
     })
 }
 
+/// [`select_common_input_type_with_control`] without production limits.
+pub fn select_common_input_type(
+    types: &[Option<&ColumnType>],
+) -> Result<Option<ColumnType>, SQLError> {
+    select_common_input_type_with_control(types, &ProductionControl::uncontrolled()).map(
+        |selected| {
+            selected.map(|value| {
+                value
+                    .into_uncontrolled()
+                    .expect("ordinary common type has no reservation")
+            })
+        },
+    )
+}
+
+/// `select_common_type` over typed and `unknown` (`None`) inputs: only inputs of exactly one type keep that type, which is how a domain survives; otherwise domains are reduced to their base types before the pairwise rules. `unknown` inputs alone resolve to `text`, and `None` means the known types have no common type.
+pub(super) fn select_common_input_type_with_control(
+    types: &[Option<&ColumnType>],
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
+    if let Some(Some(first)) = types.first() {
+        if types.iter().all(|ty| ty.is_some_and(|ty| ty == *first)) {
+            return first
+                .clone_with_control(control)
+                .map(Some)
+                .map_err(Into::into);
+        }
+    }
+    let mut selected: Option<Produced<ColumnType>> = None;
+    for ty in types.iter().flatten() {
+        let ty = base_type(ty);
+        selected = Some(match selected {
+            None => ty.clone_with_control(control)?,
+            Some(current) => match common_type_with_control(&current, ty, control) {
+                Ok(common) => common,
+                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
+                    return Err(error)
+                }
+                Err(_) => return Ok(None),
+            },
+        });
+    }
+    match selected {
+        Some(selected) => Ok(Some(selected)),
+        None => control
+            .finish(ColumnType::Text, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into),
+    }
+}
+
 /// Preserve the existing common-type rules while the selected type owns its copied names and array boxes.
 pub(super) fn common_type_with_control(
     left: &ColumnType,
@@ -401,20 +454,25 @@ pub(super) fn common_type_with_control(
             | (ColumnType::TimestampTz, ColumnType::Date | ColumnType::Timestamp) => {
                 ColumnType::TimestampTz
             }
-            (ColumnType::Array(left), ColumnType::Array(right)) => {
+            (ColumnType::Array(_), ColumnType::Array(_)) => {
+                // An array type does not fix its number of dimensions: `integer[][]` is `integer[]`, so arrays meet at their element types, and each value keeps its own dimensions.
                 return ColumnType::array_with_control(
-                    common_type_with_control(left, right, control)?,
+                    common_type_with_control(
+                        innermost_array_element(left),
+                        innermost_array_element(right),
+                        control,
+                    )?,
                     control,
                 )
-                .map_err(Into::into)
+                .map_err(Into::into);
             }
-            _ => {
-                return Err(SQLError::TypeMismatch(format!(
+            _ => same_category_common_type(left, right).ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
                     "types {} and {} cannot be matched",
                     left.sql_name(),
                     right.sql_name()
-                )))
-            }
+                ))
+            })?,
         }
     };
     control
@@ -422,7 +480,37 @@ pub(super) fn common_type_with_control(
         .map_err(Into::into)
 }
 
+/// `select_common_type` for two types of one category that the rules above do not cover: the first type stays unless it is not its category's preferred type and coerces implicitly to the second, which does not coerce back to it. The other type must then coerce implicitly to the selected one, as `coerce_to_common_type` requires.
+fn same_category_common_type(left: &ColumnType, right: &ColumnType) -> Option<ColumnType> {
+    use super::overload_resolution::{
+        routine_type_accepts_implicit_cast as implicit, routine_type_category,
+        routine_type_is_preferred,
+    };
+    let left_name = super::canonical_column_type_name(left);
+    let right_name = super::canonical_column_type_name(right);
+    if routine_type_category(&left_name) != routine_type_category(&right_name) {
+        return None;
+    }
+    let switch = !routine_type_is_preferred(&left_name)
+        && implicit(&left_name, &right_name)
+        && !implicit(&right_name, &left_name);
+    let (selected, selected_name, other_name) = if switch {
+        (right, &right_name, &left_name)
+    } else {
+        (left, &left_name, &right_name)
+    };
+    implicit(other_name, selected_name).then(|| selected.clone())
+}
+
 pub(super) mod case;
+
+/// The element type below every array level of `ty`.
+fn innermost_array_element(mut ty: &ColumnType) -> &ColumnType {
+    while let ColumnType::Array(element) = ty {
+        ty = element;
+    }
+    ty
+}
 
 fn is_integral_type(ty: &ColumnType) -> bool {
     matches!(

@@ -347,6 +347,34 @@ def test_close_releases_persistent_file_and_is_idempotent(tmp_path) -> None:
     assert not path.exists()
 
 
+def test_enum_values_reach_python_as_their_current_labels() -> None:
+    engine = uqa.Engine()
+    engine.sql("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')")
+    engine.sql("CREATE TABLE moods (id INTEGER, m mood, ms mood[])")
+    engine.sql("INSERT INTO moods VALUES (1, 'happy', '{sad,ok}'), (2, 'sad', NULL)")
+    assert engine.sql("SELECT id, m, ms FROM moods ORDER BY m").rows == [
+        {"id": 2, "m": "sad", "ms": None},
+        {"id": 1, "m": "happy", "ms": ["sad", "ok"]},
+    ]
+    engine.sql("ALTER TYPE mood RENAME VALUE 'ok' TO 'neutral'")
+    assert engine.sql("SELECT ms FROM moods WHERE id = 1").rows == [
+        {"ms": ["sad", "neutral"]}
+    ]
+    results = engine.sql_batch(
+        [
+            ("CREATE TYPE fleeting AS ENUM ('a')", []),
+            ("SELECT 'a'::fleeting AS f", []),
+            ("DROP TYPE fleeting", []),
+        ]
+    )
+    assert results[1].rows == [{"f": "a"}]
+    engine.register_scalar_function("py_label", lambda value: f"label:{value}")
+    assert engine.sql("SELECT py_label(m) AS l FROM moods ORDER BY id").rows == [
+        {"l": "label:happy"},
+        {"l": "label:sad"},
+    ]
+
+
 def test_python_user_defined_functions() -> None:
     engine = uqa.Engine()
     engine.sql("CREATE TABLE samples (grp TEXT, val INTEGER)")

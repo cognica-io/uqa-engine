@@ -7,16 +7,16 @@
 //! DROP and ALTER routine target binding and ownership validation.
 
 use super::{
-    alter_routine_kind_matches, alter_routine_kind_name, ensure_routine_owner_as,
+    alter_routine_kind_matches, alter_routine_kind_name, ambiguous_routine_error,
     names::{routine_lookup_keys, RoutineNameCatalog},
-    routine_signature_label, wrong_routine_kind_error, RoutineDropResolution, RoutineDropTarget,
+    require_routine_ownership, routine_signature_display, wrong_routine_kind_error,
+    RoutineDropResolution, RoutineDropTarget,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::{AlterRoutineKind, DropFunctionItem, DropFunctionStmt},
     catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey},
     routines::{routine_signature_types, SQLUserFunction},
-    type_resolution::canonical_routine_type_name,
     SQLError,
 };
 use std::{
@@ -24,11 +24,14 @@ use std::{
     sync::Arc,
 };
 
+/// Find the routines a DROP names, item by item as `RemoveObjects` does: each item's routine is looked up and then passed to `ensure_owner`, before the next item is looked up.
 pub fn resolve_sql_function_drop_targets(
     catalog: &dyn RoutineNameCatalog,
+    types: &dyn crate::routines::declaration::RoutineTypeCatalog,
     stmt: &DropFunctionStmt,
     registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     kind: &'static str,
+    mut ensure_owner: impl FnMut(&SQLUserFunction, &DropFunctionItem) -> Result<(), SQLError>,
 ) -> Result<RoutineDropResolution, SQLError> {
     let mut resolution = RoutineDropResolution {
         targets: Vec::new(),
@@ -36,10 +39,33 @@ pub fn resolve_sql_function_drop_targets(
         notices: Vec::new(),
     };
     for item in &stmt.items {
-        let target =
-            resolve_sql_function_drop_target(catalog, registry, item, stmt.is_procedure, kind)?;
+        // Argument types name catalog types, as `LookupFuncWithArgs` resolves them; a missing type skips the item under IF EXISTS.
+        let requested_types = match crate::routines::declaration::resolve_routine_identity_types(
+            types,
+            item.arg_types.as_deref(),
+            &[],
+            "DROP routine",
+        ) {
+            Ok(types) => types,
+            Err(error) if stmt.if_exists && error.sqlstate() == Some("42704") => {
+                resolution
+                    .notices
+                    .push(crate::SQLNotice::notice(format!("{error}, skipping")));
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let target = resolve_sql_function_drop_target(
+            catalog,
+            registry,
+            item,
+            requested_types.as_deref(),
+            stmt.is_procedure,
+            kind,
+        )?;
         if let Some((key, position)) = target {
             let function = &registry[&key][position];
+            ensure_owner(function, item)?;
             let target = RoutineDropTarget {
                 object_id: function.def.object_id,
                 name: key,
@@ -60,8 +86,12 @@ pub fn resolve_sql_function_drop_targets(
                 )));
                 continue;
             }
-            let described = match &item.arg_types {
-                Some(_) => format!("{kind} {spelled} does not exist"),
+            // The notice echoes the argument types as written; the error spells the resolved types as `format_type_be` does.
+            let described = match requested_types.as_deref() {
+                Some(types) => format!(
+                    "{kind} {} does not exist",
+                    routine_signature_display(catalog, &item.name, types)
+                ),
                 None => format!("could not find a {kind} named \"{}\"", item.name),
             };
             return Err(SQLError::Routine {
@@ -73,24 +103,22 @@ pub fn resolve_sql_function_drop_targets(
     Ok(resolution)
 }
 
+/// Find the routine a DROP item names; `requested_types` are its argument types resolved to catalog type names.
 pub fn resolve_sql_function_drop_target(
     catalog: &dyn RoutineNameCatalog,
     registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     item: &DropFunctionItem,
+    requested_types: Option<&[String]>,
     is_procedure: bool,
     expected_kind: &str,
 ) -> Result<Option<(String, usize)>, SQLError> {
-    let requested_types = item.arg_types.as_ref().map(|types| {
-        types
-            .iter()
-            .map(|type_name| canonical_routine_type_name(type_name))
-            .collect::<Vec<_>>()
-    });
-    for key in routine_lookup_keys(catalog, &item.name)? {
-        let Some(overloads) = registry.get(&key) else {
-            continue;
-        };
-        if let Some(types) = requested_types.as_ref() {
+    let keys = routine_lookup_keys(catalog, &item.name)?;
+    // An argument list selects a routine of any kind, which then must be of the command's kind.
+    if let Some(types) = requested_types {
+        for key in keys {
+            let Some(overloads) = registry.get(&key) else {
+                continue;
+            };
             let Some((position, function)) = overloads
                 .iter()
                 .enumerate()
@@ -100,42 +128,34 @@ pub fn resolve_sql_function_drop_target(
             };
             if function.def.is_procedure != is_procedure {
                 return Err(wrong_routine_kind_error(
-                    &function.def.name,
-                    types,
-                    function.def.is_procedure,
+                    &routine_signature_display(catalog, &item.name, types),
                     expected_kind,
                 ));
             }
             return Ok(Some((key, position)));
         }
-
-        let positions = overloads
-            .iter()
-            .enumerate()
-            .filter(|(_, function)| function.def.is_procedure == is_procedure)
-            .map(|(position, _)| position)
-            .collect::<Vec<_>>();
-        match positions.as_slice() {
-            [] => {
-                if let Some(function) = overloads.first() {
-                    return Err(wrong_routine_kind_error(
-                        &function.def.name,
-                        &routine_signature_types(&function.def),
-                        function.def.is_procedure,
-                        expected_kind,
-                    ));
-                }
-            }
-            [position] => return Ok(Some((key, *position))),
-            _ => {
-                return Err(SQLError::Routine {
-                    sqlstate: "42725".into(),
-                    message: format!("{expected_kind} name \"{}\" is not unique", item.name),
-                });
+        return Ok(None);
+    }
+    // A bare name considers only routines of the command's kind, after search-path shadowing by declared identity.
+    let mut visible_signatures = BTreeSet::new();
+    let mut candidates = Vec::new();
+    for key in keys {
+        let Some(overloads) = registry.get(&key) else {
+            continue;
+        };
+        for (position, function) in overloads.iter().enumerate() {
+            if visible_signatures.insert(routine_signature_types(&function.def))
+                && function.def.is_procedure == is_procedure
+            {
+                candidates.push((key.clone(), position));
             }
         }
     }
-    Ok(None)
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [(key, position)] => Ok(Some((key.clone(), *position))),
+        _ => Err(ambiguous_routine_error(expected_kind, &item.name)),
+    }
 }
 
 pub fn resolve_sql_routine_alter_target(
@@ -161,9 +181,7 @@ pub fn resolve_sql_routine_alter_target(
             };
             if !alter_routine_kind_matches(kind, &function.def) {
                 return Err(wrong_routine_kind_error(
-                    &function.def.name,
-                    types,
-                    function.def.is_procedure,
+                    &routine_signature_display(catalog, requested_name, types),
                     kind_name,
                 ));
             }
@@ -172,8 +190,9 @@ pub fn resolve_sql_routine_alter_target(
         return Err(SQLError::Routine {
             sqlstate: "42883".into(),
             message: format!(
-                "{kind_name} {} does not exist",
-                routine_signature_label(requested_name, types)
+                "{} {} does not exist",
+                missing_routine_kind(kind),
+                routine_signature_display(catalog, requested_name, types)
             ),
         });
     }
@@ -198,48 +217,49 @@ pub fn resolve_sql_routine_alter_target(
         [(name, position)] => Ok((name.clone(), *position)),
         [] => Err(SQLError::Routine {
             sqlstate: "42883".into(),
-            message: format!("could not find a {kind_name} named \"{requested_name}\""),
+            message: format!(
+                "could not find a {} named \"{requested_name}\"",
+                missing_routine_kind(kind)
+            ),
         }),
-        _ => Err(SQLError::Routine {
-            sqlstate: "42725".into(),
-            message: format!("{kind_name} name \"{requested_name}\" is not unique"),
-        }),
+        _ => Err(ambiguous_routine_error(kind_name, requested_name)),
     }
 }
 
-pub fn ensure_routine_drop_owners(
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
-    targets: &[RoutineDropTarget],
+/// `LookupFuncWithArgs` reports a missing `ROUTINE` as a missing function.
+const fn missing_routine_kind(kind: AlterRoutineKind) -> &'static str {
+    match kind {
+        AlterRoutineKind::Procedure => "procedure",
+        AlterRoutineKind::Function | AlterRoutineKind::Routine => "function",
+    }
+}
+
+/// `RemoveObjects`' ownership check of a routine a DROP names: the owner of the routine's schema may drop it, and otherwise only its owner, reported by the command's kind and the name as written.
+pub fn ensure_routine_drop_owner(
+    catalog: &dyn RoutineNameCatalog,
+    function: &SQLUserFunction,
+    written: &str,
+    kind: &str,
     current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Result<(), SQLError> {
-    for target in targets {
-        let definition = registry
-            .get(&target.name)
-            .and_then(|overloads| {
-                overloads.iter().find(|function| {
-                    function.def.is_procedure == target.is_procedure
-                        && routine_signature_types(&function.def) == target.argument_types
-                })
-            })
-            .map(|function| &function.def)
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved {} {} disappeared before ownership validation",
-                    target.kind(),
-                    target.label()
-                ))
-            })?;
-        ensure_routine_owner_as(
-            definition,
-            role_inherits(
-                roles,
-                memberships,
-                current_user,
-                &crate::routines::security::bound_routine_owner(definition)?,
-            ),
-        )?;
+    let schema = uqa_core::RelationIdentity::from_legacy_name(&function.def.name)
+        .map_err(|error| SQLError::Internal(format!("resolve dropped routine schema: {error}")))?
+        .schema;
+    if catalog.schema_security(&schema).is_some_and(|security| {
+        role_inherits(roles, memberships, current_user, &security.role_owner)
+    }) {
+        return Ok(());
     }
-    Ok(())
+    require_routine_ownership(
+        kind,
+        written,
+        role_inherits(
+            roles,
+            memberships,
+            current_user,
+            &crate::routines::security::bound_routine_owner(&function.def)?,
+        ),
+    )
 }

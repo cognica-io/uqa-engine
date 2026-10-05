@@ -33,8 +33,9 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<()> {
-        self.table_removal_context()
-            .drop_temporary_table_on_commit_inner(name)
+        use uqa_execution::schema::deletion::CatalogRemovalInputs;
+        uqa_execution::schema::deletion::drop_table_on_commit(&self.catalog_removal_context(), name)
+            .map_err(|error| uqa_storage::StorageBackendError::backend("ON COMMIT DROP", error))
     }
 
     pub fn has_table(&self, name: &str) -> StorageBackendResult<bool> {

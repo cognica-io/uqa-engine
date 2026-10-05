@@ -196,6 +196,16 @@ pub fn read_i32(bytes: &mut &[u8]) -> i32 {
     value
 }
 
+/// Compare the diagnostic fields a reference recorded; references captured without DETAIL and HINT omit those fields.
+pub fn error_matches(actual: &Value, expected: &Value) -> bool {
+    match (actual.as_object(), expected.as_object()) {
+        (Some(actual), Some(expected)) => expected
+            .iter()
+            .all(|(field, value)| actual.get(field).unwrap_or(&Value::Null) == value),
+        _ => actual == expected,
+    }
+}
+
 pub fn evidence(messages: &[Message]) -> Value {
     result_evidence(messages, false)
 }
@@ -207,6 +217,7 @@ pub fn evidence_with_fields(messages: &[Message]) -> Value {
 fn result_evidence(messages: &[Message], include_fields: bool) -> Value {
     let mut tags = Vec::new();
     let mut error = Value::Null;
+    let mut notices = Vec::new();
     let mut results = Vec::new();
     let mut columns = Vec::new();
     let mut types = Vec::new();
@@ -262,10 +273,87 @@ fn result_evidence(messages: &[Message], include_fields: bool) -> Value {
             }
             b'E' => {
                 let diagnostic = fields(bytes);
-                error = json!({ "sqlstate": diagnostic[&b'C'], "message": diagnostic[&b'M'] });
+                error = json!({
+                    "sqlstate": diagnostic[&b'C'],
+                    "message": diagnostic[&b'M'],
+                    "detail": diagnostic.get(&b'D'),
+                    "hint": diagnostic.get(&b'H'),
+                });
+            }
+            b'N' => {
+                let diagnostic = fields(bytes);
+                notices.push(json!({
+                    "severity": diagnostic[&b'V'],
+                    "sqlstate": diagnostic[&b'C'],
+                    "message": diagnostic[&b'M'],
+                    "detail": diagnostic.get(&b'D'),
+                    "hint": diagnostic.get(&b'H'),
+                }));
             }
             _ => {}
         }
     }
-    json!({ "command_tags": tags, "error": error, "results": results })
+    json!({ "command_tags": tags, "error": error, "results": results, "notices": notices })
+}
+
+/// User-defined type OIDs are database-local, so a transcript and the server compare them by class.
+const FIRST_USER_OID: i64 = 16_384;
+
+fn normalized_type_oids(mut evidence: Value) -> Value {
+    for result in evidence["results"].as_array_mut().into_iter().flatten() {
+        for oid in result["type_oids"].as_array_mut().into_iter().flatten() {
+            // The wire field is an unsigned OID; the test client reads it as a signed 32-bit integer.
+            if oid
+                .as_i64()
+                .map(|value| if value < 0 { value + (1 << 32) } else { value })
+                .is_some_and(|value| value >= FIRST_USER_OID)
+            {
+                *oid = json!("user-defined");
+            }
+        }
+    }
+    evidence
+}
+
+/// Replay a `PostgreSQL` 18.4 simple-query transcript over one connection: command tags, the error with its DETAIL and HINT, result columns, types and rows, and the notices when the transcript records them.
+pub fn compare_oracle(transcript: &str) {
+    let fixture = Fixture::new();
+    let mut client = fixture.connect();
+    let reference: Value = serde_json::from_str(transcript).unwrap();
+    let include_fields = reference["cases"][0]["results"][0].get("fields").is_some();
+    let mut differences = Vec::new();
+    for case in reference["cases"].as_array().unwrap() {
+        let sql = case["sql"].as_str().unwrap();
+        let response = client.query(sql);
+        let actual = normalized_type_oids(if include_fields {
+            evidence_with_fields(&response)
+        } else {
+            evidence(&response)
+        });
+        let case = normalized_type_oids(case.clone());
+        for key in ["command_tags", "error", "results", "notices"] {
+            // A transcript captured without rows or notices records them as absent or null; a null error means none.
+            let Some(expected) = case
+                .get(key)
+                .filter(|value| key == "error" || !value.is_null())
+            else {
+                continue;
+            };
+            if key == "results" && sql == "SELECT version()" {
+                continue;
+            }
+            let matches = if key == "error" {
+                error_matches(&actual[key], expected)
+            } else {
+                &actual[key] == expected
+            };
+            if !matches {
+                differences.push(format!(
+                    "{sql}\n{key}: expected {expected}\nactual: {}",
+                    actual[key]
+                ));
+            }
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
 }

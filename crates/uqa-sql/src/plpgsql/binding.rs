@@ -169,14 +169,35 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             list: bind_exprs(list, r)?,
             negated: *negated,
         },
-        Expr::WindowCall { name, args, spec } => Expr::WindowCall {
+        Expr::WindowCall {
+            name,
+            args,
+            spec,
+            filter,
+            modifiers,
+        } => Expr::WindowCall {
+            modifiers: *modifiers,
             name: name.clone(),
             args: bind_exprs(args, r)?,
             spec: crate::ast::WindowSpec {
                 reference: spec.reference.clone(),
                 partition_by: bind_exprs(&spec.partition_by, r)?,
                 order_by: bind_order_by(&spec.order_by, r)?,
-                frame: spec.frame.clone(),
+                frame: spec
+                    .frame
+                    .as_ref()
+                    .map(|frame| -> Result<crate::ast::WindowFrame> {
+                        Ok(crate::ast::WindowFrame {
+                            start: bind_frame_bound(&frame.start, r)?,
+                            end: bind_frame_bound(&frame.end, r)?,
+                            ..frame.clone()
+                        })
+                    })
+                    .transpose()?,
+            },
+            filter: match filter {
+                Some(f) => Some(Box::new(bind_expr(f, r)?)),
+                None => None,
             },
         },
         Expr::Case {
@@ -215,6 +236,21 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             body: Box::new(bind_select(body, r)?),
             negated: *negated,
         },
+    })
+}
+
+/// A frame offset may name a PL/pgSQL variable, which becomes a parameter of the query.
+fn bind_frame_bound(
+    bound: &crate::ast::FrameBound,
+    r: &mut dyn VariableResolver,
+) -> Result<crate::ast::FrameBound> {
+    use crate::ast::FrameBound;
+    Ok(match bound {
+        FrameBound::Preceding(offset) => FrameBound::Preceding(Box::new(bind_expr(offset, r)?)),
+        FrameBound::Following(offset) => FrameBound::Following(Box::new(bind_expr(offset, r)?)),
+        FrameBound::UnboundedPreceding => FrameBound::UnboundedPreceding,
+        FrameBound::UnboundedFollowing => FrameBound::UnboundedFollowing,
+        FrameBound::CurrentRow => FrameBound::CurrentRow,
     })
 }
 
@@ -550,6 +586,7 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
             if_not_exists,
             column_names,
             with_no_data,
+            select_into,
             persistence,
             on_commit,
             body,
@@ -558,6 +595,7 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
             if_not_exists: *if_not_exists,
             column_names: column_names.clone(),
             with_no_data: *with_no_data,
+            select_into: *select_into,
             persistence: *persistence,
             on_commit: *on_commit,
             body: Box::new(bind_select(body, r)?),

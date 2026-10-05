@@ -11,6 +11,10 @@ pub fn storage_error(action: &str, err: &(dyn std::error::Error + 'static)) -> S
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(error) = source {
         if let Some(error) = error.downcast_ref::<SQLError>() {
+            // A diagnostic keeps its DETAIL and HINT for the client.
+            if matches!(error, SQLError::Diagnostic { .. }) {
+                return error.clone();
+            }
             return SQLError::Routine {
                 sqlstate: error.sqlstate().unwrap_or("XX000").into(),
                 message: error.to_string(),
@@ -50,6 +54,21 @@ mod tests {
         let error = storage_error("column type coercion", &CatalogFailure(original));
         assert_eq!(error.sqlstate(), Some("42501"));
         assert_eq!(error.to_string(), expected);
+    }
+    #[test]
+    fn catalog_error_chain_keeps_diagnostic_detail_and_hint() {
+        let original = SQLError::Diagnostic {
+            sqlstate: "42501".into(),
+            message: "permission denied to create \"pg_catalog.t\"".into(),
+            detail: Some("System catalog modifications are currently disallowed.".into()),
+            hint: None,
+        };
+        let error = storage_error("CREATE TABLE", &CatalogFailure(original));
+        assert!(matches!(
+            error,
+            SQLError::Diagnostic { sqlstate, detail: Some(detail), .. }
+                if sqlstate == "42501" && detail == "System catalog modifications are currently disallowed."
+        ));
     }
     #[test]
     fn plain_catalog_errors_retain_the_operation_context() {

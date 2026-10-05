@@ -10,7 +10,7 @@ use super::{
 };
 use crate::compiler::{extract_string, range_var_name};
 
-fn compile_acl_role_specification(
+pub(in crate::compiler) fn compile_acl_role_specification(
     role: &pg_query::protobuf::RoleSpec,
     context: &str,
 ) -> Result<crate::ast::AclRoleSpecification> {

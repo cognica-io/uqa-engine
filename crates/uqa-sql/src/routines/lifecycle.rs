@@ -8,7 +8,6 @@
 
 pub mod binding;
 pub mod dependencies;
-pub mod diagnostics;
 pub mod lookup;
 pub mod names;
 pub mod relations;
@@ -25,39 +24,14 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-use uqa_core::RelationIdentity;
 
 pub type RoutineRegistry = BTreeMap<String, Vec<Arc<SQLUserFunction>>>;
-
-pub struct SQLFunctionDropPlan {
-    pub domains: BTreeSet<u32>,
-    pub targets: Vec<RoutineDropTarget>,
-    pub dependents: RoutineObjectDependents,
-    pub notices: Vec<crate::SQLNotice>,
-}
 
 #[derive(Default)]
 pub struct RoutineDropResolution {
     pub targets: Vec<RoutineDropTarget>,
     pub seen_targets: BTreeSet<RoutineDropTarget>,
     pub notices: Vec<crate::SQLNotice>,
-}
-
-pub struct RoutineObjectDependents {
-    pub indexes: Vec<RelationIdentity>,
-    pub views: Vec<String>,
-    pub columns: Vec<(String, String, bool)>,
-    pub defaults: Vec<(String, String, bool)>,
-    pub checks: Vec<(String, String, bool)>,
-    pub triggers: Vec<(String, String)>,
-    pub rules: Vec<(String, String)>,
-}
-
-#[derive(Default)]
-pub struct RoutineSchemaDependents {
-    pub columns: Vec<(String, String, bool)>,
-    pub defaults: Vec<(String, String, bool)>,
-    pub checks: Vec<(String, String, bool)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -79,6 +53,13 @@ impl RoutineDropTarget {
 
     pub fn label(&self) -> String {
         routine_signature_label(&self.name, &self.argument_types)
+    }
+
+    /// Whether `function`, an overload registered under the target's name, is the routine the target resolved: the same kind and signature, and the same identity when the target has one.
+    pub fn names(&self, function: &SQLUserFunction) -> bool {
+        function.def.is_procedure == self.is_procedure
+            && super::routine_signature_types(&function.def) == self.argument_types
+            && (self.object_id.is_none() || function.def.object_id == self.object_id)
     }
 
     pub fn binding(&self) -> FunctionBinding {
@@ -105,23 +86,36 @@ pub fn routine_signature_label(name: &str, types: &[String]) -> String {
     format!("{name}({})", display_types.join(", "))
 }
 
-pub fn wrong_routine_kind_error(
+/// `func_signature_string`: the routine name as the command wrote it and each argument type as `format_type_be` spells it.
+pub fn routine_signature_display(
+    catalog: &dyn names::RoutineNameCatalog,
     name: &str,
     types: &[String],
-    actual_is_procedure: bool,
-    expected_kind: &str,
-) -> SQLError {
-    let actual_kind = if actual_is_procedure {
-        "procedure"
-    } else {
-        "function"
-    };
+) -> String {
+    let types = types
+        .iter()
+        .map(|type_name| catalog.routine_type_display(type_name))
+        .collect::<Vec<_>>();
+    format!("{name}({})", types.join(", "))
+}
+
+/// `LookupFuncWithArgs`: the routine an argument list selects is not of the kind the command names.
+pub fn wrong_routine_kind_error(signature: &str, expected_kind: &str) -> SQLError {
     SQLError::Routine {
         sqlstate: "42809".into(),
-        message: format!(
-            "{} is a {actual_kind}, not a {expected_kind}",
-            routine_signature_label(name, types)
-        ),
+        message: format!("{signature} is not a {expected_kind}"),
+    }
+}
+
+/// `LookupFuncWithArgs`: a name without an argument list selects more than one routine of the command's kind.
+pub fn ambiguous_routine_error(kind: &str, name: &str) -> SQLError {
+    SQLError::Diagnostic {
+        sqlstate: "42725".into(),
+        message: format!("{kind} name \"{name}\" is not unique"),
+        detail: None,
+        hint: Some(format!(
+            "Specify the argument list to select the {kind} unambiguously."
+        )),
     }
 }
 
@@ -141,8 +135,10 @@ pub fn alter_routine_kind_matches(kind: AlterRoutineKind, def: &CreateFunction) 
     }
 }
 
-pub fn ensure_routine_owner_as(
-    definition: &CreateFunction,
+/// `must be owner of <kind> <name>`, which `aclcheck_error` reports for a routine whose owner the current user is not; each command names the routine its own way.
+pub fn require_routine_ownership(
+    kind: &str,
+    name: &str,
     current_user_has_owner_privileges: bool,
 ) -> Result<(), SQLError> {
     if current_user_has_owner_privileges {
@@ -150,15 +146,7 @@ pub fn ensure_routine_owner_as(
     } else {
         Err(SQLError::Routine {
             sqlstate: "42501".into(),
-            message: format!(
-                "must be owner of {} {}",
-                if definition.is_procedure {
-                    "procedure"
-                } else {
-                    "function"
-                },
-                definition.name
-            ),
+            message: format!("must be owner of {kind} {name}"),
         })
     }
 }

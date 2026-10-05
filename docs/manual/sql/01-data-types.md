@@ -13,6 +13,7 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `INT2VECTOR`, `OIDVECTOR` | Distinct catalog-vector carriers with one zero-based dimension, including empty values; atomic elements inside an outer SQL array |
 | `REGTYPE` | Type-catalog OID over the integer carrier; cast to text or use PostgreSQL result formatting for its visible SQL name |
 | User-defined domains | A distinct catalog type over its base value, with [declaration defaults and conversion-time constraints](02-ddl.md#domain-declarations-and-deletion) |
+| User-defined enum types | A distinct catalog type whose values keep an immutable label identity; [labels, their order and renames](#enum-types) come from the [enum declaration](02-ddl.md#enum-types) |
 | `REAL`, `FLOAT4` | IEEE 754 single-precision inputs, arithmetic, and sums over a widened floating runtime carrier |
 | `FLOAT8`, `DOUBLE PRECISION` | Double-precision declaration over the floating runtime carrier |
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` | Exact decimal carrier with declared precision and scale checks |
@@ -139,6 +140,26 @@ Discrete integer and date ranges canonicalize inclusive upper bounds and exclusi
 
 This implemented surface is limited to PostgreSQL's six built-in range families and text-form values. User-defined range types, binary range I/O, range indexes and exclusion-index planning, and complete comparison ordering remain open compatibility bugs.
 
+## Enum types
+
+An enum type is a catalog-defined list of labels. A value's text is exactly one of its type's labels: input is case-sensitive, keeps surrounding spaces, and reports `22P02` for any other text. Values order by the labels' declaration order, not by their spelling, and every comparison operator, `ORDER BY`, `DISTINCT`, grouping, joins, `min` and `max` use that order. Distinct enum types never compare with each other or with text; such comparisons report `42883` like PostgreSQL. A string literal or untyped parameter compared with an enum value, listed in `IN`, used as a `BETWEEN` bound or passed where a function expects the enum type is converted to that type once, as PostgreSQL's parse analysis converts it, so an unknown label is rejected even when no row is read.
+
+```sql execute
+CREATE TYPE ticket_state AS ENUM ('new', 'triaged', 'closed');
+CREATE TABLE tickets (id integer, state ticket_state, history ticket_state[]);
+INSERT INTO tickets VALUES (1, 'closed', '{new,closed}'), (2, 'new', NULL), (3, 'triaged', '{new}');
+SELECT id, state, state > 'new' AS progressed, enum_range(NULL::ticket_state) AS all_states
+FROM tickets
+WHERE state IN ('new', 'closed')
+ORDER BY state;
+```
+
+Casts from the string types (`text`, `varchar`, `char`, `name`) convert through the label, and casts to them produce the label; there are no other casts to or from an enum type (`42846`). Output functions of containers and text or JSON builders use the current label: `||`, `concat`, `concat_ws`, `format`, `quote_literal`, `quote_nullable`, `to_json`, `to_jsonb`, `row_to_json`, `array_to_json`, `json_build_object`, `json_build_array`, their JSONB forms, `json_agg`, `jsonb_agg` and the JSON object aggregates. Arrays of an enum type use its generated array type, named like PostgreSQL's `_name` with a numeric suffix when that name is taken.
+
+`enum_first(anyenum)`, `enum_last(anyenum)` and `enum_range(anyenum)` read only their argument's type, so a typed NULL such as `NULL::ticket_state` selects the type; `enum_range(lower, upper)` returns the labels between two values inclusively, treating a NULL bound as open and returning an empty array when the lower bound follows the upper bound. `enum_first` and `enum_last` of a type without labels report `55000`. `enum_cmp`, `enum_eq`, `enum_ne`, `enum_lt`, `enum_le`, `enum_gt`, `enum_ge`, `enum_smaller` and `enum_larger` compare two values of one type, `hashenum` and `hashenumextended` hash the label's OID, and SQL routines may declare `anyenum` parameters and results. An `anyenum` argument must be an enum type rather than a domain over one, and every `anyenum` argument of a call must have the same type.
+
+A value stores an immutable label key, not its text. `ALTER TYPE ... RENAME VALUE` therefore changes the text of existing values without rewriting them, and `ALTER TYPE ... ADD VALUE ... BEFORE | AFTER` places a new label between existing ones without changing any stored order. A label that a transaction adds to a type the same transaction did not create cannot be read, compared or returned until the transaction commits (`55P04`); labels of a type created in the same transaction are usable at once. `pg_enum.enumsortorder` follows PostgreSQL's float4 midpoint positions, including its renumbering when a midpoint cannot be represented, while value order is unaffected. Embedded clients receive enum values as labels: see [host result labels](../reference/02-rust-engine-api.md#enum-labels-in-results).
+
 ## JSON and JSONB
 
 JSON values must be syntactically valid. JSONB provides canonical object behavior and containment, path, update, insertion, deletion, key, and expansion functions.
@@ -216,3 +237,12 @@ SELECT pg_typeof(42) AS type_name;
 ```
 
 Conversions can fail on invalid syntax, overflow, non-finite vector values, dimension mismatch, decimal precision or scale violation, invalid JSON, or incompatible assignment. Treat a conversion failure as an input error instead of silently substituting a default.
+
+A string literal or untyped parameter has PostgreSQL's `unknown` type until its context selects one. Comparison operators give it the argument type of the selected operator, so `true = 't'`, `'a'::bytea = 'a'` and `ARRAY[1, 2] = '{1,2}'` compare typed values. An `IN` list compares the tested value and every item at their common type when they have one, and otherwise compares each item through its own `=` operator, as `transformAExprIn` does, in queries and in `INSERT`, `UPDATE` and `DELETE` alike; each `BETWEEN` bound takes the type of its comparison, `op ANY (array)` and `op ALL (array)` give an untyped array literal the array type of the selected operator, and `NULLIF` and `IS DISTINCT FROM` resolve their equality operator the same way. The inputs that `VALUES`, `CASE`, `COALESCE`, `UNION`, `ARRAY` and `GREATEST` unify take PostgreSQL's common type, as `select_common_type` selects it: types of one category meet at the first input's type unless that type is not the category's preferred type and coerces implicitly to a later input's type that does not coerce back, and every input must then coerce implicitly to the type selected. `oid` is the preferred type of the numeric category, so `oid` and an OID alias type such as `regclass` meet at `oid` when `oid` comes first and at the alias otherwise; an integer and an OID alias type meet at the alias; `time` and `timetz` meet at `timetz`; and `CASE` considers its `ELSE` result before its `THEN` results. The `anycompatible` array functions `array_append`, `array_prepend`, `array_cat`, `array_remove`, `array_replace`, `array_position` and `array_positions` convert untyped arguments to the element or array type chosen by their typed arguments.
+
+```sql execute
+SELECT 5 IN ('5', '6') AS in_list,
+       '5' = ANY (ARRAY[5, 6]) AS any_array,
+       nullif(5, '5') IS NULL AS nullif_equal,
+       array_position(ARRAY[1, 2, 1], '1', '2') AS position_from_two;
+```

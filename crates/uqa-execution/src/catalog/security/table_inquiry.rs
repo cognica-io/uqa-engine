@@ -10,8 +10,8 @@ use crate::catalog::{
     context::CatalogContext,
     foreign::StoredForeignTable,
     projection::{
-        foreign_table_relation_oid, resolve_regclass_kind_by_oid, sequence_relation_oid,
-        snapshot_table_relation_oid, view_relation_oid,
+        foreign_table_relation_oid, resolve_regclass_kind_by_oid, snapshot_table_relation_oid,
+        view_relation_oid,
     },
     sequence::snapshot::{SequenceReadSnapshot, SequenceSnapshotSource},
     view::StoredView,
@@ -325,14 +325,8 @@ impl TablePrivilegeCatalog for InquiryRead<'_, '_> {
             }
         }
         let snapshot = self.sequence_snapshot()?;
-        if let Some((relation, _)) = snapshot
-            .object_ids
-            .iter()
-            .find(|(_, object_id)| sequence_relation_oid(**object_id) == oid)
-        {
-            return Ok(Some(ResolvedTablePrivilegeTarget::Sequence(
-                relation.clone(),
-            )));
+        if let Some(relation) = snapshot.relation_with_oid(oid) {
+            return Ok(Some(ResolvedTablePrivilegeTarget::Sequence(relation)));
         }
         if let Some((name, kind)) = resolve_regclass_kind_by_oid(&self.context.catalog, oid)? {
             if kind == "S" {

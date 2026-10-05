@@ -22,7 +22,8 @@ use super::types::{
     validate_foreign_key_set_columns,
 };
 use super::{
-    compile_qualified_name, compile_returning_clause, range_var_name, render_relation_component,
+    compile_qualified_name, compile_returning_clause, range_var_alias, range_var_name,
+    render_relation_component,
 };
 
 pub(super) fn extract_string(node: &Node) -> Result<String> {
@@ -45,6 +46,7 @@ pub(super) fn extract_strings(nodes: &[Node]) -> Result<Vec<String>> {
 // CREATE TABLE
 // -------------------------------------------------------------------------
 
+mod column_declaration;
 mod ddl;
 mod expression_atoms;
 mod expression_core;
@@ -55,6 +57,7 @@ mod locking;
 mod select;
 mod window;
 
+pub(in crate::compiler) use column_declaration::compile_column_declaration;
 pub(in crate::compiler) use ddl::*;
 pub(in crate::compiler) use expression_atoms::*;
 pub(in crate::compiler) use expression_core::*;

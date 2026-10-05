@@ -5,10 +5,11 @@
 //
 
 use super::{
-    read_sequence, sequence_relation_oid, BTreeMap, RelationIdentity, RelationPersistence,
-    RoleCatalogSnapshot, SequenceDataType, SequenceSecurity, SequenceSnapshotSource, SequenceState,
+    read_sequence, BTreeMap, RelationIdentity, RelationPersistence, RoleCatalogSnapshot,
+    SequenceDataType, SequenceSecurity, SequenceSnapshotSource, SequenceState,
     StorageBackendResult,
 };
+use crate::catalog::projection::legacy_sequence_relation_oid;
 use crate::catalog::sequence::snapshot::SequenceReadSnapshot;
 use std::{
     cell::{Cell, RefCell},
@@ -40,6 +41,7 @@ fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missin
     };
     let catalog = TestCatalog {
         snapshot: RefCell::new(SequenceReadSnapshot {
+            catalog_oids: std::sync::Arc::default(),
             sequences: Arc::new(BTreeMap::from([(relation.clone(), state)])),
             object_ids: Arc::new(BTreeMap::from([(relation.clone(), object_id)])),
             persistence: Arc::new(BTreeMap::from([(
@@ -57,7 +59,7 @@ fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missin
         }),
         reads: Cell::new(0),
     };
-    let sequence = read_sequence(&catalog, sequence_relation_oid(object_id))
+    let sequence = read_sequence(&catalog, legacy_sequence_relation_oid(object_id))
         .unwrap()
         .unwrap();
     assert_eq!(catalog.reads.get(), 1);
@@ -72,12 +74,14 @@ fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missin
     assert_eq!(sequence.security, security);
     assert_eq!(sequence.persistence, RelationPersistence::Unlogged);
     assert!(sequence.authority.roles.contains_key("uqa"));
-    let error = read_sequence(&catalog, sequence_relation_oid(object_id))
+    let error = read_sequence(&catalog, legacy_sequence_relation_oid(object_id))
         .err()
         .unwrap();
     assert!(error.to_string().contains("disappeared"), "{error}");
     assert_eq!(catalog.reads.get(), 2);
-    assert!(read_sequence(&catalog, sequence_relation_oid([8; 16]))
-        .unwrap()
-        .is_none());
+    assert!(
+        read_sequence(&catalog, legacy_sequence_relation_oid([8; 16]))
+            .unwrap()
+            .is_none()
+    );
 }

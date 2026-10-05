@@ -9,10 +9,10 @@
 use super::super::{
     age_between,
     conversion::{to_f64_with_control, to_i64_with_control, value_to_string_with_control},
-    float_to_i64_rounded, make_timestamp, out_of_range,
+    datetime_out_of_range, float_to_i64_rounded, make_timestamp,
     time::{coerce_temporal_with_control, date_trunc_value, extract_from_value},
     uuid::{extract_uuid_timestamp, extract_uuid_version},
-    Result, SQLError, TemporalValue, Value,
+    IntervalFields, Result, SQLError, TemporalValue, Value,
 };
 use super::undefined_uuid_extraction;
 use uqa_core::memory::{Produced, ProductionControl, ProductionString};
@@ -37,6 +37,8 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
             | "make_date"
             | "make_interval"
             | "justify_hours"
+            | "justify_days"
+            | "justify_interval"
             | "isfinite"
             | "uuid_extract_version"
             | "uuid_extract_timestamp"
@@ -101,11 +103,16 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                         "make_timestamp takes 6-7 args".into(),
                     ));
                 }
-                let year = i32::try_from(integer(&args[0])?).map_err(|_| out_of_range("date"))?;
-                let month = u32::try_from(integer(&args[1])?).map_err(|_| out_of_range("date"))?;
-                let day = u32::try_from(integer(&args[2])?).map_err(|_| out_of_range("date"))?;
-                let hour = u32::try_from(integer(&args[3])?).map_err(|_| out_of_range("time"))?;
-                let minute = u32::try_from(integer(&args[4])?).map_err(|_| out_of_range("time"))?;
+                let year =
+                    i32::try_from(integer(&args[0])?).map_err(|_| datetime_out_of_range("date"))?;
+                let month =
+                    u32::try_from(integer(&args[1])?).map_err(|_| datetime_out_of_range("date"))?;
+                let day =
+                    u32::try_from(integer(&args[2])?).map_err(|_| datetime_out_of_range("date"))?;
+                let hour =
+                    u32::try_from(integer(&args[3])?).map_err(|_| datetime_out_of_range("time"))?;
+                let minute =
+                    u32::try_from(integer(&args[4])?).map_err(|_| datetime_out_of_range("time"))?;
                 let second = float(&args[5])?;
                 inline(make_timestamp(year, month, day, hour, minute, second)?)
             }
@@ -113,9 +120,12 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                 if args.len() != 3 {
                     return Err(SQLError::TypeMismatch("make_date takes 3 args".into()));
                 }
-                let year = i32::try_from(integer(&args[0])?).map_err(|_| out_of_range("date"))?;
-                let month = u32::try_from(integer(&args[1])?).map_err(|_| out_of_range("date"))?;
-                let day = u32::try_from(integer(&args[2])?).map_err(|_| out_of_range("date"))?;
+                let year =
+                    i32::try_from(integer(&args[0])?).map_err(|_| datetime_out_of_range("date"))?;
+                let month =
+                    u32::try_from(integer(&args[1])?).map_err(|_| datetime_out_of_range("date"))?;
+                let day =
+                    u32::try_from(integer(&args[2])?).map_err(|_| datetime_out_of_range("date"))?;
                 let epoch = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive();
                 let date = chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
                     SQLError::Routine {
@@ -127,7 +137,7 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                 })?;
                 inline(Value::Temporal(TemporalValue::Date {
                     days: i32::try_from(date.signed_duration_since(epoch).num_days())
-                        .map_err(|_| out_of_range("date"))?,
+                        .map_err(|_| datetime_out_of_range("date"))?,
                 }))
             }
             "make_interval" => {
@@ -144,12 +154,12 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                     .checked_mul(12)
                     .and_then(|value| value.checked_add(months))
                     .and_then(|value| i32::try_from(value).ok())
-                    .ok_or_else(|| out_of_range("interval"))?;
+                    .ok_or_else(|| datetime_out_of_range("interval"))?;
                 let total_days = weeks
                     .checked_mul(7)
                     .and_then(|value| value.checked_add(days))
                     .and_then(|value| i32::try_from(value).ok())
-                    .ok_or_else(|| out_of_range("interval"))?;
+                    .ok_or_else(|| datetime_out_of_range("interval"))?;
                 let whole_micros = hours
                     .checked_mul(3_600)
                     .and_then(|value| {
@@ -157,39 +167,30 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                             .and_then(|mins| value.checked_add(mins))
                     })
                     .and_then(|value| value.checked_mul(1_000_000))
-                    .ok_or_else(|| out_of_range("interval"))?;
+                    .ok_or_else(|| datetime_out_of_range("interval"))?;
                 let fractional_micros = float_to_i64_rounded(secs * 1e6, "interval")?;
                 let micros = whole_micros
                     .checked_add(fractional_micros)
-                    .ok_or_else(|| out_of_range("interval"))?;
+                    .ok_or_else(|| datetime_out_of_range("interval"))?;
                 inline(Value::Temporal(TemporalValue::Interval {
                     months: total_months,
                     days: total_days,
                     micros,
                 }))
             }
-            "justify_hours" => {
-                if let Some(Value::Temporal(TemporalValue::Interval {
-                    months,
-                    days,
-                    micros,
-                })) = args.first()
-                {
-                    let extra_days = micros.div_euclid(86_400_000_000);
-                    let extra_days =
-                        i32::try_from(extra_days).map_err(|_| out_of_range("interval"))?;
-                    let days = days
-                        .checked_add(extra_days)
-                        .ok_or_else(|| out_of_range("interval"))?;
-                    return inline(Value::Temporal(TemporalValue::Interval {
-                        months: *months,
-                        days,
-                        micros: micros.rem_euclid(86_400_000_000),
-                    }));
-                }
-                Err(SQLError::TypeMismatch(
-                    "justify_hours takes an interval".into(),
-                ))
+            "justify_hours" | "justify_days" | "justify_interval" => {
+                let [Value::Temporal(interval @ TemporalValue::Interval { .. })] = args else {
+                    return Err(SQLError::TypeMismatch(format!("{name} takes an interval")));
+                };
+                let interval = IntervalFields::of(interval).ok_or_else(|| {
+                    SQLError::Internal(format!("{name} argument is not an interval"))
+                })?;
+                let justified = match name {
+                    "justify_hours" => interval.justify_hours(),
+                    "justify_days" => interval.justify_days(),
+                    _ => interval.justify_interval(),
+                }?;
+                inline(Value::Temporal(justified.value()))
             }
             "isfinite" => {
                 if args.len() != 1 {

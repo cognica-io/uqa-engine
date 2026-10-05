@@ -22,6 +22,11 @@ impl QueryPlan {
         rewrite_query_scalars(self, rewrite);
     }
 
+    /// Visit every `FROM` item this query owns, including those of nested queries.
+    pub fn visit_sources_mut(&mut self, visit: &mut dyn FnMut(&mut SourcePlan)) {
+        super::rewrite::visit_query_sources(self, visit);
+    }
+
     #[must_use]
     pub fn lower(statement: SelectStmt) -> Self {
         Self::lower_with(statement, &NoRegisteredAggregates)

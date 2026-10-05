@@ -49,12 +49,6 @@ pub enum RoutinePolymorphicType {
 }
 
 impl RoutinePolymorphicType {
-    /// Return whether the current [`ColumnType`] model can carry an actual value of this pseudo-type's constrained shape.
-    #[must_use]
-    pub const fn has_actual_carrier(self) -> bool {
-        !matches!(self, Self::AnyEnum)
-    }
-
     const fn family(self) -> RoutinePolymorphicFamily {
         match self {
             Self::AnyElement
@@ -179,9 +173,9 @@ impl RoutineTypeSubstitutions {
     #[must_use]
     pub fn substitute(&self, polymorphic: RoutinePolymorphicType) -> Option<ColumnType> {
         match polymorphic {
-            RoutinePolymorphicType::AnyElement | RoutinePolymorphicType::AnyNonArray => {
-                self.simple_element.clone()
-            }
+            RoutinePolymorphicType::AnyElement
+            | RoutinePolymorphicType::AnyNonArray
+            | RoutinePolymorphicType::AnyEnum => self.simple_element.clone(),
             RoutinePolymorphicType::AnyArray => self.simple_array.clone(),
             RoutinePolymorphicType::AnyRange => self.simple_range.clone(),
             RoutinePolymorphicType::AnyMultirange => self.simple_multirange.clone(),
@@ -190,7 +184,6 @@ impl RoutineTypeSubstitutions {
             RoutinePolymorphicType::AnyCompatibleArray => self.compatible_array.clone(),
             RoutinePolymorphicType::AnyCompatibleRange => self.compatible_range.clone(),
             RoutinePolymorphicType::AnyCompatibleMultirange => self.compatible_multirange.clone(),
-            RoutinePolymorphicType::AnyEnum => None,
         }
     }
 }

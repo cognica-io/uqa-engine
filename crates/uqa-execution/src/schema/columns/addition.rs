@@ -54,7 +54,6 @@ pub fn add_column<S: Clone + 'static>(
     if_not_exists: bool,
 ) -> Result<(), SQLError> {
     uqa_sql::schema::columns::validate_postgres_column_name(&column.name)?;
-    uqa_sql::schema::columns::validate_postgres_relation_column_type(&column.name, &column.ty)?;
     let col_name = column.name.clone();
     if column_exists(context, table, &col_name, if_not_exists)? {
         return Ok(());
@@ -66,6 +65,9 @@ pub fn add_column<S: Clone + 'static>(
     column.unique = key_constraints
         .iter()
         .any(|key| key.kind == uqa_sql::ast::TableKeyConstraintKind::Unique);
+    // ATExecAddColumn: BuildDescForRelation requires USAGE on the type and CheckAttributeType rejects a pseudo-type once the name is free, before the default and constraints are analyzed.
+    context.analysis.schema.require_type_usage(&column.ty)?;
+    uqa_sql::schema::columns::validate_postgres_relation_column_type(&column.name, &column.ty)?;
     uqa_sql::schema::columns::addition::bind_added_column(
         &context.analysis,
         table,

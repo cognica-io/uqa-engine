@@ -14,13 +14,13 @@ use crate::mutation::{
     rows::{context::MutationExpressionContext, join_rows as dml_join_rows},
     statement_end,
     triggers::context::TriggerContext,
-    views::commands::{materialize_view_rows, target_row, SourceOutputPruning},
+    views::commands::{materialize_view_rows, target_row, SourceOutputPruning, TriggerViewChecks},
 };
 use crate::query::{scope::StatementCommands, sources::build_join_spill_with_ctes, CteScope};
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_core::Value;
 use uqa_sql::{
-    plan::{MergePlan, MergeWhenPlan, ViewCheckPlan},
+    plan::{MergePlan, MergeWhenPlan},
     semantics::view_mutation::{
         resolve_view_target, target_columns, ViewMutationTarget as ViewDmlTarget,
     },
@@ -353,6 +353,7 @@ fn evaluate_view_assignment<S: Clone + 'static>(
 struct ViewMergeActionContext<'a, S: Clone + 'static> {
     assignment: MutationAssignmentContext<'a, S>,
     triggers: &'a TriggerContext<'a>,
+    checks: TriggerViewChecks<'a, S>,
     returning: &'a ReturningExecutionContext<'a, S>,
     target: &'a ViewDmlTarget,
     plan: &'a MergePlan,
@@ -411,7 +412,7 @@ fn execute_view_merge_update<S: Clone + 'static>(
     else {
         return Ok(ViewMergeActionResult::suppressed());
     };
-    validate_view_merge_checks(context, &final_new)?;
+    context.checks.validate(&final_new)?;
     let returning = build_action_returning(
         context,
         pair,
@@ -466,41 +467,13 @@ fn execute_view_merge_insert<S: Clone + 'static>(
     else {
         return Ok(ViewMergeActionResult::suppressed());
     };
-    validate_view_merge_checks(context, &final_new)?;
+    context.checks.validate(&final_new)?;
     let returning =
         build_action_returning(context, pair, &final_new, None, Some(&final_new), "INSERT")?;
     Ok(ViewMergeActionResult {
         affected: true,
         returning,
     })
-}
-
-fn validate_view_merge_checks<S: Clone + 'static>(
-    context: &ViewMergeActionContext<'_, S>,
-    values: &[Value],
-) -> Result<(), SQLError> {
-    if context.plan.view_checks.is_empty() {
-        return Ok(());
-    }
-    let row = target_row(context.target, &context.plan.target_qualifier, values)?;
-    for ViewCheckPlan { view, predicate } in &context.plan.view_checks {
-        let value = eval_mutation_expr(
-            context.assignment.expressions,
-            context.ctes,
-            predicate,
-            Some(&row),
-            context.params,
-        )?;
-        if !uqa_sql::expr::truthy(&value) {
-            let name = uqa_core::RelationIdentity::from_legacy_name(view)
-                .map_or_else(|_| view.clone(), |relation| relation.name);
-            return Err(SQLError::Routine {
-                sqlstate: "44000".into(),
-                message: format!("new row violates check option for view \"{name}\""),
-            });
-        }
-    }
-    Ok(())
 }
 
 fn build_action_returning<S: Clone + 'static>(
@@ -610,7 +583,6 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
     let mut statement_scope = None;
     let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
-            let read_mutation = &read_context.mutation;
             let ctes = statement_scope.insert(view_merge_scope(
                 context,
                 read_context,
@@ -620,39 +592,27 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
                 &statement_commands,
                 statement_snapshot.clone(),
             )?);
-            let source_privilege_expressions =
-                uqa_sql::semantics::view_privileges::merge_privilege_expressions(plan);
-            crate::query::privileges::ensure_select_privileges_for_source_expressions(
-                &plan.source,
-                &source_privilege_expressions,
-                ctes,
-            )?;
-            let source_rows =
-                build_join_spill_with_ctes(&read_context.query.source, &plan.source, params, ctes)?;
-            let mut target_scope = ctes.returning_statement_snapshot_scope();
-            let candidates = materialize_view_rows(
-                &read_context.query,
-                prune,
-                &target,
-                None,
-                params,
-                &mut target_scope,
-            )?;
-            let snapshot = ctes.returning_statement_snapshot_scope();
-            let pairings = build_view_merge_pairings(PairingInput {
-                expressions: read_mutation.preparation.referential.assignment.expressions,
-                runtime: read_context.query.source.relational.runtime,
-                target: &target,
-                plan,
-                candidates: &candidates,
-                source_rows: &source_rows,
-                params,
-                ctes: &snapshot,
-            })?;
+            let ViewMergeRows {
+                source_rows,
+                pairings,
+                snapshot,
+            } = pair_view_merge_rows(read_context, prune, &target, plan, params, ctes)?;
             let source_relation = uqa_sql::ast::InternalRelationId::allocate();
+            let supplied_columns =
+                uqa_sql::semantics::merge::merge_supplied_columns(plan, &target.columns);
             let action_context = ViewMergeActionContext {
                 assignment,
                 triggers,
+                checks: TriggerViewChecks {
+                    expressions: assignment.expressions,
+                    constraints: mutation.preparation.referential.constraints,
+                    target: &target,
+                    target_qualifier: &plan.target_qualifier,
+                    checks: &plan.view_checks,
+                    supplied: &supplied_columns,
+                    params,
+                    scope: &snapshot,
+                },
                 returning,
                 target: &target,
                 plan,
@@ -687,6 +647,65 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
     }?;
     statement_end::finish_statement(context, params, &plan.ctes, statement_scope.as_mut())?;
     Ok(result)
+}
+
+/// The rows a view MERGE acts on.
+struct ViewMergeRows<S: Clone + 'static> {
+    source_rows: crate::SharedSpill,
+    /// Each source row with the view row it matches, or with none.
+    pairings: crate::SharedSpill,
+    /// The statement's snapshot, which the actions read under.
+    snapshot: CteScope<S>,
+}
+
+/// Read the MERGE's source and the view's rows under the statement's snapshot and pair them.
+fn pair_view_merge_rows<S: Clone + Send + Sync + 'static>(
+    read_context: &MutationStatementContext<'_, S>,
+    prune: SourceOutputPruning,
+    target: &ViewDmlTarget,
+    plan: &MergePlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+) -> Result<ViewMergeRows<S>, SQLError> {
+    let source_privilege_expressions =
+        uqa_sql::semantics::view_privileges::merge_privilege_expressions(plan);
+    crate::query::privileges::ensure_select_privileges_for_source_expressions(
+        &plan.source,
+        &source_privilege_expressions,
+        ctes,
+    )?;
+    let source_rows =
+        build_join_spill_with_ctes(&read_context.query.source, &plan.source, params, ctes)?;
+    let mut target_scope = ctes.returning_statement_snapshot_scope();
+    let candidates = materialize_view_rows(
+        &read_context.query,
+        prune,
+        target,
+        None,
+        params,
+        &mut target_scope,
+    )?;
+    let snapshot = ctes.returning_statement_snapshot_scope();
+    let pairings = build_view_merge_pairings(PairingInput {
+        expressions: read_context
+            .mutation
+            .preparation
+            .referential
+            .assignment
+            .expressions,
+        runtime: read_context.query.source.relational.runtime,
+        target,
+        plan,
+        candidates: &candidates,
+        source_rows: &source_rows,
+        params,
+        ctes: &snapshot,
+    })?;
+    Ok(ViewMergeRows {
+        source_rows,
+        pairings,
+        snapshot,
+    })
 }
 
 /// The statement a view MERGE belongs to, with the BEFORE STATEMENT triggers of the view fired for the MERGE's actions.

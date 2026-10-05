@@ -13,6 +13,8 @@
 mod legacy_vectors;
 #[path = "support/native_storage.rs"]
 mod native_storage;
+#[path = "support/pg18_oracle.rs"]
+mod pg18_oracle;
 #[path = "support/waits.rs"]
 mod waits;
 

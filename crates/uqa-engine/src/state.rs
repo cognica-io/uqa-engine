@@ -79,6 +79,8 @@ pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};
 
 pub(super) struct DurableCatalogState {
     pub(super) domains: CatalogCell<BTreeMap<String, super::domains::StoredDomain>>,
+    pub(super) enums: CatalogCell<uqa_execution::catalog::enum_type::EnumRegistry>,
+    pub(super) composites: CatalogCell<uqa_execution::catalog::composite_type::CompositeRegistry>,
     pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
@@ -90,6 +92,11 @@ pub(super) struct DurableCatalogState {
     pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: CatalogCell<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
+    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
+    pub(super) sequence_catalog_oids: CatalogCell<BTreeMap<[u8; 16], u32>>,
+    /// The OIDs graphs and their labels recorded when they were created, by graph name.
+    pub(super) graph_catalog_oids:
+        CatalogCell<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
     pub(super) sequence_persistence:
         CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
@@ -115,6 +122,8 @@ pub(super) struct DurableCatalogState {
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
     pub(super) domains: Arc<BTreeMap<String, super::domains::StoredDomain>>,
+    pub(super) enums: Arc<uqa_execution::catalog::enum_type::EnumRegistry>,
+    pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: Arc<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: Arc<BTreeMap<String, String>>,
@@ -125,6 +134,9 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
+    pub(super) sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
+    pub(super) graph_catalog_oids:
+        Arc<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
     pub(super) sequence_persistence:
         Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
@@ -149,6 +161,8 @@ impl DurableCatalogState {
     pub(super) fn new() -> Self {
         Self {
             domains: CatalogCell::new(BTreeMap::new()),
+            enums: CatalogCell::new(BTreeMap::new()),
+            composites: CatalogCell::new(BTreeMap::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
             models: CatalogCell::new(BTreeMap::new()),
             scoring_params: CatalogCell::new(BTreeMap::new()),
@@ -162,6 +176,8 @@ impl DurableCatalogState {
             path_indexes: CatalogCell::new(BTreeMap::new()),
             sequences: CatalogCell::new(BTreeMap::new()),
             sequence_object_ids: CatalogCell::new(BTreeMap::new()),
+            sequence_catalog_oids: CatalogCell::new(BTreeMap::new()),
+            graph_catalog_oids: CatalogCell::new(BTreeMap::new()),
             sequence_persistence: CatalogCell::new(BTreeMap::new()),
             sequence_security: CatalogCell::new(BTreeMap::new()),
             named_analyzers: CatalogCell::new(BTreeMap::new()),
@@ -185,6 +201,8 @@ impl DurableCatalogState {
     pub(super) fn snapshot(&self) -> DurableCatalogSnapshot {
         DurableCatalogSnapshot {
             domains: self.domains.snapshot(),
+            enums: self.enums.snapshot(),
+            composites: self.composites.snapshot(),
             graphs: self.graphs.snapshot(),
             models: self.models.snapshot(),
             scoring_params: self.scoring_params.snapshot(),
@@ -195,6 +213,8 @@ impl DurableCatalogState {
             path_indexes: self.path_indexes.snapshot(),
             sequences: self.sequences.snapshot(),
             sequence_object_ids: self.sequence_object_ids.snapshot(),
+            sequence_catalog_oids: self.sequence_catalog_oids.snapshot(),
+            graph_catalog_oids: self.graph_catalog_oids.snapshot(),
             sequence_persistence: self.sequence_persistence.snapshot(),
             sequence_security: self.sequence_security.snapshot(),
             named_analyzers: self.named_analyzers.snapshot(),
@@ -224,6 +244,10 @@ impl DurableCatalogState {
         self.sequences.restore(&snapshot.sequences);
         self.sequence_object_ids
             .restore(&snapshot.sequence_object_ids);
+        self.sequence_catalog_oids
+            .restore(&snapshot.sequence_catalog_oids);
+        self.graph_catalog_oids
+            .restore(&snapshot.graph_catalog_oids);
         self.sequence_persistence
             .restore(&snapshot.sequence_persistence);
         self.sequence_security.restore(&snapshot.sequence_security);
@@ -238,6 +262,8 @@ impl DurableCatalogState {
             .restore(&snapshot.system_relation_security);
         self.sql_user_functions
             .restore(&snapshot.sql_user_functions);
+        self.enums.restore(&snapshot.enums);
+        self.composites.restore(&snapshot.composites);
         self.domains.restore(&snapshot.domains);
         self.roles.restore(&snapshot.roles);
         self.role_memberships.restore(&snapshot.role_memberships);
@@ -264,8 +290,6 @@ pub(super) struct SessionContext {
     pub(super) query_memory_limit: std::sync::atomic::AtomicUsize,
     /// Whether a terminated session has rolled back its transaction and dropped what it held.
     pub(super) termination_finished: AtomicBool,
-    /// Bodies `CREATE FUNCTION` left unexamined, as this session compiled them at their first call; like a backend's compiled functions, they survive rollback.
-    pub(super) compiled_routine_bodies: crate::session::CompiledRoutineBodies,
     /// Prepared definitions belong to the connection and survive transaction or
     /// savepoint rollback, including definitions created or removed after a boundary.
     pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
@@ -294,6 +318,10 @@ pub(super) struct SessionContext {
     pub(super) next_portal_transaction_origin: Mutex<u64>,
     pub(crate) statistics_worker: AtomicBool,
     pub(crate) statistics_client: AtomicBool,
+    /// Enum labels that the outermost transaction added to types it did not create; they become usable at commit. Label checks run while catalog restoration holds the transaction stack, so this state has its own lock.
+    pub(crate) uncommitted_enum_labels: Mutex<uqa_execution::schema::enums::UncommittedEnumLabels>,
+    /// Routine source bodies this session compiled, as `PostgreSQL`'s backend-local function cache keeps them. The cache is not transactional, and portal workers share it with their session.
+    pub(crate) routine_bodies: uqa_execution::routines::invocation::bodies::SessionRoutineBodies,
     /// Row changes of this session's commits that no maintenance record counts yet.
     pub(crate) kept_statistics: Mutex<crate::statistics::StatisticsChanges>,
 }
@@ -314,7 +342,7 @@ impl SessionContext {
         let state = super::SessionStateSnapshot {
             graph_overlay: None,
             search_path: crate::session::default_search_path(),
-            temporary_namespace_allocated: false,
+            temporary_namespace: None,
             session_vars: BTreeMap::new(),
             parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),
             sequence_currvals: BTreeMap::new(),
@@ -334,7 +362,6 @@ impl SessionContext {
             parameters: Mutex::new(crate::session::SessionParameterRegistry::default()),
             query_memory_limit: std::sync::atomic::AtomicUsize::new(0),
             termination_finished: AtomicBool::new(false),
-            compiled_routine_bodies: crate::session::CompiledRoutineBodies::default(),
             prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
             sequence_snapshot: Mutex::new(None),
@@ -355,6 +382,11 @@ impl SessionContext {
             next_portal_transaction_origin: Mutex::new(1),
             statistics_worker: AtomicBool::new(false),
             statistics_client: AtomicBool::new(false),
+            uncommitted_enum_labels: Mutex::new(
+                uqa_execution::schema::enums::UncommittedEnumLabels::default(),
+            ),
+            routine_bodies:
+                uqa_execution::routines::invocation::bodies::SessionRoutineBodies::default(),
             kept_statistics: Mutex::new(BTreeMap::new()),
         }
     }
@@ -498,6 +530,9 @@ pub(super) struct QueryRuntime {
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
     pub(super) regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache,
+    pub(super) enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache,
+    pub(super) composite_descriptor_cache:
+        uqa_execution::catalog::composite_type::CompositeDescriptorCache,
     pub(super) physical_index_cache: uqa_execution::catalog::index::physical::PhysicalIndexCache,
     pub(super) enforced_key_cache: uqa_execution::catalog::index::EnforcedKeyCache,
 }
@@ -532,6 +567,9 @@ impl QueryRuntime {
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
             regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache::default(),
+            enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache::default(),
+            composite_descriptor_cache:
+                uqa_execution::catalog::composite_type::CompositeDescriptorCache::default(),
             physical_index_cache:
                 uqa_execution::catalog::index::physical::PhysicalIndexCache::default(),
             enforced_key_cache: uqa_execution::catalog::index::EnforcedKeyCache::default(),

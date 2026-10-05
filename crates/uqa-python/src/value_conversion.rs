@@ -66,6 +66,10 @@ pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> 
         }
         Value::Bytes(value) => Ok(PyBytes::new(py, value).into_any().unbind()),
         Value::Temporal(value) => temporal_to_string(value).into_py_any(py),
+        // Result conversion renders enum columns through the engine catalog before reaching this context-free converter.
+        Value::Enum(value) => Err(super::errors::runtime_error(
+            uqa_sql::expr::catalog_output_required(value),
+        )),
         Value::Array(array) => values_to_py_list(py, array.elements()),
         Value::LegacyVector(vector) => values_to_py_list(py, vector.elements()),
         Value::List(values) => values_to_py_list(py, values),

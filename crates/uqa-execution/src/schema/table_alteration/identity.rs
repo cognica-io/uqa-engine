@@ -9,7 +9,6 @@
 use super::{ddl_storage_error, TableAlterContext};
 use crate::schema::sequences::{
     alteration::SequenceDefinitionContext, dispatch::SequenceCommandCatalog,
-    removal::SequenceRemovalInputs,
 };
 use uqa_core::RelationIdentity;
 use uqa_sql::ast::{
@@ -22,7 +21,6 @@ use uqa_sql::SQLError;
 pub struct IdentityAlterContext<'a> {
     pub definitions: SequenceDefinitionContext<'a>,
     pub catalog: &'a dyn SequenceCommandCatalog,
-    pub removal: &'a dyn SequenceRemovalInputs,
 }
 
 /// Where an action runs in a partition hierarchy.
@@ -73,7 +71,7 @@ fn partition_error(message: &str) -> SQLError {
     }
 }
 
-/// The column `name` of `table`, which `PostgreSQL` reports missing with `42703`.
+/// The column `name` of `table`. `PostgreSQL` reports a system column as one it cannot alter (`0A000`) and any other missing name with `42703`.
 fn column<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     table: &str,
@@ -87,10 +85,7 @@ fn column<S: Clone + 'static>(
         .unwrap_or_default()
         .into_iter()
         .find(|definition| definition.name == name)
-        .map_or_else(
-            || Err(column_error("42703", table, name, "does not exist")?),
-            Ok,
-        )
+        .ok_or_else(|| uqa_sql::schema::columns::missing_altered_column(table, name))
 }
 
 /// Whether a column draws its values as an identity column. A column an earlier version gave a table counter counts as one.
@@ -468,12 +463,52 @@ pub(super) fn drop_identity<S: Clone + 'static>(
         }
     }
     if let (false, Some(sequence)) = (target.recursing, sequence) {
-        context
-            .identities
-            .removal
-            .sequence_removal_context()
-            .drop_owned_sequence(&sequence, false)
-            .map_err(|error| ddl_storage_error("ALTER COLUMN DROP IDENTITY", error))?;
+        drop_identity_sequence(context, &sequence)?;
     }
     Ok(())
+}
+
+/// The identity sequence stops belonging to its column: its owner, the internal dependency of the sequence on the column, is cleared.
+fn release_identity_sequence(
+    context: &IdentityAlterContext<'_>,
+    name: &str,
+    relation: &RelationIdentity,
+) -> Result<(), SQLError> {
+    let definitions = &context.definitions;
+    let object_id = definitions.catalog.object_id(relation).ok_or_else(|| {
+        SQLError::Internal(format!("identity sequence `{name}` has no object identity"))
+    })?;
+    let mut state = definitions
+        .catalog
+        .state(relation)?
+        .ok_or_else(|| SQLError::Internal(format!("identity sequence `{name}` disappeared")))?;
+    state.owner = None;
+    definitions.publication.replace_sequence(
+        name,
+        relation,
+        object_id,
+        context.catalog.sequence_persistence(relation),
+        state,
+        true,
+    )
+}
+
+/// `ATExecDropIdentity` removes the sequence's internal dependency on the column, as `deleteDependencyRecordsForClass` does, and then `performDeletion` drops the sequence as it drops any sequence, failing while another object depends on it.
+fn drop_identity_sequence<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    sequence: &str,
+) -> Result<(), SQLError> {
+    let relation = RelationIdentity::from_legacy_name(sequence)
+        .map_err(|error| SQLError::Internal(format!("resolve sequence `{sequence}`: {error}")))?;
+    release_identity_sequence(&context.identities, sequence, &relation)?;
+    crate::schema::deletion::perform_deletion(
+        &context.removal.deletion.catalog_removal_context(),
+        |dependencies| {
+            Ok(vec![crate::schema::deletion::required_address(
+                dependencies.relation_address(&relation, None),
+                || format!("sequence {sequence}"),
+            )?])
+        },
+        false,
+    )
 }

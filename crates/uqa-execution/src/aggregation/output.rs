@@ -197,7 +197,12 @@ pub(super) fn finish_group(
         .iter()
         .zip(&accumulators)
         .map(|(finalizer, accumulator)| {
-            aggregate_value_with_args(&finalizer.name, accumulator, &finalizer.args)
+            aggregate_value_with_args(
+                &finalizer.name,
+                accumulator,
+                &finalizer.args,
+                uqa_sql::expr::EngineHook::enum_labels(context),
+            )
         })
         .collect::<Result<Vec<_>, _>>()?;
     let hook = context;
@@ -334,7 +339,7 @@ fn references_external_row(
     let nested = |expression| references_external_row(expression, aggregate_relation);
     match expression {
         ScalarExpr::InternalColumn(column) => column.relation() != aggregate_relation,
-        ScalarExpr::Func { args, filter, .. } => {
+        ScalarExpr::Func { args, filter, .. } | ScalarExpr::WindowCall { args, filter, .. } => {
             args.iter().any(nested) || filter.as_deref().is_some_and(nested)
         }
         ScalarExpr::Array(items)
@@ -348,7 +353,6 @@ fn references_external_row(
         ScalarExpr::IsNull { expr, .. } => nested(expr),
         ScalarExpr::Between { expr, low, high } => nested(expr) || nested(low) || nested(high),
         ScalarExpr::InList { expr, list, .. } => nested(expr) || list.iter().any(nested),
-        ScalarExpr::WindowCall { args, .. } => args.iter().any(nested),
         ScalarExpr::Case {
             base,
             when,

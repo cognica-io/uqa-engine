@@ -762,10 +762,21 @@ fn create_table_keeps_key_declarations_for_analysis() {
             "{sql}"
         );
     }
-    assert!(compile(
-        "CREATE TABLE t (a INTEGER, CONSTRAINT same CHECK (a > 0), CONSTRAINT same CHECK (a > 1))"
-    )
-    .is_err());
+    // `AddRelationNewConstraints` rejects a repeated CHECK name only after it transforms the earlier CHECKs, so the statement keeps both in written order.
+    let Statement::CreateTable(table) = first(
+        "CREATE TABLE t (a INTEGER CONSTRAINT same CHECK (a > 0), CONSTRAINT same CHECK (a > 1))",
+    ) else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(
+        table.check_order,
+        [
+            crate::ast::DeclaredCheck::Column("a".into()),
+            crate::ast::DeclaredCheck::Table(0)
+        ]
+    );
+    assert_eq!(table.columns[0].check_name.as_deref(), Some("same"));
+    assert_eq!(table.checks[0].name.as_deref(), Some("same"));
 }
 
 #[test]

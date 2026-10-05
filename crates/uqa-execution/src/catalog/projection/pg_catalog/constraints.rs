@@ -80,35 +80,14 @@ pub fn build_pg_constraint(
                 None => 0,
             };
             let index_oid = constraint_index_oid(&constraint, &indexes);
-            let parent_index_constraint_oid = constraint
-                .parent_oid
-                .unwrap_or_else(|| key_parent_oid(catalog, &constraint, &indexes));
+            let parent_index_constraint_oid = constraint_parent_oid(catalog, &constraint, &indexes);
             let (inheritance_count, is_local) = if constraint.parent_oid.is_some() {
                 (1, false)
             } else {
                 constraint_inheritance_state(catalog, resolution, &constraint)?
             };
             Ok(row([
-                (
-                    "oid",
-                    int_value(constraint.catalog_oid.unwrap_or_else(|| {
-                        constraint
-                            .object_id
-                            .filter(|_| constraint.kind == ConstraintCatalogKind::Check)
-                            .map_or_else(
-                                || {
-                                    stable_oid(
-                                        "constraint",
-                                        &format!(
-                                            "{}.{}.{}",
-                                            constraint.schema, constraint.table, constraint.name
-                                        ),
-                                    )
-                                },
-                                |object_id| stable_object_oid("constraint", &object_id),
-                            )
-                    })),
-                ),
+                ("oid", int_value(constraint_row_oid(&constraint))),
                 ("conname", str_value(constraint.name)),
                 (
                     "connamespace",
@@ -159,10 +138,34 @@ pub fn build_pg_constraint(
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
+    rows.extend(super::constraint_definitions::domain_constraint_rows(
+        catalog,
+    )?);
     rows.extend(super::super::events::build_trigger_constraints(
         catalog, resolution,
     )?);
     Ok(rows)
+}
+
+/// The `pg_constraint` OID of a relation constraint.
+pub(crate) fn constraint_row_oid(constraint: &ConstraintCatalogRow) -> i64 {
+    constraint.catalog_oid.unwrap_or_else(|| {
+        constraint
+            .object_id
+            .filter(|_| constraint.kind == ConstraintCatalogKind::Check)
+            .map_or_else(
+                || {
+                    stable_oid(
+                        "constraint",
+                        &format!(
+                            "{}.{}.{}",
+                            constraint.schema, constraint.table, constraint.name
+                        ),
+                    )
+                },
+                |object_id| stable_object_oid("constraint", &object_id),
+            )
+    })
 }
 
 fn constraint_inheritance_state(
@@ -284,7 +287,8 @@ const fn foreign_key_match_code(match_type: uqa_sql::ast::ForeignKeyMatch) -> &'
     }
 }
 
-fn constraint_index_oid(
+/// `conindid`: the index that implements a key constraint, or the unique index a foreign key references; zero for other constraints.
+pub(crate) fn constraint_index_oid(
     constraint: &super::super::helpers::constraints::ConstraintCatalogRow,
     indexes: &[super::CatalogIndexRelation],
 ) -> i64 {
@@ -313,11 +317,15 @@ fn constraint_index_oid(
         .map_or(0, super::CatalogIndexRelation::oid)
 }
 
-fn key_parent_oid(
+/// `conparentid`: the foreign key that a constraint derived on a referenced partition belongs to, or the constraint of the parent partitioned table whose index is the parent of this key constraint's index; zero otherwise.
+pub(crate) fn constraint_parent_oid(
     catalog: &CatalogReadView,
     constraint: &ConstraintCatalogRow,
     indexes: &[super::CatalogIndexRelation],
 ) -> i64 {
+    if let Some(parent) = constraint.parent_oid {
+        return parent;
+    }
     let Some(owner) = constraint.object_id else {
         return 0;
     };

@@ -231,7 +231,10 @@ fn evaluate_truth<F: FieldValues + ?Sized>(
         ProjectedExpr::IsNull {
             expression,
             negated,
-        } => Some(matches!(evaluate(expression, fields)?.as_value(), Value::Null) != *negated),
+        } => Some(uqa_core::sql_null_test(
+            Some(evaluate(expression, fields)?.as_value()),
+            *negated,
+        )),
         ProjectedExpr::Between {
             expression,
             low,
@@ -349,9 +352,10 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
         ProjectedExpr::IsNull {
             expression,
             negated,
-        } => ProjectedValue::Owned(Value::Bool(
-            matches!(evaluate(expression, fields)?.as_value(), Value::Null) != *negated,
-        )),
+        } => ProjectedValue::Owned(Value::Bool(uqa_core::sql_null_test(
+            Some(evaluate(expression, fields)?.as_value()),
+            *negated,
+        ))),
         ProjectedExpr::Between {
             expression,
             low,

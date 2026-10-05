@@ -24,6 +24,21 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
         .map(Some)
     }
 
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        Some(self.engine)
+    }
+
+    fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
+        Some(self.engine)
+    }
+
+    fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
+        uqa_execution::catalog::security::type_inquiry::require_type_usage(
+            &self.engine.catalog_execution(),
+            ty,
+        )
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

@@ -7,13 +7,17 @@
 //! Recompute stored generated values from a relation's declared row schema.
 
 use uqa_core::Value;
-use uqa_sql::assignment::conversion::convert_value_to_column_type;
+use uqa_sql::assignment::{
+    conversion::convert_value_to_column_type_with_context, AssignmentContext,
+};
 use uqa_sql::{
     ast::{ColumnDef, Expr, GeneratedColumnKind},
     ResultRow, RowSchema, SQLError,
 };
 
+/// Recompute every stored generated column; each value takes its column type through catalog-aware assignment conversion.
 pub fn refresh_stored_generated_columns(
+    assignment: &dyn AssignmentContext,
     columns: &[ColumnDef],
     document: &mut ResultRow,
     evaluate: &mut dyn FnMut(&Expr, &ResultRow, &RowSchema) -> Result<Value, SQLError>,
@@ -40,7 +44,7 @@ pub fn refresh_stored_generated_columns(
         let value = evaluate(&generated.expression, document, &schema)?;
         document.insert(
             column.name.clone(),
-            convert_value_to_column_type(value, &column.ty)?,
+            convert_value_to_column_type_with_context(assignment, value, &column.ty)?,
         );
     }
     Ok(())

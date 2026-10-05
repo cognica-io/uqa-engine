@@ -14,7 +14,9 @@ use uqa_core::{
     memory::{MemoryReservation, Produced, ProductionControl},
     Value,
 };
+mod arrays;
 mod comparison;
+mod enums;
 mod helpers;
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types.
@@ -43,7 +45,46 @@ pub fn bind_type_introspection_with_control(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<ScalarExpr>, SQLError> {
-    bind_owned(expression, schema, params, None, control)
+    bind_owned(expression, schema, params, None, control, false)
+}
+
+/// Convert the `unknown` literals that binding coerces to catalog enum types, reporting the first invalid input as `PostgreSQL` parse analysis does. Binding at execution then folds the same literals without failing.
+pub fn validate_catalog_literals(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<(), SQLError> {
+    if !resolver
+        .enum_labels()
+        .is_some_and(crate::expr::enums::EnumLabelCatalog::has_enum_types)
+    {
+        return Ok(());
+    }
+    let control = ProductionControl::uncontrolled();
+    let expression = control.finish(expression.clone(), None)?;
+    bind_owned(expression, schema, params, Some(resolver), &control, true).map(drop)
+}
+
+/// Bind a copy of a stored expression as parse analysis does, so the caller can keep the enum constants that binding coerces from `unknown` literals. Returns `None` when the statement catalog defines no enum type. Input that no label matches stays unconverted for the literal's own validation to report.
+pub fn bind_catalog_constants(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<ScalarExpr>, SQLError> {
+    if !resolver
+        .enum_labels()
+        .is_some_and(crate::expr::enums::EnumLabelCatalog::has_enum_types)
+    {
+        return Ok(None);
+    }
+    let control = ProductionControl::uncontrolled();
+    let expression = control.finish(expression.clone(), None)?;
+    bind_owned(expression, schema, params, Some(resolver), &control, false)?
+        .into_uncontrolled()
+        .map(Some)
+        .map_err(|_| SQLError::Internal("uncontrolled binding retained a reservation".into()))
 }
 
 fn bind_ordinary(
@@ -56,7 +97,7 @@ fn bind_ordinary(
     let expression = control
         .finish(expression, None)
         .expect("ordinary scalar owner");
-    bind_owned(expression, schema, params, resolver, &control)
+    bind_owned(expression, schema, params, resolver, &control, false)
         .expect("ordinary binding cannot be cancelled or limited")
         .into_uncontrolled()
         .expect("ordinary binding has no reservation")
@@ -73,6 +114,7 @@ fn bind_owned(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
     control: &ProductionControl<'_>,
+    strict_literals: bool,
 ) -> Result<Produced<ScalarExpr>, SQLError> {
     assert!(
         control.budget().is_none() || resolver.is_none(),
@@ -88,6 +130,7 @@ fn bind_owned(
         resolver,
         control: *control,
         memory: &mut root.memory,
+        strict_literals,
     }
     .bind(expression)?;
     Ok(control.finish(root.expression, root.memory)?)
@@ -99,6 +142,8 @@ struct Binder<'a, 'b> {
     resolver: Option<&'a dyn FunctionTypeResolver>,
     control: ProductionControl<'a>,
     memory: &'b mut Option<MemoryReservation>,
+    /// Report an `unknown` literal that its coerced type rejects instead of leaving the conversion to evaluation.
+    strict_literals: bool,
 }
 
 impl Binder<'_, '_> {
@@ -150,13 +195,12 @@ impl Binder<'_, '_> {
                     }))?
                     .flatten();
                 let comparison = self
-                    .semantic(self.numeric_comparison_types(op, &lhs, &rhs))?
+                    .semantic(self.comparison_types(op, &lhs, &rhs))?
                     .flatten();
                 self.in_place(&mut lhs)?;
                 self.in_place(&mut rhs)?;
-                if let Some(types) = comparison {
-                    self.common_cast(&mut lhs, &types[0])?;
-                    self.common_cast(&mut rhs, &types[1])?;
+                if comparison.is_some() {
+                    self.coerce_comparison(comparison, &mut lhs, &mut rhs)?;
                 } else if let Some(ty) = result
                     .as_deref()
                     .filter(|ty| matches!(ty, ColumnType::Real | ColumnType::DoublePrecision))
@@ -204,9 +248,24 @@ impl Binder<'_, '_> {
                 mut low,
                 mut high,
             } => {
+                let types = [
+                    self.semantic(self.comparison_types(
+                        crate::ast::BinaryOp::GreaterEqual,
+                        &expr,
+                        &low,
+                    ))?
+                    .flatten(),
+                    self.semantic(self.comparison_types(
+                        crate::ast::BinaryOp::LessEqual,
+                        &expr,
+                        &high,
+                    ))?
+                    .flatten(),
+                ];
                 self.in_place(&mut expr)?;
                 self.in_place(&mut low)?;
                 self.in_place(&mut high)?;
+                self.coerce_between(types, &mut expr, &mut low, &mut high)?;
                 ScalarExpr::Between { expr, low, high }
             }
             ScalarExpr::InList {
@@ -216,6 +275,7 @@ impl Binder<'_, '_> {
             } => {
                 self.in_place(&mut expr)?;
                 self.items(&mut list)?;
+                self.coerce_in_list(&mut expr, &mut list)?;
                 ScalarExpr::InList {
                     expr,
                     list,
@@ -226,8 +286,13 @@ impl Binder<'_, '_> {
                 name,
                 mut args,
                 mut spec,
+                mut filter,
+                modifiers,
             } => {
                 self.items(&mut args)?;
+                if let Some(filter) = filter.as_deref_mut() {
+                    self.in_place(filter)?;
+                }
                 self.items(&mut spec.partition_by)?;
                 for order in &mut spec.order_by {
                     self.in_place(&mut order.expr)?;
@@ -236,7 +301,13 @@ impl Binder<'_, '_> {
                     self.frame_bound(&mut frame.start)?;
                     self.frame_bound(&mut frame.end)?;
                 }
-                ScalarExpr::WindowCall { name, args, spec }
+                ScalarExpr::WindowCall {
+                    name,
+                    args,
+                    spec,
+                    filter,
+                    modifiers,
+                }
             }
             ScalarExpr::Case {
                 mut base,
@@ -268,10 +339,12 @@ impl Binder<'_, '_> {
                         }
                     }
                 }
+                // `transformCaseExpr` selects the result type with the ELSE result first.
                 let ty = self.common_type(
-                    when.iter()
-                        .map(|(_, result)| result)
-                        .chain(else_branch.iter().map(Box::as_ref)),
+                    else_branch
+                        .iter()
+                        .map(Box::as_ref)
+                        .chain(when.iter().map(|(_, result)| result)),
                 )?;
                 if let Some(ty) = ty {
                     for (_, result) in &mut when {
@@ -288,6 +361,7 @@ impl Binder<'_, '_> {
                 }
             }
             ScalarExpr::Cast { mut expr, ty } => {
+                self.fold_enum_array_constructor(&mut expr, &ty)?;
                 let source = if self.cast_requires_source(&ty)? {
                     let source = self.semantic(self.infer(&expr))?.flatten();
                     source
@@ -298,6 +372,9 @@ impl Binder<'_, '_> {
                     None
                 };
                 self.in_place(&mut expr)?;
+                if let Some(folded) = self.fold_explicit_enum_cast(&expr, &ty)? {
+                    return Ok(folded);
+                }
                 if let Some(source) = source {
                     self.wrap_declared(&mut expr, &source)?;
                 }
@@ -385,14 +462,22 @@ impl Binder<'_, '_> {
         if helpers::is_common_type_function(&call.name) {
             self.common_expressions(&mut call.arguments)?;
         }
+        self.coerce_comparison_call(&mut call)?;
+        self.coerce_compatible_array_call(&mut call)?;
         self.bind_optional_calls(&mut call, &mut infer)?;
+        self.bind_enum_call(&mut call)?;
         if helpers::is_pg_typeof(&call.name) && call.arguments.len() == 1 {
             let ty = self.semantic(self.infer(&call.arguments[0]))?.flatten();
+            let cast = control.copy_text("regtype")?;
+            // A user-defined type is folded by OID: its name may be shadowed by a built-in type or depend on the search path.
+            if let Some(ty) = ty.as_deref().filter(|ty| helpers::is_user_defined_type(ty)) {
+                let oid = crate::catalog::type_metadata::pg_type_oid(ty);
+                return self.cast(ScalarExpr::Literal(Value::Int(oid)), cast);
+            }
             let name = ty.map_or_else(
                 || control.copy_text("unknown"),
                 |ty| ty.regtype_name_with_control(&control),
             )?;
-            let cast = control.copy_text("regtype")?;
             let name = self.retain(name);
             return self.cast(ScalarExpr::Literal(Value::Str(name)), cast);
         }

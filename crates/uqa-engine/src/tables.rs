@@ -41,6 +41,7 @@ impl Engine {
             persistence: table.persistence,
             on_commit: table.on_commit,
             hierarchy: table.hierarchy.read().clone(),
+            catalog_oids: table.recorded_catalog_oids(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }
@@ -88,8 +89,13 @@ impl Engine {
             })
             .collect();
         let columns_json = serde_json::to_string(columns).map_err(StorageBackendError::from)?;
+        // The table's state is the authority for the OIDs it was created with.
+        let constraints = uqa_sql::ast::TableConstraintSet {
+            catalog_oids: table.recorded_catalog_oids(),
+            ..constraints.clone()
+        };
         let constraints_json =
-            uqa_execution::schema::indexes::constraint_names::encode(constraints)?;
+            uqa_execution::schema::indexes::constraint_names::encode(&constraints)?;
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
@@ -144,6 +150,11 @@ impl Engine {
         })
     }
 
+    /// Create a table whose name relation creation resolved, under the OIDs `CREATE TABLE` allocated for it or, when none are given, OIDs allocated now.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the lifecycle attributes and the OIDs a statement allocated are set once at creation"
+    )]
     pub(crate) fn create_table_with_lifecycle(
         &self,
         name: &str,
@@ -152,23 +163,34 @@ impl Engine {
         persistence: uqa_sql::ast::RelationPersistence,
         on_commit: uqa_sql::ast::OnCommitAction,
         owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
+        catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
     ) -> StorageBackendResult<()> {
         if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            return self.create_table_inner(
+            return self.create_resolved_table(
                 name,
                 analyzer,
                 fts_fields,
                 persistence,
                 on_commit,
                 owner,
+                catalog_oids,
             );
         }
         let name = name.to_string();
         self.with_implicit_storage_transaction(move |engine| {
-            engine.create_table_inner(&name, analyzer, fts_fields, persistence, on_commit, owner)
+            engine.create_resolved_table(
+                &name,
+                analyzer,
+                fts_fields,
+                persistence,
+                on_commit,
+                owner,
+                catalog_oids,
+            )
         })
     }
 
+    /// Create a table named through the API, whose name resolves among the durable schemas.
     fn create_table_inner(
         &self,
         raw_name: &str,
@@ -178,15 +200,35 @@ impl Engine {
         on_commit: uqa_sql::ast::OnCommitAction,
         owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
     ) -> StorageBackendResult<()> {
-        let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            self.relation_creation_context()
-                .temporary_name(raw_name)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?
-        } else {
-            self.relation_creation_context().api_name(raw_name)?
-        };
-        let relation = Self::resolved_relation_identity(&name)?;
-        if let Some(kind) = self.relation_kind_at(&name)? {
+        let name = self.relation_creation_context().api_name(raw_name)?;
+        self.create_resolved_table(
+            &name,
+            analyzer,
+            fts_fields,
+            persistence,
+            on_commit,
+            owner,
+            None,
+        )
+    }
+
+    /// Create a table under the canonical name that relation creation resolved, in the namespace and with the persistence it chose. `CREATE TABLE` passes the OIDs it allocated where `heap_create_with_catalog` allocates them; a table the API or `CREATE TABLE AS` creates reserves its row type name and takes its OIDs here.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the lifecycle attributes and the OIDs a statement allocated are set once at creation"
+    )]
+    fn create_resolved_table(
+        &self,
+        name: &str,
+        analyzer: Analyzer,
+        fts_fields: Vec<FieldName>,
+        persistence: uqa_sql::ast::RelationPersistence,
+        on_commit: uqa_sql::ast::OnCommitAction,
+        owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
+        catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
+    ) -> StorageBackendResult<()> {
+        let relation = Self::resolved_relation_identity(name)?;
+        if let Some(kind) = self.relation_kind_at(name)? {
             return Err(StorageBackendError::Other(format!(
                 "relation `{name}` already exists as {kind}"
             )));
@@ -208,8 +250,8 @@ impl Engine {
                 )
             } else if let Some(backend) = self.storage.backend.as_ref() {
                 (
-                    backend.document_store(&name),
-                    backend.inverted_index(&name, analyzer.clone()),
+                    backend.document_store(name),
+                    backend.inverted_index(name, analyzer.clone()),
                 )
             } else {
                 (
@@ -220,9 +262,20 @@ impl Engine {
         self.relation_creation_context()
             .retain_owner(owner)
             .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?;
-        self.relation_creation_context()
-            .reserve_row_type_name(&name)
-            .map_err(|error| StorageBackendError::backend("CREATE TABLE name", error))?;
+        let catalog_oids = if let Some(catalog_oids) = catalog_oids {
+            catalog_oids
+        } else {
+            self.relation_creation_context()
+                .reserve_row_type_name(name)
+                .map_err(|error| StorageBackendError::backend("CREATE TABLE name", error))?;
+            self.catalog_identity_reservation_context()
+                .allocator(uqa_execution::catalog::identity::allocate_catalog_object_id)
+                .allocate_relation_oids(
+                    uqa_sql::catalog::relation_oids::RelationOidKind::Table,
+                    &relation,
+                )
+                .map_err(|error| StorageBackendError::backend("CREATE TABLE OIDs", error))?
+        };
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
@@ -250,13 +303,14 @@ impl Engine {
             doc_count_dirty: AtomicBool::new(true),
             persistence,
             on_commit,
+            catalog_oids: Some(catalog_oids),
         };
         let table_arc = Arc::new(table);
         if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {
-            self.try_save_table_schema(&name, &table_arc)?;
+            self.try_save_table_schema(name, &table_arc)?;
         }
         let analyzer_bindings =
-            self.initialize_table_analyzer_bindings(&name, &table_arc, default_revision)?;
+            self.initialize_table_analyzer_bindings(name, &table_arc, default_revision)?;
         self.storage.tables.write().insert(relation, table_arc);
         self.durable
             .table_field_analyzers

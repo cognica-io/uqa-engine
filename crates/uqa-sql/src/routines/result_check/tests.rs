@@ -27,8 +27,12 @@ impl RoutineTypeCatalog for Types {
         ColumnType::from_sql_name(name)
     }
 
-    fn resolve_catalog_domain_type_by_oid(&self, _: u32) -> Option<ColumnType> {
+    fn resolve_catalog_user_type_by_oid(&self, _: u32) -> Option<ColumnType> {
         None
+    }
+
+    fn require_type_usage(&self, _: &ColumnType) -> Result<(), SQLError> {
+        Ok(())
     }
 
     fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError> {

@@ -8,7 +8,7 @@
 
 use crate::Engine;
 use uqa_execution::schema::view_dependencies::{self, ViewDependencyContext};
-use uqa_sql::{ast::FunctionBinding, SQLError};
+use uqa_sql::ast::FunctionBinding;
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
@@ -27,27 +27,6 @@ impl Engine {
             &self.view_dependency_context(),
             canonical_name,
         )
-    }
-    pub(crate) fn views_depending_on_sequence(
-        &self,
-        canonical_name: &str,
-    ) -> StorageBackendResult<Vec<String>> {
-        view_dependencies::views_depending_on_sequence(
-            &self.view_dependency_context(),
-            canonical_name,
-        )
-    }
-    pub(crate) fn views_depending_on_function(
-        &self,
-        target: &FunctionBinding,
-    ) -> StorageBackendResult<Vec<String>> {
-        view_dependencies::views_depending_on_function(&self.view_dependency_context(), target)
-    }
-    pub(crate) fn cascade_view_closure(
-        &self,
-        initial: Vec<String>,
-    ) -> Result<Vec<String>, SQLError> {
-        view_dependencies::cascade_view_closure(&self.view_dependency_context(), initial)
     }
     pub(crate) fn rewrite_view_routine_identity(
         &self,

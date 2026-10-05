@@ -21,6 +21,7 @@ pub trait ConstraintTriggerEvents {
 }
 #[derive(Clone, Copy)]
 pub struct EventLifecycleContext<'a> {
+    pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub lookup: EventLookupContext<'a>,
     pub catalog: EventCatalogContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,

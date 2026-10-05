@@ -10,6 +10,7 @@ use crate::Engine;
 use parking_lot::MappedRwLockReadGuard;
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_graph::GraphStoreHandle;
+use uqa_sql::catalog::graph_oids::GraphCatalogOids;
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     catalog::security::{
@@ -22,13 +23,22 @@ use uqa_sql::{
     SQLError,
 };
 
-struct GraphNamesGuard<'a>(MappedRwLockReadGuard<'a, BTreeMap<String, Arc<GraphStoreHandle>>>);
+struct GraphNamesGuard<'a> {
+    graphs: MappedRwLockReadGuard<'a, BTreeMap<String, Arc<GraphStoreHandle>>>,
+    oids: MappedRwLockReadGuard<'a, BTreeMap<String, GraphCatalogOids>>,
+}
 impl GraphNamespaceRead for GraphNamesGuard<'_> {
     fn names(&self) -> Box<dyn Iterator<Item = &str> + '_> {
-        Box::new(self.0.keys().map(String::as_str))
+        Box::new(self.graphs.keys().map(String::as_str))
     }
     fn contains(&self, name: &str) -> bool {
-        self.0.contains_key(name)
+        self.graphs.contains_key(name)
+    }
+    fn namespace_oid(&self, name: &str) -> i64 {
+        self.oids.get(name).map_or_else(
+            || uqa_sql::catalog::oids::schema_oid(name),
+            |oids| i64::from(oids.namespace),
+        )
     }
 }
 
@@ -42,10 +52,15 @@ impl SchemaPrivilegeCatalog for Engine {
         Box::new(self.durable.schemas.read())
     }
     fn graphs(&self) -> Box<dyn GraphNamespaceRead + '_> {
-        Box::new(GraphNamesGuard(self.durable.graphs.read()))
+        Box::new(GraphNamesGuard {
+            graphs: self.durable.graphs.read(),
+            oids: self.durable.graph_catalog_oids.read(),
+        })
     }
-    fn temporary_namespace_allocated(&self) -> bool {
-        self.temporary_namespace_allocated()
+    fn temporary_namespace_oids(
+        &self,
+    ) -> Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids> {
+        self.temporary_namespace_oids()
     }
     fn temporary_schema_name(&self) -> String {
         self.temporary_schema_name()
@@ -106,6 +121,8 @@ impl CreationRelationGuards for Engine {
     fn named_type_exists(&self, identity: &RelationIdentity) -> bool {
         uqa_execution::catalog::projection::named_type_exists(
             self.durable.domains.read().values(),
+            self.durable.enums.read().values(),
+            self.durable.composites.read().values(),
             identity,
         )
     }
@@ -124,6 +141,19 @@ impl CreationRelationGuards for Engine {
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CreationNamesGuard(self.durable.catalog_indexes.read()))
     }
+    fn composite_types(&self) -> Box<dyn CreationRelationNames + '_> {
+        Box::new(CompositeNamesGuard(self.durable.composites.read()))
+    }
+}
+
+/// The composite registry is keyed by qualified type name, which is also the composite relation's name.
+struct CompositeNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_execution::catalog::composite_type::CompositeRegistry>>
+    CreationRelationNames for CompositeNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(&relation.qualified_name())
+    }
 }
 impl RelationCreationRuntime for Engine {
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()> {
@@ -141,8 +171,15 @@ impl RelationCreationRuntime for Engine {
     fn fence_catalog_writer_and_refresh_snapshot(&self) -> Result<(), SQLError> {
         Engine::fence_catalog_writer_and_refresh_snapshot(self)
     }
-    fn allocate_temporary_namespace(&self) {
-        self.session.state.write().temporary_namespace_allocated = true;
+    fn create_temporary_namespace(&self) -> Result<(), SQLError> {
+        let oids = self
+            .catalog_identity_reservation_context()
+            .allocator(uqa_execution::catalog::identity::allocate_catalog_object_id)
+            .allocate_temporary_namespace_oids(|oid| {
+                Ok(uqa_execution::schema::namespaces::identity::namespace_oid_in_use(self, oid))
+            })?;
+        self.session.state.write().temporary_namespace = Some(oids);
+        Ok(())
     }
 }
 impl Engine {

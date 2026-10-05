@@ -670,26 +670,8 @@ pub(in crate::compiler) fn compile_projections(
             Some(node) => compile_expr(node)?,
             None => return Err(SQLError::Internal("ResTarget without value".into())),
         };
-        let alias = match (
-            alias,
-            res_target.val.as_ref().and_then(|node| node.node.as_ref()),
-        ) {
-            (None, Some(NodeEnum::TypeCast(cast))) => cast
-                .arg
-                .as_ref()
-                .and_then(|argument| strong_projection_name(argument))
-                .or_else(|| {
-                    cast.type_name
-                        .as_ref()
-                        .and_then(|ty| ty.names.last())
-                        .and_then(|node| match node.node.as_ref() {
-                            Some(NodeEnum::String(name)) => Some(name.sval.clone()),
-                            _ => None,
-                        })
-                }),
-            (None, Some(NodeEnum::SqlvalueFunction(function))) => {
-                sql_value_projection_name(function.op()).map(str::to_owned)
-            }
+        let alias = match (alias, res_target.val.as_deref()) {
+            (None, Some(node)) if names_implicitly(node) => implicit_projection_name(node),
             (alias, _) => alias,
         };
         out.push(Projection { expr, alias });
@@ -697,8 +679,32 @@ pub(in crate::compiler) fn compile_projections(
     Ok(out)
 }
 
-fn strong_projection_name(node: &Node) -> Option<String> {
-    let name = |nodes: &[Node]| {
+/// Whether the compiler names an unaliased target of this form; column references and plain function calls keep the name their bound expression gives them.
+fn names_implicitly(node: &Node) -> bool {
+    !matches!(
+        node.node.as_ref(),
+        Some(NodeEnum::ColumnRef(_) | NodeEnum::FuncCall(_)) | None
+    )
+}
+
+/// How firmly `FigureColnameInternal` names an expression: a cast's type name and `case` are weak, and an enclosing cast or `CASE` replaces them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NameStrength {
+    Weak,
+    Strong,
+}
+
+/// `FigureColname`: the name of an unaliased target, or `None` when the expression gives itself none and the target is `?column?`.
+fn implicit_projection_name(node: &Node) -> Option<String> {
+    figure_colname(node).map(|(name, _)| name)
+}
+
+/// `FigureColnameInternal`.
+fn figure_colname(node: &Node) -> Option<(String, NameStrength)> {
+    use pg_query::protobuf::{AExprKind, JsonExprOp, MinMaxOp, SubLinkType, XmlExprOp};
+    use NameStrength::{Strong, Weak};
+
+    let last_name = |nodes: &[Node]| {
         nodes
             .iter()
             .rev()
@@ -707,54 +713,110 @@ fn strong_projection_name(node: &Node) -> Option<String> {
                 _ => None,
             })
     };
+    let strong = |name: &str| Some((name.to_owned(), Strong));
     match node.node.as_ref()? {
-        NodeEnum::ColumnRef(column) => name(&column.fields),
-        NodeEnum::FuncCall(function) => name(&function.funcname),
-        NodeEnum::TypeCast(cast) => cast
-            .arg
-            .as_ref()
-            .and_then(|argument| strong_projection_name(argument)),
-        NodeEnum::CollateClause(collate) => collate
-            .arg
-            .as_ref()
-            .and_then(|argument| strong_projection_name(argument)),
-        NodeEnum::AIndirection(indirection) => name(&indirection.indirection).or_else(|| {
-            indirection
-                .arg
-                .as_ref()
-                .and_then(|argument| strong_projection_name(argument))
-        }),
-        NodeEnum::CaseExpr(case) => case
-            .defresult
-            .as_ref()
-            .and_then(|argument| strong_projection_name(argument)),
-        NodeEnum::AArrayExpr(_) => Some("array".into()),
-        NodeEnum::RowExpr(_) => Some("row".into()),
-        NodeEnum::CoalesceExpr(_) => Some("coalesce".into()),
-        NodeEnum::GroupingFunc(_) => Some("grouping".into()),
-        NodeEnum::SqlvalueFunction(function) => {
-            sql_value_projection_name(function.op()).map(str::to_owned)
+        NodeEnum::ColumnRef(column) => last_name(&column.fields).map(|name| (name, Strong)),
+        // The last field name, ignoring `*` and subscripts, or else the name of the subscripted expression.
+        NodeEnum::AIndirection(indirection) => match last_name(&indirection.indirection) {
+            Some(name) => Some((name, Strong)),
+            None => indirection.arg.as_deref().and_then(figure_colname),
+        },
+        NodeEnum::FuncCall(function) => last_name(&function.funcname).map(|name| (name, Strong)),
+        NodeEnum::AExpr(expression) if expression.kind == AExprKind::AexprNullif as i32 => {
+            strong("nullif")
         }
-        NodeEnum::MinMaxExpr(expression) => Some(
-            if expression.op == pg_query::protobuf::MinMaxOp::IsGreatest as i32 {
-                "greatest"
-            } else {
-                "least"
+        NodeEnum::TypeCast(cast) => {
+            let argument = cast.arg.as_deref().and_then(figure_colname);
+            if matches!(argument, Some((_, Strong))) {
+                return argument;
             }
-            .into(),
-        ),
-        NodeEnum::AExpr(expression)
-            if expression.kind == pg_query::protobuf::AExprKind::AexprNullif as i32 =>
-        {
-            Some("nullif".into())
+            cast.type_name
+                .as_ref()
+                .and_then(|ty| last_name(&ty.names))
+                .map(|name| (name, Weak))
+                .or(argument)
         }
-        NodeEnum::SubLink(link)
-            if link.sub_link_type == pg_query::protobuf::SubLinkType::ExistsSublink as i32 =>
-        {
-            Some("exists".into())
+        NodeEnum::CollateClause(collate) => collate.arg.as_deref().and_then(figure_colname),
+        NodeEnum::GroupingFunc(_) => strong("grouping"),
+        NodeEnum::MergeSupportFunc(_) => strong("merge_action"),
+        NodeEnum::SubLink(link) => match SubLinkType::try_from(link.sub_link_type) {
+            Ok(SubLinkType::ExistsSublink) => strong("exists"),
+            Ok(SubLinkType::ArraySublink) => strong("array"),
+            Ok(SubLinkType::ExprSublink) => link
+                .subselect
+                .as_deref()
+                .and_then(subquery_target_name)
+                .map(|name| (name, Strong)),
+            // As with other operator-like nodes, these have no names.
+            _ => None,
+        },
+        NodeEnum::CaseExpr(case) => match case.defresult.as_deref().and_then(figure_colname) {
+            Some((name, Strong)) => Some((name, Strong)),
+            _ => Some(("case".into(), Weak)),
+        },
+        NodeEnum::AArrayExpr(_) => strong("array"),
+        NodeEnum::RowExpr(_) => strong("row"),
+        NodeEnum::CoalesceExpr(_) => strong("coalesce"),
+        NodeEnum::MinMaxExpr(expression) => match MinMaxOp::try_from(expression.op) {
+            Ok(MinMaxOp::IsGreatest) => strong("greatest"),
+            Ok(MinMaxOp::IsLeast) => strong("least"),
+            _ => None,
+        },
+        NodeEnum::SqlvalueFunction(function) => {
+            sql_value_projection_name(function.op()).and_then(strong)
         }
+        NodeEnum::XmlExpr(expression) => match XmlExprOp::try_from(expression.op) {
+            Ok(XmlExprOp::IsXmlconcat) => strong("xmlconcat"),
+            Ok(XmlExprOp::IsXmlelement) => strong("xmlelement"),
+            Ok(XmlExprOp::IsXmlforest) => strong("xmlforest"),
+            Ok(XmlExprOp::IsXmlparse) => strong("xmlparse"),
+            Ok(XmlExprOp::IsXmlpi) => strong("xmlpi"),
+            Ok(XmlExprOp::IsXmlroot) => strong("xmlroot"),
+            Ok(XmlExprOp::IsXmlserialize) => strong("xmlserialize"),
+            _ => None,
+        },
+        NodeEnum::XmlSerialize(_) => strong("xmlserialize"),
+        NodeEnum::JsonParseExpr(_) => strong("json"),
+        NodeEnum::JsonScalarExpr(_) => strong("json_scalar"),
+        NodeEnum::JsonSerializeExpr(_) => strong("json_serialize"),
+        NodeEnum::JsonObjectConstructor(_) => strong("json_object"),
+        NodeEnum::JsonArrayConstructor(_) | NodeEnum::JsonArrayQueryConstructor(_) => {
+            strong("json_array")
+        }
+        NodeEnum::JsonObjectAgg(_) => strong("json_objectagg"),
+        NodeEnum::JsonArrayAgg(_) => strong("json_arrayagg"),
+        NodeEnum::JsonFuncExpr(expression) => match JsonExprOp::try_from(expression.op) {
+            Ok(JsonExprOp::JsonExistsOp) => strong("json_exists"),
+            Ok(JsonExprOp::JsonQueryOp) => strong("json_query"),
+            Ok(JsonExprOp::JsonValueOp) => strong("json_value"),
+            _ => None,
+        },
         _ => None,
     }
+}
+
+/// The result name of a scalar subquery's single target, which names the subquery: the target's alias, or else its own implicit name or `?column?`. A set operation takes the names of its leftmost query.
+fn subquery_target_name(node: &Node) -> Option<String> {
+    let NodeEnum::SelectStmt(select) = node.node.as_ref()? else {
+        return None;
+    };
+    let mut select: &pg_query::protobuf::SelectStmt = select;
+    while let Some(left) = select.larg.as_deref() {
+        select = left;
+    }
+    let Some(NodeEnum::ResTarget(target)) = select.target_list.first()?.node.as_ref() else {
+        return None;
+    };
+    if !target.name.is_empty() {
+        return Some(target.name.clone());
+    }
+    Some(
+        target
+            .val
+            .as_deref()
+            .and_then(implicit_projection_name)
+            .unwrap_or_else(|| "?column?".into()),
+    )
 }
 
 fn sql_value_projection_name(op: pg_query::protobuf::SqlValueFunctionOp) -> Option<&'static str> {

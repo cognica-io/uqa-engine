@@ -89,9 +89,7 @@ fn relation_inquiries_bind_new_committed_roles_before_resolving_sequence_targets
         for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
             let (_directory, engine, peer) = sessions(provider);
             sql(&engine, "CREATE SEQUENCE ids");
-            let oid = uqa_execution::catalog::projection::sequence_relation_oid(
-                engine.durable.sequence_object_ids.read()[&RelationIdentity::new("public", "ids")],
-            );
+            let oid = super::super::sequence_oid(&engine, &RelationIdentity::new("public", "ids"));
             sql(
                 &engine,
                 &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM t"),
@@ -154,9 +152,9 @@ fn relation_inquiries_preserve_private_roles_and_sequence_acls_through_savepoint
                     "{provider}: {isolation}: {name}"
                 );
             }
-            let private_oid = uqa_execution::catalog::projection::sequence_relation_oid(
-                engine.durable.sequence_object_ids.read()
-                    [&RelationIdentity::new("public", "private_ids")],
+            let private_oid = super::super::sequence_oid(
+                &engine,
+                &RelationIdentity::new("public", "private_ids"),
             );
             sql(&engine, "ROLLBACK TO private_acl");
             for name in ["ids", "temporary_ids"] {

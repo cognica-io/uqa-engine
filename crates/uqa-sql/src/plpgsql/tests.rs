@@ -56,7 +56,8 @@ fn plpgsql_synthesized_definition_preserves_variadic_parameters() {
     let FunctionBody::Source(body) = &definition.body else {
         panic!("expected source body");
     };
-    let synthesized = synthesize_create_text(&definition, body);
+    let synthesized =
+        synthesize_create_text(&definition, body, &|type_name| Ok(type_name.to_string())).unwrap();
     assert!(synthesized.contains("VARIADIC \"items\" int4[]"));
     parse_function(&definition).unwrap();
 }

@@ -1,0 +1,4622 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE mood AS ENUM ('sad', 'happy')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN positive AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE pair AS (x integer, y text)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE pair AS (z integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"pair\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE dup AS (a integer, a text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"a\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE bad AS (a nosuch, a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"a\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE badtype AS (a nosuch)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE pseudo AS (a record)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "column \"a\" has pseudo-type record",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE pseudo_array AS (a record[])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "column \"a\" has pseudo-type record[]",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE voidy AS (a void)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "column \"a\" has pseudo-type void",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE serial_attr AS (a serial)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"serial\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE setof_attr AS (a setof integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "column \"a\" cannot be declared SETOF",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE coll_int AS (a integer COLLATE \"C\")",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "collations are not supported by type integer",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE coll_missing AS (a text COLLATE \"nosuch\")",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "collation \"nosuch\" for encoding \"UTF8\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE coll_text AS (a text COLLATE \"C\", b text, c varchar(4)[])",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE empty_t AS ()",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE rich AS (id integer, m mood, p positive, amounts numeric(5,2)[], note varchar(3), stamp date)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE outer_t AS (p pair, n integer, ps pair[])",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE pg_catalog.sys_t AS (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied to create \"pg_catalog.sys_t\"",
+        "detail": "System catalog modifications are currently disallowed.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE \"Mixed Case\" AS (\"Field One\" integer, \"b\" text)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typname, typtype, typcategory, typlen, typbyval, typalign, typstorage, typinput, typoutput, typreceive, typsend, typanalyze, typsubscript, typdelim, typcollation, typelem, typarray::regtype, typrelid::regclass FROM pg_type WHERE typname IN ('pair', 'outer_t', 'empty_t') ORDER BY typname",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "typtype",
+            "typcategory",
+            "typlen",
+            "typbyval",
+            "typalign",
+            "typstorage",
+            "typinput",
+            "typoutput",
+            "typreceive",
+            "typsend",
+            "typanalyze",
+            "typsubscript",
+            "typdelim",
+            "typcollation",
+            "typelem",
+            "typarray",
+            "typrelid"
+          ],
+          "type_oids": [
+            19,
+            18,
+            18,
+            21,
+            16,
+            18,
+            18,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            18,
+            26,
+            26,
+            2206,
+            2205
+          ],
+          "rows": [
+            [
+              "empty_t",
+              "c",
+              "C",
+              "-1",
+              "f",
+              "d",
+              "x",
+              "record_in",
+              "record_out",
+              "record_recv",
+              "record_send",
+              "-",
+              "-",
+              ",",
+              "0",
+              "0",
+              "empty_t[]",
+              "empty_t"
+            ],
+            [
+              "outer_t",
+              "c",
+              "C",
+              "-1",
+              "f",
+              "d",
+              "x",
+              "record_in",
+              "record_out",
+              "record_recv",
+              "record_send",
+              "-",
+              "-",
+              ",",
+              "0",
+              "0",
+              "outer_t[]",
+              "outer_t"
+            ],
+            [
+              "pair",
+              "c",
+              "C",
+              "-1",
+              "f",
+              "d",
+              "x",
+              "record_in",
+              "record_out",
+              "record_recv",
+              "record_send",
+              "-",
+              "-",
+              ",",
+              "0",
+              "0",
+              "pair[]",
+              "pair"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typname, typtype, typcategory, typelem::regtype, typarray, typinput, typanalyze, typsubscript, typalign, typstorage FROM pg_type WHERE typname IN ('_pair', '_outer_t') ORDER BY typname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "typtype",
+            "typcategory",
+            "typelem",
+            "typarray",
+            "typinput",
+            "typanalyze",
+            "typsubscript",
+            "typalign",
+            "typstorage"
+          ],
+          "type_oids": [
+            19,
+            18,
+            18,
+            2206,
+            26,
+            24,
+            24,
+            24,
+            18,
+            18
+          ],
+          "rows": [
+            [
+              "_outer_t",
+              "b",
+              "A",
+              "outer_t",
+              "0",
+              "array_in",
+              "array_typanalyze",
+              "array_subscript_handler",
+              "d",
+              "x"
+            ],
+            [
+              "_pair",
+              "b",
+              "A",
+              "pair",
+              "0",
+              "array_in",
+              "array_typanalyze",
+              "array_subscript_handler",
+              "d",
+              "x"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT relname, relkind, relnatts, reltuples, relpersistence, relhasrules, relhasindex, relreplident, relam, reltoastrelid, relispopulated, reloftype, relacl, reltype = (SELECT oid FROM pg_type t WHERE t.typrelid = c.oid) FROM pg_class c WHERE relname IN ('pair', 'outer_t', 'empty_t', 'coll_text', 'Mixed Case') ORDER BY relname",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "relkind",
+            "relnatts",
+            "reltuples",
+            "relpersistence",
+            "relhasrules",
+            "relhasindex",
+            "relreplident",
+            "relam",
+            "reltoastrelid",
+            "relispopulated",
+            "reloftype",
+            "relacl",
+            "?column?"
+          ],
+          "type_oids": [
+            19,
+            18,
+            21,
+            700,
+            18,
+            16,
+            16,
+            18,
+            26,
+            26,
+            16,
+            26,
+            1034,
+            16
+          ],
+          "rows": [
+            [
+              "Mixed Case",
+              "c",
+              "2",
+              "-1",
+              "p",
+              "f",
+              "f",
+              "n",
+              "0",
+              "0",
+              "t",
+              "0",
+              null,
+              "t"
+            ],
+            [
+              "coll_text",
+              "c",
+              "3",
+              "-1",
+              "p",
+              "f",
+              "f",
+              "n",
+              "0",
+              "0",
+              "t",
+              "0",
+              null,
+              "t"
+            ],
+            [
+              "empty_t",
+              "c",
+              "0",
+              "-1",
+              "p",
+              "f",
+              "f",
+              "n",
+              "0",
+              "0",
+              "t",
+              "0",
+              null,
+              "t"
+            ],
+            [
+              "outer_t",
+              "c",
+              "3",
+              "-1",
+              "p",
+              "f",
+              "f",
+              "n",
+              "0",
+              "0",
+              "t",
+              "0",
+              null,
+              "t"
+            ],
+            [
+              "pair",
+              "c",
+              "2",
+              "-1",
+              "p",
+              "f",
+              "f",
+              "n",
+              "0",
+              "0",
+              "t",
+              "0",
+              null,
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attrelid::regclass, attname, atttypid::regtype, attlen, attnum, atttypmod, attndims, attbyval, attalign, attstorage, attnotnull, atthasdef, attisdropped, attislocal, attinhcount, attcollation, attstattarget IS NULL, attacl FROM pg_attribute WHERE attrelid IN ('pair'::regclass, 'coll_text'::regclass, 'rich'::regclass, 'outer_t'::regclass, '\"Mixed Case\"'::regclass) ORDER BY attrelid, attnum",
+      "command_tags": [
+        "SELECT 16"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attrelid",
+            "attname",
+            "atttypid",
+            "attlen",
+            "attnum",
+            "atttypmod",
+            "attndims",
+            "attbyval",
+            "attalign",
+            "attstorage",
+            "attnotnull",
+            "atthasdef",
+            "attisdropped",
+            "attislocal",
+            "attinhcount",
+            "attcollation",
+            "?column?",
+            "attacl"
+          ],
+          "type_oids": [
+            2205,
+            19,
+            2206,
+            21,
+            21,
+            23,
+            21,
+            16,
+            18,
+            18,
+            16,
+            16,
+            16,
+            16,
+            21,
+            26,
+            16,
+            1034
+          ],
+          "rows": [
+            [
+              "pair",
+              "x",
+              "integer",
+              "4",
+              "1",
+              "-1",
+              "0",
+              "t",
+              "i",
+              "p",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "pair",
+              "y",
+              "text",
+              "-1",
+              "2",
+              "-1",
+              "0",
+              "f",
+              "i",
+              "x",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "100",
+              "t",
+              null
+            ],
+            [
+              "coll_text",
+              "a",
+              "text",
+              "-1",
+              "1",
+              "-1",
+              "0",
+              "f",
+              "i",
+              "x",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "950",
+              "t",
+              null
+            ],
+            [
+              "coll_text",
+              "b",
+              "text",
+              "-1",
+              "2",
+              "-1",
+              "0",
+              "f",
+              "i",
+              "x",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "100",
+              "t",
+              null
+            ],
+            [
+              "coll_text",
+              "c",
+              "character varying[]",
+              "-1",
+              "3",
+              "8",
+              "1",
+              "f",
+              "i",
+              "x",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "100",
+              "t",
+              null
+            ],
+            [
+              "rich",
+              "id",
+              "integer",
+              "4",
+              "1",
+              "-1",
+              "0",
+              "t",
+              "i",
+              "p",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "rich",
+              "m",
+              "mood",
+              "4",
+              "2",
+              "-1",
+              "0",
+              "t",
+              "i",
+              "p",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "rich",
+              "p",
+              "positive",
+              "4",
+              "3",
+              "-1",
+              "0",
+              "t",
+              "i",
+              "p",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "rich",
+              "amounts",
+              "numeric[]",
+              "-1",
+              "4",
+              "327686",
+              "1",
+              "f",
+              "i",
+              "x",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "rich",
+              "note",
+              "character varying",
+              "-1",
+              "5",
+              "7",
+              "0",
+              "f",
+              "i",
+              "x",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "100",
+              "t",
+              null
+            ],
+            [
+              "rich",
+              "stamp",
+              "date",
+              "4",
+              "6",
+              "-1",
+              "0",
+              "t",
+              "i",
+              "p",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "outer_t",
+              "p",
+              "pair",
+              "-1",
+              "1",
+              "-1",
+              "0",
+              "f",
+              "d",
+              "x",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "outer_t",
+              "n",
+              "integer",
+              "4",
+              "2",
+              "-1",
+              "0",
+              "t",
+              "i",
+              "p",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "outer_t",
+              "ps",
+              "pair[]",
+              "-1",
+              "3",
+              "-1",
+              "1",
+              "f",
+              "d",
+              "x",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "\"Mixed Case\"",
+              "Field One",
+              "integer",
+              "4",
+              "1",
+              "-1",
+              "0",
+              "t",
+              "i",
+              "p",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "0",
+              "t",
+              null
+            ],
+            [
+              "\"Mixed Case\"",
+              "b",
+              "text",
+              "-1",
+              "2",
+              "-1",
+              "0",
+              "f",
+              "i",
+              "x",
+              "f",
+              "f",
+              "f",
+              "t",
+              "0",
+              "100",
+              "t",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'pair'::regtype, '_pair'::regtype, 'pair[]'::regtype, 'pair'::regclass, to_regtype('pair'), to_regclass('pair'), to_regtype('nosuch_t')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regtype",
+            "regtype",
+            "regtype",
+            "regclass",
+            "to_regtype",
+            "to_regclass",
+            "to_regtype"
+          ],
+          "type_oids": [
+            2206,
+            2206,
+            2206,
+            2205,
+            2206,
+            2205,
+            2206
+          ],
+          "rows": [
+            [
+              "pair",
+              "pair[]",
+              "pair[]",
+              "pair",
+              "pair",
+              "pair",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT format_type('pair'::regtype, NULL), format_type('_pair'::regtype, NULL), format_type('outer_t'::regtype, -1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "format_type",
+            "format_type",
+            "format_type"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "pair",
+              "pair[]",
+              "outer_t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'pair'::regclass::oid < 'pair'::regtype::oid, '_pair'::regtype::oid < 'pair'::regtype::oid, '_pair'::regtype::oid > 'pair'::regclass::oid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_describe_object(classid, objid, objsubid), pg_describe_object(refclassid, refobjid, refobjsubid), deptype FROM pg_depend WHERE classid IN ('pg_class'::regclass, 'pg_type'::regclass) AND (objid IN (SELECT oid FROM pg_class WHERE relname IN ('outer_t', 'rich')) OR objid IN (SELECT oid FROM pg_type WHERE typname IN ('outer_t', '_outer_t', 'rich', '_rich')) OR refobjid IN (SELECT oid FROM pg_type WHERE typname IN ('pair', '_pair', 'mood', 'positive'))) ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 14"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_describe_object",
+            "pg_describe_object",
+            "deptype"
+          ],
+          "type_oids": [
+            25,
+            25,
+            18
+          ],
+          "rows": [
+            [
+              "column m of composite type rich",
+              "type mood",
+              "n"
+            ],
+            [
+              "column p of composite type outer_t",
+              "type pair",
+              "n"
+            ],
+            [
+              "column p of composite type rich",
+              "type positive",
+              "n"
+            ],
+            [
+              "column ps of composite type outer_t",
+              "type pair[]",
+              "n"
+            ],
+            [
+              "composite type outer_t",
+              "type outer_t",
+              "i"
+            ],
+            [
+              "composite type pair",
+              "type pair",
+              "i"
+            ],
+            [
+              "composite type rich",
+              "type rich",
+              "i"
+            ],
+            [
+              "type mood[]",
+              "type mood",
+              "i"
+            ],
+            [
+              "type outer_t",
+              "schema public",
+              "n"
+            ],
+            [
+              "type outer_t[]",
+              "type outer_t",
+              "i"
+            ],
+            [
+              "type pair[]",
+              "type pair",
+              "i"
+            ],
+            [
+              "type positive[]",
+              "type positive",
+              "i"
+            ],
+            [
+              "type rich",
+              "schema public",
+              "n"
+            ],
+            [
+              "type rich[]",
+              "type rich",
+              "i"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,abc)'::pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pair"
+          ],
+          "type_oids": [
+            27476
+          ],
+          "rows": [
+            [
+              "(1,abc)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ('(1,\"a b\")'::pair)::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,\"a b\")"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,\"a \"\"quoted\"\", name\")'::pair, '(2,\"\")'::pair, '(3,)'::pair, '( 4 ,x)'::pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pair",
+            "pair",
+            "pair",
+            "pair"
+          ],
+          "type_oids": [
+            27476,
+            27476,
+            27476,
+            27476
+          ],
+          "rows": [
+            [
+              "(1,\"a \"\"quoted\"\", name\")",
+              "(2,\"\")",
+              "(3,)",
+              "(4,x)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,b\\\\c)'::pair, '(1,\"b\\\\c\")'::pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pair",
+            "pair"
+          ],
+          "type_oids": [
+            27476,
+            27476
+          ],
+          "rows": [
+            [
+              "(1,\"b\\\\c\")",
+              "(1,\"b\\\\c\")"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ' (5,x) '::pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pair"
+          ],
+          "type_oids": [
+            27476
+          ],
+          "rows": [
+            [
+              "(5,x)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1)'::pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed record literal: \"(1)\"",
+        "detail": "Too few columns.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,2,3)'::pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed record literal: \"(1,2,3)\"",
+        "detail": "Too many columns.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '1,2)'::pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed record literal: \"1,2)\"",
+        "detail": "Missing left parenthesis.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,2) x'::pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed record literal: \"(1,2) x\"",
+        "detail": "Junk after right parenthesis.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,\"2)'::pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed record literal: \"(1,\"2)\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(a,b)'::pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '()'::empty_t, ROW()::empty_t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "empty_t",
+            "row"
+          ],
+          "type_oids": [
+            27482,
+            27482
+          ],
+          "rows": [
+            [
+              "()",
+              "()"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,sad,5,\"{1.5,2.25}\",abc,2024-01-02)'::rich",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rich"
+          ],
+          "type_oids": [
+            27485
+          ],
+          "rows": [
+            [
+              "(1,sad,5,\"{1.50,2.25}\",abc,2024-01-02)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,angry,5,,,)'::rich",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum mood: \"angry\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,sad,0,,,)'::rich",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain positive violates check constraint \"positive_check\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,sad,1,,abcd,)'::rich",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22001",
+        "message": "value too long for type character varying(3)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,sad,1,{1.555},,)'::rich",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rich"
+          ],
+          "type_oids": [
+            27485
+          ],
+          "rows": [
+            [
+              "(1,sad,1,{1.56},,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ROW(1, 'x')::pair, ROW(1, 'x')::pair::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row",
+            "row"
+          ],
+          "type_oids": [
+            27476,
+            25
+          ],
+          "rows": [
+            [
+              "(1,x)",
+              "(1,x)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ROW(1, 'x', 3)::pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type record to pair",
+        "detail": "Input has too many columns.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ROW(1)::pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type record to pair",
+        "detail": "Input has too few columns.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ROW('a', 'x')::pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ROW(1.7, 'x')::pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row"
+          ],
+          "type_oids": [
+            27476
+          ],
+          "rows": [
+            [
+              "(2,x)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof('(1,x)'::pair), pg_typeof(ROW(1, 'x')::pair), pg_typeof(ROW(1, 2))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206,
+            2206,
+            2206
+          ],
+          "rows": [
+            [
+              "pair",
+              "pair",
+              "record"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ('(1,\"a b\")'::pair).x, ('(1,\"a b\")'::pair).y",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "a b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ('(1,x)'::pair).missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" not found in data type pair",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (ROW(1, 'a'::text)).f2, (ROW(1, 2)).f1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "f2",
+            "f1"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "a",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (ROW(1, 2)).f3",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "could not identify column \"f3\" in record data type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (1).x",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "column notation .x applied to type integer, which is not a composite type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ('(1,x)'::pair).x + 1, pg_typeof(('(1,x)'::pair).y)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            23,
+            2206
+          ],
+          "rows": [
+            [
+              "2",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(\"(1,a)\",5,\"{\"\"(2,b)\"\",NULL}\")'::outer_t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "outer_t"
+          ],
+          "type_oids": [
+            27488
+          ],
+          "rows": [
+            [
+              "(\"(1,a)\",5,\"{\"\"(2,b)\"\",NULL}\")"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (('(\"(1,a)\",5,)'::outer_t).p).y, ('(\"(1,a)\",5,\"{\"\"(2,b)\"\"}\")'::outer_t).ps",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "y",
+            "ps"
+          ],
+          "type_oids": [
+            25,
+            27475
+          ],
+          "rows": [
+            [
+              "a",
+              "{\"(2,b)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ((('(\"(1,a)\",5,\"{\"\"(2,b)\"\"}\")'::outer_t).ps)[1]).x",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{\"(1,a)\",\"(2,\\\"b c\\\")\",NULL}'::pair[]",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pair"
+          ],
+          "type_oids": [
+            27475
+          ],
+          "rows": [
+            [
+              "{\"(1,a)\",\"(2,\\\"b c\\\")\",NULL}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ('{\"(1,a)\",\"(2,b)\"}'::pair[])[2], (('{\"(1,a)\",\"(2,b)\"}'::pair[])[2]).y",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pair",
+            "y"
+          ],
+          "type_oids": [
+            27476,
+            25
+          ],
+          "rows": [
+            [
+              "(2,b)",
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ARRAY[ROW(1, 'a')::pair, ROW(2, NULL)::pair], pg_typeof(ARRAY[ROW(1, 'a')::pair])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            27475,
+            2206
+          ],
+          "rows": [
+            [
+              "{\"(1,a)\",\"(2,)\"}",
+              "pair[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{\"(1,a)\"}'::pair[]::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,a)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ROW(1, 'x')::pair = ROW(1, 'x')::pair, ROW(1, 'x')::pair <> ROW(1, 'y')::pair, ROW(1, 'x')::pair < ROW(2, 'a')::pair, ROW(1, NULL)::pair > ROW(1, 'z')::pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ROW(1, NULL)::pair = ROW(1, NULL)::pair, ROW(NULL, NULL)::pair IS NULL, ROW(1, NULL)::pair IS NULL, ROW(1, NULL)::pair IS NOT NULL, ROW(1, 'x')::pair IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "f",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ROW(1, NULL) = ROW(1, NULL), ROW(NULL, NULL) IS NULL, ROW() IS NULL, ROW() IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              null,
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE holder (id integer PRIMARY KEY, p pair, ps pair[], o outer_t, r rich)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder VALUES (1, ROW(1, 'one'), ARRAY[ROW(10, 'ten')::pair], ROW(ROW(5, 'five'), 50, NULL), ROW(1, 'happy', 3, '{1.5}', 'abc', '2024-02-03'))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder VALUES (2, '(2,two)', '{\"(20,twenty)\"}', '(\"(6,six)\",60,\"{\"\"(7,seven)\"\"}\")', NULL)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder VALUES (3, NULL, NULL, NULL, NULL), (4, ROW(NULL, NULL), '{}', NULL, NULL), (5, ROW(5, NULL), NULL, NULL, NULL)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder (id, p) VALUES (6, ROW(1))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type record to pair",
+        "detail": "Input has too few columns.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder (id, p) VALUES (6, ROW(1, 2, 3))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type record to pair",
+        "detail": "Input has too many columns.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder (id, p) VALUES (6, ROW('a', 2))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder (id, p) VALUES (6, '(a,b)')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"a\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder (id, r) VALUES (6, ROW(1, 'sad', -1, NULL, NULL, NULL))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain positive violates check constraint \"positive_check\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT * FROM holder ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p",
+            "ps",
+            "o",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            27476,
+            27475,
+            27488,
+            27485
+          ],
+          "rows": [
+            [
+              "1",
+              "(1,one)",
+              "{\"(10,ten)\"}",
+              "(\"(5,five)\",50,)",
+              "(1,happy,3,{1.50},abc,2024-02-03)"
+            ],
+            [
+              "2",
+              "(2,two)",
+              "{\"(20,twenty)\"}",
+              "(\"(6,six)\",60,\"{\"\"(7,seven)\"\"}\")",
+              null
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              "4",
+              "(,)",
+              "{}",
+              null,
+              null
+            ],
+            [
+              "5",
+              "(5,)",
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, p, (p).x, (p).y AS why, ps, (o).n, ((o).p).y, r FROM holder ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p",
+            "x",
+            "why",
+            "ps",
+            "n",
+            "y",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            27476,
+            23,
+            25,
+            27475,
+            23,
+            25,
+            27485
+          ],
+          "rows": [
+            [
+              "1",
+              "(1,one)",
+              "1",
+              "one",
+              "{\"(10,ten)\"}",
+              "50",
+              "five",
+              "(1,happy,3,{1.50},abc,2024-02-03)"
+            ],
+            [
+              "2",
+              "(2,two)",
+              "2",
+              "two",
+              "{\"(20,twenty)\"}",
+              "60",
+              "six",
+              null
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              "4",
+              "(,)",
+              null,
+              null,
+              "{}",
+              null,
+              null,
+              null
+            ],
+            [
+              "5",
+              "(5,)",
+              "5",
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, p IS NULL, p IS NOT NULL, NOT (p IS NULL), p IS DISTINCT FROM NULL FROM holder ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f",
+              "t",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "f",
+              "t",
+              "t",
+              "t"
+            ],
+            [
+              "3",
+              "t",
+              "f",
+              "f",
+              "f"
+            ],
+            [
+              "4",
+              "t",
+              "f",
+              "f",
+              "t"
+            ],
+            [
+              "5",
+              "f",
+              "f",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id FROM holder WHERE p = ROW(2, 'two')::pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id FROM holder WHERE p = ROW(2, 'two'::text)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id FROM holder WHERE p IS NULL ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ],
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id FROM holder WHERE p IS NOT NULL ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, p FROM holder ORDER BY p, id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            27476
+          ],
+          "rows": [
+            [
+              "1",
+              "(1,one)"
+            ],
+            [
+              "2",
+              "(2,two)"
+            ],
+            [
+              "5",
+              "(5,)"
+            ],
+            [
+              "4",
+              "(,)"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, p FROM holder ORDER BY p DESC, id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            27476
+          ],
+          "rows": [
+            [
+              "3",
+              null
+            ],
+            [
+              "4",
+              "(,)"
+            ],
+            [
+              "5",
+              "(5,)"
+            ],
+            [
+              "2",
+              "(2,two)"
+            ],
+            [
+              "1",
+              "(1,one)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT DISTINCT p FROM holder ORDER BY p",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p"
+          ],
+          "type_oids": [
+            27476
+          ],
+          "rows": [
+            [
+              "(1,one)"
+            ],
+            [
+              "(2,two)"
+            ],
+            [
+              "(5,)"
+            ],
+            [
+              "(,)"
+            ],
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT p, count(*) FROM holder GROUP BY p ORDER BY p",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "count"
+          ],
+          "type_oids": [
+            27476,
+            20
+          ],
+          "rows": [
+            [
+              "(1,one)",
+              "1"
+            ],
+            [
+              "(2,two)",
+              "1"
+            ],
+            [
+              "(5,)",
+              "1"
+            ],
+            [
+              "(,)",
+              "1"
+            ],
+            [
+              null,
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT max(id), min((p).x) FROM holder",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "max",
+            "min"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (p).x AS px FROM holder WHERE (p).y = 'one'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "px"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE holder SET p.x = 100 WHERE id = 1",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE holder SET p.y = 'filled', p.x = 30 WHERE id = 3",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE holder SET ps[1].y = 'TEN', o.n = 51, o.p.y = 'FIVE' WHERE id = 1",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE holder SET p.missing = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "cannot assign to field \"missing\" of column \"p\" because there is no such column in data type pair",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE holder SET p.x = 'abc' WHERE id = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"abc\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE holder SET p = ROW(1, 2, 3) WHERE id = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type record to pair",
+        "detail": "Input has too many columns.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE holder SET r.p = 0 WHERE id = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain positive violates check constraint \"positive_check\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder (id, p.x, p.y) VALUES (7, 70, 'seventy')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO holder (id, p.x) VALUES (8, 80)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, p, ps, o, r FROM holder ORDER BY id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p",
+            "ps",
+            "o",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            27476,
+            27475,
+            27488,
+            27485
+          ],
+          "rows": [
+            [
+              "1",
+              "(100,one)",
+              "{\"(10,TEN)\"}",
+              "(\"(5,FIVE)\",51,)",
+              "(1,happy,3,{1.50},abc,2024-02-03)"
+            ],
+            [
+              "2",
+              "(2,two)",
+              "{\"(20,twenty)\"}",
+              "(\"(6,six)\",60,\"{\"\"(7,seven)\"\"}\")",
+              null
+            ],
+            [
+              "3",
+              "(30,filled)",
+              null,
+              null,
+              null
+            ],
+            [
+              "4",
+              "(,)",
+              "{}",
+              null,
+              null
+            ],
+            [
+              "5",
+              "(5,)",
+              null,
+              null,
+              null
+            ],
+            [
+              "7",
+              "(70,seventy)",
+              null,
+              null,
+              null
+            ],
+            [
+              "8",
+              "(80,)",
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE INDEX holder_p ON holder (p)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id FROM holder WHERE p > ROW(5, NULL)::pair ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "3"
+            ],
+            [
+              "4"
+            ],
+            [
+              "7"
+            ],
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT * FROM pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot open relation \"pair\"",
+        "detail": "This operation is not supported for composite types.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO pair VALUES (1, 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot open relation \"pair\"",
+        "detail": "This operation is not supported for composite types.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE pair SET x = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot open relation \"pair\"",
+        "detail": "This operation is not supported for composite types.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DELETE FROM pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot open relation \"pair\"",
+        "detail": "This operation is not supported for composite types.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not a table",
+        "detail": null,
+        "hint": "Use DROP TYPE to remove a type."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP VIEW pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not a view",
+        "detail": null,
+        "hint": "Use DROP TYPE to remove a type."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP SEQUENCE pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not a sequence",
+        "detail": null,
+        "hint": "Use DROP TYPE to remove a type."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP INDEX pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not an index",
+        "detail": null,
+        "hint": "Use DROP TYPE to remove a type."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP FOREIGN TABLE pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not a foreign table",
+        "detail": null,
+        "hint": "Use DROP TYPE to remove a type."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP MATERIALIZED VIEW pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not a materialized view",
+        "detail": null,
+        "hint": "Use DROP TYPE to remove a type."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE pair ADD COLUMN z integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is a composite type",
+        "detail": null,
+        "hint": "Use ALTER TYPE instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE pair RENAME TO pair2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is a composite type",
+        "detail": null,
+        "hint": "Use ALTER TYPE instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER VIEW pair RENAME TO pair2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not a view",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE INDEX ON pair (x)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot open relation \"pair\"",
+        "detail": "This operation is not supported for composite types.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "TRUNCATE pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not a table",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "GRANT SELECT ON pair TO PUBLIC",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is a composite type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE pair_child () INHERITS (pair)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot open relation \"pair\"",
+        "detail": "This operation is not supported for composite types.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE r AS ON INSERT TO pair DO NOTHING",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot open relation \"pair\"",
+        "detail": "This operation is not supported for composite types.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW pair_view AS SELECT * FROM pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot open relation \"pair\"",
+        "detail": "This operation is not supported for composite types.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE pair (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"pair\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW pair AS SELECT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"pair\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE OR REPLACE VIEW pair AS SELECT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not a view",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SEQUENCE pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"pair\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE holder AS (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"holder\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE holder_p AS (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"holder_p\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW composite_view AS SELECT (p).x, (p).y AS why, ps[1].y AS arr_y, ROW(1, 'z')::pair AS c, '(3,w)'::pair AS d, (o).p.x AS nested, (ROW(1, 2)).f1 AS anon, (holder).id AS wr FROM holder",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('composite_view'::regclass)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT (p).x AS x,\n    (p).y AS why,\n    ps[1].y AS arr_y,\n    ROW(1, 'z'::text)::pair AS c,\n    '(3,w)'::pair AS d,\n    (o).p.x AS nested,\n    (ROW(1, 2)).f1 AS anon,\n    id AS wr\n   FROM holder;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT * FROM composite_view ORDER BY x",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "why",
+            "arr_y",
+            "c",
+            "d",
+            "nested",
+            "anon",
+            "wr"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            27476,
+            27476,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "two",
+              "twenty",
+              "(1,z)",
+              "(3,w)",
+              "6",
+              "1",
+              "2"
+            ],
+            [
+              "5",
+              null,
+              null,
+              "(1,z)",
+              "(3,w)",
+              null,
+              "1",
+              "5"
+            ],
+            [
+              "30",
+              "filled",
+              null,
+              "(1,z)",
+              "(3,w)",
+              null,
+              "1",
+              "3"
+            ],
+            [
+              "70",
+              "seventy",
+              null,
+              "(1,z)",
+              "(3,w)",
+              null,
+              "1",
+              "7"
+            ],
+            [
+              "80",
+              null,
+              null,
+              "(1,z)",
+              "(3,w)",
+              null,
+              "1",
+              "8"
+            ],
+            [
+              "100",
+              "one",
+              "TEN",
+              "(1,z)",
+              "(3,w)",
+              "5",
+              "1",
+              "1"
+            ],
+            [
+              null,
+              null,
+              null,
+              "(1,z)",
+              "(3,w)",
+              null,
+              "1",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW composite_filter AS SELECT id FROM holder WHERE p = ROW(1, 'a'::text) AND p IS NOT NULL AND (p).x > 0",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('composite_filter'::regclass)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id\n   FROM holder\n  WHERE ((p = ROW(1, 'a'::text)) AND (p IS NOT NULL) AND ((p).x > 0));"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type pair because other objects depend on it",
+        "detail": "column ps of composite type outer_t depends on type pair[]\ncolumn ps of table holder depends on type pair[]\ncolumn p of composite type outer_t depends on type pair\ncolumn p of table holder depends on type pair\nview composite_filter depends on column p of table holder\nview composite_view depends on type pair",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type mood because other objects depend on it",
+        "detail": "column m of composite type rich depends on type mood",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE outer_t",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type outer_t because other objects depend on it",
+        "detail": "column o of table holder depends on type outer_t\nview composite_view depends on column o of table holder",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE _pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type pair[] because type pair requires it",
+        "detail": null,
+        "hint": "You can drop type pair instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE IF EXISTS nosuch_t",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "type \"nosuch_t\" does not exist, skipping",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN pair",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pair\" is not a domain",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE ROLE composite_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE ROLE composite_reader",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE pair RENAME TO couple",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT relname FROM pg_class WHERE oid = 'couple'::regclass",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "couple"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typname FROM pg_type WHERE typname LIKE '%couple%' ORDER BY typname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "_couple"
+            ],
+            [
+              "couple"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT atttypid::regtype FROM pg_attribute WHERE attrelid = 'outer_t'::regclass ORDER BY attnum",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "atttypid"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "couple"
+            ],
+            [
+              "integer"
+            ],
+            [
+              "couple[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('composite_view'::regclass)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT (p).x AS x,\n    (p).y AS why,\n    ps[1].y AS arr_y,\n    ROW(1, 'z'::text)::couple AS c,\n    '(3,w)'::couple AS d,\n    (o).p.x AS nested,\n    (ROW(1, 2)).f1 AS anon,\n    id AS wr\n   FROM holder;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE couple RENAME TO holder",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"holder\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE couple RENAME TO outer_t",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"outer_t\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE _couple RENAME TO other",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot alter array type couple[]",
+        "detail": null,
+        "hint": "You can alter type couple, which will alter the array type as well."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA other_schema",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE couple SET SCHEMA other_schema",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT relnamespace::regnamespace, relname FROM pg_class WHERE relname = 'couple'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relnamespace",
+            "relname"
+          ],
+          "type_oids": [
+            4089,
+            19
+          ],
+          "rows": [
+            [
+              "other_schema",
+              "couple"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typnamespace::regnamespace, typname FROM pg_type WHERE typname IN ('couple', '_couple') ORDER BY typname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typnamespace",
+            "typname"
+          ],
+          "type_oids": [
+            4089,
+            19
+          ],
+          "rows": [
+            [
+              "other_schema",
+              "_couple"
+            ],
+            [
+              "other_schema",
+              "couple"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT atttypid::regtype FROM pg_attribute WHERE attrelid = 'outer_t'::regclass ORDER BY attnum",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "atttypid"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "other_schema.couple"
+            ],
+            [
+              "integer"
+            ],
+            [
+              "other_schema.couple[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, p FROM holder WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            27476
+          ],
+          "rows": [
+            [
+              "1",
+              "(100,one)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other_schema.couple SET SCHEMA public",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE couple OWNER TO composite_owner",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT relowner::regrole, (SELECT typowner::regrole FROM pg_type WHERE typname = 'couple') FROM pg_class WHERE relname = 'couple'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relowner",
+            "typowner"
+          ],
+          "type_oids": [
+            4096,
+            4096
+          ],
+          "rows": [
+            [
+              "composite_owner",
+              "composite_owner"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_describe_object(classid, objid, objsubid), refobjid::regrole, deptype FROM pg_shdepend WHERE refobjid = 'composite_owner'::regrole ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_describe_object",
+            "refobjid",
+            "deptype"
+          ],
+          "type_oids": [
+            25,
+            4096,
+            18
+          ],
+          "rows": [
+            [
+              "type couple",
+              "composite_owner",
+              "o"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE couple TO composite_reader",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE typname = 'couple'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{=U/composite_owner,composite_owner=U/composite_owner,composite_reader=U/composite_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "REVOKE USAGE ON TYPE couple FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE typname = 'couple'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{composite_owner=U/composite_owner,composite_reader=U/composite_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE _couple TO composite_reader",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0LP01",
+        "message": "cannot set privileges of array types",
+        "detail": null,
+        "hint": "Set the privileges of the element type instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE composite_reader",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('couple', 'USAGE')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "has_type_privilege"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE ROLE composite_stranger",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE composite_stranger",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('couple', 'USAGE')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "has_type_privilege"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '(1,x)'::couple",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "couple"
+          ],
+          "type_oids": [
+            27476
+          ],
+          "rows": [
+            [
+              "(1,x)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE couple",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type couple because other objects depend on it",
+        "detail": "column ps of composite type outer_t depends on type couple[]\ncolumn ps of table holder depends on type couple[]\ncolumn p of composite type outer_t depends on type couple\ncolumn p of table holder depends on type couple\nview composite_filter depends on column p of table holder\nview composite_view depends on type couple",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE couple CASCADE",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "drop cascades to 6 other objects",
+          "detail": "drop cascades to column ps of composite type outer_t\ndrop cascades to column ps of table holder\ndrop cascades to column p of composite type outer_t\ndrop cascades to column p of table holder\ndrop cascades to view composite_filter\ndrop cascades to view composite_view",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM holder ORDER BY id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "o",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            27488,
+            27485
+          ],
+          "rows": [
+            [
+              "1",
+              "(51)",
+              "(1,happy,3,{1.50},abc,2024-02-03)"
+            ],
+            [
+              "2",
+              "(60)",
+              null
+            ],
+            [
+              "3",
+              null,
+              null
+            ],
+            [
+              "4",
+              null,
+              null
+            ],
+            [
+              "5",
+              null,
+              null
+            ],
+            [
+              "7",
+              null,
+              null
+            ],
+            [
+              "8",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, atttypid::regtype, attisdropped FROM pg_attribute WHERE attrelid = 'outer_t'::regclass ORDER BY attnum",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "atttypid",
+            "attisdropped"
+          ],
+          "type_oids": [
+            19,
+            2206,
+            16
+          ],
+          "rows": [
+            [
+              "........pg.dropped.1........",
+              "-",
+              "t"
+            ],
+            [
+              "n",
+              "integer",
+              "f"
+            ],
+            [
+              "........pg.dropped.3........",
+              "-",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, o FROM holder ORDER BY id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "o"
+          ],
+          "type_oids": [
+            23,
+            27488
+          ],
+          "rows": [
+            [
+              "1",
+              "(51)"
+            ],
+            [
+              "2",
+              "(60)"
+            ],
+            [
+              "3",
+              null
+            ],
+            [
+              "4",
+              null
+            ],
+            [
+              "5",
+              null
+            ],
+            [
+              "7",
+              null
+            ],
+            [
+              "8",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE mood CASCADE",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "drop cascades to column m of composite type rich",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, r FROM holder ORDER BY id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            27485
+          ],
+          "rows": [
+            [
+              "1",
+              "(1,3,{1.50},abc,2024-02-03)"
+            ],
+            [
+              "2",
+              null
+            ],
+            [
+              "3",
+              null
+            ],
+            [
+              "4",
+              null
+            ],
+            [
+              "5",
+              null
+            ],
+            [
+              "7",
+              null
+            ],
+            [
+              "8",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attisdropped FROM pg_attribute WHERE attrelid = 'rich'::regclass ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attisdropped"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "id",
+              "f"
+            ],
+            [
+              "........pg.dropped.2........",
+              "t"
+            ],
+            [
+              "p",
+              "f"
+            ],
+            [
+              "amounts",
+              "f"
+            ],
+            [
+              "note",
+              "f"
+            ],
+            [
+              "stamp",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE outer_t CASCADE",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "drop cascades to column o of table holder",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM holder ORDER BY id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            27485
+          ],
+          "rows": [
+            [
+              "1",
+              "(1,3,{1.50},abc,2024-02-03)"
+            ],
+            [
+              "2",
+              null
+            ],
+            [
+              "3",
+              null
+            ],
+            [
+              "4",
+              null
+            ],
+            [
+              "5",
+              null
+            ],
+            [
+              "7",
+              null
+            ],
+            [
+              "8",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE \"Mixed Case\", empty_t, coll_text",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT count(*) FROM pg_type WHERE typname IN ('Mixed Case', 'empty_t', 'coll_text', '_empty_t')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE rolled AS (a integer)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'rolled'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regtype"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "rolled"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT to_regtype('rolled')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "to_regtype"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE _pair2 AS (a integer)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE pair2 AS (b integer)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typname FROM pg_type WHERE typname LIKE '%pair2%' ORDER BY typname",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "__pair2"
+            ],
+            [
+              "_pair2"
+            ],
+            [
+              "_pair2_1"
+            ],
+            [
+              "pair2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

@@ -22,7 +22,8 @@ use uqa_sql::{
     },
     plan::{QueryPlan, UnifiedPlan},
     schema::view_creation::{
-        replacement_is_view, validate_replacement_schema, view_creation_target,
+        replacement_is_view, temporary_view_notice, validate_replacement_schema,
+        view_becomes_temporary, view_creation_target,
     },
     SQLError,
 };
@@ -139,6 +140,9 @@ fn register_view_plan_inner(
     let owner = context.namespace.bind_owner()?;
     context.bindings.lock_relations(&plan)?;
     let uses_temporary_relation = context.bindings.bind_relations(&mut plan)?;
+    if view_becomes_temporary(persistence, uses_temporary_relation) {
+        context.notices.push(temporary_view_notice(name)?);
+    }
     let (name, persistence) = view_creation_target(
         &context.namespace,
         name,
@@ -148,8 +152,13 @@ fn register_view_plan_inner(
     let relation = RelationIdentity::from_legacy_name(&name)
         .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
     let query_schema = context.bindings.bind_routines(&mut plan, params)?;
+    context.bindings.bind_type_identities(&mut plan)?;
     reject_regrole_constants(context, &mut plan)?;
     let output_columns = create_view_output_columns(&query_schema, column_names)?;
+    // DefineVirtualRelation describes every column with BuildDescForRelation, a replaced view as well, which requires USAGE on its type before CheckAttributeNamesTypes rejects a pseudo-type.
+    for ty in query_schema.column_types().iter().flatten() {
+        context.routines.require_type_usage(ty)?;
+    }
     validate_view_column_types(&query_schema, &output_columns)?;
     let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
     let existing_view =
@@ -159,12 +168,14 @@ fn register_view_plan_inner(
     }
     context.locks.prepare_definition_write()?;
     context.namespace.ensure_create(&name)?;
-    let object_id = if let Some(existing) = existing_view.as_ref() {
-        existing.object_id
+    // A replaced view keeps its identity and OIDs.
+    let (object_id, catalog_oids) = if let Some(existing) = existing_view.as_ref() {
+        (existing.object_id, existing.catalog_oids)
     } else {
-        context.catalog.allocate_identity().map_err(|error| {
+        let object_id = context.catalog.allocate_identity().map_err(|error| {
             SQLError::Internal(format!("allocate view `{name}` identity: {error}"))
-        })?
+        })?;
+        (object_id, Some(allocate_view_oids(context, &relation)?))
     };
     let view = StoredView {
         security: existing_view.as_ref().map_or_else(
@@ -181,6 +192,7 @@ fn register_view_plan_inner(
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
             populated: true,
+            catalog_oids,
         },
     };
     uqa_sql::semantics::view_rewrite::validate_view_definition_check_option(
@@ -193,4 +205,18 @@ fn register_view_plan_inner(
     }
     publication::publish_regular_view(context.publication, context.changes, relation, view, &name)?;
     Ok(())
+}
+
+/// The OIDs of a new view or materialized view: its relation, array type and row type, then its `_RETURN` rule.
+pub(super) fn allocate_view_oids(
+    context: &ViewCreationContext<'_>,
+    relation: &RelationIdentity,
+) -> Result<uqa_sql::catalog::relation_oids::RelationCatalogOids, SQLError> {
+    context
+        .identities
+        .allocator(crate::catalog::identity::allocate_catalog_object_id)
+        .allocate_relation_oids(
+            uqa_sql::catalog::relation_oids::RelationOidKind::View,
+            relation,
+        )
 }

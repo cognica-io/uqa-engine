@@ -11,9 +11,7 @@ mod rules;
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
-use uqa_sql::ast::{
-    BinaryOp, CreateTrigger, Expr, FunctionDispatch, RuleEvent, TriggerEvent, TriggerTiming,
-};
+use uqa_sql::ast::{CreateTrigger, RuleEvent, TriggerEvent, TriggerTiming};
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::catalog::context::CatalogContext;
@@ -23,14 +21,13 @@ use uqa_sql::canonical_routine_type_name;
 use uqa_sql::catalog::events::{StoredRule, StoredTrigger};
 use uqa_sql::routines::{routine_signature_types, SQLUserFunction};
 
-use super::expression_text::schema_expr_text;
 use super::helpers::oids::{namespace_oid, split_schema_name, stable_oid};
 use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value};
 use super::helpers::views::view_columns_for;
 use super::pg_catalog::table_relation_oid_from;
 use super::pg_proc::user_routine_catalog_oid;
 
-use rules::{render_rule_definition, render_rule_relation, rule_condition_text};
+use rules::{render_rule_definition, render_rule_relation};
 
 const TRIGGER_TYPE_ROW: i64 = 1;
 const TRIGGER_TYPE_BEFORE: i64 = 2;
@@ -68,6 +65,9 @@ pub fn trigger_catalog_oid(
     resolution: &RelationNameResolution,
     trigger: &StoredTrigger,
 ) -> Result<i64, SQLError> {
+    if let Some(oid) = trigger.catalog_oid {
+        return Ok(oid);
+    }
     let identity = if let Some(object_id) = trigger.object_id {
         format!(
             "{}:{}",
@@ -87,6 +87,9 @@ pub fn trigger_constraint_catalog_oid(
 ) -> Result<i64, SQLError> {
     if !trigger.definition.constraint {
         return Ok(0);
+    }
+    if let Some(oid) = trigger.constraint_catalog_oid {
+        return Ok(oid);
     }
     let constraint_name = trigger
         .constraint_name
@@ -115,6 +118,12 @@ fn hex_object_id(object_id: [u8; 16]) -> String {
 }
 
 pub fn rule_catalog_oid(rule: &StoredRule) -> i64 {
+    rule.catalog_oid
+        .unwrap_or_else(|| legacy_rule_catalog_oid(rule))
+}
+
+/// The OID a rule created before OIDs were recorded derives from its relation and name.
+pub fn legacy_rule_catalog_oid(rule: &StoredRule) -> i64 {
     stable_oid(
         "rule",
         &format!("{}.{}", rule.definition.table, rule.definition.name),
@@ -161,10 +170,17 @@ pub fn catalog_triggers(
             for original in originals.iter().filter(|trigger| {
                 trigger.definition.row && trigger.definition.table == source.qualified_name()
             }) {
+                // A partition's clone of a row trigger has OIDs of its own, derived from the trigger's identity and the partition; the recorded OIDs are those of the trigger on its own table.
                 let mut clone = original.clone();
                 clone.definition.table.clone_from(&table);
+                clone.catalog_oid = None;
+                clone.constraint_catalog_oid = None;
                 let mut parent_clone = original.clone();
                 parent_clone.definition.table = parent.qualified_name();
+                if *parent != *source {
+                    parent_clone.catalog_oid = None;
+                    parent_clone.constraint_catalog_oid = None;
+                }
                 catalog
                     .entry((table.clone(), clone.definition.name.clone()))
                     .or_insert((
@@ -333,9 +349,12 @@ fn pg_trigger_row(
         ("tgargs", Value::Bytes(arguments)),
         (
             "tgqual",
-            definition.when.as_ref().map_or(Value::Null, |condition| {
-                str_value(schema_expr_text(condition))
-            }),
+            match definition.when.as_ref() {
+                Some(condition) => str_value(super::view_definition::stored_expression_text(
+                    catalog, resolution, condition,
+                )?),
+                None => Value::Null,
+            },
         ),
         (
             "tgoldtable",
@@ -454,8 +473,14 @@ pub fn build_pg_rewrite(
                 ("is_instead", bool_value(definition.instead)),
                 (
                     "ev_qual",
-                    rule_condition_text(definition, false)?
-                        .map_or_else(|| str_value("<>"), str_value),
+                    match definition.condition.as_ref() {
+                        Some(condition) => {
+                            str_value(super::view_definition::stored_expression_text(
+                                catalog, resolution, condition,
+                            )?)
+                        }
+                        None => str_value("<>"),
+                    },
                 ),
                 (
                     "ev_action",
@@ -585,7 +610,11 @@ fn catalog_view_rules(
 }
 
 fn view_rule_oid(view: &crate::catalog::view::StoredView) -> i64 {
-    super::helpers::oids::stable_object_oid("view-rule", &view.object_id)
+    i64::from(
+        view.relation_oids()
+            .rule
+            .expect("a view's OIDs include its _RETURN rule"),
+    )
 }
 
 fn definition_arguments(
@@ -755,7 +784,9 @@ fn render_trigger_definition(
     rendered.push_str(if definition.row { "ROW" } else { "STATEMENT" });
     if let Some(condition) = &definition.when {
         rendered.push_str(" WHEN (");
-        rendered.push_str(&render_trigger_condition(condition, pretty));
+        rendered.push_str(&super::view_definition::trigger_condition_definition(
+            catalog, resolution, condition, pretty,
+        )?);
         rendered.push(')');
     }
     rendered.push_str(" EXECUTE FUNCTION ");
@@ -805,137 +836,6 @@ fn render_trigger_function(
         local
     } else {
         render_qualified_name(name)
-    }
-}
-
-fn render_trigger_condition(condition: &Expr, pretty: bool) -> String {
-    if pretty {
-        render_pretty_expr(condition, 0)
-    } else {
-        schema_expr_text(condition)
-    }
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves catalog column and OID order"
-)]
-fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
-    let (precedence, rendered) = match expr {
-        Expr::Or(items) => (
-            1,
-            items
-                .iter()
-                .map(|item| render_pretty_expr(item, 1))
-                .collect::<Vec<_>>()
-                .join(" OR "),
-        ),
-        Expr::And(items) => (
-            2,
-            items
-                .iter()
-                .map(|item| render_pretty_expr(item, 2))
-                .collect::<Vec<_>>()
-                .join(" AND "),
-        ),
-        Expr::Not(inner) => match inner.as_ref() {
-            Expr::Func { binding, args, .. }
-                if binding.as_ref().and_then(|binding| binding.dispatch)
-                    == Some(FunctionDispatch::IsDistinct)
-                    && args.len() == 2 =>
-            {
-                (
-                    4,
-                    format!(
-                        "{} IS NOT DISTINCT FROM {}",
-                        render_pretty_expr(&args[0], 5),
-                        render_pretty_expr(&args[1], 5)
-                    ),
-                )
-            }
-            _ => (3, format!("NOT {}", render_pretty_expr(inner, 3))),
-        },
-        Expr::Binary { op, lhs, rhs } => {
-            let (precedence, operator) = match op {
-                BinaryOp::Equal => (4, "="),
-                BinaryOp::NotEqual => (4, "<>"),
-                BinaryOp::Less => (4, "<"),
-                BinaryOp::LessEqual => (4, "<="),
-                BinaryOp::Greater => (4, ">"),
-                BinaryOp::GreaterEqual => (4, ">="),
-                BinaryOp::Add => (5, "+"),
-                BinaryOp::Subtract => (5, "-"),
-                BinaryOp::Multiply => (6, "*"),
-                BinaryOp::Divide => (6, "/"),
-            };
-            let rhs_precedence = if matches!(op, BinaryOp::Subtract | BinaryOp::Divide) {
-                precedence + 1
-            } else {
-                precedence
-            };
-            (
-                precedence,
-                format!(
-                    "{} {operator} {}",
-                    render_pretty_expr(lhs, precedence),
-                    render_pretty_expr(rhs, rhs_precedence)
-                ),
-            )
-        }
-        Expr::Func { binding, args, .. }
-            if binding.as_ref().and_then(|binding| binding.dispatch)
-                == Some(FunctionDispatch::IsDistinct)
-                && args.len() == 2 =>
-        {
-            (
-                4,
-                format!(
-                    "{} IS DISTINCT FROM {}",
-                    render_pretty_expr(&args[0], 5),
-                    render_pretty_expr(&args[1], 5)
-                ),
-            )
-        }
-        Expr::IsNull { expr, negated } => (
-            4,
-            format!(
-                "{} IS {}NULL",
-                render_pretty_expr(expr, 5),
-                if *negated { "NOT " } else { "" }
-            ),
-        ),
-        Expr::Between { expr, low, high } => (
-            4,
-            format!(
-                "{} BETWEEN {} AND {}",
-                render_pretty_expr(expr, 5),
-                render_pretty_expr(low, 5),
-                render_pretty_expr(high, 5)
-            ),
-        ),
-        Expr::InList {
-            expr,
-            list,
-            negated,
-        } => (
-            4,
-            format!(
-                "{} {}IN ({})",
-                render_pretty_expr(expr, 5),
-                if *negated { "NOT " } else { "" },
-                list.iter()
-                    .map(|item| render_pretty_expr(item, 0))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        ),
-        Expr::UnaryMinus(inner) => (7, format!("-{}", render_pretty_expr(inner, 7))),
-        _ => (8, schema_expr_text(expr)),
-    };
-    if precedence < parent_precedence {
-        format!("({rendered})")
-    } else {
-        rendered
     }
 }
 

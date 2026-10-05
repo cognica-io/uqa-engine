@@ -180,7 +180,7 @@ fn grant_releases_catalog_guards_for_locks_then_persists_before_publication() {
 }
 
 #[test]
-fn drop_reports_grantor_dependency_before_object_catalog_reads() {
+fn drop_reports_memberships_the_role_granted() {
     let catalog = Catalog::new();
     for name in ["grantor", "team", "member"] {
         catalog.role(name, &[]);
@@ -193,7 +193,8 @@ fn drop_reports_grantor_dependency_before_object_catalog_reads() {
     };
     let error = drop_roles(&catalog.context(), &statement).unwrap_err();
     assert!(
-        matches!(error, SQLError::Routine { sqlstate, message } if sqlstate == "2BP01" && message == "role \"grantor\" cannot be dropped because some objects depend on it: privileges for membership of role member in role team")
+        matches!(&error, SQLError::Diagnostic { sqlstate, message, detail, hint: None } if sqlstate == "2BP01" && message == "role \"grantor\" cannot be dropped because some objects depend on it" && detail.as_deref() == Some("privileges for membership of role member in role team")),
+        "{error:?}"
     );
     let events = catalog.events.borrow();
     let lock = events
@@ -201,13 +202,14 @@ fn drop_reports_grantor_dependency_before_object_catalog_reads() {
         .position(|event| event == "lock role")
         .unwrap();
     let writer = events.iter().position(|event| event == "writer").unwrap();
-    assert!(lock < writer);
+    let dependencies = events
+        .iter()
+        .position(|event| event == "shared dependencies")
+        .unwrap();
+    assert!(lock < writer && writer < dependencies);
     assert!(events
         .iter()
         .any(|event| event == "NOTICE: role \"missing\" does not exist, skipping"));
-    assert!(!events
-        .iter()
-        .any(|event| ["database", "schemas", "tables"].contains(&event.as_str())));
     drop(events);
     assert_eq!(*catalog.roles.borrow(), roles);
     assert_eq!(catalog.epoch.get(), 0);

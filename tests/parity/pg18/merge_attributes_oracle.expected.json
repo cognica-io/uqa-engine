@@ -1,0 +1,1585 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_d1 (b int, b int);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"b\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_d2 (b int, b text);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"b\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_d3 (b int, c int, b int, c int);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"b\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_d4 (b int DEFAULT nofunc(), b int);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"b\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_d5 (b nosuchtype, b int);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_p (a int, b text);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_c1 (b text) INHERITS (cma_p);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"b\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_c2 (b int) INHERITS (cma_p);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"b\" has a type conflict",
+        "detail": "text versus integer",
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"b\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_c3 (x int, a int) INHERITS (cma_p);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"a\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_c4 (b text, b text) INHERITS (cma_p);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"b\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_q (a int, b varchar(10));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_c5 () INHERITS (cma_p, cma_q);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "inherited column \"b\" has a type conflict",
+        "detail": "text versus character varying(10)",
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"a\"",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"b\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_r (a int, b text);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_c6 () INHERITS (cma_p, cma_r);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"a\"",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"b\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_g (a int, g int GENERATED ALWAYS AS (a) STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_c9 (g int) INHERITS (cma_g);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"g\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_c10 (g int GENERATED ALWAYS AS (a * 2) STORED) INHERITS (cma_g);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"g\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cma_c10'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(a * 2)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_c11 (g int GENERATED ALWAYS AS (a * 2) VIRTUAL) INHERITS (cma_g);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "column \"g\" inherits from generated column of different kind",
+        "detail": "Parent column is STORED, child column is VIRTUAL.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"g\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_h (a int, g int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_c12 () INHERITS (cma_g, cma_h);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "inherited column \"g\" has a generation conflict",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"a\"",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"g\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_c13 (g int GENERATED ALWAYS AS (a) STORED) INHERITS (cma_h);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "child column \"g\" specifies generation expression",
+        "detail": null,
+        "hint": "A child table column cannot be generated unless its parent column is."
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"g\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_c14 (g int DEFAULT 5) INHERITS (cma_g);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "column \"g\" inherits from generated column but specifies default",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"g\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_dp (a int DEFAULT 1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_dq (a int DEFAULT 2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_c15 () INHERITS (cma_dp, cma_dq);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "column \"a\" inherits conflicting default values",
+        "detail": null,
+        "hint": "To resolve the conflict, specify a default explicitly."
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"a\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_c16 (a int DEFAULT 3) INHERITS (cma_dp, cma_dq);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"a\"",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging column \"a\" with inherited definition",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cma_c16'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_c17 () INHERITS (cma_p, cma_p);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"cma_p\" would be inherited from more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_c18 (z int) INHERITS (cma_p);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnum, attislocal, attinhcount FROM pg_attribute WHERE attrelid = 'cma_c18'::regclass AND attnum > 0 ORDER BY attnum;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnum",
+            "attislocal",
+            "attinhcount"
+          ],
+          "type_oids": [
+            19,
+            21,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "a",
+              "1",
+              "f",
+              "1"
+            ],
+            [
+              "b",
+              "2",
+              "f",
+              "1"
+            ],
+            [
+              "z",
+              "3",
+              "t",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnum, attislocal, attinhcount FROM pg_attribute WHERE attrelid = 'cma_c3'::regclass AND attnum > 0 ORDER BY attnum;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnum",
+            "attislocal",
+            "attinhcount"
+          ],
+          "type_oids": [
+            19,
+            21,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "a",
+              "1",
+              "t",
+              "1"
+            ],
+            [
+              "b",
+              "2",
+              "f",
+              "1"
+            ],
+            [
+              "x",
+              "3",
+              "t",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnum, attislocal, attinhcount FROM pg_attribute WHERE attrelid = 'cma_c6'::regclass AND attnum > 0 ORDER BY attnum;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnum",
+            "attislocal",
+            "attinhcount"
+          ],
+          "type_oids": [
+            19,
+            21,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "a",
+              "1",
+              "f",
+              "2"
+            ],
+            [
+              "b",
+              "2",
+              "f",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x1 (a int, a int) INHERITS (nosuch);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_pt (a int) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x2 (a int, a int) INHERITS (cma_pt);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"a\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x3 () INHERITS (cma_p, public.cma_p);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"cma_p\" would be inherited from more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_dp1 (a int DEFAULT 1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_dp2 (a int DEFAULT 1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x4 () INHERITS (cma_dp1, cma_dp2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"a\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cma_x4'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_g1 (a int, g int GENERATED ALWAYS AS (a + 1) STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_g2 (a int, g int GENERATED ALWAYS AS (a + 2) STORED);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x5 () INHERITS (cma_g1, cma_g2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "column \"g\" inherits conflicting generation expressions",
+        "detail": null,
+        "hint": "To resolve the conflict, specify a generation expression explicitly."
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"a\"",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"g\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_x6 (g int GENERATED ALWAYS AS (a + 3) STORED) INHERITS (cma_g1, cma_g2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"a\"",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"g\"",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"g\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cma_x6'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(a + 3)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_gv (a int, g int GENERATED ALWAYS AS (a + 1) VIRTUAL);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x7 () INHERITS (cma_g1, cma_gv);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "inherited column \"g\" has a generation conflict",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"a\"",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging multiple inherited definitions of column \"g\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_ip (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x8 (a int GENERATED ALWAYS AS IDENTITY) INHERITS (cma_ip);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging column \"a\" with inherited definition",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_x9 (g int GENERATED ALWAYS AS IDENTITY) INHERITS (cma_g1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42611",
+        "message": "column \"g\" inherits from generated column but specifies identity",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"g\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_x10 (a int DEFAULT 5) INHERITS (cma_dp1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging column \"a\" with inherited definition",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'cma_x10'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x11 (c int, a int NOT NULL, d int, b text) INHERITS (cma_p);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"a\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"b\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT attname, attnum, attnotnull, attislocal, attinhcount FROM pg_attribute WHERE attrelid = 'cma_x11'::regclass AND attnum > 0 ORDER BY attnum;",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnum",
+            "attnotnull",
+            "attislocal",
+            "attinhcount"
+          ],
+          "type_oids": [
+            19,
+            21,
+            16,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "a",
+              "1",
+              "t",
+              "t",
+              "1"
+            ],
+            [
+              "b",
+              "2",
+              "f",
+              "t",
+              "1"
+            ],
+            [
+              "c",
+              "3",
+              "f",
+              "t",
+              "0"
+            ],
+            [
+              "d",
+              "4",
+              "f",
+              "t",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x12 (g int) INHERITS (cma_g1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"g\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO cma_x12 (a) VALUES (10);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, g FROM cma_x12;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "g"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "10",
+              "11"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_x13 (g int GENERATED ALWAYS AS (a * 10) STORED) INHERITS (cma_g1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"g\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO cma_x13 (a) VALUES (10);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, g FROM cma_x13;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "g"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "10",
+              "100"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a, g FROM cma_g1 ORDER BY a, g;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "g"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "10",
+              "11"
+            ],
+            [
+              "10",
+              "100"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_np (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_npp PARTITION OF cma_np FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "\"cma_np\" is not partitioned",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_xc1 (b int) INHERITS (cma_pt);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot inherit from partitioned table \"cma_pt\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_pt1 PARTITION OF cma_pt FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_xc2 (b int) INHERITS (cma_pt1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot inherit from partition \"cma_pt1\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW cma_v AS SELECT 1 AS a;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_xc3 (b int) INHERITS (cma_v);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "inherited relation \"cma_v\" is not a table or foreign table",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE cma_tmp (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_tc1 (b int) INHERITS (cma_tmp);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot inherit from temporary relation \"cma_tmp\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE cma_tc2 (b int) INHERITS (cma_tmp);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE cma_tc3 (b int) INHERITS (cma_p);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"b\" has a type conflict",
+        "detail": "text versus integer",
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"b\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TEMP TABLE cma_tp1 PARTITION OF cma_pt FOR VALUES IN (2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot create a temporary relation as partition of permanent relation \"cma_pt\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE cma_ttp (a int) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cma_tp2 PARTITION OF cma_ttp FOR VALUES IN (2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot create a permanent relation as partition of temporary relation \"cma_ttp\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE cma_tp3 PARTITION OF cma_ttp FOR VALUES IN (3);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE UNLOGGED TABLE cma_uc (b int) INHERITS (cma_p);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"b\" has a type conflict",
+        "detail": "text versus integer",
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "moving and merging column \"b\" with inherited definition",
+          "detail": "User-specified column moved to the position of the inherited column.",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cma_tc4 (b int, b int) INHERITS (cma_tmp);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"b\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    }
+  ]
+}

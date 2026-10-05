@@ -46,13 +46,13 @@ pub fn format_regtype_value_with_control(
         if !is_regtype(element) {
             return Ok(None);
         }
-        let Value::Array(array) = value else {
+        let Value::Array(_) = value else {
             return value_to_string_with_control(value, control).map(Some);
         };
-        let elements = format_array_elements(array.elements(), element, engine, control)?;
-        let formatted = rebuild_array(array, elements, control)?.ok_or_else(|| {
-            SQLError::Internal("regtype array output changed the array dimensions".into())
-        })?;
+        let Some(formatted) = format_regtype_elements_with_control(value, ty, engine, control)?
+        else {
+            return Ok(None);
+        };
         return array_value_to_string_with_control(&formatted, control).map(Some);
     }
     if !is_regtype(ty) {
@@ -81,6 +81,27 @@ pub fn format_regtype_value_with_control(
         }
         None => Ok(Some(control.format(format_args!("{oid}"))?)),
     }
+}
+
+/// An array of a `reg*` type with each element spelled by the type's output function, as `ArrayCoerceExpr` applies `CoerceViaIO` to every element; `None` when the array's element type is no such type or the value is no array.
+pub fn format_regtype_elements_with_control(
+    value: &Value,
+    ty: &ColumnType,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<uqa_core::ArrayValue>>> {
+    let (ColumnType::Array(element), Value::Array(array)) = (ty, value) else {
+        return Ok(None);
+    };
+    if !is_regtype(element) {
+        return Ok(None);
+    }
+    let elements = format_array_elements(array.elements(), element, engine, control)?;
+    rebuild_array(array, elements, control)?
+        .ok_or_else(|| {
+            SQLError::Internal("regtype array output changed the array dimensions".into())
+        })
+        .map(Some)
 }
 
 fn is_regtype(ty: &ColumnType) -> bool {

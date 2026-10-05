@@ -584,10 +584,18 @@ mod unified_plan_tests {
         let dir = tempfile::tempdir().expect("temporary database directory");
         let root = Engine::open(&dir.path().join("statement-data-epoch.db"))
             .expect("open persistent engine");
-        root.sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
-            .expect("create table");
         let writer = root.new_session().expect("writer session");
         let observer = root.new_session().expect("observer session");
+        // Automatic statistics would commit their first collection at an arbitrary point and change SQLite's data version inside the measured window.
+        for engine in [&root, &writer, &observer] {
+            engine.release_automatic_statistics_client();
+            engine
+                .session
+                .statistics_worker
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        root.sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .expect("create table");
         let query = "SELECT id FROM items WHERE id = 1";
 
         let version_before_query = observer

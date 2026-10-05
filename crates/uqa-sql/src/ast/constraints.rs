@@ -70,6 +70,9 @@ pub struct ColumnDef {
     /// only when a logical row is read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated: Option<GeneratedColumn>,
+    /// The `pg_attrdef` OID of the default or generation expression, allocated when the expression was set; an expression set before OIDs were recorded derives it from the table and column names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_catalog_oid: Option<i64>,
     /// `CHECK (<expr>)` column-level constraint. Evaluated at INSERT
     /// (and UPDATE-replace) time against the row being written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -94,6 +97,41 @@ pub struct ColumnDef {
     /// Column-level `REFERENCES parent[(col)]` foreign key. An omitted column is resolved to the referenced primary key before publication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub references: Option<ForeignKeyRef>,
+}
+
+impl ColumnDef {
+    /// A nullable column without a default, generation expression, identity or constraint.
+    #[must_use]
+    pub fn nullable(name: impl Into<String>, ty: ColumnType) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            object_id: None,
+            missing_value: None,
+            primary_key: false,
+            not_null: false,
+            not_null_explicit: false,
+            not_null_name: None,
+            not_null_identity: None,
+            not_null_validated: true,
+            not_null_no_inherit: false,
+            not_null_is_local: true,
+            auto_increment: None,
+            unique: false,
+            default: None,
+            generated: None,
+            check: None,
+            check_name: None,
+            check_enforced: true,
+            check_validated: true,
+            check_no_inherit: false,
+            check_is_local: true,
+            check_object_id: None,
+            check_catalog_oid: None,
+            default_catalog_oid: None,
+            references: None,
+        }
+    }
 }
 
 pub use uqa_core::catalog_identity::CatalogObjectIdentity as ConstraintCatalogIdentity;
@@ -172,6 +210,74 @@ pub struct CreateTable {
     /// time, then persists the canonical hierarchy with the table schema.
     #[serde(default)]
     pub hierarchy: TableHierarchy,
+    /// Each CHECK the statement declares, in written order, which `DefineRelation` adds in that order. Only the statement carries it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub check_order: Vec<DeclaredCheck>,
+    /// The columns and NOT NULL table constraints the statement declares, in written order, as `transformCreateStmt` examines them. Only the statement carries it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub element_order: Vec<DeclaredElement>,
+    /// The columns a `PARTITION OF` statement declares without a type, which are options on the parent's columns and take their types when the columns merge. Only the statement carries it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub untyped_columns: Vec<String>,
+}
+
+/// An element of a CREATE TABLE statement that `transformCreateStmt` examines in written order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeclaredElement {
+    /// The statement's next column, with the clauses it writes.
+    Column(ColumnDeclaration),
+    /// A table constraint `NOT NULL column`.
+    NotNull { no_inherit: bool },
+    /// A table PRIMARY KEY or UNIQUE constraint that is DEFERRABLE or INITIALLY DEFERRED.
+    DeferrableKey,
+}
+
+/// The clauses a column definition writes, in written order, which `transformColumnDefinition` checks against each other.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnDeclaration {
+    /// The column's type is SERIAL, SMALLSERIAL or BIGSERIAL, which adds a default after the written clauses.
+    pub serial: bool,
+    /// The column's type is an array of a SERIAL type.
+    pub serial_array: bool,
+    pub clauses: Vec<ColumnClause>,
+}
+
+/// One clause of a column definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnClause {
+    pub kind: ColumnClauseKind,
+    /// The name a `CONSTRAINT` clause gives it.
+    pub name: Option<String>,
+    pub no_inherit: bool,
+}
+
+/// The kind of a column definition's clause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColumnClauseKind {
+    Null,
+    NotNull,
+    Default,
+    Identity,
+    Generated,
+    Check,
+    PrimaryKey,
+    Unique,
+    ForeignKey,
+    Deferrable,
+    NotDeferrable,
+    InitiallyDeferred,
+    InitiallyImmediate,
+    Enforced,
+    NotEnforced,
+}
+
+/// Where a CHECK that a CREATE TABLE statement declares is held.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeclaredCheck {
+    /// The CHECK the named column holds as its own.
+    Column(String),
+    /// The entry at this position among the statement's own entries of `CreateTable::checks`.
+    Table(usize),
 }
 
 /// A syntactically valid `CREATE TABLE IF NOT EXISTS` whose definition must be analyzed only after execution has established that the target relation does not already exist.
@@ -205,6 +311,9 @@ pub struct TableKeyConstraint {
     /// Independent catalog row lifetime, retained while the owning index changes its name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_identity: Option<ConstraintCatalogIdentity>,
+    /// The identity of the index that enforces the key (`conindid`), reserved before the constraint's own as `index_create` creates the index before `index_constraint_create`. Keys created before it was recorded bind their index when it is registered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_identity: Option<ConstraintCatalogIdentity>,
     pub name: Option<String>,
     pub kind: TableKeyConstraintKind,
     pub columns: Vec<String>,
@@ -244,6 +353,9 @@ pub struct TableConstraintSet {
     /// Durable relation hierarchy and partition-bound metadata.
     #[serde(default)]
     pub hierarchy: TableHierarchy,
+    /// The relation's public OIDs, allocated when it was created. Tables created before OIDs were recorded derive them from their identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_oids: Option<crate::catalog::relation_oids::RelationCatalogOids>,
 }
 
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>

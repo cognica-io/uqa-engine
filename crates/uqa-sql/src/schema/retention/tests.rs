@@ -88,6 +88,7 @@ fn column_types_charge_domain_names_and_every_boxed_base() {
         schema,
         name,
         oid: 42,
+        array_oid: None,
         base: Box::new(ColumnType::Array(Box::new(ColumnType::Text))),
     };
     let budget = MemoryBudget::new(16 * 1024);

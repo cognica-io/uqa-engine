@@ -352,7 +352,13 @@ fn view_sources_bind_to_creation_namespace_across_nested_query_shapes() {
         result.rows
     );
     let error = eng.sql("DROP TABLE s1.renamed_items", &[]).unwrap_err();
-    assert!(error.to_string().contains("public.bound_items"), "{error}");
+    assert!(
+        error
+            .detail()
+            .is_some_and(|detail| detail
+                .contains("view public.bound_items depends on table s1.renamed_items")),
+        "{error:?}"
+    );
 }
 
 #[test]

@@ -7,13 +7,14 @@
 //! Rendering for data-modifying statement trees.
 
 use super::{
-    assignment_targets_sql, assignments_sql, expr_sql, from_sql, ident, only_relation,
-    render_returning, render_target_alias, rows_sql, select_sql, with_sql,
+    assignment_targets_sql, assignments_sql, expr_list, from_sql, ident, only_relation,
+    render_expr, render_returning, render_target_alias, rows_sql, select_sql, with_sql,
 };
 use crate::ast::{DeleteStmt, InsertStmt, MergeStmt, MergeWhen, OnConflictAction, UpdateStmt};
+use crate::SQLError;
 
-pub(super) fn insert_sql(statement: &InsertStmt) -> String {
-    let mut rendered = with_sql(&statement.with);
+pub(super) fn insert_sql(statement: &InsertStmt) -> Result<String, SQLError> {
+    let mut rendered = with_sql(&statement.with)?;
     rendered.push_str("INSERT INTO ");
     rendered.push_str(&only_relation(
         &statement.table,
@@ -22,7 +23,7 @@ pub(super) fn insert_sql(statement: &InsertStmt) -> String {
     render_target_alias(&mut rendered, &statement.table, &statement.target_qualifier);
     if !statement.columns.is_empty() {
         rendered.push_str(" (");
-        rendered.push_str(&assignment_targets_sql(&statement.columns));
+        rendered.push_str(&assignment_targets_sql(&statement.columns)?);
         rendered.push(')');
     }
     if let Some(overriding) = statement.overriding {
@@ -33,10 +34,10 @@ pub(super) fn insert_sql(statement: &InsertStmt) -> String {
         rendered.push_str(" DEFAULT VALUES");
     } else if !statement.rows.is_empty() {
         rendered.push_str(" VALUES ");
-        rendered.push_str(&rows_sql(&statement.rows));
+        rendered.push_str(&rows_sql(&statement.rows)?);
     } else if let Some(select) = statement.select_source.as_deref() {
         rendered.push(' ');
-        rendered.push_str(&select_sql(select));
+        rendered.push_str(&select_sql(select)?);
     }
     if let Some(conflict) = &statement.on_conflict {
         rendered.push_str(" ON CONFLICT");
@@ -49,20 +50,20 @@ pub(super) fn insert_sql(statement: &InsertStmt) -> String {
             let keys = conflict
                 .conflict_columns
                 .iter()
-                .map(|name| ident(name))
+                .map(|name| Ok(ident(name)))
                 .chain(
                     conflict
                         .expressions
                         .iter()
-                        .map(|expr| format!("({})", expr_sql(expr))),
+                        .map(|expr| Ok(format!("({})", render_expr(expr)?))),
                 )
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, SQLError>>()?;
             rendered.push_str(&keys.join(", "));
             rendered.push(')');
         }
         if let Some(predicate) = &conflict.predicate {
             rendered.push_str(" WHERE ");
-            rendered.push_str(&expr_sql(predicate));
+            rendered.push_str(&render_expr(predicate)?);
         }
         match &conflict.action {
             OnConflictAction::Nothing => rendered.push_str(" DO NOTHING"),
@@ -71,10 +72,10 @@ pub(super) fn insert_sql(statement: &InsertStmt) -> String {
                 r#where,
             } => {
                 rendered.push_str(" DO UPDATE SET ");
-                rendered.push_str(&assignments_sql(assignments));
+                rendered.push_str(&assignments_sql(assignments)?);
                 if let Some(predicate) = r#where {
                     rendered.push_str(" WHERE ");
-                    rendered.push_str(&expr_sql(predicate));
+                    rendered.push_str(&render_expr(predicate)?);
                 }
             }
         }
@@ -83,12 +84,12 @@ pub(super) fn insert_sql(statement: &InsertStmt) -> String {
         &mut rendered,
         &statement.returning_aliases,
         &statement.returning,
-    );
-    rendered
+    )?;
+    Ok(rendered)
 }
 
-pub(super) fn update_sql(statement: &UpdateStmt) -> String {
-    let mut rendered = with_sql(&statement.with);
+pub(super) fn update_sql(statement: &UpdateStmt) -> Result<String, SQLError> {
+    let mut rendered = with_sql(&statement.with)?;
     rendered.push_str("UPDATE ");
     rendered.push_str(&only_relation(
         &statement.table,
@@ -96,25 +97,25 @@ pub(super) fn update_sql(statement: &UpdateStmt) -> String {
     ));
     render_target_alias(&mut rendered, &statement.table, &statement.target_qualifier);
     rendered.push_str(" SET ");
-    rendered.push_str(&assignments_sql(&statement.assignments));
+    rendered.push_str(&assignments_sql(&statement.assignments)?);
     if let Some(source) = &statement.from {
         rendered.push_str(" FROM ");
-        rendered.push_str(&from_sql(source));
+        rendered.push_str(&from_sql(source)?);
     }
     if let Some(predicate) = &statement.r#where {
         rendered.push_str(" WHERE ");
-        rendered.push_str(&expr_sql(predicate));
+        rendered.push_str(&render_expr(predicate)?);
     }
     render_returning(
         &mut rendered,
         &statement.returning_aliases,
         &statement.returning,
-    );
-    rendered
+    )?;
+    Ok(rendered)
 }
 
-pub(super) fn delete_sql(statement: &DeleteStmt) -> String {
-    let mut rendered = with_sql(&statement.with);
+pub(super) fn delete_sql(statement: &DeleteStmt) -> Result<String, SQLError> {
+    let mut rendered = with_sql(&statement.with)?;
     rendered.push_str("DELETE FROM ");
     rendered.push_str(&only_relation(
         &statement.table,
@@ -123,22 +124,22 @@ pub(super) fn delete_sql(statement: &DeleteStmt) -> String {
     render_target_alias(&mut rendered, &statement.table, &statement.target_qualifier);
     if let Some(source) = &statement.using {
         rendered.push_str(" USING ");
-        rendered.push_str(&from_sql(source));
+        rendered.push_str(&from_sql(source)?);
     }
     if let Some(predicate) = &statement.r#where {
         rendered.push_str(" WHERE ");
-        rendered.push_str(&expr_sql(predicate));
+        rendered.push_str(&render_expr(predicate)?);
     }
     render_returning(
         &mut rendered,
         &statement.returning_aliases,
         &statement.returning,
-    );
-    rendered
+    )?;
+    Ok(rendered)
 }
 
-pub(super) fn merge_sql(statement: &MergeStmt) -> String {
-    let mut rendered = with_sql(&statement.with);
+pub(super) fn merge_sql(statement: &MergeStmt) -> Result<String, SQLError> {
+    let mut rendered = with_sql(&statement.with)?;
     rendered.push_str("MERGE INTO ");
     rendered.push_str(&only_relation(
         &statement.target,
@@ -150,9 +151,9 @@ pub(super) fn merge_sql(statement: &MergeStmt) -> String {
         &statement.target_qualifier,
     );
     rendered.push_str(" USING ");
-    rendered.push_str(&from_sql(&statement.source));
+    rendered.push_str(&from_sql(&statement.source)?);
     rendered.push_str(" ON ");
-    rendered.push_str(&expr_sql(&statement.join_condition));
+    rendered.push_str(&render_expr(&statement.join_condition)?);
     for clause in &statement.when_clauses {
         let (matching, condition) = match clause {
             MergeWhen::UpdateMatched { condition, .. }
@@ -170,14 +171,14 @@ pub(super) fn merge_sql(statement: &MergeStmt) -> String {
         rendered.push_str(matching);
         if let Some(condition) = condition {
             rendered.push_str(" AND ");
-            rendered.push_str(&expr_sql(condition));
+            rendered.push_str(&render_expr(condition)?);
         }
         rendered.push_str(" THEN ");
         match clause {
             MergeWhen::UpdateMatched { assignments, .. }
             | MergeWhen::UpdateNotMatchedBySource { assignments, .. } => {
                 rendered.push_str("UPDATE SET ");
-                rendered.push_str(&assignments_sql(assignments));
+                rendered.push_str(&assignments_sql(assignments)?);
             }
             MergeWhen::DeleteMatched { .. } | MergeWhen::DeleteNotMatchedBySource { .. } => {
                 rendered.push_str("DELETE");
@@ -191,7 +192,7 @@ pub(super) fn merge_sql(statement: &MergeStmt) -> String {
                 rendered.push_str("INSERT");
                 if !columns.is_empty() {
                     rendered.push_str(" (");
-                    rendered.push_str(&assignment_targets_sql(columns));
+                    rendered.push_str(&assignment_targets_sql(columns)?);
                     rendered.push(')');
                 }
                 if let Some(overriding) = overriding {
@@ -202,7 +203,7 @@ pub(super) fn merge_sql(statement: &MergeStmt) -> String {
                     rendered.push_str(" DEFAULT VALUES");
                 } else {
                     rendered.push_str(" VALUES (");
-                    rendered.push_str(&values.iter().map(expr_sql).collect::<Vec<_>>().join(", "));
+                    rendered.push_str(&expr_list(values)?);
                     rendered.push(')');
                 }
             }
@@ -215,6 +216,6 @@ pub(super) fn merge_sql(statement: &MergeStmt) -> String {
         &mut rendered,
         &statement.returning_aliases,
         &statement.returning,
-    );
-    rendered
+    )?;
+    Ok(rendered)
 }

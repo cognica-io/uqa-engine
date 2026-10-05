@@ -11,6 +11,7 @@ use crate::schema::keys::definition::index_order;
 fn key(kind: TableKeyConstraintKind, name: Option<&str>, columns: &[&str]) -> TableKeyConstraint {
     TableKeyConstraint {
         catalog_identity: None,
+        index_identity: None,
         name: name.map(str::to_owned),
         kind,
         columns: columns.iter().map(|column| (*column).to_owned()).collect(),

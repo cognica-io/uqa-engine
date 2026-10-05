@@ -955,3 +955,15 @@ fn drop_restrict_dependency_precedes_a_pending_parent_event() {
 
 #[path = "pg18_constraint_lifecycle/catalog_lifecycle.rs"]
 mod catalog_lifecycle;
+#[path = "pg18_constraint_lifecycle/column_declarations.rs"]
+mod column_declarations;
+#[path = "pg18_constraint_lifecycle/default_cooking.rs"]
+mod default_cooking;
+#[path = "pg18_constraint_lifecycle/merge_attributes.rs"]
+mod merge_attributes;
+#[path = "pg18_constraint_lifecycle/partition_column_options.rs"]
+mod partition_column_options;
+#[path = "pg18_constraint_lifecycle/table_creation_oids.rs"]
+mod table_creation_oids;
+#[path = "pg18_constraint_lifecycle/table_creation_order.rs"]
+mod table_creation_order;

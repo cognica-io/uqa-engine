@@ -152,10 +152,17 @@ pub(super) fn scalar_type_inner_with_control(
             }
             copy_type(Some(&ColumnType::Boolean), control)
         }
+        // `unknown` operands take the type selected by each comparison operator.
         ScalarExpr::Between { expr, low, high } => {
-            let value = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
-            let low = scalar_type_inner_with_control(low, schema, params, resolver, control)?;
-            let high = scalar_type_inner_with_control(high, schema, params, resolver, control)?;
+            let value = common::common_context_expression_type_with_control(
+                expr, schema, params, resolver, control,
+            )?;
+            let low = common::common_context_expression_type_with_control(
+                low, schema, params, resolver, control,
+            )?;
+            let high = common::common_context_expression_type_with_control(
+                high, schema, params, resolver, control,
+            )?;
             operators::binary_result_type_with_control(
                 crate::ast::BinaryOp::GreaterEqual,
                 value.as_deref(),
@@ -171,16 +178,38 @@ pub(super) fn scalar_type_inner_with_control(
             copy_type(Some(&ColumnType::Boolean), control)
         }
         ScalarExpr::InList { expr, list, .. } => {
-            let needle = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
+            let needle = common::common_context_expression_type_with_control(
+                expr, schema, params, resolver, control,
+            )?;
+            let mut candidates = Vec::with_capacity(list.len());
             for item in list {
-                let candidate =
-                    scalar_type_inner_with_control(item, schema, params, resolver, control)?;
-                operators::binary_result_type_with_control(
-                    crate::ast::BinaryOp::Equal,
-                    needle.as_deref(),
-                    candidate.as_deref(),
-                    control,
-                )?;
+                candidates.push(common::common_context_expression_type_with_control(
+                    item, schema, params, resolver, control,
+                )?);
+            }
+            // `transformAExprIn` compares the needle with the list coerced to the inputs' common type; without one, each item is compared separately.
+            let inputs = std::iter::once(needle.as_deref())
+                .chain(candidates.iter().map(Option::as_deref))
+                .collect::<Vec<_>>();
+            match common::select_common_input_type_with_control(&inputs, control)? {
+                Some(common) => {
+                    operators::binary_result_type_with_control(
+                        crate::ast::BinaryOp::Equal,
+                        needle.as_deref(),
+                        Some(&common),
+                        control,
+                    )?;
+                }
+                None => {
+                    for candidate in &candidates {
+                        operators::binary_result_type_with_control(
+                            crate::ast::BinaryOp::Equal,
+                            needle.as_deref(),
+                            candidate.as_deref(),
+                            control,
+                        )?;
+                    }
+                }
             }
             copy_type(Some(&ColumnType::Boolean), control)
         }
@@ -219,7 +248,7 @@ pub(super) fn scalar_type_inner_with_control(
                 })
                 .transpose()?
                 .flatten();
-            let mut result = None;
+            let mut results = Vec::with_capacity(when.len() + 1);
             for (condition, value) in when {
                 let condition_type = if simple {
                     common::common_context_expression_type_with_control(
@@ -236,22 +265,22 @@ pub(super) fn scalar_type_inner_with_control(
                         control,
                     )?;
                 }
-                result = common::merge_value_types(
-                    result,
-                    common::common_context_expression_type_with_control(
-                        value, schema, params, resolver, control,
-                    )?,
-                    control,
-                )?;
+                results.push(common::common_context_expression_type_with_control(
+                    value, schema, params, resolver, control,
+                )?);
             }
             if let Some(value) = else_branch {
-                result = common::merge_value_types(
-                    result,
+                // `transformCaseExpr` selects the result type with the ELSE result first.
+                results.insert(
+                    0,
                     common::common_context_expression_type_with_control(
                         value, schema, params, resolver, control,
                     )?,
-                    control,
-                )?;
+                );
+            }
+            let mut result = None;
+            for ty in results {
+                result = common::merge_value_types(result, ty, control)?;
             }
             match result {
                 Some(result) => common::case::case_output_type_with_control(
@@ -281,6 +310,11 @@ pub(super) fn scalar_type_inner_with_control(
                 .and_then(|binding| binding.resolution_error.as_ref())
             {
                 return Err(error.sql_error());
+            }
+            if binding.as_ref().and_then(|binding| binding.dispatch)
+                == Some(crate::ast::FunctionDispatch::FieldSelect)
+            {
+                return field_selection_type(args, schema, params, resolver, control);
             }
             if let Some(filter) = filter {
                 scalar_type_inner_with_control(filter, schema, params, resolver, control)?;
@@ -316,7 +350,16 @@ pub(super) fn scalar_type_inner_with_control(
                 control,
             )
         }
-        ScalarExpr::WindowCall { name, args, spec } => {
+        ScalarExpr::WindowCall {
+            name,
+            args,
+            spec,
+            filter,
+            ..
+        } => {
+            if let Some(filter) = filter {
+                scalar_type_inner_with_control(filter, schema, params, resolver, control)?;
+            }
             for expression in &spec.partition_by {
                 if let Some(ty) =
                     scalar_type_inner_with_control(expression, schema, params, resolver, control)?
@@ -376,6 +419,62 @@ pub(super) fn scalar_type_inner_with_control(
         }
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) | ScalarExpr::Default => Ok(None),
     }
+}
+
+/// `(expression).field`: a whole-row reference selects its relation's column, a row constructor its `fN` field, and any other expression its composite type's attribute.
+pub(super) fn field_selection_type(
+    args: &[ScalarExpr],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    use super::field_selection;
+    let [base, ScalarExpr::Literal(uqa_core::Value::Str(field))] = args else {
+        return Err(SQLError::Internal(
+            "field selection takes an expression and a field name".into(),
+        ));
+    };
+    let whole_row = match base {
+        ScalarExpr::Column(qualifier)
+            if !schema.has_unqualified_column(qualifier)
+                && !schema.column_is_ambiguous(qualifier)
+                && schema.has_qualifier(qualifier) =>
+        {
+            Some(qualifier)
+        }
+        ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => Some(qualifier),
+        _ => None,
+    };
+    if let Some(qualifier) = whole_row {
+        if !schema.has_qualified_column(qualifier, field) {
+            return Err(field_selection::missing_relation_column(qualifier, field));
+        }
+        return copy_type(schema.qualified_type(qualifier, field), control);
+    }
+    if let ScalarExpr::Row(items) = base {
+        let items = items
+            .iter()
+            .map(|item| {
+                scalar_type_inner_with_control(item, schema, params, resolver, control)
+                    .map(|ty| ty.map(|ty| (*ty).clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return copy_type(
+            field_selection::row_field_type(&items, field)?.as_ref(),
+            control,
+        );
+    }
+    if let ScalarExpr::Literal(value) = base {
+        if let Some(field_type) = field_selection::literal_field_type(value, field) {
+            return copy_type(field_type?.as_ref(), control);
+        }
+    }
+    let base = scalar_type_inner_with_control(base, schema, params, resolver, control)?;
+    copy_type(
+        field_selection::value_field_type(base.as_deref(), field, resolver)?.as_ref(),
+        control,
+    )
 }
 
 fn copy_type(

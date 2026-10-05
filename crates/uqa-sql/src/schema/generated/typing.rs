@@ -8,7 +8,7 @@
 
 use crate::ast::{
     BinaryOp, ColumnDef, Expr, FunctionBinding, FunctionDispatch, FunctionReturns,
-    GeneratedFunctionDependency, RangeFunctionOperation, RangeSubtype,
+    GeneratedFunctionDependency, RangeSubtype,
 };
 use crate::schema::SchemaExpressionCatalog;
 use crate::{routines::routine_signature_types, type_resolution::canonical_routine_type_name};
@@ -45,6 +45,8 @@ pub(in crate::schema) enum GenerationType {
     Vector,
     Tensor,
     Record,
+    Enum(crate::ast::EnumTypeReference),
+    Composite(crate::ast::CompositeTypeReference),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -152,6 +154,26 @@ fn bind_function_calls(
                     .is_some()
             {
                 return Ok(());
+            }
+            if binding.is_none() {
+                let declared_types = call_arguments
+                    .iter()
+                    .zip(&argument_types)
+                    .map(|(argument, inferred)| {
+                        enums::declared_type(columns, argument.value, inferred)
+                    })
+                    .collect::<Vec<_>>();
+                if enums::enum_support_call(
+                    engine,
+                    name,
+                    &argument_names,
+                    &argument_types,
+                    &declared_types,
+                )?
+                .is_some()
+                {
+                    return Ok(());
+                }
             }
             if builtin::bind_fixed_builtin_call(
                 builtin::FixedBuiltinCall {
@@ -282,6 +304,8 @@ pub(in crate::schema) fn column_generation_type(ty: &ColumnType) -> GenerationTy
         ColumnType::Named(name) => {
             unreachable!("unresolved declaration type {name} reached catalog projection")
         }
+        ColumnType::Enum(reference) => GenerationType::Enum(reference.clone()),
+        ColumnType::Composite(reference) => GenerationType::Composite(reference.clone()),
         ColumnType::SmallInteger => GenerationType::SmallInteger,
         ColumnType::Integer => GenerationType::Integer,
         ColumnType::BigInteger => GenerationType::BigInteger,
@@ -372,6 +396,8 @@ pub(in crate::schema) fn generation_type_name(ty: &GenerationType) -> String {
         GenerationType::Vector => "vector".into(),
         GenerationType::Tensor => "tensor".into(),
         GenerationType::Record => "record".into(),
+        GenerationType::Enum(reference) => ColumnType::Enum(reference.clone()).sql_name(),
+        GenerationType::Composite(reference) => ColumnType::Composite(reference.clone()).sql_name(),
     }
 }
 
@@ -391,7 +417,7 @@ fn infer_expression(
             .find(|column| column.name == *name)
             .map(|column| column_generation_type(&column.ty))
             .ok_or_else(|| SQLError::UnknownColumn(name.clone())),
-        Expr::Literal(value) => Ok(value_generation_type(value)),
+        Expr::Literal(value) => value_generation_type(value),
         Expr::TypedLiteral { ty, .. } => crate::expr::EngineHook::resolve_type_name(engine, ty)
             .ok()
             .flatten()
@@ -416,7 +442,20 @@ fn infer_expression(
         Expr::Binary { op, lhs, rhs } => {
             let lhs = infer_expression(engine, columns, lhs, dependencies)?;
             let rhs = infer_expression(engine, columns, rhs, dependencies)?;
-            infer_binary_type(*op, &lhs, &rhs)
+            let result = infer_binary_type(*op, &lhs, &rhs)?;
+            if matches!(
+                op,
+                BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::Less
+                    | BinaryOp::LessEqual
+                    | BinaryOp::Greater
+                    | BinaryOp::GreaterEqual
+            ) {
+                enums::validate_unknown_against(engine, &lhs, &rhs)?;
+                enums::validate_unknown_against(engine, &rhs, &lhs)?;
+            }
+            Ok(result)
         }
         Expr::Not(inner) => {
             let ty = infer_expression(engine, columns, inner, dependencies)?;
@@ -433,10 +472,10 @@ fn infer_expression(
                 | GenerationType::Numeric
                 | GenerationType::Interval => Ok(ty),
                 GenerationType::Oid | GenerationType::Xid => Ok(GenerationType::Integer),
-                _ => Err(SQLError::TypeMismatch(format!(
-                    "operator does not exist: - {}",
-                    generation_type_name(&ty)
-                ))),
+                _ => Err(crate::type_resolution::undefined_prefix_operator(
+                    "-",
+                    &generation_type_name(&ty),
+                )),
             }
         }
         Expr::And(items) | Expr::Or(items) => {
@@ -455,15 +494,24 @@ fn infer_expression(
             let value = infer_expression(engine, columns, expr, dependencies)?;
             let low = infer_expression(engine, columns, low, dependencies)?;
             let high = infer_expression(engine, columns, high, dependencies)?;
-            common_type(&value, &low)?;
-            common_type(&value, &high)?;
+            for (left, right) in [(&value, &low), (&value, &high)] {
+                common_type(left, right)?;
+                enums::validate_unknown_against(engine, left, right)?;
+                enums::validate_unknown_against(engine, right, left)?;
+            }
             Ok(GenerationType::Boolean)
         }
         Expr::InList { expr, list, .. } => {
             let value = infer_expression(engine, columns, expr, dependencies)?;
+            let mut common = value.clone();
+            let mut items = Vec::with_capacity(list.len());
             for item in list {
                 let item = infer_expression(engine, columns, item, dependencies)?;
-                common_type(&value, &item)?;
+                common = common_type(&common, &item)?;
+                items.push(item);
+            }
+            for item in std::iter::once(&value).chain(&items) {
+                enums::validate_unknown_against(engine, item, &common)?;
             }
             Ok(GenerationType::Boolean)
         }
@@ -498,10 +546,20 @@ fn infer_expression(
             Ok(finalize_common_type(result_type))
         }
         Expr::Cast { expr, ty } => {
-            infer_expression(engine, columns, expr, dependencies)?;
-            crate::expr::EngineHook::resolve_type_name(engine, ty)
+            let source = infer_expression(engine, columns, expr, dependencies)?;
+            let target = crate::expr::EngineHook::resolve_type_name(engine, ty)
                 .ok()
                 .flatten()
+                .or_else(|| ColumnType::from_sql_name(ty).ok());
+            if let Some(target) = target.as_ref() {
+                enums::validate_cast_volatility(
+                    engine,
+                    &source,
+                    enums::declared_type(columns, expr, &source).as_ref(),
+                    target,
+                )?;
+            }
+            target
                 .as_ref()
                 .map(column_generation_type)
                 .or_else(|| generation_type_from_name(ty))
@@ -531,6 +589,68 @@ fn infer_expression(
     }
 }
 
+/// `(expression).field` in a generation expression: a row constructor's `fN` field or a composite value's attribute.
+fn field_generation_type(
+    engine: &dyn SchemaExpressionCatalog,
+    columns: &[ColumnDef],
+    args: &[Expr],
+    argument_types: &[GenerationType],
+    dependencies: &mut Vec<GeneratedFunctionDependency>,
+) -> Result<GenerationType, SQLError> {
+    use crate::type_resolution::field_selection;
+    let ([base, Expr::Literal(Value::Str(field))], [base_type, _]) = (args, argument_types) else {
+        return Err(SQLError::Internal(
+            "field selection takes an expression and a field name".into(),
+        ));
+    };
+    let declared = |ty: &GenerationType| {
+        if type_rules::is_unknown(ty) {
+            None
+        } else {
+            match ty {
+                GenerationType::Composite(reference) => {
+                    Some(ColumnType::Composite(reference.clone()))
+                }
+                GenerationType::Record => Some(ColumnType::Record),
+                other => ColumnType::from_sql_name(&generation_type_name(other)).ok(),
+            }
+        }
+    };
+    let field_type = if let Expr::Row(items) = base {
+        let items = items
+            .iter()
+            .map(|item| {
+                infer_expression(engine, columns, item, dependencies).map(|ty| declared(&ty))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        field_selection::row_field_type(&items, field)?
+    } else {
+        let catalog = CompositeFieldResolver(engine);
+        field_selection::value_field_type(declared(base_type).as_ref(), field, Some(&catalog))?
+    };
+    Ok(field_type.map_or(GenerationType::Null, |ty| column_generation_type(&ty)))
+}
+
+/// Composite attribute lookup for generation expressions, which bind through the schema catalog rather than a routine resolver.
+struct CompositeFieldResolver<'a>(&'a dyn SchemaExpressionCatalog);
+
+impl crate::type_resolution::FunctionTypeResolver for CompositeFieldResolver<'_> {
+    fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
+        crate::expr::EngineHook::composite_types(self.0)
+    }
+
+    fn resolve_function_type(
+        &self,
+        _name: &str,
+        _binding: Option<&crate::ast::FunctionBinding>,
+        _argument_names: &[Option<String>],
+        _argument_types: &[Option<ColumnType>],
+        _explicit_variadic: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+}
+
 fn infer_function(
     engine: &dyn SchemaExpressionCatalog,
     columns: &[ColumnDef],
@@ -542,8 +662,8 @@ fn infer_function(
     let call_arguments = generated_call_arguments(args)?;
     let mut argument_names = Vec::with_capacity(call_arguments.len());
     let mut argument_types = Vec::with_capacity(call_arguments.len());
-    for argument in call_arguments {
-        argument_names.push(argument.name);
+    for argument in &call_arguments {
+        argument_names.push(argument.name.clone());
         argument_types.push(infer_expression(
             engine,
             columns,
@@ -554,6 +674,9 @@ fn infer_function(
 
     if let Some(binding) = binding {
         if binding.builtin {
+            if binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect) {
+                return field_generation_type(engine, columns, args, &argument_types, dependencies);
+            }
             if let Some(dispatch) = binding.dispatch {
                 if let Some(return_type) = infer_dispatched_function(dispatch, &argument_types)? {
                     return Ok(return_type);
@@ -566,60 +689,7 @@ fn infer_function(
             return infer_builtin_function(&dispatch_name, &argument_names, &argument_types)?
                 .ok_or_else(|| SQLError::UnknownFunction(binding.name.clone()));
         }
-        let function = engine
-            .lookup_bound_sql_functions_by_binding(binding)
-            .and_then(|overloads| {
-                overloads.into_iter().find(|function| {
-                    routine_signature_types(&function.def) == binding.argument_types
-                })
-            })
-            .ok_or_else(|| SQLError::UnknownFunction(binding.name.clone()))?;
-        if let Some(type_name) = binding
-            .invocation
-            .as_deref()
-            .and_then(|invocation| invocation.return_type.as_deref())
-        {
-            let return_type = crate::expr::EngineHook::resolve_type_name(engine, type_name)
-                .ok()
-                .flatten()
-                .as_ref()
-                .map(column_generation_type)
-                .or_else(|| generation_type_from_name(type_name))
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "generated-column function `{name}` returns unsupported type `{type_name}`"
-                    ))
-                })?;
-            return Ok(return_type);
-        }
-        let return_type = match &function.def.returns {
-            FunctionReturns::Scalar { type_name } => generation_type_from_name(type_name)
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "generated-column function `{name}` returns unsupported type `{type_name}`"
-                    ))
-                })?,
-            FunctionReturns::None => {
-                let outputs = function.def.output_params();
-                if outputs.len() > 1 {
-                    GenerationType::Record
-                } else {
-                    let output = outputs.first().ok_or_else(|| {
-                        SQLError::TypeMismatch(format!(
-                            "generated-column function `{name}` does not return a value"
-                        ))
-                    })?;
-                    generation_type_from_name(&output.type_name).ok_or_else(|| {
-                        SQLError::TypeMismatch(format!(
-                            "generated-column function `{name}` returns unsupported type `{}`",
-                            output.type_name
-                        ))
-                    })?
-                }
-            }
-            FunctionReturns::SetOf { .. } | FunctionReturns::Table => unreachable!(),
-        };
-        return Ok(return_type);
+        return bound_routine_return_type(engine, name, binding);
     }
 
     if engine
@@ -631,268 +701,102 @@ fn infer_function(
         )));
     }
 
+    let declared_types = call_arguments_declared_types(columns, args, &argument_types)?;
+    if let Some((operation, reference)) =
+        enums::enum_call_type(name, &argument_names, &declared_types)
+    {
+        return dispatched::enum_function_type(
+            operation.label(),
+            operation,
+            &[GenerationType::Enum(reference)],
+        );
+    }
+
     let dispatch_name = builtin_function_dispatch_name(&name.to_ascii_lowercase());
-    infer_builtin_function(&dispatch_name, &argument_names, &argument_types)?
-        .ok_or_else(|| SQLError::UnknownFunction(name.to_string()))
-}
-
-fn infer_dispatched_function(
-    dispatch: FunctionDispatch,
-    arguments: &[GenerationType],
-) -> Result<Option<GenerationType>, SQLError> {
-    let first = || {
-        arguments.first().cloned().ok_or_else(|| {
-            SQLError::TypeMismatch(format!("{} requires an argument", dispatch.label()))
-        })
-    };
-    Ok(Some(match dispatch {
-        FunctionDispatch::NumericOperator(operator) => {
-            let types = arguments
-                .iter()
-                .map(|ty| {
-                    if type_rules::is_unknown(ty) {
-                        Ok(None)
-                    } else {
-                        ColumnType::from_sql_name(&generation_type_name(ty)).map(Some)
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let selected = crate::type_resolution::numeric_operator_types(operator, &types)?;
-            column_generation_type(&selected.result)
-        }
-        FunctionDispatch::JsonExtract { as_text, .. } => match first()? {
-            input @ (GenerationType::Json | GenerationType::JsonB) => {
-                if as_text {
-                    GenerationType::Text
-                } else {
-                    input
-                }
-            }
-            other => {
-                return Err(function_type_error(
-                    dispatch.label(),
-                    &other,
-                    "json or jsonb",
-                ))
-            }
-        },
-        FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => return Ok(None),
-        FunctionDispatch::ArraySubscripts | FunctionDispatch::Subscript => match first()? {
-            GenerationType::Array(element) => *element,
-            GenerationType::Vector | GenerationType::Tensor => GenerationType::Real,
-            GenerationType::Null | GenerationType::UnknownLiteral(_) => GenerationType::Null,
-            other => {
-                return Err(function_type_error(dispatch.label(), &other, "an array"));
-            }
-        },
-        FunctionDispatch::ArraySlices
-        | FunctionDispatch::Slice
-        | FunctionDispatch::ArraySortJson => first()?,
-        FunctionDispatch::AnyOperator
-        | FunctionDispatch::AllOperator
-        | FunctionDispatch::IsDistinct
-        | FunctionDispatch::BetweenSymmetric => GenerationType::Boolean,
-        FunctionDispatch::ToBinInt4
-        | FunctionDispatch::ToBinInt8
-        | FunctionDispatch::ToHexInt4
-        | FunctionDispatch::ToHexInt8
-        | FunctionDispatch::ToOctInt4
-        | FunctionDispatch::ToOctInt8 => GenerationType::Text,
-        FunctionDispatch::RandomInt4Range => GenerationType::Integer,
-        FunctionDispatch::RandomInt8Range => GenerationType::BigInteger,
-        FunctionDispatch::RandomNumericRange => GenerationType::Numeric,
-        FunctionDispatch::Range {
-            operation, subtype, ..
-        } => match operation {
-            RangeFunctionOperation::Lower | RangeFunctionOperation::Upper => {
-                column_generation_type(&subtype.scalar_type())
-            }
-            RangeFunctionOperation::Merge => GenerationType::Range(subtype),
-            RangeFunctionOperation::Multirange => GenerationType::Multirange(subtype),
-            RangeFunctionOperation::IsEmpty
-            | RangeFunctionOperation::LowerInclusive
-            | RangeFunctionOperation::UpperInclusive
-            | RangeFunctionOperation::LowerInfinite
-            | RangeFunctionOperation::UpperInfinite
-            | RangeFunctionOperation::Overlap
-            | RangeFunctionOperation::Contains
-            | RangeFunctionOperation::ContainedBy
-            | RangeFunctionOperation::Adjacent => GenerationType::Boolean,
-        },
-    }))
-}
-
-#[derive(Debug)]
-pub(in crate::schema) struct GeneratedCallArgument<'a> {
-    pub(in crate::schema) name: Option<String>,
-    pub(in crate::schema) value: &'a Expr,
-    pub(in crate::schema) explicit_variadic: bool,
-}
-
-pub(in crate::schema) fn generated_call_arguments(
-    arguments: &[Expr],
-) -> Result<Vec<GeneratedCallArgument<'_>>, SQLError> {
-    let decoded = arguments
-        .iter()
-        .map(generated_call_argument)
-        .collect::<Result<Vec<_>, _>>()?;
-    let variadic_positions = decoded
-        .iter()
-        .enumerate()
-        .filter_map(|(position, argument)| argument.explicit_variadic.then_some(position))
-        .collect::<Vec<_>>();
-    if variadic_positions.len() > 1 {
-        return Err(malformed_generated_argument(
-            "call contains more than one explicit VARIADIC argument",
-        ));
-    }
-    if variadic_positions
-        .first()
-        .is_some_and(|position| *position + 1 != arguments.len())
-    {
-        return Err(malformed_generated_argument(
-            "explicit VARIADIC argument must be the final call argument",
-        ));
-    }
-    Ok(decoded)
-}
-
-fn generated_call_argument(expression: &Expr) -> Result<GeneratedCallArgument<'_>, SQLError> {
-    let Expr::Func {
-        name,
-        args,
-        binding,
-        distinct,
-        order_by,
-        filter,
-    } = expression
-    else {
-        return Ok(GeneratedCallArgument {
-            name: None,
-            value: expression,
-            explicit_variadic: false,
-        });
-    };
-    if binding.as_ref().and_then(|binding| binding.dispatch)
-        == Some(crate::ast::FunctionDispatch::NamedArgument)
-    {
-        validate_generated_marker(
-            binding.as_ref(),
-            crate::ast::FunctionDispatch::NamedArgument,
-            *distinct,
-            order_by,
-            filter.as_deref(),
+    infer_builtin_function(&dispatch_name, &argument_names, &argument_types)?.ok_or_else(|| {
+        // No function has the name: `ParseFuncOrColumn` names the call with the types its arguments have.
+        let argument_types = call_arguments
+            .iter()
+            .zip(&argument_types)
+            .map(|(argument, inferred)| {
+                generation_expression_column_type(columns, argument.value, inferred)
+            })
+            .collect::<Vec<_>>();
+        crate::type_resolution::function_resolution_error(
+            "42883",
             name,
-        )?;
-        let [Expr::Literal(Value::Str(argument_name)), value] = args.as_slice() else {
-            return Err(malformed_generated_argument(
-                "named argument marker must contain a string name and one value",
-            ));
-        };
-        let (value, explicit_variadic) = generated_variadic_argument(value)?;
-        if !explicit_variadic
-            && matches!(
-                value,
-                Expr::Func { binding, .. }
-                    if binding.as_ref().and_then(|binding| binding.dispatch)
-                        == Some(crate::ast::FunctionDispatch::NamedArgument)
-            )
-        {
-            return Err(malformed_generated_argument(
-                "call argument contains nested syntax markers",
-            ));
-        }
-        return Ok(GeneratedCallArgument {
-            name: Some(argument_name.clone()),
-            value,
-            explicit_variadic,
-        });
-    }
-    let (value, explicit_variadic) = generated_variadic_argument(expression)?;
-    Ok(GeneratedCallArgument {
-        name: None,
-        value,
-        explicit_variadic,
+            &argument_names,
+            &argument_types,
+            "does not exist",
+        )
     })
 }
 
-fn generated_variadic_argument(expression: &Expr) -> Result<(&Expr, bool), SQLError> {
-    let Expr::Func {
-        name,
-        args,
-        binding,
-        distinct,
-        order_by,
-        filter,
-    } = expression
-    else {
-        return Ok((expression, false));
-    };
-    if binding.as_ref().and_then(|binding| binding.dispatch)
-        != Some(crate::ast::FunctionDispatch::VariadicArgument)
-    {
-        return Ok((expression, false));
-    }
-    validate_generated_marker(
-        binding.as_ref(),
-        crate::ast::FunctionDispatch::VariadicArgument,
-        *distinct,
-        order_by,
-        filter.as_deref(),
-        name,
-    )?;
-    let [value] = args.as_slice() else {
-        return Err(malformed_generated_argument(
-            "VARIADIC argument marker must contain exactly one value",
-        ));
-    };
-    if matches!(
-        value,
-        Expr::Func { binding, .. }
-            if matches!(
-                binding.as_ref().and_then(|binding| binding.dispatch),
-                Some(
-                    crate::ast::FunctionDispatch::VariadicArgument
-                        | crate::ast::FunctionDispatch::NamedArgument
-                )
-            )
-    ) {
-        return Err(malformed_generated_argument(
-            "call argument contains nested syntax markers",
-        ));
-    }
-    Ok((value, true))
-}
-
-fn validate_generated_marker(
-    binding: Option<&FunctionBinding>,
-    expected_dispatch: crate::ast::FunctionDispatch,
-    distinct: bool,
-    order_by: &[crate::ast::OrderBy],
-    filter: Option<&Expr>,
+/// Return type of a call bound to a user SQL routine: its invocation's resolved type, else the routine's declared result.
+fn bound_routine_return_type(
+    engine: &dyn SchemaExpressionCatalog,
     name: &str,
-) -> Result<(), SQLError> {
-    if binding.is_none_or(|binding| {
-        !binding.builtin
-            || binding.dispatch != Some(expected_dispatch)
-            || !binding.argument_types.is_empty()
-            || binding.invocation.is_some()
-            || binding.resolution_error.is_some()
-    }) || distinct
-        || !order_by.is_empty()
-        || filter.is_some()
+    binding: &FunctionBinding,
+) -> Result<GenerationType, SQLError> {
+    let function = engine
+        .lookup_bound_sql_functions_by_binding(binding)
+        .and_then(|overloads| {
+            overloads
+                .into_iter()
+                .find(|function| routine_signature_types(&function.def) == binding.argument_types)
+        })
+        .ok_or_else(|| SQLError::UnknownFunction(binding.name.clone()))?;
+    let unsupported = |type_name: &str| {
+        SQLError::TypeMismatch(format!(
+            "generated-column function `{name}` returns unsupported type `{type_name}`"
+        ))
+    };
+    if let Some(type_name) = binding
+        .invocation
+        .as_deref()
+        .and_then(|invocation| invocation.return_type.as_deref())
     {
-        return Err(malformed_generated_argument(&format!(
-            "{name} syntax marker contains function-call metadata"
-        )));
+        return crate::expr::EngineHook::resolve_type_name(engine, type_name)
+            .ok()
+            .flatten()
+            .as_ref()
+            .map(column_generation_type)
+            .or_else(|| generation_type_from_name(type_name))
+            .ok_or_else(|| unsupported(type_name));
     }
-    Ok(())
+    match &function.def.returns {
+        FunctionReturns::Scalar { type_name } => {
+            generation_type_from_name(type_name).ok_or_else(|| unsupported(type_name))
+        }
+        FunctionReturns::None => {
+            let outputs = function.def.output_params();
+            if outputs.len() > 1 {
+                return Ok(GenerationType::Record);
+            }
+            let output = outputs.first().ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
+                    "generated-column function `{name}` does not return a value"
+                ))
+            })?;
+            generation_type_from_name(&output.type_name)
+                .ok_or_else(|| unsupported(&output.type_name))
+        }
+        FunctionReturns::SetOf { .. } | FunctionReturns::Table => Err(SQLError::Internal(format!(
+            "generated-column function `{name}` returns a set"
+        ))),
+    }
 }
 
-fn malformed_generated_argument(message: &str) -> SQLError {
-    SQLError::TypeMismatch(format!(
-        "malformed generated-column call argument: {message}"
-    ))
+fn call_arguments_declared_types(
+    columns: &[ColumnDef],
+    args: &[Expr],
+    argument_types: &[GenerationType],
+) -> Result<Vec<Option<ColumnType>>, SQLError> {
+    Ok(generated_call_arguments(args)?
+        .iter()
+        .zip(argument_types)
+        .map(|(argument, inferred)| enums::declared_type(columns, argument.value, inferred))
+        .collect())
 }
 
 pub(in crate::schema) fn generation_expression_column_type(
@@ -961,8 +865,13 @@ pub(in crate::schema) fn validate_bound_function(
     Ok(binding.clone())
 }
 
+mod arguments;
+pub(in crate::schema) use arguments::generated_call_arguments;
 mod builtin;
 use builtin::infer_builtin_function;
+mod dispatched;
+mod enums;
+use dispatched::infer_dispatched_function;
 mod type_rules;
 use type_rules::{
     accepts_class, assignment_compatible, common_numeric_type, common_type, common_types,

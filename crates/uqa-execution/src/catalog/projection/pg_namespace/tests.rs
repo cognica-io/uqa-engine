@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::catalog::{test_support::empty_catalog, RelationLookupMode};
+use crate::catalog::{test_support::empty_catalog, RelationLookupMode, RelationNameResolution};
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{ArrayValue, Value};
 use uqa_sql::catalog::{roles::RoleDefinition, security::BoundSchemaSecurity};
@@ -78,7 +78,7 @@ fn namespace_snapshots_keep_owner_oids_and_project_acl_and_information_schema_na
             ],
         ),
     ] {
-        let row = build_pg_namespace(catalog, &resolution)
+        let row = build_pg_namespace(catalog)
             .unwrap()
             .into_iter()
             .find(|row| row["nspname"] == Value::Str("public".into()))

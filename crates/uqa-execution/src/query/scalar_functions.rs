@@ -154,6 +154,8 @@ fn is_catalog_scalar(name: &str) -> bool {
         "pg_get_expr"
             | "pg_get_partkeydef"
             | "pg_backend_pid"
+            | "pg_my_temp_schema"
+            | "pg_is_other_temp_schema"
             | "pg_trigger_depth"
             | "pg_notify"
             | "pg_notification_queue_usage"
@@ -165,13 +167,20 @@ fn is_catalog_scalar(name: &str) -> bool {
             | "pg_get_ruledef"
             | "pg_get_viewdef"
             | "pg_get_indexdef"
+            | "pg_get_constraintdef"
+            | "pg_get_function_arguments"
+            | "pg_get_function_identity_arguments"
+            | "pg_get_function_result"
+            | "pg_get_function_sqlbody"
             | "format_type"
+            | "pg_describe_object"
             | "pg_has_role"
             | "pg_get_userbyid"
             | "has_database_privilege"
             | "has_schema_privilege"
             | "has_sequence_privilege"
             | "has_function_privilege"
+            | "has_type_privilege"
     )
 }
 
@@ -192,6 +201,15 @@ pub fn catalog_scalar_value(
     Some(match lower.as_str() {
         "pg_backend_pid" => no_scalar_arguments(&lower, arguments)
             .map(|()| Value::Int(i64::from(context.session.backend_process_id()))),
+        "pg_my_temp_schema" => no_scalar_arguments(&lower, arguments).map(|()| {
+            crate::catalog::projection::pg_my_temp_schema_value(
+                &context.catalog.catalog_read_view(),
+            )
+        }),
+        "pg_is_other_temp_schema" => crate::catalog::projection::pg_is_other_temp_schema_value(
+            &context.catalog.catalog_read_view(),
+            arguments,
+        ),
         "pg_trigger_depth" => no_scalar_arguments(&lower, arguments)
             .map(|()| Value::Int(crate::mutation::triggers::trigger_depth())),
         "pg_notify" => (|| {
@@ -216,6 +234,27 @@ pub fn catalog_scalar_value(
             crate::catalog::projection::pg_get_viewdef_value(&context.catalog, arguments)
         }
         "format_type" => crate::catalog::projection::format_type_value(&context.catalog, arguments),
+        "pg_describe_object" => {
+            crate::catalog::projection::pg_describe_object_value(&context.catalog, arguments)
+        }
+        "pg_get_constraintdef" => {
+            crate::catalog::projection::pg_get_constraintdef_value(&context.catalog, arguments)
+        }
+        "pg_get_function_arguments" => {
+            crate::catalog::projection::pg_get_function_arguments_value(&context.catalog, arguments)
+        }
+        "pg_get_function_identity_arguments" => {
+            crate::catalog::projection::pg_get_function_identity_arguments_value(
+                &context.catalog,
+                arguments,
+            )
+        }
+        "pg_get_function_result" => {
+            crate::catalog::projection::pg_get_function_result_value(&context.catalog, arguments)
+        }
+        "pg_get_function_sqlbody" => {
+            crate::catalog::projection::pg_get_function_sqlbody_value(&context.catalog, arguments)
+        }
         "pg_get_indexdef" => {
             crate::catalog::projection::pg_get_indexdef_value(&context.catalog, arguments)
         }
@@ -241,6 +280,10 @@ pub fn catalog_scalar_value(
                 arguments,
             )
         }
+        "has_type_privilege" => crate::catalog::security::type_inquiry::has_type_privilege_value(
+            &context.catalog,
+            arguments,
+        ),
         "has_sequence_privilege" => context
             .sequence_privileges
             .has_sequence_privilege_value(arguments),

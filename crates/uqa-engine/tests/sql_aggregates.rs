@@ -698,15 +698,25 @@ fn bool_and_with_group_by() {
 #[test]
 fn aggregate_type_errors_are_not_silently_ignored() {
     let eng = engine_with_table();
+    // PostgreSQL resolves no overload for these argument types.
     let sum_error = eng
         .sql("SELECT SUM(name) FROM t", &[])
         .expect_err("SUM over text must fail");
-    assert!(sum_error.to_string().contains("numeric"), "{sum_error}");
+    assert_eq!(sum_error.sqlstate(), Some("42883"));
+    assert_eq!(sum_error.to_string(), "function sum(text) does not exist");
+    assert_eq!(
+        sum_error.hint(),
+        Some("No function matches the given name and argument types. You might need to add explicit type casts.")
+    );
 
     let bool_error = eng
         .sql("SELECT BOOL_AND(val) FROM t", &[])
         .expect_err("BOOL_AND over integers must fail");
-    assert!(bool_error.to_string().contains("boolean"), "{bool_error}");
+    assert_eq!(bool_error.sqlstate(), Some("42883"));
+    assert_eq!(
+        bool_error.to_string(),
+        "function bool_and(integer) does not exist"
+    );
 }
 
 // =====================================================================
@@ -954,6 +964,8 @@ fn group_by_alias() {
     assert_eq!(counts.get("B").copied(), Some(1));
 }
 
+#[path = "sql_aggregates/min_max_overloads.rs"]
+mod min_max_overloads;
 #[path = "sql_aggregates/numeric_statistics.rs"]
 mod numeric_statistics;
 

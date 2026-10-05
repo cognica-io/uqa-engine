@@ -26,6 +26,7 @@ pub mod events;
 
 pub mod table_alteration;
 
+pub mod deletion;
 pub mod removal;
 
 pub mod relation_alteration;
@@ -34,9 +35,12 @@ pub mod view_alteration;
 pub mod view_creation;
 pub mod view_dependencies;
 
+pub mod composites;
 pub mod domains;
+pub mod enums;
 pub mod foreign_table_alteration;
 pub mod namespaces;
+pub mod types;
 
 pub mod view_references;
 pub mod view_removal;

@@ -1,0 +1,562 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE vts_base (id integer PRIMARY KEY, v integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO vts_base VALUES (1, 10), (2, 20)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vts_view AS SELECT id, v FROM vts_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE vts_log (seq integer GENERATED ALWAYS AS IDENTITY, entry text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION vts_row() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO vts_log (entry) VALUES (TG_OP); IF TG_OP = 'DELETE' THEN RETURN OLD; END IF; RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION vts_statement() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO vts_log (entry) VALUES (TG_WHEN || ' ' || TG_OP); RETURN NULL; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER vts_row INSTEAD OF INSERT OR UPDATE OR DELETE ON vts_view FOR EACH ROW EXECUTE FUNCTION vts_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER vts_before BEFORE INSERT OR UPDATE OR DELETE ON vts_view FOR EACH STATEMENT EXECUTE FUNCTION vts_statement()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER vts_after AFTER INSERT OR UPDATE OR DELETE ON vts_view FOR EACH STATEMENT EXECUTE FUNCTION vts_statement()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vts_checked AS SELECT id, v FROM vts_view WHERE v > 0 WITH CHECK OPTION",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET session_replication_role = replica",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO vts_view VALUES (3, 30), (4, 40) RETURNING *",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "30"
+            ],
+            [
+              "4",
+              "40"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE vts_view SET v = v + 1 WHERE id = 1 RETURNING *",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "11"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DELETE FROM vts_view WHERE id = 2 RETURNING *",
+      "command_tags": [
+        "DELETE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO vts_checked VALUES (5, -5) RETURNING *",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"vts_checked\"",
+        "detail": "Failing row contains (5, -5).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE vts_checked SET v = -1 WHERE id = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"vts_checked\"",
+        "detail": "Failing row contains (1, -1).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vts_checked VALUES (6, 6) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "6",
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO vts_view t USING (VALUES (1, 100)) s(id, val) ON t.id = s.id WHEN MATCHED THEN UPDATE SET v = s.val RETURNING merge_action(), t.*",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "merge_action",
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "UPDATE",
+              "1",
+              "100"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO vts_view t USING (VALUES (9, 900)) s(id, val) ON t.id = s.id WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val) RETURNING merge_action(), t.*",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "merge_action",
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "INSERT",
+              "9",
+              "900"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO vts_view t USING (VALUES (2)) s(id) ON t.id = s.id WHEN MATCHED THEN DELETE RETURNING merge_action(), t.*",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "merge_action",
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "DELETE",
+              "2",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO vts_checked t USING (VALUES (7, -7)) s(id, val) ON t.id = s.id WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"vts_checked\"",
+        "detail": "Failing row contains (7, -7).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET session_replication_role",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, v FROM vts_base ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "10"
+            ],
+            [
+              "2",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) FROM vts_log",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO vts_view VALUES (8, 80) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "8",
+              "80"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT entry FROM vts_log ORDER BY seq",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "entry"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEFORE INSERT"
+            ],
+            [
+              "INSERT"
+            ],
+            [
+              "AFTER INSERT"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP VIEW vts_checked, vts_view",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE vts_base, vts_log",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION vts_row(), vts_statement()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

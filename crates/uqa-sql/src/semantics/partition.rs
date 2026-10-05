@@ -7,7 +7,9 @@
 //! Declarative partition validation, value comparison, and routing semantics.
 
 use crate::{
+    assignment::AssignmentContext,
     ast::{ColumnDef, Expr, TableHierarchy},
+    schema::SchemaExpressionCatalog,
     type_resolution::FunctionTypeResolver,
     ResultRow, RowSchema, SQLError, SQLParam,
 };
@@ -41,9 +43,21 @@ pub struct PartitionContext<'a> {
     pub catalog: &'a dyn PartitionCatalog,
     pub expressions: &'a dyn PartitionExpressions,
     pub types: &'a dyn FunctionTypeResolver,
+    /// Catalog-aware assignment coercion of bound values and output of key values.
+    pub assignment: &'a dyn AssignmentContext,
+    /// Aggregate, window and set-returning classification of bound and key expressions.
+    pub schema: &'a dyn SchemaExpressionCatalog,
 }
 
+mod admission;
+mod bounds;
+mod datum_text;
 mod hash;
+mod key;
+
+pub use admission::validate_new_partition_bound;
+pub use bounds::transform_partition_bound;
+pub use datum_text::{partition_datum_text, range_bound_text, stored_datum};
 
 pub fn validate_hash_partition_spec(
     context: &PartitionContext<'_>,
@@ -51,75 +65,6 @@ pub fn validate_hash_partition_spec(
     columns: &[crate::ast::ColumnDef],
 ) -> Result<(), SQLError> {
     hash::validate_partition_spec(context.types, spec, columns)
-}
-
-pub fn validate_new_partition_bound(
-    context: &PartitionContext<'_>,
-    parent: &str,
-    bound: &crate::ast::PartitionBound,
-) -> Result<(), SQLError> {
-    let hierarchy = context
-        .catalog
-        .try_table_hierarchy(parent)
-        .map_err(|error| SQLError::Internal(format!("read parent partition metadata: {error}")))?;
-    let spec = hierarchy
-        .partition_spec
-        .as_ref()
-        .ok_or_else(|| SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("relation \"{parent}\" is not partitioned"),
-        })?;
-    validate_partition_bound_width(spec, bound)?;
-    if let crate::ast::PartitionBound::Hash { modulus, remainder } = bound {
-        hash::validate_bound(*modulus, *remainder)?;
-        let mut existing_moduli = Vec::new();
-        for sibling in context.catalog.direct_hierarchy_children(parent)? {
-            let sibling_hierarchy = context
-                .catalog
-                .try_table_hierarchy(&sibling)
-                .map_err(|error| SQLError::Internal(format!("read sibling partition: {error}")))?;
-            match sibling_hierarchy.partition_bound.as_ref() {
-                Some(crate::ast::PartitionBound::Hash { modulus, remainder }) => {
-                    hash::validate_bound(*modulus, *remainder)?;
-                    existing_moduli.push(*modulus);
-                }
-                Some(crate::ast::PartitionBound::Default) => {
-                    return Err(SQLError::Internal(format!(
-                        "HASH-partitioned table `{parent}` has a default partition"
-                    )))
-                }
-                Some(_) => {
-                    return Err(SQLError::Internal(
-                        "partition siblings use different bound strategies".into(),
-                    ))
-                }
-                None => {}
-            }
-        }
-        hash::validate_modulus_chain(*modulus, existing_moduli)?;
-    }
-    if let crate::ast::PartitionBound::Range { lower, upper } = bound {
-        if compare_partition_points(context, lower, upper)? != Ordering::Less {
-            return Err(invalid_partition_bound(
-                "empty range bound specified for partition",
-            ));
-        }
-    }
-    for sibling in context.catalog.direct_hierarchy_children(parent)? {
-        let sibling_hierarchy = context
-            .catalog
-            .try_table_hierarchy(&sibling)
-            .map_err(|error| SQLError::Internal(format!("read sibling partition: {error}")))?;
-        let Some(sibling_bound) = sibling_hierarchy.partition_bound.as_ref() else {
-            continue;
-        };
-        if partition_bounds_overlap(context, bound, sibling_bound)? {
-            return Err(invalid_partition_bound(format!(
-                "partition would overlap partition \"{sibling}\""
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// Test one stored row against a prospective direct-child bound before the
@@ -142,9 +87,9 @@ pub fn prospective_partition_bound_accepts_document(
             sqlstate: "42809".into(),
             message: format!("relation \"{parent}\" is not partitioned"),
         })?;
-    let (keys, row_hash) = partition_key_values_and_hash(context, parent, spec, document)?;
+    let key = routing_key(context, parent, spec, document, &[])?;
     if !matches!(bound, crate::ast::PartitionBound::Default) {
-        return partition_bound_matches(context, bound, &keys, &[], row_hash);
+        return partition_bound_matches(context, bound, &key, &[]);
     }
     for sibling in context.catalog.direct_hierarchy_children(parent)? {
         let sibling_hierarchy = context
@@ -157,7 +102,7 @@ pub fn prospective_partition_bound_accepts_document(
         if matches!(sibling_bound, crate::ast::PartitionBound::Default) {
             continue;
         }
-        if partition_bound_matches(context, sibling_bound, &keys, &[], row_hash)? {
+        if partition_bound_matches(context, sibling_bound, &key, &[])? {
             return Ok(false);
         }
     }
@@ -174,158 +119,29 @@ pub fn partition_constraint_accepts_document(
     bound: &crate::ast::PartitionBound,
     document: &ResultRow,
 ) -> Result<bool, SQLError> {
-    let (keys, row_hash) = partition_key_values_and_hash(context, table, spec, document)?;
-    partition_bound_matches(context, bound, &keys, &[], row_hash)
+    let key = routing_key(context, table, spec, document, &[])?;
+    partition_bound_matches(context, bound, &key, &[])
 }
 
-fn partition_key_values_and_hash(
+/// A row's partition key under one partitioned table, with the row hash of a HASH partition key.
+struct RoutingKey {
+    values: Vec<Value>,
+    hash: Option<u64>,
+}
+
+fn routing_key(
     context: &PartitionContext<'_>,
     table: &str,
     spec: &crate::ast::PartitionSpec,
     document: &ResultRow,
-) -> Result<(Vec<Value>, Option<u64>), SQLError> {
-    let (keys, definitions) = evaluate_partition_keys(context, table, &spec.keys, document, &[])?;
-    let row_hash = (spec.strategy == crate::ast::PartitionStrategy::Hash)
-        .then(|| hash::row_hash(context.types, spec, &definitions, &keys))
+    params: &[SQLParam],
+) -> Result<RoutingKey, SQLError> {
+    let (values, definitions) =
+        evaluate_partition_keys(context, table, &spec.keys, document, params)?;
+    let hash = (spec.strategy == crate::ast::PartitionStrategy::Hash)
+        .then(|| hash::row_hash(context, spec, &definitions, &values))
         .transpose()?;
-    Ok((keys, row_hash))
-}
-
-fn validate_partition_bound_width(
-    spec: &crate::ast::PartitionSpec,
-    bound: &crate::ast::PartitionBound,
-) -> Result<(), SQLError> {
-    use crate::ast::{PartitionBound, PartitionStrategy};
-    match (spec.strategy, bound) {
-        (_, PartitionBound::Default) => Ok(()),
-        (PartitionStrategy::List, PartitionBound::List(_)) if spec.keys.len() != 1 => {
-            Err(invalid_partition_bound(
-                "cannot use list partition bounds with more than one partition key",
-            ))
-        }
-        (PartitionStrategy::List, PartitionBound::List(_)) => Ok(()),
-        (PartitionStrategy::Range, PartitionBound::Range { lower, upper })
-            if lower.len() != spec.keys.len() || upper.len() != spec.keys.len() =>
-        {
-            Err(invalid_partition_bound(
-                "partition bound has the wrong number of columns",
-            ))
-        }
-        (PartitionStrategy::Range, PartitionBound::Range { .. })
-        | (PartitionStrategy::Hash, PartitionBound::Hash { .. }) => Ok(()),
-        (strategy, _) => Err(invalid_partition_bound(format!(
-            "invalid bound specification for a {} partitioned table",
-            match strategy {
-                PartitionStrategy::List => "list",
-                PartitionStrategy::Range => "range",
-                PartitionStrategy::Hash => "hash",
-            }
-        ))),
-    }
-}
-
-fn partition_bounds_overlap(
-    context: &PartitionContext<'_>,
-    left: &crate::ast::PartitionBound,
-    right: &crate::ast::PartitionBound,
-) -> Result<bool, SQLError> {
-    use crate::ast::PartitionBound;
-    match (left, right) {
-        (PartitionBound::Default, PartitionBound::Default) => Ok(true),
-        (PartitionBound::Default, _) | (_, PartitionBound::Default) => Ok(false),
-        (PartitionBound::List(left), PartitionBound::List(right)) => {
-            let left = evaluate_bound_values(context, left)?;
-            let right = evaluate_bound_values(context, right)?;
-            Ok(left.iter().any(|value| right.contains(value)))
-        }
-        (
-            PartitionBound::Range {
-                lower: left_lower,
-                upper: left_upper,
-            },
-            PartitionBound::Range {
-                lower: right_lower,
-                upper: right_upper,
-            },
-        ) => Ok(
-            compare_partition_points(context, left_lower, right_upper)? == Ordering::Less
-                && compare_partition_points(context, right_lower, left_upper)? == Ordering::Less,
-        ),
-        (
-            PartitionBound::Hash {
-                modulus: left_modulus,
-                remainder: left_remainder,
-            },
-            PartitionBound::Hash {
-                modulus: right_modulus,
-                remainder: right_remainder,
-            },
-        ) => hash::bounds_overlap(
-            *left_modulus,
-            *left_remainder,
-            *right_modulus,
-            *right_remainder,
-        ),
-        _ => Err(SQLError::Internal(
-            "partition siblings use different bound strategies".into(),
-        )),
-    }
-}
-
-fn evaluate_bound_values(
-    context: &PartitionContext<'_>,
-    expressions: &[crate::ast::Expr],
-) -> Result<Vec<Value>, SQLError> {
-    expressions
-        .iter()
-        .map(|expression| context.expressions.evaluate_bound(expression, &[]))
-        .collect()
-}
-
-fn compare_partition_points(
-    context: &PartitionContext<'_>,
-    left: &[crate::ast::PartitionRangeDatum],
-    right: &[crate::ast::PartitionRangeDatum],
-) -> Result<Ordering, SQLError> {
-    if left.len() != right.len() {
-        return Err(invalid_partition_bound(
-            "partition range points have different widths",
-        ));
-    }
-    for (left, right) in left.iter().zip(right) {
-        let ordering = match (left, right) {
-            (
-                crate::ast::PartitionRangeDatum::MinValue,
-                crate::ast::PartitionRangeDatum::MinValue,
-            )
-            | (
-                crate::ast::PartitionRangeDatum::MaxValue,
-                crate::ast::PartitionRangeDatum::MaxValue,
-            ) => Ordering::Equal,
-            (crate::ast::PartitionRangeDatum::MinValue, _)
-            | (_, crate::ast::PartitionRangeDatum::MaxValue) => Ordering::Less,
-            (crate::ast::PartitionRangeDatum::MaxValue, _)
-            | (_, crate::ast::PartitionRangeDatum::MinValue) => Ordering::Greater,
-            (
-                crate::ast::PartitionRangeDatum::Value(left),
-                crate::ast::PartitionRangeDatum::Value(right),
-            ) => context
-                .expressions
-                .evaluate_bound(left, &[])?
-                .cmp(&context.expressions.evaluate_bound(right, &[])?),
-        };
-        if ordering != Ordering::Equal {
-            return Ok(ordering);
-        }
-    }
-    Ok(Ordering::Equal)
-}
-
-fn invalid_partition_bound(message: impl Into<String>) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42P17".into(),
-        message: message.into(),
-    }
+    Ok(RoutingKey { values, hash })
 }
 
 /// Why partition routing rejects a row. The executor reports each with a description of the row, which depends on the statement and the role that writes it.
@@ -461,11 +277,19 @@ fn select_direct_partition(
     document: &ResultRow,
     params: &[SQLParam],
 ) -> Result<DirectPartition, SQLError> {
-    let (keys, definitions) =
-        evaluate_partition_keys(context, parent, &spec.keys, document, params)?;
-    let row_hash = (spec.strategy == crate::ast::PartitionStrategy::Hash)
-        .then(|| hash::row_hash(context.types, spec, &definitions, &keys))
-        .transpose()?;
+    let key = routing_key(context, parent, spec, document, params)?;
+    Ok(match select_partition(context, parent, &key, params)? {
+        Some(child) => DirectPartition::Child(child),
+        None => DirectPartition::None { keys: key.values },
+    })
+}
+
+fn select_partition(
+    context: &PartitionContext<'_>,
+    parent: &str,
+    key: &RoutingKey,
+    params: &[SQLParam],
+) -> Result<Option<String>, SQLError> {
     let mut default = None;
     for child in context.catalog.direct_hierarchy_children(parent)? {
         let child_hierarchy = context
@@ -483,11 +307,11 @@ fn select_direct_partition(
             }
             continue;
         }
-        if partition_bound_matches(context, bound, &keys, params, row_hash)? {
-            return Ok(DirectPartition::Child(child));
+        if partition_bound_matches(context, bound, key, params)? {
+            return Ok(Some(child));
         }
     }
-    Ok(default.map_or(DirectPartition::None { keys }, DirectPartition::Child))
+    Ok(default)
 }
 
 fn evaluate_partition_keys(
@@ -526,11 +350,11 @@ fn evaluate_partition_keys(
 fn partition_bound_matches(
     context: &PartitionContext<'_>,
     bound: &crate::ast::PartitionBound,
-    keys: &[Value],
+    key: &RoutingKey,
     params: &[SQLParam],
-    row_hash: Option<u64>,
 ) -> Result<bool, SQLError> {
     use crate::ast::PartitionBound;
+    let keys = key.values.as_slice();
     match bound {
         PartitionBound::Default => Ok(true),
         PartitionBound::List(values) => {
@@ -540,7 +364,12 @@ fn partition_bound_matches(
                 ));
             };
             for expression in values {
-                if context.expressions.evaluate_bound(expression, params)? == *key {
+                if context
+                    .expressions
+                    .evaluate_bound(expression, params)?
+                    .cmp(key)
+                    == Ordering::Equal
+                {
                     return Ok(true);
                 }
             }
@@ -556,7 +385,7 @@ fn partition_bound_matches(
             )
         }
         PartitionBound::Hash { modulus, remainder } => hash::bound_matches(
-            row_hash.ok_or_else(|| {
+            key.hash.ok_or_else(|| {
                 SQLError::Internal("HASH partition bound has no computed row hash".into())
             })?,
             *modulus,

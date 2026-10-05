@@ -31,6 +31,18 @@ pub fn builtin_function_type(
     builtin_function_type_inner(name, None, args, order_by, schema, params, None)
 }
 
+/// Type a built-in call whose arguments may name catalog types, such as casts to domains and enums.
+pub fn builtin_function_type_with_resolver(
+    name: &str,
+    args: &[ScalarExpr],
+    order_by: &[crate::ScalarOrder],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<ColumnType>, SQLError> {
+    builtin_function_type_inner(name, None, args, order_by, schema, params, Some(resolver))
+}
+
 /// Return the declared argument targets selected by PostgreSQL-compatible built-in resolution. Known argument types are retained for polymorphic calls, while fixed signatures and overloaded operators supply the context needed to resolve `unknown` arguments.
 #[must_use]
 pub fn builtin_function_argument_targets(
@@ -83,7 +95,7 @@ pub fn builtin_function_argument_targets(
     targets
 }
 
-fn compatible_array_argument(name: &str, position: usize) -> bool {
+pub(super) fn compatible_array_argument(name: &str, position: usize) -> bool {
     name == "array_cat" || position == usize::from(name == "array_prepend")
 }
 
@@ -126,6 +138,17 @@ pub(super) fn builtin_function_type_inner(
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
     let control = ProductionControl::uncontrolled();
+    if binding.and_then(|binding| binding.dispatch)
+        == Some(crate::ast::FunctionDispatch::FieldSelect)
+    {
+        return super::inference::field_selection_type(args, schema, params, resolver, &control)
+            .map(|ty| {
+                ty.map(|ty| {
+                    ty.into_uncontrolled()
+                        .expect("ordinary field selection type")
+                })
+            });
+    }
     let mut infer = |expression: &ScalarExpr| {
         scalar_type_inner(expression, schema, params, resolver)?
             .map(|ty| {

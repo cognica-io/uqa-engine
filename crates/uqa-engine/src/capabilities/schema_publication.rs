@@ -95,6 +95,7 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             columns_declared: None,
             persistence: self.state.persistence,
             on_commit: self.state.on_commit,
+            catalog_oids: self.state.recorded_catalog_oids(),
         }
     }
     fn publish_expressions(&self, columns: &[ColumnDef], checks: &[uqa_sql::ast::TableCheck]) {
@@ -122,6 +123,7 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             persistence: self.state.persistence,
             on_commit: self.state.on_commit,
             hierarchy: self.state.hierarchy.read().clone(),
+            catalog_oids: self.state.recorded_catalog_oids(),
             ..TableConstraintSet::default()
         }
     }
@@ -154,6 +156,7 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             foreign_keys: self.state.foreign_keys.read().clone(),
             key_constraints: self.state.key_constraints.read().clone(),
             hierarchy: self.state.hierarchy.read().clone(),
+            catalog_oids: self.state.recorded_catalog_oids(),
         }
     }
     fn columns_declared(&self) -> bool {

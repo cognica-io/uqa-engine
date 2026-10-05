@@ -453,8 +453,5 @@ fn resolution_error(
     suffix: &str,
 ) -> SQLError {
     let arguments = super::static_routine_argument_types(argument_names, argument_types);
-    SQLError::Routine {
-        sqlstate: sqlstate.into(),
-        message: format!("function {name}({arguments}) {suffix}"),
-    }
+    SQLError::function_call_resolution(sqlstate, &format!("{name}({arguments})"), suffix)
 }

@@ -12,6 +12,7 @@ mod context;
 mod tree;
 pub use context::*;
 
+/// `RemoveRelations` for indexes: the indexes bound in statement order, with their partitions locked, and what depends on them.
 pub fn run_drop_index(
     context: &IndexRemovalContext<'_>,
     stmt: DropStmt,
@@ -28,53 +29,28 @@ pub fn run_drop_index(
     for index in &indexes {
         lock_index_partitions(context, &index.table_name)?;
     }
-    for index in &indexes {
-        uqa_sql::schema::indexes::removal::ensure_index_not_constraint_owned(
-            &index.relation,
-            &index.table_name,
-            context.catalog.has_constraint_index(&index.relation),
-        )?;
-    }
-    let tree = tree::bind_removals(context, &indexes, stmt.cascade)?;
-    let mut dependents = std::collections::BTreeSet::new();
-    for index in tree.values() {
-        let referrers = context
-            .referrers
-            .referrers_to(&index.table_name)
-            .map_err(|error| {
-                SQLError::Internal(format!("index foreign-key dependencies: {error}"))
-            })?;
-        uqa_sql::schema::indexes::removal::collect_index_dependents(
-            &index.relation.name,
-            crate::catalog::index::index_definition(index)
-                .map_err(|error| ddl_storage_error("DROP INDEX identity", error))?
-                .catalog
-                .ok_or_else(|| SQLError::Internal("index has no identity".into()))?
-                .identity
-                .object_id,
-            referrers,
-            stmt.cascade,
-            &mut dependents,
-        )?;
-    }
-    let targets = crate::schema::constraints::drop::capture_foreign_key_dependencies(
-        &context.constraints,
-        dependents,
-    )?;
+    let relations = indexes
+        .into_iter()
+        .map(|index| index.relation)
+        .collect::<Vec<_>>();
     context
         .transactions
         .with_index_write(Box::new(move |context| {
-            crate::schema::constraints::drop::drop_foreign_key_dependencies(
-                &context.constraints,
-                targets,
+            crate::schema::deletion::perform_deletion(
+                &context.deletion.catalog_removal_context(),
+                |dependencies| {
+                    relations
+                        .iter()
+                        .map(|relation| {
+                            crate::schema::deletion::required_address(
+                                dependencies.relation_address(relation, None),
+                                || format!("index {}", relation.qualified_name()),
+                            )
+                        })
+                        .collect()
+                },
+                stmt.cascade,
             )?;
-            drop_tree_side_effects(context, &tree)?;
-            for row in indexes {
-                context
-                    .publication
-                    .drop_catalog_index_relation(&row.relation)
-                    .map_err(|error| ddl_storage_error("DROP INDEX", error))?;
-            }
             Ok(SQLResult::empty())
         }))
 }

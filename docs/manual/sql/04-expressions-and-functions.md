@@ -15,12 +15,27 @@ SELECT CASE
 FROM predictions;
 ```
 
+The conditions of `WHERE`, `HAVING`, `JOIN ... ON`, a searched `CASE`, `AND`, `OR`, `NOT`, and an aggregate's `FILTER` must be `boolean` or a domain over it, as in PostgreSQL: any other type is `42804` (`argument of WHERE must be type boolean, not type integer`), and a quoted literal whose type is not yet known is read as boolean input, so `'false'`, `'no'`, `'off'`, `'0'`, and their prefixes are false and text that is not a boolean is `22P02`. The operand of a simple `CASE` is compared with each value instead. The retrieval predicates in [Retrieval](06-retrieval.md) are conditions as well.
+
 `LIKE`, `ILIKE`, and `SIMILAR TO` accept `ESCAPE` with a runtime text expression. Omitting the clause uses PostgreSQL's default backslash escape, `ESCAPE ''` disables escaping, `ESCAPE NULL` produces NULL, and every nonempty escape must contain exactly one character. Escaped wildcard and regular-expression metacharacters are treated literally, while escaped alphanumeric characters in `SIMILAR TO` retain the implemented PostgreSQL regular-expression escape behavior.
 
 ```sql execute
 SELECT value
 FROM (VALUES ('a_b'), ('axb')) AS candidates(value)
 WHERE value LIKE 'a!_b' ESCAPE '!';
+```
+
+## Row and composite values
+
+`ROW(...)` and a parenthesized list of two or more expressions build an anonymous row; casting it to a [composite type](02-ddl.md#composite-types) or assigning it to a column of one coerces each field to its attribute's type, and a row with a different number of fields reports `42846` with PostgreSQL's detail. Text casts to a composite type as `record_in` reads it, and a composite value casts to text as `record_out` writes it, quoting a field that is empty or contains a separator, parenthesis, quote, backslash or whitespace. `(value).field` selects a field: an attribute of a composite value, the `fN` field of an anonymous row, or a column of a relation through its whole-row reference, which `pg_get_viewdef` prints as the column itself. A missing field reports `42703`, as `column t.missing does not exist`, `column "missing" not found in data type pair` or `could not identify column "f3" in record data type`, and field notation on a value that is not composite reports `42809`.
+
+Composite values compare field by field: equality treats two NULL fields as equal, and ordering places NULL fields after all other values, as PostgreSQL's record operators do; anonymous rows compare with SQL's three-valued row comparison instead. `IS NULL` is true for a row or composite value whose fields are all NULL, and `IS NOT NULL` is true when none of its fields is NULL, so a value with both kinds of fields satisfies neither.
+
+```sql execute
+SELECT (ROW(1, 'a')).f2 AS second_field,
+       ROW(NULL, NULL) IS NULL AS all_null,
+       ROW(1, NULL) IS NOT NULL AS none_null,
+       ROW(1, NULL) IS NULL AS some_null;
 ```
 
 ## NULL and comparison helpers
@@ -249,7 +264,7 @@ SELECT json_strip_nulls(strip_in_arrays => true, target => '{"keep":1,"drop":nul
 | Current time | `now`, `transaction_timestamp`, `statement_timestamp`, `clock_timestamp`, `current_date`, `current_time`, `current_timestamp`, `localtime`, `localtimestamp`, `timeofday` |
 | Conversion | `to_timestamp`, `to_date`, `to_char` |
 | Parts and truncation | `extract`, `date_part`, `date_trunc` |
-| Arithmetic and construction | `age`, `make_timestamp`, `make_date`, `make_interval`, `justify_hours` |
+| Arithmetic and construction | `age`, `make_timestamp`, `make_date`, `make_interval`, `justify_hours`, `justify_days`, `justify_interval` |
 | Validation | `isfinite` |
 
 `CURRENT_DATE`, `CURRENT_TIME[(precision)]`, `CURRENT_TIMESTAMP[(precision)]`, `LOCALTIME[(precision)]`, and `LOCALTIMESTAMP[(precision)]` are SQL value expressions. Their result types are `date`, `time with time zone`, `timestamp with time zone`, `time without time zone`, and `timestamp without time zone`, respectively. A precision from zero through six rounds fractional seconds and remains visible in result metadata. SQL value expressions keep their built-in identity even when the search path contains a user function with the same name.
@@ -265,6 +280,16 @@ SELECT pg_typeof(CURRENT_TIME)::text AS time_type,
 ```
 
 The results are `time with time zone`, `timestamp without time zone`, `true`, and `true`. The differential clock transcript uses UTC; session time-zone conversion and display, complete catalog signatures, and precision-reduction diagnostics remain open PostgreSQL compatibility bugs tracked in the [compatibility ledger](09-compatibility.md).
+
+An interval keeps months, days, and time separately. Multiplying or dividing one by a number scales each field on its own and cascades a fractional month into days at 30 days a month and a fractional day into time at 24 hours a day, never upward, so `interval '1 month' * 0.5` is `15 days`; division divides each field rather than multiplying by the reciprocal, and dividing by zero reports SQLSTATE `22012`. `justify_hours` moves whole 24-hour periods of the time into days, `justify_days` moves whole 30-day periods into months, and `justify_interval` does both so that every field takes one sign; each carry truncates toward zero, so `justify_hours(interval '-25 hours')` is `-1 days -01:00:00`. Adding an interval to or subtracting it from a `time` or `time with time zone` value uses only its time field and wraps within the day. A date, time, timestamp, or interval result outside its type's range reports SQLSTATE `22008`.
+
+```sql execute
+SELECT interval '1 day' / 3 AS third,
+       interval '1 mon 1 day 1 sec' * 0.3 AS scaled,
+       justify_interval(interval '1 mon -00:00:01') AS justified;
+```
+
+The results are `08:00:00`, `9 days 07:12:00.3`, and `29 days 23:59:59`.
 
 ## Range and multirange functions
 
@@ -309,6 +334,8 @@ to_regtype(text) -> regtype
 The input is a PostgreSQL object name or type spelling. `to_regclass` resolves a relation, `to_regnamespace` resolves a schema, `to_regrole` resolves one global unqualified role, `to_regproc` resolves a unique visible routine name without selecting an overload, `to_regprocedure` requires a routine name followed by an exact input-type signature, and `to_regtype` accepts PostgreSQL type aliases, qualification, typmods, and array bounds while returning the underlying catalog type identity. Object-name components follow PostgreSQL's `reg*` identifier-string rules, so reserved words and non-whitespace punctuation do not require SQL-statement quoting in the text value; quoted components preserve case and doubled quotes, while unquoted components use PostgreSQL case folding and identifier-length clipping. Type spellings use PostgreSQL's dedicated type-name parser.
 
 Each function returns the catalog OID in its declared `reg*` alias; relation, routine, and type lookups use `search_path` when the input is unqualified, while roles are global and qualified role names return NULL. A missing object returns NULL; an ambiguous `to_regproc` name or a signature-less `to_regprocedure` name also returns NULL. An all-digit input uses PostgreSQL's OID input syntax, including its leading-zero octal form, without requiring the OID to identify an existing object, and `-` denotes OID 0. Text output follows the corresponding `reg*` carrier, including visible-name qualification, role identifier quoting, PostgreSQL built-in type aliases, and decimal output for an unresolved nonzero OID.
+
+A cast of a `reg*` value, or of an array of them, to `text`, `name`, `varchar` or `char` spells the value with its output function, element by element for an array, and then applies the target's length, as PostgreSQL's I/O conversion cast does: `'pg_class'::regclass::varchar(4)` is `pg_c` and `0::regclass::name` is `-`.
 
 These lookups do not mutate state. They are strict, stable, parallel-safe, and not leakproof, so a NULL input returns NULL and the functions are rejected in generated-column expressions that require immutability. `pg_catalog.pg_proc` exposes PostgreSQL 18 OIDs 3494, 3479, 3495, 4086, 4093, and 3493 for the functions in the syntax order above, and `information_schema.routines` exposes their exact `reg*` return aliases.
 
@@ -366,7 +393,9 @@ SELECT lastval() AS last_allocated;
 | Ordered set | `percentile_cont`, `percentile_disc`, `mode` |
 | JSON | `json_agg`, `jsonb_agg`, `json_object_agg`, `jsonb_object_agg` |
 
-Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it. `min` and `max` compare arrays and record-like map values lexicographically in addition to their scalar inputs.
+`sum` and `avg` also take `interval` input: the sum adds months, days, and time separately and reports SQLSTATE `22008` when a field overflows, and the average divides that sum by the input count as interval division does, so the average of `1 mon` and `0` is `15 days`.
+
+Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it; on an ordinary function each is `42809` (`FILTER specified, but abs is not an aggregate function`). `min` and `max` compare arrays and record-like map values lexicographically in addition to their scalar inputs.
 
 `mode() WITHIN GROUP (ORDER BY value [ASC | DESC])` returns the most frequent non-NULL value with the input's type, or NULL for empty or all-NULL input. SQL-equal values count together, including signed floating zero, equal intervals and equivalent JSONB representations. When frequencies tie, the first value in the requested ordering wins. Memory and spilled aggregate execution use the same equality and tie rules.
 
@@ -389,7 +418,7 @@ FROM samples;
 
 ## Window functions
 
-Ranking and offset windows are `row_number`, `rank`, `dense_rank`, `lag`, `lead`, and `ntile`. Aggregate windows are `sum`, `count`, `avg`, `min`, and `max`.
+The window functions are `row_number`, `rank`, `dense_rank`, `percent_rank`, `cume_dist`, `ntile`, `lag`, `lead`, `first_value`, `last_value`, and `nth_value`, and every built-in or registered aggregate can be computed over a window, with `FILTER (WHERE condition)` leaving out the frame rows for which the condition is not true. [Window functions](03-queries-and-dml.md#window-functions) describes peers, frames, and exclusions. As in PostgreSQL, the function is resolved first, with a `WITHIN GROUP` call's ordering expressions after its arguments, and a function that does not exist is `42883`. Calling an ordinary function with `OVER` is `42809`, as is calling `count()` without `*`, an ordered-set aggregate without `WITHIN GROUP`, or any other function with it; an ordered-set aggregate cannot take `OVER` (`0A000`), and neither `DISTINCT`, an aggregate `ORDER BY`, nor `FILTER` on a function that is not an aggregate is implemented for window calls (`0A000`).
 
 ## General table functions
 

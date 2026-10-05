@@ -15,7 +15,6 @@ use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{FunctionBinding, RelationPersistence},
     catalog::stored_view::dependencies as analysis,
-    SQLError,
 };
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
@@ -62,29 +61,6 @@ pub fn views_depending_on_function(
     ))
 }
 
-pub fn cascade_view_closure(
-    context: &ViewDependencyContext<'_>,
-    initial: Vec<String>,
-) -> Result<Vec<String>, SQLError> {
-    let mut views = initial;
-    views.sort();
-    views.dedup();
-    let mut index = 0;
-    while index < views.len() {
-        let dependents = views_depending_on_relation(context, &views[index]).map_err(|error| {
-            SQLError::Internal(format!("read cascading view dependencies: {error}"))
-        })?;
-        for dependent in dependents {
-            if !views.contains(&dependent) {
-                views.push(dependent);
-            }
-        }
-        index += 1;
-    }
-    views.sort();
-    Ok(views)
-}
-
 pub fn rewrite_view_routine_identity(
     context: &ViewDependencyContext<'_>,
     target: &FunctionBinding,
@@ -94,11 +70,81 @@ pub fn rewrite_view_routine_identity(
     let mut next = (**views).clone();
     drop(views);
     let changed = analysis::rewrite_view_routine_identity(&mut next, target, new_name);
+    publish_rewritten_views(context, next, &changed)
+}
+
+/// Views embed the catalog names of the user-defined types they bind; a rename or schema move rewrites them.
+pub fn rewrite_view_type_references(
+    context: &ViewDependencyContext<'_>,
+    oid: u32,
+    identity: &RelationIdentity,
+) -> StorageBackendResult<()> {
+    context.views.synchronize_catalog()?;
+    let views = context.views.view_definitions();
+    let mut next = (**views).clone();
+    drop(views);
+    let changed = analysis::rewrite_view_type_references(&mut next, oid, identity);
+    publish_rewritten_views(context, next, &changed)
+}
+
+/// Materialized views store their rows, so a composite type's attribute change rewrites the stored values of the type in each column whose declared type holds it.
+pub fn rewrite_materialized_composite_values(
+    context: &ViewDependencyContext<'_>,
+    target: u32,
+    change: &uqa_sql::expr::composites::AttributeChange,
+    types: &dyn uqa_sql::expr::composites::CompositeTypeCatalog,
+) -> Result<(), uqa_sql::SQLError> {
+    let storage = |error: StorageBackendError| {
+        uqa_sql::catalog::errors::storage_error("rewrite materialized view rows", &error)
+    };
+    context.views.synchronize_catalog().map_err(storage)?;
+    let views = context.views.view_definitions();
+    let mut next = (**views).clone();
+    drop(views);
+    let mut changed = Vec::new();
+    for (relation, view) in &mut next {
+        let columns = view
+            .output_columns
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .zip(view.materialized_column_types.clone())
+            .filter_map(|(name, ty)| ty.map(|ty| (name, ty)))
+            .collect::<Vec<_>>();
+        let mut affected = Vec::new();
+        for (name, ty) in columns {
+            if uqa_sql::expr::composites::type_contains_composite(&ty, target, types)? {
+                affected.push((name, ty));
+            }
+        }
+        if affected.is_empty() {
+            continue;
+        }
+        for row in &mut view.materialized_rows {
+            for (name, ty) in &affected {
+                if let Some(value) = row.get(name).cloned() {
+                    let value = uqa_sql::expr::composites::apply_attribute_change(
+                        value, ty, target, change, types,
+                    )?;
+                    row.insert(name.clone(), value);
+                }
+            }
+        }
+        changed.push(relation.clone());
+    }
+    publish_rewritten_views(context, next, &changed).map_err(storage)
+}
+
+fn publish_rewritten_views(
+    context: &ViewDependencyContext<'_>,
+    next: std::collections::BTreeMap<RelationIdentity, uqa_sql::catalog::stored_view::StoredView>,
+    changed: &[RelationIdentity],
+) -> StorageBackendResult<()> {
     if changed.is_empty() {
         return Ok(());
     }
     if context.publication.has_catalog() {
-        for relation in &changed {
+        for relation in changed {
             let view = next.get(relation).ok_or_else(|| {
                 StorageBackendError::Other(format!(
                     "rewritten view `{}` disappeared before persistence",

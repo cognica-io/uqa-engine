@@ -473,6 +473,22 @@ impl Engine {
         &self,
         statements: &[(&str, &[SQLParam])],
     ) -> Result<Vec<SQLResult>, SQLError> {
+        self.sql_batch_observed(statements, |_, _| Ok(()))
+    }
+
+    /// Execute multiple SQL statements inside one engine transaction like [`Engine::sql_batch`], replacing each result's enum values by their labels before the next statement runs, so a later statement cannot remove a type an earlier result still names. Host bindings return these results.
+    pub fn sql_batch_with_labels(
+        &self,
+        statements: &[(&str, &[SQLParam])],
+    ) -> Result<Vec<SQLResult>, SQLError> {
+        self.sql_batch_observed(statements, Engine::render_enum_labels)
+    }
+
+    fn sql_batch_observed(
+        &self,
+        statements: &[(&str, &[SQLParam])],
+        observe: impl Fn(&Engine, &mut SQLResult) -> Result<(), SQLError>,
+    ) -> Result<Vec<SQLResult>, SQLError> {
         self.transaction(|engine| {
             uqa_execution::statement::notifications::admit_sql_batch(
                 engine.notification_subscriptions_required(),
@@ -481,7 +497,9 @@ impl Engine {
             )?;
             let mut results = Vec::with_capacity(statements.len());
             for (sql, params) in statements {
-                results.push(engine.sql(sql, params)?);
+                let mut result = engine.sql(sql, params)?;
+                observe(engine, &mut result)?;
+                results.push(result);
             }
             Ok(results)
         })

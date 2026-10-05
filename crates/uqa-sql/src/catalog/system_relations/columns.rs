@@ -45,15 +45,6 @@ impl SystemRelation {
                 "collicurules",
                 "collversion",
             ],
-            Self::PgDepend => &[
-                "classid",
-                "objid",
-                "objsubid",
-                "refclassid",
-                "refobjid",
-                "refobjsubid",
-                "deptype",
-            ],
             Self::PgSequence => &[
                 "seqrelid",
                 "seqtypid",

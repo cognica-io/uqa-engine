@@ -97,6 +97,8 @@ pub fn prepare_update_row<S: Clone + 'static>(
     )?;
     validate_view_checks(ViewCheckContext {
         services: context.referential.assignment,
+        constraints: context.referential.constraints,
+        statement,
         table: &stmt.table,
         storage_table: &rewritten_storage_table,
         target_qualifier: &stmt.target_qualifier,

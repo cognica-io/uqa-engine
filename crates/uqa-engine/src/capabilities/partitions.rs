@@ -20,6 +20,8 @@ impl Engine {
             catalog: self,
             expressions: self,
             types: self,
+            assignment: self,
+            schema: self,
         }
     }
 }

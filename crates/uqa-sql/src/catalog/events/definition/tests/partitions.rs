@@ -98,6 +98,8 @@ pub(super) fn trigger(table: &str, name: &str) -> StoredTrigger {
         panic!("expected trigger")
     };
     StoredTrigger {
+        catalog_oid: None,
+        constraint_catalog_oid: None,
         definition,
         function_object_id: Some([4; 16]),
         enabled: crate::ast::EventEnableMode::Origin,

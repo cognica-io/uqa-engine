@@ -133,9 +133,14 @@ pub fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize
                 collect_subquery_ids(item, output);
             }
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             for argument in args {
                 collect_subquery_ids(argument, output);
+            }
+            if let Some(filter) = filter {
+                collect_subquery_ids(filter, output);
             }
             for partition in &spec.partition_by {
                 collect_subquery_ids(partition, output);

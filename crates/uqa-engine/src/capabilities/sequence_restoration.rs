@@ -33,6 +33,9 @@ impl Engine {
             .sequence_object_ids
             .restore(&snapshot.object_ids);
         self.durable
+            .sequence_catalog_oids
+            .restore(&snapshot.catalog_oids);
+        self.durable
             .sequence_persistence
             .restore(&snapshot.persistence);
         self.durable.sequence_security.restore(&snapshot.security);
@@ -59,6 +62,7 @@ impl crate::DurableCatalogSnapshot {
             object_ids: self.sequence_object_ids.clone(),
             persistence: self.sequence_persistence.clone(),
             security: self.sequence_security.clone(),
+            catalog_oids: self.sequence_catalog_oids.clone(),
             roles: uqa_execution::catalog::security::roles::persistence::RoleCatalogSnapshot {
                 roles: self.roles.clone(),
                 memberships: self.role_memberships.clone(),

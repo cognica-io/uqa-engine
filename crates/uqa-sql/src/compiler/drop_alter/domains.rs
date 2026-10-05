@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Preserve domain DROP type names for catalog resolution and diagnostics.
+//! Preserve DROP DOMAIN and DROP TYPE names for catalog resolution and diagnostics.
 
 use super::{extract_string, render_relation_component, Result, SQLError};
 
@@ -15,7 +15,7 @@ pub(super) fn compile_drop_domain_name(ty: &pg_query::protobuf::TypeName) -> Res
         .map(extract_string)
         .collect::<Result<Vec<_>>>()?;
     if parts.is_empty() {
-        return Err(SQLError::Internal("DROP DOMAIN target has no name".into()));
+        return Err(SQLError::Internal("DROP type target has no name".into()));
     }
     let mut name = parts
         .iter()

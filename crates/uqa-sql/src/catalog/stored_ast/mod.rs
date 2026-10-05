@@ -15,11 +15,13 @@ use uqa_core::RelationIdentity;
 mod expressions;
 mod merge;
 mod routines;
+mod sites;
 mod sources;
 mod types;
 pub use expressions::*;
 pub use merge::visit_stored_statement_merges;
 pub use routines::*;
+pub use sites::*;
 pub use sources::*;
 pub use types::*;
 
@@ -329,6 +331,36 @@ where
         Ok(())
     }
 
+    /// Bind a window call's arguments, `FILTER`, keys and frame offsets.
+    fn bind_window_call(
+        &mut self,
+        args: &mut [Expr],
+        filter: Option<&mut Expr>,
+        spec: &mut crate::ast::WindowSpec,
+        visible_ctes: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        for argument in args {
+            self.bind_expr(argument, visible_ctes)?;
+        }
+        if let Some(filter) = filter {
+            self.bind_expr(filter, visible_ctes)?;
+        }
+        for partition in &mut spec.partition_by {
+            self.bind_expr(partition, visible_ctes)?;
+        }
+        for order in &mut spec.order_by {
+            self.bind_expr(&mut order.expr, visible_ctes)?;
+        }
+        if let Some(frame) = &mut spec.frame {
+            for bound in [&mut frame.start, &mut frame.end] {
+                if let FrameBound::Preceding(inner) | FrameBound::Following(inner) = bound {
+                    self.bind_expr(inner, visible_ctes)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn bind_projection(
         &mut self,
         projection: &mut crate::ast::Projection,
@@ -390,23 +422,14 @@ where
                     self.bind_expr(item, visible_ctes)?;
                 }
             }
-            Expr::WindowCall { name, args, spec } => {
-                for argument in args {
-                    self.bind_expr(argument, visible_ctes)?;
-                }
-                for partition in &mut spec.partition_by {
-                    self.bind_expr(partition, visible_ctes)?;
-                }
-                for order in &mut spec.order_by {
-                    self.bind_expr(&mut order.expr, visible_ctes)?;
-                }
-                if let Some(frame) = &mut spec.frame {
-                    for bound in [&mut frame.start, &mut frame.end] {
-                        if let FrameBound::Preceding(inner) | FrameBound::Following(inner) = bound {
-                            self.bind_expr(inner, visible_ctes)?;
-                        }
-                    }
-                }
+            Expr::WindowCall {
+                name,
+                args,
+                spec,
+                filter,
+                ..
+            } => {
+                self.bind_window_call(args, filter.as_deref_mut(), spec, visible_ctes)?;
                 (self.routine)(name, None)?;
             }
             Expr::Case {

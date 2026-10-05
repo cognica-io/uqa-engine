@@ -16,7 +16,7 @@ use crate::{
     query::{locking::context::RowLockScopeSource, CteScope},
     OwnedPhysicalRow,
 };
-use uqa_core::{DocId, RelationIdentity, Value};
+use uqa_core::{DocId, Value};
 use uqa_sql::{
     assignment::{columns::AssignmentColumnCatalog, AssignmentContext},
     plan::{UpdatePlan, ViewCheckPlan},
@@ -121,7 +121,12 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
     let empty_schema = RowSchema::default();
     let schema = row.map_or(&empty_schema, |row| &row.schema);
     let hook = services.expressions.expressions.bind_scope(ctes.clone());
-    let source = crate::scalar_type_with_resolver(expression, schema, params, hook.as_ref())?;
+    let source = uqa_sql::type_resolution::assignment_source_type(
+        expression,
+        schema,
+        params,
+        hook.as_ref(),
+    )?;
     subscripts::assign_value(
         services,
         ctes,
@@ -170,7 +175,7 @@ pub fn eval_typed_assignment<S: Clone + 'static>(
     uqa_sql::assignment::targets::validate_assignment_type(target.target, target.ty)?;
     let schema = RowSchema::default();
     let hook = services.expressions.expressions.bind_scope(ctes.clone());
-    let source = crate::scalar_type_with_resolver(
+    let source = uqa_sql::type_resolution::assignment_source_type(
         expression,
         row.map_or(&schema, |row| &row.schema),
         params,
@@ -292,6 +297,10 @@ pub fn eval_view_rule_update_assignment<S: Clone + 'static>(
 
 pub struct ViewCheckContext<'a, S: Clone + 'static> {
     pub services: MutationAssignmentContext<'a, S>,
+    /// The catalog and authority that describe a row a check option rejects.
+    pub constraints: super::constraints::ConstraintContext<'a>,
+    /// The statement that writes the row, whose relation and columns the description follows.
+    pub statement: super::constraints::ConstraintStatement<'a>,
     pub table: &'a str,
     pub storage_table: &'a str,
     pub target_qualifier: &'a str,
@@ -307,6 +316,8 @@ pub fn validate_view_checks<S: Clone + 'static>(
 ) -> Result<(), SQLError> {
     let ViewCheckContext {
         services,
+        constraints,
+        statement,
         table,
         storage_table,
         target_qualifier,
@@ -336,14 +347,13 @@ pub fn validate_view_checks<S: Clone + 'static>(
             params,
         )?;
         if !uqa_sql::expr::truthy(&value) {
-            return Err(SQLError::Routine {
-                sqlstate: "44000".into(),
-                message: format!(
-                    "new row violates check option for view \"{}\"",
-                    RelationIdentity::from_legacy_name(&check.view)
-                        .map_or_else(|_| check.view.clone(), |relation| relation.name)
-                ),
-            });
+            return Err(super::constraints::view_check_violation(
+                constraints,
+                statement,
+                &check.view,
+                storage_table,
+                document,
+            ));
         }
     }
     Ok(())
@@ -360,6 +370,7 @@ pub fn refresh_stored_generated_columns<S: Clone + 'static>(
         .map_err(|error| SQLError::Internal(format!("read generated columns: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     super::generated::refresh_stored_generated_columns(
+        services.assignment,
         &columns,
         document,
         &mut |expression, row, schema| {

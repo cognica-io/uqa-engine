@@ -505,27 +505,7 @@ pub fn collect_session_portal_routine_dependencies(
         if !visiting_routines.insert(key.clone()) {
             continue;
         }
-        let outline;
-        let compiled = if matches!(
-            function.compiled,
-            crate::routines::CompiledFunctionBody::Deferred
-        ) {
-            outline = crate::routines::compilation::deferred_body_outline(
-                &function.def,
-                &|name: &str| inputs.routines.has_registered_aggregate_function(name),
-            );
-            outline.as_ref()
-        } else {
-            Some(&function.compiled)
-        };
-        match compiled {
-            // A body that does not parse fails its call before it reads anything.
-            None => {}
-            Some(crate::routines::CompiledFunctionBody::Deferred) => {
-                return Err(SQLError::Internal(
-                    "a deferred routine body outlines to compiled statements".into(),
-                ));
-            }
+        match crate::routines::analyzable_routine_body(inputs.routines, &function)?.as_deref() {
             Some(crate::routines::CompiledFunctionBody::SQL(plans)) => {
                 for plan in plans {
                     match plan {
@@ -550,6 +530,8 @@ pub fn collect_session_portal_routine_dependencies(
             Some(crate::routines::CompiledFunctionBody::PLpgSQL(_)) => {
                 *dependencies = SessionPortalTableDependencies::all();
             }
+            // A body that does not compile cannot run in this session, so it reads no relation.
+            None => {}
         }
         visiting_routines.remove(&key);
         if dependencies.is_all() {

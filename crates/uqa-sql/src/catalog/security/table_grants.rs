@@ -354,6 +354,18 @@ pub fn validate_table_grant_target_kinds(
     targets: &[ResolvedTableGrantTarget],
 ) -> Result<(), SQLError> {
     for target in targets {
+        // `ExecGrant_Relation` refuses indexes and composite types by their relation name.
+        let refused = match target.kind {
+            "index" => Some("an index"),
+            "composite type" => Some("a composite type"),
+            _ => None,
+        };
+        if let Some(refused) = refused {
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("\"{}\" is {refused}", target.relation.name),
+            });
+        }
         if !matches!(
             target.kind,
             "table" | "view" | "materialized view" | "foreign table" | "sequence"

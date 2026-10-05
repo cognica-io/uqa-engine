@@ -149,6 +149,7 @@ fn typed_check_nodes_and_sql_match_postgresql() {
                 schema: "public".into(),
                 name: "d_base".into(),
                 oid: 16385,
+                array_oid: None,
                 base: Box::new(crate::ColumnType::Integer),
             }
         } else {
@@ -254,6 +255,7 @@ fn nested_domain_value_retains_its_oid_before_base_type_coercion() {
         schema: "public".into(),
         name: "d".into(),
         oid: 16385,
+        array_oid: None,
         base: Box::new(crate::ColumnType::Integer),
     };
     let actual = domain_expression("CREATE DOMAIN nested AS d CHECK(VALUE<100)", base);

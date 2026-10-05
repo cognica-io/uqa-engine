@@ -92,18 +92,40 @@ impl Lowering<'_> {
         aggregates: &dyn AggregateClassifier,
         subqueries: &mut Vec<QueryPlan>,
     ) -> Result<ScalarWindowFrame> {
-        let (mode, start, end) = match source {
-            Source::Owned(WindowFrame { mode, start, end }) => {
-                (mode, Source::Owned(start), Source::Owned(end))
-            }
-            Source::Borrowed(WindowFrame { mode, start, end }) => {
-                (*mode, Source::Borrowed(start), Source::Borrowed(end))
-            }
+        let (mode, start, end, between, exclusion) = match source {
+            Source::Owned(WindowFrame {
+                mode,
+                start,
+                end,
+                between,
+                exclusion,
+            }) => (
+                mode,
+                Source::Owned(start),
+                Source::Owned(end),
+                between,
+                exclusion,
+            ),
+            Source::Borrowed(WindowFrame {
+                mode,
+                start,
+                end,
+                between,
+                exclusion,
+            }) => (
+                *mode,
+                Source::Borrowed(start),
+                Source::Borrowed(end),
+                *between,
+                *exclusion,
+            ),
         };
         Ok(ScalarWindowFrame {
             mode,
             start: self.bound(start, aggregates, subqueries)?,
             end: self.bound(end, aggregates, subqueries)?,
+            between,
+            exclusion,
         })
     }
 

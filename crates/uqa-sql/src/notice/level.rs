@@ -18,6 +18,19 @@ pub enum NoticeLevel {
 }
 
 impl NoticeLevel {
+    /// The level a name spells, as `RAISE` and `elog` accept it; `DEBUG1` through `DEBUG5` are `DEBUG`.
+    pub fn parse(name: &str) -> Option<Self> {
+        let name = name.to_ascii_uppercase();
+        match name.as_str() {
+            "LOG" => Some(NoticeLevel::Log),
+            "INFO" => Some(NoticeLevel::Info),
+            "NOTICE" => Some(NoticeLevel::Notice),
+            "WARNING" => Some(NoticeLevel::Warning),
+            _ if name.starts_with("DEBUG") => Some(NoticeLevel::Debug),
+            _ => None,
+        }
+    }
+
     /// The level's name, as clients show it.
     pub const fn as_str(self) -> &'static str {
         match self {

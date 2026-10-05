@@ -107,6 +107,7 @@ fn build_table_function_value_row_stream_with_row(
                 | "jsonb_each"
                 | "json_each_text"
                 | "jsonb_each_text"
+                | "aclexplode"
         )
     {
         let subquery_arena =
@@ -119,7 +120,21 @@ fn build_table_function_value_row_stream_with_row(
         let scalar_context = scalar_context
             .with_function_hook(context.eval_hook)
             .with_subquery_runner(&subquery_arena);
-        let call_args = eval_call_arguments(args, &scalar_context)?;
+        // Arguments bind like any other expression: catalog-typed calls such as `enum_range(NULL::mood)` select their operation from declared types.
+        let empty = crate::RowSchema::default();
+        let schema = row.map_or(&empty, |row| &row.schema);
+        let bound = args
+            .iter()
+            .map(|argument| {
+                uqa_sql::bind_type_introspection_with_resolver(
+                    argument.clone(),
+                    schema,
+                    context.params,
+                    context.resolver,
+                )
+            })
+            .collect::<Vec<_>>();
+        let call_args = eval_call_arguments(&bound, &scalar_context)?;
         if call_args.iter().any(|(name, _)| name.is_some()) {
             return Err(uqa_sql::expr::unknown_function_error(&lower, &call_args));
         }
@@ -158,6 +173,13 @@ fn build_table_function_value_row_stream_with_row(
             "json_object_keys" | "jsonb_object_keys" => json_object_key_values(&lower, evaluated)?,
             "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
                 return json_each_row_stream(&lower, evaluated, alias, column_aliases);
+            }
+            "aclexplode" => {
+                return super::acl::aclexplode_row_stream(
+                    &|name| context.session.role_oid(name),
+                    evaluated,
+                    column_aliases,
+                );
             }
             _ => {
                 return Err(SQLError::Internal(format!(

@@ -136,6 +136,11 @@ pub struct WindowFrame {
     pub mode: FrameMode,
     pub start: FrameBound,
     pub end: FrameBound,
+    /// Whether the frame was written `BETWEEN start AND end`. A frame that names only its start, such as `ROWS UNBOUNDED PRECEDING`, ends at the current row, and the definition is deparsed as it was written.
+    #[serde(default = "super::default_true")]
+    pub between: bool,
+    #[serde(default, skip_serializing_if = "FrameExclusion::is_no_others")]
+    pub exclusion: FrameExclusion,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +148,52 @@ pub enum FrameMode {
     Rows,
     Range,
     Groups,
+}
+
+/// The aggregate modifiers written on a window call, which `ParseFuncOrColumn` rejects after it has resolved the function. The arguments of a call written with `WITHIN GROUP` include its ordering expressions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowCallModifiers {
+    pub distinct: bool,
+    /// An aggregate `ORDER BY` inside the argument list.
+    pub ordered: bool,
+    pub within_group: bool,
+}
+
+impl WindowCallModifiers {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        !self.distinct && !self.ordered && !self.within_group
+    }
+}
+
+/// The frame exclusion clause: the rows of the frame that a window function or aggregate does not see.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FrameExclusion {
+    #[default]
+    NoOthers,
+    CurrentRow,
+    /// The current row and its peers.
+    Group,
+    /// The peers of the current row, but not the current row itself.
+    Ties,
+}
+
+impl FrameExclusion {
+    #[must_use]
+    pub const fn is_no_others(&self) -> bool {
+        matches!(self, Self::NoOthers)
+    }
+
+    /// The clause as `pg_get_viewdef` spells it, or `None` for `EXCLUDE NO OTHERS`, which it omits.
+    #[must_use]
+    pub const fn sql(self) -> Option<&'static str> {
+        match self {
+            Self::NoOthers => None,
+            Self::CurrentRow => Some("EXCLUDE CURRENT ROW"),
+            Self::Group => Some("EXCLUDE GROUP"),
+            Self::Ties => Some("EXCLUDE TIES"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -237,11 +288,15 @@ pub enum Expr {
         list: Vec<Expr>,
         negated: bool,
     },
-    /// `func(args) OVER (PARTITION BY ... ORDER BY ...)`.
+    /// `func(args) [FILTER (WHERE condition)] OVER (PARTITION BY ... ORDER BY ...)`. Only aggregates accept `FILTER`.
     WindowCall {
         name: String,
         args: Vec<Expr>,
         spec: WindowSpec,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter: Option<Box<Expr>>,
+        #[serde(default, skip_serializing_if = "WindowCallModifiers::is_empty")]
+        modifiers: WindowCallModifiers,
     },
     /// `CASE [base] WHEN cond THEN result ... [ELSE default] END`.
     /// `base` lifts simple-form `CASE expr WHEN val THEN ...` into an
@@ -341,9 +396,14 @@ impl Expr {
                     changed |= item.upgrade_legacy_serialized_dispatches();
                 }
             }
-            Self::WindowCall { args, spec, .. } => {
+            Self::WindowCall {
+                args, spec, filter, ..
+            } => {
                 for argument in args {
                     changed |= argument.upgrade_legacy_serialized_dispatches();
+                }
+                if let Some(filter) = filter {
+                    changed |= filter.upgrade_legacy_serialized_dispatches();
                 }
                 for partition in &mut spec.partition_by {
                     changed |= partition.upgrade_legacy_serialized_dispatches();
@@ -655,6 +715,11 @@ impl Statement {
     pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
         match self {
             Self::Select(select) => select.upgrade_legacy_serialized_dispatches(),
+            Self::CreateEnum(_)
+            | Self::CreateCompositeType(_)
+            | Self::AlterEnum(_)
+            | Self::AlterTypeObject(_)
+            | Self::GrantType(_) => false,
             Self::CreateDomain(domain) => {
                 let mut changed = upgrade_optional(&mut domain.default);
                 for check in &mut domain.checks {

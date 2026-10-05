@@ -102,6 +102,7 @@ impl EngineHook for Catalog<'_> {
                 schema: "app".into(),
                 name: "label".into(),
                 oid: 16384,
+                array_oid: None,
                 base: Box::new(ColumnType::Text),
             }),
             _ => None,
@@ -347,6 +348,7 @@ fn external_type_admission_failure_releases_partial_names_and_keeps_an_existing_
         schema: "app".into(),
         name: "oversized".repeat(128),
         oid: 16384,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     };
     let error: SQLError = ty

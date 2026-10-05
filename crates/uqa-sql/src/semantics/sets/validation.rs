@@ -33,6 +33,7 @@ pub fn builtin_returns_set(name: &str) -> bool {
             | "jsonb_each_text"
             | "json_object_keys"
             | "jsonb_object_keys"
+            | "aclexplode"
     )
 }
 
@@ -113,8 +114,14 @@ pub fn function_may_return_set(
     ) {
         Ok(function) => Ok(function.is_some_and(|function| function.def.returns_set())),
         Err(error) if binding.is_none() && error.sqlstate() == Some("42883") => {
-            match crate::type_resolution::builtin_function_type(&builtin, args, &[], schema, params)
-            {
+            match crate::type_resolution::builtin_function_type_with_resolver(
+                &builtin,
+                args,
+                &[],
+                schema,
+                params,
+                resolver,
+            ) {
                 Ok(Some(_)) => Ok(false),
                 Ok(None) | Err(_) => Err(error),
             }
@@ -251,8 +258,17 @@ pub fn expression_may_return_set(
         )? || expressions_may_return_set(
             engine, resolver, list, schema, params,
         )?),
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             if expressions_may_return_set(engine, resolver, args, schema, params)?
+                || expressions_may_return_set(
+                    engine,
+                    resolver,
+                    filter.iter().map(AsRef::as_ref),
+                    schema,
+                    params,
+                )?
                 || expressions_may_return_set(engine, resolver, &spec.partition_by, schema, params)?
                 || expressions_may_return_set(
                     engine,
@@ -429,11 +445,14 @@ fn validate_set_context(
                 validate_set_context(engine, resolver, filter, schema, params)?;
             }
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             reject_set_descendant(
                 engine,
                 resolver,
                 args.iter()
+                    .chain(filter.iter().map(AsRef::as_ref))
                     .chain(spec.partition_by.iter())
                     .chain(spec.order_by.iter().map(|order| &order.expr))
                     .chain(

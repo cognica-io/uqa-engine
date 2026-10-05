@@ -1,0 +1,1691 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_p (a int) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_p1 PARTITION OF cto_p FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_t2 (a int DEFAULT nofunc()) PARTITION BY RANGE (nocol);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_t3 (a int, g int GENERATED ALWAYS AS (nofunc()) STORED) PARTITION BY RANGE (nocol);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_t4 (g int GENERATED ALWAYS AS (nofunc1()) STORED, a int DEFAULT nofunc2());",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc1() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_t5 (a int DEFAULT nofunc2(), g int GENERATED ALWAYS AS (nofunc1()) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc2() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_t6 (a int CHECK (nofunc() > 0)) PARTITION BY RANGE (nocol);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" named in partition key does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_p7 PARTITION OF cto_p (CHECK (nofunc() > 0)) FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "partition \"cto_p7\" would overlap partition \"cto_p1\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_t8 (a int DEFAULT nofunc(), g int GENERATED ALWAYS AS (a * 2) STORED) PARTITION BY RANGE (g);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_g9 (a int DEFAULT b, b int) PARTITION BY RANGE (nocol);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use column reference in DEFAULT expression",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_t11 (a int CHECK (nofunc1() > 0), CHECK (nofunc2() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc1() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_t12 (CHECK (nofunc2() > 0), a int CHECK (nofunc1() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc2() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_t13 (a int CHECK (nofunc1() > 0), b int DEFAULT nofunc2());",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc2() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_p14 PARTITION OF cto_p (CHECK (nofunc() > 0)) FOR VALUES IN (14) PARTITION BY RANGE (nocol);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nocol\" named in partition key does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_gz (a int, g int GENERATED ALWAYS AS (nofunc(a)) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc(integer) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_gw (a int, g int GENERATED ALWAYS AS (nofunc(a, 'x', NULL, 1.5)) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc(integer, unknown, unknown, numeric) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_gx (a int DEFAULT nofunc1(), g int GENERATED ALWAYS AS (h) STORED, h int GENERATED ALWAYS AS (1) STORED);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc1() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_pd PARTITION OF cto_p DEFAULT;",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cto_p VALUES (5);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_pd2 PARTITION OF cto_p (CHECK (nofunc() > 0)) FOR VALUES IN (5);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "updated partition constraint for default partition \"cto_pd\" would be violated by some row",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_k (a int, b int, PRIMARY KEY (a)) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_k1 PARTITION OF cto_k (CHECK (nofunc() > 0)) FOR VALUES IN (1) PARTITION BY LIST (b);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "unique constraint on partitioned table must include all partitioning columns",
+        "detail": "PRIMARY KEY constraint on table \"cto_k1\" lacks column \"b\" which is part of the partition key.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_k2 (a int, b int, PRIMARY KEY (a), CHECK (nofunc() > 0)) PARTITION BY LIST (b);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_kp1 PARTITION OF cto_k (CONSTRAINT cto_kp1_pkey CHECK (a > 0)) FOR VALUES IN (2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"cto_kp1_pkey\" for relation \"cto_kp1\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_kp2 PARTITION OF cto_k (CHECK (a > 0)) FOR VALUES IN (3);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'cto_kp2'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "cto_k_a_not_null",
+              "n"
+            ],
+            [
+              "cto_kp2_a_check",
+              "c"
+            ],
+            [
+              "cto_kp2_pkey",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_s1 (a int GENERATED ALWAYS AS IDENTITY (START 0 MINVALUE 1), a int);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "START value (0) cannot be less than MINVALUE (1)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_s3 (a int GENERATED ALWAYS AS IDENTITY (START 0 MINVALUE 1)) PARTITION BY LIST (nocol);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "START value (0) cannot be less than MINVALUE (1)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_sp (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_sc (b int GENERATED ALWAYS AS IDENTITY (SEQUENCE NAME cto_sp), a text) INHERITS (cto_sp);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"cto_sp\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_sc2 (b int GENERATED ALWAYS AS IDENTITY (SEQUENCE NAME cto_sp), b int);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"cto_sp\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_m1 (a int CONSTRAINT cto_mc CHECK (a > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_m2 (c int CONSTRAINT cto_mc CHECK (c > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_m3 (b int DEFAULT nofunc()) INHERITS (cto_m1, cto_m2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "check constraint name \"cto_mc\" appears multiple times but with different expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n1 (a int CONSTRAINT x CHECK (a > 0), b int CONSTRAINT x CHECK (b > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "check constraint \"x\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n6 (a int CONSTRAINT x CHECK (nofunc() > 0), b int CONSTRAINT x CHECK (b > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n7 (a int CONSTRAINT x CHECK (a > 0), b int CONSTRAINT x CHECK (nofunc() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n9 (a int CONSTRAINT x CHECK (a > 0), b nosuchtype CONSTRAINT x CHECK (b > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n10 (a int CONSTRAINT x NOT NULL, b int CONSTRAINT x CHECK (nofunc() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n17 (a int CHECK (a > 0), CONSTRAINT cto_n17_a_check CHECK (a < 9));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "check constraint \"cto_n17_a_check\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n20 (a int, CONSTRAINT x CHECK (a > 0) NO INHERIT) PARTITION BY LIST (a);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot add NO INHERIT constraint to partitioned table \"cto_n20\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n24 (a int, CHECK (a > 0) NO INHERIT, CHECK (nofunc() > 0)) PARTITION BY LIST (a);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot add NO INHERIT constraint to partitioned table \"cto_n24\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n25 (a int, CHECK (nofunc() > 0), CHECK (a > 0) NO INHERIT) PARTITION BY LIST (a);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n27 (a int CHECK (a > 0) NO INHERIT) PARTITION BY LIST (a);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot add NO INHERIT constraint to partitioned table \"cto_n27\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_cn1 (a int CHECK (a > b), b int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_cn2 (a int CHECK (b > 0), b int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_cn3 (a int CHECK (true));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_cn4 (CHECK (a > 0), a int CHECK (a < 9));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_tc (CHECK (a > 0), a int CHECK (a < 9), b int CHECK (b > a) CHECK (b < 99), CHECK (true));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conrelid::regclass::text, conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid IN ('cto_cn1'::regclass, 'cto_cn2'::regclass, 'cto_cn3'::regclass, 'cto_cn4'::regclass, 'cto_tc'::regclass) ORDER BY 1, 2;",
+      "command_tags": [
+        "SELECT 10"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conrelid",
+            "conname",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25,
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "cto_cn1",
+              "cto_cn1_check",
+              "CHECK ((a > b))"
+            ],
+            [
+              "cto_cn2",
+              "cto_cn2_b_check",
+              "CHECK ((b > 0))"
+            ],
+            [
+              "cto_cn3",
+              "cto_cn3_check",
+              "CHECK (true)"
+            ],
+            [
+              "cto_cn4",
+              "cto_cn4_a_check",
+              "CHECK ((a > 0))"
+            ],
+            [
+              "cto_cn4",
+              "cto_cn4_a_check1",
+              "CHECK ((a < 9))"
+            ],
+            [
+              "cto_tc",
+              "cto_tc_a_check",
+              "CHECK ((a > 0))"
+            ],
+            [
+              "cto_tc",
+              "cto_tc_a_check1",
+              "CHECK ((a < 9))"
+            ],
+            [
+              "cto_tc",
+              "cto_tc_b_check",
+              "CHECK ((b < 99))"
+            ],
+            [
+              "cto_tc",
+              "cto_tc_check",
+              "CHECK ((b > a))"
+            ],
+            [
+              "cto_tc",
+              "cto_tc_check1",
+              "CHECK (true)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cto_tc VALUES (1, 2);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cto_tc VALUES (1, 0);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"cto_tc\" violates check constraint \"cto_tc_check\"",
+        "detail": "Failing row contains (1, 0).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cto_tc VALUES (0, 0);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"cto_tc\" violates check constraint \"cto_tc_a_check\"",
+        "detail": "Failing row contains (0, 0).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_cn5 (a int CONSTRAINT cto_cn6_a_check CHECK (a > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_cn6 (a int CHECK (a > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname FROM pg_constraint WHERE conrelid = 'cto_cn6'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "cto_cn6_a_check1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ip2 (a int CONSTRAINT cto_ic2_a_check CHECK (a > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ic2 (CHECK (a > 1)) INHERITS (cto_ip2);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'cto_ic2'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            19,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "cto_ic2_a_check",
+              "f",
+              "1"
+            ],
+            [
+              "cto_ic2_a_check1",
+              "t",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ip3 (a int CONSTRAINT x CHECK (a > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ic3 (CONSTRAINT x CHECK (a > 0)) INHERITS (cto_ip3);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging constraint \"x\" with inherited definition",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'cto_ic3'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            19,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "x",
+              "t",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO cto_ic3 VALUES (0);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"cto_ic3\" violates check constraint \"x\"",
+        "detail": "Failing row contains (0).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ic4 (CONSTRAINT x CHECK (a > 1)) INHERITS (cto_ip3);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"x\" for relation \"cto_ic4\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ic5 (CONSTRAINT x CHECK (a > 0), CONSTRAINT x CHECK (a > 0)) INHERITS (cto_ip3);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "check constraint \"x\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging constraint \"x\" with inherited definition",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cto_ic6 (CONSTRAINT x CHECK (a > 0) NO INHERIT) INHERITS (cto_ip3);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "constraint \"x\" conflicts with inherited constraint on relation \"cto_ic6\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ic7 (CONSTRAINT x CHECK (a > 0) NOT ENFORCED) INHERITS (cto_ip3);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "constraint \"x\" conflicts with NOT ENFORCED constraint on relation \"cto_ic7\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ic8 (CONSTRAINT x CHECK (nofunc() > 0), CONSTRAINT x CHECK (a > 1)) INHERITS (cto_ip3);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ip5 (a int CONSTRAINT z CHECK (a > 0)) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ip5a PARTITION OF cto_ip5 (CONSTRAINT z CHECK (a > 0)) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "merging constraint \"z\" with inherited definition",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cto_ip5b PARTITION OF cto_ip5 (CONSTRAINT z CHECK (a > 2)) FOR VALUES IN (2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"z\" for relation \"cto_ip5b\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'cto_ip5a'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "conislocal",
+            "coninhcount"
+          ],
+          "type_oids": [
+            19,
+            16,
+            21
+          ],
+          "rows": [
+            [
+              "z",
+              "f",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_lp (a int) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_lp1 PARTITION OF cto_lp (CHECK (a > 0) NO INHERIT) FOR VALUES IN (1);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_lp2 PARTITION OF cto_lp (CONSTRAINT y CHECK (a > 0), CONSTRAINT y CHECK (a > 0)) FOR VALUES IN (2);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "check constraint \"y\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, connoinherit FROM pg_constraint WHERE conrelid = 'cto_lp1'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "connoinherit"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "cto_lp1_a_check",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_dn (a int CONSTRAINT x DEFAULT 1 CONSTRAINT x CHECK (a > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_dn2 (a int CONSTRAINT x NULL, b int CONSTRAINT x CHECK (b > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_dn3 (a int CONSTRAINT x GENERATED ALWAYS AS (1) STORED, b int CONSTRAINT x CHECK (b > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_dn4 (a int CONSTRAINT x GENERATED ALWAYS AS IDENTITY, b int CONSTRAINT x CHECK (b > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conrelid::regclass::text, conname, contype FROM pg_constraint WHERE conrelid IN ('cto_dn'::regclass, 'cto_dn2'::regclass, 'cto_dn3'::regclass, 'cto_dn4'::regclass) ORDER BY 1, 2, 3;",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conrelid",
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            25,
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "cto_dn",
+              "x",
+              "c"
+            ],
+            [
+              "cto_dn2",
+              "x",
+              "c"
+            ],
+            [
+              "cto_dn3",
+              "x",
+              "c"
+            ],
+            [
+              "cto_dn4",
+              "cto_dn4_a_not_null",
+              "n"
+            ],
+            [
+              "cto_dn4",
+              "x",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fr (a int PRIMARY KEY);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fp (a int CONSTRAINT cto_fp_fk REFERENCES cto_fr) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fp1 PARTITION OF cto_fp (CONSTRAINT cto_fp_fk CHECK (a > 0)) FOR VALUES IN (1);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"cto_fp_fk\" for relation \"cto_fp1\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fq (a int CONSTRAINT cto_fq3_a_check REFERENCES cto_fr) PARTITION BY LIST (a);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fq3 PARTITION OF cto_fq (CHECK (a > 0)) FOR VALUES IN (3);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'cto_fq3'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "cto_fq3_a_check",
+              "f"
+            ],
+            [
+              "cto_fq3_a_check1",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fx (a int CONSTRAINT x CHECK (a > 0), b int CONSTRAINT x REFERENCES cto_fr);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"x\" for relation \"cto_fx\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fy (a int CONSTRAINT x REFERENCES cto_fr, b int CONSTRAINT x REFERENCES cto_fr);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"x\" for relation \"cto_fy\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fz (a int CONSTRAINT x REFERENCES nosuch, b int CONSTRAINT x CHECK (nofunc() > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function nofunc() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_n8 (a int CONSTRAINT x REFERENCES nosuch, b int CONSTRAINT x CHECK (b > 0));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"x\" for relation \"cto_n8\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fw (a int CONSTRAINT cto_fw_pkey CHECK (a > 0), b int PRIMARY KEY);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, contype FROM pg_constraint WHERE conrelid = 'cto_fw'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype"
+          ],
+          "type_oids": [
+            19,
+            18
+          ],
+          "rows": [
+            [
+              "cto_fw_b_not_null",
+              "n"
+            ],
+            [
+              "cto_fw_pkey",
+              "c"
+            ],
+            [
+              "cto_fw_pkey1",
+              "p"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_fv (a int PRIMARY KEY, b int CONSTRAINT cto_fv_pkey REFERENCES cto_fr);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "constraint \"cto_fv_pkey\" for relation \"cto_fv\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ac (a int, b int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cto_ac ADD COLUMN c int CHECK (c > b);",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE cto_ac ADD COLUMN d int CHECK (b > 0);",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'cto_ac'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "cto_ac_b_check",
+              "CHECK ((b > 0))"
+            ],
+            [
+              "cto_ac_check",
+              "CHECK ((c > b))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ipk (a int CONSTRAINT keep CHECK (a > 0) NO INHERIT, b int CONSTRAINT pass CHECK (b > 0));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_ick (CONSTRAINT keep CHECK (a > 0)) INHERITS (cto_ipk);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, conislocal, coninhcount, connoinherit FROM pg_constraint WHERE conrelid = 'cto_ick'::regclass ORDER BY 1;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "conislocal",
+            "coninhcount",
+            "connoinherit"
+          ],
+          "type_oids": [
+            19,
+            16,
+            21,
+            16
+          ],
+          "rows": [
+            [
+              "keep",
+              "t",
+              "0",
+              "f"
+            ],
+            [
+              "pass",
+              "f",
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE cto_nv (a int CHECK (a > 0) NOT VALID);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "syntax error at or near \"VALID\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, convalidated FROM pg_constraint WHERE conrelid = 'cto_nv'::regclass;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"cto_nv\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    }
+  ]
+}

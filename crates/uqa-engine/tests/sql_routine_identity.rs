@@ -18,6 +18,8 @@ mod alter_routine;
 mod foreign_table_dependencies;
 #[path = "sql_routine_identity/polymorphic_variadic.rs"]
 mod polymorphic_variadic;
+#[path = "sql_routine_identity/routine_attributes.rs"]
+mod routine_attributes;
 #[path = "sql_routine_identity/routine_cascade.rs"]
 mod routine_cascade;
 #[path = "sql_routine_identity/routine_rename.rs"]
@@ -361,8 +363,9 @@ fn table_routine_view_binding_survives_search_path_changes_and_reopen() {
         .unwrap_err();
     assert_eq!(dependency.sqlstate(), Some("2BP01"), "{dependency}");
     assert!(
-        dependency.to_string().contains("bound_table_view"),
-        "{dependency}"
+        dependency.detail().is_some_and(|detail| detail
+            .contains("view bound_table_view depends on function bound_table(bigint)")),
+        "{dependency:?}"
     );
     assert_eq!(
         scalar(
@@ -451,17 +454,16 @@ fn scalar_view_function_dependencies_are_exact_replaceable_and_drop_atomic() {
         Some("2BP01"),
         "{combined_dependency}"
     );
+    let detail = combined_dependency.detail().unwrap_or_default();
     assert!(
-        combined_dependency
-            .to_string()
-            .contains("generated_dependency.derived"),
-        "{combined_dependency}"
+        detail.contains(
+            "column derived of table generated_dependency depends on function shared_dependency(integer)"
+        ),
+        "{combined_dependency:?}"
     );
     assert!(
-        combined_dependency
-            .to_string()
-            .contains("function_dependency"),
-        "{combined_dependency}"
+        detail.contains("view function_dependency depends on function shared_dependency(integer)"),
+        "{combined_dependency:?}"
     );
 
     engine
@@ -520,8 +522,10 @@ fn view_function_dependency_scan_covers_function_groups_and_nested_query_shapes(
             .unwrap_err();
         assert_eq!(dependency.sqlstate(), Some("2BP01"), "{dependency}");
         assert!(
-            dependency.to_string().contains(expected_view),
-            "{dependency}"
+            dependency
+                .detail()
+                .is_some_and(|detail| detail.contains(&format!("view {expected_view} depends on"))),
+            "{dependency:?}"
         );
     }
 }

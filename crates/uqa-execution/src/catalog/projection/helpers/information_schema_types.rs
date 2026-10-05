@@ -139,54 +139,10 @@ pub fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::Record => "record".into(),
         ColumnType::Range(subtype) => subtype.range_name().into(),
         ColumnType::Multirange(subtype) => subtype.multirange_name().into(),
+        // An array type is named after its element type, and a nested array shares its innermost array type.
         ColumnType::Array(element) => match element.as_ref() {
-            ColumnType::Named(name) => {
-                unreachable!("unresolved declaration type {name} reached catalog projection")
-            }
-            ColumnType::SmallInteger => "_int2".into(),
-            ColumnType::Integer => "_int4".into(),
-            ColumnType::BigInteger => "_int8".into(),
-            ColumnType::Oid => "_oid".into(),
-            ColumnType::Xid => "_xid".into(),
-            ColumnType::Boolean => "_bool".into(),
-            ColumnType::Void => "_void".into(),
-            ColumnType::Text => "_text".into(),
-            ColumnType::RefCursor => "_refcursor".into(),
-            ColumnType::Name => "_name".into(),
-            ColumnType::Uuid => "_uuid".into(),
-            ColumnType::Varchar(_) => "_varchar".into(),
-            ColumnType::Bpchar | ColumnType::Character(_) => "_bpchar".into(),
-            ColumnType::Real => "_float4".into(),
-            ColumnType::DoublePrecision => "_float8".into(),
-            ColumnType::Numeric { .. } => "_numeric".into(),
-            ColumnType::Json => "_json".into(),
-            ColumnType::JsonB => "_jsonb".into(),
-            ColumnType::Bytea => "_bytea".into(),
-            ColumnType::InternalChar => "_char".into(),
-            ColumnType::Regproc => "_regproc".into(),
-            ColumnType::Regprocedure => "_regprocedure".into(),
-            ColumnType::Regclass => "_regclass".into(),
-            ColumnType::Regnamespace => "_regnamespace".into(),
-            ColumnType::Regrole => "_regrole".into(),
-            ColumnType::Regtype => "_regtype".into(),
-            ColumnType::PgNodeTree => "_pg_node_tree".into(),
-            ColumnType::AclItem => "_aclitem".into(),
-            ColumnType::Int2Vector => "_int2vector".into(),
-            ColumnType::OidVector => "_oidvector".into(),
-            ColumnType::AnyArray => "_anyarray".into(),
-            ColumnType::Record => "_record".into(),
-            ColumnType::Date => "_date".into(),
-            ColumnType::Time | ColumnType::TimePrecision(_) => "_time".into(),
-            ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => "_timetz".into(),
-            ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => "_timestamp".into(),
-            ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => "_timestamptz".into(),
-            ColumnType::Interval | ColumnType::IntervalWithFields { .. } => "_interval".into(),
-            ColumnType::Vector(_) => "_vector".into(),
-            ColumnType::Tensor(_) => "_tensor".into(),
-            ColumnType::Domain { name, .. } => format!("_{name}"),
-            ColumnType::Range(subtype) => format!("_{}", subtype.range_name()),
-            ColumnType::Multirange(subtype) => format!("_{}", subtype.multirange_name()),
             ColumnType::Array(_) => info_udt_name(element),
+            element => format!("_{}", info_udt_name(element)),
         },
         ColumnType::Date => "date".into(),
         ColumnType::Time | ColumnType::TimePrecision(_) => "time".into(),
@@ -197,14 +153,16 @@ pub fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::Vector(_) => "vector".into(),
         ColumnType::Tensor(_) => "tensor".into(),
         ColumnType::Domain { name, .. } => name.clone(),
+        ColumnType::Enum(reference) => reference.name.clone(),
+        ColumnType::Composite(reference) => reference.name.clone(),
     }
 }
 
 pub fn info_data_type(ty: &ColumnType) -> &str {
-    if matches!(ty, ColumnType::Array(_)) {
-        "ARRAY"
-    } else {
-        column_type_name(ty)
+    match ty {
+        ColumnType::Array(_) => "ARRAY",
+        ColumnType::Enum(_) | ColumnType::Composite(_) => "USER-DEFINED",
+        _ => column_type_name(ty),
     }
 }
 

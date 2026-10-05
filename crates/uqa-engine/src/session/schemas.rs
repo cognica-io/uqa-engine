@@ -124,6 +124,18 @@ impl Engine {
                 .read()
                 .values()
                 .any(|domain| domain.identity.schema == schema)
+            && !self
+                .durable
+                .enums
+                .read()
+                .values()
+                .any(|definition| definition.identity.schema == schema)
+            && !self
+                .durable
+                .composites
+                .read()
+                .values()
+                .any(|definition| definition.identity.schema == schema)
             && !self.durable.sql_user_functions.read().keys().any(|name| {
                 uqa_sql::schema::namespaces::removal::routine_name_occupies_schema(name, schema)
             })

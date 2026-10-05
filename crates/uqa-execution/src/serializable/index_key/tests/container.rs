@@ -296,6 +296,7 @@ fn declared_container_domains_and_resource_errors_keep_original_control() {
             schema: "public".into(),
             name: "container_value".into(),
             oid: 42_002,
+            array_oid: None,
             base: Box::new(ty),
         };
         assert_eq!(IndexDomain::from_column_type(&alias), Some(domain));

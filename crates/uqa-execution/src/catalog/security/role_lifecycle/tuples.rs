@@ -11,11 +11,8 @@ use crate::{
     catalog::security::roles::locking::ROLE_CATALOG_CLASS_ID,
     row_locks::{shared_objects::SharedCatalogLock, RelationLockMode},
 };
-use std::collections::BTreeSet;
 use uqa_sql::{
     catalog::roles::{
-        definition,
-        dependencies::ensure_roles_have_no_object_dependencies,
         identity::{RoleBinding, RoleSubject},
         tuple::RoleTuple,
     },
@@ -50,14 +47,21 @@ pub(super) fn prepare_drop(
             sqlstate: "XX000".into(),
             message: format!("could not find tuple for role {}", bound.oid),
         })?;
-    let identities = BTreeSet::from([role.identity()]);
-    let memberships = context.analysis.roles.role_memberships();
-    definition::ensure_no_grantor_dependencies(&memberships, &identities)?;
-    ensure_roles_have_no_object_dependencies(
-        context.dependencies,
-        std::slice::from_ref(&role.name),
-        &roles,
-    )?;
+    // `checkSharedDependencies`, once the memberships that name the role are gone.
+    if let Some(detail) = context
+        .dependencies
+        .role_dependency_detail(role.identity())?
+    {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "2BP01".into(),
+            message: format!(
+                "role \"{}\" cannot be dropped because some objects depend on it",
+                role.name,
+            ),
+            detail: Some(detail),
+            hint: None,
+        });
+    }
     if context
         .temporary_roles
         .peer_temporary_role_reference(bound.oid)?

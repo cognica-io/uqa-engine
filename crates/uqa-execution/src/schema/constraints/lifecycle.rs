@@ -68,8 +68,12 @@ pub fn add_foreign_key_constraint(
         .constraint_names()
         .ensure_available(table, constraint.name.as_deref())?;
     constraints.foreign_keys.push(constraint);
+    let binding = context.publication.bindings.bindings.binding_scope()?;
     uqa_sql::schema::generated::prepare_generated_columns(
-        context.publication.bindings.schema,
+        &uqa_sql::schema::SchemaBindingContext {
+            catalog: context.publication.bindings.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut columns,
         &constraints.foreign_keys,
@@ -116,26 +120,10 @@ pub fn set_not_null_constraint(
     inherited_name: Option<String>,
 ) -> Result<(), SQLError> {
     let (mut columns, constraints) = table_constraint_state(context, table)?;
-    let relation = uqa_core::RelationIdentity::from_legacy_name(table)
-        .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
-    if uqa_sql::schema::columns::POSTGRES_SYSTEM_COLUMNS.contains(&column) {
-        return Err(constraint_error(
-            "0A000",
-            format!("cannot alter system column \"{column}\""),
-        ));
-    }
     let definition = columns
         .iter_mut()
         .find(|definition| definition.name == column)
-        .ok_or_else(|| {
-            constraint_error(
-                "42703",
-                format!(
-                    "column \"{column}\" of relation \"{}\" does not exist",
-                    relation.name,
-                ),
-            )
-        })?;
+        .ok_or_else(|| uqa_sql::schema::columns::missing_altered_column(table, column))?;
     if definition.not_null {
         if recurse {
             ensure_not_null_inheritable(table, definition, "0A000")?;

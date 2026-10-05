@@ -19,6 +19,8 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             sql_user_functions: Arc::default(),
             role_memberships: Arc::default(),
             domains: Arc::default(),
+            enums: Arc::default(),
+            composites: Arc::default(),
             graphs: Arc::default(),
             views: Arc::default(),
             catalog_indexes: Arc::default(),
@@ -26,6 +28,8 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             schemas: Arc::default(),
             sequences: Arc::default(),
             sequence_object_ids: Arc::default(),
+            sequence_catalog_oids: Arc::default(),
+            graph_catalog_oids: Arc::default(),
             sequence_security: Arc::default(),
             foreign_table_security: Arc::default(),
             system_relation_security: Arc::default(),
@@ -33,6 +37,7 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             triggers: Arc::default(),
             rules: Arc::default(),
         },
+        temporary_namespace: None,
     })
 }
 

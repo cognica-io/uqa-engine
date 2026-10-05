@@ -144,6 +144,7 @@ fn direct_schema_mutations_reject_missing_relations_columns_and_duplicates() {
         check_is_local: true,
         check_object_id: None,
         check_catalog_oid: None,
+        default_catalog_oid: None,
         references: None,
     };
 
@@ -290,6 +291,7 @@ fn tensor_backfill_reports_inner_dimension_mismatch_and_allows_null() {
         check_is_local: true,
         check_object_id: None,
         check_catalog_oid: None,
+        default_catalog_oid: None,
         references: None,
     };
 

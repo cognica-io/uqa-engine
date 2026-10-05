@@ -30,6 +30,7 @@ fn controlled_assignment_preserves_character_array_numeric_and_vector_results() 
                 schema: "public".into(),
                 name: "number".into(),
                 oid: 12,
+                array_oid: None,
                 base: Box::new(ColumnType::Integer),
             },
             Value::Int(5),

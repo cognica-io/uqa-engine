@@ -12,7 +12,9 @@ mod legacy_vector;
 mod temporal;
 
 use super::conversion::value_to_string_with_control;
-use super::{out_of_range, ArrayValue, Result, SQLError, TemporalValue, Value};
+use super::{
+    datetime_out_of_range, out_of_range, ArrayValue, Result, SQLError, TemporalValue, Value,
+};
 use crate::ast::RangeSubtype;
 use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
 
@@ -230,6 +232,20 @@ pub fn cast_value_from_with_control(
             return text_value(text, false, control);
         }
         "uuid" => return cast_uuid(v, control),
+        // Every row is a record; `record_in` cannot read text without a composite type to read it as.
+        "record" => {
+            return match v {
+                Value::Row(_) | Value::Record(_) => Ok(control.copy_value(v)?),
+                Value::Str(_) | Value::FixedChar(_) => Err(SQLError::Routine {
+                    sqlstate: "0A000".into(),
+                    message: "input of anonymous composite types is not implemented".into(),
+                }),
+                _ => Err(undefined_cast(
+                    &canonical_cast_source_with_control(source_ty, v, control)?,
+                    "record",
+                )),
+            }
+        }
         "varchar" | "character varying" => {
             let text = cast_text(v, source_ty, control)?;
             let Some(modifier) = modifier else {
@@ -482,16 +498,18 @@ pub fn negate_value_with_control(
         ) => Ok(Value::Temporal(TemporalValue::Interval {
             months: months
                 .checked_neg()
-                .ok_or_else(|| out_of_range("interval"))?,
-            days: days.checked_neg().ok_or_else(|| out_of_range("interval"))?,
+                .ok_or_else(|| datetime_out_of_range("interval"))?,
+            days: days
+                .checked_neg()
+                .ok_or_else(|| datetime_out_of_range("interval"))?,
             micros: micros
                 .checked_neg()
-                .ok_or_else(|| out_of_range("interval"))?,
+                .ok_or_else(|| datetime_out_of_range("interval"))?,
         })),
-        _ => Err(SQLError::TypeMismatch(format!(
-            "operator does not exist: - {}",
-            source.as_str()
-        ))),
+        _ => Err(crate::type_resolution::undefined_prefix_operator(
+            "-",
+            postgres_type_display_name(source.as_str()),
+        )),
     }?;
     Ok(control.finish(result, control.empty_reservation())?)
 }
@@ -513,6 +531,7 @@ fn canonical_cast_source_with_control(
         Value::Json(_) => "json",
         Value::JsonB(_) => "jsonb",
         Value::Array(_) => "anyarray",
+        Value::Enum(_) => "anyenum",
         Value::LegacyVector(vector) => vector.kind().type_name(),
         Value::List(_) => "anyarray",
         Value::Row(_) | Value::Record(_) => "record",
@@ -652,6 +671,38 @@ pub(super) fn cast_integer(
     Ok(Value::Int(n))
 }
 
+/// `boolin`: `PostgreSQL`'s `parse_bool` over trimmed text, accepting case-insensitive prefixes of `true`, `false`, `yes` and `no`, `on`, at least two letters of `off`, and `1` and `0`.
+#[must_use]
+pub fn parse_boolean_input(text: &str) -> Option<bool> {
+    let text = text.trim();
+    let matches_prefix = |word: &str| {
+        !text.is_empty()
+            && word
+                .get(..text.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(text))
+    };
+    if matches_prefix("true") || matches_prefix("yes") || text == "1" {
+        Some(true)
+    } else if matches_prefix("false") || matches_prefix("no") || text == "0" {
+        Some(false)
+    } else if text.eq_ignore_ascii_case("on") {
+        Some(true)
+    } else if matches_prefix("off") && text.len() >= 2 {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// The error `boolin` reports for text that is not a boolean.
+#[must_use]
+pub fn invalid_boolean_input(text: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22P02".into(),
+        message: format!("invalid input syntax for type boolean: \"{text}\""),
+    }
+}
+
 /// Text read as `PostgreSQL`'s `int2in`, `int4in` and `int8in` read it, whose out-of-range error names the text and the type.
 fn integer_from_text(text: &str, target: &str) -> Result<Value> {
     use crate::expr::integer_input::{parse_int8, IntegerInputError};
@@ -687,30 +738,9 @@ pub(super) fn cast_boolean(v: &Value) -> Result<Value> {
         Value::Int(n) => Ok(Value::Bool(*n != 0)),
         Value::Float(f) => Ok(Value::Bool(*f != 0.0)),
         Value::Decimal(d) => Ok(Value::Bool(!d.is_zero())),
-        Value::Str(s) | Value::FixedChar(s) => {
-            let text = s.trim();
-            let matches_prefix = |word: &str| {
-                !text.is_empty()
-                    && word
-                        .get(..text.len())
-                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(text))
-            };
-            let value = if matches_prefix("true") || matches_prefix("yes") || text == "1" {
-                Some(true)
-            } else if matches_prefix("false") || matches_prefix("no") || text == "0" {
-                Some(false)
-            } else if text.eq_ignore_ascii_case("on") {
-                Some(true)
-            } else if matches_prefix("off") && text.len() >= 2 {
-                Some(false)
-            } else {
-                None
-            };
-            value.map(Value::Bool).ok_or_else(|| SQLError::Routine {
-                sqlstate: "22P02".into(),
-                message: format!("invalid input syntax for type boolean: \"{s}\""),
-            })
-        }
+        Value::Str(s) | Value::FixedChar(s) => parse_boolean_input(s)
+            .map(Value::Bool)
+            .ok_or_else(|| invalid_boolean_input(s)),
         other => Err(SQLError::TypeMismatch(format!(
             "cannot cast {other:?} to boolean"
         ))),

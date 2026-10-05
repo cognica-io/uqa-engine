@@ -165,10 +165,10 @@ fn scalar_null_and_error_precedence_stays_shared_without_admitting_copies() {
     assert!(eval_math_functions_with_control("format", &[text("%s")], &control).is_none());
     assert!(eval_math_functions_with_control("random", &[], &control).is_none());
     assert_eq!(
-        eval_math_functions("format", &[text("%s:%d"), Value::Bool(true), Value::Int(7)])
+        eval_math_functions("format", &[text("%s:%L"), Value::Bool(true), Value::Int(7)])
             .unwrap()
             .unwrap(),
-        text("t:7")
+        text("t:'7'")
     );
     assert_eq!(budget.used(), 0);
 }

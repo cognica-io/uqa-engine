@@ -8,10 +8,16 @@ use serde::{Deserialize, Serialize};
 
 use super::{IntervalFields, RangeSubtype};
 
+mod display;
+mod identity;
 mod modifiers;
 mod names;
 mod parsing;
 mod production;
+mod references;
+
+pub use display::TypeDisplayScope;
+pub use identity::{UserTypeIdentity, UserTypeKind};
 
 pub(crate) use modifiers::split_type_modifier_with_control;
 
@@ -123,8 +129,15 @@ pub enum ColumnType {
         schema: String,
         name: String,
         oid: u32,
+        /// The OID of the domain's generated array type, allocated with the domain. Domains created before array OIDs were recorded derive it from the domain OID.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        array_oid: Option<u32>,
         base: Box<ColumnType>,
     },
+    /// A user-defined enum type bound by catalog identity.
+    Enum(super::EnumTypeReference),
+    /// A composite type bound by catalog identity: a standalone composite type or a relation's row type.
+    Composite(super::CompositeTypeReference),
 }
 
 pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str> {

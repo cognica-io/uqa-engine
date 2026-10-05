@@ -15,6 +15,7 @@ pub fn clear_foreign_column_default(columns: &mut [ColumnDef], column_name: &str
     let Some(column) = columns.iter_mut().find(|column| column.name == column_name) else {
         return false;
     };
+    column.default_catalog_oid = None;
     column.default.take().is_some()
 }
 

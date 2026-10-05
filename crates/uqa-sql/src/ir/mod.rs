@@ -13,7 +13,10 @@ pub use call_arguments::{
     scalar_call_arguments_with_control, validate_scalar_call_arguments, ScalarCallArgument,
 };
 
-use crate::ast::{BinaryOp, ColumnType, FrameMode, FunctionBinding, InternalColumnRef, NullsOrder};
+use crate::ast::{
+    BinaryOp, ColumnType, FrameExclusion, FrameMode, FunctionBinding, InternalColumnRef,
+    NullsOrder, WindowCallModifiers,
+};
 use uqa_core::Value;
 
 /// Index into the query children owned by the enclosing expression plan.
@@ -80,10 +83,15 @@ pub enum ScalarExpr {
         list: Vec<Self>,
         negated: bool,
     },
+    /// A window function call; `filter` is an aggregate's `FILTER (WHERE ...)` condition.
     WindowCall {
         name: String,
         args: Vec<Self>,
         spec: ScalarWindowSpec,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter: Option<Box<Self>>,
+        #[serde(default, skip_serializing_if = "WindowCallModifiers::is_empty")]
+        modifiers: WindowCallModifiers,
     },
     Case {
         base: Option<Box<Self>>,
@@ -125,6 +133,16 @@ pub struct ScalarWindowFrame {
     pub mode: FrameMode,
     pub start: ScalarFrameBound,
     pub end: ScalarFrameBound,
+    /// Whether the frame was written `BETWEEN start AND end`; see [`crate::ast::WindowFrame::between`].
+    #[serde(default = "frame_written_between")]
+    pub between: bool,
+    #[serde(default, skip_serializing_if = "FrameExclusion::is_no_others")]
+    pub exclusion: FrameExclusion,
+}
+
+/// Frames recorded before the spelling was kept were deparsed with `BETWEEN`.
+const fn frame_written_between() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

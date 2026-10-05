@@ -45,5 +45,17 @@ pub fn reserve_catalog_oid(
     }
 }
 
+/// Reserve the next OID of the database's counter that the catalog does not hold, as `GetNewOidWithIndex` skips an OID in use after the counter wraps.
+pub fn reserve_new_catalog_oid(
+    session: &dyn SharedObjectLockSession,
+    class_id: u32,
+    kind: &str,
+    in_use: impl FnMut(i64) -> Result<bool, SQLError>,
+) -> Result<i64, SQLError> {
+    reserve_catalog_oid(session, class_id, kind, in_use, || {
+        session.next_catalog_oid().map(i64::from)
+    })
+}
+
 #[cfg(test)]
 mod tests;

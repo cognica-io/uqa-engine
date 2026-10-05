@@ -6,11 +6,15 @@
 
 //! Immutable catalog inputs and runtime catalog projections.
 
+pub mod composite_type;
 pub mod domain;
+pub mod enum_type;
 pub mod foreign;
 pub mod identity;
 pub mod security;
 pub mod sequence;
+pub mod type_identity_restoration;
+pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
@@ -25,6 +29,7 @@ pub use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolutio
 use view::StoredView;
 mod analysis;
 pub mod graph;
+pub mod graph_oids;
 mod graph_reads;
 pub mod namespaces;
 mod read;
@@ -47,12 +52,16 @@ pub struct CatalogReadView {
 pub struct CatalogReadSnapshot {
     pub tables: BTreeMap<uqa_core::RelationIdentity, CatalogTableSnapshot>,
     pub definitions: CatalogDefinitionSnapshot,
+    /// The session's temporary namespace once its first temporary object created it.
+    pub temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespace>,
 }
 
 /// Immutable table-definition fields used by binding and catalog projection.
 #[derive(Clone)]
 pub struct CatalogTableSnapshot {
     pub object_id: [u8; 16],
+    /// The table's public OIDs, recorded or derived from its identity.
+    pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
     pub security: Arc<crate::catalog::security::BoundTableSecurity>,
     pub columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns_declared: bool,
@@ -94,6 +103,8 @@ pub struct CatalogDefinitionSnapshot {
     >,
 
     pub domains: Arc<BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>>,
+    pub enums: Arc<enum_type::EnumRegistry>,
+    pub composites: Arc<composite_type::CompositeRegistry>,
     pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
@@ -101,6 +112,10 @@ pub struct CatalogDefinitionSnapshot {
     pub schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
+    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
+    pub sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
+    /// The OIDs graphs and their labels recorded when they were created, by graph name.
+    pub graph_catalog_oids: Arc<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
     pub sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub system_relation_security:

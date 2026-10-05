@@ -6,6 +6,7 @@
 
 //! Routine invocation, scoped state, interpreter entry, and physical result shaping.
 mod anonymous;
+pub mod bodies;
 pub mod context;
 mod depth;
 mod execution;

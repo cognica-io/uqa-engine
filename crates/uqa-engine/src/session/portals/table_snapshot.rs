@@ -181,6 +181,7 @@ impl Engine {
             doc_count_dirty: std::sync::atomic::AtomicBool::new(doc_count_dirty),
             persistence: metadata.persistence,
             on_commit: metadata.on_commit,
+            catalog_oids: metadata.recorded_catalog_oids(),
         })
     }
 }

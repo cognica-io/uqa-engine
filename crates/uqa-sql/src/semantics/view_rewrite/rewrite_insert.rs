@@ -5,15 +5,16 @@
 //
 
 use super::{
-    active_unconditional_instead_rule, add_check_option, automatic_view_layer,
-    duplicate_assignment, insert_conflict_subquery_ids, insert_input_width,
-    instead_of_trigger_definition, not_automatically_updatable, preserve_view_rule_returning,
-    record_view_rule_relation, returning_subquery_ids, rewrite_correlated_dml_context,
-    rewrite_existing_view_checks, rewrite_returning, rewrite_target_expression,
-    validate_direct_view_rule_path, validate_insert_expressions, validate_insert_targets,
-    validate_mapped_columns, validate_public_insert_contract, validate_public_view_targets,
-    view_updatability, writable_column, BTreeSet, ConflictActionPlan, CorrelatedDmlContext,
-    ExpressionScope, InsertPlan, SQLError, TriggerEvent, ViewRewriteContext, ViewRuleInsertPlan,
+    add_check_option, canonical_view_name, duplicate_assignment, insert_conflict_subquery_ids,
+    insert_input_width, instead_of_trigger_definition, next_rewritten_layer,
+    preserve_view_rule_returning, record_view_rule_relation, returning_subquery_ids,
+    rewritable_layer, rewrite_correlated_dml_context, rewrite_existing_view_checks,
+    rewrite_returning, rewrite_target_expression, validate_direct_view_rule_path,
+    validate_insert_expressions, validate_insert_targets, validate_mapped_columns,
+    validate_public_insert_contract, validate_public_view_targets, validate_writable_columns,
+    view_not_updatable, writable_column, BTreeSet, ColumnWrite, ConflictActionPlan,
+    CorrelatedDmlContext, ExpressionScope, InsertPlan, LayerPrivileges, NotUpdatableReason,
+    SQLError, TriggerEvent, ViewCommand, ViewRewriteContext, ViewRuleInsertPlan,
 };
 
 #[expect(
@@ -35,26 +36,31 @@ pub fn rewrite_insert_to_base(
             .map(|target| target.column.as_str()),
     )?;
     validate_public_insert_contract(services, statement)?;
-    let Some(initial_layer) = automatic_view_layer(services, &statement.table)? else {
-        return Err(not_automatically_updatable(&statement.table, "INSERT"));
-    };
-    validate_insert_targets(&initial_layer, statement)?;
+    let view = canonical_view_name(services, &statement.table)?;
     validate_direct_view_rule_path(
         services,
-        &initial_layer.canonical_name,
+        &view,
         crate::ast::RuleEvent::Insert,
-        "INSERT",
+        ViewCommand::Insert,
     )?;
-    if !view_updatability(services, &statement.table)?
-        .automatic
-        .insertable
-    {
-        return Err(not_automatically_updatable(&statement.table, "INSERT"));
+    let initial_layer = rewritable_layer(services, &view, ViewCommand::Insert)?;
+    if !initial_layer.has_writable_column() {
+        return Err(view_not_updatable(
+            &view,
+            ViewCommand::Insert,
+            NotUpdatableReason::NoUpdatableColumns,
+        ));
     }
+    validate_insert_targets(&initial_layer, statement)?;
+    let mut initial_layer = Some(initial_layer);
     let mut plan = statement.clone();
-    let next_privilege_subject =
-        crate::semantics::view_privileges::ensure_insert(services.authorization, &plan)?;
-    plan.target_privilege_subject = Some(next_privilege_subject);
+    let mut privileges = LayerPrivileges::new();
+    plan.target_privilege_subject = Some(privileges.check(
+        services.authorization,
+        &plan.table,
+        plan.target_privilege_subject.as_ref(),
+        || crate::semantics::view_privileges::ensure_insert(services.authorization, &plan),
+    )?);
     let mut implicit_width = if statement.columns.is_empty() {
         Some(insert_input_width(
             services,
@@ -69,35 +75,29 @@ pub fn rewrite_insert_to_base(
     let mut visited = BTreeSet::new();
     let mut rewrite_suppressed = false;
     loop {
-        let Some(layer) = automatic_view_layer(services, &plan.table)? else {
-            if active_unconditional_instead_rule(
-                services,
-                &plan.table,
-                crate::ast::RuleEvent::Insert,
-            )? {
-                break;
-            }
-            return Err(not_automatically_updatable(&plan.table, "INSERT"));
+        // An underlying view with an INSTEAD OF trigger ends the rewrite, since `RewriteQuery` rewrites only a view without one: the trigger performs the INSERT on that view.
+        if !visited.is_empty()
+            && !rewrite_suppressed
+            && instead_of_trigger_definition(services, &plan.table, TriggerEvent::Insert)?
+        {
+            break;
+        }
+        let Some(layer) = next_rewritten_layer(
+            services,
+            &plan.table,
+            &mut initial_layer,
+            rewrite_suppressed,
+            crate::ast::RuleEvent::Insert,
+            ViewCommand::Insert,
+        )?
+        else {
+            break;
         };
         if !visited.insert(layer.canonical_name.clone()) {
             return Err(SQLError::Internal(format!(
                 "cycle while rewriting automatically updatable view `{}`",
                 layer.canonical_name
             )));
-        }
-        if !rewrite_suppressed {
-            validate_direct_view_rule_path(
-                services,
-                &layer.canonical_name,
-                crate::ast::RuleEvent::Insert,
-                "INSERT",
-            )?;
-        }
-        if !rewrite_suppressed
-            && visited.len() > 1
-            && instead_of_trigger_definition(services, &layer.canonical_name, TriggerEvent::Insert)?
-        {
-            return Err(not_automatically_updatable(&layer.canonical_name, "INSERT"));
         }
         let has_view_rules = if rewrite_suppressed {
             false
@@ -116,9 +116,19 @@ pub fn rewrite_insert_to_base(
                 crate::ast::RuleEvent::Insert,
             )?;
         if visited.len() > 1 && !rewrite_suppressed && !layer_suppresses {
-            let next_privilege_subject =
-                crate::semantics::view_privileges::ensure_insert(services.authorization, &plan)?;
-            plan.target_privilege_subject = Some(next_privilege_subject);
+            if !layer.has_writable_column() {
+                return Err(view_not_updatable(
+                    &layer.canonical_name,
+                    ViewCommand::Insert,
+                    NotUpdatableReason::NoUpdatableColumns,
+                ));
+            }
+            plan.target_privilege_subject = Some(privileges.check(
+                services.authorization,
+                &plan.table,
+                plan.target_privilege_subject.as_ref(),
+                || crate::semantics::view_privileges::ensure_insert(services.authorization, &plan),
+            )?);
         }
         if has_view_rules
             && super::context::relation_has_returning_provider(
@@ -185,11 +195,28 @@ pub fn rewrite_insert_to_base(
         let columns = if rewrite_suppressed || layer_suppresses {
             supplied_columns.clone()
         } else {
+            let conflict_updates = match plan.on_conflict.as_ref().map(|conflict| &conflict.action)
+            {
+                Some(ConflictActionPlan::Update { assignments, .. }) => assignments.as_slice(),
+                _ => &[],
+            };
+            validate_writable_columns(
+                &layer,
+                supplied_columns
+                    .iter()
+                    .map(|target| target.column.as_str())
+                    .chain(
+                        conflict_updates
+                            .iter()
+                            .map(|assignment| assignment.target.column.as_str()),
+                    ),
+                ColumnWrite::Insert,
+            )?;
             supplied_columns
                 .clone()
                 .into_iter()
                 .map(|mut target| {
-                    target.column = writable_column(&layer, &target.column, "INSERT")?;
+                    target.column = writable_column(&layer, &target.column, ColumnWrite::Insert)?;
                     Ok::<_, SQLError>(target)
                 })
                 .collect::<Result<Vec<_>, _>>()?
@@ -227,7 +254,7 @@ pub fn rewrite_insert_to_base(
             conflict.conflict_columns = conflict
                 .conflict_columns
                 .iter()
-                .map(|column| writable_column(&layer, column, "INSERT"))
+                .map(|column| writable_column(&layer, column, ColumnWrite::Insert))
                 .collect::<Result<Vec<_>, _>>()?;
             if let ConflictActionPlan::Update {
                 assignments,
@@ -242,7 +269,7 @@ pub fn rewrite_insert_to_base(
                 };
                 for assignment in assignments.iter_mut() {
                     assignment.target.column =
-                        writable_column(&layer, &assignment.target.column, "UPDATE")?;
+                        writable_column(&layer, &assignment.target.column, ColumnWrite::Insert)?;
                     for expression in assignment.expressions_mut() {
                         rewrite_target_expression(
                             services,
@@ -309,5 +336,6 @@ pub fn rewrite_insert_to_base(
             .map(|target| target.column.clone())
             .collect();
     }
+    privileges.finish()?;
     Ok(plan)
 }

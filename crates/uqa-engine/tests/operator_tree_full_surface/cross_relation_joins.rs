@@ -162,6 +162,10 @@ fn both_operator_join_relations_are_tracked_as_view_dependencies() {
 
     for table in ["docs", "archive_docs"] {
         let error = engine.sql(&format!("DROP TABLE {table}"), &[]).unwrap_err();
-        assert!(error.to_string().contains("public.doc_pairs"), "{error}");
+        assert_eq!(
+            error.detail(),
+            Some(format!("view doc_pairs depends on table {table}").as_str()),
+            "{error:?}"
+        );
     }
 }

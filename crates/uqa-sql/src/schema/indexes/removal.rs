@@ -5,12 +5,7 @@
 //
 
 //! DROP INDEX names, constraint dependencies and stored field references.
-use crate::{
-    ast::{ColumnType, ForeignKey},
-    catalog::resolution::RelationResolution,
-    SQLError,
-};
-use std::collections::BTreeSet;
+use crate::{ast::ColumnType, catalog::resolution::RelationResolution, SQLError};
 use uqa_core::RelationIdentity;
 
 pub fn resolve_drop_index_name(
@@ -21,10 +16,14 @@ pub fn resolve_drop_index_name(
 ) -> Result<Option<String>, SQLError> {
     match resolution {
         RelationResolution::Found(canonical, "index") => Ok(Some(canonical)),
-        RelationResolution::Found(_, _) => Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("\"{requested}\" is not an index"),
-        }),
+        RelationResolution::Found(_, found) => {
+            let local = uqa_core::RelationIdentity::parse_reference(requested)
+                .map_err(SQLError::Internal)?
+                .1;
+            Err(crate::schema::removal::wrong_drop_kind_error(
+                &local, "index", found,
+            ))
+        }
         RelationResolution::MissingSchema(schema) if if_exists => {
             notice(&format!("schema \"{schema}\" does not exist, skipping"));
             Ok(None)
@@ -51,22 +50,6 @@ pub fn resolve_drop_index_name(
         }
     }
 }
-pub fn ensure_index_not_constraint_owned(
-    relation: &RelationIdentity,
-    table: &str,
-    constraint_owned: bool,
-) -> Result<(), SQLError> {
-    if constraint_owned {
-        return Err(SQLError::Routine {
-            sqlstate: "2BP01".into(),
-            message: format!(
-                "cannot drop index {} because constraint {} on table {} requires it",
-                relation.name, relation.name, table
-            ),
-        });
-    }
-    Ok(())
-}
 pub fn catalog_index_columns(
     relation: &RelationIdentity,
     columns_json: &str,
@@ -80,30 +63,6 @@ pub fn catalog_index_columns(
     })
 }
 
-pub fn collect_index_dependents(
-    index_name: &str,
-    index_id: [u8; 16],
-    referrers: Vec<(String, ForeignKey)>,
-    cascade: bool,
-    dependents: &mut BTreeSet<(String, String)>,
-) -> Result<(), SQLError> {
-    for (table, foreign_key) in referrers {
-        if foreign_key.referenced_index != Some(index_id) {
-            continue;
-        }
-        let name = foreign_key
-            .name
-            .ok_or_else(|| SQLError::Internal("unnamed foreign-key dependency".into()))?;
-        if !cascade {
-            return Err(SQLError::Routine {
-                    sqlstate: "2BP01".into(),
-                    message: format!("cannot drop index {index_name} because constraint {name} on table {table} depends on it"),
-                });
-        }
-        dependents.insert((table, name));
-    }
-    Ok(())
-}
 /// Borrowed catalog metadata used to detect remaining references to a physical text field.
 pub struct IndexRemovalCandidate<'a> {
     pub relation: &'a RelationIdentity,

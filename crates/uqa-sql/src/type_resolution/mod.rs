@@ -11,7 +11,6 @@ use crate::{SQLError, SQLParam};
 
 use crate::schema::ScalarTypeSchema;
 use crate::{RowSchema, ScalarExpr};
-#[cfg(test)]
 use uqa_core::Value;
 
 mod array_transform;
@@ -23,7 +22,9 @@ pub(crate) use common::array_element_type;
 pub(crate) use common::value_type;
 pub(crate) use common::value_type_with_control;
 mod containment;
+pub(crate) mod enums;
 mod equality;
+pub(crate) mod field_selection;
 mod fixed_builtin;
 mod functions;
 mod gamma;
@@ -33,31 +34,41 @@ mod introspection;
 mod json_strip;
 mod length;
 mod md5;
+mod operator_errors;
+pub use operator_errors::{
+    undefined_binary_operator, undefined_binary_operator_named, undefined_prefix_operator,
+};
 mod operators;
 mod overload_resolution;
 mod qualified_column;
 mod range;
+mod range_offsets;
+pub use range_offsets::range_frame_offset_type;
 mod reverse;
 mod routine_signature;
 mod scalar_input;
+mod stored_constants;
 pub use scalar_input::{
     scalar_cast_source_type_name_with_control, scalar_integer_operation_width,
     scalar_integer_operation_width_with_control, scalar_operand_type_name,
     scalar_operand_type_name_with_control,
 };
+pub use stored_constants::{
+    contains_unknown_literal, fold_stored_enum_constants, stored_enum_constant,
+};
 mod string_binary;
 
 pub(crate) use cast_compatibility::cast_catalog_entry_with_control;
 pub use cast_compatibility::{
-    assignment_type_compatible, cast_catalog_entry, explicit_type_compatible, CastCatalogEntry,
-    CastMethod,
+    assignment_type_compatible, cast_catalog_entry, cast_volatility, explicit_type_compatible,
+    CastCatalogEntry, CastMethod,
 };
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
     common_context_expression_type, common_type, effective_overload_argument_type,
     effective_overload_argument_type_with_params, function_call_argument_signature,
-    values_column_types, FunctionCallArgumentSignature,
+    select_common_input_type, values_column_types, FunctionCallArgumentSignature,
 };
 pub use equality::{
     equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,
@@ -67,12 +78,14 @@ pub use fixed_builtin::{
     fixed_builtin_return_type, fixed_builtin_return_type_with_control,
     is_function as is_fixed_builtin, resolve_fixed_builtin_call, ResolvedFixedBuiltinCall,
 };
-pub use functions::{builtin_function_argument_targets, builtin_function_type};
+pub use functions::{
+    builtin_function_argument_targets, builtin_function_type, builtin_function_type_with_resolver,
+};
 #[doc(hidden)]
 pub use gamma::{resolve_gamma_overload, ResolvedGammaOverload};
 pub use introspection::{
     bind_type_introspection, bind_type_introspection_with_control,
-    bind_type_introspection_with_resolver,
+    bind_type_introspection_with_resolver, validate_catalog_literals,
 };
 #[doc(hidden)]
 pub use json_strip::{resolve_json_strip_overload, ResolvedJsonStripOverload};
@@ -92,10 +105,10 @@ pub use operators::{
 pub use overload_resolution::{
     builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
     canonical_routine_type_name, function_resolution_error, match_builtin_function_overload,
-    match_function_signature, rank_function_matches, resolve_local_builtin_overload,
-    routine_type_accepts_implicit_cast, routine_type_category, routine_type_is_preferred,
-    FunctionParameterDescriptor, MatchedBuiltinFunction, MatchedFunctionSignature,
-    RankedFunctionMatch,
+    match_function_signature, parse_enum_type_identity, rank_function_matches,
+    resolve_local_builtin_overload, routine_type_accepts_implicit_cast, routine_type_category,
+    routine_type_is_preferred, FunctionParameterDescriptor, MatchedBuiltinFunction,
+    MatchedFunctionSignature, RankedFunctionMatch,
 };
 #[doc(hidden)]
 pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
@@ -122,6 +135,21 @@ pub trait FunctionTypeResolver: Send + Sync {
     /// built-in [`ColumnType::from_sql_name`] mapping, such as a domain.
     fn resolve_type_name(&self, _name: &str) -> Result<Option<ColumnType>, SQLError> {
         Ok(None)
+    }
+
+    /// Enum labels of the binding catalog. Binding converts `unknown` literals coerced to an enum type with them, as `PostgreSQL` parse analysis calls the type's input function.
+    fn enum_labels(&self) -> Option<&dyn crate::expr::enums::EnumLabelCatalog> {
+        None
+    }
+
+    /// Composite type attributes of the binding catalog, which type field selections and row coercions.
+    fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
+        None
+    }
+
+    /// Require the current user's `USAGE` privilege on a type that a relation column, domain or routine declares, as `object_aclcheck(TypeRelationId, ..., ACL_USAGE)` and `aclcheck_error_type` require it; see [`crate::catalog::security::type_inquiry::usage_governing_type`]. A resolver without roles and type privileges has nothing to deny.
+    fn require_type_usage(&self, _ty: &ColumnType) -> Result<(), SQLError> {
+        Ok(())
     }
 
     fn resolve_function_type(
@@ -244,6 +272,24 @@ pub fn scalar_type_with_resolver(
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ColumnType>, SQLError> {
     scalar_type_inner(expression, schema, params, Some(resolver))
+}
+
+/// A bare string or NULL literal, which `PostgreSQL` types as `unknown` until its context resolves it.
+pub fn is_unknown_literal(expression: &ScalarExpr) -> bool {
+    matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null))
+}
+
+/// The type of an assignment's source before coercion to its destination. A bare string or NULL literal has none: `transformAssignedExpr` and `transformAssignmentIndirection` convert it with the destination type's input function instead of checking a source type, so `'7'` assigns to an integer array element and `'abc'` fails as integer input.
+pub fn assignment_source_type(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<ColumnType>, SQLError> {
+    if is_unknown_literal(expression) {
+        return Ok(None);
+    }
+    scalar_type_with_resolver(expression, schema, params, resolver)
 }
 
 pub(super) fn scalar_type_inner(

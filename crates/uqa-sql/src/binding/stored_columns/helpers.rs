@@ -161,8 +161,17 @@ pub(super) fn projection_output_names(projections: &[crate::ast::Projection]) ->
                 .clone()
                 .unwrap_or_else(|| match &projection.expr {
                     Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => name.clone(),
-                    Expr::Func { name, binding, .. } => {
-                        crate::semantics::function_projection_label(name, binding.as_ref())
+                    Expr::Func {
+                        name,
+                        binding,
+                        args,
+                        ..
+                    } => crate::semantics::field_selection_label(binding.as_ref(), args.get(1))
+                        .unwrap_or_else(|| {
+                            crate::semantics::function_projection_label(name, binding.as_ref())
+                        }),
+                    Expr::WindowCall { name, .. } => {
+                        crate::semantics::function_projection_label(name, None)
                     }
                     _ => "?column?".into(),
                 })

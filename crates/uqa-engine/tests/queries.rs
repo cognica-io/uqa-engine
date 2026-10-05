@@ -24,10 +24,20 @@ mod operator_tree_pipeline;
 mod optimizer_passes;
 #[path = "queries/row_metadata_filters.rs"]
 mod row_metadata_filters;
+#[path = "queries/sql_aggregate_nulls.rs"]
+mod sql_aggregate_nulls;
 #[path = "sql_aggregates.rs"]
 mod sql_aggregates;
 #[path = "sql_blocking_spill.rs"]
 mod sql_blocking_spill;
+#[path = "queries/sql_boolean_conditions.rs"]
+mod sql_boolean_conditions;
+#[path = "queries/sql_common_type_selection.rs"]
+mod sql_common_type_selection;
+#[path = "queries/sql_composites.rs"]
+mod sql_composites;
+#[path = "queries/sql_composites_reopen.rs"]
+mod sql_composites_reopen;
 #[path = "sql_correlated_subqueries.rs"]
 mod sql_correlated_subqueries;
 #[path = "sql_cte.rs"]
@@ -44,8 +54,12 @@ mod sql_cursor;
 mod sql_domains;
 #[path = "sql_dpccp_join_order.rs"]
 mod sql_dpccp_join_order;
+#[path = "queries/sql_enums.rs"]
+mod sql_enums;
 #[path = "sql_explain.rs"]
 mod sql_explain;
+#[path = "queries/sql_failing_row_details.rs"]
+mod sql_failing_row_details;
 #[path = "sql_filter_aggregate.rs"]
 mod sql_filter_aggregate;
 #[path = "sql_golden.rs"]
@@ -66,12 +80,20 @@ mod sql_lateral;
 mod sql_legacy_vectors;
 #[path = "sql_limit_offset.rs"]
 mod sql_limit_offset;
+#[path = "queries/sql_literal_coercion.rs"]
+mod sql_literal_coercion;
 #[path = "sql_nulls_order.rs"]
 mod sql_nulls_order;
 #[path = "sql_offset_like.rs"]
 mod sql_offset_like;
+#[path = "queries/sql_partition_bounds.rs"]
+mod sql_partition_bounds;
 #[path = "sql_prepared.rs"]
 mod sql_prepared;
+#[path = "queries/sql_routine_late_binding.rs"]
+mod sql_routine_late_binding;
+#[path = "queries/sql_routine_lookup.rs"]
+mod sql_routine_lookup;
 #[path = "sql_row_locks.rs"]
 mod sql_row_locks;
 #[path = "queries/sql_row_locks_recheck.rs"]
@@ -82,7 +104,15 @@ mod sql_simple_query;
 mod sql_subqueries;
 #[path = "sql_subquery.rs"]
 mod sql_subquery;
+#[path = "queries/sql_type_lifecycle.rs"]
+mod sql_type_lifecycle;
+#[path = "queries/sql_type_lifecycle_reopen.rs"]
+mod sql_type_lifecycle_reopen;
+#[path = "queries/sql_type_usage.rs"]
+mod sql_type_usage;
 #[path = "sql_window.rs"]
 mod sql_window;
 #[path = "sql_window_frame.rs"]
 mod sql_window_frame;
+#[path = "queries/sql_window_frames.rs"]
+mod sql_window_frames;

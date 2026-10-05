@@ -18,6 +18,10 @@ pub enum ValueRetentionError {
     Memory(#[from] MemoryError),
     #[error(transparent)]
     Cancelled(#[from] QueryCancelled),
+    /// A recognized tagged carrier whose payload violates its format. Such
+    /// input is a typed decoding failure, never an opaque document map.
+    #[error("malformed {kind} value: {reason}")]
+    Malformed { kind: &'static str, reason: String },
 }
 
 enum Children<'a> {
@@ -105,6 +109,7 @@ impl Value {
                     | Self::Json(text)
                     | Self::JsonB(text) => (text.capacity(), None),
                     Self::Bytes(bytes) => (bytes.capacity(), None),
+                    Self::Enum(value) => (value.retained_bytes(), None),
                     Self::Decimal(decimal) => (decimal.retained_bytes(), None),
                     Self::Array(array) => (
                         array.retained_buffer_bytes()?,

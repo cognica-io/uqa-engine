@@ -11,7 +11,7 @@ use super::{
     run_suppressed_view_insert_rules, target_columns, validate_returning_alias_relations,
     values_from_result, view_document, with_mutation_snapshot, BTreeSet, CteScope,
     DmlReturningShape, InsertPlan, MutationStatementContext, ReturningValueProjectionRow, SQLError,
-    SQLParam, SQLResult, ScalarExpr, SourceOutputPruning, Value,
+    SQLParam, SQLResult, ScalarExpr, SourceOutputPruning, TriggerViewChecks, Value,
 };
 
 #[expect(
@@ -262,6 +262,25 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 uqa_sql::ast::RuleEvent::Insert,
                 rule_rows,
             )?;
+            let supplied_columns =
+                uqa_sql::semantics::mutation_privileges::insert_supplied_columns(stmt, || {
+                    Ok(target.columns.clone())
+                })?;
+            let checks = TriggerViewChecks {
+                expressions: read_context
+                    .mutation
+                    .preparation
+                    .referential
+                    .assignment
+                    .expressions,
+                constraints: read_context.mutation.preparation.referential.constraints,
+                target: &target,
+                target_qualifier: &stmt.target_qualifier,
+                checks: &stmt.view_checks,
+                supplied: &supplied_columns,
+                params,
+                scope: ctes,
+            };
             let mut affected = 0_u64;
             let mut returning_rows = Vec::new();
             for (index, new) in proposed_rows.into_iter().enumerate() {
@@ -279,6 +298,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 else {
                     continue;
                 };
+                checks.validate(&final_new)?;
                 affected += 1;
                 if !stmt.returning.is_empty() {
                     returning_rows.push(build_returning_value_row(

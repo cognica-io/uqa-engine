@@ -72,10 +72,7 @@ fn sql_standard_routine_dependencies_restrict_and_cascade_transitively() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![uqa_engine::SQLNotice::notice(
-            "drop cascades to 3 other objects"
-        )]
-    );
+        vec![uqa_engine::SQLNotice::notice("drop cascades to 3 other objects").with_detail("drop cascades to function cascade_middle(integer)\ndrop cascades to function cascade_leaf(integer)\ndrop cascades to view cascade_leaf_view")]);
     for sql in [
         "SELECT cascade_base(1)",
         "SELECT cascade_middle(1)",
@@ -290,7 +287,8 @@ fn dependent_sql_procedure_and_durable_reopen_follow_the_same_graph() {
     assert_eq!(
         reopened.take_sql_notices(),
         vec![uqa_engine::SQLNotice::notice(
-            "drop cascades to procedure public.durable_proc(integer)"
+            // `getObjectDescription` calls every routine a function and qualifies only a routine the search path does not reach.
+            "drop cascades to function durable_proc(integer)"
         )]
     );
     assert_eq!(sqlstate(&reopened, "CALL durable_proc(1)"), "42883");
@@ -473,10 +471,7 @@ fn command_body_dependency_survives_rename_recreation_and_reopen() {
         .unwrap();
     assert_eq!(
         reopened.take_sql_notices(),
-        vec![uqa_engine::SQLNotice::notice(
-            "drop cascades to 2 other objects"
-        )]
-    );
+        vec![uqa_engine::SQLNotice::notice("drop cascades to 2 other objects").with_detail("drop cascades to function command_writer(integer)\ndrop cascades to function command_merge_writer()")]);
     assert_eq!(sqlstate(&reopened, "CALL command_writer(4)"), "42883");
     assert_eq!(sqlstate(&reopened, "CALL command_merge_writer()"), "42883");
 }
@@ -736,10 +731,7 @@ fn parameter_default_dependencies_bind_every_body_form_and_creation_path() {
         .unwrap();
     assert_eq!(
         reopened.take_sql_notices(),
-        vec![uqa_engine::SQLNotice::notice(
-            "drop cascades to 3 other objects"
-        )]
-    );
+        vec![uqa_engine::SQLNotice::notice("drop cascades to 3 other objects").with_detail("drop cascades to function default_standard(integer)\ndrop cascades to function default_source(integer)\ndrop cascades to function default_plpgsql(integer)")]);
     for sql in [
         "SELECT early.default_standard()",
         "SELECT early.default_source()",
@@ -810,10 +802,7 @@ fn table_defaults_and_checks_keep_exact_routine_dependencies() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![uqa_engine::SQLNotice::notice(
-            "drop cascades to 3 other objects"
-        )]
-    );
+        vec![uqa_engine::SQLNotice::notice("drop cascades to 3 other objects").with_detail("drop cascades to default value for column id of table schema_dependency_rows\ndrop cascades to constraint value_dep_check on table schema_dependency_rows\ndrop cascades to constraint other_dep_check on table schema_dependency_rows")]);
     assert!(engine
         .column_default_expr("schema_dependency_rows", "id")
         .unwrap()

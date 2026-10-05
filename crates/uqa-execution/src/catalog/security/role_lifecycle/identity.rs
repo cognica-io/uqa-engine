@@ -32,8 +32,9 @@ pub(super) fn reserve_membership_oid(
     )
 }
 
-pub(super) fn allocate_oid() -> Result<i64, SQLError> {
-    crate::catalog::identity::allocate_catalog_oid("role")
+/// The next OID of the database's counter, for a role or a role membership.
+pub(super) fn allocate_oid(context: &RoleExecutionContext<'_>) -> Result<i64, SQLError> {
+    context.locks.next_catalog_oid().map(i64::from)
 }
 
 pub(super) fn reserve_definition(
@@ -72,7 +73,7 @@ pub(super) fn reserve_definition(
         });
     }
     name_guard.retain();
-    reserve_oid(context, statement, allocate_oid)
+    reserve_oid(context, statement, || allocate_oid(context))
 }
 
 pub(super) fn reserve_oid(

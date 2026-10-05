@@ -36,7 +36,7 @@ pub(in crate::compiler) fn compile_named_windows(nodes: &[Node]) -> Result<Named
             ));
         }
         let mut spec = compile_named_window_spec(definition)?;
-        resolve_window_spec(&mut spec, &windows)?;
+        resolve_window_spec(&mut spec, &windows, WindowSpecSite::WindowClause)?;
         resolve_window_spec_expressions(&mut spec, &windows)?;
         windows.insert(definition.name.clone(), spec);
     }
@@ -93,9 +93,14 @@ pub(in crate::compiler) fn resolve_named_windows_in_expr(
             resolve_named_windows_in_expr(expr, windows)?;
             resolve_named_windows_in_exprs(list, windows)?;
         }
-        Expr::WindowCall { args, spec, .. } => {
+        Expr::WindowCall {
+            args, spec, filter, ..
+        } => {
             resolve_named_windows_in_exprs(args, windows)?;
-            resolve_window_spec(spec, windows)?;
+            if let Some(filter) = filter {
+                resolve_named_windows_in_expr(filter, windows)?;
+            }
+            resolve_window_spec(spec, windows, WindowSpecSite::OverClause)?;
             resolve_window_spec_expressions(spec, windows)?;
         }
         Expr::Case {
@@ -198,7 +203,19 @@ fn resolve_named_windows_in_exprs(exprs: &mut [Expr], windows: &NamedWindows) ->
     Ok(())
 }
 
-fn resolve_window_spec(spec: &mut WindowSpec, windows: &NamedWindows) -> Result<()> {
+/// Where a window specification that names another window was written; `transformWindowDefinitions` words one of its errors differently for an `OVER` clause.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WindowSpecSite {
+    WindowClause,
+    OverClause,
+}
+
+/// Apply a window reference as `transformWindowDefinitions` does, checking the `PARTITION BY`, `ORDER BY` and frame of the copy in that order.
+fn resolve_window_spec(
+    spec: &mut WindowSpec,
+    windows: &NamedWindows,
+    site: WindowSpecSite,
+) -> Result<()> {
     let Some(reference) = spec.reference.take() else {
         return Ok(());
     };
@@ -219,15 +236,6 @@ fn resolve_window_spec(spec: &mut WindowSpec, windows: &NamedWindows) -> Result<
             *spec = base.clone();
         }
         WindowReferenceKind::Copy => {
-            if base.frame.is_some() {
-                return Err(window_error(
-                    "42P20",
-                    format!(
-                        "cannot copy window \"{}\" because it has a frame clause",
-                        reference.name
-                    ),
-                ));
-            }
             if !spec.partition_by.is_empty() {
                 return Err(window_error(
                     "42P20",
@@ -245,6 +253,28 @@ fn resolve_window_spec(spec: &mut WindowSpec, windows: &NamedWindows) -> Result<
                         reference.name
                     ),
                 ));
+            }
+            if base.frame.is_some() {
+                let message = format!(
+                    "cannot copy window \"{}\" because it has a frame clause",
+                    reference.name
+                );
+                // `OVER (w)` alone copies nothing but the frame it cannot copy; `OVER w` uses the window as defined.
+                return Err(
+                    if site == WindowSpecSite::OverClause
+                        && spec.order_by.is_empty()
+                        && spec.frame.is_none()
+                    {
+                        SQLError::Diagnostic {
+                            sqlstate: "42P20".into(),
+                            message,
+                            detail: None,
+                            hint: Some("Omit the parentheses in this OVER clause.".into()),
+                        }
+                    } else {
+                        window_error("42P20", message)
+                    },
+                );
             }
             spec.partition_by.clone_from(&base.partition_by);
             if spec.order_by.is_empty() {
@@ -290,7 +320,7 @@ fn window_error(sqlstate: &str, message: String) -> SQLError {
 pub(in crate::compiler) fn compile_window_frame(
     w: &pg_query::protobuf::WindowDef,
 ) -> Result<Option<crate::ast::WindowFrame>> {
-    use crate::ast::{FrameBound, FrameMode, WindowFrame};
+    use crate::ast::{FrameBound, FrameExclusion, FrameMode, WindowFrame};
     // pg_query bit constants for frame_options.
     const FRAMEOPTION_NONDEFAULT: u32 = 0x000_0001;
     const FRAMEOPTION_RANGE: u32 = 0x000_0002;
@@ -340,19 +370,28 @@ pub(in crate::compiler) fn compile_window_frame(
             "window frame contains unknown option bits 0x{unknown:x}"
         )));
     }
-    if f & FRAMEOPTION_EXCLUSION != 0 {
-        return Err(SQLError::Unsupported(
-            "window frame EXCLUDE clauses are not represented by WindowFrame".into(),
-        ));
-    }
+    let exclusion = match f & FRAMEOPTION_EXCLUSION {
+        0 => FrameExclusion::NoOthers,
+        FRAMEOPTION_EXCLUDE_CURRENT_ROW => FrameExclusion::CurrentRow,
+        FRAMEOPTION_EXCLUDE_GROUP => FrameExclusion::Group,
+        FRAMEOPTION_EXCLUDE_TIES => FrameExclusion::Ties,
+        other => {
+            return Err(SQLError::Internal(format!(
+                "window frame must select at most one exclusion, got bits 0x{other:x}"
+            )));
+        }
+    };
     // PostgreSQL always encodes a default frame in `frame_options`
     // (RANGE UNBOUNDED PRECEDING TO CURRENT ROW). Only honor the
     // frame when the user explicitly wrote one - that's exactly what
     // the `FRAMEOPTION_NONDEFAULT` bit indicates.
     if f & FRAMEOPTION_NONDEFAULT == 0 {
-        if w.start_offset.is_some() || w.end_offset.is_some() {
+        if w.start_offset.is_some()
+            || w.end_offset.is_some()
+            || exclusion != FrameExclusion::NoOthers
+        {
             return Err(SQLError::Internal(
-                "default window frame unexpectedly has an offset expression".into(),
+                "default window frame unexpectedly has an offset or exclusion".into(),
             ));
         }
         return Ok(None);
@@ -450,7 +489,13 @@ pub(in crate::compiler) fn compile_window_frame(
             "window frame end offset payload does not match its option bits".into(),
         ));
     }
-    Ok(Some(WindowFrame { mode, start, end }))
+    Ok(Some(WindowFrame {
+        mode,
+        start,
+        end,
+        between: f & FRAMEOPTION_BETWEEN != 0,
+        exclusion,
+    }))
 }
 
 pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) -> Result<Expr> {

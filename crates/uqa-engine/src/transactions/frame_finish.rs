@@ -108,6 +108,9 @@ impl Engine {
         let committed = stack
             .pop()
             .ok_or_else(|| SQLError::Internal("COMMIT lost its transaction frame".into()))?;
+        if stack.is_empty() {
+            self.session.uncommitted_enum_labels.lock().clear();
+        }
         self.publish_committed_transaction_frame(
             stack,
             committed,
@@ -535,6 +538,7 @@ impl Engine {
         let first_snapshot_set = frame.first_snapshot_set;
         stack.pop();
         if stack.is_empty() {
+            self.session.uncommitted_enum_labels.lock().clear();
             if let Err(error) = self.rollback_notification_state() {
                 cleanup_errors.push(format!("notification state restore: {error}"));
             }

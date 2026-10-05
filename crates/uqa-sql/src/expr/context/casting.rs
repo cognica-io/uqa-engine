@@ -12,7 +12,7 @@ use uqa_core::{
 };
 
 use super::super::casting::{cast_value_from_with_control, parse_pg_array_literal_with_control};
-use super::{format_regtype_value_with_control, EngineHook};
+use super::{format_regtype_elements_with_control, format_regtype_value_with_control, EngineHook};
 use crate::{
     ast::ColumnType,
     error::{Result, SQLError},
@@ -42,6 +42,14 @@ fn coercion_type_name_with_control(
         }
         _ => Ok(ty.sql_name_with_control(control)?),
     }
+}
+
+/// The types of `PostgreSQL`'s string category, which any type casts to through its output function.
+fn is_string_type(ty: &ColumnType) -> bool {
+    matches!(
+        ty,
+        ColumnType::Text | ColumnType::Name | ColumnType::Varchar(_) | ColumnType::Character(_)
+    )
 }
 
 fn regrole_array_type(ty: &ColumnType) -> bool {
@@ -89,6 +97,38 @@ pub fn cast_value_with_type_resolution(
     .map_err(|_| SQLError::Internal("ordinary catalog cast owner".into()))
 }
 
+/// The text a value's output function spells, and the type to cast it from, when a cast goes through output: an enum label, `record_out` of a composite record cast to a string type, and a container whose enum fields and elements spell their current labels.
+fn output_for_cast<'a>(
+    engine: &dyn EngineHook,
+    value: &Value,
+    source_ty: Option<&'a str>,
+    resolved_source_type: Option<&ColumnType>,
+    target: &ColumnType,
+) -> Result<Option<(Value, Option<&'a str>)>> {
+    if let Value::Enum(label) = value {
+        let output =
+            super::super::enums::enum_output_for_cast(engine.enum_labels(), label, target)?;
+        return Ok(Some((output, Some("text"))));
+    }
+    // `record_out` spells each field through its attribute type's output function.
+    if let (Value::Record(_), Some(source @ ColumnType::Composite(_))) =
+        (value, resolved_source_type)
+    {
+        if is_string_type(target) {
+            let text = crate::result::format_postgres_text(value, source, Some(engine))?;
+            return Ok(Some((Value::Str(text), Some("text"))));
+        }
+    }
+    if matches!(value, Value::Record(_) | Value::Row(_))
+        && is_string_type(target)
+        && super::super::enums::contains_enum_carrier(value)
+    {
+        let rendered = super::super::enums::render_enum_labels(engine.enum_labels(), value)?;
+        return Ok(Some((rendered, source_ty)));
+    }
+    Ok(None)
+}
+
 /// Resolve catalog inputs at their external handoff, then admit SQL-owned names, element conversions and output before constructing them.
 pub fn cast_value_with_type_resolution_with_control(
     value: &Value,
@@ -106,9 +146,46 @@ pub fn cast_value_with_type_resolution_with_control(
         .map(|ty| ty.retain_external_with_control(control))
         .transpose()?;
     control.check()?;
+    let resolved_source_type = match (engine, source_ty) {
+        (Some(engine), Some(source)) => engine
+            .resolve_type_name(source)
+            .map_err(SQLError::Internal)?,
+        _ => None,
+    };
     if let (Some(engine), Some(target)) = (engine, resolved_target.as_deref()) {
         if let Some(value) = engine.cast_domain(value, source_ty, target)? {
             return Ok(control.retain_external_value(value)?);
+        }
+        if let Some(value) = super::super::enums::cast_to_enum(
+            engine.enum_labels(),
+            value,
+            resolved_source_type.as_ref(),
+            target,
+        )? {
+            return Ok(control.retain_external_value(value)?);
+        }
+        if let Some(value) = super::super::composites::cast_to_composite(
+            engine,
+            value,
+            resolved_source_type.as_ref(),
+            target,
+        )? {
+            return Ok(control.retain_external_value(value)?);
+        }
+        if let Some((output, output_source)) = output_for_cast(
+            engine,
+            value,
+            source_ty,
+            resolved_source_type.as_ref(),
+            target,
+        )? {
+            return cast_value_with_type_resolution_with_control(
+                &output,
+                output_source,
+                target_ty,
+                Some(engine),
+                control,
+            );
         }
         control.check()?;
         if matches!(target, ColumnType::Array(_)) && requires_catalog_array_cast(target) {
@@ -178,7 +255,30 @@ fn cast_resolved_value(
             control,
         );
     }
-    if target_ty.eq_ignore_ascii_case("text") {
+    // `find_coercion_pathway` casts an OID alias to a string type through its output function, as `CoerceViaIO`, and the string type then applies its own modifier; an array does so element by element.
+    if let Some(ColumnType::Array(element)) = target_column_type {
+        if is_string_type(element) {
+            if let Some(source_ty) = source_ty
+                .map(|source| optional_type_name(source, control))
+                .transpose()?
+                .flatten()
+            {
+                if let Some(elements) =
+                    format_regtype_elements_with_control(value, &source_ty, engine, control)?
+                {
+                    let (elements, _memory) = elements.into_parts();
+                    return cast_value_from_with_control(
+                        &Value::Array(elements),
+                        target_ty,
+                        Some("text[]"),
+                        control,
+                    );
+                }
+            }
+        }
+    }
+    let text_target = target_ty.eq_ignore_ascii_case("text");
+    if text_target || target_column_type.is_some_and(is_string_type) {
         if let Some(source_ty) = source_ty
             .map(|source| optional_type_name(source, control))
             .transpose()?
@@ -188,7 +288,15 @@ fn cast_resolved_value(
                 format_regtype_value_with_control(value, &source_ty, engine, control)?
             {
                 let (text, memory) = text.into_parts();
-                return Ok(control.finish(Value::Str(text), memory)?);
+                if text_target {
+                    return Ok(control.finish(Value::Str(text), memory)?);
+                }
+                return cast_value_from_with_control(
+                    &Value::Str(text),
+                    target_ty,
+                    Some("text"),
+                    control,
+                );
             }
         }
     }
@@ -210,6 +318,7 @@ fn resolve_regobject_input(
 ) -> Result<Option<i64>> {
     enum ObjectKind {
         Relation,
+        RoutineName,
         Routine,
         Role,
         Namespace,
@@ -217,6 +326,10 @@ fn resolve_regobject_input(
     }
     let kind = if target_ty.eq_ignore_ascii_case("regclass") {
         ObjectKind::Relation
+    } else if matches!(target_column_type, Some(ColumnType::Regproc))
+        || target_ty.eq_ignore_ascii_case("regproc")
+    {
+        ObjectKind::RoutineName
     } else if target_ty.eq_ignore_ascii_case("regprocedure") {
         ObjectKind::Routine
     } else if target_ty.eq_ignore_ascii_case("regrole") {
@@ -230,9 +343,9 @@ fn resolve_regobject_input(
     };
     let oid = match kind {
         ObjectKind::Relation => engine.resolve_regclass_input(name)?,
-        ObjectKind::Routine => engine
-            .resolve_regprocedure(name)
-            .map_err(SQLError::Internal)?,
+        // `regprocin` reports its own missing and ambiguous names.
+        ObjectKind::RoutineName => return engine.resolve_regproc(name),
+        ObjectKind::Routine => engine.resolve_regprocedure_input(name)?,
         ObjectKind::Role => engine.resolve_regrole(name)?,
         ObjectKind::Namespace => engine.resolve_regnamespace(name)?,
         ObjectKind::Type => engine.resolve_regtype_input(name)?,
@@ -243,10 +356,12 @@ fn resolve_regobject_input(
     }
     let (sqlstate, message) = match kind {
         ObjectKind::Relation => ("42P01", format!("relation \"{name}\" does not exist")),
-        ObjectKind::Routine => ("42883", format!("function {name} does not exist")),
+        ObjectKind::Routine => ("42883", format!("function \"{name}\" does not exist")),
         ObjectKind::Role => ("42704", format!("role \"{name}\" does not exist")),
         ObjectKind::Namespace => ("3F000", format!("schema \"{name}\" does not exist")),
-        ObjectKind::Type => unreachable!("unresolved regtype uses ordinary conversion"),
+        ObjectKind::Type | ObjectKind::RoutineName => {
+            unreachable!("regtype and regproc input return before reporting a missing object")
+        }
     };
     Err(SQLError::Routine {
         sqlstate: sqlstate.into(),
@@ -256,7 +371,10 @@ fn resolve_regobject_input(
 
 fn requires_catalog_array_cast(ty: &ColumnType) -> bool {
     match ty {
-        ColumnType::Domain { .. } | ColumnType::Regtype => true,
+        ColumnType::Domain { .. }
+        | ColumnType::Regtype
+        | ColumnType::Enum(_)
+        | ColumnType::Composite(_) => true,
         ColumnType::Array(element) => requires_catalog_array_cast(element),
         _ => false,
     }
@@ -273,7 +391,8 @@ fn cast_catalog_array(
         return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
     let source_element = source.map(|name| name.trim_end_matches("[]"));
-    let target_element = array_leaf_type(target).sql_name_with_control(control)?;
+    let leaf = array_leaf_type(target);
+    let target_element = control.copy_text(&leaf.catalog_name())?;
     let target_name = target.sql_name_with_control(control)?;
     cast_array(
         value,

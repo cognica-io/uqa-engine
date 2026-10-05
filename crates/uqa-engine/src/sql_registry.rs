@@ -136,7 +136,10 @@ impl Engine {
         args: &[Value],
     ) -> Option<std::result::Result<Value, SQLError>> {
         let registration = self.query_runtime_view().lookup_scalar_function(name)?;
-        Some(registration.function.call(args))
+        Some(
+            uqa_sql::expr::enums::render_host_arguments(Some(self), args)
+                .and_then(|args| registration.function.call(&args)),
+        )
     }
 
     pub(crate) fn has_registered_scalar_functions(&self) -> bool {

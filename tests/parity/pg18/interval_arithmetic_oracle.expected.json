@@ -1,0 +1,1180 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 month' * 0.5 AS a, interval '1 day' * 1.5 AS b, interval '1 mon 1 day 1 sec' * 0.3 AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "15 days",
+              "1 day 12:00:00",
+              "9 days 07:12:00.3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '7 mons 11 days 13:17:19.123457' * 1.1 AS a, interval '7 mons 11 days 13:17:19.123457' * -2.7 AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "7 mons 33 days 17:01:03.035803",
+              "-1 years -6 mons -56 days -52:40:45.633334"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 2.5 * interval '5 mons 23:00' AS a, 3 * interval '1 mon 1 day' AS b, interval '100 years' * 1.23456789 AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "1 year 15 days 57:30:00",
+              "3 mons 3 days",
+              "123 years 5 mons 14 days 10:39:25.056"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day' / 3 AS a, interval '1 month' / 7 AS b, interval '1 mon 1 day 1 sec' / 0.3 AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "08:00:00",
+              "4 days 06:51:25.6896",
+              "3 mons 13 days 08:00:03.333333"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '7 mons 11 days 13:17:19.123457' / 1.1 AS a, interval '7 mons 11 days 13:17:19.123457' / -2.7 AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "6 mons 20 days 33:53:55.574634",
+              "-2 mons -21 days -25:21:58.213073"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '100 years' / 7 AS a, interval '5 mons 23:00' / 2.5 AS b, interval '-3 mons -5 days' / 0.333333 AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "14 years 3 mons 12 days 20:34:17.1552",
+              "2 mons 09:12:00",
+              "-9 mons -15 days -00:00:24.624001"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '10 days' / 'infinity'::float8 AS a, interval '1 sec' / 1e-10::float8 AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "00:00:00",
+              "2777777:46:40"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day' * 0.999999999999 AS a, interval '29 days 23:59:59.999999' * 1.0000001 AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "1 day",
+              "29 days 24:00:00.259199"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day' / 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day' / 0.0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day' * 'NaN'::float8",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 day' / 'NaN'::float8",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '2147483647 mons' * 2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '-2147483648 days' * -1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '1 microsecond' / 1e-300::float8",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '0' * 'infinity'::float8",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '178956970 years 7 mons' + interval '1 mon'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '0 days' - interval '-2147483648 days'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT interval '-2147483648 days' - interval '1 day'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT - interval '-178956970 years -8 mons'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT - interval '-178956970 years -7 mons' AS a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            1186
+          ],
+          "rows": [
+            [
+              "178956970 years 7 mons"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT timestamp '2000-01-01' - interval '-2147483648 days'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT date '2000-01-01' - interval '-2147483648 days'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT time '23:59:59.999999' + interval '2562047788:00:54.775807' AS a, time '00:00:01' - interval '2562047788:00:54.775807' AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            1083,
+            1083
+          ],
+          "rows": [
+            [
+              "19:59:05.22419",
+              "19:59:06.224193"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT time '01:00' - interval '-2147483648 days' AS a, time '01:00' + interval '1 mon 1 day 25:00' AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            1083,
+            1083
+          ],
+          "rows": [
+            [
+              "01:00:00",
+              "02:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT timetz '01:00+02' - interval '-2147483648 days' AS a, timetz '23:30+02' + interval '1 hour' AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            1266,
+            1266
+          ],
+          "rows": [
+            [
+              "01:00:00+02",
+              "00:30:00+02"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT date '2000-01-31' + interval '1 month' AS a, date '2000-03-31' - interval '1 month' AS b, interval '1 day' + date '2000-02-28' AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1114,
+            1114,
+            1114
+          ],
+          "rows": [
+            [
+              "2000-02-29 00:00:00",
+              "2000-02-29 00:00:00",
+              "2000-02-29 00:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT date '2000-01-01' + 2147483647",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT timestamp '2000-01-01' + interval '2147483647 days'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT timestamp '2000-01-01' - interval '2147483647 days'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT timestamp '2000-01-01' + interval '2147483647 mons'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT timestamptz '2000-01-01 00:00:00+00' - interval '2147483647 mons'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT date '2000-01-01' + interval '-2147483648 mons'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT justify_hours(interval '-25 hours') AS a, justify_hours(interval '1 day -1 hour') AS b, justify_hours(interval '-35 days -30 hours') AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "-1 days -01:00:00",
+              "23:00:00",
+              "-36 days -06:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT justify_days(interval '35 days 30 hours') AS a, justify_days(interval '1 mon -31 days 25:00') AS b, justify_days(interval '-1 mon 1 day') AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "1 mon 5 days 30:00:00",
+              "-1 days +25:00:00",
+              "-29 days"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT justify_interval(interval '1 mon -00:00:01') AS a, justify_interval(interval '-1 mon +00:00:01') AS b, justify_interval(interval '59 days 47:59:59.999999') AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "29 days 23:59:59",
+              "-29 days -23:59:59",
+              "2 mons 23:59:59.999999"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT justify_interval(interval '1 mon -31 days +25:00') AS a, justify_interval(interval '-35 days -30 hours') AS b, justify_days(interval '2 mons -65 days') AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "01:00:00",
+              "-1 mons -6 days -06:00:00",
+              "-5 days"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT justify_hours(NULL::interval) AS a, justify_days(NULL) AS b, pg_typeof(justify_interval(interval '1 day')) AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            2206
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              "interval"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT justify_hours(interval '2147483647 days 24:00')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT justify_days(interval '2147483647 mons 30 days')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT justify_interval(interval '2147483647 mons 29 days 24:00')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT justify_days(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function justify_days(integer) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE iv (g integer, v interval)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO iv VALUES (1, interval '1 mon'), (1, interval '0'), (1, NULL), (2, interval '1 day'), (2, interval '1 day'), (2, interval '1 day 1 sec'), (3, NULL)",
+      "command_tags": [
+        "INSERT 0 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT g, sum(v) AS total, avg(v) AS mean, count(v) AS n FROM iv GROUP BY g ORDER BY g",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "total",
+            "mean",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            1186,
+            1186,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1 mon",
+              "15 days",
+              "2"
+            ],
+            [
+              "2",
+              "3 days 00:00:01",
+              "1 day 00:00:00.333333",
+              "3"
+            ],
+            [
+              "3",
+              null,
+              null,
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT sum(v) AS total, avg(v) AS mean FROM iv",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "total",
+            "mean"
+          ],
+          "type_oids": [
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "1 mon 3 days 00:00:01",
+              "6 days 14:24:00.2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT sum(v) AS total, avg(v) AS mean FROM iv WHERE g = 3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "total",
+            "mean"
+          ],
+          "type_oids": [
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT sum(v) AS total, avg(v) AS mean FROM iv WHERE false",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "total",
+            "mean"
+          ],
+          "type_oids": [
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT g, v, sum(v) OVER (ORDER BY g, v ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS moving_sum, avg(v) OVER (PARTITION BY g) AS group_mean FROM iv ORDER BY g, v",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "v",
+            "moving_sum",
+            "group_mean"
+          ],
+          "type_oids": [
+            23,
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "1",
+              "00:00:00",
+              "00:00:00",
+              "15 days"
+            ],
+            [
+              "1",
+              "1 mon",
+              "1 mon",
+              "15 days"
+            ],
+            [
+              "1",
+              null,
+              "1 mon",
+              "15 days"
+            ],
+            [
+              "2",
+              "1 day",
+              "1 day",
+              "1 day 00:00:00.333333"
+            ],
+            [
+              "2",
+              "1 day",
+              "2 days",
+              "1 day 00:00:00.333333"
+            ],
+            [
+              "2",
+              "1 day 00:00:01",
+              "2 days 00:00:01",
+              "1 day 00:00:00.333333"
+            ],
+            [
+              "3",
+              null,
+              "1 day 00:00:01",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT avg(v) FILTER (WHERE g = 2) AS mean_two, sum(DISTINCT v) AS distinct_total FROM iv",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "mean_two",
+            "distinct_total"
+          ],
+          "type_oids": [
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "1 day 00:00:00.333333",
+              "1 mon 2 days 00:00:01"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT avg(x) AS a FROM (VALUES (interval '1 sec'), (interval '1 sec'), (interval '2 sec')) t(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            1186
+          ],
+          "rows": [
+            [
+              "00:00:01.333333"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT avg(x) AS a FROM (VALUES (interval '1 mon'), (interval '1 mon'), (interval '1 day')) t(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            1186
+          ],
+          "rows": [
+            [
+              "20 days 08:00:00"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT sum(x) FROM (VALUES (interval '178956970 years 7 mons'), (interval '1 mon')) t(x)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT sum(x) FROM (VALUES (interval '178956970 years 7 mons'), (interval '1 mon'), (interval '-1 mon')) t(x)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT avg(x) FROM (VALUES (interval '2147483647 days'), (interval '1 day')) t(x)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "interval out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(sum(v)) AS s, pg_typeof(avg(v)) AS a FROM iv",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s",
+            "a"
+          ],
+          "type_oids": [
+            2206,
+            2206
+          ],
+          "rows": [
+            [
+              "interval",
+              "interval"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE iv",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

@@ -291,6 +291,7 @@ fn normalize_instead_of_trigger_record(
         .map(Some)
 }
 
+/// Run the `INSTEAD OF` row triggers of `view` for one row in name order, as `ExecIRInsertTriggers`, `ExecIRUpdateTriggers` and `ExecIRDeleteTriggers` do, and return the row the command then counts, checks and returns: the last trigger's result for INSERT and UPDATE and the original OLD row for DELETE, or `None` when a trigger returns NULL. When `session_replication_role` suppresses every trigger, the row is counted as it stands, although nothing performs the command.
 pub fn fire_instead_of_row_triggers(
     context: &TriggerContext<'_>,
     view: &str,
@@ -309,13 +310,11 @@ pub fn fire_instead_of_row_triggers(
         true,
         updated_columns,
     )?;
-    if triggers.is_empty() {
-        if context
+    if triggers.is_empty()
+        && !context
             .catalog
             .has_trigger_definition(view, TriggerTiming::InsteadOf, event, true)?
-        {
-            return Ok(None);
-        }
+    {
         return Err(SQLError::Routine {
             sqlstate: "55000".into(),
             message: format!(

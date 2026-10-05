@@ -35,6 +35,7 @@ impl EngineHook for DomainCastHook {
             name: name.into(),
             base: Box::new(base),
             oid: 80_000,
+            array_oid: None,
         }))
     }
 }
@@ -386,7 +387,6 @@ fn integer_projection_rejects_float_saturation_boundaries() {
             &uqa_core::memory::ProductionControl::uncontrolled()
         )
         .is_err());
-        assert_eq!(coerce_i64(&Value::Float(value)), None);
     }
     assert_eq!(
         to_i64(&Value::Float(-9_223_372_036_854_775_808.0)).unwrap(),

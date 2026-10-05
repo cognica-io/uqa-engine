@@ -69,7 +69,13 @@ pub(super) fn build_table_function_rows_with_row(
         if let Some(result) = context
             .runtime
             .lookup_table_function(&identity)
-            .map(|registration| registration.function.call(&evaluated))
+            .map(|registration| {
+                uqa_sql::expr::enums::render_host_arguments(
+                    context.eval_hook.enum_labels(),
+                    &evaluated,
+                )
+                .and_then(|arguments| registration.function.call(&arguments))
+            })
         {
             return registered_table_function_rows(name, result?, alias, column_aliases);
         }

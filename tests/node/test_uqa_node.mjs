@@ -574,6 +574,32 @@ test("sql notices and function depth limit", async () => {
   assert.equal(engine.sqlFunctionDepthLimit(), 1);
 });
 
+test("enum values reach JavaScript as their current labels", async () => {
+  const engine = new uqa.Engine();
+  engine.sqlSync("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')");
+  engine.sqlSync("CREATE TABLE moods (id INTEGER, m mood, ms mood[])");
+  engine.sqlSync("INSERT INTO moods VALUES (1, 'happy', '{sad,ok}'), (2, 'sad', NULL)");
+  assert.deepEqual(engine.sqlSync("SELECT id, m, ms FROM moods ORDER BY m").rows, [
+    { id: 2, m: "sad", ms: null },
+    { id: 1, m: "happy", ms: ["sad", "ok"] },
+  ]);
+  engine.sqlSync("ALTER TYPE mood RENAME VALUE 'ok' TO 'neutral'");
+  assert.deepEqual((await engine.sql("SELECT ms FROM moods WHERE id = 1")).rows, [
+    { ms: ["sad", "neutral"] },
+  ]);
+  const results = engine.sqlBatchSync([
+    ["CREATE TYPE fleeting AS ENUM ('a')", []],
+    ["SELECT 'a'::fleeting AS f", []],
+    ["DROP TYPE fleeting", []],
+  ]);
+  assert.deepEqual(results[1].rows, [{ f: "a" }]);
+  engine.registerScalarFunction("js_label", (value) => `label:${value}`);
+  assert.deepEqual(engine.sqlSync("SELECT js_label(m) AS l FROM moods ORDER BY id").rows, [
+    { l: "label:happy" },
+    { l: "label:sad" },
+  ]);
+});
+
 test("JavaScript scalar, table, and aggregate SQL callbacks", async () => {
   const engine = new uqa.Engine();
   engine.sqlSync("CREATE TABLE samples (grp TEXT, val INTEGER)");

@@ -7,6 +7,7 @@
 //! Capture routine namespaces, bind catalog dependencies, and recompile changed definitions.
 
 use super::compilation::{self, StoredRoutineCompilationContext};
+use std::sync::Arc;
 use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
     binding::stored_columns::StoredSourceCatalog,
@@ -15,7 +16,7 @@ use uqa_sql::{
         compilation::{compile_function_body, defer_function_body},
         dependencies::{self, RoutineCompilationMode},
         regclass::{self, RoutineRegclassCatalog},
-        CompiledFunctionBody,
+        CompiledFunctionBody, RoutineBody,
     },
     SQLError,
 };
@@ -46,11 +47,21 @@ impl RoutineBodyCompilation {
     }
 }
 
+/// A routine definition bound to the catalog.
+pub struct BoundRoutine {
+    /// The body as the catalog keeps it.
+    pub body: RoutineBody,
+    /// The compilation that validated a source body when the routine was defined.
+    pub validated: Option<CompiledFunctionBody>,
+    /// Whether binding changed the stored definition.
+    pub changed: bool,
+}
+
 pub fn compile_catalog_bound_routine(
     context: &RoutineDefinitionContext<'_>,
     def: &mut CreateFunction,
     bodies: RoutineBodyCompilation,
-) -> Result<(CompiledFunctionBody, bool), SQLError> {
+) -> Result<BoundRoutine, SQLError> {
     let mode = bodies.mode();
     if matches!(mode, RoutineCompilationMode::Definition) {
         if matches!(def.body, FunctionBody::Statements(_))
@@ -69,45 +80,57 @@ pub fn compile_catalog_bound_routine(
         changed |= record_sql_standard_body_parameters(&context.compilation.analysis, def)?;
     }
     let mut compiled = compile_routine_body(&context.compilation, def, bodies)?;
-    let body_changed = {
-        let dependency_body = compilation::stored_merge_dependency_body(&context.compilation, def)?;
-        dependencies::bind_sql_standard_body_routines(
-            &context.compilation.analysis,
-            def,
-            dependency_body.as_ref().unwrap_or(&compiled),
-        )
-    }? | bind_routine_regclass_constants(context, def)?;
+    let body_changed = with_creation_search_path(context, def, |def| {
+        dependencies::bind_sql_standard_body_routines(&context.compilation.analysis, def, mode)
+    })? | bind_routine_regclass_constants(context, def)?;
     changed |= body_changed;
     if body_changed {
         compiled = compile_routine_body(&context.compilation, def, bodies)?;
     }
-    Ok((compiled, changed))
+    if !matches!(def.body, FunctionBody::Statements(_)) {
+        return Ok(BoundRoutine {
+            body: RoutineBody::Source,
+            validated: compiled,
+            changed,
+        });
+    }
+    let compiled = compiled.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "SQL-standard body of routine `{}` was not compiled",
+            def.name
+        ))
+    })?;
+    Ok(BoundRoutine {
+        body: RoutineBody::Bound(Arc::new(compiled)),
+        validated: None,
+        changed,
+    })
 }
 
+/// Compile the body as `bodies` asks: a SQL-standard body always, and a source body only to validate a new definition under `check_function_bodies`. The sessions that run a source body compile it.
 fn compile_routine_body(
     context: &StoredRoutineCompilationContext<'_>,
     def: &CreateFunction,
     bodies: RoutineBodyCompilation,
-) -> Result<CompiledFunctionBody, SQLError> {
+) -> Result<Option<CompiledFunctionBody>, SQLError> {
     match (bodies, &def.body) {
         (
             RoutineBodyCompilation::Checked | RoutineBodyCompilation::Unchecked,
             FunctionBody::Statements(_),
-        ) => compile_function_body(&context.analysis, def),
+        ) => compile_function_body(&context.analysis, def).map(Some),
         (RoutineBodyCompilation::Stored, FunctionBody::Statements(_)) => {
-            compilation::compile_persisted_sql_function(context, def)
+            compilation::compile_persisted_sql_function(context, def).map(Some)
         }
         (RoutineBodyCompilation::Checked, FunctionBody::Source(_)) => {
             compilation::with_routine_settings(context, def, || {
                 compile_function_body(&context.analysis, def)
             })
+            .map(Some)
         }
         (RoutineBodyCompilation::Unchecked, FunctionBody::Source(_)) => {
             defer_function_body(&context.analysis, def)
         }
-        (RoutineBodyCompilation::Stored, FunctionBody::Source(_)) => {
-            Ok(CompiledFunctionBody::Deferred)
-        }
+        (RoutineBodyCompilation::Stored, FunctionBody::Source(_)) => Ok(None),
     }
 }
 
@@ -116,14 +139,22 @@ fn bind_routine_definition_dependencies(
     def: &mut CreateFunction,
     mode: RoutineCompilationMode,
 ) -> Result<bool, SQLError> {
-    let bind = |def: &mut CreateFunction| {
+    with_creation_search_path(context, def, |def| {
         dependencies::bind_routine_definition_dependencies(
             &context.compilation.analysis,
             context.sources,
             def,
             mode,
         )
-    };
+    })
+}
+
+/// Resolve names in stored routine syntax with the search path captured when the routine was created.
+fn with_creation_search_path<T>(
+    context: &RoutineDefinitionContext<'_>,
+    def: &mut CreateFunction,
+    bind: impl FnOnce(&mut CreateFunction) -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
     if def.creation_search_path.is_empty() {
         return bind(def);
     }

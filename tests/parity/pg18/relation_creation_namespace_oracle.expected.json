@@ -1,0 +1,931 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE marker (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_my_temp_schema() = 0 AS no_temporary_namespace",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no_temporary_namespace"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE public.t_public (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot create temporary relation in non-temporary schema",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE IF NOT EXISTS public.marker (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot create temporary relation in non-temporary schema",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE missing_schema.t (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"missing_schema\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP VIEW public.v_public AS SELECT 1 AS a",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot create temporary relation in non-temporary schema",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP SEQUENCE public.s_public",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot create temporary relation in non-temporary schema",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_my_temp_schema() = 0 AS no_temporary_namespace",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no_temporary_namespace"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE before_unlogged (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE UNLOGGED TABLE pg_temp.u_table (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "only temporary relations may be created in temporary schemas",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE after_unlogged (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'after_unlogged'::regclass::oid::int - 'before_unlogged'::regclass::oid::int AS oid_offset, pg_my_temp_schema() = 0 AS no_temporary_namespace",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid_offset",
+            "no_temporary_namespace"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "5",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE pg_temp.t_qualified (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 't_qualified'::regclass::oid::int - pg_my_temp_schema()::int AS oid_offset",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid_offset"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS pg_temp.t_qualified (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "42P07",
+          "message": "relation \"t_qualified\" already exists, skipping",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW pg_temp.v_qualified AS SELECT 1 AS a",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SEQUENCE pg_temp.s_qualified",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE pg_temp.c_qualified AS SELECT 1 AS a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 AS a INTO pg_temp.i_qualified",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE UNLOGGED SEQUENCE pg_temp.u_sequence",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "only temporary relations may be created in temporary schemas",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SET search_path = pg_temp, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE t_path (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SEQUENCE s_path",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW v_path AS SELECT 1 AS a",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE c_path AS SELECT 1 AS a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE UNLOGGED TABLE u_path (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "only temporary relations may be created in temporary schemas",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT current_schema() = pg_my_temp_schema()::regnamespace::name AS temporary_current_schema",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "temporary_current_schema"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET search_path = missing_schema, pg_temp, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE t_leading (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET search_path = public, pg_temp",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE t_trailing (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET search_path",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT relname, relpersistence, relnamespace = pg_my_temp_schema() AS in_temporary FROM pg_class WHERE relname IN ('t_qualified', 'v_qualified', 's_qualified', 'c_qualified', 'i_qualified', 't_path', 's_path', 'v_path', 'c_path', 't_leading', 't_trailing') ORDER BY relname",
+      "command_tags": [
+        "SELECT 11"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "relpersistence",
+            "in_temporary"
+          ],
+          "type_oids": [
+            19,
+            18,
+            16
+          ],
+          "rows": [
+            [
+              "c_path",
+              "t",
+              "t"
+            ],
+            [
+              "c_qualified",
+              "t",
+              "t"
+            ],
+            [
+              "i_qualified",
+              "t",
+              "t"
+            ],
+            [
+              "s_path",
+              "t",
+              "t"
+            ],
+            [
+              "s_qualified",
+              "t",
+              "t"
+            ],
+            [
+              "t_leading",
+              "t",
+              "t"
+            ],
+            [
+              "t_path",
+              "t",
+              "t"
+            ],
+            [
+              "t_qualified",
+              "t",
+              "t"
+            ],
+            [
+              "t_trailing",
+              "p",
+              "f"
+            ],
+            [
+              "v_path",
+              "t",
+              "t"
+            ],
+            [
+              "v_qualified",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE temp_source (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW auto_view AS SELECT * FROM temp_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "view \"auto_view\" will be a temporary view",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.auto_public AS SELECT * FROM temp_source",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot create temporary relation in non-temporary schema",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "view \"auto_public\" will be a temporary view",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE OR REPLACE VIEW auto_view AS SELECT a, 1 AS b FROM temp_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "view \"auto_view\" will be a temporary view",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT relname, relpersistence, relnamespace = pg_my_temp_schema() AS in_temporary FROM pg_class WHERE relname IN ('auto_view', 'auto_public') ORDER BY relname",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "relpersistence",
+            "in_temporary"
+          ],
+          "type_oids": [
+            19,
+            18,
+            16
+          ],
+          "rows": [
+            [
+              "auto_view",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE IF NOT EXISTS public.marker AS SELECT 1 AS a",
+      "command_tags": [
+        "CREATE TABLE AS"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "42P07",
+          "message": "relation \"marker\" already exists, skipping",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TEMP TABLE public.marker AS SELECT 1 AS a",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P07",
+        "message": "relation \"marker\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE public.ctas_public AS SELECT 1 AS a",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot create temporary relation in non-temporary schema",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 AS a INTO TEMP public.into_public",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot create temporary relation in non-temporary schema",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE public.ctas_invalid AS SELECT no_such_column",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"no_such_column\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE UNLOGGED TABLE pg_temp.ctas_unlogged AS SELECT 1 AS a",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "only temporary relations may be created in temporary schemas",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE before_refusal (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE pg_catalog.refused_table (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied to create \"pg_catalog.refused_table\"",
+        "detail": "System catalog modifications are currently disallowed.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW pg_catalog.refused_view AS SELECT 1 AS a",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied to create \"pg_catalog.refused_view\"",
+        "detail": "System catalog modifications are currently disallowed.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SEQUENCE pg_catalog.refused_sequence",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied to create \"pg_catalog.refused_sequence\"",
+        "detail": "System catalog modifications are currently disallowed.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE pg_catalog.refused_missing_type (a no_such_type)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"no_such_type\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE after_refusal (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'after_refusal'::regclass::oid::int - 'before_refusal'::regclass::oid::int AS oid_offset",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid_offset"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT count(*) AS refused FROM pg_class WHERE relname LIKE 'refused%'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "refused"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

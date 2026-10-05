@@ -86,6 +86,8 @@ pub struct ConstraintCatalogRow {
     pub state: ConstraintCatalogState,
     pub period: bool,
     pub foreign_key: Option<ForeignKeyCatalogData>,
+    /// The expression of a CHECK constraint.
+    pub expression: Option<uqa_sql::ast::Expr>,
     /// The catalog row of the constraint this one derives from, which `pg_constraint.conparentid` names; such a constraint is not local and is inherited once.
     pub parent_oid: Option<i64>,
 }
@@ -193,6 +195,7 @@ pub struct PendingConstraintCatalogRow {
     pub state: ConstraintCatalogState,
     pub period: bool,
     pub foreign_key: Option<ForeignKeyCatalogData>,
+    pub expression: Option<uqa_sql::ast::Expr>,
     pub parent_oid: Option<i64>,
 }
 
@@ -242,6 +245,7 @@ pub fn constraint_catalog_rows(
                     ),
                     period: false,
                     foreign_key: None,
+                    expression: None,
                     parent_oid: None,
                 });
             }
@@ -261,6 +265,7 @@ pub fn constraint_catalog_rows(
                     ),
                     period: false,
                     foreign_key: None,
+                    expression: Some(expr.clone()),
                     parent_oid: None,
                 });
             }
@@ -305,6 +310,7 @@ pub fn constraint_catalog_rows(
             }
             key_constraints.push(uqa_sql::ast::TableKeyConstraint {
                 catalog_identity: None,
+                index_identity: None,
                 name: None,
                 kind,
                 columns: vec![column.name.clone()],
@@ -336,6 +342,7 @@ pub fn constraint_catalog_rows(
                 ),
                 period: constraint.without_overlaps,
                 foreign_key: None,
+                expression: None,
                 parent_oid: None,
             });
         }
@@ -356,6 +363,7 @@ pub fn constraint_catalog_rows(
                 ),
                 period: false,
                 foreign_key: None,
+                expression: Some(constraint.expr.clone()),
                 parent_oid: None,
             });
         }
@@ -397,6 +405,7 @@ pub fn constraint_catalog_rows(
                 state: constraint.state,
                 period: constraint.period,
                 foreign_key: constraint.foreign_key,
+                expression: constraint.expression,
                 parent_oid: constraint.parent_oid,
             });
         }
@@ -436,6 +445,7 @@ pub fn constraint_catalog_rows(
                     ),
                     period: false,
                     foreign_key: None,
+                    expression: None,
                     parent_oid: None,
                 });
             }
@@ -458,6 +468,7 @@ pub fn constraint_catalog_rows(
                     ),
                     period: false,
                     foreign_key: None,
+                    expression: Some(expression.clone()),
                     parent_oid: None,
                 });
             }
@@ -478,6 +489,7 @@ pub fn constraint_catalog_rows(
                 ),
                 period: false,
                 foreign_key: None,
+                expression: Some(check.expr.clone()),
                 parent_oid: None,
             });
         }
@@ -499,6 +511,7 @@ pub fn constraint_catalog_rows(
                 state: constraint.state,
                 period: constraint.period,
                 foreign_key: constraint.foreign_key,
+                expression: constraint.expression,
                 parent_oid: constraint.parent_oid,
             });
         }
@@ -581,6 +594,7 @@ fn foreign_key_catalog_row(
             on_delete: foreign_key.on_delete,
             match_type: foreign_key.match_type,
         }),
+        expression: None,
         parent_oid: None,
     })
 }
@@ -743,6 +757,7 @@ fn derived_constraint_catalog_rows(
                 match_type: foreign_key.match_type,
             }),
             parent_oid: Some(parent_oid),
+            expression: None,
         });
     }
     Ok(rows)

@@ -62,6 +62,10 @@ impl FunctionTypeResolver for RoutineOverloadContext<'_> {
             .map(Some)
     }
 
+    fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
+        self.catalog.require_type_usage(ty)
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,
@@ -492,6 +496,18 @@ fn match_static_function_signature(
 fn declared_parameter_type(catalog: &RoutineTypeSnapshot, type_name: &str) -> Option<ColumnType> {
     if let Some(element) = type_name.strip_suffix("[]") {
         return declared_parameter_type(catalog, element).map(|ty| ColumnType::Array(Box::new(ty)));
+    }
+    // Enum parameters match by identity alone; a domain parameter also needs its base type.
+    if let Some(identity) = crate::ast::UserTypeIdentity::parse(type_name) {
+        return (identity.kind == crate::ast::UserTypeKind::Domain)
+            .then(|| {
+                catalog
+                    .values()
+                    .find(|domain| domain.oid == identity.oid)
+                    .map(StoredDomain::column_type)
+                    .or_else(|| crate::catalog::system_catalog_domain(identity.oid))
+            })
+            .flatten();
     }
     ColumnType::from_sql_name(type_name).ok().or_else(|| {
         catalog.values().map(StoredDomain::column_type).find(|ty| {

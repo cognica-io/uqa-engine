@@ -7,17 +7,40 @@
 use crate::Engine;
 use std::cell::Cell;
 use uqa_core::RelationIdentity;
+use uqa_execution::schema::deletion::{
+    perform_deletion, required_address, CatalogRemovalContext, CatalogRemovalInputs,
+};
 use uqa_execution::schema::sequences::removal::SequenceRemovalPublication;
 use uqa_sql::SQLError;
+
+/// `DROP SEQUENCE ... CASCADE` of the named sequences of `public` through `context`.
+fn drop_sequences(context: &CatalogRemovalContext<'_>, names: &[&str]) -> Result<(), SQLError> {
+    perform_deletion(
+        context,
+        |dependencies| {
+            names
+                .iter()
+                .map(|name| {
+                    required_address(
+                        dependencies
+                            .relation_address(&RelationIdentity::new("public", *name), None),
+                        || format!("sequence {name}"),
+                    )
+                })
+                .collect()
+        },
+        true,
+    )
+}
 
 struct UnreachablePublication;
 impl SequenceRemovalPublication for UnreachablePublication {
     fn remove_state(&self, _: &str) -> Result<bool, String> {
-        panic!("all identity-owner checks must finish before any sequence removal")
+        panic!("every dependency check must finish before any sequence removal")
     }
 }
 #[test]
-fn multi_sequence_identity_preflight_prevents_removing_an_earlier_unowned_sequence() {
+fn an_identity_sequence_in_a_multi_sequence_drop_prevents_removing_an_earlier_sequence() {
     let engine = Engine::new();
     engine
         .sql(
@@ -29,9 +52,9 @@ fn multi_sequence_identity_preflight_prevents_removing_an_earlier_unowned_sequen
     let identity = engine.sequence_state("items_id_seq").unwrap().unwrap().1;
     let error = engine
         .with_implicit_transaction(|engine| {
-            let mut context = engine.sequence_removal_context();
-            context.publication = &UnreachablePublication;
-            context.drop_sequences(&["public.plain".into(), "public.items_id_seq".into()], true)
+            let mut context = engine.catalog_removal_context();
+            context.tables.sequences.publication = &UnreachablePublication;
+            drop_sequences(&context, &["plain", "items_id_seq"])
         })
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("2BP01"));
@@ -88,7 +111,7 @@ impl SequenceRemovalPublication for FailedPublication<'_> {
         );
         assert!(
             self.engine.runtime.notices.is_empty(),
-            "final cascade notices must follow successful sequence publication"
+            "the cascade notice follows the removal of every object"
         );
         self.reached.set(true);
         Err("injected sequence removal failure".into())
@@ -117,9 +140,9 @@ fn failed_sequence_publication_rolls_back_prior_native_default_and_view_deletion
         };
         let error = engine
             .with_implicit_transaction(|engine| {
-                let mut context = engine.sequence_removal_context();
-                context.publication = &publication;
-                context.drop_sequences(&["public.ids".into()], true)
+                let mut context = engine.catalog_removal_context();
+                context.tables.sequences.publication = &publication;
+                drop_sequences(&context, &["ids"])
             })
             .unwrap_err();
         assert!(

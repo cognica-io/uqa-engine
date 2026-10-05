@@ -16,7 +16,7 @@ use super::{
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct AggregateValueRecord {
     pub(super) value: Value,
-    pub(super) sort_keys: Vec<(Value, bool)>,
+    pub(super) sort_keys: Vec<super::ordering::AggregateSortKey>,
     pub(super) sequence: u64,
 }
 
@@ -125,7 +125,7 @@ impl AggregateValueBuffer {
     pub(super) fn push(
         &mut self,
         value: Value,
-        sort_keys: Vec<(Value, bool)>,
+        sort_keys: Vec<super::ordering::AggregateSortKey>,
     ) -> Result<(), SQLError> {
         let next_sequence = self
             .next_sequence

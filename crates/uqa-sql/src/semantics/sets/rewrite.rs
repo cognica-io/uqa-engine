@@ -177,12 +177,25 @@ pub fn rewrite_set_calls(
                 )?;
             }
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             for argument in args {
                 *argument = rewrite_set_calls(
                     engine,
                     resolver,
                     argument.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
+            }
+            if let Some(filter) = filter {
+                **filter = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    (**filter).clone(),
                     calls,
                     call_relation,
                     schema,
@@ -395,14 +408,12 @@ fn replace_group_set_expression(
             filter,
             ..
         } => {
-            for argument in args {
-                replace_group_set_expression(argument, mappings);
-            }
-            for order in order_by {
-                replace_group_set_expression(&mut order.expr, mappings);
-            }
-            if let Some(filter) = filter {
-                replace_group_set_expression(filter, mappings);
+            for expression in args
+                .iter_mut()
+                .chain(order_by.iter_mut().map(|order| &mut order.expr))
+                .chain(filter.as_deref_mut())
+            {
+                replace_group_set_expression(expression, mappings);
             }
         }
         ScalarExpr::Array(items)
@@ -434,15 +445,16 @@ fn replace_group_set_expression(
                 replace_group_set_expression(item, mappings);
             }
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
-            for argument in args {
-                replace_group_set_expression(argument, mappings);
-            }
-            for item in &mut spec.partition_by {
-                replace_group_set_expression(item, mappings);
-            }
-            for order in &mut spec.order_by {
-                replace_group_set_expression(&mut order.expr, mappings);
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
+            for expression in args
+                .iter_mut()
+                .chain(filter.as_deref_mut())
+                .chain(&mut spec.partition_by)
+                .chain(spec.order_by.iter_mut().map(|order| &mut order.expr))
+            {
+                replace_group_set_expression(expression, mappings);
             }
             if let Some(frame) = &mut spec.frame {
                 replace_group_set_frame_bound(&mut frame.start, mappings);
@@ -726,7 +738,13 @@ fn rewrite_aggregate_dependencies(
                 .collect(),
             negated: *negated,
         },
-        ScalarExpr::WindowCall { name, args, spec } => {
+        ScalarExpr::WindowCall {
+            name,
+            args,
+            spec,
+            filter,
+            modifiers,
+        } => {
             let mut spec = spec.clone();
             spec.partition_by = spec
                 .partition_by
@@ -742,6 +760,7 @@ fn rewrite_aggregate_dependencies(
                 rewrite_aggregate_frame_bound(engine, group_by, &mut frame.end, dependencies);
             }
             ScalarExpr::WindowCall {
+                modifiers: *modifiers,
                 name: name.clone(),
                 args: args
                     .iter()
@@ -750,6 +769,14 @@ fn rewrite_aggregate_dependencies(
                     })
                     .collect(),
                 spec,
+                filter: filter.as_deref().map(|filter| {
+                    Box::new(rewrite_aggregate_dependencies(
+                        engine,
+                        group_by,
+                        filter,
+                        dependencies,
+                    ))
+                }),
             }
         }
         ScalarExpr::Case {

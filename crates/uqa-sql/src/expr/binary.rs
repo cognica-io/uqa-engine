@@ -309,8 +309,7 @@ pub(super) fn eval_operand_borrowed<'a>(
     }
 }
 
-/// `NULL` is falsy; otherwise truthy iff the value coerces to a non-zero
-/// boolean / number / non-empty string.
+/// Whether a condition holds. `NULL` does not; text, which reaches a condition only as an `unknown` literal or parameter, holds when `boolin` reads it as true (parse analysis rejects any other text); the engine's numeric retrieval predicates hold when non-zero.
 pub fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
@@ -318,7 +317,7 @@ pub fn truthy(v: &Value) -> bool {
         Value::Int(n) => *n != 0,
         Value::Float(f) => *f != 0.0,
         Value::Decimal(d) => !d.is_zero(),
-        Value::Str(s) | Value::FixedChar(s) => !s.is_empty(),
+        Value::Str(s) | Value::FixedChar(s) => super::parse_boolean_input(s) == Some(true),
         _ => true,
     }
 }
@@ -328,6 +327,14 @@ pub(crate) fn division_by_zero() -> SQLError {
     SQLError::Routine {
         sqlstate: "22012".into(),
         message: "division by zero".into(),
+    }
+}
+
+/// `PostgreSQL`'s error for a date, time, timestamp or interval beyond its type's range (SQLSTATE 22008).
+pub(crate) fn datetime_out_of_range(type_name: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22008".into(),
+        message: format!("{type_name} out of range"),
     }
 }
 

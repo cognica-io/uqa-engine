@@ -207,6 +207,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `execution.static-row-schema-and-spill-v1` | `M3` | `partial` |
 | `types.declared-identity-casts-and-catalog` | `M3` | `partial` |
 | `ddl.alter-type-and-migration` | `M3` | `partial` |
+| `ddl.alter-column-diagnostics` | `M3` | `verified` |
 | `catalog.pg-database-locale` | `M3` | `partial` |
 | `plpgsql.datum-slots-and-bound-cursors` | `M4` | `partial` |
 | `sequences.nontransactional-values-and-catalog-state` | `M4` | `partial` |
@@ -242,6 +243,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.schema-drop-cascade` | `M3` | `partial` |
 | `ddl.stored-relation-routine-dependencies` | `M3` | `partial` |
 | `ddl.domain-drop-cascade` | `M3` | `partial` |
+| `ddl.dependency-aware-deletion` | `M3` | `verified` |
 | `types.numeric-comparison-coherence` | `M4` | `verified` |
 | `types.time-timetz-key-coherence` | `M4` | `verified` |
 | `types.nonfinite-float-persistence` | `M4` | `verified` |
@@ -251,6 +253,25 @@ The following compact ledger is the readable projection of the machine-readable 
 | `aggregates.mode-equality-and-ties` | `M4` | `verified` |
 | `types.legacy-vector-coherence` | `M4` | `verified` |
 | `dml.assignment-subscripts` | `M4` | `verified` |
+| `types.enum-declarations-and-values` | `M3` | `verified` |
+| `types.unknown-literal-coercion` | `M3` | `partial` |
+| `ddl.partition-bound-transformation` | `M3` | `partial` |
+| `dml.failing-row-details` | `M4` | `verified` |
+| `query.window-frames` | `M1` | `verified` |
+| `aggregates.null-and-enum-inputs` | `M1` | `verified` |
+| `expressions.boolean-conditions` | `M1` | `verified` |
+| `expressions.interval-arithmetic` | `M1` | `verified` |
+| `routines.sql-standard-body-deparse` | `M1` | `verified` |
+| `routines.attribute-checks` | `M3` | `partial` |
+| `types.common-type-selection` | `M4` | `partial` |
+| `ddl.default-cooking` | `M3` | `partial` |
+| `ddl.create-table-oid-allocation` | `M3` | `partial` |
+| `ddl.create-table-analysis-order` | `M3` | `partial` |
+| `types.type-object-lifecycle` | `M3` | `verified` |
+| `catalog.object-dependencies` | `M3` | `partial` |
+| `catalog.creation-ordered-oids` | `M3` | `partial` |
+| `ddl.relation-creation-namespaces` | `M3` | `partial` |
+| `ddl.rule-and-trigger-definitions` | `M3` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 

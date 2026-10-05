@@ -16,7 +16,9 @@ use std::collections::BTreeMap;
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use uqa_core::{ArrayValue, DecimalValue, DocId, LegacyVectorValue, TemporalValue, Value};
+use uqa_core::{
+    ArrayValue, DecimalValue, DocId, EnumValue, LegacyVectorValue, TemporalValue, Value,
+};
 
 use super::{ManagedConnection, Result, SQLiteError};
 use crate::value_index_key::SQLiteValueIndexKey;
@@ -63,6 +65,7 @@ enum StoredValue {
     Row(Vec<StoredValue>),
     Record(Vec<(String, StoredValue)>),
     Map(BTreeMap<String, StoredValue>),
+    Enum(EnumValue),
 }
 
 impl From<&Value> for StoredValue {
@@ -96,6 +99,7 @@ impl From<&Value> for StoredValue {
                     .map(|(key, value)| (key.clone(), Self::from(value)))
                     .collect(),
             ),
+            Value::Enum(value) => Self::Enum(value.clone()),
         }
     }
 }
@@ -131,6 +135,7 @@ impl StoredValue {
                     .map(|(key, value)| (key, value.into_value()))
                     .collect(),
             ),
+            Self::Enum(value) => Value::Enum(value),
         }
     }
 }

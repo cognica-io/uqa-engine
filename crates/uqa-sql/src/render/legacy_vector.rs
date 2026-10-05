@@ -76,7 +76,8 @@ mod tests {
                 assert_eq!(
                     crate::catalog::expression_text::schema_expr_text(&crate::ast::Expr::Literal(
                         Value::LegacyVector(vector)
-                    )),
+                    ))
+                    .unwrap(),
                     expression
                 );
             }

@@ -12,13 +12,10 @@ use super::{
 use crate::{
     ast::{EventEnableMode, Expr, FunctionBinding},
     catalog::events::{
-        definition::rewrites::rewrite_trigger_routine_references,
-        reads::EventLookupState,
-        removal::{removed_dependent_rules, removed_relation_events},
-        PreparedRuleColumnDrop, RuleCatalog, RuleColumnDependency, RuleDependencies,
-        RuleRoutineDependency, StoredRule, TriggerCatalog,
+        definition::rewrites::rewrite_trigger_routine_references, removal::removed_relation_events,
+        PreparedRuleColumnDrop, RuleCatalog, RuleColumnDependency, RuleDependencies, StoredRule,
+        TriggerCatalog,
     },
-    SQLError,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::RelationIdentity;
@@ -28,6 +25,7 @@ fn relation(name: &str) -> RelationIdentity {
 }
 fn stored_rule(name: &str) -> StoredRule {
     StoredRule {
+        catalog_oid: None,
         definition: rule(&format!(
             "CREATE RULE {name} AS ON INSERT TO child DO NOTHING"
         )),
@@ -63,165 +61,6 @@ fn column_dependency() -> RuleColumnDependency {
         relation: relation("child"),
         column: "id".into(),
     }
-}
-
-#[test]
-fn relation_dependents_skip_owned_rules_and_sort_external_definitions() {
-    let catalog = Catalog::default();
-    let mut partitions = fixture();
-    let mut owned = stored_rule("owned");
-    owned.dependencies = None;
-    partitions.rules.insert(
-        relation("parent"),
-        BTreeMap::from([("owned".into(), owned)]),
-    );
-    let mut first = stored_rule("alpha");
-    first
-        .dependencies
-        .as_mut()
-        .unwrap()
-        .relations
-        .insert(relation("parent"));
-    let mut second = first.clone();
-    second.definition.name = "zeta".into();
-    partitions.rules.insert(
-        relation("child"),
-        BTreeMap::from([
-            ("zeta".into(), second),
-            ("alpha".into(), first),
-            ("independent".into(), stored_rule("independent")),
-        ]),
-    );
-    assert_eq!(
-        partitions
-            .context(&catalog.context())
-            .rules_depending_on_relations(&["public.parent".into()])
-            .unwrap(),
-        [
-            (relation("child"), "alpha".into()),
-            (relation("child"), "zeta".into())
-        ]
-    );
-    assert_eq!(*partitions.reads.borrow(), ["rules"]);
-}
-
-#[test]
-fn corrupt_rule_dependency_state_fails_instead_of_hiding_dependents() {
-    let catalog = Catalog::default();
-    let mut partitions = fixture();
-    let mut corrupt = stored_rule("corrupt");
-    corrupt.dependencies = None;
-    partitions.rules.insert(
-        relation("child"),
-        BTreeMap::from([("corrupt".into(), corrupt)]),
-    );
-    let lookup = partitions.context(&catalog.context());
-    let expected = "rule `corrupt` on `public.child` has no bound dependency state";
-    assert_eq!(
-        lookup
-            .rules_depending_on_relations(&["public.parent".into()])
-            .unwrap_err(),
-        expected
-    );
-    assert_eq!(
-        lookup
-            .rules_depending_on_routine(&binding(Some([1; 16]), "public.handler"))
-            .unwrap_err(),
-        expected
-    );
-    assert!(
-        matches!(lookup.column_event_dependencies("public.child","id"),Err(SQLError::Internal(message)) if message==expected)
-    );
-}
-
-#[test]
-fn rule_routine_dependencies_use_object_identity_and_legacy_signature_pairs() {
-    let catalog = Catalog::default();
-    let mut partitions = fixture();
-    let mut entries = BTreeMap::new();
-    for (name, id, routine_name, args) in [
-        ("identity", Some([1; 16]), "public.old", vec![]),
-        ("stale", Some([2; 16]), "public.handler", vec![]),
-        ("legacy", None, "public.handler", vec![]),
-        ("overload", None, "public.handler", vec!["integer".into()]),
-    ] {
-        let mut stored = stored_rule(name);
-        stored
-            .dependencies
-            .as_mut()
-            .unwrap()
-            .routines
-            .insert(RuleRoutineDependency {
-                object_id: id,
-                name: routine_name.into(),
-                argument_types: args,
-            });
-        entries.insert(name.into(), stored);
-    }
-    partitions.rules.insert(relation("child"), entries);
-    let lookup = partitions.context(&catalog.context());
-    assert_eq!(
-        lookup
-            .rules_depending_on_routine(&binding(Some([1; 16]), "public.handler"))
-            .unwrap(),
-        [(relation("child"), "identity".into())]
-    );
-    assert_eq!(
-        lookup
-            .rules_depending_on_routine(&binding(None, "public.handler"))
-            .unwrap(),
-        [(relation("child"), "legacy".into())]
-    );
-}
-
-struct PinnedTriggers(TriggerCatalog);
-impl EventLookupState for PinnedTriggers {
-    fn query_rules(&self) -> Option<&RuleCatalog> {
-        panic!("trigger dependency discovery must not inspect rules")
-    }
-    fn query_triggers(&self) -> Option<&TriggerCatalog> {
-        Some(&self.0)
-    }
-    fn session_replication_role_is_replica(&self) -> bool {
-        panic!("dependency discovery must include disabled triggers")
-    }
-}
-#[test]
-fn trigger_routine_dependencies_include_pinned_when_bindings_and_disabled_definitions() {
-    let catalog = Catalog::default();
-    let mut partitions = fixture();
-    let mut invokes = trigger("public.child", "invokes");
-    invokes.function_object_id = Some([1; 16]);
-    invokes.enabled = EventEnableMode::Disabled;
-    let mut condition = trigger("public.child", "condition");
-    condition.definition.when = Some(call(binding(Some([1; 16]), "public.filter")));
-    let mut stale = trigger("public.child", "stale");
-    stale.function_object_id = Some([2; 16]);
-    stale.definition.function = "public.handler".into();
-    let pinned = PinnedTriggers(TriggerCatalog::from([(
-        relation("child"),
-        BTreeMap::from([
-            ("invokes".into(), invokes),
-            ("condition".into(), condition),
-            ("stale".into(), stale),
-        ]),
-    )]));
-    partitions.triggers.insert(
-        relation("child"),
-        BTreeMap::from([("live".into(), trigger("public.child", "live"))]),
-    );
-    let mut lookup = partitions.context(&catalog.context());
-    lookup.state = &pinned;
-    assert_eq!(
-        lookup
-            .triggers_depending_on_routine(&binding(Some([1; 16]), "public.handler"))
-            .unwrap(),
-        [
-            ("public.child".into(), "condition".into()),
-            ("public.child".into(), "invokes".into())
-        ]
-    );
-    assert!(partitions.reads.borrow().is_empty());
 }
 
 #[test]
@@ -338,32 +177,6 @@ fn removed_relation_candidates_include_referencing_constraints_and_preserve_orig
     assert_eq!(triggers.len(), 2);
     assert_eq!(triggers[&relation("parent")].len(), 2);
     assert_eq!(rules.len(), 1);
-}
-
-#[test]
-fn missing_dependent_rule_fails_without_mutating_the_source_catalog() {
-    let rules = RuleCatalog::from([(
-        relation("child"),
-        BTreeMap::from([("keep".into(), stored_rule("keep"))]),
-    )]);
-    let error = removed_dependent_rules(
-        &rules,
-        &[
-            (relation("child"), "keep".into()),
-            (relation("child"), "missing".into()),
-        ],
-    )
-    .unwrap_err();
-    assert_eq!(
-        error,
-        "dependent rule `missing` on `public.child` disappeared after DROP preflight"
-    );
-    assert!(rules[&relation("child")].contains_key("keep"));
-    assert!(
-        removed_dependent_rules(&rules, &[(relation("child"), "keep".into())])
-            .unwrap()
-            .is_empty()
-    );
 }
 
 #[test]

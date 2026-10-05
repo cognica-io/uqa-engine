@@ -144,6 +144,13 @@ impl CatalogReadView {
                 || self.has_constraint_index(&relation)
             {
                 Some("index")
+            } else if self
+                .snapshot
+                .definitions
+                .composites
+                .contains_key(&relation.qualified_name())
+            {
+                Some("composite type")
             } else {
                 None
             };
@@ -172,7 +179,7 @@ impl CatalogReadView {
         Ok(None)
     }
 
-    pub fn all_schema_names(&self, resolution: &RelationNameResolution) -> Vec<String> {
+    pub fn all_schema_names(&self) -> Vec<String> {
         let mut schemas = vec![
             "pg_catalog".to_string(),
             "information_schema".to_string(),
@@ -180,26 +187,9 @@ impl CatalogReadView {
         ];
         schemas.extend(self.snapshot.definitions.schemas.keys().cloned());
         schemas.extend(self.snapshot.definitions.graphs.keys().cloned());
-        let temporary_schema = resolution.temporary_schema.clone();
-        let has_temporary_relation = self
-            .snapshot
-            .tables
-            .iter()
-            .any(|(relation, _)| relation.schema == temporary_schema)
-            || self
-                .snapshot
-                .definitions
-                .views
-                .keys()
-                .any(|relation| relation.schema == temporary_schema)
-            || self.snapshot.definitions.sequence_persistence.iter().any(
-                |(relation, persistence)| {
-                    relation.schema == temporary_schema
-                        && *persistence == uqa_sql::ast::RelationPersistence::Temporary
-                },
-            );
-        if has_temporary_relation {
-            schemas.push(temporary_schema);
+        if let Some(temporary) = &self.snapshot.temporary_namespace {
+            schemas.push(temporary.schema.clone());
+            schemas.push(temporary.toast_schema());
         }
         schemas.sort();
         schemas.dedup();
@@ -290,6 +280,22 @@ impl CatalogReadView {
         &self,
     ) -> impl Iterator<Item = &uqa_sql::catalog::roles::RoleMembership> {
         self.snapshot.definitions.role_memberships.values()
+    }
+
+    /// The OIDs the graph recorded when it and its labels were created; `None` for a graph created before OIDs were recorded.
+    pub fn graph_catalog_oids(
+        &self,
+        graph: &str,
+    ) -> Option<&uqa_sql::catalog::graph_oids::GraphCatalogOids> {
+        self.snapshot.definitions.graph_catalog_oids.get(graph)
+    }
+
+    /// The `pg_class` OID of the sequence with the object identity.
+    pub fn sequence_catalog_oid(&self, object_id: &[u8; 16]) -> i64 {
+        super::sequence::catalog_oids::sequence_catalog_oid(
+            &self.snapshot.definitions.sequence_catalog_oids,
+            object_id,
+        )
     }
 
     pub fn sequences(&self) -> Result<Vec<super::CatalogSequenceMetadata>, SQLError> {
@@ -503,8 +509,21 @@ impl CatalogReadView {
         role: &(impl RoleSubject + ?Sized),
         privilege: crate::catalog::security::schema::SchemaAclPrivilege,
     ) -> bool {
-        let Some(security) = self.snapshot.definitions.schemas.get(schema) else {
-            return true;
+        let toast_security;
+        let security = match self.snapshot.definitions.schemas.get(schema) {
+            Some(security) => security,
+            None => match self.snapshot.temporary_namespace.as_ref() {
+                // `InitTempTableNamespace` creates the TOAST namespace for the bootstrap superuser with no ACL, so only its privileges reach it.
+                Some(temporary) if schema == temporary.toast_schema() => {
+                    toast_security =
+                        crate::catalog::security::BoundSchemaSecurity::bootstrap_with_oid(
+                            schema,
+                            temporary.oids.toast_namespace,
+                        );
+                    &toast_security
+                }
+                _ => return true,
+            },
         };
         security
             .resolve(&self.snapshot.definitions.roles)
@@ -599,6 +618,31 @@ impl CatalogReadView {
 
     pub fn domains(&self) -> impl Iterator<Item = &uqa_sql::catalog::domain::StoredDomain> {
         self.snapshot.definitions.domains.values()
+    }
+
+    pub fn enums(&self) -> impl Iterator<Item = &uqa_sql::catalog::enum_type::StoredEnum> {
+        self.snapshot.definitions.enums.values()
+    }
+
+    pub fn composites(
+        &self,
+    ) -> impl Iterator<Item = &uqa_sql::catalog::composite_type::StoredComposite> {
+        self.snapshot.definitions.composites.values()
+    }
+
+    /// Resolve a standalone composite type by its type OID or by the OID of its generated array type.
+    pub fn composite_by_type_oid(
+        &self,
+        oid: u32,
+    ) -> Option<&uqa_sql::catalog::composite_type::StoredComposite> {
+        self.composites()
+            .find(|definition| definition.oid == oid || definition.array_oid == oid)
+    }
+
+    /// Resolve an enum by its type OID or by the OID of its generated array type.
+    pub fn enum_by_type_oid(&self, oid: u32) -> Option<&uqa_sql::catalog::enum_type::StoredEnum> {
+        self.enums()
+            .find(|definition| definition.oid == oid || definition.array_oid == oid)
     }
 
     pub fn sql_functions(

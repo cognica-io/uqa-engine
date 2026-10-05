@@ -128,6 +128,27 @@ impl ArrayValue {
         lower.checked_add(length)?.checked_sub(1)
     }
 
+    /// The element at one subscript per dimension, with each dimension's lower bound; `None` outside the bounds or for a subscript count other than the array's dimension count.
+    pub fn element_at(&self, subscripts: &[i32]) -> Option<&Value> {
+        if subscripts.len() != self.storage.dimensions.len() {
+            return None;
+        }
+        let mut level = self.storage.elements.as_slice();
+        let mut element = None;
+        for (dimension, subscript) in subscripts.iter().enumerate() {
+            let offset = i64::from(*subscript) - i64::from(self.lower_bound(dimension)?);
+            let value = level.get(usize::try_from(offset).ok()?)?;
+            element = Some(value);
+            if dimension + 1 < subscripts.len() {
+                let Value::List(inner) = value else {
+                    return None;
+                };
+                level = inner;
+            }
+        }
+        element
+    }
+
     pub fn with_elements(&self, elements: Vec<Value>) -> Option<Self> {
         Self::with_lower_bounds(elements, self.storage.lower_bounds.clone())
     }

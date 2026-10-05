@@ -41,6 +41,7 @@ fn stored_rule(name: &str) -> StoredRule {
         panic!("expected rule")
     };
     StoredRule {
+        catalog_oid: None,
         definition,
         enabled: EventEnableMode::Origin,
         condition_plan: None,
@@ -51,6 +52,8 @@ fn stored_rule(name: &str) -> StoredRule {
 fn stored_trigger(name: &str) -> StoredTrigger {
     let Statement::CreateTrigger(definition)=crate::compile(&format!("CREATE TRIGGER saved BEFORE INSERT ON public.{name} FOR EACH ROW EXECUTE FUNCTION handler()")).unwrap().remove(0) else {panic!("expected trigger")};
     StoredTrigger {
+        catalog_oid: None,
+        constraint_catalog_oid: None,
         definition,
         enabled: EventEnableMode::Origin,
         function_object_id: Some([1; 16]),

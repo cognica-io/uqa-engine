@@ -714,22 +714,9 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
                     .iter()
                     .any(|item| expression_has_external_reference(item, scopes))
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
-            args.iter()
-                .any(|expr| expression_has_external_reference(expr, scopes))
-                || spec
-                    .partition_by
-                    .iter()
-                    .any(|expr| expression_has_external_reference(expr, scopes))
-                || spec
-                    .order_by
-                    .iter()
-                    .any(|order| expression_has_external_reference(&order.expr, scopes))
-                || spec.frame.as_ref().is_some_and(|frame| {
-                    frame_bound_has_external_reference(&frame.start, scopes)
-                        || frame_bound_has_external_reference(&frame.end, scopes)
-                })
-        }
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => window_has_external_reference(args, filter.as_deref(), spec, scopes),
         ScalarExpr::Case {
             base,
             when,
@@ -776,6 +763,24 @@ fn resolves_unqualified(column: &str, scopes: &[QueryScope]) -> bool {
         }
     }
     false
+}
+
+/// Whether a window call's arguments, `FILTER`, keys or frame offsets refer outside the query scopes.
+fn window_has_external_reference(
+    args: &[ScalarExpr],
+    filter: Option<&ScalarExpr>,
+    spec: &crate::ScalarWindowSpec,
+    scopes: &[QueryScope],
+) -> bool {
+    args.iter()
+        .chain(filter)
+        .chain(&spec.partition_by)
+        .chain(spec.order_by.iter().map(|order| &order.expr))
+        .any(|expr| expression_has_external_reference(expr, scopes))
+        || spec.frame.as_ref().is_some_and(|frame| {
+            frame_bound_has_external_reference(&frame.start, scopes)
+                || frame_bound_has_external_reference(&frame.end, scopes)
+        })
 }
 
 fn frame_bound_has_external_reference(bound: &ScalarFrameBound, scopes: &[QueryScope]) -> bool {

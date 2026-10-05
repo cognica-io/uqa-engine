@@ -26,89 +26,8 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
         return lower;
     };
     let is_builtin = match schema {
-        "ag_catalog" => matches!(
-            local,
-            "cypher"
-                | "create_graph"
-                | "drop_graph"
-                | "graph_exists"
-                | "create_vlabel"
-                | "create_elabel"
-                | "drop_label"
-                | "alter_graph"
-        ),
-        "pg_catalog" => {
-            crate::registry::is_registered(local)
-                || matches!(
-                    local,
-                    "generate_series"
-                        | "unnest"
-                        | "regexp_split_to_table"
-                        | "string_to_table"
-                        | "json_array_elements"
-                        | "jsonb_array_elements"
-                        | "json_array_elements_text"
-                        | "jsonb_array_elements_text"
-                        | "json_each"
-                        | "jsonb_each"
-                        | "json_each_text"
-                        | "jsonb_each_text"
-                        | "json_object_keys"
-                        | "jsonb_object_keys"
-                        | "upper"
-                        | "lower"
-                        | "bit_length"
-                        | "char_length"
-                        | "character_length"
-                        | "crc32"
-                        | "crc32c"
-                        | "gamma"
-                        | "json_strip_nulls"
-                        | "jsonb_strip_nulls"
-                        | "length"
-                        | "lgamma"
-                        | "md5"
-                        | "octet_length"
-                        | "reverse"
-                        | "random"
-                        | "setseed"
-                        | "nextval"
-                        | "currval"
-                        | "lastval"
-                        | "setval"
-                        | "current_schema"
-                        | "current_schemas"
-                        | "current_setting"
-                        | "set_config"
-                        | "pg_sleep"
-                        | "pg_sleep_for"
-                        | "pg_sleep_until"
-                        | "pg_backend_pid"
-                        | "pg_trigger_depth"
-                        | "pg_listening_channels"
-                        | "pg_notify"
-                        | "pg_notification_queue_usage"
-                        | "pg_get_expr"
-                        | "pg_get_partkeydef"
-                        | "pg_get_serial_sequence"
-                        | "pg_get_sequence_data"
-                        | "pg_sequence_last_value"
-                        | "pg_sequence_parameters"
-                        | "pg_get_triggerdef"
-                        | "pg_get_ruledef"
-                        | "pg_get_viewdef"
-                        | "pg_get_indexdef"
-                        | "format_type"
-                        | "pg_has_role"
-                        | "pg_get_userbyid"
-                        | "has_table_privilege"
-                        | "has_column_privilege"
-                        | "has_database_privilege"
-                        | "has_schema_privilege"
-                        | "has_sequence_privilege"
-                        | "has_function_privilege"
-                )
-        }
+        "ag_catalog" => is_age_catalog_function(local),
+        "pg_catalog" => crate::registry::is_registered(local) || is_pg_catalog_function(local),
         _ => false,
     };
     if is_builtin {
@@ -116,6 +35,104 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
     } else {
         lower
     }
+}
+
+/// The functions of the `ag_catalog` schema that a qualified call names.
+fn is_age_catalog_function(local: &str) -> bool {
+    matches!(
+        local,
+        "cypher"
+            | "create_graph"
+            | "drop_graph"
+            | "graph_exists"
+            | "create_vlabel"
+            | "create_elabel"
+            | "drop_label"
+            | "alter_graph"
+    )
+}
+
+/// The built-in functions outside the scalar registry that a `pg_catalog`-qualified call names.
+fn is_pg_catalog_function(local: &str) -> bool {
+    matches!(
+        local,
+        "generate_series"
+            | "unnest"
+            | "regexp_split_to_table"
+            | "string_to_table"
+            | "json_array_elements"
+            | "jsonb_array_elements"
+            | "json_array_elements_text"
+            | "jsonb_array_elements_text"
+            | "json_each"
+            | "jsonb_each"
+            | "json_each_text"
+            | "jsonb_each_text"
+            | "aclexplode"
+            | "json_object_keys"
+            | "jsonb_object_keys"
+            | "upper"
+            | "lower"
+            | "bit_length"
+            | "char_length"
+            | "character_length"
+            | "crc32"
+            | "crc32c"
+            | "gamma"
+            | "json_strip_nulls"
+            | "jsonb_strip_nulls"
+            | "length"
+            | "lgamma"
+            | "md5"
+            | "octet_length"
+            | "reverse"
+            | "random"
+            | "setseed"
+            | "nextval"
+            | "currval"
+            | "lastval"
+            | "setval"
+            | "current_schema"
+            | "current_schemas"
+            | "current_setting"
+            | "set_config"
+            | "pg_sleep"
+            | "pg_sleep_for"
+            | "pg_sleep_until"
+            | "pg_backend_pid"
+            | "pg_my_temp_schema"
+            | "pg_is_other_temp_schema"
+            | "pg_trigger_depth"
+            | "pg_listening_channels"
+            | "pg_notify"
+            | "pg_notification_queue_usage"
+            | "pg_get_expr"
+            | "pg_get_partkeydef"
+            | "pg_get_serial_sequence"
+            | "pg_get_sequence_data"
+            | "pg_sequence_last_value"
+            | "pg_sequence_parameters"
+            | "pg_get_triggerdef"
+            | "pg_get_ruledef"
+            | "pg_get_viewdef"
+            | "pg_get_indexdef"
+            | "pg_get_constraintdef"
+            | "pg_get_function_arguments"
+            | "pg_get_function_identity_arguments"
+            | "pg_get_function_result"
+            | "pg_get_function_sqlbody"
+            | "format_type"
+            | "pg_describe_object"
+            | "pg_has_role"
+            | "pg_get_userbyid"
+            | "has_table_privilege"
+            | "has_column_privilege"
+            | "has_database_privilege"
+            | "has_schema_privilege"
+            | "has_sequence_privilege"
+            | "has_function_privilege"
+            | "has_type_privilege"
+    )
 }
 
 pub fn is_builtin_aggregate(expr: &ScalarExpr) -> bool {
@@ -300,8 +317,11 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
         ScalarExpr::InList { expr, list, .. } => {
             contains_retrieval(expr) || list.iter().any(contains_retrieval)
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             args.iter().any(contains_retrieval)
+                || filter.as_deref().is_some_and(contains_retrieval)
                 || spec.partition_by.iter().any(contains_retrieval)
                 || spec
                     .order_by

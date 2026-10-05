@@ -219,12 +219,15 @@ fn domain_constraints_run_at_their_argument_position_after_base_input_conversion
     let domain = StoredDomain {
         object_id: [1; 16],
         oid: 90_001,
+        array_oid: None,
         identity: uqa_core::RelationIdentity {
             schema: "public".into(),
             name: "positive".into(),
         },
         owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
         definition,
+        array_name: None,
+        usage_acl: None,
     };
     let target = domain.column_type();
     let scopes = Scopes {

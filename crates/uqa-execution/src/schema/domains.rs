@@ -10,7 +10,8 @@ use super::namespaces::SchemaStatementWriter;
 use crate::catalog::domain::{self, DomainRegistryPublication};
 use uqa_sql::{
     ast::CreateDomain,
-    catalog::domain::{domain_object_oid, StoredDomain},
+    catalog::domain::StoredDomain,
+    schema::constraint_metadata::{CatalogObjectAllocator, CatalogOidClass},
     SQLError,
 };
 
@@ -24,6 +25,9 @@ pub struct DomainCreationContext<'a> {
     pub bindings: &'a dyn DomainDeclarationBinding,
     pub allocate_identity: fn() -> Result<[u8; 16], SQLError>,
     pub publication: &'a dyn DomainRegistryPublication,
+    /// Enum and composite arrays share the type namespace with domain arrays.
+    pub enums: &'a dyn crate::catalog::enum_type::EnumRegistryPublication,
+    pub composites: &'a dyn crate::catalog::composite_type::CompositeRegistryPublication,
     pub changes: &'a dyn super::namespaces::NamespaceCatalogChanges,
 }
 
@@ -34,16 +38,45 @@ pub fn create_domain(
     let owner = context.creation.bind_owner()?;
     context.writer.prepare_writer()?;
     definition.name = context.creation.persistent_name(&definition.name)?;
+    // DefineDomain: a generated array holding the name moves aside; any other type is a conflict.
+    super::types::arrays::displace_array_type(
+        &context.creation,
+        super::types::arrays::UserTypeRegistries {
+            enums: context.enums,
+            domains: context.publication,
+            composites: context.composites,
+        },
+        &uqa_core::RelationIdentity::from_legacy_name(&definition.name)
+            .map_err(SQLError::Internal)?,
+    )?;
     let identity = context.creation.reserve_type_name(&definition.name)?;
+    let array_name = super::types::arrays::reserve_array_name(
+        &context.creation,
+        &identity.schema,
+        &identity.name,
+    )?;
     context.bindings.bind_domain_declaration(&mut definition)?;
+    // `DefineDomain` assigns the array type's OID, creates the domain, and then its constraints.
+    let object_id = (context.allocate_identity)()?;
     let mut allocator = context
         .identities
         .allocator(crate::catalog::identity::allocate_catalog_object_id);
+    let mut type_oid = || {
+        allocator
+            .allocate_catalog_oid(CatalogOidClass::Type, &object_id)
+            .map_err(|error| {
+                uqa_sql::catalog::errors::storage_error("domain catalog identity", &error)
+            })
+            .and_then(|oid| {
+                u32::try_from(oid)
+                    .map_err(|_| SQLError::Internal(format!("invalid domain OID {oid}")))
+            })
+    };
+    let array_oid = type_oid()?;
+    let oid = type_oid()?;
     uqa_sql::schema::domains::constraints::materialize(&mut definition, &mut allocator).map_err(
         |error| uqa_sql::catalog::errors::storage_error("domain constraint identity", &error),
     )?;
-    let object_id = (context.allocate_identity)()?;
-    let oid = domain_object_oid(&object_id);
     context.creation.retain_owner(&owner)?;
     let before = context.publication.domain_registry().clone();
     let mut registry = before.clone();
@@ -52,9 +85,12 @@ pub fn create_domain(
         StoredDomain {
             object_id,
             oid,
+            array_oid: Some(array_oid),
             identity,
             owner: owner.identity(),
             definition,
+            array_name: Some(array_name),
+            usage_acl: None,
         },
     );
     domain::publish(context.publication, &before, registry)?;

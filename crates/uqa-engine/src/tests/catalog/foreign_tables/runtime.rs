@@ -133,11 +133,20 @@ fn foreign_drop_checks_owned_sequence_dependents_before_removing_persisted_state
         )
         .unwrap();
     let error = engine.drop_foreign_table("items").unwrap_err();
-    assert!(
-        error.contains("cannot drop foreign table public.items"),
-        "{error}"
+    assert_eq!(
+        error,
+        "cannot drop foreign table items because other objects depend on it"
     );
-    assert!(error.contains("view public.dependent"), "{error}");
+    let error = engine.sql("DROP FOREIGN TABLE items", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("2BP01"));
+    assert_eq!(
+        error.detail(),
+        Some("view dependent depends on sequence items_id_seq")
+    );
+    assert_eq!(
+        error.hint(),
+        Some("Use DROP ... CASCADE to drop the dependent objects too.")
+    );
     assert!(engine.foreign_table("items").unwrap().is_some());
     assert_eq!(
         engine.extensions.foreign_memory_tables.read()[&relation].len(),

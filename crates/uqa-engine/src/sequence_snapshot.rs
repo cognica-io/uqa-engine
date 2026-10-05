@@ -69,6 +69,7 @@ impl Engine {
             object_ids: self.durable.sequence_object_ids.snapshot(),
             persistence: self.durable.sequence_persistence.snapshot(),
             security: self.durable.sequence_security.snapshot(),
+            catalog_oids: self.durable.sequence_catalog_oids.snapshot(),
             roles: RoleCatalogSnapshot {
                 roles: self.durable.roles.snapshot(),
                 memberships: self.durable.role_memberships.snapshot(),

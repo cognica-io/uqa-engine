@@ -8,7 +8,7 @@
 
 use super::{
     body_validation::routine_parameter_values,
-    compilation::{lower_sql_body_statement, RoutineCompilationContext},
+    compilation::{lower_sql_routine_statement, RoutineCompilationContext, SQLRoutineLowering},
     routine_local_name,
 };
 use crate::{
@@ -39,6 +39,22 @@ pub const fn is_sql_body_parameter(parameter: &FunctionParam) -> bool {
     )
 }
 
+/// The names a SQL body gives its input parameters, in order. A body given as a string names each by its own name; a SQL-standard body names the input at position `n` by the parameter declared at position `n` among all parameters, as `interpret_AS_clause` names them, so an input that follows an output parameter goes by that output parameter's name.
+#[must_use]
+pub fn sql_body_parameter_names(def: &CreateFunction) -> Vec<String> {
+    match def.body {
+        FunctionBody::Statements(_) => def
+            .sql_body_parameters()
+            .into_iter()
+            .map(|parameter| parameter.name.to_string())
+            .collect(),
+        FunctionBody::Source(_) => sql_body_parameters(def)
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect(),
+    }
+}
+
 /// The scope of the parameters a SQL body names, typed as `params` types them.
 pub fn sql_body_parameter_scope(
     def: &CreateFunction,
@@ -46,10 +62,7 @@ pub fn sql_body_parameter_scope(
 ) -> Result<RoutineParameterScope, SQLError> {
     Ok(RoutineParameterScope::new(
         &routine_local_name(&def.name)?,
-        sql_body_parameters(def)
-            .iter()
-            .map(|parameter| parameter.name.clone())
-            .collect(),
+        sql_body_parameter_names(def),
         params
             .iter()
             .map(|param| param.declared_scalar_type().cloned())
@@ -72,10 +85,7 @@ pub fn record_sql_standard_body_parameters(
         params,
         sites: ParameterSites {
             function: routine_local_name(&def.name)?,
-            names: sql_body_parameters(def)
-                .iter()
-                .map(|parameter| parameter.name.clone())
-                .collect(),
+            names: sql_body_parameter_names(def),
         },
     };
     let mut recorded = statements.clone();
@@ -189,7 +199,15 @@ impl ParameterRecording<'_> {
 
     /// The number of references to each parameter that analysis of `statement` resolves by name.
     fn resolved_counts(&self, statement: Statement) -> Result<Vec<usize>, SQLError> {
-        let mut plan = lower_sql_body_statement(self.context, statement, true, false, false)?;
+        let mut plan = lower_sql_routine_statement(
+            self.context,
+            statement,
+            SQLRoutineLowering {
+                bind_catalog_dependencies: true,
+                persisted_definition: false,
+                preserve_target_expressions: false,
+            },
+        )?;
         let before = parameter_counts(&mut plan, self.params.len());
         let snapshot = self.context.catalog.binding_snapshot()?;
         bind_routine_parameter_references(

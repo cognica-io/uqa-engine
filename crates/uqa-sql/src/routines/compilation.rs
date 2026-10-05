@@ -15,7 +15,7 @@ use super::{
     CompiledFunctionBody, RoutineResolution,
 };
 use crate::{
-    ast::{CreateFunction, FunctionBody, FunctionReturns, Statement},
+    ast::{ColumnType, CreateFunction, FunctionBody, FunctionReturns, Statement},
     binding::{
         snapshot::BindingSnapshot,
         stored_relations::{
@@ -54,58 +54,26 @@ pub fn compile_function_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(context, def, false, false)
+    compile_function_body_inner(context, def, false)
 }
 
 pub fn compile_persisted_function_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(context, def, true, false)
+    compile_function_body_inner(context, def, true)
 }
 
-pub fn compile_persisted_function_dependencies(
-    context: &RoutineCompilationContext<'_>,
-    def: &CreateFunction,
-) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(context, def, true, true)
-}
-
-/// The body `CREATE FUNCTION` stores under `check_function_bodies = off`: the declaration is checked as always, a SQL-standard body, which the statement itself analyzes, is compiled, and a body given as a string is left unexamined until a call compiles it.
+/// The body `CREATE FUNCTION` compiles under `check_function_bodies = off`: the declaration is checked as always, a SQL-standard body, which the statement itself analyzes, is compiled, and a body given as a string is left unexamined, `None`, for each session to compile when it first calls the routine.
 pub fn defer_function_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
-) -> Result<CompiledFunctionBody, SQLError> {
+) -> Result<Option<CompiledFunctionBody>, SQLError> {
     if matches!(def.body, FunctionBody::Statements(_)) {
-        return compile_function_body(context, def);
+        return compile_function_body(context, def).map(Some);
     }
     validate_routine_signature(context, def)?.reject_with(context.regroles)?;
-    Ok(CompiledFunctionBody::Deferred)
-}
-
-/// The statements of a body nothing has compiled yet, read without the catalog, for analyses that must know what a routine runs before a call compiles it. `None` when the body does not parse, in which case a call fails before it runs anything.
-#[must_use]
-pub fn deferred_body_outline(
-    def: &CreateFunction,
-    aggregates: &dyn crate::plan::AggregateClassifier,
-) -> Option<CompiledFunctionBody> {
-    let FunctionBody::Source(source) = &def.body else {
-        return None;
-    };
-    match def.language.as_str() {
-        "plpgsql" => crate::plpgsql::parse_function(def)
-            .ok()
-            .map(CompiledFunctionBody::PLpgSQL),
-        "sql" => crate::compile(source).ok().map(|statements| {
-            CompiledFunctionBody::SQL(
-                statements
-                    .into_iter()
-                    .map(|statement| UnifiedPlan::lower_with(statement, aggregates))
-                    .collect(),
-            )
-        }),
-        _ => None,
-    }
+    Ok(None)
 }
 
 /// The checks `CREATE FUNCTION` makes whatever `check_function_bodies` says: the language and the body form it accepts, the declared types, and the role constants of parameter defaults, which are returned for the body's own checks.
@@ -126,7 +94,7 @@ fn validate_routine_signature(
     }
     let stored_regrole_constants = routine_parameter_regrole_constants(context.types, def);
     stored_regrole_constants.validate_inputs_with(context.regroles)?;
-    validate_routine_declaration(context.types, def)?;
+    validate_routine_declaration(def)?;
     Ok(stored_regrole_constants)
 }
 
@@ -154,7 +122,6 @@ fn compile_function_body_inner(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
     persisted_definition: bool,
-    preserve_target_expressions: bool,
 ) -> Result<CompiledFunctionBody, SQLError> {
     let mut stored_regrole_constants = validate_routine_signature(context, def)?;
     match def.language.as_str() {
@@ -180,7 +147,6 @@ fn compile_function_body_inner(
                 statements,
                 bind_catalog_dependencies,
                 persisted_definition && matches!(def.body, FunctionBody::Statements(_)),
-                preserve_target_expressions,
             )?;
             if bind_catalog_dependencies {
                 for plan in &mut plans {
@@ -200,7 +166,6 @@ fn compile_sql_routine_plans(
     statements: Vec<Statement>,
     bind_catalog_dependencies: bool,
     persisted_definition: bool,
-    preserve_target_expressions: bool,
 ) -> Result<Vec<UnifiedPlan>, SQLError> {
     let positional_parameters =
         super::body_validation::routine_parameter_values(context.types, def);
@@ -208,14 +173,16 @@ fn compile_sql_routine_plans(
     statements
         .into_iter()
         .map(|statement| {
-            let mut plan = lower_sql_body_statement(
+            let mut plan = lower_sql_routine_statement(
                 context,
                 statement,
-                bind_catalog_dependencies,
-                persisted_definition,
-                preserve_target_expressions,
+                SQLRoutineLowering {
+                    bind_catalog_dependencies,
+                    persisted_definition,
+                    preserve_target_expressions: false,
+                },
             )?;
-            // A SQL-standard body is analyzed when the routine is defined, so its names resolve against the catalog of that moment, as `PostgreSQL` stores the analyzed statements. A body given as a string keeps its names until each statement is analyzed before it runs.
+            // A SQL-standard body is analyzed when the routine is defined, so its names resolve against the catalog of that moment, as `PostgreSQL` stores the analyzed statements. A body given as a string keeps its names until each statement is analyzed before it runs, and keeps the types the session resolved when it compiled the body.
             if bind_catalog_dependencies {
                 let binding = context.catalog.binding_snapshot()?;
                 crate::binding::bind_routine_parameter_references(
@@ -234,6 +201,8 @@ fn compile_sql_routine_plans(
                         None,
                     )?;
                 }
+            } else {
+                bind_session_plan_types(context, &mut plan)?;
             }
             // Stored definitions retain their analyzed logical expressions;
             // immutable evaluation belongs to invocation planning.
@@ -242,21 +211,30 @@ fn compile_sql_routine_plans(
         .collect()
 }
 
-/// Lower one statement of a SQL body. The statement of a SQL-standard body also binds the relations it reads, as the routine's definition stores them.
-pub(super) fn lower_sql_body_statement(
+/// How a SQL routine statement is lowered from its stored syntax.
+#[derive(Clone, Copy)]
+pub struct SQLRoutineLowering {
+    /// Bind relations, sequences and `MERGE` target columns of catalog-owned syntax.
+    pub bind_catalog_dependencies: bool,
+    /// The syntax comes from a persisted definition, whose legacy call markers are upgraded.
+    pub persisted_definition: bool,
+    /// Keep `MERGE` target columns as written.
+    pub preserve_target_expressions: bool,
+}
+
+/// Lower one statement of a SQL routine body with its relations bound, before routine calls are bound.
+pub fn lower_sql_routine_statement(
     context: &RoutineCompilationContext<'_>,
     mut statement: Statement,
-    bind_catalog_dependencies: bool,
-    persisted_definition: bool,
-    preserve_target_expressions: bool,
+    lowering: SQLRoutineLowering,
 ) -> Result<UnifiedPlan, SQLError> {
-    if bind_catalog_dependencies && !preserve_target_expressions {
+    if lowering.bind_catalog_dependencies && !lowering.preserve_target_expressions {
         super::merge_columns::normalize_stored_merge_target_columns(context.merge, &mut statement)?;
     }
     let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
         context.catalog.has_registered_aggregate_function(name)
     });
-    if persisted_definition {
+    if lowering.persisted_definition {
         plan.rewrite_scalar_expressions(&mut |expression| {
             let ScalarExpr::Func { name, binding, .. } = expression else {
                 return;
@@ -264,7 +242,7 @@ pub(super) fn lower_sql_body_statement(
             crate::ast::FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
         });
     }
-    if bind_catalog_dependencies {
+    if lowering.bind_catalog_dependencies {
         match &mut plan {
             UnifiedPlan::Query(query) => {
                 let namespace = context.catalog.stored_query_namespace();
@@ -278,7 +256,7 @@ pub(super) fn lower_sql_body_statement(
                     query,
                     "SQL routine body",
                     false,
-                    persisted_definition,
+                    lowering.persisted_definition,
                 )?;
             }
             UnifiedPlan::Command(_) => {
@@ -287,4 +265,20 @@ pub(super) fn lower_sql_body_statement(
         }
     }
     Ok(plan)
+}
+
+/// A session's compilation of a source body keeps the types it resolved, as its analyzed plan holds type OIDs that renaming an enum does not invalidate. A domain coercion records the domain as a plan dependency, so a changed domain is resolved again, and relations and routines are resolved when the plan runs.
+fn bind_session_plan_types(
+    context: &RoutineCompilationContext<'_>,
+    plan: &mut UnifiedPlan,
+) -> Result<(), SQLError> {
+    crate::binding::stored_types::bind_unified_plan_type_identities(plan, &mut |name| {
+        let resolved = context.types.resolve_catalog_column_type(name);
+        let mut element = resolved.as_ref();
+        while let Some(ColumnType::Array(inner)) = element {
+            element = Some(inner.as_ref());
+        }
+        let domain = matches!(element, Some(ColumnType::Domain { .. }));
+        Ok(resolved.filter(|_| !domain))
+    })
 }

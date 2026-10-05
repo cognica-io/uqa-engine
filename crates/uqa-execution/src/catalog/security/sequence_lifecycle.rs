@@ -11,9 +11,7 @@ use super::roles::{
     locking::RoleLockContext,
 };
 use crate::catalog::{
-    context::CatalogContext,
-    projection::{resolve_regclass_kind_by_oid, sequence_relation_oid},
-    sequence::sequence_row,
+    context::CatalogContext, projection::resolve_regclass_kind_by_oid, sequence::sequence_row,
     sequence_introspection::SequenceIntrospectionCatalog,
 };
 use crate::row_locks::shared_objects::SharedObjectLockSession;
@@ -278,11 +276,12 @@ impl SequencePrivilegeContext<'_> {
         self.sequences.refresh_sequences().map_err(|error| {
             SQLError::Internal(format!("load sequences for privilege inquiry: {error}"))
         })?;
+        let catalog = self.catalog.catalog_read_view();
         if let Some((relation, _)) = self
             .sequences
             .object_ids()
             .iter()
-            .find(|(_, object_id)| sequence_relation_oid(**object_id) == oid)
+            .find(|(_, object_id)| catalog.sequence_catalog_oid(object_id) == oid)
         {
             return Ok(Some((relation.qualified_name(), relation.clone())));
         }

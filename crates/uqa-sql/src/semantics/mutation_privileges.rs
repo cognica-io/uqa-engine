@@ -158,6 +158,14 @@ pub fn insert_target_columns(
     catalog: &dyn MutationPrivilegeCatalog,
     stmt: &crate::plan::InsertPlan,
 ) -> Result<Vec<String>, SQLError> {
+    insert_supplied_columns(stmt, || catalog.bound_table_column_names(&stmt.table))
+}
+
+/// The columns an `INSERT` supplies, as [`insert_target_columns`] finds them, for a target whose columns `target_columns` lists in order.
+pub fn insert_supplied_columns(
+    stmt: &crate::plan::InsertPlan,
+    target_columns: impl FnOnce() -> Result<Vec<String>, SQLError>,
+) -> Result<Vec<String>, SQLError> {
     if !stmt.columns.is_empty() {
         return Ok(stmt
             .columns
@@ -175,7 +183,7 @@ pub fn insert_target_columns(
     if supplied == Some(0) {
         return Ok(Vec::new());
     }
-    let columns = catalog.bound_table_column_names(&stmt.table)?;
+    let columns = target_columns()?;
     Ok(match supplied {
         Some(supplied) => columns.into_iter().take(supplied).collect(),
         None => columns,

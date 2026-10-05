@@ -63,6 +63,7 @@ fn view(object_id: u8, persistence: RelationPersistence) -> StoredView {
         ),
         definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
             object_id: [object_id; 16],
+            catalog_oids: None,
             query: *query,
             output_columns: Some(vec!["value".into()]),
             persistence,
@@ -250,6 +251,9 @@ impl ViewPlanBinding for Fixture {
             vec!["value".into()],
             vec![Some(ColumnType::Integer)],
         ))
+    }
+    fn bind_type_identities(&self, _: &mut QueryPlan) -> Result<(), SQLError> {
+        panic!("restoration keeps the recorded type identities");
     }
 }
 impl ViewRestoreSchemas for Fixture {

@@ -16,7 +16,7 @@ pub use lifecycle::{
     bind_rule_action_column_dependencies, bind_rule_condition_column_dependencies,
     bind_stored_statement_source_columns, remove_rule_source_column_aliases,
     remove_stored_statement_source_column_aliases, rewrite_rule_column_references,
-    stored_statement_column_dependencies,
+    stored_statement_column_dependencies, stored_statement_references, StoredStatementColumns,
 };
 pub use statements::rewrite_stored_statement_column;
 
@@ -184,6 +184,8 @@ struct StoredColumnBinder<'a> {
     catalog: StoredColumnBindingContext<'a>,
     mode: ColumnBindingMode<'a>,
     dependencies: BTreeSet<RuleColumnDependency>,
+    /// Column references, by qualifier and name, that no enclosing scope provides.
+    unresolved: Vec<(Option<String>, String)>,
     alias_shape_changed: bool,
 }
 
@@ -193,6 +195,7 @@ impl<'a> StoredColumnBinder<'a> {
             catalog,
             mode,
             dependencies: BTreeSet::new(),
+            unresolved: Vec::new(),
             alias_shape_changed: false,
         }
     }

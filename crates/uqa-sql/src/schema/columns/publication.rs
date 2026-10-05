@@ -7,6 +7,7 @@
 //! Mutate a declared column candidate before its catalog publication.
 use crate::ast::{ColumnDef, ColumnType, Expr, GeneratedColumn};
 
+#[derive(Clone)]
 pub enum ColumnProperty<'a> {
     Default(Option<Expr>),
     Generated(Option<GeneratedColumn>),
@@ -37,6 +38,8 @@ pub fn apply_property(
         ColumnProperty::Type(ty) => definition.ty.clone_from(ty),
         ColumnProperty::AutoIncrement(provenance) => definition.auto_increment = provenance,
     }
+    // Each change removes the column's `pg_attrdef` row; an expression that remains is stored again under a new OID, as `ATExecAlterColumnType` and `ATExecColumnDefault` store it.
+    definition.default_catalog_oid = None;
     Ok(())
 }
 pub fn set_not_null(

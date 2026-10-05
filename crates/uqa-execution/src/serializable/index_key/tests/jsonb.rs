@@ -63,6 +63,7 @@ fn jsonb_index_keys_preserve_native_ranges_and_semantic_equality() {
         schema: "public".into(),
         name: "payload".into(),
         oid: 42002,
+        array_oid: None,
         base: Box::new(ColumnType::JsonB),
     };
     assert_eq!(

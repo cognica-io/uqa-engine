@@ -294,6 +294,13 @@ impl RowSchema {
                 open_qualifiers,
                 extra_ambiguous_unqualified: ambiguous_unqualified,
                 extra_ambiguous_qualified: ambiguous_qualified,
+                local_width: Some(
+                    input
+                        .index
+                        .cold
+                        .local_width
+                        .unwrap_or_else(|| input.physical_width()),
+                ),
                 ..SchemaBuildMetadata::default()
             },
         );

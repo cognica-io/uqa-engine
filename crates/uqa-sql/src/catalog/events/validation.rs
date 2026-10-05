@@ -110,7 +110,7 @@ impl RuleRowTypeResolver<'_> {
             .ok_or_else(|| SQLError::UnknownColumn(format!("{qualifier}.{column}")))?;
         Ok(Some(ResolvedVariable {
             value: Value::Null,
-            declared_type: Some(ty.sql_name()),
+            declared_type: Some(ty.catalog_name()),
         }))
     }
 }
@@ -169,7 +169,7 @@ impl VariableResolver for TriggerConditionTypeResolver<'_> {
             .find(|definition| definition.name == column)
             .map(|definition| ResolvedVariable {
                 value: Value::Null,
-                declared_type: Some(definition.ty.sql_name()),
+                declared_type: Some(definition.ty.catalog_name()),
             }))
     }
 
@@ -664,8 +664,14 @@ fn validate_rule_expr_scopes(catalog: &dyn RuleSourceCatalog, expr: &Expr) -> Re
                 validate_rule_expr_scopes(catalog, item)?;
             }
         }
-        Expr::WindowCall { args, spec, .. } => {
-            for expr in args.iter().chain(spec.partition_by.iter()) {
+        Expr::WindowCall {
+            args, spec, filter, ..
+        } => {
+            for expr in args
+                .iter()
+                .chain(filter.iter().map(AsRef::as_ref))
+                .chain(spec.partition_by.iter())
+            {
                 validate_rule_expr_scopes(catalog, expr)?;
             }
             for order in &spec.order_by {

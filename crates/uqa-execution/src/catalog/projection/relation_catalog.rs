@@ -7,7 +7,7 @@
 //! `pg_class` and `pg_inherits` rows for physical and virtual relations.
 
 use super::helpers::acl::acl_identifier;
-use super::helpers::oids::{split_schema_name, stable_object_oid};
+use super::helpers::oids::split_schema_name;
 use super::helpers::rows::{bool_value, catalog_array, catalog_usize, int_value, row, str_value};
 use super::helpers::views::view_columns_for;
 use super::partitioning::partition_bound_node;
@@ -252,7 +252,7 @@ pub fn build_pg_class(
         );
         row.insert(
             "oid".into(),
-            int_value(stable_object_oid("relation", &object_id)),
+            int_value(catalog.sequence_catalog_oid(&object_id)),
         );
         row.insert(
             "relowner".into(),
@@ -287,6 +287,7 @@ pub fn build_pg_class(
         index_row.insert("relhassubclass".into(), bool_value(index.has_children));
         out.push(index_row);
     }
+    out.extend(super::pg_catalog::composite_class_rows(catalog)?);
     out.extend(super::ag_catalog::age_pg_class_rows(catalog)?);
     Ok(out)
 }

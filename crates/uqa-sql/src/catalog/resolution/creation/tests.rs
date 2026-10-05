@@ -70,7 +70,9 @@ impl SchemaPrivilegeCatalog for Catalog {
     fn graphs(&self) -> Box<dyn GraphNamespaceRead + '_> {
         panic!("raw API creation uses loaded schema names")
     }
-    fn temporary_namespace_allocated(&self) -> bool {
+    fn temporary_namespace_oids(
+        &self,
+    ) -> Option<crate::catalog::temporary_namespace::TemporaryNamespaceOids> {
         panic!("creation selection does not inspect allocation")
     }
     fn temporary_schema_name(&self) -> String {
@@ -149,4 +151,65 @@ fn creation_diagnostics_distinguish_absent_explicit_and_effective_namespaces() {
         "no schema has been selected to create in"
     );
     assert!(catalog.path.try_borrow_mut().is_ok());
+}
+
+#[test]
+fn relation_persistence_follows_the_temporary_namespaces_as_postgresql_adjusts_it() {
+    use crate::ast::RelationPersistence::{Permanent, Temporary, Unlogged};
+    let adjusted = |schema: &str, persistence| {
+        adjusted_relation_persistence(schema, persistence, "pg_temp_7")
+            .map_err(|error| (error.sqlstate().map(str::to_string), error.to_string()))
+    };
+    for schema in ["pg_temp_7", "pg_toast_temp_7"] {
+        assert_eq!(adjusted(schema, Temporary), Ok(Temporary));
+        assert_eq!(adjusted(schema, Permanent), Ok(Temporary));
+        assert_eq!(
+            adjusted(schema, Unlogged),
+            Err((
+                Some("42P16".into()),
+                "only temporary relations may be created in temporary schemas".into()
+            ))
+        );
+    }
+    assert_eq!(
+        adjusted("public", Temporary),
+        Err((
+            Some("42P16".into()),
+            "cannot create temporary relation in non-temporary schema".into()
+        ))
+    );
+    assert_eq!(adjusted("public", Permanent), Ok(Permanent));
+    assert_eq!(adjusted("public", Unlogged), Ok(Unlogged));
+    for persistence in [Temporary, Permanent] {
+        assert_eq!(
+            adjusted("pg_temp_8", persistence),
+            Err((
+                Some("42P16".into()),
+                "cannot create relations in temporary schemas of other sessions".into()
+            ))
+        );
+    }
+}
+
+#[test]
+fn relations_are_refused_in_system_and_toast_namespaces() {
+    for schema in ["pg_catalog", "pg_toast", "pg_toast_temp_7"] {
+        let error =
+            ensure_relation_namespace_writable(&RelationIdentity::new(schema, "t"), "pg_temp_7")
+                .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42501"));
+        assert_eq!(
+            error.to_string(),
+            format!("permission denied to create \"{schema}.t\"")
+        );
+    }
+    for schema in [
+        "public",
+        "pg_temp_7",
+        "information_schema",
+        "pg_toast_temp_8",
+    ] {
+        ensure_relation_namespace_writable(&RelationIdentity::new(schema, "t"), "pg_temp_7")
+            .unwrap();
+    }
 }

@@ -288,11 +288,23 @@ impl RelationLockCatalog for Fixture {
     fn relation_object_id(&self, name: &str) -> Result<Option<[u8; 16]>, SQLError> {
         Ok(self.tables.borrow().get(name).copied())
     }
+    fn relation_catalog_oid(&self, name: &str) -> Result<Option<u32>, SQLError> {
+        Ok(self.tables.borrow().get(name).map(|object_id| {
+            uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
+                uqa_sql::catalog::relation_oids::RelationOidKind::Table,
+                object_id,
+            )
+            .relation
+        }))
+    }
     fn table_name(&self, object_id: [u8; 16]) -> Option<String> {
         self.tables
             .borrow()
             .iter()
             .find_map(|(name, id)| (*id == object_id).then(|| name.clone()))
+    }
+    fn relation_name(&self, object_id: [u8; 16]) -> Option<String> {
+        self.table_name(object_id)
     }
 }
 

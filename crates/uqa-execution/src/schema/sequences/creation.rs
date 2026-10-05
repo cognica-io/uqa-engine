@@ -20,6 +20,7 @@ pub trait SequenceCreationNamespace {
 }
 
 pub trait SequenceCreationPublication {
+    /// Publish a new sequence with the `pg_class` OID reserved for it.
     fn insert_sequence(
         &self,
         name: &str,
@@ -27,11 +28,13 @@ pub trait SequenceCreationPublication {
         state: SequenceState,
         persistence: RelationPersistence,
         role_owner: uqa_core::catalog_role::RoleIdentity,
+        catalog_oid: u32,
     ) -> Result<bool, SQLError>;
 }
 
 #[derive(Clone, Copy)]
 pub struct SequenceCreationContext<'a> {
+    pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub namespace: &'a dyn SequenceCreationNamespace,
     pub owners: &'a dyn SequenceOwnerCatalog,
@@ -64,11 +67,10 @@ pub fn create_sequence(
 ) -> Result<bool, SQLError> {
     validate_sequence_definition(&state.definition(), Some(state.current))?;
     let role_owner = context.creation.bind_owner()?;
-    let name = if persistence == RelationPersistence::Temporary {
-        context.creation.temporary_name(name)?
-    } else {
-        context.creation.persistent_relation_name(name)?
-    };
+    let temporary = context
+        .creation
+        .targets_temporary_namespace(name, persistence)?;
+    let (name, persistence) = context.creation.relation_target(name, persistence)?;
     let relation = RelationIdentity::from_legacy_name(&name)
         .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
     context.namespace.refresh_sequences().map_err(|error| {
@@ -83,7 +85,7 @@ pub fn create_sequence(
     }
     state.owner = bind_sequence_owner(context.owners, &name, ownership)?;
     context.creation.retain_owner(&role_owner)?;
-    if persistence == RelationPersistence::Temporary {
+    if temporary {
         context.creation.ensure_temporary_privilege()?;
     } else {
         context.creation.ensure_create(&name)?;
@@ -96,12 +98,21 @@ pub fn create_sequence(
         return sequence_create_collision(&relation.name, if_not_exists);
     }
     context.creation.reserve_name(&name)?;
+    let catalog_oid = context
+        .identities
+        .allocator(crate::catalog::identity::allocate_catalog_object_id)
+        .allocate_relation_oids(
+            uqa_sql::catalog::relation_oids::RelationOidKind::Sequence,
+            &relation,
+        )?
+        .relation;
     if !context.publication.insert_sequence(
         &name,
         &relation,
         state,
         persistence,
         role_owner.identity(),
+        catalog_oid,
     )? {
         return sequence_create_collision(&relation.name, if_not_exists);
     }
@@ -110,11 +121,12 @@ pub fn create_sequence(
 
 fn sequence_create_collision(name: &str, if_not_exists: bool) -> Result<bool, SQLError> {
     if if_not_exists {
-        Ok(false)
-    } else {
-        Err(SQLError::Routine {
-            sqlstate: "42P07".into(),
-            message: format!("relation \"{name}\" already exists"),
-        })
+        return Ok(false);
     }
+    let local = uqa_core::RelationIdentity::from_legacy_name(name)
+        .map_or_else(|_| name.to_string(), |relation| relation.name);
+    Err(SQLError::Routine {
+        sqlstate: "42P07".into(),
+        message: format!("relation \"{local}\" already exists"),
+    })
 }

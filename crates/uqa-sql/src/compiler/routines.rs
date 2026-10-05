@@ -11,13 +11,15 @@ use super::{
     compile_expr, compile_qualified_name, extract_string, render_relation_component, Expr, Node,
     NodeEnum, Result, SQLError, Statement,
 };
+use crate::ast::SQLBodyForm;
 
+mod attributes;
 mod roles;
 
 pub(super) use roles::{
-    compile_alter_role, compile_alter_routine_owner, compile_create_role, compile_drop_role,
-    compile_grant, compile_grant_role, compile_object_with_args, compile_role_specification,
-    CompiledRoutineTarget,
+    compile_acl_role_specification, compile_alter_role, compile_alter_routine_owner,
+    compile_create_role, compile_drop_role, compile_grant, compile_grant_role,
+    compile_object_with_args, compile_role_specification, CompiledRoutineTarget,
 };
 
 struct CompiledFunctionTypeName {
@@ -179,7 +181,7 @@ pub(super) fn compile_create_function(
 ) -> Result<crate::ast::CreateFunction> {
     use crate::ast::{
         CreateFunction, FunctionBody, FunctionParam, FunctionParamMode, FunctionReturns,
-        FunctionVolatility,
+        FunctionVolatility, RoutineAttributeClause,
     };
     use pg_query::protobuf::FunctionParameterMode;
 
@@ -215,12 +217,11 @@ pub(super) fn compile_create_function(
                 )));
             }
         };
-        let compiled_type = fp
+        let arg_type = fp
             .arg_type
             .as_ref()
-            .map(compile_function_type_name)
-            .transpose()?
             .ok_or_else(|| SQLError::Internal(format!("{keyword}: parameter without type")))?;
+        let compiled_type = compile_function_type_name(arg_type)?;
         let default = match fp.defexpr.as_ref() {
             Some(node) => Some(compile_expr(node)?),
             None => None,
@@ -233,35 +234,17 @@ pub(super) fn compile_create_function(
             name: fp.name.clone(),
             type_name: compiled_type.name,
             type_reference: compiled_type.reference,
+            written_type: Some(attributes::written_type_name(arg_type)?),
             mode,
             default,
         });
     }
 
-    // Mirror PostgreSQL's parse-time rule: once an input parameter
-    // has a DEFAULT, every following input parameter needs one too.
-    let mut saw_default = false;
-    for p in &params {
-        if !matches!(
-            p.mode,
-            FunctionParamMode::In | FunctionParamMode::InOut | FunctionParamMode::Variadic
-        ) {
-            continue;
-        }
-        if p.default.is_some() {
-            saw_default = true;
-        } else if saw_default {
-            return Err(SQLError::Unsupported(
-                "input parameters after one with a default value must also have defaults".into(),
-            ));
-        }
-    }
-
-    let (returns, return_type_reference) = if has_table_param {
-        (FunctionReturns::Table, None)
+    let (returns, return_type_reference, return_written_type) = if has_table_param {
+        (FunctionReturns::Table, None, None)
     } else {
         match stmt.return_type.as_ref() {
-            None => (FunctionReturns::None, None),
+            None => (FunctionReturns::None, None, None),
             Some(t) => {
                 let compiled = compile_function_type_name(t)?;
                 let returns = if t.setof {
@@ -273,7 +256,11 @@ pub(super) fn compile_create_function(
                         type_name: compiled.name,
                     }
                 };
-                (returns, compiled.reference)
+                (
+                    returns,
+                    compiled.reference,
+                    Some(attributes::written_type_name(t)?),
+                )
             }
         }
     };
@@ -285,17 +272,27 @@ pub(super) fn compile_create_function(
     let mut leakproof = false;
     let mut parallel = crate::ast::FunctionParallel::Unsafe;
     let mut support = None;
+    let mut cost = None;
+    let mut rows = None;
     let mut config_actions = Vec::new();
-    let mut source: Option<String> = None;
+    let mut as_items: Option<Vec<String>> = None;
+    let mut attribute_clauses = crate::ast::RoutineAttributeClauses::default();
     for opt in &stmt.options {
         let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
             return Err(SQLError::Internal(format!("{keyword}: malformed option")));
         };
-        match elem.defname.to_ascii_lowercase().as_str() {
-            "language" => {
+        let clause = attributes::routine_attribute_clause(elem, keyword)?;
+        let first = !attribute_clauses.clauses.contains(&clause);
+        attribute_clauses.clauses.push(clause);
+        // Registration rejects a repeated clause once the routine's schema accepts the statement.
+        if !first && !clause.repeatable() {
+            continue;
+        }
+        match clause {
+            RoutineAttributeClause::Language => {
                 language = def_elem_string(elem)?.to_ascii_lowercase();
             }
-            "volatility" => {
+            RoutineAttributeClause::Volatility => {
                 volatility = match def_elem_string(elem)?.as_str() {
                     "immutable" => FunctionVolatility::Immutable,
                     "stable" => FunctionVolatility::Stable,
@@ -307,100 +304,91 @@ pub(super) fn compile_create_function(
                     }
                 };
             }
-            "strict" => {
+            RoutineAttributeClause::Strict => {
                 strict = def_elem_bool(elem, &format!("{keyword}: STRICT"))?;
             }
-            "security" => {
+            RoutineAttributeClause::Security => {
                 security_definer = def_elem_bool(elem, &format!("{keyword}: SECURITY"))?;
             }
-            "leakproof" => {
+            RoutineAttributeClause::Leakproof => {
                 leakproof = def_elem_bool(elem, &format!("{keyword}: LEAKPROOF"))?;
             }
-            "parallel" => {
-                parallel = match def_elem_string(elem)?.as_str() {
-                    "unsafe" => crate::ast::FunctionParallel::Unsafe,
-                    "restricted" => crate::ast::FunctionParallel::Restricted,
-                    "safe" => crate::ast::FunctionParallel::Safe,
-                    other => {
-                        return Err(SQLError::TypeMismatch(format!(
-                            "{keyword}: invalid PARALLEL value `{other}`"
-                        )))
-                    }
-                };
+            RoutineAttributeClause::Parallel => match attributes::compile_parallel(elem)? {
+                Ok(value) => parallel = value,
+                Err(value) => attribute_clauses.invalid_parallel = Some(value),
+            },
+            RoutineAttributeClause::Support => support = Some(compile_support_name(elem, keyword)?),
+            RoutineAttributeClause::Set => {
+                config_actions.push(compile_routine_config_action(elem, keyword)?);
             }
-            "support" => support = Some(compile_support_name(elem, keyword)?),
-            "set" => config_actions.push(compile_routine_config_action(elem, keyword)?),
-            "as" => {
-                let items: Vec<String> = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
-                    Some(NodeEnum::List(list)) => list
-                        .items
-                        .iter()
-                        .map(extract_string)
-                        .collect::<Result<Vec<_>>>()?,
-                    Some(NodeEnum::String(s)) => vec![s.sval.clone()],
-                    other => {
-                        return Err(SQLError::TypeMismatch(format!(
-                            "{keyword}: AS expects a string body, got {other:?}"
-                        )));
-                    }
-                };
-                match items.len() {
-                    1 => source = items.into_iter().next(),
-                    _ => {
-                        return Err(SQLError::Unsupported(format!(
-                            "{keyword}: AS 'obj_file', 'link_symbol' bodies"
-                        )));
-                    }
-                }
+            RoutineAttributeClause::Cost => {
+                cost = Some(attributes::def_elem_float4(
+                    elem,
+                    &format!("{keyword}: COST"),
+                )?);
             }
-            "window" => {
-                return Err(SQLError::Unsupported(format!(
-                    "{keyword}: WINDOW functions"
-                )));
+            RoutineAttributeClause::Rows => {
+                rows = Some(attributes::def_elem_float4(
+                    elem,
+                    &format!("{keyword}: ROWS"),
+                )?);
             }
-            // Planner / execution hints outside this routine contract: COST and ROWS.
-            other => {
-                return Err(SQLError::Unsupported(format!(
-                    "{keyword}: option `{other}` is not supported"
-                )));
+            RoutineAttributeClause::As => {
+                as_items = Some(attributes::compile_as_items(elem, keyword)?);
             }
+            RoutineAttributeClause::Transform => {
+                attribute_clauses.transform_types =
+                    attributes::compile_transform_types(elem, keyword)?;
+            }
+            // Registration rejects a window function where PostgreSQL would create one.
+            RoutineAttributeClause::Window => {}
         }
     }
 
-    let body = match (source, stmt.sql_body.as_deref()) {
-        (Some(src), None) => FunctionBody::Source(src),
-        (None, Some(node)) => FunctionBody::Statements(compile_sql_standard_body(node)?),
-        (Some(_), Some(_)) => {
-            return Err(SQLError::Unsupported(format!(
-                "{keyword}: both AS body and SQL-standard body"
-            )));
+    let (body, sql_body_form) = match (as_items, stmt.sql_body.as_deref()) {
+        (Some(items), None) => {
+            if items.len() != 1 {
+                attribute_clauses.body_error = Some(crate::ast::RoutineBodyError::ExtraAsItems);
+            }
+            (
+                FunctionBody::Source(items.into_iter().next().unwrap_or_default()),
+                None,
+            )
+        }
+        (None, Some(node)) => {
+            let (statements, form) = compile_sql_standard_body(node)?;
+            (FunctionBody::Statements(statements), Some(form))
+        }
+        (Some(items), Some(_)) => {
+            attribute_clauses.body_error = Some(crate::ast::RoutineBodyError::Duplicate);
+            (
+                FunctionBody::Source(items.into_iter().next().unwrap_or_default()),
+                None,
+            )
         }
         (None, None) => {
-            return Err(SQLError::Unsupported(format!(
-                "{keyword}: no function body"
-            )));
+            attribute_clauses.body_error = Some(crate::ast::RoutineBodyError::Missing);
+            (FunctionBody::Source(String::new()), None)
         }
     };
-    if language.is_empty() {
-        if matches!(body, FunctionBody::Statements(_)) {
-            language = "sql".into();
-        } else {
-            return Err(SQLError::Unsupported(format!(
-                "{keyword}: no language specified"
-            )));
-        }
+    // A SQL-standard body implies LANGUAGE sql; without either, registration reports that no language is specified.
+    if language.is_empty() && stmt.sql_body.is_some() {
+        language = "sql".into();
     }
 
     Ok(CreateFunction {
         object_id: None,
+        catalog_oid: None,
         name,
         or_replace: stmt.replace,
         is_procedure: stmt.is_procedure,
         params,
         returns,
         return_type_reference,
+        return_written_type,
         language,
         body,
+        sql_body_form,
         creation_search_path: Vec::new(),
         volatility,
         strict,
@@ -411,15 +399,18 @@ pub(super) fn compile_create_function(
         },
         parallel,
         support,
+        cost,
+        rows,
         config: Vec::new(),
         config_actions,
+        attribute_clauses,
         execute_acl: None,
     })
 }
 
 /// Compile a SQL-standard function body (`RETURN expr` or
-/// `BEGIN ATOMIC stmt; ... END`) into plain statements.
-pub(super) fn compile_sql_standard_body(node: &Node) -> Result<Vec<Statement>> {
+/// `BEGIN ATOMIC stmt; ... END`) into plain statements and its written form.
+pub(super) fn compile_sql_standard_body(node: &Node) -> Result<(Vec<Statement>, SQLBodyForm)> {
     let Some(inner) = node.node.as_ref() else {
         return Err(SQLError::Internal("empty SQL function body".into()));
     };
@@ -429,7 +420,10 @@ pub(super) fn compile_sql_standard_body(node: &Node) -> Result<Vec<Statement>> {
                 .returnval
                 .as_deref()
                 .ok_or_else(|| SQLError::Internal("RETURN without a value".into()))?;
-            Ok(vec![select_of_expr(compile_expr(value)?)])
+            Ok((
+                vec![select_of_expr(compile_expr(value)?)],
+                SQLBodyForm::Return,
+            ))
         }
         NodeEnum::List(list) => {
             let mut out = Vec::with_capacity(list.items.len());
@@ -454,7 +448,7 @@ pub(super) fn compile_sql_standard_body(node: &Node) -> Result<Vec<Statement>> {
                     _ => out.push(compile_stmt(item)?),
                 }
             }
-            Ok(out)
+            Ok((out, SQLBodyForm::Atomic))
         }
         other => Err(SQLError::Unsupported(format!(
             "SQL function body node {other:?}"
@@ -594,7 +588,9 @@ pub(super) fn compile_drop_function(
 pub(super) fn compile_alter_routine(
     stmt: &pg_query::protobuf::AlterFunctionStmt,
 ) -> Result<crate::ast::AlterRoutineStmt> {
-    use crate::ast::{AlterRoutineKind, AlterRoutineStmt, FunctionParallel, FunctionVolatility};
+    use crate::ast::{
+        AlterRoutineKind, AlterRoutineStmt, FunctionVolatility, RoutineAttributeClause,
+    };
     use pg_query::protobuf::ObjectType;
 
     let (kind, keyword) = match stmt.objtype() {
@@ -640,7 +636,10 @@ pub(super) fn compile_alter_routine(
     let mut leakproof = None;
     let mut parallel = None;
     let mut support = None;
+    let mut cost = None;
+    let mut rows = None;
     let mut config_actions = Vec::new();
+    let mut attribute_clauses = crate::ast::RoutineAttributeClauses::default();
     for action in &stmt.actions {
         let Some(NodeEnum::DefElem(element)) = action.node.as_ref() else {
             return Err(SQLError::Unsupported(format!(
@@ -648,14 +647,15 @@ pub(super) fn compile_alter_routine(
                 action.node
             )));
         };
-        match element.defname.to_ascii_lowercase().as_str() {
-            "volatility" => {
-                if volatility.is_some() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42601".into(),
-                        message: format!("{keyword}: conflicting or redundant volatility option"),
-                    });
-                }
+        let clause = attributes::routine_attribute_clause(element, keyword)?;
+        let first = !attribute_clauses.clauses.contains(&clause);
+        attribute_clauses.clauses.push(clause);
+        // `AlterFunction` rejects a repeated action once it has found the routine.
+        if !first && !clause.repeatable() {
+            continue;
+        }
+        match clause {
+            RoutineAttributeClause::Volatility => {
                 volatility = Some(match def_elem_string(element)?.as_str() {
                     "immutable" => FunctionVolatility::Immutable,
                     "stable" => FunctionVolatility::Stable,
@@ -667,88 +667,47 @@ pub(super) fn compile_alter_routine(
                     }
                 });
             }
-            "strict" => {
-                if strict.is_some() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42601".into(),
-                        message: format!("{keyword}: conflicting or redundant null-input option"),
-                    });
-                }
-                strict = Some(
-                    match element.arg.as_ref().and_then(|arg| arg.node.as_ref()) {
-                        Some(NodeEnum::Boolean(value)) => value.boolval,
-                        other => {
-                            return Err(SQLError::TypeMismatch(format!(
-                                "{keyword}: null-input option expects a boolean, got {other:?}"
-                            )))
-                        }
-                    },
-                );
+            RoutineAttributeClause::Strict => {
+                strict = Some(def_elem_bool(element, &format!("{keyword}: STRICT"))?);
             }
-            "security" => {
-                if security_definer.is_some() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42601".into(),
-                        message: format!("{keyword}: conflicting or redundant security option"),
-                    });
-                }
+            RoutineAttributeClause::Security => {
                 security_definer = Some(def_elem_bool(element, &format!("{keyword}: SECURITY"))?);
             }
-            "leakproof" => {
-                if leakproof.is_some() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42601".into(),
-                        message: format!("{keyword}: conflicting or redundant leakproof option"),
-                    });
-                }
+            RoutineAttributeClause::Leakproof => {
                 leakproof = Some(def_elem_bool(element, &format!("{keyword}: LEAKPROOF"))?);
             }
-            "parallel" => {
-                if parallel.is_some() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42601".into(),
-                        message: format!("{keyword}: conflicting or redundant parallel option"),
-                    });
-                }
-                parallel = Some(match def_elem_string(element)?.as_str() {
-                    "unsafe" => FunctionParallel::Unsafe,
-                    "restricted" => FunctionParallel::Restricted,
-                    "safe" => FunctionParallel::Safe,
-                    other => {
-                        return Err(SQLError::TypeMismatch(format!(
-                            "{keyword}: invalid PARALLEL value `{other}`"
-                        )))
-                    }
-                });
-            }
-            "support" => {
-                if support.is_some() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42601".into(),
-                        message: format!("{keyword}: conflicting or redundant support option"),
-                    });
-                }
+            RoutineAttributeClause::Parallel => match attributes::compile_parallel(element)? {
+                Ok(value) => parallel = Some(value),
+                Err(value) => attribute_clauses.invalid_parallel = Some(value),
+            },
+            RoutineAttributeClause::Support => {
                 support = Some(compile_support_name(element, keyword)?);
             }
-            "set" => config_actions.push(compile_routine_config_action(element, keyword)?),
-            other => {
-                return Err(SQLError::Unsupported(format!(
-                    "{keyword}: action `{other}` is not supported"
+            RoutineAttributeClause::Set => {
+                config_actions.push(compile_routine_config_action(element, keyword)?);
+            }
+            RoutineAttributeClause::Cost => {
+                cost = Some(attributes::def_elem_float4(
+                    element,
+                    &format!("{keyword}: COST"),
+                )?);
+            }
+            RoutineAttributeClause::Rows => {
+                rows = Some(attributes::def_elem_float4(
+                    element,
+                    &format!("{keyword}: ROWS"),
+                )?);
+            }
+            RoutineAttributeClause::As
+            | RoutineAttributeClause::Language
+            | RoutineAttributeClause::Transform
+            | RoutineAttributeClause::Window => {
+                return Err(SQLError::Internal(format!(
+                    "{keyword}: action `{}` is not an ALTER action",
+                    element.defname
                 )))
             }
         }
-    }
-    if volatility.is_none()
-        && strict.is_none()
-        && security_definer.is_none()
-        && leakproof.is_none()
-        && parallel.is_none()
-        && support.is_none()
-        && config_actions.is_empty()
-    {
-        return Err(SQLError::Unsupported(format!(
-            "{keyword}: no supported action"
-        )));
     }
     Ok(AlterRoutineStmt {
         kind,
@@ -761,6 +720,9 @@ pub(super) fn compile_alter_routine(
         leakproof,
         parallel,
         support,
+        cost,
+        rows,
         config_actions,
+        attribute_clauses,
     })
 }

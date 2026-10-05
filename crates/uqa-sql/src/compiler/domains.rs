@@ -85,7 +85,7 @@ pub(super) fn compile_create_domain(statement: &CreateDomainStmt) -> Result<Crea
     Ok(definition)
 }
 
-fn qualified_name(nodes: &[pg_query::protobuf::Node]) -> Result<String> {
+pub(super) fn qualified_name(nodes: &[pg_query::protobuf::Node]) -> Result<String> {
     let names = nodes
         .iter()
         .map(extract_string)

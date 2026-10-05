@@ -17,7 +17,9 @@ use uqa_sql::catalog::constraints::ConstraintIdentity;
 pub use uqa_sql::catalog::domain::domain_object_oid;
 
 mod identity_claims;
-pub use identity_claims::{catalog_oid_in_use, validate_catalog_identity_claim};
+pub use identity_claims::{
+    catalog_oid_in_use, largest_catalog_oid, validate_catalog_identity_claim,
+};
 pub(crate) use identity_claims::{legacy_relation_claims, relation_claims};
 
 pub fn is_virtual_catalog_relation(resolution: &RelationNameResolution, name: &str) -> bool {
@@ -61,7 +63,7 @@ pub fn build_info_schema_rows(
         VirtualRelation::InformationKeyColumnUsage => {
             build_info_key_column_usage(catalog, resolution)?
         }
-        VirtualRelation::PgNamespace => build_pg_namespace(catalog, resolution)?,
+        VirtualRelation::PgNamespace => build_pg_namespace(catalog)?,
         VirtualRelation::PgClass => build_pg_class(context, catalog, resolution)?,
         VirtualRelation::PgInherits => build_pg_inherits(catalog, resolution)?,
         VirtualRelation::PgPartitionedTable => {
@@ -77,9 +79,10 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgTables => build_pg_tables(catalog, resolution)?,
         VirtualRelation::PgViews => build_pg_views(catalog, resolution)?,
         VirtualRelation::PgIndexes => build_pg_indexes(catalog, resolution)?,
-        VirtualRelation::PgType => build_pg_type(catalog),
+        VirtualRelation::PgType => build_pg_type(catalog, resolution)?,
         VirtualRelation::PgRange => build_pg_range(),
-        VirtualRelation::PgProc => build_pg_proc(catalog)?,
+        VirtualRelation::PgEnum => build_pg_enum(catalog),
+        VirtualRelation::PgProc => build_pg_proc(catalog, resolution)?,
         VirtualRelation::PgDatabase => build_pg_database(catalog)?,
         VirtualRelation::PgAuthid => build_pg_authid(catalog),
         VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog)?,
@@ -89,6 +92,12 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgPreparedStatements => prepared_statements::rows(session)?,
         VirtualRelation::PgCursors => cursors::rows(session),
         VirtualRelation::PgDescription => Vec::new(),
+        VirtualRelation::PgDepend => {
+            CatalogDependencies::build(context, catalog, resolution)?.depend_rows()
+        }
+        VirtualRelation::PgShdepend => {
+            CatalogDependencies::build(context, catalog, resolution)?.shared_depend_rows()
+        }
         VirtualRelation::PgMatviews => build_pg_matviews(catalog, resolution)?,
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
         VirtualRelation::AgGraph => build_ag_graph(catalog)?,
@@ -97,16 +106,28 @@ pub fn build_info_schema_rows(
 }
 
 mod ag_catalog;
+pub(crate) use ag_catalog::named_label_relation_oid;
 mod builtin_routines;
 mod cursors;
+mod dependencies;
+pub use dependencies::{
+    pg_describe_object_value, role_dependency_detail, CatalogDependencies, CatalogObject,
+    RelationKind,
+};
 mod events;
 use uqa_sql::catalog::expression_text;
 mod index_definition;
 mod mutation;
 pub use index_definition::pg_get_indexdef_value;
+mod routine_definitions;
 pub use mutation::virtual_relation_mutation_error;
+pub use regtypes::resolve_regprocedure_input_oid;
+pub(crate) use regtypes::routine_oid_exists;
 pub use regtypes::{format_type_name, format_type_value};
-pub(crate) use regtypes::{resolve_regprocedure_input_oid, routine_oid_exists};
+pub use routine_definitions::{
+    pg_get_function_arguments_value, pg_get_function_identity_arguments_value,
+    pg_get_function_result_value, pg_get_function_sqlbody_value,
+};
 mod view_definition;
 pub use view_definition::pg_get_viewdef_value;
 pub use view_definition::{rename_view_column_query, view_query_references_column};
@@ -114,11 +135,13 @@ mod helpers;
 pub(crate) use helpers::index_definitions::index_key_definition;
 pub use uqa_sql::catalog::result_type::{postgres_result_type, SQLTypeMetadata};
 mod information_schema;
+mod output;
+pub use output::CatalogOutput;
 mod partitioning;
 mod pg_catalog;
 mod pg_namespace;
 mod pg_proc;
-pub(crate) use pg_proc::user_routine_catalog_oid;
+pub(crate) use pg_proc::{routine_oid_in_use, user_routine_catalog_oid};
 mod pg_settings;
 mod plpgsql;
 mod prepared_statements;
@@ -261,7 +284,10 @@ pub fn query_source_column_names(
 
 use ag_catalog::{build_ag_graph, build_ag_label};
 use events::{build_pg_rewrite, build_pg_rules, build_pg_trigger};
-pub use events::{event_relation_oid, pg_get_ruledef_value, pg_get_triggerdef_value};
+pub use events::{
+    event_relation_oid, legacy_rule_catalog_oid, pg_get_ruledef_value, pg_get_triggerdef_value,
+    rule_catalog_oid,
+};
 use information_schema::{
     build_info_catalog_name, build_info_column_privileges, build_info_columns,
     build_info_key_column_usage, build_info_routines, build_info_schemata, build_info_sequences,
@@ -275,23 +301,24 @@ pub fn table_relation_oid(context: &CatalogContext<'_>, table: &str) -> Result<i
     resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     snapshot_table_relation_oid(&catalog, &resolution, table)
 }
-pub fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {
+/// The OID a sequence created before OIDs were recorded derives from its identity.
+pub fn legacy_sequence_relation_oid(object_id: [u8; 16]) -> i64 {
     helpers::oids::stable_object_oid("relation", &object_id)
 }
 pub fn view_relation_oid(view: &crate::catalog::view::StoredView) -> i64 {
-    helpers::oids::stable_object_oid("relation", &view.object_id)
+    i64::from(view.relation_oids().relation)
 }
 
 pub fn view_rowtype_oid(view: &crate::catalog::view::StoredView) -> i64 {
-    helpers::oids::stable_object_oid("rowtype", &view.object_id)
+    i64::from(view.relation_oids().reltype())
 }
 
 pub fn foreign_table_relation_oid(table: &crate::catalog::foreign::StoredForeignTable) -> i64 {
-    helpers::oids::stable_object_oid("relation", &table.object_id)
+    i64::from(table.relation_oids().relation)
 }
 
 pub fn foreign_table_rowtype_oid(table: &crate::catalog::foreign::StoredForeignTable) -> i64 {
-    helpers::oids::stable_object_oid("rowtype", &table.object_id)
+    i64::from(table.relation_oids().reltype())
 }
 pub fn snapshot_table_relation_oid(
     catalog: &CatalogReadView,
@@ -302,24 +329,31 @@ pub fn snapshot_table_relation_oid(
 }
 use pg_catalog::{
     build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_authid,
-    build_pg_constraint, build_pg_database, build_pg_index, build_pg_indexes, build_pg_matviews,
-    build_pg_range, build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_type,
-    build_pg_user, build_pg_views,
+    build_pg_constraint, build_pg_database, build_pg_enum, build_pg_index, build_pg_indexes,
+    build_pg_matviews, build_pg_range, build_pg_roles, build_pg_sequences, build_pg_tables,
+    build_pg_type, build_pg_user, build_pg_views,
 };
 use pg_namespace::build_pg_namespace;
+pub use pg_namespace::{pg_is_other_temp_schema_value, pg_my_temp_schema_value};
 use pg_proc::build_pg_proc;
 use pg_settings::build_pg_settings;
 pub use regtypes::{
-    named_type_exists, resolve_bound_regclass_oid, resolve_catalog_column_type,
-    resolve_catalog_domain_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
-    resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
-    resolve_regtype_oid, resolve_regtype_output, RegtypeOutputCatalog,
+    format_type_object, named_type_exists, resolve_bound_regclass_oid, resolve_catalog_column_type,
+    resolve_catalog_user_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
+    resolve_regnamespace_oid, resolve_regobject_oid, resolve_regproc_input_oid,
+    resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid, resolve_regtype_output,
+    resolve_type_object_oid, row_type_relation, type_privilege_oid, RegtypeOutputCatalog,
 };
 
 pub fn resolve_catalog_column_type_name(
     context: &CatalogContext<'_>,
     type_name: &str,
 ) -> Result<uqa_sql::ast::ColumnType, SQLError> {
+    if let Some(identity) = uqa_sql::ast::UserTypeIdentity::parse(type_name) {
+        return resolve_catalog_column_type(context, type_name).ok_or_else(|| {
+            SQLError::Internal(format!("cache lookup failed for type {}", identity.oid))
+        });
+    }
     let parsed = uqa_sql::parse_regtype_name(type_name)?;
     if let Some(parsed) = parsed.as_ref() {
         if parsed.has_type_modifiers {
@@ -371,5 +405,6 @@ pub use regtypes::relation_oid::lookup_regclass_oid;
 pub use helpers::views::view_columns_for;
 
 pub(crate) use pg_catalog::legacy_index_relations;
+pub use pg_catalog::pg_get_constraintdef_value;
 
 pub(crate) use pg_catalog::CatalogIndexRelation;

@@ -439,7 +439,8 @@ struct SessionStateSnapshot {
     /// A pinned physical graph view plus this transaction's changed identities. Savepoints retain only handles and changed-id checkpoints, never graph payload replicas.
     graph_overlay: Option<GraphTransactionOverlay>,
     search_path: Vec<String>,
-    temporary_namespace_allocated: bool,
+    /// The OIDs of the session's temporary namespace and its TOAST namespace once its first temporary object created them; a rollback past that creation forgets them.
+    temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids>,
     session_vars: BTreeMap<String, String>,
     parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes<state::RuntimeParameterValue>,
     sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
@@ -643,6 +644,8 @@ pub(crate) struct TableState {
     /// Immutable relation lifecycle attributes captured at creation.
     persistence: uqa_sql::ast::RelationPersistence,
     on_commit: uqa_sql::ast::OnCommitAction,
+    /// The public OIDs allocated when the table was created; `None` for a table created before OIDs were recorded, which derives them from its identity.
+    catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
 }
 
 impl TableState {
@@ -656,6 +659,22 @@ impl TableState {
 
     fn object_id(&self) -> [u8; 16] {
         self.object_id
+    }
+
+    fn recorded_catalog_oids(
+        &self,
+    ) -> Option<uqa_sql::catalog::relation_oids::RelationCatalogOids> {
+        self.catalog_oids
+    }
+
+    /// The table's public OIDs: the recorded ones, or those its identity derives.
+    fn relation_oids(&self) -> uqa_sql::catalog::relation_oids::RelationCatalogOids {
+        self.catalog_oids.unwrap_or_else(|| {
+            uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
+                uqa_sql::catalog::relation_oids::RelationOidKind::Table,
+                &self.object_id,
+            )
+        })
     }
 
     /// The namespace this table's document identities are allocated and observed in.

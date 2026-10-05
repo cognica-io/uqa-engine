@@ -15,6 +15,7 @@ use super::{
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::roles::RoleReference;
+use crate::catalog::temporary_namespace::{TemporaryNamespace, TemporaryNamespaceOids};
 use crate::{
     catalog::roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
     SQLError,
@@ -29,13 +30,21 @@ pub type SchemaRegistryRead<'a> =
 pub trait GraphNamespaceRead {
     fn names(&self) -> Box<dyn Iterator<Item = &str> + '_>;
     fn contains(&self, name: &str) -> bool;
+    /// The OID of the graph's schema: the one its creation allocated, or for a graph created before OIDs were recorded the one its name derives.
+    fn namespace_oid(&self, name: &str) -> i64 {
+        crate::catalog::oids::schema_oid(name)
+    }
 }
 
 pub trait SchemaPrivilegeCatalog {
     fn refresh_namespace_catalog(&self) -> Result<(), SQLError>;
     fn schemas(&self) -> SchemaRegistryRead<'_>;
     fn graphs(&self) -> Box<dyn GraphNamespaceRead + '_>;
-    fn temporary_namespace_allocated(&self) -> bool;
+    /// The OIDs of the session's temporary namespace and its TOAST namespace once the session's first temporary object created them.
+    fn temporary_namespace_oids(&self) -> Option<TemporaryNamespaceOids>;
+    fn temporary_namespace_allocated(&self) -> bool {
+        self.temporary_namespace_oids().is_some()
+    }
     fn temporary_schema_name(&self) -> String;
 }
 
@@ -66,21 +75,46 @@ impl SchemaPrivilegeInquiry<'_> {
         if let Some(security) = self.catalog.schemas().get(schema) {
             return Some(security.clone());
         }
+        let graphs = self.catalog.graphs();
+        if graphs.contains(schema) && schema != self.catalog.temporary_schema_name() {
+            let oid = u32::try_from(graphs.namespace_oid(schema)).ok()?;
+            return Some(BoundSchemaSecurity::bootstrap_with_oid(schema, oid));
+        }
+        // The session's temporary namespaces exist once its first temporary object created them.
+        if let Some(temporary) = self.temporary_namespace() {
+            if schema == temporary.toast_schema() {
+                return Some(BoundSchemaSecurity::bootstrap_with_oid(
+                    schema,
+                    temporary.oids.toast_namespace,
+                ));
+            }
+            if schema == temporary.schema {
+                let mut security = BoundSchemaSecurity::with_public_privileges(true);
+                security.tuple = Some(uqa_core::catalog_schema::SchemaTupleIdentity::initial(
+                    temporary.oids.namespace,
+                ));
+                return Some(security);
+            }
+        }
         let mut security = match schema {
             "pg_catalog" | "information_schema" => {
                 Some(BoundSchemaSecurity::with_public_privileges(false))
             }
             "ag_catalog" => Some(BoundSchemaSecurity::bootstrap("ag_catalog")),
-            name if name == self.catalog.temporary_schema_name() => {
-                Some(BoundSchemaSecurity::with_public_privileges(true))
-            }
-            name if self.catalog.graphs().contains(name) => {
-                Some(BoundSchemaSecurity::bootstrap(name))
-            }
             _ => None,
         }?;
         security.tuple = BoundSchemaSecurity::bootstrap(schema).tuple;
         Some(security)
+    }
+
+    /// The session's temporary namespace once its first temporary object created it.
+    pub fn temporary_namespace(&self) -> Option<TemporaryNamespace> {
+        self.catalog
+            .temporary_namespace_oids()
+            .map(|oids| TemporaryNamespace {
+                schema: self.catalog.temporary_schema_name(),
+                oids,
+            })
     }
 
     pub fn require_schema_privilege(
@@ -192,8 +226,9 @@ impl SchemaPrivilegeInquiry<'_> {
         ]);
         names.extend(self.catalog.schemas().keys().cloned());
         names.extend(self.catalog.graphs().names().map(str::to_owned));
-        if self.catalog.temporary_namespace_allocated() {
-            names.insert(self.catalog.temporary_schema_name());
+        if let Some(temporary) = self.temporary_namespace() {
+            names.insert(temporary.toast_schema());
+            names.insert(temporary.schema);
         }
         Ok(names)
     }

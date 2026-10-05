@@ -27,6 +27,19 @@ impl EventAnalysisContext<'_> {
             {
                 (canonical, kind)
             }
+            // `table_openrv` refuses indexes and composite types before the event's own kind checks.
+            RelationResolution::Found(canonical, kind @ ("index" | "composite type")) => {
+                return Err(crate::catalog::analysis::UnopenableRelation {
+                    name: RelationIdentity::from_legacy_name(&canonical)
+                        .map_or(canonical, |relation| relation.name),
+                    kinds: if kind == "index" {
+                        "indexes"
+                    } else {
+                        "composite types"
+                    },
+                }
+                .error());
+            }
             RelationResolution::Found(_, _) | RelationResolution::MissingRelation => {
                 return Err(SQLError::UnknownTable(requested.to_string()));
             }

@@ -25,8 +25,7 @@ use crate::query::projection::{
 use crate::query::row_at_a_time::RowAtATime;
 use crate::query::runtime::QueryRuntimeView;
 use crate::query::CteScope;
-use crate::window::{prepare_window_plan, PhysicalWindowExecutor};
-use crate::{ColumnSelection, HashAggregate, PhysicalOperator, Project, Window};
+use crate::{ColumnSelection, HashAggregate, PhysicalOperator, Project};
 use std::sync::Arc;
 use uqa_sql::plan::{ComputePlan, QueryBlockPlan};
 use uqa_sql::semantics::sets::{
@@ -445,48 +444,11 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
             )?;
         }
         ComputePlan::Window => {
-            let source_row_schema = operator.row_schema().clone();
-            let work_mem_bytes = physical_work_mem_bytes(runtime)?;
-            let window_plan = prepare_window_plan(&statement.projections);
-            let mut projections = physical_projections(window_plan.projections());
-            let schema = window_plan.output_schema(context.catalog, &source_row_schema, params)?;
-            let output_columns = order_projection(&statement.projections, &source_row_schema)?
-                .1
-                .into_iter()
-                .enumerate()
-                .map(|(position, (output, _))| (output, ScalarExpr::Position(position)))
-                .collect::<Vec<_>>();
-            resjunk.distinct_on.extend(append_distinct_set_projections(
+            operator = super::window_output::attach_window_output(
+                operator,
                 statement,
-                &output_columns,
-                &mut projections,
-            )?);
-            let (order_statement, order_columns) = prepare_order_set_projections(
-                context.catalog,
+                &mut resjunk,
                 type_resolver.as_ref(),
-                statement,
-                &output_columns,
-                &mut projections,
-                &schema,
-                params,
-            )?;
-            resjunk.order_by.extend(order_columns);
-            operator = Box::new(Window::with_row_schema_executor(
-                operator,
-                schema.clone(),
-                Box::new(PhysicalWindowExecutor::new(
-                    context.expression_scope(ctes.clone()),
-                    window_plan,
-                    params,
-                    source_row_schema,
-                    work_mem_bytes,
-                )),
-            ));
-            let effective_order_statement = order_statement.as_ref().unwrap_or(statement);
-            operator = attach_final_projection_order(
-                operator,
-                (effective_order_statement, &output_columns),
-                projections,
                 FinalProjectionExecution {
                     context,
                     params,

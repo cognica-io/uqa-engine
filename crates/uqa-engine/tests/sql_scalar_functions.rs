@@ -274,7 +274,7 @@ fn format_substitutes_args() {
     eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
     let res = eng
         .sql(
-            "SELECT format('Hello %s -- %d -- %s/%s', 'world', 42, true, false) AS s FROM t",
+            "SELECT format('Hello %s -- %s -- %s/%s', 'world', 42, true, false) AS s FROM t",
             &[],
         )
         .unwrap();
@@ -282,6 +282,9 @@ fn format_substitutes_args() {
         res.rows[0]["s"],
         Value::Str("Hello world -- 42 -- t/f".into())
     );
+    // PostgreSQL's format() accepts only the s, I and L conversions.
+    let error = eng.sql("SELECT format('%d', 42) FROM t", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22023"), "{error}");
 }
 
 #[test]

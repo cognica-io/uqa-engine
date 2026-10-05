@@ -24,8 +24,50 @@ pub fn projection_label_at(proj: &ProjectionPlan) -> String {
         ScalarExpr::Column(c) => c.clone(),
         ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
-        ScalarExpr::Func { name, binding, .. } => function_projection_label(name, binding.as_ref()),
+        ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } => field_selection_label(binding.as_ref(), args.get(1))
+            .unwrap_or_else(|| function_projection_label(name, binding.as_ref())),
+        ScalarExpr::WindowCall { name, .. } => function_projection_label(name, None),
         _ => "?column?".into(),
+    }
+}
+
+/// `FigureColname` names a field selection by its field.
+pub(crate) fn field_selection_label<E: FieldNameLiteral>(
+    binding: Option<&crate::ast::FunctionBinding>,
+    field: Option<&E>,
+) -> Option<String> {
+    (binding.and_then(|binding| binding.dispatch)
+        == Some(crate::ast::FunctionDispatch::FieldSelect))
+    .then(|| field.and_then(FieldNameLiteral::field_name))
+    .flatten()
+    .map(str::to_owned)
+}
+
+/// The field name literal of a field selection in parsed or planned expressions.
+pub(crate) trait FieldNameLiteral {
+    fn field_name(&self) -> Option<&str>;
+}
+
+impl FieldNameLiteral for ScalarExpr {
+    fn field_name(&self) -> Option<&str> {
+        match self {
+            ScalarExpr::Literal(uqa_core::Value::Str(field)) => Some(field),
+            _ => None,
+        }
+    }
+}
+
+impl FieldNameLiteral for crate::ast::Expr {
+    fn field_name(&self) -> Option<&str> {
+        match self {
+            crate::ast::Expr::Literal(uqa_core::Value::Str(field)) => Some(field),
+            _ => None,
+        }
     }
 }
 
@@ -33,9 +75,17 @@ pub(crate) fn function_projection_label(
     name: &str,
     binding: Option<&crate::ast::FunctionBinding>,
 ) -> String {
+    // Operators and other syntax that the parser lowers to calls have no name of their own.
     if matches!(
         binding.and_then(|binding| binding.dispatch),
-        Some(crate::ast::FunctionDispatch::NumericOperator(_))
+        Some(
+            crate::ast::FunctionDispatch::NumericOperator(_)
+                | crate::ast::FunctionDispatch::IsDistinct
+                | crate::ast::FunctionDispatch::AnyOperator
+                | crate::ast::FunctionDispatch::AllOperator
+                | crate::ast::FunctionDispatch::BetweenSymmetric
+                | crate::ast::FunctionDispatch::JsonExtract { .. }
+        )
     ) {
         return "?column?".into();
     }

@@ -34,6 +34,7 @@ fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
         check_is_local: true,
         check_object_id: None,
         check_catalog_oid: None,
+        default_catalog_oid: None,
         references: None,
     }
 }
@@ -118,9 +119,12 @@ fn dependent_views_follow_table_and_column_renames_but_block_restrict() {
 
     for sql in ["DROP TABLE items", "ALTER TABLE items DROP COLUMN id"] {
         let error = engine.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("2BP01"), "{sql}: {error}");
         assert!(
-            error.to_string().contains("public.item_ids"),
-            "{sql}: {error}"
+            error
+                .detail()
+                .is_some_and(|detail| detail.contains("view item_ids depends on")),
+            "{sql}: {error:?}"
         );
     }
 
@@ -159,9 +163,10 @@ fn dependent_views_follow_table_and_column_renames_but_block_restrict() {
     );
 
     let error = engine.drop_view("item_ids").unwrap_err();
-    assert!(
-        error.to_string().contains("public.nested_item_ids"),
-        "{error}"
+    assert_eq!(
+        error.detail(),
+        Some("view nested_item_ids depends on view item_ids"),
+        "{error:?}"
     );
 
     engine.sql("BEGIN", &[]).unwrap();
@@ -211,9 +216,9 @@ fn typed_default_dependency_is_rewritten_and_drop_is_restricted() {
 
     let error = engine.drop_column("defaults", "source").unwrap_err();
     assert!(
-        error
-            .to_string()
-            .contains("dependent DEFAULT/generation expression"),
+        error.to_string().contains(
+            "cannot drop column source of table defaults because other objects depend on it"
+        ),
         "{error}"
     );
     assert_eq!(
@@ -292,7 +297,11 @@ fn foreign_keys_checks_and_indexes_follow_rename_reopen_and_rollback() {
         .unwrap();
 
     let error = engine.sql("DROP TABLE parent", &[]).unwrap_err();
-    assert!(error.to_string().contains("foreign key"), "{error}");
+    assert!(
+        error.detail().is_some_and(|detail| detail
+            .contains("constraint child_parent_id_fkey on table child depends on table parent")),
+        "{error:?}"
+    );
 
     engine.begin().unwrap();
     engine

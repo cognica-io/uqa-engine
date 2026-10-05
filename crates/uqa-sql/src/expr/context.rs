@@ -22,7 +22,9 @@ pub use casting::{
     cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,
     coercion_type_name,
 };
-pub use regtype::{format_regtype_value, format_regtype_value_with_control};
+pub use regtype::{
+    format_regtype_elements_with_control, format_regtype_value, format_regtype_value_with_control,
+};
 
 /// Engine-side hook that scalar function evaluation calls for stateful
 /// sequence and user-defined functions. Query-valued expressions are not
@@ -68,6 +70,16 @@ pub trait EngineHook {
         true
     }
 
+    /// Enum labels of the statement's catalog. Embedders without catalog enum types keep the default, so enum input and output fail as an unavailable type.
+    fn enum_labels(&self) -> Option<&dyn super::enums::EnumLabelCatalog> {
+        None
+    }
+
+    /// Composite type attributes of the statement's catalog. Embedders without catalog composite types keep the default, so composite input and coercion fail as an unavailable type.
+    fn composite_types(&self) -> Option<&dyn super::composites::CompositeTypeCatalog> {
+        None
+    }
+
     /// Resolve a catalog-owned SQL type name for casts evaluated with an engine context.
     fn resolve_type_name(&self, _name: &str) -> std::result::Result<Option<ColumnType>, String> {
         Ok(None)
@@ -98,9 +110,19 @@ pub trait EngineHook {
         self.resolve_regclass(name).map_err(SQLError::Internal)
     }
 
+    /// Resolve a routine name that must name exactly one routine, as `regproc` input does.
+    fn resolve_regproc(&self, _name: &str) -> Result<Option<i64>> {
+        Ok(None)
+    }
+
     /// Resolve an exact routine signature to the OID carrier used by `regprocedure`.
     fn resolve_regprocedure(&self, _name: &str) -> std::result::Result<Option<i64>, String> {
         Ok(None)
+    }
+
+    /// Resolve `regprocedure` input while preserving the typed errors `regprocedurein` reports. Embedders that implement only the historical lookup hook keep its behavior.
+    fn resolve_regprocedure_input(&self, name: &str) -> Result<Option<i64>> {
+        self.resolve_regprocedure(name).map_err(SQLError::Internal)
     }
 
     /// Resolve a `regrole` input while preserving hard input errors for direct casts.

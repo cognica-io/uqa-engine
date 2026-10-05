@@ -157,6 +157,11 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
                 hash_value(value, state);
             }
         }
+        // Equal enum values share their type OID and immutable label key.
+        Value::Enum(value) => {
+            15_u8.hash(state);
+            value.hash(state);
+        }
     }
 }
 
@@ -674,6 +679,40 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["id"], Value::Int(2));
         assert_eq!(out[0]["b"], Value::Str("b2".into()));
+    }
+
+    #[test]
+    fn enum_keys_match_by_type_and_label_key() {
+        let label = |type_oid, key: &[u8]| {
+            Value::Enum(uqa_core::EnumValue::new(
+                type_oid,
+                uqa_core::EnumLabelKey::from_bytes(key.to_vec()).unwrap(),
+            ))
+        };
+        let l = vec![
+            row([
+                ("m", label(7, &[64])),
+                ("side", Value::Str("left-a".into())),
+            ]),
+            row([
+                ("m", label(7, &[128])),
+                ("side", Value::Str("left-b".into())),
+            ]),
+        ];
+        let r = vec![
+            row([("n", label(7, &[64])), ("other", Value::Int(1))]),
+            row([("n", label(8, &[64])), ("other", Value::Int(2))]),
+            row([("n", Value::Bytes(vec![64])), ("other", Value::Int(3))]),
+        ];
+        let out = hash_inner_join(
+            &l,
+            &r,
+            |row| row.get("m").map(JoinKey::new),
+            |row| row.get("n").map(JoinKey::new),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["side"], Value::Str("left-a".into()));
+        assert_eq!(out[0]["other"], Value::Int(1));
     }
 
     #[test]

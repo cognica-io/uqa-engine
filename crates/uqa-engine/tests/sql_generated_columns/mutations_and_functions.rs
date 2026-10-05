@@ -224,8 +224,13 @@ fn generated_function_bindings_select_and_depend_on_exact_overloads() {
         "DROP FUNCTION generated_pick(INTEGER)",
         "DROP FUNCTION generated_literal_pick(TEXT)",
     ] {
-        let error = engine.sql(sql, &[]).unwrap_err().to_string();
-        assert!(error.contains("generated column"), "{error}");
+        let error = engine.sql(sql, &[]).unwrap_err();
+        assert!(
+            error
+                .detail()
+                .is_some_and(|detail| detail.contains("column ") && detail.contains(" of table ")),
+            "{sql}: {error:?}"
+        );
     }
     engine
         .sql(

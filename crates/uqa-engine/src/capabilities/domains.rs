@@ -23,6 +23,8 @@ impl Engine {
                     .map_err(|error| SQLError::Internal(error.to_string()))
             },
             publication: self,
+            enums: self,
+            composites: self,
             changes: self,
         }
     }
@@ -46,87 +48,25 @@ impl DomainDeclarationBinding for Engine {
         )
     }
 }
-use crate::TableState;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
-use uqa_core::RelationIdentity;
-use uqa_execution::catalog::foreign::StoredForeignTable;
+use std::collections::BTreeMap;
 use uqa_execution::schema::domains::dependencies::{
-    DomainCheckRead, DomainColumnRead, DomainDependencyCatalog, DomainDependencyContext,
-    DomainForeignRemoval, DomainIndexRemoval, DomainRegistryPublication, DomainTableMetadata,
-    DomainTableRemoval, DomainViewDependencies,
+    DomainDependencyCatalog, DomainDependencyContext, DomainRegistryPublication,
 };
-use uqa_sql::schema::domains::dependencies::DomainTypeCatalog;
-use uqa_sql::{ast::ColumnType, catalog::stored_view::StoredView};
-use uqa_storage::{CatalogIndexRow, StorageBackendResult};
 
 impl Engine {
     pub(crate) fn domain_dependency_context(&self) -> DomainDependencyContext<'_> {
         DomainDependencyContext {
-            types: self,
             catalog: self,
-            views: self,
             publication: self,
-            tables: self,
-            foreign: self,
-            indexes: self,
-            events: self,
-            locks: self,
+            enums: self,
+            composites: self,
             changes: self,
         }
-    }
-}
-impl DomainTypeCatalog for Engine {
-    fn resolve_domain_type_reference(&self, name: &str) -> Option<ColumnType> {
-        uqa_execution::catalog::projection::resolve_catalog_column_type(
-            &self.catalog_execution(),
-            name,
-        )
     }
 }
 impl DomainDependencyCatalog for Engine {
     fn domain_definitions(&self) -> BTreeMap<String, StoredDomain> {
         self.durable.domains.read().clone()
-    }
-    fn domain_index_rows(&self) -> BTreeMap<RelationIdentity, CatalogIndexRow> {
-        self.durable.catalog_indexes.read().clone()
-    }
-    fn domain_table_schemas(&self) -> Vec<(String, Arc<dyn DomainTableMetadata>)> {
-        self.table_entries()
-            .into_iter()
-            .map(|(name, table)| (name, table as Arc<dyn DomainTableMetadata>))
-            .collect()
-    }
-    fn domain_foreign_tables(&self) -> BTreeMap<RelationIdentity, StoredForeignTable> {
-        self.durable.foreign_tables.read().clone()
-    }
-    fn domain_view_definitions(&self) -> BTreeMap<RelationIdentity, StoredView> {
-        self.durable.views.read().clone()
-    }
-}
-impl DomainTableMetadata for TableState {
-    fn domain_columns(&self) -> DomainColumnRead<'_> {
-        Box::new(self.columns.read())
-    }
-    fn domain_table_checks(&self) -> DomainCheckRead<'_> {
-        Box::new(self.table_checks.read())
-    }
-}
-impl DomainViewDependencies for Engine {
-    fn views_depending_on_column(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> StorageBackendResult<Vec<String>> {
-        Engine::views_depending_on_column(self, table, column)
-    }
-    fn cascade_view_closure(&self, names: Vec<String>) -> Result<Vec<String>, SQLError> {
-        Engine::cascade_view_closure(self, names)
-    }
-    fn drop_views_inner(&self, names: &[String], cascade: bool) -> Result<(), SQLError> {
-        Engine::drop_views_inner(self, names, cascade)
     }
 }
 impl DomainRegistryPublication for Engine {
@@ -140,100 +80,73 @@ impl DomainRegistryPublication for Engine {
         *self.durable.domains.write() = registry;
     }
 }
-impl DomainTableRemoval for Engine {
-    fn drop_constraint_dependency(&self, table: &str, name: &str) -> Result<(), SQLError> {
-        Engine::drop_constraint_dependency(self, table, name)
-    }
-    fn clear_column_default(&self, table: &str, column: &str) -> StorageBackendResult<()> {
-        self.set_column_default_inner(table, column, None)
-            .map(|_| ())
-    }
-    fn drop_column_cascade(
-        &self,
-        table: &str,
-        column: &str,
-        if_exists: bool,
-    ) -> Result<(), SQLError> {
-        Engine::drop_column_cascade(self, table, column, if_exists)
-    }
-}
-impl DomainForeignRemoval for Engine {
-    fn drop_foreign_table_check_dependency(
-        &self,
-        table: &str,
-        name: &str,
-    ) -> StorageBackendResult<()> {
-        self.foreign_definition_context()
-            .drop_foreign_table_check_dependency(table, name)
-            .map(|_| ())
-    }
-    fn clear_foreign_table_default_dependency(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> StorageBackendResult<()> {
-        self.foreign_definition_context()
-            .clear_foreign_table_default_dependency(table, column)
-            .map(|_| ())
-    }
-    fn drop_foreign_table_column_dependency(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> StorageBackendResult<()> {
-        self.foreign_definition_context()
-            .drop_foreign_table_column_dependency(table, column)
-            .map(|_| ())
-    }
-}
-impl DomainIndexRemoval for Engine {
-    fn drop_index_dependency(&self, relation: &RelationIdentity) -> Result<(), SQLError> {
-        Engine::drop_index_dependency(self, relation)
-    }
-}
 
-use uqa_execution::schema::domains::removal::{
-    DomainDropNotices, DomainRemovalContext, DomainRoutineRemoval,
-};
+use uqa_execution::schema::domains::removal::{DomainDropNotices, DomainRemovalContext};
 use uqa_sql::catalog::security::BoundSchemaSecurity;
 use uqa_sql::schema::domains::removal::{
-    DomainDropAuthority, DomainDropBinding, DomainDropCatalog,
+    TypeObjectAuthority, TypeObjectBinding, TypeObjectCatalog,
 };
 
 impl Engine {
     pub(crate) fn domain_removal_context(&self) -> DomainRemovalContext<'_> {
         DomainRemovalContext {
             refresh: self,
-            binding: DomainDropBinding {
+            binding: TypeObjectBinding {
                 catalog: self,
                 authority: self,
                 session: self,
             },
-            removal: self,
+            deletion: self,
             notices: self,
         }
     }
 }
-impl DomainDropCatalog for Engine {
+impl TypeObjectCatalog for Engine {
     fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(name)
     }
-    fn resolve_domain_drop_type(&self, name: &str) -> Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regobject_oid(
-            &self.catalog_execution(),
-            &ColumnType::Regtype,
-            name,
-        )
+    fn resolve_drop_type_oid(&self, name: &str) -> Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_type_object_oid(&self.catalog_execution(), name)
     }
-    fn format_domain_drop_type(&self, oid: i64) -> Result<Option<String>, String> {
-        uqa_execution::catalog::projection::resolve_regtype_output(
-            &self.catalog_execution(),
-            &ColumnType::Regtype,
-            oid,
-        )
+    fn format_drop_type(&self, oid: i64) -> Result<Option<String>, String> {
+        uqa_execution::catalog::projection::format_type_object(&self.catalog_execution(), oid)
+    }
+    fn enum_by_type_oid(&self, oid: u32) -> Option<uqa_sql::catalog::enum_type::StoredEnum> {
+        self.durable
+            .enums
+            .read()
+            .values()
+            .find(|definition| definition.oid == oid || definition.array_oid == oid)
+            .cloned()
+    }
+    fn composite_by_type_oid(
+        &self,
+        oid: u32,
+    ) -> Option<uqa_sql::catalog::composite_type::StoredComposite> {
+        self.durable
+            .composites
+            .read()
+            .values()
+            .find(|definition| definition.oid == oid || definition.array_oid == oid)
+            .cloned()
+    }
+    fn user_array_element(&self, oid: u32) -> Option<u32> {
+        self.durable.domains.read().values().find_map(|domain| {
+            (uqa_sql::catalog::type_metadata::pg_type_array_oid(&domain.column_type())
+                == i64::from(oid))
+            .then_some(domain.oid)
+        })
+    }
+    fn row_type_relation(
+        &self,
+        oid: u32,
+    ) -> Option<uqa_sql::schema::domains::removal::RowTypeRelation> {
+        uqa_execution::catalog::projection::row_type_relation(&self.catalog_execution(), oid)
+            .ok()
+            .flatten()
     }
 }
-impl DomainDropAuthority for Engine {
+impl TypeObjectAuthority for Engine {
     fn schema_usage(&self, schema: &str, role: &RoleReference) -> bool {
         self.schema_has_privilege_for_role(
             schema,
@@ -246,15 +159,6 @@ impl DomainDropAuthority for Engine {
         role: &dyn uqa_sql::catalog::roles::identity::RoleSubject,
     ) -> bool {
         Engine::current_user_has_role_privileges(self, role)
-    }
-}
-impl DomainRoutineRemoval for Engine {
-    fn remove_domain_types_and_routines(
-        &self,
-        targets: &BTreeSet<u32>,
-        cascade: bool,
-    ) -> Result<(), SQLError> {
-        self.drop_domain_types_and_routines(targets, cascade)
     }
 }
 impl DomainDropNotices for Engine {

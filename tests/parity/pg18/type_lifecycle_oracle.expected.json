@@ -1,0 +1,4758 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE ROLE tl_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE ROLE tl_user",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE ROLE tl_other",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN posint AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN good_mood AS mood CHECK (VALUE <> 'sad')",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE lt (id integer PRIMARY KEY, m mood DEFAULT 'ok', ms mood[], p posint, g good_mood, gs good_mood[], c mood CONSTRAINT lt_c_check CHECK (c <> 'happy'), gen integer GENERATED ALWAYS AS (CASE WHEN m = 'ok' THEN 1 ELSE 0 END) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE INDEX lt_partial_idx ON lt (id) WHERE m <> 'sad'",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE INDEX lt_cast_idx ON lt ((p::integer))",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW lv AS SELECT id, m, m = 'ok' AS is_ok, 'happy'::mood AS top, p::integer AS p_int, NULL::posint AS np FROM lt WHERE m <> 'sad'",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION lt_next(x mood) RETURNS mood LANGUAGE sql AS $$ SELECT enum_larger(x, 'ok') $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION lt_double(x posint) RETURNS posint LANGUAGE sql IMMUTABLE AS $$ SELECT (x * 2)::posint $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION lt_atomic(x mood) RETURNS boolean LANGUAGE sql RETURN x = 'ok'::mood",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION lt_plpgsql(x mood) RETURNS text LANGUAGE plpgsql AS $$ DECLARE v mood := 'happy'; BEGIN RETURN (x < v)::text; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION lt_fresh(x mood) RETURNS text LANGUAGE plpgsql AS $$ DECLARE v mood := 'ok'; BEGIN RETURN (x = v)::text; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO lt (id, m, ms, p, g, gs, c) VALUES (1, 'ok', '{sad,ok}', 5, 'ok', '{ok}', 'sad')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lt_plpgsql('sad') AS before_rename",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "before_rename"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('lv'::regclass) AS view_before",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_before"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    m,\n    (m = 'ok'::mood) AS is_ok,\n    'happy'::mood AS top,\n    (p)::integer AS p_int,\n    (NULL::integer)::posint AS np\n   FROM lt\n  WHERE (m <> 'sad'::mood);"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE mood RENAME TO feeling",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE mood RENAME TO x",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"mood\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE feeling RENAME TO posint",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"posint\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE feeling RENAME TO feeling",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"feeling\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE feeling RENAME TO lt",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"lt\" already exists",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE _feeling RENAME TO f2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot alter array type feeling[]",
+        "detail": null,
+        "hint": "You can alter type feeling, which will alter the array type as well."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE lt RENAME TO lt2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "lt is a table's row type",
+        "detail": null,
+        "hint": "Use ALTER TABLE instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE lt OWNER TO tl_owner",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "lt is a table's row type",
+        "detail": null,
+        "hint": "Use ALTER TABLE instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE lt SET SCHEMA pg_catalog",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "lt is a table's row type",
+        "detail": null,
+        "hint": "Use ALTER TABLE instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER DOMAIN posint RENAME TO positive",
+      "command_tags": [
+        "ALTER DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE positive RENAME TO posint2",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER DOMAIN feeling RENAME TO x",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "feeling is not a domain",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER DOMAIN nosuch RENAME TO x",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE nosuch RENAME TO x",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typname IN ('feeling', '_feeling', 'posint2', '_posint2', 'mood', '_mood', 'good_mood', '_good_mood', 'posint', '_posint') ORDER BY 1",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "_feeling"
+            ],
+            [
+              "_good_mood"
+            ],
+            [
+              "_posint2"
+            ],
+            [
+              "feeling"
+            ],
+            [
+              "good_mood"
+            ],
+            [
+              "posint2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT t.typname, a.typname AS array_name FROM pg_type t JOIN pg_type a ON a.oid = t.typarray WHERE t.typname IN ('feeling', 'posint2', 'good_mood') ORDER BY 1",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "array_name"
+          ],
+          "type_oids": [
+            19,
+            19
+          ],
+          "rows": [
+            [
+              "feeling",
+              "_feeling"
+            ],
+            [
+              "good_mood",
+              "_good_mood"
+            ],
+            [
+              "posint2",
+              "_posint2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute WHERE attrelid = 'lt'::regclass AND attnum > 0 ORDER BY attnum",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "type"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "id",
+              "integer"
+            ],
+            [
+              "m",
+              "feeling"
+            ],
+            [
+              "ms",
+              "feeling[]"
+            ],
+            [
+              "p",
+              "posint2"
+            ],
+            [
+              "g",
+              "good_mood"
+            ],
+            [
+              "gs",
+              "good_mood[]"
+            ],
+            [
+              "c",
+              "feeling"
+            ],
+            [
+              "gen",
+              "integer"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT column_name, data_type, udt_schema, udt_name, domain_schema, domain_name FROM information_schema.columns WHERE table_name = 'lt' ORDER BY ordinal_position",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column_name",
+            "data_type",
+            "udt_schema",
+            "udt_name",
+            "domain_schema",
+            "domain_name"
+          ],
+          "type_oids": [
+            19,
+            1043,
+            19,
+            19,
+            19,
+            19
+          ],
+          "rows": [
+            [
+              "id",
+              "integer",
+              "pg_catalog",
+              "int4",
+              null,
+              null
+            ],
+            [
+              "m",
+              "USER-DEFINED",
+              "public",
+              "feeling",
+              null,
+              null
+            ],
+            [
+              "ms",
+              "ARRAY",
+              "public",
+              "_feeling",
+              null,
+              null
+            ],
+            [
+              "p",
+              "integer",
+              "pg_catalog",
+              "int4",
+              "public",
+              "posint2"
+            ],
+            [
+              "g",
+              "USER-DEFINED",
+              "public",
+              "feeling",
+              "public",
+              "good_mood"
+            ],
+            [
+              "gs",
+              "ARRAY",
+              "public",
+              "_good_mood",
+              null,
+              null
+            ],
+            [
+              "c",
+              "USER-DEFINED",
+              "public",
+              "feeling",
+              null,
+              null
+            ],
+            [
+              "gen",
+              "integer",
+              "pg_catalog",
+              "int4",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('lv'::regclass) AS view_after",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_after"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    m,\n    (m = 'ok'::feeling) AS is_ok,\n    'happy'::feeling AS top,\n    (p)::integer AS p_int,\n    (NULL::integer)::posint2 AS np\n   FROM lt\n  WHERE (m <> 'sad'::feeling);"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute WHERE attrelid = 'lv'::regclass AND attnum > 0 ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "type"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "id",
+              "integer"
+            ],
+            [
+              "m",
+              "feeling"
+            ],
+            [
+              "is_ok",
+              "boolean"
+            ],
+            [
+              "top",
+              "feeling"
+            ],
+            [
+              "p_int",
+              "integer"
+            ],
+            [
+              "np",
+              "posint2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) AS expression FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = 'lt'::regclass ORDER BY d.adnum",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "expression"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "m",
+              "'ok'::feeling"
+            ],
+            [
+              "gen",
+              "\nCASE\n    WHEN (m = 'ok'::feeling) THEN 1\n    ELSE 0\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'lt'::regclass ORDER BY conname",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "definition"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "lt_c_check",
+              "CHECK ((c <> 'happy'::feeling))"
+            ],
+            [
+              "lt_id_not_null",
+              "NOT NULL id"
+            ],
+            [
+              "lt_pkey",
+              "PRIMARY KEY (id)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE contypid IN ('posint2'::regtype, 'good_mood'::regtype) ORDER BY conname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "definition"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "good_mood_check",
+              "CHECK ((VALUE <> 'sad'::feeling))"
+            ],
+            [
+              "posint_check",
+              "CHECK ((VALUE > 0))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT indexrelid::regclass AS index, pg_get_indexdef(indexrelid) AS definition FROM pg_index WHERE indrelid = 'lt'::regclass ORDER BY 1",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "index",
+            "definition"
+          ],
+          "type_oids": [
+            2205,
+            25
+          ],
+          "rows": [
+            [
+              "lt_pkey",
+              "CREATE UNIQUE INDEX lt_pkey ON public.lt USING btree (id)"
+            ],
+            [
+              "lt_partial_idx",
+              "CREATE INDEX lt_partial_idx ON public.lt USING btree (id) WHERE (m <> 'sad'::feeling)"
+            ],
+            [
+              "lt_cast_idx",
+              "CREATE INDEX lt_cast_idx ON public.lt USING btree (((p)::integer))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT p.oid::regprocedure AS signature, pg_get_function_arguments(p.oid) AS arguments, pg_get_function_result(p.oid) AS result FROM pg_proc p WHERE proname LIKE 'lt\\_%' ORDER BY proname",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "signature",
+            "arguments",
+            "result"
+          ],
+          "type_oids": [
+            2202,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "lt_atomic(feeling)",
+              "x feeling",
+              "boolean"
+            ],
+            [
+              "lt_double(posint2)",
+              "x posint2",
+              "posint2"
+            ],
+            [
+              "lt_fresh(feeling)",
+              "x feeling",
+              "text"
+            ],
+            [
+              "lt_next(feeling)",
+              "x feeling",
+              "feeling"
+            ],
+            [
+              "lt_plpgsql(feeling)",
+              "x feeling",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('lt_atomic'::regproc) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "RETURN (x = 'ok'::feeling)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lt_next('sad') AS next",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next"
+          ],
+          "type_oids": [
+            24582
+          ],
+          "rows": [
+            [
+              "ok"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lt_double(3) AS doubled",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"posint\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lt_atomic('ok') AS atomic",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "atomic"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lt_plpgsql('sad') AS cached_plpgsql",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "cached_plpgsql"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lt_fresh('ok') AS fresh_plpgsql",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fresh_plpgsql"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, m, is_ok, top, p_int, np FROM lv",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m",
+            "is_ok",
+            "top",
+            "p_int",
+            "np"
+          ],
+          "type_oids": [
+            23,
+            24582,
+            16,
+            24582,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "ok",
+              "t",
+              "happy",
+              "5",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO lt (id, p) VALUES (2, 1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO lt (id, c) VALUES (3, 'happy')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"lt\" violates check constraint \"lt_c_check\"",
+        "detail": "Failing row contains (3, ok, null, null, null, null, happy, 1).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO lt (id, m) VALUES (4, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"m\" is of type feeling but expression is of type integer",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, m, gen FROM lt ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m",
+            "gen"
+          ],
+          "type_oids": [
+            23,
+            24582,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "ok",
+              "1"
+            ],
+            [
+              "2",
+              "ok",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ok'::feeling AS known, pg_typeof('ok'::feeling)::text AS type_name, pg_typeof(ARRAY['ok'::feeling])::text AS array_type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "known",
+            "type_name",
+            "array_type_name"
+          ],
+          "type_oids": [
+            24582,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "ok",
+              "feeling",
+              "feeling[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'x'::feeling",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum feeling: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ok'::mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"mood\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT enum_range(NULL::feeling) AS labels",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "labels"
+          ],
+          "type_oids": [
+            24581
+          ],
+          "rows": [
+            [
+              "{sad,ok,happy}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE _renamed (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE feeling RENAME TO renamed",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT t.typname, a.typname AS array_name FROM pg_type t JOIN pg_type a ON a.oid = t.typarray WHERE t.typname = 'renamed'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "array_name"
+          ],
+          "type_oids": [
+            19,
+            19
+          ],
+          "rows": [
+            [
+              "renamed",
+              "_renamed_1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT format_type('renamed'::regtype, NULL) AS element, format_type('renamed[]'::regtype, NULL) AS array_type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "element",
+            "array_type"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "renamed",
+              "renamed[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE renamed RENAME TO \"Feeling\"",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT format_type('\"Feeling\"'::regtype, NULL) AS quoted, format_type('\"Feeling\"[]'::regtype, NULL) AS quoted_array",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "quoted",
+            "quoted_array"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\"Feeling\"",
+              "\"Feeling\"[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT t.typname, a.typname AS array_name FROM pg_type t JOIN pg_type a ON a.oid = t.typarray WHERE t.typname = 'Feeling'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "array_name"
+          ],
+          "type_oids": [
+            19,
+            19
+          ],
+          "rows": [
+            [
+              "Feeling",
+              "_Feeling"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE \"Feeling\" RENAME TO aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT t.typname, a.typname AS array_name FROM pg_type t JOIN pg_type a ON a.oid = t.typarray WHERE t.oid = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "array_name"
+          ],
+          "type_oids": [
+            19,
+            19
+          ],
+          "rows": [
+            [
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa RENAME TO feeling",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE _renamed",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE feeling RENAME TO rolled",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ok'::rolled AS inside",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "inside"
+          ],
+          "type_oids": [
+            24582
+          ],
+          "rows": [
+            [
+              "ok"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ok'::feeling AS after_rollback",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "after_rollback"
+          ],
+          "type_oids": [
+            24582
+          ],
+          "rows": [
+            [
+              "ok"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ok'::rolled",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"rolled\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA other",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE feeling SET SCHEMA other",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling SET SCHEMA other",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling SET SCHEMA nosuch",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other._feeling SET SCHEMA public",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot alter array type other.feeling[]",
+        "detail": null,
+        "hint": "You can alter type other.feeling, which will alter the array type as well."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE clash AS ENUM ('a')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE other.clash AS ENUM ('b')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE clash SET SCHEMA other",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"clash\" already exists in schema \"other\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE other.clash",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE other._clash (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE clash SET SCHEMA other",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"_clash\" already exists in schema \"other\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE other._clash",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE clash",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT format_type('other.feeling'::regtype, NULL) AS qualified, format_type('other._feeling'::regtype, NULL) AS array_type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "qualified",
+            "array_type"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "other.feeling",
+              "other.feeling[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute WHERE attrelid = 'lt'::regclass AND attnum IN (2, 3, 5) ORDER BY attnum",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "type"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "m",
+              "other.feeling"
+            ],
+            [
+              "ms",
+              "other.feeling[]"
+            ],
+            [
+              "g",
+              "good_mood"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT column_name, data_type, udt_schema, udt_name, domain_schema, domain_name FROM information_schema.columns WHERE table_name = 'lt' AND column_name IN ('m', 'ms', 'g') ORDER BY ordinal_position",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column_name",
+            "data_type",
+            "udt_schema",
+            "udt_name",
+            "domain_schema",
+            "domain_name"
+          ],
+          "type_oids": [
+            19,
+            1043,
+            19,
+            19,
+            19,
+            19
+          ],
+          "rows": [
+            [
+              "m",
+              "USER-DEFINED",
+              "other",
+              "feeling",
+              null,
+              null
+            ],
+            [
+              "ms",
+              "ARRAY",
+              "other",
+              "_feeling",
+              null,
+              null
+            ],
+            [
+              "g",
+              "USER-DEFINED",
+              "other",
+              "feeling",
+              "public",
+              "good_mood"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('lv'::regclass) AS view_other",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_other"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    m,\n    (m = 'ok'::other.feeling) AS is_ok,\n    'happy'::other.feeling AS top,\n    (p)::integer AS p_int,\n    (NULL::integer)::posint2 AS np\n   FROM lt\n  WHERE (m <> 'sad'::other.feeling);"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) AS expression FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = 'lt'::regclass ORDER BY d.adnum",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "expression"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "m",
+              "'ok'::other.feeling"
+            ],
+            [
+              "gen",
+              "\nCASE\n    WHEN (m = 'ok'::other.feeling) THEN 1\n    ELSE 0\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'lt'::regclass AND contype = 'c' ORDER BY conname",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "definition"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "lt_c_check",
+              "CHECK ((c <> 'happy'::other.feeling))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT indexrelid::regclass AS index, pg_get_indexdef(indexrelid) AS definition FROM pg_index WHERE indrelid = 'lt'::regclass ORDER BY 1",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "index",
+            "definition"
+          ],
+          "type_oids": [
+            2205,
+            25
+          ],
+          "rows": [
+            [
+              "lt_pkey",
+              "CREATE UNIQUE INDEX lt_pkey ON public.lt USING btree (id)"
+            ],
+            [
+              "lt_partial_idx",
+              "CREATE INDEX lt_partial_idx ON public.lt USING btree (id) WHERE (m <> 'sad'::other.feeling)"
+            ],
+            [
+              "lt_cast_idx",
+              "CREATE INDEX lt_cast_idx ON public.lt USING btree (((p)::integer))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT p.oid::regprocedure AS signature, pg_get_function_arguments(p.oid) AS arguments, pg_get_function_result(p.oid) AS result FROM pg_proc p WHERE proname IN ('lt_next', 'lt_atomic') ORDER BY proname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "signature",
+            "arguments",
+            "result"
+          ],
+          "type_oids": [
+            2202,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "lt_atomic(other.feeling)",
+              "x other.feeling",
+              "boolean"
+            ],
+            [
+              "lt_next(other.feeling)",
+              "x other.feeling",
+              "other.feeling"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('lt_atomic'::regproc) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "RETURN (x = 'ok'::other.feeling)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, m, is_ok, top FROM lv ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m",
+            "is_ok",
+            "top"
+          ],
+          "type_oids": [
+            23,
+            24582,
+            16,
+            24582
+          ],
+          "rows": [
+            [
+              "1",
+              "ok",
+              "t",
+              "happy"
+            ],
+            [
+              "2",
+              "ok",
+              "t",
+              "happy"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lt_next('sad') AS next, lt_atomic('ok') AS atomic",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next",
+            "atomic"
+          ],
+          "type_oids": [
+            24582,
+            16
+          ],
+          "rows": [
+            [
+              "ok",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET search_path = other, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT format_type('feeling'::regtype, NULL) AS visible",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "visible"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "feeling"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('lv'::regclass) AS view_visible",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_visible"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    m,\n    (m = 'ok'::feeling) AS is_ok,\n    'happy'::feeling AS top,\n    (p)::integer AS p_int,\n    (NULL::integer)::posint2 AS np\n   FROM lt\n  WHERE (m <> 'sad'::feeling);"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT p.oid::regprocedure AS signature FROM pg_proc p WHERE proname = 'lt_next'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "signature"
+          ],
+          "type_oids": [
+            2202
+          ],
+          "rows": [
+            [
+              "lt_next(feeling)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET search_path",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER DOMAIN posint2 SET SCHEMA other",
+      "command_tags": [
+        "ALTER DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT nspname, typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE typname IN ('feeling', '_feeling', 'posint2', '_posint2') ORDER BY typname",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nspname",
+            "typname"
+          ],
+          "type_oids": [
+            19,
+            19
+          ],
+          "rows": [
+            [
+              "other",
+              "_feeling"
+            ],
+            [
+              "other",
+              "_posint2"
+            ],
+            [
+              "other",
+              "feeling"
+            ],
+            [
+              "other",
+              "posint2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, m, p FROM lt ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            24582,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "ok",
+              "5"
+            ],
+            [
+              "2",
+              "ok",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_userbyid(typowner) = current_user AS owned_by_creator FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "owned_by_creator"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling OWNER TO tl_owner",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_userbyid(typowner) AS owner FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "owner"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "tl_owner"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_userbyid(typowner) AS array_owner FROM pg_type WHERE oid = 'other._feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_owner"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "tl_owner"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling OWNER TO nosuchrole",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "role \"nosuchrole\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other._feeling OWNER TO tl_owner",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "cannot alter array type other.feeling[]",
+        "detail": null,
+        "hint": "You can alter type other.feeling, which will alter the array type as well."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER DOMAIN other.posint2 OWNER TO tl_owner",
+      "command_tags": [
+        "ALTER DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER DOMAIN other.feeling OWNER TO tl_owner",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "other.feeling is not a domain",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_userbyid(typowner) AS domain_owner FROM pg_type WHERE oid = 'other.posint2'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_owner"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "tl_owner"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON SCHEMA other TO tl_user, tl_other",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE tl_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling OWNER TO tl_user",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling RENAME TO x",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling SET SCHEMA public",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for schema public",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling ADD VALUE 'meh'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE other.feeling",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE other.feeling TO tl_other",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "WARNING",
+          "sqlstate": "01007",
+          "message": "no privileges were granted for \"feeling\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT tl_owner TO tl_user",
+      "command_tags": [
+        "GRANT ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE tl_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling OWNER TO tl_other",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be able to SET ROLE \"tl_other\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.feeling RENAME TO f3",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE other.f3 RENAME TO feeling",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "REVOKE tl_owner FROM tl_user",
+      "command_tags": [
+        "REVOKE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{=U/tl_owner,tl_owner=U/tl_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE other.feeling TO tl_user WITH GRANT OPTION",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{=U/tl_owner,tl_owner=U/tl_owner,tl_user=U*/tl_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "REVOKE USAGE ON TYPE other.feeling FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{tl_owner=U/tl_owner,tl_user=U*/tl_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a.privilege_type, pg_get_userbyid(a.grantor) AS grantor, CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee, a.is_grantable FROM pg_type t, aclexplode(t.typacl) a WHERE t.oid = 'other.feeling'::regtype ORDER BY 3",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "privilege_type",
+            "grantor",
+            "grantee",
+            "is_grantable"
+          ],
+          "type_oids": [
+            25,
+            19,
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "USAGE",
+              "tl_owner",
+              "tl_owner",
+              "f"
+            ],
+            [
+              "USAGE",
+              "tl_owner",
+              "tl_user",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other._feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE other._feeling TO tl_user",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0LP01",
+        "message": "cannot set privileges of array types",
+        "detail": null,
+        "hint": "Set the privileges of the element type instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "GRANT SELECT ON TYPE other.feeling TO tl_user",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0LP01",
+        "message": "invalid privilege type SELECT for type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON DOMAIN other.feeling TO tl_user",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"other.feeling\" is not a domain",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE nosuch TO tl_user",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE other.feeling TO nosuchrole",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "role \"nosuchrole\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON DOMAIN other.posint2 TO tl_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.posint2'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{=U/tl_owner,tl_owner=U/tl_owner,tl_user=U/tl_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT ALL PRIVILEGES ON TYPE other.feeling TO tl_other",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{tl_owner=U/tl_owner,tl_user=U*/tl_owner,tl_other=U/tl_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('tl_user', 'other.feeling', 'USAGE') AS user_usage, has_type_privilege('tl_user', 'other.feeling', 'USAGE WITH GRANT OPTION') AS user_grant, has_type_privilege('tl_other', 'other.feeling', 'USAGE WITH GRANT OPTION') AS other_grant, has_type_privilege('tl_owner', 'other.feeling', 'usage') AS owner_usage",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "user_usage",
+            "user_grant",
+            "other_grant",
+            "owner_usage"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('other.feeling', 'USAGE') AS current_usage, has_type_privilege('tl_user', 'other.feeling'::regtype, 'USAGE') AS by_oid, has_type_privilege('tl_user', 'other._feeling', 'USAGE') AS array_usage, has_type_privilege('tl_user', 'integer', 'USAGE') AS builtin",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_usage",
+            "by_oid",
+            "array_usage",
+            "builtin"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('tl_user', 'other.feeling', 'SELECT')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "unrecognized privilege type: \"SELECT\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('tl_user', 'nosuch', 'USAGE')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('nosuchrole', 'other.feeling', 'USAGE')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "role \"nosuchrole\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('tl_user', 999999::oid, 'USAGE') AS missing_oid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "missing_oid"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE tl_other",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE other.feeling TO PUBLIC",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "WARNING",
+          "sqlstate": "01007",
+          "message": "no privileges were granted for \"feeling\"",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{tl_owner=U/tl_owner,tl_user=U*/tl_owner,tl_other=U/tl_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "REVOKE USAGE ON TYPE other.feeling FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE tl_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE other.feeling TO tl_other",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{tl_owner=U/tl_owner,tl_user=U*/tl_owner,tl_other=U/tl_owner,tl_other=U/tl_user}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "REVOKE GRANT OPTION FOR USAGE ON TYPE other.feeling FROM tl_user",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "dependent privileges exist",
+        "detail": null,
+        "hint": "Use CASCADE to revoke them too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "REVOKE GRANT OPTION FOR USAGE ON TYPE other.feeling FROM tl_user CASCADE",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{tl_owner=U/tl_owner,tl_user=U/tl_owner,tl_other=U/tl_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "REVOKE ALL ON TYPE other.feeling FROM tl_other",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typacl"
+          ],
+          "type_oids": [
+            1034
+          ],
+          "rows": [
+            [
+              "{tl_owner=U/tl_owner,tl_user=U/tl_owner}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT CREATE ON SCHEMA public TO tl_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE usage_target (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE usage_target OWNER TO tl_user",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE tl_other",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ok'::other.feeling AS cast_without_usage",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "cast_without_usage"
+          ],
+          "type_oids": [
+            24582
+          ],
+          "rows": [
+            [
+              "ok"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('other.feeling', 'USAGE') AS other_usage",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "other_usage"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE tl_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT has_type_privilege('other.feeling', 'USAGE') AS user_usage",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "user_usage"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "REVOKE USAGE ON TYPE other.feeling FROM tl_user",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE tl_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE denied_table (m other.feeling)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE denied_array (m other.feeling[])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE allowed_domain (p other.posint2, g good_mood)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE usage_target ADD COLUMN m other.feeling",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE usage_target ALTER COLUMN a TYPE other.feeling USING NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION denied_argument(x other.feeling) RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION denied_result() RETURNS other.feeling LANGUAGE sql AS $$ SELECT 'ok'::other.feeling $$",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION denied_array_argument(x other.feeling[]) RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN denied_domain AS other.feeling",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW denied_view AS SELECT 'ok'::other.feeling AS m",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE denied_ctas AS SELECT 'ok'::other.feeling AS m",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE denied_temp (m other.feeling)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for type other.feeling",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'ok'::other.feeling AS cast_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "cast_value"
+          ],
+          "type_oids": [
+            24582
+          ],
+          "rows": [
+            [
+              "ok"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT m FROM lt LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for table lt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT USAGE ON TYPE other.feeling TO tl_user",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE tl_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE denied_table (m other.feeling)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE usage_target ADD COLUMN m other.feeling",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE denied_table, allowed_domain, usage_target",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE lt",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type lt because table lt requires it",
+        "detail": null,
+        "hint": "You can drop table lt instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE other._feeling",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type other.feeling[] because type other.feeling requires it",
+        "detail": null,
+        "hint": "You can drop type other.feeling instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE other.feeling",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type other.feeling because other objects depend on it",
+        "detail": "column ms of table lt depends on type other.feeling[]\ntype good_mood depends on type other.feeling\ncolumn gs of table lt depends on type good_mood[]\ncolumn g of table lt depends on type good_mood\ncolumn c of table lt depends on type other.feeling\ncolumn m of table lt depends on type other.feeling\ncolumn gen of table lt depends on type other.feeling\nview lv depends on type other.feeling\nfunction lt_next(other.feeling) depends on type other.feeling\nfunction lt_atomic(other.feeling) depends on type other.feeling\nfunction lt_plpgsql(other.feeling) depends on type other.feeling\nfunction lt_fresh(other.feeling) depends on type other.feeling",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP DOMAIN other.posint2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type other.posint2 because other objects depend on it",
+        "detail": "column p of table lt depends on type other.posint2\nview lv depends on type other.posint2\nfunction lt_double(other.posint2) depends on type other.posint2",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP DOMAIN good_mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type good_mood because other objects depend on it",
+        "detail": "column gs of table lt depends on type good_mood[]\ncolumn g of table lt depends on type good_mood",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP ROLE tl_owner",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "role \"tl_owner\" cannot be dropped because some objects depend on it",
+        "detail": "owner of type other.feeling\nowner of type other.posint2",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP ROLE tl_user",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "role \"tl_user\" cannot be dropped because some objects depend on it",
+        "detail": "privileges for schema public\nprivileges for type other.feeling\nprivileges for type other.posint2\nprivileges for schema other",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE lbl AS ENUM ('a', 'b', 'c')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE lbl_t (id integer, x lbl DEFAULT 'b' CONSTRAINT lbl_t_x_check CHECK (x <> 'c'), y integer GENERATED ALWAYS AS (CASE WHEN x = 'a' THEN 1 ELSE 2 END) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE INDEX lbl_idx ON lbl_t ((x = 'a'))",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW lbl_v AS SELECT x, x = 'b' AS is_b, 'c'::lbl AS c, ARRAY['a', 'b']::lbl[] AS labels FROM lbl_t WHERE x <> 'a'",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION lbl_f(v lbl) RETURNS boolean LANGUAGE sql RETURN v = 'b'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE lbl RENAME VALUE 'b' TO 'bee'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('lbl_v'::regclass) AS view_definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT x,\n    (x = 'bee'::lbl) AS is_b,\n    'c'::lbl AS c,\n    ARRAY['a'::lbl, 'bee'::lbl] AS labels\n   FROM lbl_t\n  WHERE (x <> 'a'::lbl);"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) AS expression FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = 'lbl_t'::regclass ORDER BY d.adnum",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "expression"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "x",
+              "'bee'::lbl"
+            ],
+            [
+              "y",
+              "\nCASE\n    WHEN (x = 'a'::lbl) THEN 1\n    ELSE 2\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'lbl_t'::regclass",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK ((x <> 'c'::lbl))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_indexdef('lbl_idx'::regclass) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CREATE INDEX lbl_idx ON public.lbl_t USING btree (((x = 'a'::lbl)))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('lbl_f'::regproc) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "RETURN (v = 'bee'::lbl)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO lbl_t (id) VALUES (1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO lbl_t (id, x) VALUES (2, 'a'), (3, 'bee')",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO lbl_t (id, x) VALUES (4, 'c')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"lbl_t\" violates check constraint \"lbl_t_x_check\"",
+        "detail": "Failing row contains (4, c, 2).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, x, y FROM lbl_t ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            24645,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "bee",
+              "2"
+            ],
+            [
+              "2",
+              "a",
+              "1"
+            ],
+            [
+              "3",
+              "bee",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT x, is_b, c, labels FROM lbl_v ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "is_b",
+            "c",
+            "labels"
+          ],
+          "type_oids": [
+            24645,
+            16,
+            24645,
+            24644
+          ],
+          "rows": [
+            [
+              "bee",
+              "t",
+              "c",
+              "{a,bee}"
+            ],
+            [
+              "bee",
+              "t",
+              "c",
+              "{a,bee}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT lbl_f('bee') AS matches, lbl_f('a') AS other",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matches",
+            "other"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP VIEW lbl_v",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP FUNCTION lbl_f(lbl)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE lbl_t",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE lbl",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA hidden",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE hidden.hmood AS ENUM ('x', 'y')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN hidden.hdom AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ht (h hidden.hmood, d hidden.hdom)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ht (h) VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"h\" is of type hidden.hmood but expression is of type integer",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'z'::hidden.hmood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum hidden.hmood: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT h = 1 FROM ht",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: hidden.hmood = integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1::hidden.hmood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type integer to hidden.hmood",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ht (d) VALUES (0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain hidden.hdom violates check constraint \"hdom_check\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(h)::text AS type_name, pg_typeof(d)::text AS domain_name FROM (SELECT 'x'::hidden.hmood AS h, 1::hidden.hdom AS d) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name",
+            "domain_name"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "hidden.hmood",
+              "hidden.hdom"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET search_path = hidden, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO ht (h) VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"h\" is of type hmood but expression is of type integer",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'z'::hmood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum hmood: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT h = 1 FROM ht",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: hmood = integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(h)::text AS type_name FROM (SELECT 'x'::hmood AS h) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hmood"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET search_path",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE ht",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP SCHEMA hidden CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "drop cascades to 2 other objects",
+          "detail": "drop cascades to type hidden.hmood\ndrop cascades to type hidden.hdom",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "DROP VIEW lv",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE lt",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP FUNCTION lt_next(other.feeling), lt_double(other.posint2), lt_atomic(other.feeling), lt_plpgsql(other.feeling), lt_fresh(other.feeling)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP SCHEMA other CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "drop cascades to 3 other objects",
+          "detail": "drop cascades to type other.feeling\ndrop cascades to type good_mood\ndrop cascades to type other.posint2",
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "REVOKE CREATE ON SCHEMA public FROM tl_user",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP ROLE tl_other",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP ROLE tl_owner",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP ROLE tl_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

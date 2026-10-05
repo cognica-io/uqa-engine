@@ -190,6 +190,7 @@ impl Engine {
             foreign_keys,
             key_constraints,
             hierarchy,
+            catalog_oids: t.recorded_catalog_oids(),
         })
     }
 

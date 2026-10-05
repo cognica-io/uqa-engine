@@ -11,9 +11,9 @@ use std::fmt::Write as _;
 use uqa_core::{TemporalValue, Value};
 
 use crate::ast::{
-    CteBody, CteMaterialization, Expr, FrameBound, FrameMode, FromClause, JoinKind, LockWait,
-    NullsOrder, OrderBy, Projection, ReturningAliases, SelectStmt, SetOpKind, Statement,
-    TableFunction, WindowReferenceKind, WindowSpec, CTE,
+    CteBody, CteMaterialization, Expr, FromClause, JoinKind, LockWait, NullsOrder,
+    OperatorJoinRelations, OrderBy, Projection, ReturningAliases, SelectStmt, SetOpKind, Statement,
+    TableFunction, CTE,
 };
 use crate::SQLError;
 
@@ -21,15 +21,18 @@ mod commands;
 use commands::{delete_sql, insert_sql, merge_sql, update_sql};
 mod legacy_vector;
 pub use legacy_vector::legacy_vector_expression;
+mod window;
+pub use window::frame_clause_sql;
+use window::window_sql;
 
 /// Render one executable statement represented by UQA's durable SQL AST.
 pub fn statement_sql(statement: &Statement) -> Result<String, SQLError> {
     match statement {
-        Statement::Select(select) => Ok(select_sql(select)),
-        Statement::Insert(insert) => Ok(insert_sql(insert)),
-        Statement::Update(update) => Ok(update_sql(update)),
-        Statement::Delete(delete) => Ok(delete_sql(delete)),
-        Statement::Merge(merge) => Ok(merge_sql(merge)),
+        Statement::Select(select) => select_sql(select),
+        Statement::Insert(insert) => insert_sql(insert),
+        Statement::Update(update) => update_sql(update),
+        Statement::Delete(delete) => delete_sql(delete),
+        Statement::Merge(merge) => merge_sql(merge),
         Statement::Notify { channel, payload } => {
             let payload = if payload.is_empty() {
                 String::new()
@@ -49,13 +52,13 @@ pub fn expression_sql(expression: &Expr) -> Result<String, SQLError> {
     render_expr(expression)
 }
 
-fn select_sql(statement: &SelectStmt) -> String {
-    let mut rendered = with_sql(&statement.with);
+fn select_sql(statement: &SelectStmt) -> Result<String, SQLError> {
+    let mut rendered = with_sql(&statement.with)?;
     if let Some(set) = statement.set_op.as_deref() {
         let left = set
             .left
             .as_deref()
-            .map_or_else(|| select_body_sql(statement), select_sql);
+            .map_or_else(|| select_body_sql(statement), select_sql)?;
         rendered.push('(');
         rendered.push_str(&left);
         rendered.push_str(") ");
@@ -68,7 +71,7 @@ fn select_sql(statement: &SelectStmt) -> String {
             rendered.push_str(" ALL");
         }
         rendered.push_str(" (");
-        rendered.push_str(&select_sql(&set.right));
+        rendered.push_str(&select_sql(&set.right)?);
         rendered.push(')');
         render_order_limit_offset(
             &mut rendered,
@@ -76,33 +79,33 @@ fn select_sql(statement: &SelectStmt) -> String {
             set.combined_limit.as_ref(),
             set.combined_with_ties,
             set.combined_offset.as_ref(),
-        );
-        return rendered;
+        )?;
+        return Ok(rendered);
     }
-    rendered.push_str(&select_body_sql(statement));
-    rendered
+    rendered.push_str(&select_body_sql(statement)?);
+    Ok(rendered)
 }
 
-fn select_body_sql(statement: &SelectStmt) -> String {
+fn select_body_sql(statement: &SelectStmt) -> Result<String, SQLError> {
     let mut rendered = String::new();
     if statement.values.is_empty() {
         rendered.push_str("SELECT");
         if !statement.distinct_on.is_empty() {
             rendered.push_str(" DISTINCT ON (");
-            rendered.push_str(&expr_list(&statement.distinct_on));
+            rendered.push_str(&expr_list(&statement.distinct_on)?);
             rendered.push(')');
         } else if statement.distinct {
             rendered.push_str(" DISTINCT");
         }
         rendered.push(' ');
-        rendered.push_str(&projections_sql(&statement.projections));
+        rendered.push_str(&projections_sql(&statement.projections)?);
         if let Some(source) = &statement.from {
             rendered.push_str(" FROM ");
-            rendered.push_str(&from_sql(source));
+            rendered.push_str(&from_sql(source)?);
         }
         if let Some(predicate) = &statement.r#where {
             rendered.push_str(" WHERE ");
-            rendered.push_str(&expr_sql(predicate));
+            rendered.push_str(&render_expr(predicate)?);
         }
         if !statement.grouping_sets.is_empty() {
             rendered.push_str(" GROUP BY ");
@@ -114,8 +117,8 @@ fn select_body_sql(statement: &SelectStmt) -> String {
                 &statement
                     .grouping_sets
                     .iter()
-                    .map(|set| format!("({})", expr_list(set)))
-                    .collect::<Vec<_>>()
+                    .map(|set| Ok(format!("({})", expr_list(set)?)))
+                    .collect::<Result<Vec<_>, SQLError>>()?
                     .join(", "),
             );
             rendered.push(')');
@@ -124,15 +127,15 @@ fn select_body_sql(statement: &SelectStmt) -> String {
             if statement.group_distinct {
                 rendered.push_str("DISTINCT ");
             }
-            rendered.push_str(&expr_list(&statement.group_by));
+            rendered.push_str(&expr_list(&statement.group_by)?);
         }
         if let Some(predicate) = &statement.having {
             rendered.push_str(" HAVING ");
-            rendered.push_str(&expr_sql(predicate));
+            rendered.push_str(&render_expr(predicate)?);
         }
     } else {
         rendered.push_str("VALUES ");
-        rendered.push_str(&rows_sql(&statement.values));
+        rendered.push_str(&rows_sql(&statement.values)?);
     }
     render_order_limit_offset(
         &mut rendered,
@@ -140,7 +143,7 @@ fn select_body_sql(statement: &SelectStmt) -> String {
         statement.limit.as_ref(),
         statement.with_ties,
         statement.offset.as_ref(),
-    );
+    )?;
     for locking in &statement.locking {
         rendered.push(' ');
         rendered.push_str(locking.strength.sql_name());
@@ -154,15 +157,15 @@ fn select_body_sql(statement: &SelectStmt) -> String {
             LockWait::NoWait => " NOWAIT",
         });
     }
-    rendered
+    Ok(rendered)
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "exhaustive FROM rendering keeps each AST variant visibly complete"
 )]
-fn from_sql(source: &FromClause) -> String {
-    match source {
+fn from_sql(source: &FromClause) -> Result<String, SQLError> {
+    Ok(match source {
         FromClause::Table {
             name,
             alias,
@@ -186,7 +189,7 @@ fn from_sql(source: &FromClause) -> String {
             lateral,
         } => {
             let mut rendered = String::from("(");
-            rendered.push_str(&from_sql(left));
+            rendered.push_str(&from_sql(left)?);
             rendered.push(' ');
             if *natural {
                 rendered.push_str("NATURAL ");
@@ -202,10 +205,10 @@ fn from_sql(source: &FromClause) -> String {
             if *lateral {
                 rendered.push_str("LATERAL ");
             }
-            rendered.push_str(&from_sql(right));
+            rendered.push_str(&from_sql(right)?);
             if let Some(predicate) = on {
                 rendered.push_str(" ON ");
-                rendered.push_str(&expr_sql(predicate));
+                rendered.push_str(&render_expr(predicate)?);
             } else if let Some(using) = using {
                 rendered.push_str(" USING (");
                 rendered.push_str(&ident_list(&using.columns));
@@ -225,7 +228,7 @@ fn from_sql(source: &FromClause) -> String {
             column_aliases,
             ..
         } => {
-            let mut rendered = format!("(VALUES {})", rows_sql(rows));
+            let mut rendered = format!("(VALUES {})", rows_sql(rows)?);
             render_relation_alias(&mut rendered, alias.as_deref(), column_aliases);
             rendered
         }
@@ -240,12 +243,7 @@ fn from_sql(source: &FromClause) -> String {
             column_types,
             ..
         } => {
-            let mut arguments = args.iter().map(expr_sql).collect::<Vec<_>>();
-            if let Some(relations) = relations {
-                arguments.insert(0, relations.left.clone());
-                arguments.insert(2, relations.right.clone());
-            }
-            let mut rendered = format!("{name}({})", arguments.join(", "));
+            let mut rendered = table_function_call_sql(name, relations.as_ref(), args)?;
             if *ordinality {
                 rendered.push_str(" WITH ORDINALITY");
             }
@@ -268,7 +266,7 @@ fn from_sql(source: &FromClause) -> String {
                 functions
                     .iter()
                     .map(table_function_sql)
-                    .collect::<Vec<_>>()
+                    .collect::<Result<Vec<_>, _>>()?
                     .join(", ")
             );
             if *ordinality {
@@ -282,20 +280,16 @@ fn from_sql(source: &FromClause) -> String {
             alias,
             column_aliases,
         } => {
-            let mut rendered = format!("({})", select_sql(body));
+            let mut rendered = format!("({})", select_sql(body)?);
             render_relation_alias(&mut rendered, alias.as_deref(), column_aliases);
             rendered
         }
-    }
+    })
 }
 
-fn table_function_sql(function: &TableFunction) -> String {
-    let mut arguments = function.args.iter().map(expr_sql).collect::<Vec<_>>();
-    if let Some(relations) = &function.relations {
-        arguments.insert(0, relations.left.clone());
-        arguments.insert(2, relations.right.clone());
-    }
-    let mut rendered = format!("{}({})", function.name, arguments.join(", "));
+fn table_function_sql(function: &TableFunction) -> Result<String, SQLError> {
+    let mut rendered =
+        table_function_call_sql(&function.name, function.relations.as_ref(), &function.args)?;
     if !function.column_types.is_empty() {
         rendered.push_str(" AS (");
         rendered.push_str(
@@ -309,7 +303,29 @@ fn table_function_sql(function: &TableFunction) -> String {
         );
         rendered.push(')');
     }
-    rendered
+    Ok(rendered)
+}
+
+/// A table function call whose operator-join relations precede the operands bound to them.
+fn table_function_call_sql(
+    name: &str,
+    relations: Option<&OperatorJoinRelations>,
+    args: &[Expr],
+) -> Result<String, SQLError> {
+    let mut arguments = args
+        .iter()
+        .map(render_expr)
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(relations) = relations {
+        if arguments.is_empty() {
+            return Err(SQLError::Internal(format!(
+                "operator join table function `{name}` has no left operand"
+            )));
+        }
+        arguments.insert(0, relations.left.clone());
+        arguments.insert(2, relations.right.clone());
+    }
+    Ok(format!("{name}({})", arguments.join(", ")))
 }
 
 #[expect(
@@ -334,25 +350,20 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
         Expr::TypedLiteral { value, ty } => format!("({})::{ty}", value_sql(value)?),
         Expr::Param(index) => format!("${index}"),
         Expr::Func {
-            binding: Some(binding),
+            binding:
+                Some(crate::ast::FunctionBinding {
+                    dispatch: Some(crate::ast::FunctionDispatch::JsonExtract { as_text, path }),
+                    ..
+                }),
             args,
             ..
-        } if matches!(
-            binding.dispatch,
-            Some(crate::ast::FunctionDispatch::JsonExtract { .. })
-        ) =>
-        {
-            let Some(crate::ast::FunctionDispatch::JsonExtract { as_text, path }) =
-                binding.dispatch
-            else {
-                unreachable!()
-            };
+        } => {
             let [lhs, rhs] = args.as_slice() else {
                 return Err(SQLError::Internal(
                     "JSON extraction requires two operands".into(),
                 ));
             };
-            let operator = match (path, as_text) {
+            let operator = match (*path, *as_text) {
                 (false, false) => "->",
                 (false, true) => "->>",
                 (true, false) => "#>",
@@ -389,7 +400,7 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
                     )),
                 };
             }
-            let mut arguments = args.iter().map(expr_sql).collect::<Vec<_>>().join(", ");
+            let mut arguments = expr_list(args)?;
             if *distinct {
                 arguments = format!("DISTINCT {arguments}");
             }
@@ -398,43 +409,51 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
                     arguments.push(' ');
                 }
                 arguments.push_str("ORDER BY ");
-                arguments.push_str(&order_by_sql(order_by));
+                arguments.push_str(&order_by_sql(order_by)?);
             }
             let mut rendered = format!("{name}({arguments})");
             if let Some(filter) = filter {
-                write!(&mut rendered, " FILTER (WHERE {})", expr_sql(filter))
+                write!(&mut rendered, " FILTER (WHERE {})", render_expr(filter)?)
                     .expect("writing to a String cannot fail");
             }
             rendered
         }
-        Expr::Array(items) => format!("ARRAY[{}]", expr_list(items)),
-        Expr::Row(items) => format!("ROW({})", expr_list(items)),
+        Expr::Array(items) => format!("ARRAY[{}]", expr_list(items)?),
+        Expr::Row(items) => format!("ROW({})", expr_list(items)?),
         Expr::Binary { op, lhs, rhs } => format!(
             "({} {} {})",
-            expr_sql(lhs),
+            render_expr(lhs)?,
             binary_operator_sql(*op),
-            expr_sql(rhs)
+            render_expr(rhs)?
         ),
-        Expr::UnaryMinus(inner) => format!("(-{})", expr_sql(inner)),
-        Expr::Not(inner) => format!("(NOT {})", expr_sql(inner)),
+        Expr::UnaryMinus(inner) => format!("(-{})", render_expr(inner)?),
+        Expr::Not(inner) => format!("(NOT {})", render_expr(inner)?),
         Expr::And(items) => format!(
             "({})",
-            items.iter().map(expr_sql).collect::<Vec<_>>().join(" AND ")
+            items
+                .iter()
+                .map(render_expr)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(" AND ")
         ),
         Expr::Or(items) => format!(
             "({})",
-            items.iter().map(expr_sql).collect::<Vec<_>>().join(" OR ")
+            items
+                .iter()
+                .map(render_expr)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(" OR ")
         ),
         Expr::IsNull { expr, negated } => format!(
             "({} IS {}NULL)",
-            expr_sql(expr),
+            render_expr(expr)?,
             if *negated { "NOT " } else { "" }
         ),
         Expr::Between { expr, low, high } => format!(
             "({} BETWEEN {} AND {})",
-            expr_sql(expr),
-            expr_sql(low),
-            expr_sql(high)
+            render_expr(expr)?,
+            render_expr(low)?,
+            render_expr(high)?
         ),
         Expr::InList {
             expr,
@@ -442,13 +461,26 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
             negated,
         } => format!(
             "({} {}IN ({}))",
-            expr_sql(expr),
+            render_expr(expr)?,
             if *negated { "NOT " } else { "" },
-            expr_list(list)
+            expr_list(list)?
         ),
-        Expr::WindowCall { name, args, spec } => {
-            format!("{name}({}) OVER {}", expr_list(args), window_sql(spec))
-        }
+        Expr::WindowCall {
+            name,
+            args,
+            spec,
+            filter,
+            ..
+        } => format!(
+            "{name}({}){} OVER {}",
+            expr_list(args)?,
+            filter
+                .as_deref()
+                .map(render_expr)
+                .transpose()?
+                .map_or_else(String::new, |filter| format!(" FILTER (WHERE {filter})")),
+            window_sql(spec)?
+        ),
         Expr::Case {
             base,
             when,
@@ -457,30 +489,30 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
             let mut rendered = String::from("CASE");
             if let Some(base) = base {
                 rendered.push(' ');
-                rendered.push_str(&expr_sql(base));
+                rendered.push_str(&render_expr(base)?);
             }
             for (condition, result) in when {
                 write!(
                     &mut rendered,
                     " WHEN {} THEN {}",
-                    expr_sql(condition),
-                    expr_sql(result)
+                    render_expr(condition)?,
+                    render_expr(result)?
                 )
                 .expect("writing to a String cannot fail");
             }
             if let Some(branch) = else_branch {
                 rendered.push_str(" ELSE ");
-                rendered.push_str(&expr_sql(branch));
+                rendered.push_str(&render_expr(branch)?);
             }
             rendered.push_str(" END");
             rendered
         }
-        Expr::Cast { expr, ty } => format!("CAST({} AS {ty})", expr_sql(expr)),
-        Expr::ScalarSubquery(body) => format!("({})", select_sql(body)),
+        Expr::Cast { expr, ty } => format!("CAST({} AS {ty})", render_expr(expr)?),
+        Expr::ScalarSubquery(body) => format!("({})", select_sql(body)?),
         Expr::Exists { body, negated } => format!(
             "{}EXISTS ({})",
             if *negated { "NOT " } else { "" },
-            select_sql(body)
+            select_sql(body)?
         ),
         Expr::InSubquery {
             expr,
@@ -488,46 +520,11 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
             negated,
         } => format!(
             "({} {}IN ({}))",
-            expr_sql(expr),
+            render_expr(expr)?,
             if *negated { "NOT " } else { "" },
-            select_sql(body)
+            select_sql(body)?
         ),
     })
-}
-
-fn window_sql(spec: &WindowSpec) -> String {
-    if let Some(reference) = &spec.reference {
-        if reference.kind == WindowReferenceKind::Direct
-            && spec.partition_by.is_empty()
-            && spec.order_by.is_empty()
-            && spec.frame.is_none()
-        {
-            return ident(&reference.name);
-        }
-    }
-    let mut parts = Vec::new();
-    if let Some(reference) = &spec.reference {
-        parts.push(ident(&reference.name));
-    }
-    if !spec.partition_by.is_empty() {
-        parts.push(format!("PARTITION BY {}", expr_list(&spec.partition_by)));
-    }
-    if !spec.order_by.is_empty() {
-        parts.push(format!("ORDER BY {}", order_by_sql(&spec.order_by)));
-    }
-    if let Some(frame) = &spec.frame {
-        parts.push(format!(
-            "{} BETWEEN {} AND {}",
-            match frame.mode {
-                FrameMode::Rows => "ROWS",
-                FrameMode::Range => "RANGE",
-                FrameMode::Groups => "GROUPS",
-            },
-            frame_bound_sql(&frame.start),
-            frame_bound_sql(&frame.end)
-        ));
-    }
-    format!("({})", parts.join(" "))
 }
 
 const fn binary_operator_sql(operator: crate::ast::BinaryOp) -> &'static str {
@@ -545,29 +542,22 @@ const fn binary_operator_sql(operator: crate::ast::BinaryOp) -> &'static str {
     }
 }
 
-fn frame_bound_sql(bound: &FrameBound) -> String {
-    match bound {
-        FrameBound::UnboundedPreceding => "UNBOUNDED PRECEDING".into(),
-        FrameBound::UnboundedFollowing => "UNBOUNDED FOLLOWING".into(),
-        FrameBound::CurrentRow => "CURRENT ROW".into(),
-        FrameBound::Preceding(expression) => format!("{} PRECEDING", expr_sql(expression)),
-        FrameBound::Following(expression) => format!("{} FOLLOWING", expr_sql(expression)),
-    }
-}
-
-fn with_sql(ctes: &[CTE]) -> String {
+fn with_sql(ctes: &[CTE]) -> Result<String, SQLError> {
     if ctes.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
     let recursive = ctes.iter().any(|cte| cte.recursive);
-    format!(
+    Ok(format!(
         "WITH {}{} ",
         if recursive { "RECURSIVE " } else { "" },
-        ctes.iter().map(cte_sql).collect::<Vec<_>>().join(", ")
-    )
+        ctes.iter()
+            .map(cte_sql)
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ")
+    ))
 }
 
-fn cte_sql(cte: &CTE) -> String {
+fn cte_sql(cte: &CTE) -> Result<String, SQLError> {
     let mut rendered = ident(&cte.name);
     if !cte.columns.is_empty() {
         rendered.push_str(" (");
@@ -587,7 +577,7 @@ fn cte_sql(cte: &CTE) -> String {
         CteBody::Update(command) => update_sql(command),
         CteBody::Delete(command) => delete_sql(command),
         CteBody::Merge(command) => merge_sql(command),
-    });
+    }?);
     rendered.push(')');
     if let Some(search) = &cte.search {
         write!(
@@ -609,13 +599,13 @@ fn cte_sql(cte: &CTE) -> String {
             " CYCLE {} SET {} TO {} DEFAULT {} USING {}",
             ident_list(&cycle.columns),
             ident(&cycle.mark_column),
-            expr_sql(&cycle.mark_value),
-            expr_sql(&cycle.mark_default),
+            render_expr(&cycle.mark_value)?,
+            render_expr(&cycle.mark_default)?,
             ident(&cycle.path_column)
         )
         .expect("writing to a String cannot fail");
     }
-    rendered
+    Ok(rendered)
 }
 
 fn render_order_limit_offset(
@@ -624,36 +614,41 @@ fn render_order_limit_offset(
     limit: Option<&Expr>,
     with_ties: bool,
     offset: Option<&Expr>,
-) {
+) -> Result<(), SQLError> {
     if !order_by.is_empty() {
         rendered.push_str(" ORDER BY ");
-        rendered.push_str(&order_by_sql(order_by));
+        rendered.push_str(&order_by_sql(order_by)?);
     }
     if with_ties {
         if let Some(offset) = offset {
             rendered.push_str(" OFFSET ");
-            rendered.push_str(&expr_sql(offset));
+            rendered.push_str(&render_expr(offset)?);
         }
         if let Some(limit) = limit {
             rendered.push_str(" FETCH FIRST ");
-            rendered.push_str(&expr_sql(limit));
+            rendered.push_str(&render_expr(limit)?);
             rendered.push_str(" ROWS WITH TIES");
         }
     } else {
         if let Some(limit) = limit {
             rendered.push_str(" LIMIT ");
-            rendered.push_str(&expr_sql(limit));
+            rendered.push_str(&render_expr(limit)?);
         }
         if let Some(offset) = offset {
             rendered.push_str(" OFFSET ");
-            rendered.push_str(&expr_sql(offset));
+            rendered.push_str(&render_expr(offset)?);
         }
     }
+    Ok(())
 }
 
-fn render_returning(rendered: &mut String, aliases: &ReturningAliases, projections: &[Projection]) {
+fn render_returning(
+    rendered: &mut String,
+    aliases: &ReturningAliases,
+    projections: &[Projection],
+) -> Result<(), SQLError> {
     if projections.is_empty() {
-        return;
+        return Ok(());
     }
     rendered.push_str(" RETURNING ");
     if aliases.old_explicit || aliases.new_explicit {
@@ -668,7 +663,8 @@ fn render_returning(rendered: &mut String, aliases: &ReturningAliases, projectio
         rendered.push_str(&names.join(", "));
         rendered.push_str(") ");
     }
-    rendered.push_str(&projections_sql(projections));
+    rendered.push_str(&projections_sql(projections)?);
+    Ok(())
 }
 
 fn render_target_alias(rendered: &mut String, relation: &str, qualifier: &str) {
@@ -720,7 +716,7 @@ fn render_function_alias(
     }
 }
 
-fn assignment_target_sql(target: &crate::ast::AssignmentTarget) -> String {
+fn assignment_target_sql(target: &crate::ast::AssignmentTarget) -> Result<String, SQLError> {
     use crate::ast::AssignmentStep;
     let mut sql = ident(&target.column);
     for step in &target.indirection {
@@ -731,67 +727,69 @@ fn assignment_target_sql(target: &crate::ast::AssignmentTarget) -> String {
             }
             AssignmentStep::Index(index) => {
                 sql.push('[');
-                sql.push_str(&expr_sql(index));
+                sql.push_str(&render_expr(index)?);
                 sql.push(']');
             }
             AssignmentStep::Slice { lower, upper } => {
                 sql.push('[');
                 if let Some(lower) = lower {
-                    sql.push_str(&expr_sql(lower));
+                    sql.push_str(&render_expr(lower)?);
                 }
                 sql.push(':');
                 if let Some(upper) = upper {
-                    sql.push_str(&expr_sql(upper));
+                    sql.push_str(&render_expr(upper)?);
                 }
                 sql.push(']');
             }
         }
     }
-    sql
+    Ok(sql)
 }
 
-fn assignment_targets_sql(targets: &[crate::ast::AssignmentTarget]) -> String {
-    targets
+fn assignment_targets_sql(targets: &[crate::ast::AssignmentTarget]) -> Result<String, SQLError> {
+    Ok(targets
         .iter()
         .map(assignment_target_sql)
-        .collect::<Vec<_>>()
-        .join(", ")
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", "))
 }
 
-fn assignments_sql(assignments: &[(crate::ast::AssignmentTarget, Expr)]) -> String {
-    assignments
+fn assignments_sql(
+    assignments: &[(crate::ast::AssignmentTarget, Expr)],
+) -> Result<String, SQLError> {
+    Ok(assignments
         .iter()
         .map(|(target, expression)| {
-            format!(
+            Ok(format!(
                 "{} = {}",
-                assignment_target_sql(target),
-                expr_sql(expression)
-            )
+                assignment_target_sql(target)?,
+                render_expr(expression)?
+            ))
         })
-        .collect::<Vec<_>>()
-        .join(", ")
+        .collect::<Result<Vec<_>, SQLError>>()?
+        .join(", "))
 }
 
-fn projections_sql(projections: &[Projection]) -> String {
-    projections
+fn projections_sql(projections: &[Projection]) -> Result<String, SQLError> {
+    Ok(projections
         .iter()
         .map(|projection| {
-            let mut rendered = expr_sql(&projection.expr);
+            let mut rendered = render_expr(&projection.expr)?;
             if let Some(alias) = &projection.alias {
                 rendered.push_str(" AS ");
                 rendered.push_str(&ident(alias));
             }
-            rendered
+            Ok(rendered)
         })
-        .collect::<Vec<_>>()
-        .join(", ")
+        .collect::<Result<Vec<_>, SQLError>>()?
+        .join(", "))
 }
 
-fn order_by_sql(order_by: &[OrderBy]) -> String {
-    order_by
+fn order_by_sql(order_by: &[OrderBy]) -> Result<String, SQLError> {
+    Ok(order_by
         .iter()
         .map(|order| {
-            let mut rendered = expr_sql(&order.expr);
+            let mut rendered = render_expr(&order.expr)?;
             if order.descending {
                 rendered.push_str(" DESC");
             }
@@ -800,29 +798,26 @@ fn order_by_sql(order_by: &[OrderBy]) -> String {
                 Some(NullsOrder::Last) => rendered.push_str(" NULLS LAST"),
                 None => {}
             }
-            rendered
+            Ok(rendered)
         })
-        .collect::<Vec<_>>()
-        .join(", ")
+        .collect::<Result<Vec<_>, SQLError>>()?
+        .join(", "))
 }
 
-fn rows_sql(rows: &[Vec<Expr>]) -> String {
-    rows.iter()
-        .map(|row| format!("({})", expr_list(row)))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn expr_list(expressions: &[Expr]) -> String {
-    expressions
+fn rows_sql(rows: &[Vec<Expr>]) -> Result<String, SQLError> {
+    Ok(rows
         .iter()
-        .map(expr_sql)
-        .collect::<Vec<_>>()
-        .join(", ")
+        .map(|row| Ok(format!("({})", expr_list(row)?)))
+        .collect::<Result<Vec<_>, SQLError>>()?
+        .join(", "))
 }
 
-fn expr_sql(expression: &Expr) -> String {
-    render_expr(expression).expect("durable SQL AST cannot contain executor-only columns")
+fn expr_list(expressions: &[Expr]) -> Result<String, SQLError> {
+    Ok(expressions
+        .iter()
+        .map(render_expr)
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", "))
 }
 
 fn only_relation(name: &str, include_descendants: bool) -> String {
@@ -884,6 +879,7 @@ fn value_sql(value: &Value) -> Result<String, SQLError> {
         Value::Float(value) if value.is_finite() => value.to_string(),
         Value::Float(value) => format!("{}::double precision", string_literal(&value.to_string())),
         Value::Str(value) => string_literal(value),
+        Value::Enum(value) => return Err(crate::expr::catalog_output_required(value)),
         Value::FixedChar(value) => format!("{}::character", string_literal(value)),
         Value::Bytes(value) => {
             let mut hex = String::new();
@@ -945,36 +941,12 @@ fn value_sql(value: &Value) -> Result<String, SQLError> {
         ),
         Value::Map(value) => format!(
             "{}::jsonb",
-            string_literal(
-                &serde_json::to_string(value)
-                    .expect("serializing an in-memory Value map cannot fail")
-            )
+            string_literal(&serde_json::to_string(value).map_err(|error| {
+                SQLError::Internal(format!("serialize map literal as jsonb: {error}"))
+            })?)
         ),
     })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::statement_sql;
-
-    #[test]
-    fn rendered_rule_action_shapes_round_trip_stably() {
-        for sql in [
-            "SELECT source.key_value, row_number() OVER (ORDER BY source.key_value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS sequence FROM left_table AS source(key_value, payload) JOIN right_table AS other USING (key_value) WHERE source.payload IS NOT NULL ORDER BY sequence LIMIT 2 OFFSET 1",
-            "WITH source(value) AS MATERIALIZED (SELECT 1) SELECT value FROM source UNION ALL SELECT 2 ORDER BY value",
-            "INSERT INTO target_table AS target(id, value) VALUES (1, 'one') ON CONFLICT (id) DO UPDATE SET value = excluded.value WHERE target.id = 1 RETURNING WITH (OLD AS before, NEW AS after) after.id",
-            "UPDATE target_table AS target SET value = source.value FROM source_table AS source(id, value) WHERE target.id = source.id RETURNING target.id",
-            "DELETE FROM target_table AS target USING source_table AS source(id) WHERE target.id = source.id RETURNING target.id",
-            "NOTIFY rule_channel, 'payload'",
-        ] {
-            let mut statements = crate::compile(sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
-            let rendered = statement_sql(&statements.remove(0))
-                .unwrap_or_else(|error| panic!("render {sql}: {error}"));
-            let mut reparsed = crate::compile(&rendered)
-                .unwrap_or_else(|error| panic!("reparse `{rendered}` from `{sql}`: {error}"));
-            let rerendered = statement_sql(&reparsed.remove(0))
-                .unwrap_or_else(|error| panic!("rerender `{rendered}`: {error}"));
-            assert_eq!(rerendered, rendered, "unstable SQL rendering for `{sql}`");
-        }
-    }
-}
+mod tests;

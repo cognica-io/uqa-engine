@@ -35,6 +35,7 @@ pub trait ConstraintModes {
     fn forget(&self, identity: &ConstraintIdentity);
 }
 pub struct ConstraintAlterContext<'a> {
+    pub deletion: &'a dyn crate::schema::deletion::CatalogRemovalInputs,
     pub catalog: &'a dyn HierarchyCatalog,
     pub relations: &'a dyn ConstraintRelations,
     pub access: &'a dyn ConstraintAlterAccess,

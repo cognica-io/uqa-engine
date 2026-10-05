@@ -47,7 +47,9 @@ pub use signature::match_function_signature;
 pub(super) use signature::{match_signature_with_control, SignatureParameters};
 
 mod type_names;
-pub use type_names::{canonical_column_type_name, canonical_routine_type_name};
+pub use type_names::{
+    canonical_column_type_name, canonical_routine_type_name, parse_enum_type_identity,
+};
 pub(super) use type_names::{
     canonical_column_type_name_with_control, canonical_routine_type_name_with_control,
 };
@@ -66,6 +68,14 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
     {
         return routine_type_accepts_implicit_cast(actual, declared);
     }
+    // Every composite value is a record, as `can_coerce_type` accepts.
+    if declared == "record"
+        && crate::ast::UserTypeIdentity::parse(actual).is_some_and(|identity| {
+            identity.kind == crate::ast::UserTypeKind::Composite && identity.dimensions == 0
+        })
+    {
+        return true;
+    }
     matches!(
         (actual, declared),
         (
@@ -79,6 +89,7 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regclass"
                 | "regnamespace"
                 | "regproc"
+                | "regprocedure"
                 | "regrole"
                 | "regtype",
         ) | (
@@ -91,6 +102,7 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regclass"
                 | "regnamespace"
                 | "regproc"
+                | "regprocedure"
                 | "regrole"
                 | "regtype",
         ) | (
@@ -102,15 +114,18 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regclass"
                 | "regnamespace"
                 | "regproc"
+                | "regprocedure"
                 | "regrole"
                 | "regtype",
         ) | (
             "oid",
-            "regclass" | "regnamespace" | "regproc" | "regrole" | "regtype",
+            "regclass" | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype",
         ) | (
-            "regclass" | "regnamespace" | "regproc" | "regrole" | "regtype",
+            "regclass" | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype",
             "oid",
-        ) | ("numeric", "float4" | "float8")
+        ) | ("regproc", "regprocedure")
+            | ("regprocedure", "regproc")
+            | ("numeric", "float4" | "float8")
             | ("float4", "float8")
             | ("bpchar", "varchar" | "name" | "text")
             | ("varchar", "bpchar" | "name" | "text" | "regclass")
@@ -131,11 +146,16 @@ fn canonical_type_category(canonical: &str) -> char {
     if canonical.ends_with("[]") {
         return 'A';
     }
+    match crate::ast::UserTypeIdentity::parse(canonical).map(|identity| identity.kind) {
+        Some(crate::ast::UserTypeKind::Enum) => return 'E',
+        Some(crate::ast::UserTypeKind::Composite) => return 'C',
+        _ => {}
+    }
     match canonical {
         "bool" => 'B',
         "date" | "time" | "timetz" | "timestamp" | "timestamptz" => 'D',
         "int2" | "int4" | "int8" | "float4" | "float8" | "numeric" | "oid" | "regclass"
-        | "regnamespace" | "regproc" | "regrole" | "regtype" => 'N',
+        | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype" => 'N',
         "int2vector" | "oidvector" => 'A',
         "anyarray" | "record" => 'P',
         "bpchar" | "name" | "text" | "varchar" => 'S',
@@ -231,10 +251,7 @@ pub fn function_resolution_error(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    SQLError::Routine {
-        sqlstate: sqlstate.into(),
-        message: format!("function {name}({arguments}) {suffix}"),
-    }
+    SQLError::function_call_resolution(sqlstate, &format!("{name}({arguments})"), suffix)
 }
 
 #[cfg(test)]
@@ -360,10 +377,11 @@ mod tests {
             schema: "public".into(),
             name: "integer_domain".into(),
             oid: 99_999,
+            array_oid: None,
             base: Box::new(ColumnType::Integer),
         };
         let domain_match = match_function_signature(
-            &[parameter("value", "public.integer_domain", false)],
+            &[parameter("value", "domain#99999", false)],
             &[None],
             &[Some(domain.clone())],
         )
@@ -413,6 +431,7 @@ mod tests {
             schema: "public".into(),
             name: "integer_domain".into(),
             oid: 99_999,
+            array_oid: None,
             base: Box::new(ColumnType::Integer),
         };
         let mut candidates = vec![

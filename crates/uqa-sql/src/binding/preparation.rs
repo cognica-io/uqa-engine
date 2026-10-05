@@ -115,7 +115,7 @@ impl Preparation<'_> {
                 "42804",
                 format!(
                     "argument of {context} must be type boolean, not type {}",
-                    ty.sql_name()
+                    ty.regtype_name()
                 ),
             ));
         }

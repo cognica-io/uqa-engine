@@ -89,6 +89,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
         ObjectType::ObjectSequence => DropKind::Sequence,
         ObjectType::ObjectSchema => DropKind::Schema,
         ObjectType::ObjectDomain => DropKind::Domain,
+        ObjectType::ObjectType => DropKind::Type,
         ObjectType::ObjectFunction => return compile_drop_function(stmt, false),
         ObjectType::ObjectProcedure => return compile_drop_function(stmt, true),
         other => {
@@ -104,7 +105,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
             .as_ref()
             .ok_or_else(|| SQLError::Internal("DROP contains an empty target".into()))?;
         match inner {
-            NodeEnum::TypeName(ty) if kind == DropKind::Domain => {
+            NodeEnum::TypeName(ty) if matches!(kind, DropKind::Domain | DropKind::Type) => {
                 names.push(domains::compile_drop_domain_name(ty)?);
             }
             NodeEnum::List(list) => {
@@ -541,6 +542,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         AlterTableAction::AddKeyConstraint {
                             constraint: TableKeyConstraint {
                                 catalog_identity: None,
+                                index_identity: None,
                                 name,
                                 kind,
                                 columns,
@@ -707,6 +709,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             }
             AlterTableType::AtDropExpression => AlterTableAction::DropExpression {
                 name: cmd.name.clone(),
+                if_exists: cmd.missing_ok,
             },
             AlterTableType::AtSetNotNull => AlterTableAction::SetNotNull {
                 name: cmd.name.clone(),

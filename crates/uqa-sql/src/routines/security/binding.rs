@@ -6,7 +6,8 @@
 
 //! Bind legacy routine names once and validate retained owner and ACL incarnations.
 
-use super::{bound_routine_owner, routine_grant_option_roles_for};
+use super::bound_routine_owner;
+use crate::catalog::security::object_acl;
 use crate::{
     ast::{CreateFunction, RoutineAclEntry},
     catalog::roles::{identity::RoleSubject, RoleDefinition, RoleIdentity, RoleReference},
@@ -78,26 +79,7 @@ fn invalid(message: &str) -> SQLError {
 }
 
 fn validate_acl(owner: RoleIdentity, acl: Option<&[RoutineAclEntry]>) -> Result<(), SQLError> {
-    if !owner.is_valid() {
-        return Err(invalid("missing owner incarnation"));
-    }
-    let reachable = routine_grant_option_roles_for(owner, acl);
-    let mut paths = BTreeSet::new();
-    for entry in acl.into_iter().flatten() {
-        if !entry.grantor.is_valid() || entry.role.is_some_and(|role| !role.is_valid()) {
-            return Err(invalid("missing ACL endpoint incarnation"));
-        }
-        if entry.role.is_none() && entry.grant_option {
-            return Err(invalid("PUBLIC cannot retain a grant option"));
-        }
-        if !paths.insert((entry.role, entry.grantor)) {
-            return Err(invalid("duplicate ACL grant path"));
-        }
-        if !reachable.contains(&entry.grantor) {
-            return Err(invalid("ACL grantor has no owner-rooted grant option"));
-        }
-    }
-    Ok(())
+    object_acl::validate_acl(owner, acl, "routine")
 }
 
 pub fn validate_routine_authority_identities(definition: &CreateFunction) -> Result<(), SQLError> {
@@ -108,13 +90,10 @@ pub fn validate_routine_authority_identities(definition: &CreateFunction) -> Res
 }
 
 fn authority_roles(definition: &CreateFunction) -> Result<BTreeSet<RoleIdentity>, SQLError> {
-    let owner = bound_routine_owner(definition)?;
-    let mut identities = BTreeSet::from([owner]);
-    for entry in definition.execute_acl.iter().flatten() {
-        identities.extend(entry.role);
-        identities.insert(entry.grantor);
-    }
-    Ok(identities)
+    Ok(object_acl::acl_roles(
+        bound_routine_owner(definition)?,
+        definition.execute_acl.as_deref(),
+    ))
 }
 
 pub fn routine_role_dependencies(
@@ -144,19 +123,7 @@ pub fn bind_routine_grantees(
     grantees: &[AclGrantee],
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<Vec<Option<RoleIdentity>>, SQLError> {
-    grantees
-        .iter()
-        .map(|grantee| {
-            grantee
-                .role_name()
-                .map(|name| {
-                    RoleReference::from(name)
-                        .bind(roles)
-                        .map(|role| role.identity())
-                })
-                .transpose()
-        })
-        .collect()
+    object_acl::bind_grantees(grantees, roles)
 }
 
 pub fn added_routine_acl_roles(
@@ -165,20 +132,13 @@ pub fn added_routine_acl_roles(
     roles: &BTreeMap<String, RoleDefinition>,
     added: &mut BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    let mut old = authority_roles(before)?;
-    old.remove(&bound_routine_owner(before)?);
-    let mut new = authority_roles(after)?;
-    new.remove(&bound_routine_owner(after)?);
-    validate_routine_authority(after, roles)?;
-    for identity in new.difference(&old) {
-        added.insert(
-            identity
-                .role_name(roles)
-                .ok_or_else(|| invalid("missing ACL incarnation"))?
-                .to_owned(),
-        );
-    }
-    Ok(())
+    object_acl::added_acl_roles(
+        (bound_routine_owner(before)?, before.execute_acl.as_deref()),
+        (bound_routine_owner(after)?, after.execute_acl.as_deref()),
+        roles,
+        "routine",
+        added,
+    )
 }
 
 #[cfg(test)]

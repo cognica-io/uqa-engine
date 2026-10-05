@@ -10,6 +10,7 @@ use super::{
     error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
 };
 use crate::ast::BinaryOp;
+use uqa_core::Value;
 
 impl Preparation<'_> {
     pub(super) fn cast_expression(
@@ -20,6 +21,10 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<ColumnType, SQLError> {
         let target = self.type_name(ty)?;
+        // Parse analysis converts an untyped literal with the enum's input function before any assignment checks.
+        if let ScalarExpr::Literal(value @ (Value::Str(_) | Value::Null)) = expr {
+            crate::expr::enums::fold_unknown_literal(self.routines.enum_labels(), value, &target)?;
+        }
         let mut source =
             if let (ScalarExpr::Array(items), ColumnType::Array(element)) = (expr, &target) {
                 let mut items = items
@@ -124,31 +129,24 @@ impl Preparation<'_> {
             }
         }
         if let Some(frame) = &spec.frame {
-            let target = if frame.mode == crate::ast::FrameMode::Range {
-                match order_type
-                    .as_ref()
-                    .map(ColumnType::without_temporal_modifiers)
-                {
-                    Some(
-                        ColumnType::Date
-                        | ColumnType::Timestamp
-                        | ColumnType::TimestampTz
-                        | ColumnType::Time
-                        | ColumnType::TimeTz
-                        | ColumnType::Interval,
-                    ) => ColumnType::Interval,
-                    Some(ty) => ty.clone(),
-                    None => ColumnType::BigInteger,
+            // An untyped offset takes the type an `unknown` literal would: `bigint` for `ROWS` and `GROUPS`, and for `RANGE` the offset type of the ordering column's `in_range` support. A `RANGE` frame without exactly one ordering column is rejected when the query is analyzed.
+            let target = match frame.mode {
+                crate::ast::FrameMode::Range if spec.order_by.len() == 1 => {
+                    Some(crate::range_frame_offset_type(order_type.as_ref(), None)?)
                 }
-            } else {
-                ColumnType::BigInteger
+                crate::ast::FrameMode::Range => None,
+                crate::ast::FrameMode::Rows | crate::ast::FrameMode::Groups => {
+                    Some(ColumnType::BigInteger)
+                }
             };
             for bound in [&frame.start, &frame.end] {
                 if let crate::ScalarFrameBound::Preceding(value)
                 | crate::ScalarFrameBound::Following(value) = bound
                 {
                     let mut value = self.expression(value, input, subqueries)?;
-                    self.parameters.coerce_unknown(&mut value, &target)?;
+                    if let Some(target) = &target {
+                        self.parameters.coerce_unknown(&mut value, target)?;
+                    }
                 }
             }
         }

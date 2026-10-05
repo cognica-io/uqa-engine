@@ -108,7 +108,7 @@ impl<'a> ScalarEvalContext<'a> {
         self.params
     }
 
-    pub(super) fn function_hook(&self) -> Option<&'a dyn EngineHook> {
+    pub(crate) fn function_hook(&self) -> Option<&'a dyn EngineHook> {
         self.function_hook
     }
 

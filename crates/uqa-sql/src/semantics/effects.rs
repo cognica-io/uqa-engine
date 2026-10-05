@@ -453,27 +453,11 @@ fn sql_routine_may_mutate_engine(
             )? {
                 return Ok(true);
             }
-            let outline;
-            let compiled = if matches!(
-                function.compiled,
-                crate::routines::CompiledFunctionBody::Deferred
-            ) {
-                outline = crate::routines::compilation::deferred_body_outline(
-                    &function.def,
-                    &|name: &str| context.catalog.has_registered_aggregate_function(name),
-                );
-                // A body that does not parse fails its call before it runs anything.
-                let Some(outline) = outline.as_ref() else {
-                    return Ok(false);
-                };
-                outline
-            } else {
-                &function.compiled
+            let Some(body) = crate::routines::analyzable_routine_body(context.catalog, &function)?
+            else {
+                return Ok(false);
             };
-            match compiled {
-                crate::routines::CompiledFunctionBody::Deferred => Err(SQLError::Internal(
-                    "a deferred routine body outlines to compiled statements".into(),
-                )),
+            match &*body {
                 crate::routines::CompiledFunctionBody::SQL(plans) => (|| {
                     let mut mutates = false;
                     for plan in plans {

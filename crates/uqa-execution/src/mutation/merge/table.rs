@@ -552,6 +552,8 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             .unwrap_or(prepared.doc_id);
                         validate_view_checks(ViewCheckContext {
                             services: assignment,
+                            constraints,
+                            statement,
                             table: &target_table,
                             storage_table: &new_storage_table,
                             target_qualifier: &target_qual,
@@ -804,6 +806,8 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         )?;
                         validate_view_checks(ViewCheckContext {
                             services: assignment,
+                            constraints,
+                            statement,
                             table: &target_table,
                             storage_table: &storage_table,
                             target_qualifier: &target_qual,

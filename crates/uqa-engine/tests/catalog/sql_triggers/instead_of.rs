@@ -431,15 +431,19 @@ fn view_merge_trigger_definitions_route_even_when_replica_mode_suppresses_them()
          DELETE FROM view_trigger_log;
          SET session_replication_role = replica",
     );
+    // With every trigger suppressed, PostgreSQL counts the action and returns its row, although nothing stores it.
     let result = exec(
         &engine,
         "MERGE INTO item_view AS target USING merge_source AS source
          ON target.id = source.id
          WHEN MATCHED THEN UPDATE SET value = source.value
-         RETURNING merge_action(), old.value, new.value",
+         RETURNING merge_action() AS action, old.value AS old_value, new.value AS new_value",
     );
-    assert_eq!(result.affected_rows, 0);
-    assert!(result.rows.is_empty());
+    assert_eq!(result.affected_rows, 1);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["action"], Value::Str("UPDATE".into()));
+    assert_eq!(result.rows[0]["old_value"], Value::Str("one".into()));
+    assert_eq!(result.rows[0]["new_value"], Value::Str("changed".into()));
     assert_eq!(
         strings(
             &engine,
@@ -506,13 +510,183 @@ fn nested_automatic_view_merge_uses_inner_triggers_and_final_check_options() {
             &[],
         )
         .expect_err("the outer check option sees the inner trigger's returned NEW row");
-    assert_eq!(check.sqlstate(), Some("44000"));
+    assert_check_option_violation(
+        check,
+        "nested_merge_outer",
+        "Failing row contains (1, 105).",
+    );
     let state = exec(
         &engine,
         "SELECT id, value FROM nested_merge_base ORDER BY id",
     );
     assert_eq!(state.rows[0]["value"], Value::Int(30));
     assert_eq!(state.rows[1]["value"], Value::Int(150));
+}
+
+/// Assert that `error` is the check option violation of `view`, describing the failing row in the columns of the view whose trigger returned it.
+fn assert_check_option_violation(error: uqa_sql::SQLError, view: &str, detail: &str) {
+    match error {
+        uqa_sql::SQLError::Diagnostic {
+            sqlstate,
+            message,
+            detail: Some(found),
+            ..
+        } => {
+            assert_eq!(sqlstate, "44000");
+            assert_eq!(
+                message,
+                format!("new row violates check option for view \"{view}\"")
+            );
+            assert_eq!(found, detail);
+        }
+        other => panic!("expected a check option violation of `{view}`, got {other:?}"),
+    }
+}
+
+#[test]
+fn nested_automatic_view_dml_uses_inner_triggers_and_final_check_options() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE nested_dml_base (id INTEGER PRIMARY KEY, value INTEGER);
+         INSERT INTO nested_dml_base VALUES (1, 10), (2, 20);
+         CREATE VIEW nested_dml_inner AS SELECT id, value FROM nested_dml_base;
+         CREATE FUNCTION nested_dml_apply() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           IF TG_OP = 'INSERT' THEN
+             NEW.value := abs(NEW.value);
+             INSERT INTO nested_dml_base VALUES (NEW.id, NEW.value);
+             RETURN NEW;
+           ELSIF TG_OP = 'UPDATE' THEN
+             UPDATE nested_dml_base SET value = NEW.value WHERE id = OLD.id;
+             RETURN NEW;
+           END IF;
+           DELETE FROM nested_dml_base WHERE id = OLD.id;
+           RETURN OLD;
+         END $$;
+         CREATE TRIGGER nested_dml_apply INSTEAD OF INSERT OR UPDATE OR DELETE
+           ON nested_dml_inner FOR EACH ROW EXECUTE FUNCTION nested_dml_apply();
+         CREATE VIEW nested_dml_outer (item_id, amount) AS
+           SELECT id, value FROM nested_dml_inner WHERE value < 100
+           WITH CASCADED CHECK OPTION",
+    );
+    // The outer view is rewritten to the inner one, whose triggers perform each command.
+    let inserted = exec(
+        &engine,
+        "INSERT INTO nested_dml_outer VALUES (3, -30) RETURNING item_id, amount",
+    );
+    assert_eq!(inserted.rows[0]["item_id"], Value::Int(3));
+    assert_eq!(inserted.rows[0]["amount"], Value::Int(30));
+    let updated = exec(
+        &engine,
+        "UPDATE nested_dml_outer SET amount = amount + 1 WHERE item_id = 1 RETURNING amount",
+    );
+    assert_eq!(updated.rows[0]["amount"], Value::Int(11));
+    let deleted = exec(
+        &engine,
+        "DELETE FROM nested_dml_outer WHERE item_id = 2 RETURNING item_id",
+    );
+    assert_eq!(deleted.rows[0]["item_id"], Value::Int(2));
+    // The outer check option checks the row the trigger returned, not the row the statement proposed.
+    for (sql, detail) in [
+        (
+            "INSERT INTO nested_dml_outer VALUES (4, -400)",
+            "Failing row contains (4, 400).",
+        ),
+        (
+            "UPDATE nested_dml_outer SET amount = 100 WHERE item_id = 1",
+            "Failing row contains (1, 100).",
+        ),
+    ] {
+        let error = engine
+            .sql(sql, &[])
+            .expect_err("the trigger's row fails the outer check option");
+        assert_check_option_violation(error, "nested_dml_outer", detail);
+    }
+    let state = exec(&engine, "SELECT id, value FROM nested_dml_base ORDER BY id");
+    let rows = state
+        .rows
+        .iter()
+        .map(|row| (row["id"].clone(), row["value"].clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        [
+            (Value::Int(1), Value::Int(11)),
+            (Value::Int(3), Value::Int(30))
+        ]
+    );
+}
+
+#[test]
+fn a_view_over_a_trigger_view_needs_only_its_own_query_to_be_updatable() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE joined_base (id INTEGER PRIMARY KEY, value INTEGER);
+         CREATE TABLE joined_side (id INTEGER, note TEXT);
+         CREATE VIEW joined_items AS
+           SELECT b.id, b.value, s.note FROM joined_base b LEFT JOIN joined_side s USING (id);
+         CREATE FUNCTION joined_items_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           INSERT INTO joined_base VALUES (NEW.id, NEW.value);
+           RETURN NEW;
+         END $$;
+         CREATE TRIGGER joined_items_insert INSTEAD OF INSERT ON joined_items
+           FOR EACH ROW EXECUTE FUNCTION joined_items_insert();
+         CREATE VIEW positive_joined_items AS
+           SELECT id, value FROM joined_items WHERE value > 0 WITH CHECK OPTION",
+    );
+    // The join view is not automatically updatable, but its INSTEAD OF trigger performs the INSERT the outer view is rewritten to.
+    exec(&engine, "INSERT INTO positive_joined_items VALUES (1, 1)");
+    let error = engine
+        .sql("INSERT INTO positive_joined_items VALUES (2, -2)", &[])
+        .expect_err("the trigger's row fails the outer check option");
+    assert_check_option_violation(
+        error,
+        "positive_joined_items",
+        "Failing row contains (2, -2, null).",
+    );
+    // Without a trigger for UPDATE or DELETE, the rewrite stops at the join view, which the errors name.
+    for (sql, view) in [
+        ("UPDATE positive_joined_items SET value = 5", "joined_items"),
+        ("DELETE FROM positive_joined_items", "joined_items"),
+    ] {
+        let error = engine
+            .sql(sql, &[])
+            .expect_err("the join view cannot be updated");
+        assert_eq!(error.sqlstate(), Some("55000"), "{sql}: {error}");
+        assert!(
+            error.to_string().contains(&format!("view \"{view}\"")),
+            "{sql}: {error}"
+        );
+    }
+    let state = exec(&engine, "SELECT id, value FROM joined_base ORDER BY id");
+    assert_eq!(state.rows.len(), 1);
+    assert_eq!(state.rows[0]["value"], Value::Int(1));
+}
+
+/// Live `PostgreSQL` 18.4 evidence that a row whose `INSTEAD OF` triggers `session_replication_role` suppresses still counts, returns its row from `RETURNING` and meets the outer check options, although nothing performs the command.
+fn verify_replication_suppressed_view_triggers(engine: &Engine) {
+    crate::pg18_oracle::verify(
+        engine,
+        include_str!(
+            "../../../../../tests/parity/pg18/view_trigger_suppression_oracle.expected.json"
+        ),
+    );
+}
+
+#[test]
+fn replication_suppressed_view_triggers_match_postgresql_memory() {
+    verify_replication_suppressed_view_triggers(&Engine::new());
+}
+
+#[test]
+fn replication_suppressed_view_triggers_match_postgresql_sqlite() {
+    let directory = TempDir::new().unwrap();
+    verify_replication_suppressed_view_triggers(
+        &Engine::open(&directory.path().join("view-trigger-suppression.db")).unwrap(),
+    );
 }
 
 #[test]

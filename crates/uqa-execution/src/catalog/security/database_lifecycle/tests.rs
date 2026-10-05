@@ -135,6 +135,9 @@ impl SharedObjectLockSession for DatabaseCatalog {
     fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
         panic!("PUBLIC has no shared role dependency")
     }
+    fn next_catalog_oid(&self) -> Result<u32, SQLError> {
+        panic!("database privileges allocate no catalog OIDs")
+    }
 }
 
 #[test]

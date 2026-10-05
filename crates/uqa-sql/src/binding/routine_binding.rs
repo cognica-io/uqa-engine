@@ -313,18 +313,35 @@ impl SchemaScope {
                     )?;
                 }
                 super::routine_parameters::keep_column_labels(&mut block.projections, labels);
-                block.projections = crate::semantics::expand_bound_projection_stars(
-                    &block.projections,
-                    &source_schema,
-                )?;
-                self.bind_grouping_variable_sites(block, &source_schema);
-                crate::semantics::grouping_sets::bind_grouping_names(
-                    routines,
-                    block,
-                    &source_schema,
-                    None,
-                    params,
-                )?;
+                if self.preserve_syntax_shape {
+                    // Stored syntax keeps `*` and output-name references as written; expanding a copy still reports their errors.
+                    let mut expanded = (**block).clone();
+                    expanded.projections = crate::semantics::expand_bound_projection_stars(
+                        &block.projections,
+                        &source_schema,
+                    )?;
+                    self.bind_grouping_variable_sites(&mut expanded, &source_schema);
+                    crate::semantics::grouping_sets::bind_grouping_names(
+                        routines,
+                        &mut expanded,
+                        &source_schema,
+                        None,
+                        params,
+                    )?;
+                } else {
+                    block.projections = crate::semantics::expand_bound_projection_stars(
+                        &block.projections,
+                        &source_schema,
+                    )?;
+                    self.bind_grouping_variable_sites(block, &source_schema);
+                    crate::semantics::grouping_sets::bind_grouping_names(
+                        routines,
+                        block,
+                        &source_schema,
+                        None,
+                        params,
+                    )?;
+                }
                 for expression in &mut block.group_by {
                     self.bind_scalar_routines_for_storage(
                         routines,
@@ -656,7 +673,36 @@ impl SchemaScope {
                 failure = Some(error);
             }
         });
-        failure.map_or(Ok(()), Err)
+        failure.map_or(Ok(()), Err)?;
+        self.bind_stored_scalar_types(engine, expression, schema, subqueries, params, outer)
+    }
+
+    /// Name user-defined types by OID identity and keep the enum constants that binding coerces from `unknown` literals by label identity, as `PostgreSQL` stores type and label OIDs in analyzed expressions.
+    fn bind_stored_scalar_types(
+        &mut self,
+        engine: &dyn RoutineResolution,
+        expression: &mut ScalarExpr,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<(), SQLError> {
+        super::stored_types::bind_scalar_type_identities(expression, &mut |name| {
+            engine.resolve_type_name(name)
+        })?;
+        if !crate::type_resolution::contains_unknown_literal(expression) {
+            return Ok(());
+        }
+        let resolver = self.query_function_type_resolver_for_subqueries(
+            engine,
+            std::slice::from_ref(expression),
+            schema,
+            subqueries,
+            params,
+            outer,
+        )?;
+        crate::type_resolution::fold_stored_enum_constants(expression, schema, params, &resolver)
+            .map(drop)
     }
 
     #[expect(
@@ -715,7 +761,20 @@ pub fn bind_query_plan_routines_for_storage(
     SchemaScope::for_analysis(ctes)?.bind_query_routines_for_storage(engine, plan, params, outer)
 }
 
-/// Bind every routine call owned by a stored scalar expression and validate its complete query-valued descendants against the expression's row scope.
+/// Bind a copy of a query lowered from stored syntax, keeping its shape so every bound identity can be carried back to that syntax.
+pub fn bind_syntax_query_plan_routines(
+    engine: &dyn RoutineResolution,
+    plan: &mut QueryPlan,
+    params: &[SQLParam],
+    ctes: &BindingContext,
+    outer: Option<&RowSchema>,
+) -> Result<RowSchema, SQLError> {
+    let mut scope = SchemaScope::for_analysis(ctes)?;
+    scope.preserve_syntax_shape = true;
+    scope.bind_query_routines_for_storage(engine, plan, params, outer)
+}
+
+/// Bind every routine call owned by a stored scalar expression and validate its complete query-valued descendants against the expression's row scope. The plan keeps the shape of the syntax it was lowered from.
 pub fn bind_expression_plan_routines_for_storage(
     engine: &dyn RoutineResolution,
     plan: &mut ExpressionPlan,
@@ -724,6 +783,7 @@ pub fn bind_expression_plan_routines_for_storage(
     schema: &RowSchema,
 ) -> Result<Option<ColumnType>, SQLError> {
     let mut scope = SchemaScope::for_analysis(ctes)?;
+    scope.preserve_syntax_shape = true;
     scope.stored_expression_outer = Some(schema.clone());
     for subquery in &mut plan.subqueries {
         scope.bind_query_routines_for_storage(engine, subquery, params, Some(schema))?;

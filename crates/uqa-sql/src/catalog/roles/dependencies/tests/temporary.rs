@@ -73,6 +73,7 @@ fn temporary_view() -> StoredView {
         .unwrap(),
         definition: crate::catalog::stored_view::StoredViewDefinition {
             object_id: [7; 16],
+            catalog_oids: None,
             query: *query,
             output_columns: None,
             persistence: RelationPersistence::Temporary,

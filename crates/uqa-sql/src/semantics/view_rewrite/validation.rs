@@ -6,12 +6,15 @@
 
 //! Public-view and mapped-target validation for automatic DML rewriting.
 
+use super::updatability::{
+    merge_into_materialized_view, merge_with_rules, mixed_merge_paths, non_writable_column,
+    view_not_updatable, ColumnWrite, NotUpdatableReason, ViewCommand,
+};
 use super::{
-    display_relation, instead_of_trigger_definition, non_writable_column,
-    not_automatically_updatable, view_updatability, AutomaticViewLayer, BTreeSet,
+    instead_of_trigger_definition, view_query_shape, AutomaticViewLayer, BTreeSet,
     ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan, MergePlan, MergeWhenPlan,
     ReturningAliases, RowSchema, SQLError, ScalarExpr, TriggerEvent, UpdatePlan, ViewColumn,
-    ViewMutationCapabilities, ViewRewriteContext,
+    ViewQueryShape, ViewRewriteContext,
 };
 
 pub(super) fn layer_column<'a>(
@@ -114,14 +117,38 @@ pub(super) fn validate_update_targets(
 pub(super) fn writable_column(
     layer: &AutomaticViewLayer,
     name: &str,
-    operation: &str,
+    write: ColumnWrite,
 ) -> Result<String, SQLError> {
     let column = layer_column(layer, name)
         .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", layer.canonical_name)))?;
-    column
-        .writable_source_column
-        .clone()
-        .ok_or_else(|| non_writable_column(&layer.canonical_name, name, operation))
+    column.writable_source_column.clone().ok_or_else(|| {
+        non_writable_column(
+            &layer.canonical_name,
+            name,
+            write,
+            layer.column_restriction(column),
+        )
+    })
+}
+
+/// Reject the first of the `modified` columns, in the view's column order, that the view cannot write, as `view_cols_are_auto_updatable` finds it for `rewriteTargetView`.
+pub(super) fn validate_writable_columns<'a>(
+    layer: &AutomaticViewLayer,
+    modified: impl IntoIterator<Item = &'a str>,
+    write: ColumnWrite,
+) -> Result<(), SQLError> {
+    let modified = modified.into_iter().collect::<BTreeSet<_>>();
+    match layer.columns.iter().find(|column| {
+        column.writable_source_column.is_none() && modified.contains(column.name.as_str())
+    }) {
+        Some(column) => Err(non_writable_column(
+            &layer.canonical_name,
+            &column.name,
+            write,
+            layer.column_restriction(column),
+        )),
+        None => Ok(()),
+    }
 }
 
 fn ambiguous_column(column: &str) -> SQLError {
@@ -494,29 +521,6 @@ pub fn validate_public_merge_targets(
     Ok(())
 }
 
-pub(super) fn merge_action_capability_error(
-    view: &str,
-    clauses: &[MergeWhenPlan],
-    capabilities: ViewMutationCapabilities,
-) -> Option<SQLError> {
-    clauses.iter().find_map(|clause| match clause {
-        MergeWhenPlan::UpdateMatched { .. } | MergeWhenPlan::UpdateNotMatchedBySource { .. }
-            if !capabilities.updatable =>
-        {
-            Some(not_automatically_updatable(view, "UPDATE"))
-        }
-        MergeWhenPlan::DeleteMatched { .. } | MergeWhenPlan::DeleteNotMatchedBySource { .. }
-            if !capabilities.deletable =>
-        {
-            Some(not_automatically_updatable(view, "DELETE FROM"))
-        }
-        MergeWhenPlan::InsertNotMatched { .. } if !capabilities.insertable => {
-            Some(not_automatically_updatable(view, "INSERT INTO"))
-        }
-        _ => None,
-    })
-}
-
 fn validate_merge_rule_free(
     services: ViewRewriteContext<'_>,
     relation: &str,
@@ -534,28 +538,7 @@ fn validate_merge_rule_free(
     if !has_rules {
         return Ok(());
     }
-    Err(SQLError::Routine {
-        sqlstate: "0A000".into(),
-        message: format!(
-            "cannot execute MERGE on relation \"{}\"",
-            display_relation(relation)
-        ),
-    })
-}
-
-fn merge_uses_event(plan: &MergePlan, event: TriggerEvent) -> bool {
-    plan.when_clauses.iter().any(|clause| match event {
-        TriggerEvent::Insert => matches!(clause, MergeWhenPlan::InsertNotMatched { .. }),
-        TriggerEvent::Update => matches!(
-            clause,
-            MergeWhenPlan::UpdateMatched { .. } | MergeWhenPlan::UpdateNotMatchedBySource { .. }
-        ),
-        TriggerEvent::Delete => matches!(
-            clause,
-            MergeWhenPlan::DeleteMatched { .. } | MergeWhenPlan::DeleteNotMatchedBySource { .. }
-        ),
-        TriggerEvent::Truncate => false,
-    })
+    Err(merge_with_rules(relation))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -564,6 +547,7 @@ pub enum MergeViewTargetPath {
     ViewTriggers,
 }
 
+/// Choose how a MERGE reaches view `plan.target`, as `RewriteQuery` and `rewriteTargetView` do: through the view's INSTEAD OF triggers when every action has one, and otherwise by rewriting the view onto its base relation, which its query must allow, with an updatable column when an action inserts or updates. When it does not, the first action in WHEN order without a trigger reports why; an automatically updatable view cannot mix the two paths.
 pub fn merge_view_target_path(
     services: ViewRewriteContext<'_>,
     plan: &MergePlan,
@@ -578,55 +562,62 @@ pub fn merge_view_target_path(
         .view_definition(&canonical)?
         .ok_or_else(|| SQLError::UnknownTable(plan.target.clone()))?;
     if definition.kind == crate::catalog::view::StoredViewKind::Materialized {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: format!(
-                "cannot execute MERGE on relation \"{}\"",
-                display_relation(&canonical)
-            ),
-        });
+        return Err(merge_into_materialized_view(&canonical));
     }
     validate_merge_rule_free(services, &canonical)?;
-    let automatic = view_updatability(services, &canonical)?.automatic;
-    let insert_trigger = instead_of_trigger_definition(services, &canonical, TriggerEvent::Insert)?;
-    let update_trigger = instead_of_trigger_definition(services, &canonical, TriggerEvent::Update)?;
-    let delete_trigger = instead_of_trigger_definition(services, &canonical, TriggerEvent::Delete)?;
-    let supported = ViewMutationCapabilities {
-        insertable: automatic.insertable || insert_trigger,
-        updatable: automatic.updatable || update_trigger,
-        deletable: automatic.deletable || delete_trigger,
-    };
-    if let Some(error) = merge_action_capability_error(&canonical, &plan.when_clauses, supported) {
-        return Err(error);
-    }
-    let mut uses_automatic = false;
-    let mut uses_trigger = false;
-    let mut has_action = false;
-    for (event, trigger) in [
-        (TriggerEvent::Insert, insert_trigger),
-        (TriggerEvent::Update, update_trigger),
-        (TriggerEvent::Delete, delete_trigger),
-    ] {
-        if !merge_uses_event(plan, event) {
+    let mut untriggered = None;
+    let mut triggered = false;
+    for clause in &plan.when_clauses {
+        let Some((event, command)) = merge_clause_command(clause) else {
             continue;
+        };
+        if instead_of_trigger_definition(services, &canonical, event)? {
+            triggered = true;
+        } else if untriggered.is_none() {
+            untriggered = Some(command);
         }
-        has_action = true;
-        uses_trigger |= trigger;
-        uses_automatic |= !trigger;
     }
-    if uses_trigger && uses_automatic {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: format!(
-                "cannot merge into view \"{}\"",
-                display_relation(&canonical)
-            ),
-        });
+    let Some(untriggered) = untriggered else {
+        return Ok(MergeViewTargetPath::ViewTriggers);
+    };
+    let writes_columns = plan.when_clauses.iter().any(|clause| {
+        matches!(
+            clause,
+            MergeWhenPlan::InsertNotMatched { .. }
+                | MergeWhenPlan::UpdateMatched { .. }
+                | MergeWhenPlan::UpdateNotMatchedBySource { .. }
+        )
+    });
+    let reason = match view_query_shape(services, &canonical)? {
+        Some(ViewQueryShape::Updatable(layer)) => (writes_columns && !layer.has_writable_column())
+            .then_some(NotUpdatableReason::NoUpdatableColumns),
+        Some(ViewQueryShape::NotUpdatable(reason)) => Some(reason),
+        None => return Err(SQLError::UnknownTable(plan.target.clone())),
+    };
+    if let Some(reason) = reason {
+        return Err(view_not_updatable(&canonical, untriggered, reason));
     }
-    if uses_trigger || !has_action {
-        Ok(MergeViewTargetPath::ViewTriggers)
-    } else {
-        Ok(MergeViewTargetPath::AutomaticRewrite)
+    if triggered {
+        return Err(mixed_merge_paths(&canonical));
+    }
+    Ok(MergeViewTargetPath::AutomaticRewrite)
+}
+
+/// The trigger event and the view command of a MERGE action that writes, or `None` for `DO NOTHING`.
+fn merge_clause_command(clause: &MergeWhenPlan) -> Option<(TriggerEvent, ViewCommand)> {
+    match clause {
+        MergeWhenPlan::InsertNotMatched { .. } => {
+            Some((TriggerEvent::Insert, ViewCommand::MergeInsert))
+        }
+        MergeWhenPlan::UpdateMatched { .. } | MergeWhenPlan::UpdateNotMatchedBySource { .. } => {
+            Some((TriggerEvent::Update, ViewCommand::MergeUpdate))
+        }
+        MergeWhenPlan::DeleteMatched { .. } | MergeWhenPlan::DeleteNotMatchedBySource { .. } => {
+            Some((TriggerEvent::Delete, ViewCommand::MergeDelete))
+        }
+        MergeWhenPlan::NothingMatched { .. }
+        | MergeWhenPlan::NothingNotMatched { .. }
+        | MergeWhenPlan::NothingNotMatchedBySource { .. } => None,
     }
 }
 
@@ -648,11 +639,12 @@ pub(super) fn validate_public_view_targets<'a>(
     Ok(())
 }
 
+/// Reject a view whose rules for `event` are conditional INSTEAD rules without an unconditional one, as `RewriteQuery` does before it tries to rewrite the view.
 pub(super) fn validate_direct_view_rule_path(
     services: ViewRewriteContext<'_>,
     view: &str,
     event: crate::ast::RuleEvent,
-    operation: &str,
+    command: ViewCommand,
 ) -> Result<(), SQLError> {
     let rules = services.catalog.rules_for(view, event)?;
     let has_conditional_instead = rules
@@ -662,7 +654,11 @@ pub(super) fn validate_direct_view_rule_path(
         .iter()
         .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
     if has_conditional_instead && !has_unconditional_instead {
-        return Err(not_automatically_updatable(view, operation));
+        return Err(view_not_updatable(
+            view,
+            command,
+            NotUpdatableReason::ConditionalInsteadRule,
+        ));
     }
     Ok(())
 }

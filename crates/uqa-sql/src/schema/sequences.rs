@@ -17,6 +17,5 @@ pub mod lifecycle;
 pub mod names;
 
 pub mod dependencies;
-pub mod dependents;
 
 pub mod owner_migration;

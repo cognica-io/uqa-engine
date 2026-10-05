@@ -75,18 +75,19 @@ pub fn set_default<S: Clone + 'static>(
     name: &str,
     mut default: Expr,
 ) -> Result<(), SQLError> {
-    alteration::validate_column_default(&context.analysis, table, name, &mut default)?;
+    let retained =
+        alteration::validate_column_default(&context.analysis, table, name, &mut default)?;
     if !publish_property(
         context.transactions,
         table,
         name,
-        ColumnProperty::Default(Some(default)),
+        ColumnProperty::Default(retained.then_some(default)),
     )
     .map_err(|error| ddl_storage_error("ALTER COLUMN SET DEFAULT", error))?
     {
-        return Err(SQLError::Unsupported(format!(
-            "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
-        )));
+        return Err(uqa_sql::schema::columns::undefined_relation_column(
+            table, name,
+        ));
     }
     context
         .fields
@@ -119,7 +120,7 @@ pub fn drop_default<S: Clone + 'static>(
     table: &str,
     name: &str,
 ) -> Result<(), SQLError> {
-    uqa_sql::schema::columns::reject_default_change(context.analysis.columns, table, name, false)?;
+    alteration::validate_default_removal(&context.analysis, table, name)?;
     if !publish_property(
         context.transactions,
         table,
@@ -128,9 +129,9 @@ pub fn drop_default<S: Clone + 'static>(
     )
     .map_err(|error| ddl_storage_error("ALTER COLUMN DROP DEFAULT", error))?
     {
-        return Err(SQLError::Unsupported(format!(
-            "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
-        )));
+        return Err(uqa_sql::schema::columns::undefined_relation_column(
+            table, name,
+        ));
     }
     context
         .fields
@@ -165,12 +166,18 @@ pub fn set_expression<S: Clone + 'static>(
         kind == GeneratedColumnKind::Stored,
     )
 }
+/// Drop a stored generated column's expression, or return the notice that skips a column that is not generated under `IF EXISTS`.
 pub fn drop_expression<S: Clone + 'static>(
     context: &ColumnAlterContext<'_, S>,
     table: &str,
     name: &str,
-) -> Result<(), SQLError> {
-    alteration::validate_drop_expression(&context.analysis, table, name)?;
+    if_exists: bool,
+) -> Result<Option<uqa_sql::SQLNotice>, SQLError> {
+    if let Some(notice) =
+        alteration::validate_drop_expression(&context.analysis, table, name, if_exists)?
+    {
+        return Ok(Some(notice));
+    }
     publish_property(
         context.transactions,
         table,
@@ -178,7 +185,7 @@ pub fn drop_expression<S: Clone + 'static>(
         ColumnProperty::Generated(None),
     )
     .map_err(|error| ddl_storage_error("ALTER COLUMN DROP EXPRESSION", error))?;
-    Ok(())
+    Ok(None)
 }
 pub fn alter_type<S: Clone + 'static>(
     context: &ColumnAlterContext<'_, S>,

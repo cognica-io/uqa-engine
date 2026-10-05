@@ -31,6 +31,7 @@ impl Engine {
     }
     pub(crate) fn event_lifecycle_context(&self) -> EventLifecycleContext<'_> {
         EventLifecycleContext {
+            identities: self.catalog_identity_reservation_context(),
             lookup: self.event_lookup_context(),
             catalog: self.event_catalog_context(),
             writer: self,

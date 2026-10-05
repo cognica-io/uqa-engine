@@ -206,8 +206,12 @@ fn rule_catalog_enable_rename_drop_and_reopen_are_durable() {
         &engine,
         "SELECT pg_get_ruledef(oid, true) AS definition FROM pg_rewrite WHERE rulename = 'renamed_rule'",
     );
-    assert!(
-        matches!(definition.rows[0].get("definition"), Some(Value::Str(value)) if value.contains("CREATE RULE renamed_rule AS ON INSERT TO rule_items DO ALSO") && value.contains("new.id + 10"))
+    // PostgreSQL 18.4 prints the renamed rule this way.
+    assert_eq!(
+        definition.rows[0].get("definition"),
+        Some(&Value::Str(
+            "CREATE RULE renamed_rule AS\n    ON INSERT TO rule_items DO  INSERT INTO rule_log (id)\n  VALUES (new.id + 10);".into()
+        ))
     );
     assert_eq!(
         exec(
@@ -356,19 +360,25 @@ fn older_rule_catalog_rebuilds_and_persists_column_dependencies() {
     assert!(metadata["rules"][0]["dependencies"]["columns"]
         .as_array()
         .is_some_and(|columns| !columns.is_empty()));
-    let action_sql = metadata["rules"][0]["definition"]["action_sql"][0]
-        .as_str()
-        .expect("canonical stored action SQL");
+    // The stored actions carry the renamed columns, which the rule's definition prints after a reopen.
+    let engine = Engine::open(&path).unwrap();
+    let definition = exec(
+        &engine,
+        "SELECT pg_get_ruledef(oid) FROM pg_rewrite WHERE rulename = 'migrated_bound_columns'",
+    );
+    let Some(Value::Str(definition)) = definition.value_at(0, 0) else {
+        panic!("stored rule definition");
+    };
     assert!(
-        action_sql.contains("source.renamed_source_value"),
-        "{action_sql}"
+        definition.contains("source.renamed_source_value"),
+        "{definition}"
     );
     assert!(
-        action_sql.contains("(renamed_target_value)"),
-        "{action_sql}"
+        definition.contains("(renamed_target_value)"),
+        "{definition}"
     );
-    assert!(!action_sql.contains("source.source_value"), "{action_sql}");
-    assert!(!action_sql.contains("(target_value)"), "{action_sql}");
+    assert!(!definition.contains("source.source_value"), "{definition}");
+    assert!(!definition.contains("(target_value)"), "{definition}");
 }
 
 #[test]

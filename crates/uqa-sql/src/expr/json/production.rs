@@ -125,6 +125,7 @@ fn from_value(value: &Value, core_carrier: bool, control: &ProductionControl<'_>
     control.check()?;
     Ok(match value {
         Value::Null => Node::Null,
+        Value::Enum(value) => return Err(crate::expr::catalog_output_required(value)),
         Value::Void => Node::String(control.copy_text("")?),
         Value::Bool(value) => Node::Bool(*value),
         Value::Int(value) => Node::Number(control.format(format_args!("{value}"))?),

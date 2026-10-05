@@ -57,6 +57,30 @@ pub fn stored_statement_column_dependencies(
     bind_rule_action_column_dependencies(catalog, &mut statement.clone())
 }
 
+/// The column references of a stored statement: the relation columns its range tables provide, and the names that none provides, which a SQL routine body resolves as its parameters.
+#[derive(Debug, Clone, Default)]
+pub struct StoredStatementColumns {
+    pub dependencies: BTreeSet<RuleColumnDependency>,
+    /// Unresolved references by qualifier and name, in the order the statement names them.
+    pub unresolved: Vec<(Option<String>, String)>,
+}
+
+pub fn stored_statement_references(
+    catalog: StoredColumnBindingContext<'_>,
+    statement: &Statement,
+) -> Result<StoredStatementColumns, SQLError> {
+    let mut binder = StoredColumnBinder::new(catalog, ColumnBindingMode::Bind);
+    binder.bind_statement(
+        &mut statement.clone(),
+        &[],
+        &ColumnBindingContext::default(),
+    )?;
+    Ok(StoredStatementColumns {
+        dependencies: binder.dependencies,
+        unresolved: binder.unresolved,
+    })
+}
+
 pub fn bind_rule_condition_column_dependencies(
     catalog: StoredColumnBindingContext<'_>,
     condition: &mut Expr,

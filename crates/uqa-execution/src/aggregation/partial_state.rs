@@ -10,6 +10,7 @@ use super::{
     value_gt, value_lt, AggregateAccumulator, DecimalValue, NumericInputKind, SQLError, ScalarExpr,
     Value,
 };
+use uqa_sql::expr::IntervalFields;
 
 pub(super) fn partial_schema(
     relation: uqa_sql::ast::InternalRelationId,
@@ -97,6 +98,9 @@ fn encode_accumulator(accumulator: AggregateAccumulator) -> Value {
             accumulator.state_plan,
             super::AggregateStatePlan::SumReal
         )),
+        accumulator
+            .interval_sum
+            .map_or(Value::Null, |sum| Value::Temporal(sum.value())),
     ])
 }
 
@@ -115,9 +119,9 @@ fn decode_accumulator(
             "partial aggregate accumulator is not a list".into(),
         ));
     };
-    if fields.len() != 19 {
+    if fields.len() != 20 {
         return Err(SQLError::Internal(format!(
-            "partial aggregate accumulator has {} fields, expected 19",
+            "partial aggregate accumulator has {} fields, expected 20",
             fields.len()
         )));
     }
@@ -163,6 +167,17 @@ fn decode_accumulator(
             ))
         }
     }
+    accumulator.interval_sum = match next(&mut fields)? {
+        Value::Null => None,
+        Value::Temporal(sum) => Some(IntervalFields::of(&sum).ok_or_else(|| {
+            SQLError::Internal("partial aggregate interval sum is not an interval".into())
+        })?),
+        _ => {
+            return Err(SQLError::Internal(
+                "invalid partial aggregate interval sum".into(),
+            ))
+        }
+    };
     Ok(accumulator)
 }
 
@@ -193,6 +208,12 @@ pub(super) fn merge_accumulators(
         .integer_sum
         .checked_add(source.integer_sum)
         .ok_or_else(|| SQLError::TypeMismatch("integer aggregate overflow".into()))?;
+    // `interval_avg_combine` adds the other state's sum only when it saw a finite input.
+    target.interval_sum = match (target.interval_sum, source.interval_sum) {
+        (Some(left), Some(right)) => Some(left.plus(right)?),
+        (Some(sum), None) | (None, Some(sum)) => Some(sum),
+        (None, None) => None,
+    };
     target.numeric_inputs = numeric_kind(has_decimal, has_float);
     target.decimal_sum = if has_decimal {
         Some(match (target_decimal, source_decimal) {

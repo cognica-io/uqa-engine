@@ -136,6 +136,45 @@ impl Catalog {
         self.events.borrow_mut().push(value.into());
     }
 }
+/// The fixture's shared dependencies are its memberships' grantors, which `pg_shdepend` records as privileges.
+impl super::super::context::RoleSharedDependencies for Catalog {
+    fn role_dependency_detail(
+        &self,
+        role: uqa_sql::catalog::roles::RoleIdentity,
+    ) -> Result<Option<String>, SQLError> {
+        use uqa_sql::catalog::dependencies::{
+            shared_dependency_detail, ObjectAddress, SharedDependency, SharedDependencyKind,
+            ROLE_CLASS, ROLE_MEMBERSHIP_CLASS,
+        };
+        self.event("shared dependencies");
+        let memberships = self.memberships.borrow();
+        let address = |oid: i64| u32::try_from(oid).expect("fixture OIDs fit in u32");
+        let rows = memberships
+            .values()
+            .map(|membership| SharedDependency {
+                database: 0,
+                dependent: ObjectAddress::whole(ROLE_MEMBERSHIP_CLASS, address(membership.oid)),
+                referenced: ObjectAddress::whole(ROLE_CLASS, membership.grantor.oid),
+                kind: SharedDependencyKind::Acl,
+            })
+            .collect::<Vec<_>>();
+        shared_dependency_detail(
+            &rows,
+            ObjectAddress::whole(ROLE_CLASS, address(role.oid)),
+            &|object| {
+                Ok(memberships
+                    .values()
+                    .find(|membership| address(membership.oid) == object.object_id)
+                    .map(|membership| {
+                        format!(
+                            "membership of role {} in role {}",
+                            membership.member.name, membership.role.name
+                        )
+                    }))
+            },
+        )
+    }
+}
 impl crate::catalog::security::roles::temporary::TemporaryRoleDependencyReads for Catalog {
     fn peer_temporary_role_reference(&self, _: u32) -> Result<bool, SQLError> {
         Ok(false)
@@ -388,5 +427,8 @@ impl crate::row_locks::shared_objects::SharedObjectLockSession for Catalog {
             *self.memberships.borrow_mut() = memberships;
         }
         Ok(())
+    }
+    fn next_catalog_oid(&self) -> Result<u32, SQLError> {
+        self.locks.catalog_oids().next_oid(None, || Ok(None))
     }
 }

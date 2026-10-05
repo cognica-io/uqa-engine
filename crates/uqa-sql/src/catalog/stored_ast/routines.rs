@@ -146,63 +146,7 @@ pub fn bind_stored_expression_routines(
     Ok(changed)
 }
 
-pub fn statement_references_routine_identity(
-    statement: &Statement,
-    target: &crate::ast::FunctionBinding,
-) -> Result<bool, SQLError> {
-    let mut statement = statement.clone();
-    let mut found = false;
-    let mut ignore_relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
-    let mut inspect = |_: &mut String,
-                       binding: Option<&mut Option<crate::ast::FunctionBinding>>|
-     -> Result<(), SQLError> {
-        found |= binding
-            .and_then(|binding| binding.as_ref())
-            .is_some_and(|binding| crate::routines::function_binding_matches(binding, target));
-        Ok(())
-    };
-    StoredAstVisitor {
-        source: None,
-        merge: None,
-        expression: None,
-        projection: None,
-        ty: None,
-        relation: &mut ignore_relation,
-        routine: &mut inspect,
-    }
-    .bind_statement(&mut statement)?;
-    Ok(found)
-}
-
-pub fn expression_references_routine_identity(
-    expression: &Expr,
-    target: &crate::ast::FunctionBinding,
-) -> Result<bool, SQLError> {
-    let mut expression = expression.clone();
-    let mut found = false;
-    let mut ignore_relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
-    let mut inspect = |_: &mut String,
-                       binding: Option<&mut Option<crate::ast::FunctionBinding>>|
-     -> Result<(), SQLError> {
-        found |= binding
-            .and_then(|binding| binding.as_ref())
-            .is_some_and(|binding| crate::routines::function_binding_matches(binding, target));
-        Ok(())
-    };
-    StoredAstVisitor {
-        source: None,
-        merge: None,
-        expression: None,
-        projection: None,
-        ty: None,
-        relation: &mut ignore_relation,
-        routine: &mut inspect,
-    }
-    .bind_expr(&mut expression, &BTreeSet::new())?;
-    Ok(found)
-}
-
-fn apply_routine_reference(
+pub(super) fn apply_routine_reference(
     name: &mut String,
     binding: Option<&mut Option<crate::ast::FunctionBinding>>,
     reference: &crate::binding::stored_routines::BoundRoutineReference,

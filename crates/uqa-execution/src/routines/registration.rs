@@ -10,7 +10,10 @@ use super::{
     catalog::RoutineMutationContext,
     compilation::{apply_session_compile_options, with_routine_settings},
     configuration::{self, RoutineConfigurationSession},
-    definition::{compile_catalog_bound_routine, RoutineBodyCompilation, RoutineDefinitionContext},
+    definition::{
+        compile_catalog_bound_routine, BoundRoutine, RoutineBodyCompilation,
+        RoutineDefinitionContext,
+    },
     invocation::context::RoutineInvocationSession,
 };
 use crate::catalog::security::roles::{
@@ -26,12 +29,16 @@ use uqa_sql::{
     ast::{AlterRoutineStmt, CreateFunction, FunctionBody, RoleAttribute},
     catalog::roles::role_inherits,
     routines::{
+        attributes,
         body_validation::{validate_sql_function_body, SQLBodyValidationContext},
         declaration::{resolve_alter_routine_identity_types, resolve_routine_type_references},
-        lifecycle::{binding::resolve_sql_routine_alter_target, ensure_routine_owner_as},
+        lifecycle::{
+            alter_routine_kind_name, binding::resolve_sql_routine_alter_target,
+            require_routine_ownership,
+        },
         registration::{self as analysis, RoutineSupportAuthority},
         resolution::RoutineOverloadContext,
-        routine_signature_types, CompiledFunctionBody, SQLUserFunction,
+        routine_signature_types, CompiledFunctionBody, RoutineBody, SQLUserFunction,
     },
     SQLError,
 };
@@ -43,8 +50,10 @@ pub struct RoutineRegistrationContext<'a> {
     pub support: &'a dyn RoutineSupportAuthority,
     pub configuration: &'a dyn RoutineConfigurationSession,
     pub overloads: RoutineOverloadContext<'a>,
-    /// The session whose compilation of a body `CREATE FUNCTION` examined serves its later calls.
+    /// The session whose settings complete a `PL/pgSQL` body `CREATE FUNCTION` compiled.
     pub session: &'a dyn RoutineInvocationSession,
+    /// The session that keeps the compilation validating a new body for its later calls.
+    pub bodies: &'a dyn super::invocation::bodies::RoutineBodySession,
 }
 
 /// Whether `CREATE FUNCTION` examines the body, as `check_function_bodies` says.
@@ -58,46 +67,6 @@ const fn body_compilation(checks_bodies: bool) -> RoutineBodyCompilation {
     } else {
         RoutineBodyCompilation::Unchecked
     }
-}
-
-/// Keep the `PL/pgSQL` body `CREATE FUNCTION` compiled, when it examined the body, as this session's compilation of the published definition, as `PostgreSQL`'s validator leaves its compilation in the backend's function cache: the body takes the settings of the moment, under the routine's own.
-fn retain_creating_session_compilation(
-    context: &RoutineRegistrationContext<'_>,
-    function: Option<&Arc<SQLUserFunction>>,
-) -> Result<(), SQLError> {
-    let Some(function) = function else {
-        return Ok(());
-    };
-    let CompiledFunctionBody::PLpgSQL(parsed) = &function.compiled else {
-        return Ok(());
-    };
-    let mut parsed = parsed.clone();
-    with_routine_settings(&context.definition.compilation, &function.def, || {
-        apply_session_compile_options(context.session, &mut parsed);
-        Ok(())
-    })?;
-    context
-        .session
-        .retain_compiled_routine_body(function, Arc::new(CompiledFunctionBody::PLpgSQL(parsed)));
-    Ok(())
-}
-
-/// The definition a registry holds for a routine's name, signature and kind.
-fn published_definition(
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
-    name: &str,
-    signature: &[String],
-    is_procedure: bool,
-) -> Option<Arc<SQLUserFunction>> {
-    registry.get(name).and_then(|overloads| {
-        overloads
-            .iter()
-            .find(|function| {
-                routine_signature_types(&function.def) == signature
-                    && function.def.is_procedure == is_procedure
-            })
-            .cloned()
-    })
 }
 
 /// Validate a SQL body once the routine is visible, so that the body can call it, as `PostgreSQL` validates a body after it stores the routine: a SQL-standard body is analyzed whatever `check_function_bodies` says, and a body given as a string is analyzed under the routine's own settings only when it is on; the final statement is checked against the declared result only when it is on.
@@ -146,16 +115,68 @@ fn allocate_routine_object_id(
     }
 }
 
-/// Resolve the routine's type references, validate its support function and configuration, and load its language's library, as `CreateFunction` does before it calls the language's validator.
-fn validate_routine_definition(
+/// The OID reserved for a routine that the registry did not hold when its creation began.
+fn created_routine_oid(name: &str, reserved: Option<u32>) -> Result<u32, SQLError> {
+    reserved.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "routine `{name}` replaced during creation disappeared"
+        ))
+    })
+}
+
+/// `ProcedureCreate` keeps a replaced routine's OID and gives a new routine the next one: `None` for a replacement. The OID is reserved before the registry is held for writing, since the reservation reads the catalog.
+fn new_routine_oid(
+    context: &RoutineRegistrationContext<'_>,
+    name: &str,
+    signature: &[String],
+) -> Result<Option<u32>, SQLError> {
+    let routines = context.catalog.registry.routine_snapshot();
+    let replaces = routines.get(name).is_some_and(|overloads| {
+        overloads
+            .iter()
+            .any(|function| routine_signature_types(&function.def) == signature)
+    });
+    if replaces {
+        return Ok(None);
+    }
+    let oid = crate::catalog::identity::reserve_new_catalog_oid(
+        context.namespace.locks,
+        uqa_sql::schema::constraint_metadata::CatalogOidClass::Procedure.class_id(),
+        "function",
+        |oid| crate::catalog::projection::routine_oid_in_use(&routines, oid),
+    )?;
+    u32::try_from(oid)
+        .map(Some)
+        .map_err(|_| SQLError::Internal(format!("invalid routine OID {oid}")))
+}
+
+/// Check the statement as `CreateFunction` does, stage by stage: CREATE on the routine's schema; then, as `compute_function_attributes` interprets them, the attribute clauses in written order, the SET values, COST, ROWS, the SUPPORT function and PARALLEL; the language; LEAKPROOF; the transforms; the argument types with their defaults and the result type; the body; and whether ROWS applies. The locked registration checks the superuser-only attributes again.
+fn validate_routine_creation(
     context: &RoutineRegistrationContext<'_>,
     def: &mut CreateFunction,
+    current_user: &uqa_sql::catalog::roles::RoleReference,
 ) -> Result<(), SQLError> {
-    resolve_routine_type_references(context.definition.compilation.analysis.types, def)?;
+    context.namespace.ensure_create(&def.name)?;
+    let clauses = std::mem::take(&mut def.attribute_clauses);
+    attributes::check_attribute_clauses(&clauses, def.is_procedure)?;
+    configuration::apply_routine_config_actions(context.configuration, def)?;
+    attributes::validate_cost(def.cost)?;
+    attributes::validate_rows(def.rows)?;
     if let Some(support) = def.support.as_deref() {
         analysis::validate_routine_support(context.support, support)?;
     }
-    configuration::apply_routine_config_actions(context.configuration, def)?;
+    attributes::validate_parallel(&clauses)?;
+    attributes::validate_routine_language(def)?;
+    let current_user_is_superuser = current_user
+        .role_definition(&context.catalog.roles.role_definitions())
+        .is_some_and(|role| role.has(RoleAttribute::Superuser));
+    analysis::validate_routine_security_attributes(def, current_user_is_superuser)?;
+    let types = context.definition.compilation.analysis.types;
+    attributes::validate_transforms(types, def, &clauses)?;
+    resolve_routine_type_references(types, def)?;
+    attributes::validate_body_form(def, &clauses)?;
+    attributes::validate_rows_applicability(def.rows, def.returns_set())?;
+    attributes::reject_window_function(def, &clauses)?;
     if def.language == "plpgsql" {
         context.configuration.load_language_library(&def.language);
     }
@@ -182,19 +203,20 @@ pub fn register_sql_function(
     def.owner = Some(owner.identity());
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
-    validate_routine_definition(context, &mut def)?;
+    validate_routine_creation(context, &mut def, &current_user)?;
     let checks_bodies = checks_function_bodies(context.configuration)?;
-    let (compiled, _) = compile_catalog_bound_routine(
+    let bound = compile_catalog_bound_routine(
         &context.definition,
         &mut def,
         body_compilation(checks_bodies),
     )?;
     let name = def.name.clone();
     let signature = routine_signature_types(&def);
+    let new_oid = new_routine_oid(context, &name, &signature)?;
     let RoleDependencyCandidate {
         roles,
         memberships,
-        value: (mut registry, next),
+        value: (mut registry, next, published),
         ..
     } = prepare_role_dependencies(
         &locks,
@@ -214,7 +236,7 @@ pub fn register_sql_function(
             let mut def = def.clone();
             let overloads = next.entry(name.clone()).or_default();
             let mut dependencies = BTreeSet::new();
-            if let Some(pos) = overloads
+            let published = if let Some(pos) = overloads
                 .iter()
                 .position(|function| routine_signature_types(&function.def) == signature)
             {
@@ -222,31 +244,29 @@ pub fn register_sql_function(
                 analysis::prepare_routine_replacement(
                     existing,
                     &mut def,
-                    &requested_name,
                     &current_user,
                     &roles,
                     &memberships,
                 )?;
-                overloads[pos] = Arc::new(SQLUserFunction {
-                    def,
-                    compiled: compiled.clone(),
-                });
+                let published = Arc::new(SQLUserFunction::new(def, bound.body.clone()));
+                overloads[pos] = Arc::clone(&published);
+                published
             } else {
                 dependencies =
                     uqa_sql::routines::security::binding::routine_role_dependencies(&def, &roles)?;
                 def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
-                overloads.push(Arc::new(SQLUserFunction {
-                    def,
-                    compiled: compiled.clone(),
-                }));
-            }
+                def.catalog_oid = Some(created_routine_oid(&name, new_oid)?);
+                let published = Arc::new(SQLUserFunction::new(def, bound.body.clone()));
+                overloads.push(Arc::clone(&published));
+                published
+            };
             overloads.sort_by(|left, right| {
                 routine_signature_types(&left.def)
                     .cmp(&routine_signature_types(&right.def))
                     .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
             });
             Ok(RoleDependencyCandidate {
-                value: (registry, next),
+                value: (registry, next, published),
                 memberships,
                 roles,
                 dependencies,
@@ -257,15 +277,49 @@ pub fn register_sql_function(
         .catalog
         .publication
         .persist_routine_definitions(&next)?;
-    let published = published_definition(&next, &name, &signature, def.is_procedure);
     **registry = next;
     drop(registry);
     drop(memberships);
     drop(roles);
+    finish_registration(context, &def, &published, &bound, checks_bodies)
+}
+
+/// Complete a published definition: the compilation that validated a `PL/pgSQL` body stays with the defining session, and a SQL body is validated now that the routine is visible, so that the body can call it. A failure aborts the statement, whose rollback withdraws the routine.
+fn finish_registration(
+    context: &RoutineRegistrationContext<'_>,
+    def: &CreateFunction,
+    published: &SQLUserFunction,
+    bound: &BoundRoutine,
+    checks_bodies: bool,
+) -> Result<(), SQLError> {
+    retain_validated_body(context, published, bound.validated.as_ref())?;
     context.catalog.changes.catalog_registry_changed();
-    retain_creating_session_compilation(context, published.as_ref().filter(|_| checks_bodies))?;
-    // A failure aborts the statement, whose rollback withdraws the routine.
-    validate_registered_sql_body(context, &def, &compiled, checks_bodies)
+    let compiled = match &bound.body {
+        RoutineBody::Bound(body) => Some(body.as_ref()),
+        RoutineBody::Source => bound.validated.as_ref(),
+    };
+    compiled.map_or(Ok(()), |compiled| {
+        validate_registered_sql_body(context, def, compiled, checks_bodies)
+    })
+}
+
+/// The PL/pgSQL validator leaves its compilation in the defining session's function cache, completed with the session's settings of the moment under the routine's own; the SQL validator does not, so a SQL body compiles when a session first runs it.
+fn retain_validated_body(
+    context: &RoutineRegistrationContext<'_>,
+    published: &SQLUserFunction,
+    validated: Option<&CompiledFunctionBody>,
+) -> Result<(), SQLError> {
+    let Some(CompiledFunctionBody::PLpgSQL(parsed)) = validated else {
+        return Ok(());
+    };
+    let mut parsed = parsed.clone();
+    with_routine_settings(&context.definition.compilation, &published.def, || {
+        apply_session_compile_options(context.session, &mut parsed);
+        Ok(())
+    })?;
+    context
+        .bodies
+        .retain_routine_body(published, CompiledFunctionBody::PLpgSQL(parsed))
 }
 
 /// Change mutable routine attributes without replacing its identity or compiled body.
@@ -282,25 +336,31 @@ pub fn alter_sql_routine(
         .role_definition(&roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser));
     let memberships = context.catalog.roles.role_memberships();
-    let mut registry = context.catalog.registry.routines_write();
+    // Lookup diagnostics read the type catalog, so the target resolves before the registry is held for writing.
+    let snapshot = context.catalog.registry.routine_snapshot();
     let (name, position) = resolve_sql_routine_alter_target(
         context.catalog.names,
-        &registry,
+        &snapshot,
         &stmt.name,
         requested_types.as_deref(),
         stmt.kind,
     )?;
+    let resolved_identity = snapshot[&name][position].def.object_id;
+    let mut registry = context.catalog.registry.routines_write();
     let existing = registry
         .get(&name)
         .and_then(|overloads| overloads.get(position))
+        .filter(|function| function.def.object_id == resolved_identity)
         .cloned()
         .ok_or_else(|| {
             SQLError::Internal(format!(
-                "resolved ALTER routine target `{name}` disappeared before mutation"
+                "resolved ALTER routine target `{name}` changed before mutation"
             ))
         })?;
-    ensure_routine_owner_as(
-        &existing.def,
+    // `AlterFunction` names the routine by the statement's object kind and the name as written.
+    require_routine_ownership(
+        alter_routine_kind_name(stmt.kind),
+        &stmt.name,
         role_inherits(
             &roles,
             &memberships,
@@ -321,10 +381,7 @@ pub fn alter_sql_routine(
             "resolved ALTER routine registry entry `{name}` disappeared before mutation"
         ))
     })?;
-    overloads[position] = Arc::new(SQLUserFunction {
-        def,
-        compiled: existing.compiled.clone(),
-    });
+    overloads[position] = Arc::new(SQLUserFunction::new(def, existing.body.clone()));
     context
         .catalog
         .publication

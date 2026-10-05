@@ -32,6 +32,9 @@ pub fn format_postgres_text(
     if let ColumnType::Array(element) = ty {
         return format_array(value, element, engine);
     }
+    if let (ColumnType::Composite(reference), Value::Record(fields)) = (ty, value) {
+        return format_record(fields, reference.oid, engine);
+    }
     Ok(match value {
         Value::Bool(value) => if *value { "t" } else { "f" }.into(),
         Value::FixedChar(value) => value.clone(),
@@ -39,6 +42,16 @@ pub fn format_postgres_text(
             crate::expr::format_real(*value as f32)
         }
         Value::Float(value) => uqa_core::format_float_pg(*value),
+        Value::Enum(label) => {
+            crate::expr::enums::enum_label_text(engine.and_then(EngineHook::enum_labels), label)?
+        }
+        // Container output calls each enum field's output function, which reads the current label.
+        _ if crate::expr::enums::contains_enum_carrier(value) => {
+            value_to_string(&crate::expr::enums::render_enum_labels(
+                engine.and_then(EngineHook::enum_labels),
+                value,
+            )?)?
+        }
         _ => value_to_string(value)?,
     })
 }
@@ -81,6 +94,53 @@ fn format_array(
         });
     }
     Ok(format!("{prefix}{{{}}}", fields.join(",")))
+}
+
+/// `record_out`: each field through its attribute type's output function, an empty field for NULL, and double quotes around a field that is empty or holds a separator, parenthesis, quote, backslash or whitespace, doubling quotes and backslashes inside.
+fn format_record(
+    fields: &[(String, Value)],
+    type_oid: u32,
+    engine: Option<&dyn EngineHook>,
+) -> Result<String, SQLError> {
+    let descriptor = crate::expr::composites::descriptor(
+        engine.and_then(EngineHook::composite_types),
+        type_oid,
+    )?;
+    let mut text = String::from("(");
+    for (index, (name, field)) in fields.iter().enumerate() {
+        if index != 0 {
+            text.push(',');
+        }
+        if matches!(field, Value::Null) {
+            continue;
+        }
+        let rendered = match descriptor.attribute(name) {
+            Some((_, attribute)) => format_postgres_text(field, &attribute.ty, engine)?,
+            None => format_postgres_text(
+                field,
+                &crate::type_resolution::value_type(field).unwrap_or(ColumnType::Text),
+                engine,
+            )?,
+        };
+        let quoted = rendered.is_empty()
+            || rendered.chars().any(|character| {
+                character.is_ascii_whitespace() || matches!(character, ',' | '(' | ')' | '"' | '\\')
+            });
+        if quoted {
+            text.push('"');
+            for character in rendered.chars() {
+                if matches!(character, '"' | '\\') {
+                    text.push(character);
+                }
+                text.push(character);
+            }
+            text.push('"');
+        } else {
+            text.push_str(&rendered);
+        }
+    }
+    text.push(')');
+    Ok(text)
 }
 
 fn array_parts(array: &uqa_core::ArrayValue) -> (&[Value], String) {

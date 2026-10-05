@@ -283,7 +283,10 @@ pub fn expr_references_columns(expr: &ScalarExpr) -> bool {
         ScalarExpr::InList { expr, list, .. } => {
             expr_references_columns(expr) || list.iter().any(expr_references_columns)
         }
-        ScalarExpr::WindowCall { args, .. } => args.iter().any(expr_references_columns),
+        ScalarExpr::WindowCall { args, filter, .. } => {
+            args.iter().any(expr_references_columns)
+                || filter.as_deref().is_some_and(expr_references_columns)
+        }
         ScalarExpr::Case {
             base,
             when,

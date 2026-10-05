@@ -13,6 +13,7 @@ use super::*;
 fn constraint(column: &str) -> TableKeyConstraint {
     TableKeyConstraint {
         catalog_identity: None,
+        index_identity: None,
         name: Some(format!("{column}_key")),
         kind: TableKeyConstraintKind::Unique,
         columns: vec![column.to_owned()],

@@ -63,12 +63,24 @@ pub fn resolve_truncate_targets(
     let mut trigger_targets = Vec::new();
     let mut privilege_targets = BTreeSet::new();
     for requested in tables {
-        let Some((table, "table")) = catalog.try_resolve_visible_relation_kind(&requested.table)?
-        else {
-            return Err(SQLError::Unsupported(format!(
-                "TRUNCATE TABLE: relation `{}` does not exist",
-                requested.table
-            )));
+        let table = match catalog.try_resolve_visible_relation_kind(&requested.table)? {
+            Some((table, "table")) => table,
+            Some((_, "foreign table")) => {
+                return Err(SQLError::Unsupported(format!(
+                    "TRUNCATE TABLE: foreign table `{}` cannot be truncated",
+                    requested.table
+                )))
+            }
+            // `truncate_check_rel` accepts only tables.
+            Some((relation, _)) => {
+                let local = uqa_core::RelationIdentity::from_legacy_name(&relation)
+                    .map_or(relation, |relation| relation.name);
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!("\"{local}\" is not a table"),
+                });
+            }
+            None => return Err(SQLError::UnknownTable(requested.table.clone())),
         };
         privilege_targets.insert(table.clone());
         let partitioned = catalog

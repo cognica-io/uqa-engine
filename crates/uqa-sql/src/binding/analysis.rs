@@ -9,6 +9,7 @@
 mod functions;
 mod query_sources;
 mod references;
+mod windows;
 
 pub(super) use query_sources::{with_projected_open_columns, with_query_source_columns};
 
@@ -56,7 +57,36 @@ struct AliasReferenceScope<'a> {
 }
 
 impl SchemaScope {
-    /// Validate the clauses of a query block whose expressions resolve against `source`, the block's own columns over `outer`, the scope of the queries that enclose it.
+    /// `DISTINCT ON` and `ORDER BY` items name an output column before a column of the block's source.
+    fn validate_output_references(
+        &mut self,
+        engine: &dyn RoutineResolution,
+        block: &QueryBlockPlan,
+        output: &RowSchema,
+        source: &RowSchema,
+        params: &[SQLParam],
+    ) -> Result<(), SQLError> {
+        for expression in block
+            .distinct_on
+            .iter()
+            .chain(block.order_by.iter().map(|order| &order.expr))
+        {
+            self.validate_alias_reference(
+                engine,
+                expression,
+                AliasReferenceScope {
+                    primary: output,
+                    fallback: source,
+                    nested: source,
+                    subqueries: &block.subqueries,
+                    params,
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Check a query block's clauses in `transformSelectStmt`'s order after its target list, against `source`, the block's own columns over `outer`, the scope of the queries that enclose it: `WHERE`, `GROUP BY`, `HAVING`, `DISTINCT ON`, `ORDER BY`, `LIMIT` and `OFFSET`, then its window frames.
     pub(super) fn validate_query_block_clauses(
         &mut self,
         engine: &dyn RoutineResolution,
@@ -72,6 +102,14 @@ impl SchemaScope {
                 predicate,
                 source,
                 None,
+                &block.subqueries,
+                params,
+            )?;
+            self.validate_condition(
+                engine,
+                predicate,
+                "WHERE",
+                source,
                 &block.subqueries,
                 params,
             )?;
@@ -107,33 +145,9 @@ impl SchemaScope {
                 &block.subqueries,
                 params,
             )?;
+            self.validate_condition(engine, having, "HAVING", source, &block.subqueries, params)?;
         }
-        for expression in &block.distinct_on {
-            self.validate_alias_reference(
-                engine,
-                expression,
-                AliasReferenceScope {
-                    primary: output,
-                    fallback: source,
-                    nested: source,
-                    subqueries: &block.subqueries,
-                    params,
-                },
-            )?;
-        }
-        for order in &block.order_by {
-            self.validate_alias_reference(
-                engine,
-                &order.expr,
-                AliasReferenceScope {
-                    primary: output,
-                    fallback: source,
-                    nested: source,
-                    subqueries: &block.subqueries,
-                    params,
-                },
-            )?;
-        }
+        self.validate_output_references(engine, block, output, source, params)?;
         let enclosing = outer.cloned().unwrap_or_default();
         for (expression, construct) in block
             .limit
@@ -153,6 +167,15 @@ impl SchemaScope {
                 params,
             )?;
         }
+        self.validate_window_frames(
+            engine,
+            block,
+            &windows::WindowFrameScope {
+                source,
+                subqueries: &block.subqueries,
+                params,
+            },
+        )?;
         crate::semantics::grouping_sets::validate_grouped_expressions(
             engine, block, source, outer, params,
         )
@@ -277,6 +300,28 @@ impl SchemaScope {
         Self::validate_expression_references_with_resolver(
             engine, expression, schema, fallback, params, &resolver,
         )
+    }
+
+    /// A clause condition must be boolean, as `transformWhereClause` requires.
+    pub(super) fn validate_condition(
+        &mut self,
+        engine: &dyn RoutineResolution,
+        condition: &ScalarExpr,
+        construct: &str,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+    ) -> Result<(), SQLError> {
+        let schema = self.with_stored_outer_internal_aliases(schema);
+        let resolver = self.query_function_type_resolver(
+            engine,
+            condition,
+            &schema,
+            subqueries,
+            params,
+            Some(&schema),
+        )?;
+        references::require_boolean_condition(condition, construct, &schema, params, &resolver)
     }
 
     pub(super) fn validate_expression_references_with_resolver(

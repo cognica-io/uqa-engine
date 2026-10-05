@@ -192,6 +192,8 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
             )?;
             validate_view_checks(ViewCheckContext {
                 services: services.referential.assignment,
+                constraints: services.referential.constraints,
+                statement,
                 table: &stmt.table,
                 storage_table,
                 target_qualifier: &stmt.target_qualifier,
@@ -274,6 +276,8 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
             )?;
             validate_view_checks(ViewCheckContext {
                 services: services.referential.assignment,
+                constraints: services.referential.constraints,
+                statement,
                 table: &stmt.table,
                 storage_table: &new_storage_table,
                 target_qualifier: &stmt.target_qualifier,

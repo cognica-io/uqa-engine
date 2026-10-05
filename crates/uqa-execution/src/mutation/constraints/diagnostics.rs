@@ -4,12 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Render visible index input values with the existing catalog deparser and SQL type output functions.
+//! Render visible index input values with the existing catalog deparser and catalog-aware SQL type output functions.
 
 use super::ConstraintContext;
 use crate::catalog::{context::CatalogContext, projection};
 use uqa_core::Value;
-use uqa_sql::{catalog::index::EnforcedKey, expr::EngineHook, ColumnType, SQLError};
+use uqa_sql::{catalog::index::EnforcedKey, ColumnType, SQLError};
 
 pub(super) fn unique_key_detail(
     context: ConstraintContext<'_>,
@@ -92,7 +92,7 @@ fn render_index_key(
             "index key values do not match the key's output types".into(),
         ));
     }
-    let output = OutputNames(catalog_context);
+    let output = projection::CatalogOutput(catalog_context);
     let values = values
         .iter()
         .zip(key_types)
@@ -140,7 +140,7 @@ pub(crate) fn foreign_key_key(
     if !diagnostics.authorization.can_view_index_key(table, &keys)? {
         return Ok(None);
     }
-    let output = OutputNames(diagnostics.catalog);
+    let output = projection::CatalogOutput(diagnostics.catalog);
     let names = columns
         .iter()
         .map(|column| uqa_sql::expr::quote_ident(column))
@@ -163,31 +163,4 @@ pub(crate) fn foreign_key_key(
         .collect::<Result<Vec<_>, SQLError>>()?
         .join(", ");
     Ok(Some(format!("Key ({names})=({values})")))
-}
-
-/// Prints values with the catalog's names for the types that print them, as type output functions do.
-pub(super) struct OutputNames<'a>(pub(super) CatalogContext<'a>);
-
-impl EngineHook for OutputNames<'_> {
-    fn resolve_regtype_output(&self, ty: &ColumnType, oid: i64) -> Result<Option<String>, String> {
-        projection::resolve_regtype_output(&self.0, ty, oid)
-    }
-
-    fn nextval(&self, _name: &str) -> Result<i64, SQLError> {
-        Err(SQLError::Internal(
-            "index output cannot advance a sequence".into(),
-        ))
-    }
-
-    fn currval(&self, _name: &str) -> Result<i64, SQLError> {
-        Err(SQLError::Internal(
-            "index output cannot read a sequence".into(),
-        ))
-    }
-
-    fn setval(&self, _name: &str, _value: i64, _is_called: bool) -> Result<i64, SQLError> {
-        Err(SQLError::Internal(
-            "index output cannot change a sequence".into(),
-        ))
-    }
 }

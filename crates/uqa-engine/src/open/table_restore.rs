@@ -96,6 +96,7 @@ impl Engine {
         )?;
         // Value records are keyed by the identities assigned above.
         catalog.migrate_sequence_values()?;
+        uqa_execution::catalog::type_identity_restoration::upgrade_stored_type_names(catalog)?;
         Ok(())
     }
 
@@ -154,6 +155,13 @@ impl Engine {
             serde_json::from_str(&schema.columns_json)?
         };
         let constraints = names.decode(&schema)?;
+        if let Some(oids) = constraints.catalog_oids {
+            if !oids.is_valid_for(uqa_sql::catalog::relation_oids::RelationOidKind::Table) {
+                return Err(StorageBackendError::Other(format!(
+                    "table `{table_name}` records invalid catalog OIDs"
+                )));
+            }
+        }
         uqa_sql::schema::constraint_metadata::identity::validate_not_null_identities(&columns)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         uqa_sql::schema::constraint_metadata::identity::foreign_keys::validate(
@@ -214,6 +222,7 @@ impl Engine {
             doc_count_dirty: AtomicBool::new(true),
             persistence: constraints.persistence,
             on_commit: constraints.on_commit,
+            catalog_oids: constraints.catalog_oids,
         }))
     }
 }

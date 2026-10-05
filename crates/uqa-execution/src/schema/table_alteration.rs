@@ -5,7 +5,6 @@
 //
 
 //! Execute table alterations in declaration order and propagate inheritable actions through child relations.
-use crate::schema::columns::removal::drop_column;
 use crate::schema::constraints::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
     drop::drop_constraint, set_not_null_constraint, table_constraint_state, validate_constraint,
@@ -15,6 +14,7 @@ use uqa_sql::{
     SQLError, SQLResult,
 };
 pub mod binding;
+mod column_removal;
 mod context;
 pub mod entry;
 pub mod identity;
@@ -25,6 +25,50 @@ use recursion::{materialize_recursive_action_names, run_recursive_alter_action};
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
 }
+/// `ATExecAddColumn` transforms an added column once it knows the column is new, as `ATParseTransformCmd` does: the column's type and then its clauses, as `transformColumnDefinition` checks them for the relation the statement found.
+fn check_added_column_declaration<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    table: &str,
+    qualifier: &str,
+    action: &mut AlterTableAction,
+) -> Result<(), SQLError> {
+    use uqa_sql::schema::table_creation::column_declarations::{
+        check_column_declaration, check_serial_array, ColumnDeclarationTarget,
+    };
+    let AlterTableAction::AddColumn {
+        column,
+        declaration,
+        ..
+    } = action
+    else {
+        return Ok(());
+    };
+    let hierarchy = context
+        .hierarchy
+        .partitions
+        .catalog
+        .try_table_hierarchy(table)
+        .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+    let partitioned = hierarchy.partition_spec.is_some();
+    let partition = hierarchy.is_partition();
+    check_serial_array(declaration)?;
+    column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
+        context.hierarchy.partitions.types,
+        &column.ty,
+    )?;
+    let target = ColumnDeclarationTarget {
+        table: qualifier,
+        partitioned,
+        partition,
+    };
+    if check_column_declaration(declaration, &column.name, target)? {
+        return Err(SQLError::Unsupported(
+            "ALTER TABLE: DEFERRABLE PRIMARY KEY and UNIQUE constraints are not supported".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn run_alter_table<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     stmt: AlterTableStmt,
@@ -61,6 +105,7 @@ pub fn run_alter_table<S: Clone + 'static>(
                 continue;
             }
         }
+        check_added_column_declaration(context, &table, &qualifier, &mut action)?;
         let column_checks = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
         run_recursive_alter_action(
             context,
@@ -318,7 +363,14 @@ fn run_alter_table_action<S: Clone + 'static>(
             if_exists,
             cascade,
         } => {
-            drop_column(&context.removal, &stmt.table, &name, if_exists, cascade)?;
+            column_removal::drop_column(
+                context,
+                &stmt.table,
+                &name,
+                if_exists,
+                cascade,
+                stmt.recurse,
+            )?;
         }
         AlterTableAction::RenameColumn { from, to } => {
             uqa_sql::schema::columns::validate_postgres_column_name(&to)?;
@@ -442,12 +494,15 @@ fn run_alter_table_action<S: Clone + 'static>(
                 expression,
             )?;
         }
-        AlterTableAction::DropExpression { name } => {
-            crate::schema::columns::alteration::drop_expression(
+        AlterTableAction::DropExpression { name, if_exists } => {
+            if let Some(notice) = crate::schema::columns::alteration::drop_expression(
                 &context.columns,
                 &stmt.table,
                 &name,
-            )?;
+                if_exists,
+            )? {
+                context.constraints.notices.push(notice);
+            }
         }
         AlterTableAction::SetNotNull { name } => {
             set_not_null_constraint(
@@ -460,14 +515,22 @@ fn run_alter_table_action<S: Clone + 'static>(
             )?;
         }
         AlterTableAction::DropNotNull { name } => {
-            let (columns, _) = table_constraint_state(&context.constraints, &stmt.table)?;
-            let column = columns
-                .iter()
-                .find(|column| column.name == name)
-                .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
+            let (columns, constraints) = table_constraint_state(&context.constraints, &stmt.table)?;
+            let column = uqa_sql::schema::columns::altered_column(&stmt.table, &columns, &name)?;
+            // `ATExecDropNotNull`: a partition keeps a column NOT NULL while its parent's is.
+            let parent_not_null = match constraints.hierarchy.parents.first() {
+                Some(parent) if constraints.hierarchy.partition_bound.is_some() => {
+                    let (parent_columns, _) = table_constraint_state(&context.constraints, parent)?;
+                    parent_columns
+                        .iter()
+                        .any(|parent_column| parent_column.name == name && parent_column.not_null)
+                }
+                _ => false,
+            };
             uqa_sql::schema::constraint_changes::not_null_removal::validate_column_removal(
                 &stmt.table,
                 column,
+                parent_not_null,
             )?;
             if let Some(constraint_name) = column.not_null_name.as_deref() {
                 drop_constraint(

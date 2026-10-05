@@ -64,6 +64,44 @@ impl SQLError {
         }
     }
 
+    /// `ParseFuncOrColumn`'s error when no function matches a call: `signature` is the name with its argument types, as `func_signature_string` spells it.
+    pub fn undefined_function_call(signature: &str) -> Self {
+        Self::Diagnostic {
+            sqlstate: "42883".into(),
+            message: format!("function {signature} does not exist"),
+            detail: None,
+            hint: Some(
+                "No function matches the given name and argument types. You might need to add explicit type casts."
+                    .into(),
+            ),
+        }
+    }
+
+    /// `ParseFuncOrColumn`'s error when more than one function matches a call equally well.
+    pub fn ambiguous_function_call(signature: &str) -> Self {
+        Self::Diagnostic {
+            sqlstate: "42725".into(),
+            message: format!("function {signature} is not unique"),
+            detail: None,
+            hint: Some(
+                "Could not choose a best candidate function. You might need to add explicit type casts."
+                    .into(),
+            ),
+        }
+    }
+
+    /// A failed call resolution in `ParseFuncOrColumn`'s terms: `42883` when no function matches and `42725` when no candidate is best, each with its hint.
+    pub fn function_call_resolution(sqlstate: &str, signature: &str, suffix: &str) -> Self {
+        match (sqlstate, suffix) {
+            ("42883", "does not exist") => Self::undefined_function_call(signature),
+            ("42725", "is not unique") => Self::ambiguous_function_call(signature),
+            _ => Self::Routine {
+                sqlstate: sqlstate.into(),
+                message: format!("function {signature} {suffix}"),
+            },
+        }
+    }
+
     pub fn unknown_qualified_column(qualifier: &str, column: &str) -> Self {
         Self::Routine {
             sqlstate: "42703".into(),
@@ -93,6 +131,22 @@ impl SQLError {
             SQLError::Internal(_) => Some("XX000"), // internal_error
         }
     }
+
+    /// `PostgreSQL` DETAIL field, reported separately from the primary message.
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            SQLError::Diagnostic { detail, .. } => detail.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// `PostgreSQL` HINT field, reported separately from the primary message.
+    pub fn hint(&self) -> Option<&str> {
+        match self {
+            SQLError::Diagnostic { hint, .. } => hint.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, SQLError>;
@@ -108,11 +162,38 @@ impl From<pg_query::Error> for SQLError {
                     message,
                 }
             }
+            // The grammar rejects impossible frame bounds as windowing errors.
             pg_query::Error::Parse(message)
-                if message.contains("constraints cannot be altered to be NOT VALID") =>
+                if matches!(
+                    message.as_str(),
+                    "frame start cannot be UNBOUNDED FOLLOWING"
+                        | "frame starting from following row cannot end with current row"
+                        | "frame end cannot be UNBOUNDED PRECEDING"
+                        | "frame starting from current row cannot have preceding rows"
+                        | "frame starting from following row cannot have preceding rows"
+                ) =>
+            {
+                SQLError::Routine {
+                    sqlstate: "42P20".into(),
+                    message,
+                }
+            }
+            // `processCASbits` reports a constraint attribute that the constraint's kind cannot take as unsupported.
+            pg_query::Error::Parse(message)
+                if message.contains("constraints cannot be altered to be NOT VALID")
+                    || message.contains(" constraints cannot be marked ") =>
             {
                 SQLError::Routine {
                     sqlstate: "0A000".into(),
+                    message,
+                }
+            }
+            // The PL/pgSQL parser looks up declared types as parse_datatype does, which reports a missing type as an undefined object.
+            pg_query::Error::Parse(message)
+                if message.starts_with("type \"") && message.ends_with("\" does not exist") =>
+            {
+                SQLError::Routine {
+                    sqlstate: "42704".into(),
                     message,
                 }
             }
@@ -136,6 +217,10 @@ impl From<uqa_core::ValueRetentionError> for SQLError {
         match error {
             uqa_core::ValueRetentionError::Memory(error) => error.into(),
             uqa_core::ValueRetentionError::Cancelled(error) => error.into(),
+            error @ uqa_core::ValueRetentionError::Malformed { .. } => Self::Routine {
+                sqlstate: "XX001".into(),
+                message: error.to_string(),
+            },
         }
     }
 }

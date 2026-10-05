@@ -286,7 +286,17 @@ impl Preparation<'_> {
         let Some(declared) = target.column_type(index) else {
             return targets::validate_assignment_type(assignment, None);
         };
-        let required = targets::assignment_value_type(assignment, declared)?;
+        let required = if targets::has_field_step(assignment) {
+            targets::field_assignment_types(
+                assignment,
+                declared,
+                crate::type_resolution::FunctionTypeResolver::composite_types(self.routines),
+            )?
+            .pop()
+            .ok_or_else(|| SQLError::Internal("field assignment has no value type".into()))?
+        } else {
+            targets::assignment_value_type(assignment, declared)?
+        };
         for bound in assignment.expressions() {
             let mut ty = self.expression(bound, input, subqueries)?;
             self.parameters

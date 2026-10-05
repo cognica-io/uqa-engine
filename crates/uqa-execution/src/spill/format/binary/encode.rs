@@ -235,6 +235,11 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             add_size(total, value.sql_string_len(), "decimal value")
         }
         Value::Json(value) | Value::JsonB(value) => add_string_size(total, value, "JSON value"),
+        Value::Enum(value) => {
+            add_size(total, 4, "enum type OID")?;
+            add_size(total, 8, "enum label key length")?;
+            add_size(total, value.key().as_bytes().len(), "enum label key")
+        }
         Value::LegacyVector(vector) => {
             add_size(total, 1, "legacy vector kind")?;
             add_size(
@@ -471,6 +476,11 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
     match value {
         Value::Null => write_tag(writer, 0),
         Value::Void => write_tag(writer, 16),
+        Value::Enum(value) => {
+            write_tag(writer, 18)?;
+            write_raw(writer, &value.type_oid().to_le_bytes(), "enum type OID")?;
+            write_bytes(writer, value.key().as_bytes())
+        }
         Value::LegacyVector(vector) => encode_legacy_vector(writer, vector, depth),
         Value::Bool(value) => {
             write_tag(writer, 1)?;
@@ -520,27 +530,15 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             for lower_bound in array.lower_bounds() {
                 write_raw(writer, &lower_bound.to_le_bytes(), "array lower bound")?;
             }
-            write_u64(writer, array.elements().len())?;
-            for value in array.elements() {
-                encode_value(writer, value, depth + 1)?;
-            }
-            Ok(())
+            encode_values(writer, array.elements(), depth)
         }
         Value::List(values) => {
             write_tag(writer, 8)?;
-            write_u64(writer, values.len())?;
-            for value in values {
-                encode_value(writer, value, depth + 1)?;
-            }
-            Ok(())
+            encode_values(writer, values, depth)
         }
         Value::Row(values) => {
             write_tag(writer, 13)?;
-            write_u64(writer, values.len())?;
-            for value in values {
-                encode_value(writer, value, depth + 1)?;
-            }
-            Ok(())
+            encode_values(writer, values, depth)
         }
         Value::Record(fields) => {
             write_tag(writer, 14)?;
@@ -561,6 +559,15 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             Ok(())
         }
     }
+}
+
+/// Write the count and nested values of a list-shaped value after its tag.
+fn encode_values(writer: &mut impl Write, values: &[Value], depth: usize) -> ExecResult<()> {
+    write_u64(writer, values.len())?;
+    for value in values {
+        encode_value(writer, value, depth + 1)?;
+    }
+    Ok(())
 }
 
 fn encode_legacy_vector(

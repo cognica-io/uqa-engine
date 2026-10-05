@@ -8,14 +8,14 @@
 
 mod foreign_tables;
 mod identity;
+mod routines;
 
 use std::collections::BTreeSet;
 
 use foreign_tables::insert_foreign_table_column_privileges;
 use identity::{owned_identity_sequence, IdentityAttributes};
+pub use routines::build_info_routines;
 
-use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
-use super::expression_text::{default_expr_text, schema_expr_text};
 use super::helpers::constraints::{constraint_catalog_rows, ConstraintCatalogKind};
 use super::helpers::information_schema_types::{
     info_character_maximum_length, info_character_octet_length, info_data_type,
@@ -24,15 +24,13 @@ use super::helpers::information_schema_types::{
 };
 use super::helpers::oids::{current_user_name, split_schema_name};
 use super::helpers::rows::{catalog_name, catalog_ordinal, int_value, row, str_value};
-use super::helpers::type_metadata::{catalog_regtype_name, catalog_type_name};
 use super::helpers::views::view_columns_for;
-use super::pg_proc::user_routine_catalog_oid;
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{services::CatalogSession, CatalogReadView, RelationNameResolution};
 use uqa_core::Value;
 use uqa_sql::ast::ColumnDef as SQLColumnDef;
+use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::value_to_text;
-use uqa_sql::registry::registered_names;
 use uqa_sql::{ResultRow, SQLError};
 use uqa_storage::SequenceOwnerDependency;
 use uqa_storage::{TableAclEntry, TablePrivileges};
@@ -47,20 +45,18 @@ pub fn build_info_schemata(
 ) -> Result<Vec<ResultRow>, SQLError> {
     let current_user = resolution.current_user();
     catalog
-        .all_schema_names(resolution)
+        .all_schema_names()
         .into_iter()
         .filter(|schema| {
-            catalog.schema_security(schema).is_none()
-                || catalog.schema_has_privilege_to(
-                    schema,
-                    current_user,
-                    crate::catalog::security::schema::SchemaAclPrivilege::Usage,
-                )
-                || catalog.schema_has_privilege_to(
-                    schema,
-                    current_user,
-                    crate::catalog::security::schema::SchemaAclPrivilege::Create,
-                )
+            catalog.schema_has_privilege_to(
+                schema,
+                current_user,
+                crate::catalog::security::schema::SchemaAclPrivilege::Usage,
+            ) || catalog.schema_has_privilege_to(
+                schema,
+                current_user,
+                crate::catalog::security::schema::SchemaAclPrivilege::Create,
+            )
         })
         .map(|schema| {
             let owner = catalog.schema_security_names(&schema)?.map_or_else(
@@ -158,17 +154,78 @@ pub fn build_info_tables(
         ]));
     }
     out.extend(super::ag_catalog::age_info_table_rows(catalog)?);
-    out.sort_by(|a, b| {
-        value_to_text(a.get("table_schema").unwrap_or(&Value::Null))
-            .cmp(&value_to_text(
-                b.get("table_schema").unwrap_or(&Value::Null),
-            ))
-            .then_with(|| {
-                value_to_text(a.get("table_name").unwrap_or(&Value::Null))
-                    .cmp(&value_to_text(b.get("table_name").unwrap_or(&Value::Null)))
-            })
-    });
-    Ok(out)
+    let mut keyed = out
+        .into_iter()
+        .map(|row| {
+            let schema = value_to_text(row.get("table_schema").unwrap_or(&Value::Null))?;
+            let table = value_to_text(row.get("table_name").unwrap_or(&Value::Null))?;
+            Ok(((schema, table), row))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    keyed.sort_by(|(left, _), (right, _)| left.cmp(right));
+    Ok(keyed.into_iter().map(|(_, row)| row).collect())
+}
+
+/// The schema and type name recorded for a column's declared type. User-defined types and their arrays name the catalog type, including a displaced array type name.
+fn column_udt(catalog: &CatalogReadView, ty: &ColumnType) -> (String, String) {
+    match ty {
+        ColumnType::Enum(reference) => (reference.schema.clone(), reference.name.clone()),
+        ColumnType::Domain { schema, name, .. } => (schema.clone(), name.clone()),
+        ColumnType::Array(element) => match element.as_ref() {
+            ColumnType::Enum(reference) => (
+                reference.schema.clone(),
+                catalog.enum_by_type_oid(reference.oid).map_or_else(
+                    || info_udt_name(ty),
+                    |definition| definition.array_name.clone(),
+                ),
+            ),
+            ColumnType::Domain { oid, schema, .. } => (
+                schema.clone(),
+                catalog
+                    .domains()
+                    .find(|domain| domain.oid == *oid)
+                    .map_or_else(
+                        || info_udt_name(ty),
+                        uqa_sql::catalog::domain::StoredDomain::array_type_name,
+                    ),
+            ),
+            _ => ("pg_catalog".into(), info_udt_name(ty)),
+        },
+        _ => ("pg_catalog".into(), info_udt_name(ty)),
+    }
+}
+
+/// How `information_schema.columns` describes a declared type: a domain column reports its base type as the data type and UDT and names the domain separately.
+struct ColumnTypeDescription {
+    data_type: String,
+    udt: (String, String),
+    domain: Option<(String, String)>,
+}
+
+fn describe_column_type(catalog: &CatalogReadView, ty: &ColumnType) -> ColumnTypeDescription {
+    let ColumnType::Domain {
+        schema, name, base, ..
+    } = ty
+    else {
+        let data_type = if matches!(ty, ColumnType::Array(_)) {
+            "ARRAY".to_string()
+        } else if column_udt(catalog, ty).0 == "pg_catalog" {
+            info_data_type(ty).to_string()
+        } else {
+            "USER-DEFINED".to_string()
+        };
+        return ColumnTypeDescription {
+            data_type,
+            udt: column_udt(catalog, ty),
+            domain: None,
+        };
+    };
+    let base = describe_column_type(catalog, base);
+    ColumnTypeDescription {
+        data_type: base.data_type,
+        udt: base.udt,
+        domain: Some((schema.clone(), name.clone())),
+    }
 }
 
 #[expect(
@@ -176,13 +233,15 @@ pub fn build_info_tables(
     reason = "preserves catalog column and OID order"
 )]
 fn information_schema_column_row(
-    schema: String,
-    table: String,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    (schema, table): (String, String),
     index: usize,
     column: &SQLColumnDef,
     updatable: bool,
     sequence: Option<&crate::catalog::sequence::SequenceState>,
 ) -> Result<ResultRow, SQLError> {
+    let description = describe_column_type(catalog, &column.ty);
     let identity = IdentityAttributes::of(column, sequence);
     Ok(row([
         ("table_catalog", catalog_name()),
@@ -193,7 +252,15 @@ fn information_schema_column_row(
             "ordinal_position",
             int_value(catalog_ordinal(index, "information_schema column")?),
         ),
-        ("column_default", default_expr_text(column.default.as_ref())),
+        (
+            "column_default",
+            match column.default.as_ref() {
+                Some(default) => str_value(super::view_definition::stored_expression_text(
+                    catalog, resolution, default,
+                )?),
+                None => Value::Null,
+            },
+        ),
         (
             "is_nullable",
             str_value(if column.not_null || column.primary_key {
@@ -202,7 +269,7 @@ fn information_schema_column_row(
                 "YES"
             }),
         ),
-        ("data_type", str_value(info_data_type(&column.ty))),
+        ("data_type", str_value(description.data_type.clone())),
         (
             "character_maximum_length",
             info_character_maximum_length(&column.ty),
@@ -223,12 +290,30 @@ fn information_schema_column_row(
         ("collation_catalog", Value::Null),
         ("collation_schema", Value::Null),
         ("collation_name", Value::Null),
-        ("domain_catalog", Value::Null),
-        ("domain_schema", Value::Null),
-        ("domain_name", Value::Null),
+        (
+            "domain_catalog",
+            description
+                .domain
+                .as_ref()
+                .map_or(Value::Null, |_| catalog_name()),
+        ),
+        (
+            "domain_schema",
+            description
+                .domain
+                .as_ref()
+                .map_or(Value::Null, |(schema, _)| str_value(schema.clone())),
+        ),
+        (
+            "domain_name",
+            description
+                .domain
+                .as_ref()
+                .map_or(Value::Null, |(_, name)| str_value(name.clone())),
+        ),
         ("udt_catalog", catalog_name()),
-        ("udt_schema", str_value("pg_catalog")),
-        ("udt_name", str_value(info_udt_name(&column.ty))),
+        ("udt_schema", str_value(description.udt.0.clone())),
+        ("udt_name", str_value(description.udt.1.clone())),
         ("scope_catalog", Value::Null),
         ("scope_schema", Value::Null),
         ("scope_name", Value::Null),
@@ -282,9 +367,14 @@ fn information_schema_column_row(
         ),
         (
             "generation_expression",
-            column.generated.as_ref().map_or(Value::Null, |generated| {
-                str_value(schema_expr_text(&generated.expression))
-            }),
+            match column.generated.as_ref() {
+                Some(generated) => str_value(super::view_definition::stored_expression_text(
+                    catalog,
+                    resolution,
+                    &generated.expression,
+                )?),
+                None => Value::Null,
+            },
         ),
         (
             "is_updatable",
@@ -322,8 +412,9 @@ pub fn build_info_columns(
                 continue;
             }
             out.push(information_schema_column_row(
-                schema.clone(),
-                table.clone(),
+                catalog,
+                resolution,
+                (schema.clone(), table.clone()),
                 idx,
                 col,
                 true,
@@ -344,8 +435,9 @@ pub fn build_info_columns(
                 continue;
             }
             out.push(information_schema_column_row(
-                schema.clone(),
-                view.clone(),
+                catalog,
+                resolution,
+                (schema.clone(), view.clone()),
                 idx,
                 column,
                 updatability
@@ -371,8 +463,9 @@ pub fn build_info_columns(
                 continue;
             }
             out.push(information_schema_column_row(
-                schema.clone(),
-                table.clone(),
+                catalog,
+                resolution,
+                (schema.clone(), table.clone()),
                 idx,
                 column,
                 false,
@@ -650,173 +743,6 @@ pub fn build_info_views(
                 "is_trigger_insertable_into",
                 str_value(if trigger_insertable { "YES" } else { "NO" }),
             ),
-        ]));
-    }
-    Ok(rows)
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves catalog column and OID order"
-)]
-pub fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
-    let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINE_GROUPS
-        .iter()
-        .flat_map(|group| group.iter())
-        .map(|routine| {
-            let regtype_name = catalog_regtype_name(routine.return_type);
-            row([
-                ("specific_catalog", catalog_name()),
-                ("specific_schema", str_value("pg_catalog")),
-                (
-                    "specific_name",
-                    str_value(format!("{}_{}", routine.name, routine.oid)),
-                ),
-                ("routine_catalog", catalog_name()),
-                ("routine_schema", str_value("pg_catalog")),
-                ("routine_name", str_value(routine.name)),
-                (
-                    "routine_type",
-                    if routine.kind == "f" {
-                        str_value("FUNCTION")
-                    } else {
-                        Value::Null
-                    },
-                ),
-                ("module_catalog", Value::Null),
-                ("module_schema", Value::Null),
-                ("module_name", Value::Null),
-                ("udt_catalog", Value::Null),
-                ("udt_schema", Value::Null),
-                ("udt_name", Value::Null),
-                (
-                    "data_type",
-                    str_value(catalog_type_name(routine.return_type)),
-                ),
-                (
-                    "type_udt_catalog",
-                    regtype_name.map_or(Value::Null, |_| catalog_name()),
-                ),
-                (
-                    "type_udt_schema",
-                    regtype_name.map_or(Value::Null, |_| str_value("pg_catalog")),
-                ),
-                ("type_udt_name", regtype_name.map_or(Value::Null, str_value)),
-                ("routine_body", str_value("EXTERNAL")),
-                ("routine_definition", Value::Null),
-                ("external_name", Value::Null),
-                ("external_language", str_value("INTERNAL")),
-                (
-                    "is_deterministic",
-                    str_value(if routine.volatility == "i" {
-                        "YES"
-                    } else {
-                        "NO"
-                    }),
-                ),
-                ("sql_data_access", str_value("MODIFIES")),
-                (
-                    "is_null_call",
-                    str_value(if routine.strict { "YES" } else { "NO" }),
-                ),
-                ("schema_level_routine", str_value("YES")),
-                ("max_dynamic_result_sets", Value::Int(0)),
-                ("is_udt_dependent", str_value("NO")),
-            ])
-        })
-        .collect();
-    rows.extend(registered_names().into_iter().map(|name| {
-        row([
-            ("specific_catalog", catalog_name()),
-            ("specific_schema", str_value("pg_catalog")),
-            ("specific_name", str_value(format!("{name}_0"))),
-            ("routine_catalog", catalog_name()),
-            ("routine_schema", str_value("pg_catalog")),
-            ("routine_name", str_value(name)),
-            ("routine_type", str_value("FUNCTION")),
-            ("module_catalog", Value::Null),
-            ("module_schema", Value::Null),
-            ("module_name", Value::Null),
-            ("udt_catalog", catalog_name()),
-            ("udt_schema", str_value("pg_catalog")),
-            ("udt_name", str_value("text")),
-            ("data_type", str_value("text")),
-            ("routine_body", str_value("EXTERNAL")),
-            ("routine_definition", Value::Null),
-            ("external_name", Value::Null),
-            ("external_language", str_value("rust")),
-            ("is_deterministic", str_value("NO")),
-            ("sql_data_access", str_value("READS SQL DATA")),
-            ("is_null_call", str_value("YES")),
-            ("schema_level_routine", str_value("YES")),
-            ("max_dynamic_result_sets", Value::Int(0)),
-            ("is_udt_dependent", str_value("NO")),
-        ])
-    }));
-    for function in catalog.all_sql_functions() {
-        let def = &function.def;
-        let (routine_schema, routine_name) = split_schema_name(&def.name)?;
-        let catalog_oid = user_routine_catalog_oid(&function)?;
-        let routine_type = if def.is_procedure {
-            "PROCEDURE"
-        } else {
-            "FUNCTION"
-        };
-        let (routine_body, external_language) = if def.language == "sql" {
-            ("SQL", "SQL".to_string())
-        } else {
-            ("EXTERNAL", def.language.to_ascii_uppercase())
-        };
-        let definition = match &def.body {
-            uqa_sql::ast::FunctionBody::Source(source) => str_value(source.clone()),
-            uqa_sql::ast::FunctionBody::Statements(_) => Value::Null,
-        };
-        let data_type = match &def.returns {
-            uqa_sql::ast::FunctionReturns::Scalar { type_name }
-            | uqa_sql::ast::FunctionReturns::SetOf { type_name } => str_value(type_name.clone()),
-            uqa_sql::ast::FunctionReturns::Table => str_value("record"),
-            uqa_sql::ast::FunctionReturns::None => Value::Null,
-        };
-        rows.push(row([
-            ("specific_catalog", catalog_name()),
-            ("specific_schema", str_value(routine_schema.clone())),
-            (
-                "specific_name",
-                str_value(format!("{routine_name}_{catalog_oid}")),
-            ),
-            ("routine_catalog", catalog_name()),
-            ("routine_schema", str_value(routine_schema)),
-            ("routine_name", str_value(routine_name)),
-            ("routine_type", str_value(routine_type)),
-            ("module_catalog", Value::Null),
-            ("module_schema", Value::Null),
-            ("module_name", Value::Null),
-            ("udt_catalog", catalog_name()),
-            ("udt_schema", str_value("pg_catalog")),
-            ("udt_name", data_type.clone()),
-            ("data_type", data_type),
-            ("routine_body", str_value(routine_body)),
-            ("routine_definition", definition),
-            ("external_name", Value::Null),
-            ("external_language", str_value(external_language)),
-            (
-                "is_deterministic",
-                str_value(
-                    if matches!(def.volatility, uqa_sql::ast::FunctionVolatility::Immutable) {
-                        "YES"
-                    } else {
-                        "NO"
-                    },
-                ),
-            ),
-            ("sql_data_access", str_value("MODIFIES SQL DATA")),
-            (
-                "is_null_call",
-                str_value(if def.strict { "YES" } else { "NO" }),
-            ),
-            ("schema_level_routine", str_value("YES")),
-            ("max_dynamic_result_sets", Value::Int(0)),
-            ("is_udt_dependent", str_value("NO")),
         ]));
     }
     Ok(rows)

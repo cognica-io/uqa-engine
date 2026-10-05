@@ -7,6 +7,8 @@
 //! Static cast compatibility that depends on declared SQL type identity.
 
 mod catalog;
+mod volatility;
+pub use volatility::cast_volatility;
 
 use crate::ast::ColumnType;
 use crate::SQLError;
@@ -71,7 +73,10 @@ pub(super) fn explicit_type_compatible_with_control(
     control.check()?;
     let source = base_type(source).without_type_modifiers_with_control(control)?;
     let target = base_type(target).without_type_modifiers_with_control(control)?;
-    if *source == *target || embedding_input_compatible(&source, &target) {
+    if *source == *target
+        || embedding_input_compatible(&source, &target)
+        || record_coercion(&source, &target)
+    {
         return Ok(true);
     }
     if catalog::context(
@@ -135,6 +140,7 @@ pub fn assignment_type_compatible(source: &ColumnType, target: &ColumnType) -> b
     if source == target
         || is_string_io_type(&target)
         || embedding_input_compatible(&source, &target)
+        || record_coercion(&source, &target)
     {
         return true;
     }
@@ -167,6 +173,15 @@ pub fn assignment_type_compatible(source: &ColumnType, target: &ColumnType) -> b
                     "int4" | "int8"
                 )
         )
+}
+
+/// `can_coerce_type` coerces an anonymous record to any composite type attribute by attribute, and any composite value is a record.
+fn record_coercion(source: &ColumnType, target: &ColumnType) -> bool {
+    matches!(
+        (source, target),
+        (ColumnType::Record, ColumnType::Composite(_))
+            | (ColumnType::Composite(_), ColumnType::Record)
+    )
 }
 
 fn array_element(mut ty: &ColumnType) -> &ColumnType {
@@ -212,8 +227,8 @@ fn undefined_cast(source: &ColumnType, target: &ColumnType) -> SQLError {
         sqlstate: "42846".into(),
         message: format!(
             "cannot cast type {} to {}",
-            source.sql_name(),
-            target.sql_name()
+            source.display_name(),
+            target.display_name()
         ),
     }
 }

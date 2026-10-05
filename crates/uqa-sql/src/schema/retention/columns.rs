@@ -37,6 +37,7 @@ impl<'a> Walker<'a> {
             check_is_local: _,
             check_object_id: _,
             check_catalog_oid: _,
+            default_catalog_oid: _,
             references,
         } = column;
         self.text(name)?;
@@ -107,11 +108,20 @@ impl<'a> Walker<'a> {
     pub(super) fn ty(&mut self, ty: &'a ColumnType) -> Result<()> {
         match ty {
             ColumnType::Named(name) => self.text(name),
+            ColumnType::Enum(reference) => {
+                self.text(&reference.schema)?;
+                self.text(&reference.name)
+            }
+            ColumnType::Composite(reference) => {
+                self.text(&reference.schema)?;
+                self.text(&reference.name)
+            }
             ColumnType::Array(element) => self.boxed(element.as_ref(), Node::Type),
             ColumnType::Domain {
                 schema,
                 name,
                 oid: _,
+                array_oid: _,
                 base,
             } => {
                 self.text(schema)?;

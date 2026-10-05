@@ -1,0 +1,1064 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE mood AS ENUM ('sad', 'happy')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN positive AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE feelings (id integer, m mood, note text, amount numeric, flag boolean, tags integer[])",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE audit (id integer, note text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE lookup (id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA hidden",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE hidden.events (id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION log_row() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO audit VALUES (NEW.id, TG_NAME); RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE plain_rule AS ON UPDATE TO feelings WHERE NEW.id > 5 DO ALSO INSERT INTO audit VALUES (NEW.id)",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE instead_rule AS ON DELETE TO feelings DO INSTEAD (INSERT INTO audit VALUES (OLD.id, 'deleted'); UPDATE audit SET id = OLD.id WHERE id = 0)",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE nothing_rule AS ON INSERT TO feelings WHERE NEW.note = 'skip' DO INSTEAD NOTHING",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE mood_rule AS ON UPDATE TO feelings WHERE NEW.m = 'happy' AND OLD.m <> NEW.m DO ALSO INSERT INTO audit (id, note) VALUES (NEW.id, NEW.m::text)",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE subquery_rule AS ON INSERT TO feelings WHERE EXISTS (SELECT 1 FROM lookup WHERE lookup.id = NEW.id) DO ALSO DELETE FROM audit WHERE audit.id = NEW.id",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE select_rule AS ON INSERT TO feelings DO ALSO INSERT INTO audit (id, note) SELECT NEW.id, 'copied'",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE case_rule AS ON UPDATE TO feelings WHERE CASE WHEN NEW.flag THEN NEW.amount > 1.5 ELSE false END DO ALSO UPDATE audit SET note = upper(NEW.note) WHERE audit.id = NEW.id",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE \"Mixed Rule\" AS ON DELETE TO hidden.events DO ALSO DELETE FROM audit WHERE audit.id = OLD.id",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE notify_rule AS ON INSERT TO audit DO ALSO NOTIFY audit_channel",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE RULE payload_rule AS ON UPDATE TO audit DO ALSO (NOTIFY audit_channel, 'it''s updated'; INSERT INTO lookup VALUES (NEW.id))",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT rulename, pg_get_ruledef(oid) FROM pg_rewrite WHERE rulename NOT LIKE '\\_%' AND rulename NOT LIKE 'pg\\_%' ORDER BY rulename",
+      "command_tags": [
+        "SELECT 10"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rulename",
+            "pg_get_ruledef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "Mixed Rule",
+              "CREATE RULE \"Mixed Rule\" AS\n    ON DELETE TO hidden.events DO  DELETE FROM audit\n  WHERE (audit.id = old.id);"
+            ],
+            [
+              "case_rule",
+              "CREATE RULE case_rule AS\n    ON UPDATE TO public.feelings\n   WHERE\n        CASE\n            WHEN new.flag THEN (new.amount > 1.5)\n            ELSE false\n        END DO  UPDATE audit SET note = upper(new.note)\n  WHERE (audit.id = new.id);"
+            ],
+            [
+              "instead_rule",
+              "CREATE RULE instead_rule AS\n    ON DELETE TO public.feelings DO INSTEAD ( INSERT INTO audit (id, note)\n  VALUES (old.id, 'deleted'::text);\n UPDATE audit SET id = old.id\n  WHERE (audit.id = 0);\n);"
+            ],
+            [
+              "mood_rule",
+              "CREATE RULE mood_rule AS\n    ON UPDATE TO public.feelings\n   WHERE ((new.m = 'happy'::mood) AND (old.m <> new.m)) DO  INSERT INTO audit (id, note)\n  VALUES (new.id, (new.m)::text);"
+            ],
+            [
+              "nothing_rule",
+              "CREATE RULE nothing_rule AS\n    ON INSERT TO public.feelings\n   WHERE (new.note = 'skip'::text) DO INSTEAD NOTHING;"
+            ],
+            [
+              "notify_rule",
+              "CREATE RULE notify_rule AS\n    ON INSERT TO public.audit DO\n NOTIFY audit_channel;"
+            ],
+            [
+              "payload_rule",
+              "CREATE RULE payload_rule AS\n    ON UPDATE TO public.audit DO (\n NOTIFY audit_channel, 'it''s updated';\n INSERT INTO lookup (id)\n  VALUES (new.id);\n);"
+            ],
+            [
+              "plain_rule",
+              "CREATE RULE plain_rule AS\n    ON UPDATE TO public.feelings\n   WHERE (new.id > 5) DO  INSERT INTO audit (id)\n  VALUES (new.id);"
+            ],
+            [
+              "select_rule",
+              "CREATE RULE select_rule AS\n    ON INSERT TO public.feelings DO  INSERT INTO audit (id, note)  SELECT new.id,\n            'copied';"
+            ],
+            [
+              "subquery_rule",
+              "CREATE RULE subquery_rule AS\n    ON INSERT TO public.feelings\n   WHERE (EXISTS ( SELECT 1\n           FROM lookup\n          WHERE (lookup.id = new.id))) DO  DELETE FROM audit\n  WHERE (audit.id = new.id);"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT rulename, pg_get_ruledef(oid, true) FROM pg_rewrite WHERE rulename NOT LIKE '\\_%' AND rulename NOT LIKE 'pg\\_%' ORDER BY rulename",
+      "command_tags": [
+        "SELECT 10"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rulename",
+            "pg_get_ruledef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "Mixed Rule",
+              "CREATE RULE \"Mixed Rule\" AS\n    ON DELETE TO hidden.events DO  DELETE FROM audit\n  WHERE audit.id = old.id;"
+            ],
+            [
+              "case_rule",
+              "CREATE RULE case_rule AS\n    ON UPDATE TO feelings\n   WHERE\n        CASE\n            WHEN new.flag THEN new.amount > 1.5\n            ELSE false\n        END DO  UPDATE audit SET note = upper(new.note)\n  WHERE audit.id = new.id;"
+            ],
+            [
+              "instead_rule",
+              "CREATE RULE instead_rule AS\n    ON DELETE TO feelings DO INSTEAD ( INSERT INTO audit (id, note)\n  VALUES (old.id, 'deleted'::text);\n UPDATE audit SET id = old.id\n  WHERE audit.id = 0;\n);"
+            ],
+            [
+              "mood_rule",
+              "CREATE RULE mood_rule AS\n    ON UPDATE TO feelings\n   WHERE new.m = 'happy'::mood AND old.m <> new.m DO  INSERT INTO audit (id, note)\n  VALUES (new.id, new.m::text);"
+            ],
+            [
+              "nothing_rule",
+              "CREATE RULE nothing_rule AS\n    ON INSERT TO feelings\n   WHERE new.note = 'skip'::text DO INSTEAD NOTHING;"
+            ],
+            [
+              "notify_rule",
+              "CREATE RULE notify_rule AS\n    ON INSERT TO audit DO\n NOTIFY audit_channel;"
+            ],
+            [
+              "payload_rule",
+              "CREATE RULE payload_rule AS\n    ON UPDATE TO audit DO (\n NOTIFY audit_channel, 'it''s updated';\n INSERT INTO lookup (id)\n  VALUES (new.id);\n);"
+            ],
+            [
+              "plain_rule",
+              "CREATE RULE plain_rule AS\n    ON UPDATE TO feelings\n   WHERE new.id > 5 DO  INSERT INTO audit (id)\n  VALUES (new.id);"
+            ],
+            [
+              "select_rule",
+              "CREATE RULE select_rule AS\n    ON INSERT TO feelings DO  INSERT INTO audit (id, note)  SELECT new.id,\n            'copied';"
+            ],
+            [
+              "subquery_rule",
+              "CREATE RULE subquery_rule AS\n    ON INSERT TO feelings\n   WHERE (EXISTS ( SELECT 1\n           FROM lookup\n          WHERE lookup.id = new.id)) DO  DELETE FROM audit\n  WHERE audit.id = new.id;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT rulename, definition FROM pg_rules WHERE schemaname IN ('public', 'hidden') ORDER BY rulename",
+      "command_tags": [
+        "SELECT 10"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rulename",
+            "definition"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "Mixed Rule",
+              "CREATE RULE \"Mixed Rule\" AS\n    ON DELETE TO hidden.events DO  DELETE FROM audit\n  WHERE (audit.id = old.id);"
+            ],
+            [
+              "case_rule",
+              "CREATE RULE case_rule AS\n    ON UPDATE TO public.feelings\n   WHERE\n        CASE\n            WHEN new.flag THEN (new.amount > 1.5)\n            ELSE false\n        END DO  UPDATE audit SET note = upper(new.note)\n  WHERE (audit.id = new.id);"
+            ],
+            [
+              "instead_rule",
+              "CREATE RULE instead_rule AS\n    ON DELETE TO public.feelings DO INSTEAD ( INSERT INTO audit (id, note)\n  VALUES (old.id, 'deleted'::text);\n UPDATE audit SET id = old.id\n  WHERE (audit.id = 0);\n);"
+            ],
+            [
+              "mood_rule",
+              "CREATE RULE mood_rule AS\n    ON UPDATE TO public.feelings\n   WHERE ((new.m = 'happy'::mood) AND (old.m <> new.m)) DO  INSERT INTO audit (id, note)\n  VALUES (new.id, (new.m)::text);"
+            ],
+            [
+              "nothing_rule",
+              "CREATE RULE nothing_rule AS\n    ON INSERT TO public.feelings\n   WHERE (new.note = 'skip'::text) DO INSTEAD NOTHING;"
+            ],
+            [
+              "notify_rule",
+              "CREATE RULE notify_rule AS\n    ON INSERT TO public.audit DO\n NOTIFY audit_channel;"
+            ],
+            [
+              "payload_rule",
+              "CREATE RULE payload_rule AS\n    ON UPDATE TO public.audit DO (\n NOTIFY audit_channel, 'it''s updated';\n INSERT INTO lookup (id)\n  VALUES (new.id);\n);"
+            ],
+            [
+              "plain_rule",
+              "CREATE RULE plain_rule AS\n    ON UPDATE TO public.feelings\n   WHERE (new.id > 5) DO  INSERT INTO audit (id)\n  VALUES (new.id);"
+            ],
+            [
+              "select_rule",
+              "CREATE RULE select_rule AS\n    ON INSERT TO public.feelings DO  INSERT INTO audit (id, note)  SELECT new.id,\n            'copied';"
+            ],
+            [
+              "subquery_rule",
+              "CREATE RULE subquery_rule AS\n    ON INSERT TO public.feelings\n   WHERE (EXISTS ( SELECT 1\n           FROM lookup\n          WHERE (lookup.id = new.id))) DO  DELETE FROM audit\n  WHERE (audit.id = new.id);"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TRIGGER when_plain BEFORE UPDATE ON feelings FOR EACH ROW WHEN (NEW.id > 0) EXECUTE FUNCTION log_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TRIGGER when_distinct AFTER UPDATE ON feelings FOR EACH ROW WHEN (OLD.note IS DISTINCT FROM NEW.note) EXECUTE FUNCTION log_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TRIGGER when_mood BEFORE INSERT ON feelings FOR EACH ROW WHEN (NEW.m = 'happy') EXECUTE FUNCTION log_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TRIGGER when_list BEFORE INSERT ON feelings FOR EACH ROW WHEN (NEW.m IN ('sad', 'happy') AND NEW.note LIKE 'a%') EXECUTE FUNCTION log_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TRIGGER when_cast BEFORE INSERT ON feelings FOR EACH ROW WHEN (NEW.id::bigint > 2 OR NEW.amount = 1.5) EXECUTE FUNCTION log_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TRIGGER when_same BEFORE UPDATE ON feelings FOR EACH ROW WHEN (OLD.m IS NOT DISTINCT FROM NEW.m) EXECUTE FUNCTION log_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TRIGGER when_any BEFORE INSERT ON feelings FOR EACH ROW WHEN (NEW.id = ANY (NEW.tags) AND NEW.id > ALL (ARRAY[0, -1])) EXECUTE FUNCTION log_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TRIGGER when_case BEFORE UPDATE ON feelings FOR EACH ROW WHEN (CASE WHEN NEW.flag THEN NEW.id ELSE 0 END > 1) EXECUTE FUNCTION log_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TRIGGER when_bool BEFORE UPDATE ON feelings FOR EACH ROW WHEN (NEW.flag AND NOT OLD.flag) EXECUTE FUNCTION log_row()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tgname, pg_get_triggerdef(oid) FROM pg_trigger WHERE tgname LIKE 'when\\_%' ORDER BY tgname",
+      "command_tags": [
+        "SELECT 9"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "tgname",
+            "pg_get_triggerdef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "when_any",
+              "CREATE TRIGGER when_any BEFORE INSERT ON public.feelings FOR EACH ROW WHEN (((new.id = ANY (new.tags)) AND (new.id > ALL (ARRAY[0, '-1'::integer])))) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_bool",
+              "CREATE TRIGGER when_bool BEFORE UPDATE ON public.feelings FOR EACH ROW WHEN ((new.flag AND (NOT old.flag))) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_case",
+              "CREATE TRIGGER when_case BEFORE UPDATE ON public.feelings FOR EACH ROW WHEN ((\n        CASE\n            WHEN new.flag THEN new.id\n            ELSE 0\n        END > 1)) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_cast",
+              "CREATE TRIGGER when_cast BEFORE INSERT ON public.feelings FOR EACH ROW WHEN ((((new.id)::bigint > 2) OR (new.amount = 1.5))) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_distinct",
+              "CREATE TRIGGER when_distinct AFTER UPDATE ON public.feelings FOR EACH ROW WHEN ((old.note IS DISTINCT FROM new.note)) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_list",
+              "CREATE TRIGGER when_list BEFORE INSERT ON public.feelings FOR EACH ROW WHEN (((new.m = ANY (ARRAY['sad'::mood, 'happy'::mood])) AND (new.note ~~ 'a%'::text))) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_mood",
+              "CREATE TRIGGER when_mood BEFORE INSERT ON public.feelings FOR EACH ROW WHEN ((new.m = 'happy'::mood)) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_plain",
+              "CREATE TRIGGER when_plain BEFORE UPDATE ON public.feelings FOR EACH ROW WHEN ((new.id > 0)) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_same",
+              "CREATE TRIGGER when_same BEFORE UPDATE ON public.feelings FOR EACH ROW WHEN ((NOT (old.m IS DISTINCT FROM new.m))) EXECUTE FUNCTION log_row()"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tgname, pg_get_triggerdef(oid, true) FROM pg_trigger WHERE tgname LIKE 'when\\_%' ORDER BY tgname",
+      "command_tags": [
+        "SELECT 9"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "tgname",
+            "pg_get_triggerdef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "when_any",
+              "CREATE TRIGGER when_any BEFORE INSERT ON feelings FOR EACH ROW WHEN ((new.id = ANY (new.tags)) AND (new.id > ALL (ARRAY[0, '-1'::integer]))) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_bool",
+              "CREATE TRIGGER when_bool BEFORE UPDATE ON feelings FOR EACH ROW WHEN (new.flag AND NOT old.flag) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_case",
+              "CREATE TRIGGER when_case BEFORE UPDATE ON feelings FOR EACH ROW WHEN (\n        CASE\n            WHEN new.flag THEN new.id\n            ELSE 0\n        END > 1) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_cast",
+              "CREATE TRIGGER when_cast BEFORE INSERT ON feelings FOR EACH ROW WHEN (new.id::bigint > 2 OR new.amount = 1.5) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_distinct",
+              "CREATE TRIGGER when_distinct AFTER UPDATE ON feelings FOR EACH ROW WHEN (old.note IS DISTINCT FROM new.note) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_list",
+              "CREATE TRIGGER when_list BEFORE INSERT ON feelings FOR EACH ROW WHEN ((new.m = ANY (ARRAY['sad'::mood, 'happy'::mood])) AND new.note ~~ 'a%'::text) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_mood",
+              "CREATE TRIGGER when_mood BEFORE INSERT ON feelings FOR EACH ROW WHEN (new.m = 'happy'::mood) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_plain",
+              "CREATE TRIGGER when_plain BEFORE UPDATE ON feelings FOR EACH ROW WHEN (new.id > 0) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_same",
+              "CREATE TRIGGER when_same BEFORE UPDATE ON feelings FOR EACH ROW WHEN (NOT old.m IS DISTINCT FROM new.m) EXECUTE FUNCTION log_row()"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE mood RENAME VALUE 'happy' TO 'glad'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE feelings RENAME COLUMN note TO remark",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT rulename, pg_get_ruledef(oid) FROM pg_rewrite WHERE rulename IN ('mood_rule', 'case_rule', 'nothing_rule') ORDER BY rulename",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rulename",
+            "pg_get_ruledef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "case_rule",
+              "CREATE RULE case_rule AS\n    ON UPDATE TO public.feelings\n   WHERE\n        CASE\n            WHEN new.flag THEN (new.amount > 1.5)\n            ELSE false\n        END DO  UPDATE audit SET note = upper(new.remark)\n  WHERE (audit.id = new.id);"
+            ],
+            [
+              "mood_rule",
+              "CREATE RULE mood_rule AS\n    ON UPDATE TO public.feelings\n   WHERE ((new.m = 'glad'::mood) AND (old.m <> new.m)) DO  INSERT INTO audit (id, note)\n  VALUES (new.id, (new.m)::text);"
+            ],
+            [
+              "nothing_rule",
+              "CREATE RULE nothing_rule AS\n    ON INSERT TO public.feelings\n   WHERE (new.remark = 'skip'::text) DO INSTEAD NOTHING;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tgname, pg_get_triggerdef(oid) FROM pg_trigger WHERE tgname IN ('when_mood', 'when_list', 'when_distinct') ORDER BY tgname",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "tgname",
+            "pg_get_triggerdef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "when_distinct",
+              "CREATE TRIGGER when_distinct AFTER UPDATE ON public.feelings FOR EACH ROW WHEN ((old.remark IS DISTINCT FROM new.remark)) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_list",
+              "CREATE TRIGGER when_list BEFORE INSERT ON public.feelings FOR EACH ROW WHEN (((new.m = ANY (ARRAY['sad'::mood, 'glad'::mood])) AND (new.remark ~~ 'a%'::text))) EXECUTE FUNCTION log_row()"
+            ],
+            [
+              "when_mood",
+              "CREATE TRIGGER when_mood BEFORE INSERT ON public.feelings FOR EACH ROW WHEN ((new.m = 'glad'::mood)) EXECUTE FUNCTION log_row()"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO feelings VALUES (1, 'glad', 'ab', 1.5, true, ARRAY[1]), (2, 'sad', 'skip', 2, false, NULL), (3, 'sad', 'a', 3, true, ARRAY[3, 4])",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE feelings SET m = 'glad', flag = true WHERE id = 3",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, note FROM audit ORDER BY id, note",
+      "command_tags": [
+        "SELECT 13"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "note"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "copied"
+            ],
+            [
+              "1",
+              "when_any"
+            ],
+            [
+              "1",
+              "when_cast"
+            ],
+            [
+              "1",
+              "when_list"
+            ],
+            [
+              "1",
+              "when_mood"
+            ],
+            [
+              "2",
+              "copied"
+            ],
+            [
+              "3",
+              "A"
+            ],
+            [
+              "3",
+              "A"
+            ],
+            [
+              "3",
+              "A"
+            ],
+            [
+              "3",
+              "A"
+            ],
+            [
+              "3",
+              "glad"
+            ],
+            [
+              "3",
+              "when_case"
+            ],
+            [
+              "3",
+              "when_plain"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DELETE FROM feelings WHERE id = 1",
+      "command_tags": [
+        "DELETE 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, note FROM audit ORDER BY id, note",
+      "command_tags": [
+        "SELECT 14"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "note"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "copied"
+            ],
+            [
+              "1",
+              "deleted"
+            ],
+            [
+              "1",
+              "when_any"
+            ],
+            [
+              "1",
+              "when_cast"
+            ],
+            [
+              "1",
+              "when_list"
+            ],
+            [
+              "1",
+              "when_mood"
+            ],
+            [
+              "2",
+              "copied"
+            ],
+            [
+              "3",
+              "A"
+            ],
+            [
+              "3",
+              "A"
+            ],
+            [
+              "3",
+              "A"
+            ],
+            [
+              "3",
+              "A"
+            ],
+            [
+              "3",
+              "glad"
+            ],
+            [
+              "3",
+              "when_case"
+            ],
+            [
+              "3",
+              "when_plain"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, m, remark FROM feelings ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m",
+            "remark"
+          ],
+          "type_oids": [
+            23,
+            27018,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "glad",
+              "ab"
+            ],
+            [
+              "3",
+              "glad",
+              "a"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

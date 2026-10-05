@@ -1,0 +1,1295 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE vud_user",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE vud_base (id integer PRIMARY KEY, v integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE vud_side (id integer, w integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO vud_base VALUES (1, 1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_distinct AS SELECT DISTINCT id, v FROM vud_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_distinct_on AS SELECT DISTINCT ON (v) id, v FROM vud_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_group AS SELECT v, count(*) AS n FROM vud_base GROUP BY v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_sets AS SELECT v FROM vud_base GROUP BY GROUPING SETS ((v), ())",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_having AS SELECT count(*) AS n FROM vud_base HAVING count(*) > 0",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_union AS SELECT id, v FROM vud_base UNION SELECT id, w FROM vud_side",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_with AS WITH x AS (SELECT id, v FROM vud_base) SELECT id, v FROM x",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_limit AS SELECT id, v FROM vud_base LIMIT 5",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_offset AS SELECT id, v FROM vud_base OFFSET 1",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_aggregate AS SELECT count(*) AS n FROM vud_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_window AS SELECT id, row_number() OVER () AS r FROM vud_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_srf AS SELECT id, generate_series(1, 2) AS g FROM vud_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_join AS SELECT b.id, b.v, s.w FROM vud_base b JOIN vud_side s USING (id)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_subquery AS SELECT id, v FROM (SELECT id, v FROM vud_base) s",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_function AS SELECT g FROM generate_series(1, 3) g",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_no_from AS SELECT 1 AS x",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_values AS SELECT x FROM (VALUES (1)) vals(x)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_computed AS SELECT v + 1 AS w FROM vud_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_mixed AS SELECT id, v + 1 AS a, v + 2 AS b, tableoid AS rel FROM vud_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_over_mixed AS SELECT id, a, b FROM vud_mixed",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_locked AS SELECT id, v FROM vud_base FOR UPDATE",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE MATERIALIZED VIEW vud_snapshot AS SELECT id, v FROM vud_base",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_over_snapshot AS SELECT id, v FROM vud_snapshot",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_over_join AS SELECT id, v FROM vud_join",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_ruled AS SELECT b.id, b.v, s.w FROM vud_base b JOIN vud_side s USING (id)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE vud_ruled_insert AS ON INSERT TO vud_ruled WHERE NEW.v > 0 DO INSTEAD NOTHING",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_plain AS SELECT id, v FROM vud_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE vud_plain_update AS ON UPDATE TO vud_plain WHERE NEW.v > 0 DO INSTEAD NOTHING",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_over_plain AS SELECT id, v FROM vud_plain",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION vud_noop() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_partial AS SELECT id, v FROM vud_base",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER vud_partial_insert INSTEAD OF INSERT ON vud_partial FOR EACH ROW EXECUTE FUNCTION vud_noop()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW vud_join_partial AS SELECT b.id, b.v, s.w FROM vud_base b JOIN vud_side s USING (id)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER vud_join_partial_insert INSTEAD OF INSERT ON vud_join_partial FOR EACH ROW EXECUTE FUNCTION vud_noop()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO vud_distinct VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_distinct\"",
+        "detail": "Views containing DISTINCT are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE vud_distinct SET v = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot update view \"vud_distinct\"",
+        "detail": "Views containing DISTINCT are not automatically updatable.",
+        "hint": "To enable updating the view, provide an INSTEAD OF UPDATE trigger or an unconditional ON UPDATE DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "DELETE FROM vud_distinct",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"vud_distinct\"",
+        "detail": "Views containing DISTINCT are not automatically updatable.",
+        "hint": "To enable deleting from the view, provide an INSTEAD OF DELETE trigger or an unconditional ON DELETE DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_distinct_on VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_distinct_on\"",
+        "detail": "Views containing DISTINCT are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_group VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_group\"",
+        "detail": "Views containing GROUP BY are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_sets VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_sets\"",
+        "detail": "Views containing GROUP BY are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_having VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_having\"",
+        "detail": "Views containing HAVING are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_union VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_union\"",
+        "detail": "Views containing UNION, INTERSECT, or EXCEPT are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_with VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_with\"",
+        "detail": "Views containing WITH are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_limit VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_limit\"",
+        "detail": "Views containing LIMIT or OFFSET are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_offset VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_offset\"",
+        "detail": "Views containing LIMIT or OFFSET are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_aggregate VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_aggregate\"",
+        "detail": "Views that return aggregate functions are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_window VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_window\"",
+        "detail": "Views that return window functions are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_srf VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_srf\"",
+        "detail": "Views that return set-returning functions are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_join VALUES (1, 1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_join\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE vud_join SET v = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot update view \"vud_join\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable updating the view, provide an INSTEAD OF UPDATE trigger or an unconditional ON UPDATE DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "DELETE FROM vud_join",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"vud_join\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable deleting from the view, provide an INSTEAD OF DELETE trigger or an unconditional ON DELETE DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_subquery VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_subquery\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_function VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_function\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_no_from VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_no_from\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_values VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_values\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_computed VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_computed\"",
+        "detail": "Views that have no updatable columns are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE vud_computed SET w = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot update view \"vud_computed\"",
+        "detail": "Views that have no updatable columns are not automatically updatable.",
+        "hint": "To enable updating the view, provide an INSTEAD OF UPDATE trigger or an unconditional ON UPDATE DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "DELETE FROM vud_computed WHERE w < 0",
+      "command_tags": [
+        "DELETE 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO vud_mixed (b, a) VALUES (1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot insert into column \"a\" of view \"vud_mixed\"",
+        "detail": "View columns that are not columns of their base relation are not updatable.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_mixed (id, rel) VALUES (2, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot insert into column \"rel\" of view \"vud_mixed\"",
+        "detail": "View columns that refer to system columns are not updatable.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE vud_mixed SET b = 1, a = 2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot update column \"a\" of view \"vud_mixed\"",
+        "detail": "View columns that are not columns of their base relation are not updatable.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE vud_mixed SET rel = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot update column \"rel\" of view \"vud_mixed\"",
+        "detail": "View columns that refer to system columns are not updatable.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_over_mixed (b, a) VALUES (1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot insert into column \"a\" of view \"vud_mixed\"",
+        "detail": "View columns that are not columns of their base relation are not updatable.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_locked VALUES (2, 2) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO vud_over_snapshot VALUES (9, 9)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_over_snapshot\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "DELETE FROM vud_over_snapshot",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"vud_over_snapshot\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable deleting from the view, provide an INSTEAD OF DELETE trigger or an unconditional ON DELETE DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_over_join VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_join\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE vud_over_join SET v = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot update view \"vud_join\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable updating the view, provide an INSTEAD OF UPDATE trigger or an unconditional ON UPDATE DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_ruled VALUES (1, 1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_ruled\"",
+        "detail": "Views with conditional DO INSTEAD rules are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE vud_over_plain SET v = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot update view \"vud_plain\"",
+        "detail": "Views with conditional DO INSTEAD rules are not automatically updatable.",
+        "hint": "To enable updating the view, provide an INSTEAD OF UPDATE trigger or an unconditional ON UPDATE DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "SET ROLE vud_user",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO vud_over_join VALUES (3, 3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"vud_join\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule."
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_mixed (b, a) VALUES (1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot insert into column \"a\" of view \"vud_mixed\"",
+        "detail": "View columns that are not columns of their base relation are not updatable.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO vud_base VALUES (3, 3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for table vud_base",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO vud_join USING (VALUES (1)) s(id) ON vud_join.id = s.id WHEN MATCHED THEN UPDATE SET v = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot update view \"vud_join\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable updating the view using MERGE, provide an INSTEAD OF UPDATE trigger."
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO vud_join USING (VALUES (1)) s(id) ON vud_join.id = s.id WHEN MATCHED THEN DO NOTHING",
+      "command_tags": [
+        "MERGE 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO vud_computed USING (VALUES (1)) s(id) ON false WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"vud_computed\"",
+        "detail": "Views that have no updatable columns are not automatically updatable.",
+        "hint": "To enable deleting from the view using MERGE, provide an INSTEAD OF DELETE trigger."
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO vud_computed USING (VALUES (1)) s(id) ON false WHEN MATCHED THEN DELETE",
+      "command_tags": [
+        "MERGE 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO vud_mixed t USING (VALUES (1)) s(id) ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = 1 WHEN NOT MATCHED THEN INSERT (id, a) VALUES (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot merge into column \"a\" of view \"vud_mixed\"",
+        "detail": "View columns that are not columns of their base relation are not updatable.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO vud_partial USING (VALUES (1)) s(id) ON vud_partial.id = s.id WHEN MATCHED THEN UPDATE SET v = 3 WHEN NOT MATCHED THEN INSERT VALUES (s.id, 3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot merge into view \"vud_partial\"",
+        "detail": "MERGE is not supported for views with INSTEAD OF triggers for some actions but not all.",
+        "hint": "To enable merging into the view, either provide a full set of INSTEAD OF triggers or drop the existing INSTEAD OF triggers."
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO vud_partial USING (VALUES (1)) s(id) ON vud_partial.id = s.id WHEN MATCHED THEN UPDATE SET v = 3",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO vud_join_partial USING (VALUES (1)) s(id) ON vud_join_partial.id = s.id WHEN NOT MATCHED THEN INSERT VALUES (s.id, 4, 4) WHEN MATCHED THEN DELETE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"vud_join_partial\"",
+        "detail": "Views that do not select from a single table or view are not automatically updatable.",
+        "hint": "To enable deleting from the view using MERGE, provide an INSTEAD OF DELETE trigger."
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO vud_ruled USING (VALUES (1)) s(id) ON vud_ruled.id = s.id WHEN MATCHED THEN DO NOTHING",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot execute MERGE on relation \"vud_ruled\"",
+        "detail": "MERGE is not supported for relations with rules.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO vud_over_plain USING (VALUES (1)) s(id) ON vud_over_plain.id = s.id WHEN MATCHED THEN UPDATE SET v = 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot execute MERGE on relation \"vud_plain\"",
+        "detail": "MERGE is not supported for relations with rules.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO vud_snapshot USING (VALUES (1)) s(id) ON vud_snapshot.id = s.id WHEN MATCHED THEN DELETE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot execute MERGE on relation \"vud_snapshot\"",
+        "detail": "This operation is not supported for materialized views.",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE VIEW vud_checked_distinct AS SELECT DISTINCT id FROM vud_base WITH CHECK OPTION",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "WITH CHECK OPTION is supported only on automatically updatable views",
+        "detail": null,
+        "hint": "Views containing DISTINCT are not automatically updatable."
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE VIEW vud_checked_computed AS SELECT v + 1 AS w FROM vud_base WITH LOCAL CHECK OPTION",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "WITH CHECK OPTION is supported only on automatically updatable views",
+        "detail": null,
+        "hint": "Views that have no updatable columns are not automatically updatable."
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER VIEW vud_aggregate SET (check_option = cascaded)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "WITH CHECK OPTION is supported only on automatically updatable views",
+        "detail": null,
+        "hint": "Views that return aggregate functions are not automatically updatable."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT id, v FROM vud_base ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP VIEW vud_distinct, vud_distinct_on, vud_group, vud_sets, vud_having, vud_union, vud_with, vud_limit, vud_offset, vud_aggregate, vud_window, vud_srf, vud_over_join, vud_join, vud_subquery, vud_function, vud_no_from, vud_values, vud_computed, vud_over_mixed, vud_mixed, vud_locked, vud_over_snapshot, vud_ruled, vud_over_plain, vud_plain, vud_partial, vud_join_partial",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP MATERIALIZED VIEW vud_snapshot",
+      "command_tags": [
+        "DROP MATERIALIZED VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE vud_base, vud_side",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION vud_noop()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE vud_user",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

@@ -195,9 +195,9 @@ pub(super) fn eval_scalar_inner(
         ScalarExpr::And(items) => eval_and(items, context, control),
         ScalarExpr::Or(items) => eval_or(items, context, control),
         ScalarExpr::IsNull { expr, negated } => {
-            let is_null = matches!(*eval_scalar_inner(expr, context, control)?, Value::Null);
+            let value = eval_scalar_inner(expr, context, control)?;
             plain(
-                Value::Bool(if *negated { !is_null } else { is_null }),
+                Value::Bool(uqa_core::sql_null_test(Some(&value), *negated)),
                 control,
             )
         }
@@ -300,6 +300,11 @@ fn materialize_qualified_whole_row(
         .filter(|(column, logical, _, _)| {
             logical.map_or_else(
                 || {
+                    // A whole-row value holds user attributes only; scans expose system columns through qualified aliases.
+                    if uqa_sql::schema::columns::POSTGRES_SYSTEM_COLUMNS.contains(&column.as_str())
+                    {
+                        return false;
+                    }
                     let mut matching = false;
                     let mut visible = false;
                     for (position, identity) in schema.identities().iter().enumerate() {

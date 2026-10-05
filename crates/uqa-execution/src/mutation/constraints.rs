@@ -42,7 +42,9 @@ use uqa_sql::{
     SQLError, SQLParam,
 };
 use uqa_storage::document_store::Document;
-pub use violations::partition_rejection_error;
+pub use violations::{
+    partition_rejection_error, trigger_view_check_violation, view_check_violation,
+};
 
 /// Check the constraints of a row that `statement` inserts into `table`, or of an existing row that a table alteration validates when `statement` is `None`.
 pub fn validate_document_constraints(

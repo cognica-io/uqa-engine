@@ -4,9 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+#[path = "server/catalog_lifecycle.rs"]
+mod catalog_lifecycle;
 #[path = "server/client.rs"]
 mod client;
 #[path = "server/concurrent_transactions.rs"]
 mod concurrent_transactions;
+#[path = "server/enums.rs"]
+mod enums;
 #[path = "server/simple_query.rs"]
 mod simple_query;

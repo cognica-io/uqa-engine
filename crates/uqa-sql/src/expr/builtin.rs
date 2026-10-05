@@ -60,7 +60,18 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "has_column_privilege" if matches!(argument_count, 3 | 4) => Some(true),
         "has_database_privilege" if matches!(argument_count, 2 | 3) => Some(true),
         "has_schema_privilege" if matches!(argument_count, 2 | 3) => Some(true),
-        "has_sequence_privilege" | "has_function_privilege" if matches!(argument_count, 2 | 3) => {
+        "has_sequence_privilege" | "has_function_privilege" | "has_type_privilege"
+            if matches!(argument_count, 2 | 3) =>
+        {
+            Some(true)
+        }
+        "pg_get_constraintdef" if matches!(argument_count, 1 | 2) => Some(true),
+        "pg_get_function_arguments"
+        | "pg_get_function_identity_arguments"
+        | "pg_get_function_result"
+        | "pg_get_function_sqlbody"
+            if argument_count == 1 =>
+        {
             Some(true)
         }
         "pg_get_sequence_data" | "pg_sequence_last_value" | "pg_sequence_parameters"
@@ -104,7 +115,9 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         | "json_typeof"
         | "jsonb_typeof"
         | "jsonb_pretty"
+        | "justify_days"
         | "justify_hours"
+        | "justify_interval"
         | "length"
         | "lgamma"
         | "ln"
@@ -210,6 +223,7 @@ pub fn bound_scalar_function_strictness(
             FunctionDispatch::NumericOperator(_) => Some(true),
             FunctionDispatch::ArraySubscripts
             | FunctionDispatch::Subscript
+            | FunctionDispatch::FieldSelect
             | FunctionDispatch::BetweenSymmetric
             | FunctionDispatch::ToBinInt4
             | FunctionDispatch::ToBinInt8
@@ -228,6 +242,7 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::AnyOperator
             | FunctionDispatch::AllOperator
             | FunctionDispatch::IsDistinct => Some(false),
+            FunctionDispatch::Enum { operation, .. } => Some(operation.is_strict()),
             FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => None,
         };
     }
@@ -274,6 +289,18 @@ pub fn eval_bound_builtin_function_call(
         .into_iter()
         .map(|(_, value)| value)
         .collect::<Vec<_>>();
+    if let FunctionDispatch::Enum {
+        operation,
+        type_oid,
+    } = dispatch
+    {
+        return super::enums::enum_function_value(
+            ctx.engine.and_then(super::EngineHook::enum_labels),
+            operation,
+            type_oid,
+            &evaluated,
+        );
+    }
     eval_dispatched_builtin_with_control(
         binding,
         dispatch,
@@ -316,6 +343,15 @@ pub(super) fn eval_dispatched_builtin_with_control(
             multirange,
         } => scalar_range::eval_dispatched_range_function_with_control(
             operation, subtype, multirange, evaluated, control,
+        ),
+        // Catalog-free evaluation: comparisons use label keys; label lookups report the missing catalog.
+        FunctionDispatch::Enum {
+            operation,
+            type_oid,
+        } => Ok(
+            control.retain_external_value(super::enums::enum_function_value(
+                None, operation, type_oid, evaluated,
+            )?)?,
         ),
         FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => Err(
             SQLError::Internal("call-argument syntax marker reached scalar execution".into()),

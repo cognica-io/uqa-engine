@@ -133,7 +133,9 @@ pub fn compare_nullable_with_control(
         | (Value::Array(_), Value::Array(_))
         | (Value::LegacyVector(_), Value::LegacyVector(_))
         | (Value::List(_), Value::List(_))
-        | (Value::Record(_), Value::Record(_)) => Ok(Some(compare_sql_values(a, b, control)?)),
+        | (Value::Record(_), Value::Record(_) | Value::Row(_))
+        | (Value::Row(_), Value::Record(_))
+        | (Value::Enum(_), Value::Enum(_)) => Ok(Some(compare_sql_values(a, b, control)?)),
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(x), Value::FixedChar(y)) => {
             Ok(Some(compare_fixed_text(x, y, control)?))
         }
@@ -203,8 +205,26 @@ pub fn compare_typed_values_with_control(
                 control,
             );
         }
+        // A composite value compared with an anonymous row uses the record operators, which order NULL fields after all others.
+        (Value::Record(left), Value::Row(right)) => {
+            return compare_sequence(left.iter().map(|(_, v)| v), right.iter(), control);
+        }
+        (Value::Row(left), Value::Record(right)) => {
+            return compare_sequence(left.iter(), right.iter().map(|(_, v)| v), control);
+        }
         (Value::Row(left), Value::Row(right)) | (Value::List(left), Value::List(right)) => {
             return compare_sequence(left.iter(), right.iter(), control);
+        }
+        // Enum operators are declared on one enum type; binding coerces every other operand to it.
+        (Value::Enum(left), Value::Enum(right)) if left.type_oid() == right.type_oid() => {
+            return Ok(left.key().cmp(right.key()));
+        }
+        (Value::Enum(_), _) | (_, Value::Enum(_)) => {
+            return Err(SQLError::Internal(format!(
+                "enum comparison reached operands of different types: {} and {}",
+                comparison_operand_type(left),
+                comparison_operand_type(right)
+            )));
         }
         _ => {}
     }
@@ -214,6 +234,13 @@ pub fn compare_typed_values_with_control(
         }
     }
     left.cmp_with_control(right, control).map_err(Into::into)
+}
+
+fn comparison_operand_type(value: &Value) -> String {
+    match value {
+        Value::Enum(label) => format!("enum type OID {}", label.type_oid()),
+        other => super::super::diagnostics::value_type_name(other).to_owned(),
+    }
 }
 
 /// Validate the layout required by the `oidvector` scalar equality, ordering and hashing operators. Array operators on `int2vector` permit dimensionless arrays.
@@ -265,6 +292,12 @@ fn equal_sql_values(left: &Value, right: &Value, control: &ProductionControl<'_>
             right.iter().map(|(_, v)| v),
             control,
         ),
+        (Value::Record(left), Value::Row(right)) => {
+            equal_sequence(left.iter().map(|(_, v)| v), right.iter(), control)
+        }
+        (Value::Row(left), Value::Record(right)) => {
+            equal_sequence(left.iter(), right.iter().map(|(_, v)| v), control)
+        }
         (Value::Row(left), Value::Row(right)) | (Value::List(left), Value::List(right)) => {
             equal_sequence(left.iter(), right.iter(), control)
         }

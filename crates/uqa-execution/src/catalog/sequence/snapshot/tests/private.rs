@@ -11,6 +11,7 @@ use uqa_sql::{ast::SequenceDataType, catalog::roles::RoleDefinition};
 
 fn registry(entries: &[(&str, u8, i64)]) -> SequenceReadSnapshot {
     let mut snapshot = SequenceReadSnapshot {
+        catalog_oids: std::sync::Arc::default(),
         sequences: Arc::new(BTreeMap::new()),
         object_ids: Arc::new(BTreeMap::new()),
         persistence: Arc::new(BTreeMap::new()),

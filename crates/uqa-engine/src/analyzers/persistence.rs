@@ -153,10 +153,10 @@ impl Engine {
                     binding
                 };
                 // Default document fields index only stored strings, even when a declared column has another type.
-                // Named assignments on declared SQL tables retain the stricter column contract.
-                // Document tables have no declared columns; their physical FTS field above owns the binding.
-                // GIN definitions are checked separately.
-                if *table.columns_declared.read()
+                // Named field assignments on declared SQL tables retain the stricter column contract.
+                // GIN-owned bindings are checked with their GIN definitions, and document tables have no declared columns; their physical FTS field above owns the binding.
+                if binding.owner == AnalyzerBindingOwner::Field
+                    && *table.columns_declared.read()
                     && (binding.index.name.is_some() || binding.search.name.is_some())
                 {
                     Self::validate_table_analyzer_field(table_name, table, &field)

@@ -297,7 +297,7 @@ impl Preparation<'_> {
                     "42804",
                     format!(
                         "argument of {context} must be type bigint, not type {}",
-                        ty.sql_name()
+                        ty.regtype_name()
                     ),
                 ));
             }

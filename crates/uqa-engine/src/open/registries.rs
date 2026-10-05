@@ -18,6 +18,11 @@ impl Engine {
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_catalog(catalog, mode.allows_migration())?;
+        self.restore_sequence_catalog_oids(catalog)?;
+        *self.durable.graph_catalog_oids.write() =
+            uqa_execution::catalog::graph_oids::load(catalog)?;
+        self.restore_enums_from_catalog(catalog)?;
+        self.restore_composites_from_catalog(catalog)?;
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
         *self.durable.system_relation_security.write() =
             uqa_execution::catalog::security::system_relations::restore(
@@ -48,6 +53,26 @@ impl Engine {
         self.restore_catalog_indexes_from_catalog(catalog, mode)?;
         self.finish_domain_restoration(catalog, domains)?;
         self.restore_path_indexes_from_catalog(catalog)?;
+        Ok(())
+    }
+
+    /// The recorded OIDs of the catalog's sequences, and of the session's temporary sequences, which the catalog does not hold.
+    fn restore_sequence_catalog_oids(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        let mut oids = uqa_execution::catalog::sequence::catalog_oids::load(catalog)?;
+        let current = self.durable.sequence_catalog_oids.read().clone();
+        let persistence = self.durable.sequence_persistence.read();
+        for (relation, object_id) in self.durable.sequence_object_ids.read().iter() {
+            if persistence.get(relation) == Some(&uqa_sql::ast::RelationPersistence::Temporary) {
+                if let Some(oid) = current.get(object_id) {
+                    oids.insert(*object_id, *oid);
+                }
+            }
+        }
+        drop(persistence);
+        *self.durable.sequence_catalog_oids.write() = oids;
         Ok(())
     }
 

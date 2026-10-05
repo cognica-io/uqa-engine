@@ -6,19 +6,16 @@
 
 //! Capability-scoped `pg_namespace` row synthesis.
 
-use crate::catalog::{CatalogReadView, RelationNameResolution};
+use crate::catalog::CatalogReadView;
 use uqa_sql::{ResultRow, SQLError};
 
 use super::helpers::acl::acl_identifier;
 use super::helpers::oids::{current_user_oid, namespace_oid};
 use super::helpers::rows::{catalog_array, int_value, row, str_value};
 
-pub fn build_pg_namespace(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-) -> Result<Vec<ResultRow>, SQLError> {
+pub fn build_pg_namespace(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     catalog
-        .all_schema_names(resolution)
+        .all_schema_names()
         .into_iter()
         .map(|schema| {
             let security = catalog.schema_security(&schema);
@@ -37,6 +34,54 @@ pub fn build_pg_namespace(
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()
+}
+
+/// `pg_my_temp_schema()`: the OID of the session's temporary namespace, or 0 before the session's first temporary object created it.
+pub fn pg_my_temp_schema_value(catalog: &CatalogReadView) -> uqa_core::Value {
+    uqa_core::Value::Int(
+        catalog
+            .snapshot()
+            .temporary_namespace
+            .as_ref()
+            .map_or(0, |temporary| i64::from(temporary.oids.namespace)),
+    )
+}
+
+/// `pg_is_other_temp_schema(oid)`: whether the namespace is another session's temporary namespace or TOAST namespace, which `isOtherTempNamespace` decides by the name alone.
+pub fn pg_is_other_temp_schema_value(
+    catalog: &CatalogReadView,
+    arguments: &[uqa_core::Value],
+) -> Result<uqa_core::Value, SQLError> {
+    let [argument] = arguments else {
+        return Err(SQLError::BadArity {
+            name: "pg_is_other_temp_schema".into(),
+            expected: "1".into(),
+            actual: arguments.len(),
+        });
+    };
+    let oid = match argument {
+        uqa_core::Value::Null => return Ok(uqa_core::Value::Null),
+        uqa_core::Value::Int(oid) => *oid,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "pg_is_other_temp_schema namespace must be oid, got {other:?}"
+            )))
+        }
+    };
+    if catalog
+        .snapshot()
+        .temporary_namespace
+        .as_ref()
+        .is_some_and(|temporary| temporary.holds_oid(oid))
+    {
+        return Ok(uqa_core::Value::Bool(false));
+    }
+    Ok(uqa_core::Value::Bool(
+        catalog.all_schema_names().iter().any(|name| {
+            namespace_oid(catalog, name) == oid
+                && uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(name)
+        }),
+    ))
 }
 
 fn schema_acl_catalog_value(

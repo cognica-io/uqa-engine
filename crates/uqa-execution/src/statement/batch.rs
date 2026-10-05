@@ -112,6 +112,11 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
             error.into(),
         ));
     }
+    // Diagnostics spell user-defined types as the statement's search path finds them.
+    let display = context
+        .statements
+        .diagnostic_search_path()
+        .map(|path| uqa_sql::ast::TypeDisplayScope::enter(&path));
     if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
         if let Some(plan) = context.cache.cached_optimized_sql_plan(sql) {
             let _statement_deadline = (!nested_statement)
@@ -135,7 +140,14 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
             }
         }
     }
-    execute_uncached_or_snapshot_scoped(context, sql, params, nested_statement, consumer)
+    execute_uncached_or_snapshot_scoped(
+        context,
+        sql,
+        params,
+        nested_statement,
+        consumer,
+        display.as_ref(),
+    )
 }
 
 #[inline(never)]
@@ -149,6 +161,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     nested_statement: bool,
     consumer: &mut ResultConsumer<'_>,
+    display: Option<&uqa_sql::ast::TypeDisplayScope>,
 ) -> Result<SQLResult, SQLError> {
     // Parse an uncached batch completely before executing its first statement.
     // This preserves syntax atomicity. Exact single-statement cache hits reuse
@@ -200,6 +213,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     context.transactions,
                     error.into(),
                 ));
+            }
+            // An earlier statement of the message may have changed the search path.
+            if let (Some(display), Some(path)) = (
+                display.filter(|_| statement_index > 0),
+                context.statements.diagnostic_search_path(),
+            ) {
+                display.refresh(&path);
             }
             let statement = statement
                 .compile()

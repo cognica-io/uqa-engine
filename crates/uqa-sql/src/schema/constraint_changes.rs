@@ -162,6 +162,18 @@ pub fn take_column_check(column: &mut crate::ast::ColumnDef) -> Option<TableChec
     Some(check)
 }
 
+/// Give a column the CHECK [`take_column_check`] took from it.
+pub fn restore_column_check(column: &mut crate::ast::ColumnDef, check: TableCheck) {
+    column.check = Some(check.expr);
+    column.check_catalog_oid = check.catalog_oid;
+    column.check_name = check.name;
+    column.check_object_id = check.object_id;
+    column.check_is_local = check.is_local;
+    column.check_enforced = check.enforced;
+    column.check_validated = check.validated;
+    column.check_no_inherit = check.no_inherit;
+}
+
 pub fn foreign_key_object_id(
     columns: &[crate::ast::ColumnDef],
     constraints: &crate::ast::TableConstraintSet,

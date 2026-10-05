@@ -7,9 +7,9 @@
 //! Temporal, formatting, identity, and UUID built-ins.
 
 use super::{
-    coerce_temporal, format_pg_number, format_temporal, generate_random_uuid, generate_uuid_v7,
-    out_of_range, pg_to_chrono_fmt, typeof_value, value_to_string, DecimalValue, Result, SQLError,
-    TemporalValue, Value,
+    coerce_temporal, datetime_out_of_range, format_pg_number, format_temporal,
+    generate_random_uuid, generate_uuid_v7, pg_to_chrono_fmt, typeof_value, value_to_string,
+    DecimalValue, Result, SQLError, TemporalValue, Value,
 };
 use uqa_core::memory::ProductionControl;
 
@@ -81,7 +81,7 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                 let epoch = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive();
                 Ok(Value::Temporal(TemporalValue::Date {
                     days: i32::try_from(date.signed_duration_since(epoch).num_days())
-                        .map_err(|_| out_of_range("date"))?,
+                        .map_err(|_| datetime_out_of_range("date"))?,
                 }))
             }
             "to_number" => {
@@ -139,10 +139,7 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
 
 fn undefined_uuid_extraction(name: &str, args: &[Value]) -> SQLError {
     let signature = args.iter().map(typeof_value).collect::<Vec<_>>().join(", ");
-    SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!("function {name}({signature}) does not exist"),
-    }
+    SQLError::undefined_function_call(&format!("{name}({signature})"))
 }
 
 fn parse_roman_numeral(input: &str) -> Option<i64> {

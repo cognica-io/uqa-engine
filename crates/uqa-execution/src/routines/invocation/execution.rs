@@ -10,57 +10,17 @@ use crate::routines::{
     transaction::RoutineTransactionGuard, CreateFunction, FunctionReturns, Interpreter,
     PLpgSQLDatum, RoutineOutcome, TriggerRoutineContext,
 };
-use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{
     ast::RoutineInvocationBinding,
-    routines::{
-        compilation::compile_function_body, invocation::specialized_definition,
-        CompiledFunctionBody, SQLUserFunction,
-    },
+    routines::{invocation::specialized_definition, CompiledFunctionBody, SQLUserFunction},
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
 
-/// The body this session runs for `function`. Each `PostgreSQL` backend compiles a function at its first call, under the settings then in effect, and keeps the compilation for later calls of the same definition: a body `CREATE FUNCTION` left unexamined is compiled now, and a `PL/pgSQL` body takes the session's `plpgsql.variable_conflict` unless it declares its own. The caller has applied the routine's own settings.
-fn session_compiled_body(
-    context: &RoutineInvocationContext<'_>,
-    function: &Arc<SQLUserFunction>,
-) -> Result<Arc<CompiledFunctionBody>, SQLError> {
-    if let Some(body) = context.session.compiled_routine_body(function) {
-        return Ok(body);
-    }
-    let mut body = match &function.compiled {
-        CompiledFunctionBody::Deferred => {
-            compile_function_body(&context.compilation, &function.def)?
-        }
-        compiled => compiled.clone(),
-    };
-    if let CompiledFunctionBody::PLpgSQL(parsed) = &mut body {
-        crate::routines::compilation::apply_session_compile_options(context.session, parsed);
-    }
-    let body = Arc::new(body);
-    context
-        .session
-        .retain_compiled_routine_body(function, Arc::clone(&body));
-    Ok(body)
-}
-
-/// The body to run for `function` in this session: a SQL body runs as `CREATE FUNCTION` compiled it, every other body as this session compiled it.
-fn running_body<'b>(
-    context: &RoutineInvocationContext<'_>,
-    function: &'b Arc<SQLUserFunction>,
-    session_body: &'b mut Option<Arc<CompiledFunctionBody>>,
-) -> Result<&'b CompiledFunctionBody, SQLError> {
-    if matches!(function.compiled, CompiledFunctionBody::SQL(_)) {
-        return Ok(&function.compiled);
-    }
-    Ok(session_body.insert(session_compiled_body(context, function)?))
-}
-
 pub(super) fn execute_routine(
     context: &RoutineInvocationContext<'_>,
-    function: &Arc<SQLUserFunction>,
+    function: &SQLUserFunction,
     bound: Vec<Value>,
     invocation: &RoutineInvocationBinding,
     allow_nonatomic: bool,
@@ -86,9 +46,8 @@ pub(super) fn execute_routine(
     let _transaction_context = RoutineTransactionGuard::enter(context.runtime.session, nonatomic);
     uqa_sql::routines::security::ensure_routine_execute_privilege(context.authority, definition)?;
     super::scopes::with_routine_context(context.session, definition, || {
-        let mut session_body = None;
-        let compiled = running_body(context, function, &mut session_body)?;
-        execute_compiled_body(context, definition, specialized.is_some(), compiled, bound)
+        let body = context.lookup.routine_body(function)?;
+        execute_compiled_body(context, definition, specialized.is_some(), &body, bound)
     })
 }
 
@@ -116,24 +75,19 @@ fn execute_compiled_body(
         CompiledFunctionBody::SQL(statements) => {
             execute_sql_language(context, definition, statements, &bound)
         }
-        CompiledFunctionBody::Deferred => Err(SQLError::Internal(format!(
-            "routine `{}` reached execution without compiling its body",
-            definition.name
-        ))),
     }
 }
 
 pub fn execute_trigger_routine(
     context: &RoutineInvocationContext<'_>,
-    function: &Arc<SQLUserFunction>,
+    function: &SQLUserFunction,
     trigger: &TriggerRoutineContext,
 ) -> Result<Value, SQLError> {
     let _guard = DepthGuard::enter(context.session)?;
     let _transaction_context = RoutineTransactionGuard::enter(context.runtime.session, false);
     super::scopes::with_routine_context(context.session, &function.def, || {
-        let mut session_body = None;
-        let compiled = running_body(context, function, &mut session_body)?;
-        let CompiledFunctionBody::PLpgSQL(parsed) = compiled else {
+        let body = context.lookup.routine_body(function)?;
+        let CompiledFunctionBody::PLpgSQL(parsed) = &*body else {
             return Err(SQLError::Unsupported(
                 "only LANGUAGE plpgsql trigger functions are executable".into(),
             ));

@@ -475,6 +475,8 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         )?;
         validate_view_checks(ViewCheckContext {
             services: context.mutation.preparation.referential.assignment,
+            constraints: context.mutation.preparation.referential.constraints,
+            statement,
             table: &stmt.table,
             storage_table: &rewritten_storage_table,
             target_qualifier: &stmt.target_qualifier,

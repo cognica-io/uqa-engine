@@ -31,6 +31,7 @@ struct Catalog {
 fn key(kind: TableKeyConstraintKind, columns: &[&str]) -> EnforcedKey {
     EnforcedKey::from(TableKeyConstraint {
         catalog_identity: None,
+        index_identity: None,
         name: None,
         kind,
         columns: columns.iter().map(|column| (*column).to_owned()).collect(),

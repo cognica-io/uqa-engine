@@ -61,9 +61,9 @@ fn resolved_regclass_oid(
                     "resolved sequence `{canonical}` has no object identity"
                 ))
             })?;
-        return Ok(Some(crate::catalog::projection::sequence_relation_oid(
-            object_id,
-        )));
+        return Ok(Some(
+            context.catalog_read_view().sequence_catalog_oid(&object_id),
+        ));
     }
     if kind == "index" {
         let relation =
@@ -115,6 +115,18 @@ fn resolved_regclass_oid(
                 ))
             })
             .map(Some),
+        "composite type" => context
+            .catalog_read_view()
+            .snapshot()
+            .definitions
+            .composites
+            .get(canonical)
+            .map(|definition| Some(i64::from(definition.relation_oid)))
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved composite type `{canonical}` has no catalog definition"
+                ))
+            }),
         other => Err(SQLError::Internal(format!(
             "unknown relation kind `{other}` for `{canonical}`"
         ))),

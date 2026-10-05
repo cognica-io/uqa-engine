@@ -105,11 +105,78 @@ fn range(lower: PartitionRangeDatum, upper: PartitionRangeDatum) -> PartitionBou
     }
 }
 
+/// Bound ordering reads no domain, assignment or schema expression.
+struct Unused;
+
+impl crate::expr::EngineHook for Unused {
+    fn nextval(&self, _: &str) -> Result<i64, SQLError> {
+        unreachable!("bound ordering executes no sequence")
+    }
+    fn currval(&self, _: &str) -> Result<i64, SQLError> {
+        unreachable!("bound ordering executes no sequence")
+    }
+    fn setval(&self, _: &str, _: i64, _: bool) -> Result<i64, SQLError> {
+        unreachable!("bound ordering executes no sequence")
+    }
+}
+
+impl crate::catalog::domain::DomainCatalog for Unused {
+    fn domain_by_oid(&self, _: u32) -> Option<crate::catalog::domain::StoredDomain> {
+        None
+    }
+}
+
+impl crate::assignment::AssignmentContext for Unused {
+    fn evaluate_domain_check(
+        &self,
+        _: &Expr,
+        _: &ResultRow,
+        _: &RowSchema,
+    ) -> Result<Value, SQLError> {
+        unreachable!("bound ordering checks no domain")
+    }
+}
+
+impl FunctionTypeResolver for Unused {
+    fn resolve_function_type(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+        _: &[Option<String>],
+        _: &[Option<ColumnType>],
+        _: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        unreachable!("bound ordering resolves no function")
+    }
+}
+
+impl crate::routines::RoutineResolution for Unused {}
+
+impl crate::plan::AggregateClassifier for Unused {
+    fn is_registered_aggregate(&self, _: &str) -> bool {
+        false
+    }
+}
+
+impl crate::schema::SchemaExpressionCatalog for Unused {
+    fn registered_runtime_function_volatility(
+        &self,
+        _: &str,
+    ) -> Option<crate::ast::FunctionVolatility> {
+        None
+    }
+    fn schema_expression_columns(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, SQLError> {
+        Ok(None)
+    }
+}
+
 fn context(catalog: &Catalog) -> PartitionContext<'_> {
     PartitionContext {
         catalog,
         expressions: &Literals,
         types: &NoFunctions,
+        assignment: &Unused,
+        schema: &Unused,
     }
 }
 

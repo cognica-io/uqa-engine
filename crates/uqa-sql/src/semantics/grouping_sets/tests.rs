@@ -26,6 +26,7 @@ impl FunctionTypeResolver for Catalog {
             schema: "public".into(),
             name: "grouping_literal_numeric".into(),
             oid: 50_001,
+            array_oid: None,
             base: Box::new(ColumnType::Numeric {
                 precision: None,
                 scale: None,

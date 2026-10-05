@@ -12,7 +12,6 @@ use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{FunctionBinding, IndexKey},
     schema::indexes::routines as analysis,
-    SQLError,
 };
 use uqa_storage::{CatalogFacade, CatalogIndexRow, StorageBackendError, StorageBackendResult};
 
@@ -25,24 +24,6 @@ pub trait IndexRoutineRegistry {
 pub struct IndexRoutineContext<'a> {
     pub registry: &'a dyn IndexRoutineRegistry,
     pub catalog: Option<&'a dyn CatalogFacade>,
-}
-
-pub fn indexes_depending_on_routine(
-    registry: &dyn IndexRoutineRegistry,
-    target: &FunctionBinding,
-) -> Result<Vec<RelationIdentity>, SQLError> {
-    let mut indexes = Vec::new();
-    let rows = registry.routine_index_rows();
-    for row in rows.values() {
-        let definition =
-            index_definition(row).map_err(|error| SQLError::Internal(error.to_string()))?;
-        let keys: Vec<IndexKey> = serde_json::from_str(&row.columns_json)
-            .map_err(|error| SQLError::Internal(error.to_string()))?;
-        if analysis::index_references_routine(&keys, &definition, target)? {
-            indexes.push(row.relation.clone());
-        }
-    }
-    Ok(indexes)
 }
 
 pub fn rewrite_index_routine_identity(

@@ -98,3 +98,49 @@ fn namespace_selection_respects_usage_and_keeps_empty_and_temporary_results() {
         Some("pg_temp_1".into())
     );
 }
+
+#[test]
+fn the_temporary_namespace_leads_the_implicit_schemas_once_it_exists() {
+    let catalog = catalog();
+    let mut path = resolution(&["public"]);
+    assert_eq!(
+        current_schema_names(&catalog, &path, "uqa", true),
+        ["pg_catalog", "public"]
+    );
+    path.temporary_namespace_allocated = true;
+    assert_eq!(
+        current_schema_names(&catalog, &path, "uqa", true),
+        ["pg_temp_1", "pg_catalog", "public"]
+    );
+    assert_eq!(
+        current_schema_names(&catalog, &path, "uqa", false),
+        ["public"]
+    );
+    // An explicit `pg_temp` keeps its position and stands for the namespace only once it exists.
+    let mut path = resolution(&["public", "pg_temp"]);
+    assert_eq!(
+        current_schema_names(&catalog, &path, "uqa", true),
+        ["pg_catalog", "public"]
+    );
+    path.temporary_namespace_allocated = true;
+    assert_eq!(
+        current_schema_names(&catalog, &path, "uqa", true),
+        ["pg_catalog", "public", "pg_temp_1"]
+    );
+    let mut path = resolution(&["pg_temp", "public"]);
+    assert_eq!(
+        current_schema_name(&catalog, &path, "uqa"),
+        Some("public".into())
+    );
+    path.temporary_namespace_allocated = true;
+    assert_eq!(
+        current_schema_name(&catalog, &path, "uqa"),
+        Some("pg_temp_1".into())
+    );
+    // The namespace's own name stands for it only once it exists.
+    let path = resolution(&["pg_temp_1", "public"]);
+    assert_eq!(
+        current_schema_names(&catalog, &path, "uqa", false),
+        ["public"]
+    );
+}

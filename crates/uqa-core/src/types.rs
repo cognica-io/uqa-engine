@@ -35,6 +35,7 @@ pub type PathExpr = Vec<PathSegment>;
 
 mod array;
 mod decimal;
+mod enum_value;
 mod graph;
 mod graph_phi;
 mod index_stats;
@@ -50,6 +51,9 @@ pub use array::{
     ControlledArrayElements,
 };
 pub use decimal::DecimalValue;
+pub use enum_value::{
+    EnumLabelKey, EnumLabelKeyError, EnumLabelKeyParseError, EnumValue, MAX_ENUM_LABEL_KEY_BYTES,
+};
 pub use graph::{Edge, EdgeId, Vertex, VertexId};
 pub use graph_phi::{
     GraphPhiEnvelope, GraphPhiPayload, GRAPH_PHI_EDGES_FIELD, GRAPH_PHI_FIELD,

@@ -386,8 +386,11 @@ fn contains_explicit_fusion(expression: &ScalarExpr) -> bool {
         ScalarExpr::InList { expr, list, .. } => {
             contains_explicit_fusion(expr) || list.iter().any(contains_explicit_fusion)
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             args.iter().any(contains_explicit_fusion)
+                || filter.as_deref().is_some_and(contains_explicit_fusion)
                 || spec.partition_by.iter().any(contains_explicit_fusion)
                 || spec
                     .order_by

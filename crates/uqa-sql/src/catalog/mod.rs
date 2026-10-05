@@ -40,11 +40,14 @@ impl VirtualRelation {
                 | Self::PgRewrite
                 | Self::PgType
                 | Self::PgRange
+                | Self::PgEnum
                 | Self::PgProc
                 | Self::PgDatabase
                 | Self::PgAuthid
                 | Self::PgAuthMembers
                 | Self::PgDescription
+                | Self::PgDepend
+                | Self::PgShdepend
                 | Self::AgGraph
                 | Self::AgLabel
         )
@@ -433,6 +436,12 @@ impl VirtualRelation {
                 "typdefault" => ColumnType::Text,
                 "typacl" => array(ColumnType::AclItem),
             ],
+            Self::PgEnum => columns![
+                "oid" => ColumnType::Oid,
+                "enumtypid" => ColumnType::Oid,
+                "enumsortorder" => ColumnType::Real,
+                "enumlabel" => ColumnType::Name,
+            ],
             Self::PgRange => columns![
                 "rngtypid" => ColumnType::Oid,
                 "rngsubtype" => ColumnType::Oid,
@@ -586,6 +595,24 @@ impl VirtualRelation {
                 "objsubid" => ColumnType::Integer,
                 "description" => ColumnType::Text,
             ],
+            Self::PgDepend => columns![
+                "classid" => ColumnType::Oid,
+                "objid" => ColumnType::Oid,
+                "objsubid" => ColumnType::Integer,
+                "refclassid" => ColumnType::Oid,
+                "refobjid" => ColumnType::Oid,
+                "refobjsubid" => ColumnType::Integer,
+                "deptype" => ColumnType::InternalChar,
+            ],
+            Self::PgShdepend => columns![
+                "dbid" => ColumnType::Oid,
+                "classid" => ColumnType::Oid,
+                "objid" => ColumnType::Oid,
+                "objsubid" => ColumnType::Integer,
+                "refclassid" => ColumnType::Oid,
+                "refobjid" => ColumnType::Oid,
+                "deptype" => ColumnType::InternalChar,
+            ],
             Self::PgMatviews => columns![
                 "schemaname" => ColumnType::Name,
                 "matviewname" => ColumnType::Name,
@@ -630,6 +657,7 @@ fn ag_catalog_domain(name: &str, base: ColumnType) -> ColumnType {
         schema: AG_CATALOG_SCHEMA.into(),
         name: name.into(),
         oid: ag_catalog_type_oid(name),
+        array_oid: None,
         base: Box::new(base),
     }
 }
@@ -665,15 +693,27 @@ pub fn ag_catalog_domains() -> Vec<ColumnType> {
     vec![ag_label_id(), ag_label_kind()]
 }
 
+/// The fixed system catalog domain with this OID: the `information_schema` domains and the AGE catalog types.
+#[must_use]
+pub fn system_catalog_domain(oid: u32) -> Option<ColumnType> {
+    information_schema_domains()
+        .into_iter()
+        .chain(ag_catalog_domains())
+        .chain([age_graphid(), age_agtype()])
+        .find(|ty| matches!(ty, ColumnType::Domain { oid: domain_oid, .. } if *domain_oid == oid))
+}
+
 fn array(element: ColumnType) -> ColumnType {
     ColumnType::Array(Box::new(element))
 }
 
+/// An `information_schema` domain; initdb assigned each domain's array type the preceding OID.
 fn information_schema_domain(name: &str, oid: u32, base: ColumnType) -> ColumnType {
     ColumnType::Domain {
         schema: "information_schema".into(),
         name: name.into(),
         oid,
+        array_oid: Some(oid - 1),
         base: Box::new(base),
     }
 }
@@ -806,7 +846,11 @@ mod tests;
 
 pub mod analysis;
 
+pub mod array_type_names;
+
+pub mod composite_type;
 pub mod domain;
+pub mod enum_type;
 pub mod events;
 pub mod index;
 pub mod roles;
@@ -823,12 +867,18 @@ pub mod session;
 
 pub mod constraints;
 
+pub mod dependencies;
+
 pub const DATABASE_NAME: &str = "uqa";
 pub const DATABASE_OID: i64 = 5;
 
 pub mod stored_ast;
 
 pub mod regrole_dependencies;
+
+pub mod graph_oids;
+pub mod relation_oids;
+pub mod temporary_namespace;
 
 pub mod security;
 

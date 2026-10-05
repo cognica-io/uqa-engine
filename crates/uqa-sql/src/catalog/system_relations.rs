@@ -72,7 +72,6 @@ system_relations! {
     PgShadow => ("pg_catalog", "pg_shadow", 12005, "view"),
     PgTablespace => ("pg_catalog", "pg_tablespace", 1213, "table"),
     PgCollation => ("pg_catalog", "pg_collation", 3456, "table"),
-    PgDepend => ("pg_catalog", "pg_depend", 2608, "table"),
     PgSequence => ("pg_catalog", "pg_sequence", 2224, "table"),
     PgLanguage => ("pg_catalog", "pg_language", 2612, "table"),
     InformationEnabledRoles => ("information_schema", "enabled_roles", 13410, "view"),
@@ -159,7 +158,7 @@ impl SystemRelation {
                 P(PgNamespace),
                 Self::PgCollation,
                 P(PgNamespace),
-                Self::PgDepend,
+                P(VirtualRelation::PgDepend),
                 Self::PgSequence,
             ],
             P(InformationColumnPrivileges) => &[
@@ -191,9 +190,12 @@ impl SystemRelation {
                 P(PgType),
                 P(PgNamespace),
             ],
-            P(VirtualRelation::InformationSequences) => {
-                &[P(PgNamespace), P(PgClass), Self::PgSequence, Self::PgDepend]
-            }
+            P(VirtualRelation::InformationSequences) => &[
+                P(PgNamespace),
+                P(PgClass),
+                Self::PgSequence,
+                P(VirtualRelation::PgDepend),
+            ],
             P(VirtualRelation::InformationTableConstraints) => &[
                 P(PgNamespace),
                 P(PgNamespace),

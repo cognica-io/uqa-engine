@@ -88,8 +88,8 @@ pub(super) fn temporal_plus_interval_type(
     })
 }
 
-pub(super) fn value_generation_type(value: &Value) -> GenerationType {
-    match value {
+pub(super) fn value_generation_type(value: &Value) -> Result<GenerationType, SQLError> {
+    Ok(match value {
         Value::Null => GenerationType::Null,
         Value::Void => GenerationType::Void,
         Value::Bool(_) => GenerationType::Boolean,
@@ -111,28 +111,43 @@ pub(super) fn value_generation_type(value: &Value) -> GenerationType {
         Value::Temporal(uqa_core::TemporalValue::Interval { .. }) => GenerationType::Interval,
         Value::Array(array) => {
             let mut element = GenerationType::Null;
-            merge_array_generation_types(array.elements(), &mut element);
+            merge_array_generation_types(array.elements(), &mut element)?;
             GenerationType::Array(Box::new(element))
         }
         Value::List(values) => {
-            let element = values.iter().fold(GenerationType::Null, |current, value| {
-                common_type(&current, &value_generation_type(value)).unwrap_or(current)
-            });
+            let element = values
+                .iter()
+                .try_fold(GenerationType::Null, |current, value| {
+                    Ok::<_, SQLError>(
+                        common_type(&current, &value_generation_type(value)?).unwrap_or(current),
+                    )
+                })?;
             GenerationType::Array(Box::new(element))
         }
         Value::Row(_) | Value::Record(_) => GenerationType::Record,
         Value::Map(_) => GenerationType::JsonB,
-    }
+        // Parsed generation expressions keep enum literals as typed input text; a stored carrier here is an invariant violation.
+        Value::Enum(value) => {
+            return Err(SQLError::Internal(format!(
+                "generated-column typing received an enum carrier of type OID {}",
+                value.type_oid()
+            )))
+        }
+    })
 }
 
-pub(super) fn merge_array_generation_types(values: &[Value], element: &mut GenerationType) {
+pub(super) fn merge_array_generation_types(
+    values: &[Value],
+    element: &mut GenerationType,
+) -> Result<(), SQLError> {
     for value in values {
         if let Value::List(nested) = value {
-            merge_array_generation_types(nested, element);
-        } else if let Ok(common) = common_type(element, &value_generation_type(value)) {
+            merge_array_generation_types(nested, element)?;
+        } else if let Ok(common) = common_type(element, &value_generation_type(value)?) {
             *element = common;
         }
     }
+    Ok(())
 }
 
 pub(super) fn generation_type_from_name(name: &str) -> Option<GenerationType> {
@@ -196,6 +211,8 @@ pub(super) fn assignment_compatible(source: &GenerationType, target: &Generation
         | (T::Time, T::TimeTz | T::Interval)
         | (T::TimeTz | T::Interval, T::Time) => true,
         (T::Array(source), T::Array(target)) => assignment_compatible(source, target),
+        // A row constructor is coerced to the target composite type attribute by attribute.
+        (T::Record, T::Composite(_)) => true,
         (T::Array(element), T::Vector) => is_numeric(element),
         (T::Array(element), T::Tensor) => {
             matches!(element.as_ref(), T::Array(inner) if is_numeric(inner))

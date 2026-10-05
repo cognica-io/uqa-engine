@@ -385,6 +385,8 @@ pub struct InsertPlan {
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
+    #[serde(default)]
+    pub target_alias: Option<String>,
     pub include_descendants: bool,
     pub columns: Vec<crate::ast::AssignmentTarget<ScalarExpr>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -431,6 +433,8 @@ pub struct UpdatePlan {
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
+    #[serde(default)]
+    pub target_alias: Option<String>,
     pub include_descendants: bool,
     pub assignments: Vec<AssignmentPlan>,
     pub predicate: Option<ScalarExpr>,
@@ -456,6 +460,8 @@ pub struct DeletePlan {
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
+    #[serde(default)]
+    pub target_alias: Option<String>,
     pub include_descendants: bool,
     pub predicate: Option<ScalarExpr>,
     pub ctes: Vec<CtePlan>,
@@ -634,12 +640,20 @@ pub enum CommandPlan {
     },
     CreateSequence(crate::ast::CreateSequence),
     CreateDomain(crate::ast::CreateDomain),
+    CreateEnum(crate::ast::CreateEnum),
+    CreateCompositeType(crate::ast::CreateCompositeType),
+    AlterEnum(crate::ast::AlterEnum),
+    AlterTypeObject(crate::ast::AlterTypeObject),
+    GrantType(crate::ast::GrantTypeStmt),
     AlterSequence(crate::ast::AlterSequence),
     CreateTableAs {
         name: String,
         if_not_exists: bool,
         column_names: Vec<String>,
         with_no_data: bool,
+        /// Written as `SELECT ... INTO`, which `PostgreSQL` tags `SELECT INTO`.
+        #[serde(default)]
+        select_into: bool,
         persistence: crate::ast::RelationPersistence,
         on_commit: crate::ast::OnCommitAction,
         query: Box<QueryPlan>,

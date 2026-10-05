@@ -33,6 +33,7 @@ pub(super) enum StoredValue {
     Row(Vec<StoredValue>),
     Record(Vec<(String, StoredValue)>),
     Map(BTreeMap<String, StoredValue>),
+    Enum(uqa_core::EnumValue),
 }
 
 impl StoredValue {
@@ -66,6 +67,7 @@ impl StoredValue {
                     .map(|(key, value)| (key, Self::from_value(value)))
                     .collect(),
             ),
+            Value::Enum(value) => Self::Enum(value),
         }
     }
 
@@ -99,6 +101,7 @@ impl StoredValue {
                     .map(|(key, value)| (key, value.into_value()))
                     .collect(),
             ),
+            Self::Enum(value) => Value::Enum(value),
         }
     }
 }

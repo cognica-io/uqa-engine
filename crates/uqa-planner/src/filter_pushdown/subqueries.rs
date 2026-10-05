@@ -114,7 +114,13 @@ pub(super) fn outer_expression_contains_volatile_function(
                     .iter()
                     .any(|item| outer_expression_contains_volatile_function(context, item))
         }
-        ScalarExpr::WindowCall { name, args, spec } => {
+        ScalarExpr::WindowCall {
+            name,
+            args,
+            spec,
+            filter,
+            ..
+        } => {
             uqa_sql::semantics::volatility::function_volatility(
                 context.volatility,
                 name,
@@ -122,15 +128,10 @@ pub(super) fn outer_expression_contains_volatile_function(
             ) == uqa_sql::ast::FunctionVolatility::Volatile
                 || args
                     .iter()
+                    .chain(filter.as_deref())
+                    .chain(&spec.partition_by)
+                    .chain(spec.order_by.iter().map(|order| &order.expr))
                     .any(|expr| outer_expression_contains_volatile_function(context, expr))
-                || spec
-                    .partition_by
-                    .iter()
-                    .any(|expr| outer_expression_contains_volatile_function(context, expr))
-                || spec
-                    .order_by
-                    .iter()
-                    .any(|order| outer_expression_contains_volatile_function(context, &order.expr))
                 || spec.frame.as_ref().is_some_and(|frame| {
                     frame_bound_outer_expression_contains_volatile_function(context, &frame.start)
                         || frame_bound_outer_expression_contains_volatile_function(

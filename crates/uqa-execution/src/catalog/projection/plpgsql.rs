@@ -17,11 +17,11 @@ pub fn plpgsql_catalog(
     resolution: &RelationNameResolution,
     search_path: Vec<String>,
 ) -> Result<PlpgsqlCatalog, SQLError> {
-    let namespaces = super::build_pg_namespace(catalog, resolution)?
+    let namespaces = super::build_pg_namespace(catalog)?
         .iter()
         .map(|row| Ok((text(row, "nspname")?.to_string(), oid(row, "oid")?)))
         .collect::<Result<_, SQLError>>()?;
-    let types = super::build_pg_type(catalog)
+    let types = super::build_pg_type(catalog, resolution)?
         .iter()
         .map(|row| {
             Ok(PlpgsqlType {

@@ -49,18 +49,31 @@ pub fn generated_columns_referencing_column(columns: &[ColumnDef], column: &str)
         .map(|candidate| candidate.name.clone())
         .collect()
 }
+fn described_columns(
+    context: &ColumnAlterAnalysisContext<'_>,
+    table: &str,
+    action: &str,
+) -> Result<Vec<ColumnDef>, SQLError> {
+    context
+        .columns
+        .try_describe_table(table)
+        .map_err(|error| ddl_storage_error(action, error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
+}
+/// `ATExecColumnDefault` for `SET DEFAULT`: the column is checked before the default is analyzed against its type. Returns whether a default remains; `SET DEFAULT NULL` leaves none.
 pub fn validate_column_default(
     context: &ColumnAlterAnalysisContext<'_>,
     table: &str,
     column: &str,
     default: &mut Expr,
-) -> Result<(), SQLError> {
-    super::reject_default_change(context.columns, table, column, true)?;
+) -> Result<bool, SQLError> {
+    let columns = described_columns(context, table, "ALTER COLUMN SET DEFAULT")?;
+    super::validate_default_change(table, super::altered_column(table, &columns, column)?, true)?;
     let target = context
         .state
         .column_type(table, column)
         .map_err(|error| ddl_storage_error("ALTER COLUMN SET DEFAULT", error))?
-        .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{column}")))?;
+        .ok_or_else(|| super::undefined_relation_column(table, column))?;
     let binding = context.bindings.bindings.binding_scope()?;
     crate::schema::defaults::validate_default_expression(
         &crate::schema::SchemaBindingContext {
@@ -69,7 +82,30 @@ pub fn validate_column_default(
         },
         default,
         &target,
+        column,
     )
+}
+/// `ATExecColumnDefault` for `DROP DEFAULT`.
+pub fn validate_default_removal(
+    context: &ColumnAlterAnalysisContext<'_>,
+    table: &str,
+    column: &str,
+) -> Result<(), SQLError> {
+    let columns = described_columns(context, table, "ALTER COLUMN DROP DEFAULT")?;
+    super::validate_default_change(
+        table,
+        super::altered_column(table, &columns, column)?,
+        false,
+    )
+}
+fn not_generated(table: &str, column: &str) -> Result<String, SQLError> {
+    let relation = uqa_core::RelationIdentity::from_legacy_name(table).map_err(|error| {
+        SQLError::Internal(format!("resolve ALTER TABLE target `{table}`: {error}"))
+    })?;
+    Ok(format!(
+        "column \"{column}\" of relation \"{}\" is not a generated column",
+        relation.name
+    ))
 }
 pub fn analyze_generated_expression(
     context: &ColumnAlterAnalysisContext<'_>,
@@ -86,11 +122,12 @@ pub fn analyze_generated_expression(
     let column = columns
         .iter_mut()
         .find(|column| column.name == name)
-        .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{name}")))?;
+        .ok_or_else(|| super::missing_altered_column(table, name))?;
     let Some(current) = column.generated.as_ref() else {
-        return Err(SQLError::TypeMismatch(format!(
-            "column `{name}` of relation `{table}` is not a generated column"
-        )));
+        return Err(SQLError::Routine {
+            sqlstate: "55000".into(),
+            message: not_generated(table, name)?,
+        });
     };
     let kind = current.kind;
     column.generated = Some(GeneratedColumn {
@@ -102,8 +139,12 @@ pub fn analyze_generated_expression(
         .keys
         .try_foreign_keys(table)
         .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?;
+    let binding = context.bindings.bindings.binding_scope()?;
     crate::schema::generated::prepare_generated_columns(
-        context.bindings.schema,
+        &crate::schema::SchemaBindingContext {
+            catalog: context.bindings.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut columns,
         &foreign_keys,
@@ -119,31 +160,43 @@ pub fn analyze_generated_expression(
         })?;
     Ok((generated, kind))
 }
+/// `ATExecDropExpression`'s checks: the notice that skips a column that is not generated under `IF EXISTS`, or `None` to drop the expression of a stored generated column.
 pub fn validate_drop_expression(
     context: &ColumnAlterAnalysisContext<'_>,
     table: &str,
     name: &str,
-) -> Result<(), SQLError> {
-    let columns = context
-        .columns
-        .try_describe_table(table)
-        .map_err(|error| ddl_storage_error("ALTER COLUMN DROP EXPRESSION", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let column = columns
-        .iter()
-        .find(|column| column.name == name)
-        .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{name}")))?;
+    if_exists: bool,
+) -> Result<Option<crate::SQLNotice>, SQLError> {
+    let columns = described_columns(context, table, "ALTER COLUMN DROP EXPRESSION")?;
+    let column = super::altered_column(table, &columns, name)?;
     let Some(generated) = column.generated.as_ref() else {
-        return Err(SQLError::TypeMismatch(format!(
-            "column `{name}` of relation `{table}` is not a generated column"
-        )));
+        let message = not_generated(table, name)?;
+        if if_exists {
+            return Ok(Some(crate::SQLNotice::notice(format!(
+                "{message}, skipping"
+            ))));
+        }
+        return Err(SQLError::Routine {
+            sqlstate: "55000".into(),
+            message,
+        });
     };
     if generated.kind == GeneratedColumnKind::Virtual {
-        return Err(SQLError::Unsupported(format!(
-            "ALTER TABLE / DROP EXPRESSION is not supported for virtual generated column `{name}`"
-        )));
+        let relation = uqa_core::RelationIdentity::from_legacy_name(table).map_err(|error| {
+            SQLError::Internal(format!("resolve ALTER TABLE target `{table}`: {error}"))
+        })?;
+        return Err(SQLError::Diagnostic {
+            sqlstate: "0A000".into(),
+            message: "ALTER TABLE / DROP EXPRESSION is not supported for virtual generated columns"
+                .into(),
+            detail: Some(format!(
+                "Column \"{name}\" of relation \"{}\" is a virtual generated column.",
+                relation.name
+            )),
+            hint: None,
+        });
     }
-    Ok(())
+    Ok(None)
 }
 pub fn analyze_column_type(
     context: &ColumnAlterAnalysisContext<'_>,
@@ -157,10 +210,10 @@ pub fn analyze_column_type(
         .has_column(table, name)
         .map_err(|error| ddl_storage_error("ALTER COLUMN", error))?
     {
-        return Err(SQLError::Unsupported(format!(
-            "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
-        )));
+        return Err(super::missing_altered_column(table, name));
     }
+    // ATPrepAlterColumnType requires USAGE on the new type before CheckAttributeType rejects a pseudo-type.
+    context.bindings.schema.require_type_usage(ty)?;
     super::validate_postgres_relation_column_type(name, ty)?;
     let mut candidate_columns = context
         .columns
@@ -198,8 +251,12 @@ pub fn analyze_column_type(
         &key_constraints,
         &foreign_keys,
     )?;
+    let binding = context.bindings.bindings.binding_scope()?;
     crate::schema::generated::prepare_generated_columns(
-        context.bindings.schema,
+        &crate::schema::SchemaBindingContext {
+            catalog: context.bindings.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut candidate_columns,
         &foreign_keys,

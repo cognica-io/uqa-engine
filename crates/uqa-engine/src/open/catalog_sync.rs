@@ -33,6 +33,7 @@ impl Engine {
             persistence: table.persistence,
             on_commit: table.on_commit,
             hierarchy: table.hierarchy.read().clone(),
+            catalog_oids: table.recorded_catalog_oids(),
         };
         let security = table.security();
         serde_json::to_vec(&(
@@ -232,6 +233,18 @@ impl Engine {
             self.storage.catalog.as_deref(),
             &current.domains,
             snapshot.domains,
+            &snapshot.roles,
+        )?;
+        snapshot.enums = uqa_execution::catalog::enum_type::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.enums,
+            snapshot.enums,
+            &snapshot.roles,
+        )?;
+        snapshot.composites = uqa_execution::catalog::composite_type::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.composites,
+            snapshot.composites,
             &snapshot.roles,
         )?;
         snapshot.sql_user_functions = uqa_execution::routines::catalog::merge_private(

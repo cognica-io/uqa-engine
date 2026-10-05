@@ -7,8 +7,8 @@
 //! UPDATE and DELETE statement lowering.
 
 use super::{
-    compile_expr, compile_from_node, compile_returning_clause, compile_with_clause, range_var_name,
-    DeleteStmt, NodeEnum, Result, SQLError, UpdateStmt,
+    compile_expr, compile_from_node, compile_returning_clause, compile_with_clause,
+    range_var_alias, range_var_name, DeleteStmt, NodeEnum, Result, SQLError, UpdateStmt,
 };
 
 pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
@@ -24,23 +24,7 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
         .filter(|alias| !alias.is_empty())
         .unwrap_or(&relation.relname)
         .to_string();
-    let mut assignments = Vec::new();
-    for target_node in &stmt.target_list {
-        let inner = target_node
-            .node
-            .as_ref()
-            .ok_or_else(|| SQLError::Internal("UPDATE contains an empty assignment".into()))?;
-        let NodeEnum::ResTarget(rt) = inner else {
-            return Err(SQLError::Internal(format!(
-                "UPDATE expected ResTarget, got {inner:?}"
-            )));
-        };
-        let value = rt
-            .val
-            .as_ref()
-            .ok_or_else(|| SQLError::Internal("UPDATE assignment without value".into()))?;
-        assignments.push((compile_assignment_target(rt)?, compile_expr(value)?));
-    }
+    let assignments = compile_set_clause(&stmt.target_list, "UPDATE")?;
     let r#where = stmt
         .where_clause
         .as_ref()
@@ -59,6 +43,7 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
         table,
         target_relation_bound: false,
         target_qualifier,
+        target_alias: range_var_alias(relation),
         include_descendants: relation.inh,
         assignments,
         r#where,
@@ -67,6 +52,69 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
         returning,
         returning_aliases,
     })
+}
+
+/// The `SET` list of `UPDATE`, `INSERT ... ON CONFLICT DO UPDATE` and `MERGE ... UPDATE`, as `transformUpdateTargetList` reads it: an item `(a, b) = ROW(...)` assigns each column the row's element at its position.
+pub(super) fn compile_set_clause(
+    targets: &[pg_query::protobuf::Node],
+    statement: &str,
+) -> Result<Vec<(crate::ast::AssignmentTarget, crate::ast::Expr)>> {
+    targets
+        .iter()
+        .map(|node| {
+            let Some(NodeEnum::ResTarget(target)) = node.node.as_ref() else {
+                return Err(SQLError::Internal(format!(
+                    "{statement} contains a malformed assignment"
+                )));
+            };
+            let value = target.val.as_ref().ok_or_else(|| {
+                SQLError::Internal(format!("{statement} assignment without value"))
+            })?;
+            let value = match value.node.as_ref() {
+                Some(NodeEnum::MultiAssignRef(reference)) => multiple_column_value(reference)?,
+                _ => compile_expr(value)?,
+            };
+            Ok((compile_assignment_target(target)?, value))
+        })
+        .collect()
+}
+
+/// `transformMultiAssignRef`: the value one column of a multiple-column `SET` item takes.
+fn multiple_column_value(
+    reference: &pg_query::protobuf::MultiAssignRef,
+) -> Result<crate::ast::Expr> {
+    use pg_query::protobuf::SubLinkType;
+    match reference
+        .source
+        .as_ref()
+        .and_then(|source| source.node.as_ref())
+    {
+        Some(NodeEnum::RowExpr(row)) => {
+            if usize::try_from(reference.ncolumns).ok() != Some(row.args.len()) {
+                return Err(SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message: "number of columns does not match number of values".into(),
+                });
+            }
+            let element = usize::try_from(reference.colno)
+                .ok()
+                .and_then(|column| column.checked_sub(1))
+                .and_then(|index| row.args.get(index))
+                .ok_or_else(|| {
+                    SQLError::Internal("multiple-column assignment outside its row".into())
+                })?;
+            compile_expr(element)
+        }
+        Some(NodeEnum::SubLink(link)) if link.sub_link_type() == SubLinkType::ExprSublink => Err(
+            SQLError::Unsupported("multiple-column assignment from a sub-SELECT".into()),
+        ),
+        _ => Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message:
+                "source for a multiple-column UPDATE item must be a sub-SELECT or ROW() expression"
+                    .into(),
+        }),
+    }
 }
 
 pub(super) fn compile_assignment_target(
@@ -140,6 +188,7 @@ pub(super) fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<De
         table,
         target_relation_bound: false,
         target_qualifier,
+        target_alias: range_var_alias(relation),
         include_descendants: relation.inh,
         r#where,
         with,

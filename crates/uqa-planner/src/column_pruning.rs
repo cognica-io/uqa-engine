@@ -646,9 +646,14 @@ fn collect_expr_prune_columns(
                 collect_expr_prune_columns(item, scope, prune, valid);
             }
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             for argument in args {
                 collect_expr_prune_columns(argument, scope, prune, valid);
+            }
+            if let Some(filter) = filter {
+                collect_expr_prune_columns(filter, scope, prune, valid);
             }
             for expression in &spec.partition_by {
                 collect_expr_prune_columns(expression, scope, prune, valid);

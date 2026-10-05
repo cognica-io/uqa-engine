@@ -39,6 +39,22 @@ pub fn convert_value_to_column_type_with_control(
             sqlstate: "42704".into(),
             message: format!("type \"{name}\" does not exist"),
         }),
+        // Label input needs the catalog; catalog-aware assignment converts text before this context-free step.
+        ColumnType::Enum(reference) => match &*value {
+            Value::Enum(label) if label.type_oid() == reference.oid => Ok(value),
+            _ => Err(SQLError::Internal(format!(
+                "enum input for type OID {} requires catalog-aware conversion",
+                reference.oid
+            ))),
+        },
+        // Composite input and coercion need the attributes; catalog-aware assignment converts rows and text before this context-free step.
+        ColumnType::Composite(reference) => match &*value {
+            Value::Record(_) => Ok(value),
+            _ => Err(SQLError::Internal(format!(
+                "composite input for type OID {} requires catalog-aware conversion",
+                reference.oid
+            ))),
+        },
         ColumnType::SmallInteger => cast_value_from_with_control(&value, "smallint", None, control),
         ColumnType::Integer => cast_value_from_with_control(&value, "integer", None, control),
         ColumnType::BigInteger => cast_value_from_with_control(&value, "bigint", None, control),

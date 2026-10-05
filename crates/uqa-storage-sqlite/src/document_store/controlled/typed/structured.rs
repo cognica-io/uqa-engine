@@ -246,3 +246,50 @@ fn temporal_number(
         control.memory().empty_reservation(),
     ))
 }
+
+/// Typed enum payloads carry the type OID and hexadecimal label key. The hexadecimal text's reservation covers the decoded key, and invalid keys are malformed stored carriers.
+pub(super) fn enum_value(
+    input: &[u8],
+    control: &StorageReadControl,
+    depth: usize,
+) -> Result<Budgeted<Value>, JsonReadError> {
+    let mut container = Container::new(input, control, depth)?;
+    let mut type_oid = None;
+    let mut key = None;
+    if container.kind == Kind::Array {
+        type_oid = Some(container.next()?.ok_or(JsonReadError::InvalidJson)?.value);
+        key = Some(string(
+            container.next()?.ok_or(JsonReadError::InvalidJson)?.value,
+            control,
+        )?);
+        if container.next()?.is_some() {
+            return Err(JsonReadError::InvalidJson);
+        }
+    } else {
+        while let Some(item) = container.next()? {
+            let name = string(item.key.expect("enum field"), control)?;
+            match name.as_str() {
+                "type_oid" if type_oid.is_none() => type_oid = Some(item.value),
+                "key" if key.is_none() => key = Some(string(item.value, control)?),
+                _ => return Err(JsonReadError::InvalidJson),
+            }
+        }
+    }
+    let (Some(type_oid), Some(key)) = (type_oid, key) else {
+        return Err(JsonReadError::InvalidJson);
+    };
+    let malformed = |reason: String| JsonReadError::Malformed {
+        kind: "enum",
+        reason,
+    };
+    let type_oid = u32::try_from(super::unsigned(type_oid, control, false)?)
+        .map_err(|_| malformed("type OID out of range".into()))?;
+    let (key, memory) = key.into_parts();
+    let key =
+        uqa_core::EnumLabelKey::from_hex(&key).map_err(|error| malformed(error.to_string()))?;
+    super::finish(
+        Value::Enum(uqa_core::EnumValue::new(type_oid, key)),
+        memory,
+        control,
+    )
+}

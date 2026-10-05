@@ -9,10 +9,15 @@
 pub use uqa_storage::catalog::new_nonzero_catalog_identity;
 
 mod reservation;
-pub use reservation::reserve_catalog_oid;
+pub use reservation::{reserve_catalog_oid, reserve_new_catalog_oid};
 
 mod allocation;
-pub use allocation::{CatalogIdentityReservationContext, ReservedCatalogIdentityAllocator};
+pub use allocation::{
+    CatalogIdentityReservationContext, LabelShape, ReservedCatalogIdentityAllocator,
+};
+
+mod counter;
+pub use counter::{CatalogOidCounter, FIRST_NORMAL_OBJECT_ID};
 
 pub fn allocate_catalog_oid(kind: &str) -> Result<i64, uqa_sql::SQLError> {
     loop {

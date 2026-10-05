@@ -160,6 +160,21 @@ impl SharedObjectLockSession for Engine {
     fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
         self.refresh_explicit_statement_snapshot()
     }
+
+    fn next_catalog_oid(&self) -> Result<u32, SQLError> {
+        let durable = self
+            .storage
+            .backend
+            .as_ref()
+            .and_then(|backend| backend.identifier_allocator());
+        self.row_locks.catalog_oids().next_oid(durable, || {
+            let catalog = self.catalog_execution();
+            uqa_execution::catalog::projection::largest_catalog_oid(
+                &catalog.catalog_read_view(),
+                &catalog.session.relation_name_resolution(),
+            )
+        })
+    }
 }
 
 impl RelationLockCatalog for Engine {
@@ -193,9 +208,49 @@ impl RelationLockCatalog for Engine {
             .get(&relation)
             .map(|table| table.object_id))
     }
+    fn relation_catalog_oid(&self, name: &str) -> Result<Option<u32>, SQLError> {
+        let relation =
+            uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
+        if let Some(table) = self.storage.tables.read().get(&relation) {
+            return Ok(Some(table.relation_oids().relation));
+        }
+        if let Some(view) = self.durable.views.read().get(&relation) {
+            return Ok(Some(view.relation_oids().relation));
+        }
+        Ok(self
+            .durable
+            .foreign_tables
+            .read()
+            .get(&relation)
+            .map(|table| table.relation_oids().relation))
+    }
     fn table_name(&self, object_id: [u8; 16]) -> Option<String> {
         self.storage.tables.read().iter().find_map(|(name, table)| {
             (table.object_id() == object_id).then(|| name.qualified_name())
         })
+    }
+    fn relation_name(&self, object_id: [u8; 16]) -> Option<String> {
+        self.table_name(object_id)
+            .or_else(|| {
+                self.durable.views.read().iter().find_map(|(name, view)| {
+                    (view.object_id == object_id).then(|| name.qualified_name())
+                })
+            })
+            .or_else(|| {
+                self.durable
+                    .sequence_object_ids
+                    .read()
+                    .iter()
+                    .find_map(|(name, id)| (*id == object_id).then(|| name.qualified_name()))
+            })
+            .or_else(|| {
+                self.durable
+                    .foreign_tables
+                    .read()
+                    .iter()
+                    .find_map(|(name, table)| {
+                        (table.object_id == object_id).then(|| name.qualified_name())
+                    })
+            })
     }
 }

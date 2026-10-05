@@ -18,6 +18,7 @@ use uqa_storage::StorageBackendResult;
 impl Engine {
     pub(crate) fn sequence_creation_context(&self) -> SequenceCreationContext<'_> {
         SequenceCreationContext {
+            identities: self.catalog_identity_reservation_context(),
             creation: self.relation_creation_context(),
             namespace: self,
             owners: self,
@@ -82,6 +83,7 @@ impl SequenceCreationPublication for Engine {
         mut state: SequenceState,
         persistence: RelationPersistence,
         role_owner: uqa_core::catalog_role::RoleIdentity,
+        catalog_oid: u32,
     ) -> Result<bool, SQLError> {
         let security = BoundSequenceSecurity::owner(role_owner);
         let object_id = crate::new_sequence_object_id().map_err(|error| {
@@ -106,6 +108,14 @@ impl SequenceCreationPublication for Engine {
             if !created {
                 return Ok(false);
             }
+            uqa_execution::catalog::sequence::catalog_oids::record(
+                catalog.as_ref(),
+                &object_id,
+                catalog_oid,
+            )
+            .map_err(|error| {
+                SQLError::Internal(format!("persist sequence catalog OID: {error}"))
+            })?;
         } else {
             let seqs = self.durable.sequences.read();
             if seqs.contains_key(relation) {
@@ -120,6 +130,10 @@ impl SequenceCreationPublication for Engine {
             .sequence_object_ids
             .write()
             .insert(relation.clone(), object_id);
+        self.durable
+            .sequence_catalog_oids
+            .write()
+            .insert(object_id, catalog_oid);
         self.durable
             .sequence_persistence
             .write()

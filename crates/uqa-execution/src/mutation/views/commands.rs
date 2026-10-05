@@ -35,8 +35,10 @@ use uqa_sql::{
 use uqa_storage::document_store::Document;
 
 pub type SourceOutputPruning = fn(&mut QueryPlan, &BTreeSet<usize>, usize);
+mod checks;
 mod insert;
 mod update_delete;
+pub use checks::TriggerViewChecks;
 pub use insert::run_view_insert_inner;
 pub use update_delete::{run_view_delete_inner, run_view_update_inner};
 

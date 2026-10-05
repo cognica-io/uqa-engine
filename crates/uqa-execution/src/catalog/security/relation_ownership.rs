@@ -64,6 +64,14 @@ impl TablePrivilegeContext<'_> {
                 .security_read()
                 .get(relation)
                 .map(|security| security.role_owner),
+            "composite type" => self
+                .catalog
+                .catalog_read_view()
+                .snapshot()
+                .definitions
+                .composites
+                .get(&relation.qualified_name())
+                .map(|definition| definition.owner),
             "index" => {
                 let catalog = self.catalog.catalog_read_view();
                 let index = catalog

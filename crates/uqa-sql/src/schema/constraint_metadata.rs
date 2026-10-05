@@ -39,6 +39,16 @@ impl std::error::Error for ConstraintMetadataError {
         }
     }
 }
+impl ConstraintMetadataError {
+    /// The error as a statement reports it: an invalid identity is internal, an execution error is itself.
+    pub fn into_sql_error(self) -> crate::SQLError {
+        match self {
+            Self::Invalid(message) => crate::SQLError::Internal(message),
+            Self::Execution(error) => *error,
+        }
+    }
+}
+
 pub type ConstraintMetadataResult<T> = Result<T, ConstraintMetadataError>;
 pub type CatalogIdentityAllocator<'a> = dyn CatalogObjectAllocator + 'a;
 
@@ -46,6 +56,18 @@ pub type CatalogIdentityAllocator<'a> = dyn CatalogObjectAllocator + 'a;
 pub enum CatalogOidClass {
     Constraint,
     Relation,
+    /// `pg_type` rows, including generated array types.
+    Type,
+    /// `pg_enum` label rows.
+    EnumLabel,
+    /// `pg_rewrite` rows: user rules and the `_RETURN` rules of views.
+    Rewrite,
+    /// `pg_proc` rows.
+    Procedure,
+    /// `pg_attrdef` rows: column defaults and generation expressions.
+    AttributeDefault,
+    /// `pg_trigger` rows.
+    Trigger,
 }
 
 impl CatalogOidClass {
@@ -53,6 +75,12 @@ impl CatalogOidClass {
         match self {
             Self::Constraint => 2606,
             Self::Relation => 1259,
+            Self::Type => 1247,
+            Self::EnumLabel => 3501,
+            Self::Rewrite => 2618,
+            Self::Procedure => 1255,
+            Self::AttributeDefault => 2604,
+            Self::Trigger => 2620,
         }
     }
 
@@ -60,6 +88,12 @@ impl CatalogOidClass {
         match self {
             Self::Constraint => "constraint",
             Self::Relation => "relation",
+            Self::Type => "type",
+            Self::EnumLabel => "enum label",
+            Self::Rewrite => "rule",
+            Self::Procedure => "function",
+            Self::AttributeDefault => "default",
+            Self::Trigger => "trigger",
         }
     }
 }
@@ -148,6 +182,23 @@ pub fn materialize_constraint_metadata_with_names(
         if let Some(object_id) = column.object_id {
             column_object_ids.insert(object_id);
         }
+    }
+    // `DefineRelation` stores the defaults and generation expressions, then the CHECK constraints of the columns and of the table, then the NOT NULL constraints; key indexes and foreign keys follow the relation.
+    for column in columns.iter_mut() {
+        changed |= identity::materialize_default_oid(column, allocate)?;
+    }
+    for column in columns.iter_mut() {
+        if let Some(check) = &column.check {
+            changed |= assign_check_name(&relation.name, check, &mut column.check_name, &mut used)?;
+            changed |= materialize_check_identity(
+                &mut column.check_object_id,
+                &mut column.check_catalog_oid,
+                allocate,
+            )?;
+        }
+    }
+    changed |= materialize_checks(relation, &mut constraints.checks, &mut used, allocate)?;
+    for column in columns.iter_mut() {
         if column.not_null {
             changed |= assign_constraint_name(
                 &mut column.not_null_name,
@@ -155,33 +206,6 @@ pub fn materialize_constraint_metadata_with_names(
                 &mut used,
             )?;
             changed |= identity::materialize_not_null_identity(column, allocate)?;
-        }
-        if column.check.is_some() {
-            changed |= assign_constraint_name(
-                &mut column.check_name,
-                (&relation.name, &column.name, "check"),
-                &mut used,
-            )?;
-            changed |= assign_catalog_object_id(
-                &mut column.check_object_id,
-                "CHECK constraint",
-                allocate,
-            )?;
-            changed |= identity::materialize_check_oid(
-                column.check_object_id,
-                &mut column.check_catalog_oid,
-                allocate,
-            )?;
-        }
-        if let Some(reference) = &mut column.references {
-            changed |= assign_constraint_name(
-                &mut reference.name,
-                (&relation.name, &column.name, "fkey"),
-                &mut used,
-            )?;
-            changed |= assign_constraint_object_id(&mut reference.object_id, allocate)?;
-            changed |=
-                identity::foreign_keys::materialize(&mut reference.catalog_identity, allocate)?;
         }
     }
     for constraint in &mut constraints.key_constraints {
@@ -199,7 +223,20 @@ pub fn materialize_constraint_metadata_with_names(
         )?;
         changed |= identity::materialize_key_identity(constraint, allocate)?;
     }
-    changed |= materialize_checks(relation, &mut constraints.checks, &mut used, allocate)?;
+    for column in columns.iter_mut() {
+        if let Some(reference) = &mut column.references {
+            changed |= assign_constraint_name(
+                &mut reference.name,
+                (&relation.name, &column.name, "fkey"),
+                &mut used,
+            )?;
+            changed |= materialize_foreign_key_identity(
+                &mut reference.object_id,
+                &mut reference.catalog_identity,
+                allocate,
+            )?;
+        }
+    }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     for constraint in &mut constraints.foreign_keys {
         let component = constraint_column_component(&constraint.local_columns, relation)?;
@@ -208,8 +245,11 @@ pub fn materialize_constraint_metadata_with_names(
             (&relation.name, &component, "fkey"),
             &mut used,
         )?;
-        changed |= assign_constraint_object_id(&mut constraint.object_id, allocate)?;
-        changed |= identity::foreign_keys::materialize(&mut constraint.catalog_identity, allocate)?;
+        changed |= materialize_foreign_key_identity(
+            &mut constraint.object_id,
+            &mut constraint.catalog_identity,
+            allocate,
+        )?;
     }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     changed |= identity::keys::synchronize_provenance(constraints);
@@ -225,26 +265,35 @@ fn materialize_checks(
 ) -> ConstraintMetadataResult<bool> {
     let mut changed = false;
     for constraint in checks {
-        let mut referenced_columns = Vec::new();
-        collect_constraint_columns(&constraint.expr, &mut referenced_columns);
-        let component = if referenced_columns.len() == 1 {
-            referenced_columns[0].as_str()
-        } else {
-            ""
-        };
-        changed |= assign_constraint_name(
-            &mut constraint.name,
-            (&relation.name, component, "check"),
-            used,
-        )?;
-        changed |=
-            assign_catalog_object_id(&mut constraint.object_id, "CHECK constraint", allocate)?;
-        changed |= identity::materialize_check_oid(
-            constraint.object_id,
+        changed |= assign_check_name(&relation.name, &constraint.expr, &mut constraint.name, used)?;
+        changed |= materialize_check_identity(
+            &mut constraint.object_id,
             &mut constraint.catalog_oid,
             allocate,
         )?;
     }
+    Ok(changed)
+}
+
+/// `StoreRelCheck`: a CHECK constraint takes its incarnation and its `pg_constraint` OID when it is stored and keeps them afterwards.
+pub fn materialize_check_identity(
+    object_id: &mut Option<[u8; 16]>,
+    catalog_oid: &mut Option<i64>,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> ConstraintMetadataResult<bool> {
+    let mut changed = assign_catalog_object_id(object_id, "CHECK constraint", allocate)?;
+    changed |= identity::materialize_check_oid(*object_id, catalog_oid, allocate)?;
+    Ok(changed)
+}
+
+/// `CreateConstraintEntry` for a foreign key: the constraint row's incarnation and OID, allocated when the constraint is created and kept afterwards.
+pub fn materialize_foreign_key_identity(
+    object_id: &mut Option<[u8; 16]>,
+    catalog_identity: &mut Option<crate::ast::ConstraintCatalogIdentity>,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> ConstraintMetadataResult<bool> {
+    let mut changed = assign_constraint_object_id(object_id, allocate)?;
+    changed |= identity::foreign_keys::materialize(catalog_identity, allocate)?;
     Ok(changed)
 }
 
@@ -340,6 +389,7 @@ pub fn materialize_column_key_constraints(
                 .key_constraints
                 .push(crate::ast::TableKeyConstraint {
                     catalog_identity: None,
+                    index_identity: None,
                     name: None,
                     kind,
                     columns: vec![column.name.clone()],
@@ -469,6 +519,22 @@ fn duplicate_constraint(relation: &RelationIdentity, name: &str) -> ConstraintMe
     ))
 }
 
+/// Name an unnamed CHECK as `AddRelationNewConstraints` does, wherever the statement wrote it: after the relation, the one column the expression references when it references exactly one, then `check`, unique among `used` as `ChooseConstraintName` makes it.
+pub(super) fn assign_check_name(
+    relation: &str,
+    expression: &crate::ast::Expr,
+    target: &mut Option<String>,
+    used: &mut BTreeSet<String>,
+) -> ConstraintMetadataResult<bool> {
+    let mut referenced_columns = Vec::new();
+    collect_constraint_columns(expression, &mut referenced_columns);
+    let component = match referenced_columns.as_slice() {
+        [column] => column.as_str(),
+        _ => "",
+    };
+    assign_constraint_name(target, (relation, component, "check"), used)
+}
+
 pub(super) fn assign_constraint_name(
     target: &mut Option<String>,
     parts: (&str, &str, &str),
@@ -558,23 +624,25 @@ fn collect_constraint_columns(expression: &crate::ast::Expr, output: &mut Vec<St
                 collect_constraint_columns(item, output);
             }
         }
-        Expr::WindowCall { args, spec, .. } => {
-            for argument in args {
-                collect_constraint_columns(argument, output);
-            }
-            for expression in &spec.partition_by {
+        Expr::WindowCall {
+            args, spec, filter, ..
+        } => {
+            for expression in args
+                .iter()
+                .chain(filter.as_deref())
+                .chain(&spec.partition_by)
+                .chain(spec.order_by.iter().map(|order| &order.expr))
+            {
                 collect_constraint_columns(expression, output);
             }
-            for order in &spec.order_by {
-                collect_constraint_columns(&order.expr, output);
-            }
-            if let Some(frame) = &spec.frame {
-                for bound in [&frame.start, &frame.end] {
-                    if let FrameBound::Preceding(expression) | FrameBound::Following(expression) =
-                        bound
-                    {
-                        collect_constraint_columns(expression, output);
-                    }
+            for bound in spec
+                .frame
+                .iter()
+                .flat_map(|frame| [&frame.start, &frame.end])
+            {
+                if let FrameBound::Preceding(expression) | FrameBound::Following(expression) = bound
+                {
+                    collect_constraint_columns(expression, output);
                 }
             }
         }

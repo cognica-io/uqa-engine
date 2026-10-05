@@ -41,6 +41,8 @@ pub struct SequenceReadSnapshot {
     pub object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub persistence: Arc<BTreeMap<RelationIdentity, RelationPersistence>>,
     pub security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
+    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
+    pub catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
     pub roles: RoleCatalogSnapshot,
 }
 
@@ -170,10 +172,25 @@ impl SequenceReadSnapshot {
             };
             Arc::make_mut(&mut self.sequences).insert(relation.clone(), *state);
             Arc::make_mut(&mut self.object_ids).insert(relation.clone(), object_id);
+            if let Some(oid) = current.catalog_oids.get(&object_id) {
+                Arc::make_mut(&mut self.catalog_oids).insert(object_id, *oid);
+            }
             Arc::make_mut(&mut self.persistence).insert(relation.clone(), *persistence);
             Arc::make_mut(&mut self.security).insert(relation, security.clone());
         }
         Ok(self)
+    }
+
+    /// The OID of the sequence with the object identity.
+    pub fn catalog_oid(&self, object_id: &[u8; 16]) -> i64 {
+        super::catalog_oids::sequence_catalog_oid(&self.catalog_oids, object_id)
+    }
+
+    /// The sequence with the OID.
+    pub fn relation_with_oid(&self, oid: i64) -> Option<RelationIdentity> {
+        self.object_ids.iter().find_map(|(relation, object_id)| {
+            (self.catalog_oid(object_id) == oid).then(|| relation.clone())
+        })
     }
 
     pub fn privileges<'a>(
@@ -188,7 +205,12 @@ impl SequenceReadSnapshot {
         }
     }
 
-    fn with_rows(self, rows: Vec<uqa_storage::SequenceRow>) -> StorageBackendResult<Self> {
+    /// Replace the persistent sequences with the catalog's rows and recorded OIDs, keeping the session's temporary ones.
+    fn with_rows(
+        self,
+        rows: Vec<uqa_storage::SequenceRow>,
+        recorded: BTreeMap<[u8; 16], u32>,
+    ) -> StorageBackendResult<Self> {
         let temporary = RestoredSequenceRegistry::temporary(
             &self.sequences,
             &self.object_ids,
@@ -196,11 +218,22 @@ impl SequenceReadSnapshot {
             &self.security,
         );
         let registry = prepare_sequence_rows(temporary, rows, &self.roles.roles)?;
+        let catalog_oids = registry
+            .object_ids
+            .values()
+            .filter_map(|object_id| {
+                recorded
+                    .get(object_id)
+                    .or_else(|| self.catalog_oids.get(object_id))
+                    .map(|oid| (*object_id, *oid))
+            })
+            .collect();
         Ok(Self {
             sequences: Arc::new(registry.sequences),
             object_ids: Arc::new(registry.object_ids),
             persistence: Arc::new(registry.persistence),
             security: Arc::new(registry.security),
+            catalog_oids: Arc::new(catalog_oids),
             roles: self.roles,
         })
     }
@@ -215,7 +248,10 @@ pub fn read_sequence_snapshot(
 ) -> StorageBackendResult<SequenceReadSnapshot> {
     let Some(independent) = independent else {
         return match bound {
-            Some(catalog) => current.with_rows(catalog.load_sequence_rows()?),
+            Some(catalog) => current.with_rows(
+                catalog.load_sequence_rows()?,
+                super::catalog_oids::load(catalog)?,
+            ),
             None => Ok(current),
         };
     };
@@ -225,17 +261,26 @@ pub fn read_sequence_snapshot(
             roles: Arc::new(roles.roles),
             memberships: Arc::new(roles.memberships),
         };
-        let rows = if preserve_private {
+        let (rows, recorded) = if preserve_private {
             current.roles = roles.merge_private(bound, &current.roles)?;
             match bound {
-                Some(bound) => load_sequence_value_rows(bound, catalog)?,
-                None => catalog.load_sequence_rows()?,
+                Some(bound) => (
+                    load_sequence_value_rows(bound, catalog)?,
+                    super::catalog_oids::load(bound)?,
+                ),
+                None => (
+                    catalog.load_sequence_rows()?,
+                    super::catalog_oids::load(catalog)?,
+                ),
             }
         } else {
             current.roles = roles;
-            catalog.load_sequence_rows()?
+            (
+                catalog.load_sequence_rows()?,
+                super::catalog_oids::load(catalog)?,
+            )
         };
-        current.with_rows(rows)
+        current.with_rows(rows, recorded)
     })
 }
 

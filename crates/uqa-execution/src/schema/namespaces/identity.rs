@@ -67,17 +67,17 @@ pub(super) fn reserve_creation(
         });
     }
     name_guard.retain();
-    let oid = crate::catalog::identity::reserve_catalog_oid(
+    let oid = crate::catalog::identity::reserve_new_catalog_oid(
         context.locks,
         SCHEMA_CATALOG_CLASS_ID,
         "schema",
-        |oid| Ok(oid_in_use(context.schemas, oid)),
-        || crate::catalog::identity::allocate_catalog_oid("schema"),
+        |oid| Ok(namespace_oid_in_use(context.schemas, oid)),
     )?;
     new_tuple(oid).map_err(|error| SQLError::Internal(error.to_string()))
 }
 
-fn oid_in_use(
+/// Whether a namespace already holds `oid`: a built-in, created or graph schema, or the session's temporary namespace or its TOAST namespace.
+pub fn namespace_oid_in_use(
     catalog: &dyn uqa_sql::catalog::security::schema_inquiry::SchemaPrivilegeCatalog,
     oid: i64,
 ) -> bool {
@@ -87,6 +87,11 @@ fn oid_in_use(
     {
         return true;
     }
+    if catalog.temporary_namespace_oids().is_some_and(|oids| {
+        oid == i64::from(oids.namespace) || oid == i64::from(oids.toast_namespace)
+    }) {
+        return true;
+    }
     if catalog
         .schemas()
         .iter()
@@ -94,5 +99,7 @@ fn oid_in_use(
     {
         return true;
     }
-    catalog.graphs().names().any(|name| schema_oid(name) == oid)
+    let graphs = catalog.graphs();
+    let in_use = graphs.names().any(|name| graphs.namespace_oid(name) == oid);
+    in_use
 }

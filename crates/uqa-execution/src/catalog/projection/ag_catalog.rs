@@ -20,13 +20,12 @@ use uqa_graph::{GraphLabelInfo, LabelKind};
 use uqa_sql::expr::quote_ident;
 use uqa_sql::{ResultRow, SQLError};
 
-use super::helpers::oids::{
-    current_user_name, current_user_oid, relation_oid, schema_oid, stable_oid,
-};
+use super::helpers::oids::{current_user_name, current_user_oid, relation_oid, schema_oid};
 use super::helpers::rows::{bool_value, catalog_name, int_value, row, str_value};
 use super::pg_catalog::pg_class_row;
 use super::schema::{ag_catalog_type_oid, AG_CATALOG_SCHEMA};
 use crate::catalog::{CatalogReadView, RelationNameResolution};
+use uqa_sql::catalog::graph_oids::LabelCatalogOids;
 
 /// AGE `_label_id_seq`: the per-graph label id allocator.
 const LABEL_ID_SEQUENCE: &str = "_label_id_seq";
@@ -102,14 +101,48 @@ fn graphid_value(graphid: u64) -> Result<Value, SQLError> {
     })
 }
 
-/// `ag_graph.graphid` of a named graph.
-pub fn graph_oid(graph: &str) -> i64 {
-    stable_oid("graph", graph)
+/// `ag_graph.graphid` of a named graph, which is the OID of its schema.
+pub fn graph_oid(catalog: &CatalogReadView, graph: &str) -> i64 {
+    super::helpers::oids::namespace_oid(catalog, graph)
+}
+
+/// The OIDs a label recorded when it was created; `None` for a label created before OIDs were recorded, which derives them from its name.
+fn recorded_label_oids<'a>(
+    catalog: &'a CatalogReadView,
+    graph: &str,
+    label: &GraphLabelInfo,
+) -> Option<&'a LabelCatalogOids> {
+    catalog.graph_catalog_oids(graph)?.labels.get(&label.id)
 }
 
 /// `pg_class.oid` of a label relation.
-pub fn label_relation_oid(graph: &str, label: &str) -> i64 {
-    relation_oid("r", graph, label)
+pub fn label_relation_oid(catalog: &CatalogReadView, graph: &str, label: &GraphLabelInfo) -> i64 {
+    recorded_label_oids(catalog, graph, label).map_or_else(
+        || relation_oid("r", graph, &label.name),
+        |oids| i64::from(oids.relation.relation),
+    )
+}
+
+/// `pg_class.oid` of the label relation named `label`, whose id the graph's label registry gives.
+pub fn named_label_relation_oid(
+    catalog: &CatalogReadView,
+    graph: &str,
+    label: &str,
+) -> Result<i64, SQLError> {
+    let entry = graph_catalog_entries(catalog)?
+        .into_iter()
+        .find(|entry| entry.name == graph);
+    Ok(entry
+        .and_then(|entry| {
+            entry
+                .labels
+                .into_iter()
+                .find(|candidate| candidate.name == label)
+        })
+        .map_or_else(
+            || relation_oid("r", graph, label),
+            |info| label_relation_oid(catalog, graph, &info),
+        ))
 }
 
 /// `regclass` text of a label relation, quoted like `PostgreSQL` prints
@@ -129,7 +162,7 @@ pub fn build_ag_graph(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLEr
         .into_iter()
         .map(|name| {
             row([
-                ("graphid", int_value(graph_oid(&name))),
+                ("graphid", int_value(graph_oid(catalog, &name))),
                 ("name", str_value(name.clone())),
                 ("namespace", str_value(name)),
             ])
@@ -143,7 +176,7 @@ pub fn build_ag_label(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLEr
         for label in &entry.labels {
             out.push(row([
                 ("name", str_value(label.name.clone())),
-                ("graph", int_value(graph_oid(&entry.name))),
+                ("graph", int_value(graph_oid(catalog, &entry.name))),
                 ("id", int_value(i64::from(label.id))),
                 ("kind", str_value(label.kind.as_char().to_string())),
                 (
@@ -197,19 +230,18 @@ fn label_columns(kind: LabelKind) -> &'static [(&'static str, &'static str)] {
 pub fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for entry in graph_catalog_entries(catalog)? {
-        out.push(pg_class_row(
-            catalog,
-            &entry.name,
-            LABEL_ID_SEQUENCE,
-            "S",
-            0,
-            0.0,
-            false,
-        ));
+        let graph_oids = catalog.graph_catalog_oids(&entry.name);
+        let mut label_sequence =
+            pg_class_row(catalog, &entry.name, LABEL_ID_SEQUENCE, "S", 0, 0.0, false);
+        if let Some(oids) = graph_oids {
+            label_sequence.insert("oid".into(), int_value(i64::from(oids.label_sequence)));
+        }
+        out.push(label_sequence);
         for label in &entry.labels {
             let natts = i64::try_from(label_columns(label.kind).len())
                 .map_err(|_| SQLError::Internal("label column count".into()))?;
-            out.push(pg_class_row(
+            let recorded = recorded_label_oids(catalog, &entry.name, label);
+            let mut relation = pg_class_row(
                 catalog,
                 &entry.name,
                 &label.name,
@@ -217,8 +249,8 @@ pub fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
                 natts,
                 label_relation_tuples(catalog, &entry.name, label)?,
                 false,
-            ));
-            out.push(pg_class_row(
+            );
+            let mut sequence = pg_class_row(
                 catalog,
                 &entry.name,
                 &label_sequence_name(&label.name),
@@ -226,7 +258,17 @@ pub fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
                 0,
                 0.0,
                 false,
-            ));
+            );
+            if let Some(oids) = recorded {
+                relation.insert("oid".into(), int_value(i64::from(oids.relation.relation)));
+                relation.insert(
+                    "reltype".into(),
+                    int_value(i64::from(oids.relation.reltype())),
+                );
+                sequence.insert("oid".into(), int_value(i64::from(oids.sequence)));
+            }
+            out.push(relation);
+            out.push(sequence);
         }
     }
     Ok(out)
@@ -237,7 +279,7 @@ pub fn age_pg_attribute_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>
     let mut out = Vec::new();
     for entry in graph_catalog_entries(catalog)? {
         for label in &entry.labels {
-            let relid = label_relation_oid(&entry.name, &label.name);
+            let relid = label_relation_oid(catalog, &entry.name, label);
             for (index, (column, type_name)) in label_columns(label.kind).iter().enumerate() {
                 let attnum = i64::try_from(index + 1)
                     .map_err(|_| SQLError::Internal("label attribute number".into()))?;
@@ -262,7 +304,7 @@ fn age_pg_attribute_row(relid: i64, attnum: i64, column: &str, type_name: &str) 
             "atttypid",
             int_value(i64::from(ag_catalog_type_oid(type_name))),
         ),
-        ("attstattarget", int_value(-1)),
+        ("attstattarget", Value::Null),
         ("attlen", int_value(attlen)),
         ("attnum", int_value(attnum)),
         ("attndims", int_value(0)),

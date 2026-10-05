@@ -10,6 +10,7 @@ use super::{
     value_as_f64, value_gt, value_lt, AggregateValueBuffer, Arc, DecimalValue, DistinctTracker,
     RegisteredAggregateBuffer, SQLAggregateFunction, SQLAggregateState, SQLError, Value,
 };
+use uqa_sql::expr::IntervalFields;
 
 pub struct AggregateAccumulator {
     pub(super) registered: Option<Arc<dyn SQLAggregateFunction>>,
@@ -19,6 +20,8 @@ pub struct AggregateAccumulator {
     pub(super) sum: f64,
     pub(super) integer_sum: i128,
     pub(super) decimal_sum: Option<DecimalValue>,
+    /// `sumX` of `sum(interval)` and `avg(interval)`, added field by field as `interval_avg_accum` adds each input.
+    pub(super) interval_sum: Option<IntervalFields>,
     pub(super) numeric_inputs: NumericInputKind,
     pub(super) min: Option<Value>,
     pub(super) max: Option<Value>,
@@ -29,6 +32,8 @@ pub struct AggregateAccumulator {
     /// state and must not spill values that their finalizer never reads.
     pub(super) state_plan: AggregateStatePlan,
     pub(super) values: AggregateValueBuffer,
+    /// Shape of the first `array_agg(anyarray)` input observed in transition order.
+    pub(super) array_inputs: super::array_inputs::ArrayInputShape,
     /// Boolean folds for `BOOL_AND` / `BOOL_OR`. Stay `None` until the
     /// first observation so an empty input set returns `NULL` (matches
     /// `PostgreSQL`).
@@ -132,7 +137,12 @@ pub enum AggregateStatePlan {
     Max,
     BoolAnd,
     BoolOr,
+    /// Retains non-NULL inputs: `string_agg`, the ordered-set aggregates and the JSON object aggregates, whose pairs are never NULL.
     Buffered,
+    /// Retains every input including NULL, as `array_agg` over non-array input, `json_agg` and `jsonb_agg` do.
+    BufferedWithNulls,
+    /// `array_agg` over array input, whose transition rejects NULL, empty and differently shaped arrays.
+    BufferedArrays,
     Statistics,
 }
 
@@ -144,6 +154,10 @@ impl AggregateStatePlan {
         }
         if name.eq_ignore_ascii_case("sum") && matches!(input_type, Some(ColumnType::Real)) {
             Self::SumReal
+        } else if name.eq_ignore_ascii_case("array_agg")
+            && matches!(input_type, Some(ColumnType::Array(_)))
+        {
+            Self::BufferedArrays
         } else {
             Self::builtin(name)
         }
@@ -160,14 +174,18 @@ impl AggregateStatePlan {
             "stddev" | "stddev_samp" | "stddev_pop" | "variance" | "var_samp" | "var_pop" => {
                 Self::Statistics
             }
-            "string_agg" | "array_agg" | "json_agg" | "jsonb_agg" | "json_object_agg"
-            | "jsonb_object_agg" | "percentile_cont" | "percentile_disc" | "mode" => Self::Buffered,
+            "array_agg" | "json_agg" | "jsonb_agg" => Self::BufferedWithNulls,
+            "string_agg" | "json_object_agg" | "jsonb_object_agg" | "percentile_cont"
+            | "percentile_disc" | "mode" => Self::Buffered,
             _ => Self::Generic,
         }
     }
 
     pub(super) fn retains_values(self) -> bool {
-        matches!(self, Self::Generic | Self::Buffered)
+        matches!(
+            self,
+            Self::Generic | Self::Buffered | Self::BufferedWithNulls | Self::BufferedArrays
+        )
     }
 }
 
@@ -181,12 +199,14 @@ impl Default for AggregateAccumulator {
             sum: 0.0,
             integer_sum: 0,
             decimal_sum: None,
+            interval_sum: None,
             numeric_inputs: NumericInputKind::default(),
             min: None,
             max: None,
             distinct: DistinctTracker::default(),
             state_plan: AggregateStatePlan::Generic,
             values: AggregateValueBuffer::default(),
+            array_inputs: super::array_inputs::ArrayInputShape::default(),
             bool_and: None,
             bool_or: None,
             statistics_count: 0,
@@ -213,12 +233,14 @@ impl AggregateAccumulator {
             sum: 0.0,
             integer_sum: 0,
             decimal_sum: None,
+            interval_sum: None,
             numeric_inputs: NumericInputKind::default(),
             min: None,
             max: None,
             distinct: DistinctTracker::new(component_budget),
             state_plan: AggregateStatePlan::Generic,
             values: AggregateValueBuffer::new(component_budget),
+            array_inputs: super::array_inputs::ArrayInputShape::default(),
             bool_and: None,
             bool_or: None,
             statistics_count: 0,
@@ -274,8 +296,11 @@ impl AggregateAccumulator {
     }
 
     pub fn observe(&mut self, value: &Value) -> Result<(), SQLError> {
+        if let AggregateStatePlan::BufferedArrays = self.state_plan {
+            self.array_inputs.accept(value)?;
+        }
         if matches!(value, Value::Null) {
-            return Ok(());
+            return self.observe_null(Vec::new());
         }
         self.observe_state(value)?;
         if self.state_plan.retains_values() {
@@ -363,7 +388,9 @@ impl AggregateAccumulator {
             AggregateStatePlan::Max => self.observe_max(value)?,
             AggregateStatePlan::BoolAnd => self.observe_bool_and(value)?,
             AggregateStatePlan::BoolOr => self.observe_bool_or(value)?,
-            AggregateStatePlan::Buffered => {}
+            AggregateStatePlan::Buffered
+            | AggregateStatePlan::BufferedWithNulls
+            | AggregateStatePlan::BufferedArrays => {}
             AggregateStatePlan::Statistics => self.observe_statistics(value)?,
         }
         Ok(())
@@ -465,9 +492,22 @@ impl AggregateAccumulator {
     }
 
     pub(super) fn observe_sum(&mut self, value: &Value) -> Result<(), SQLError> {
+        if let Value::Temporal(temporal) = value {
+            let interval = IntervalFields::of(temporal).ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
+                    "SUM/AVG requires a numeric or interval value, got {value:?}"
+                ))
+            })?;
+            self.interval_sum = Some(
+                self.interval_sum
+                    .unwrap_or(IntervalFields::ZERO)
+                    .plus(interval)?,
+            );
+            return Ok(());
+        }
         if !matches!(value, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
             return Err(SQLError::TypeMismatch(format!(
-                "SUM/AVG requires a numeric value, got {value:?}"
+                "SUM/AVG requires a numeric or interval value, got {value:?}"
             )));
         }
         match value {
@@ -535,7 +575,7 @@ impl AggregateAccumulator {
             }
             _ => {
                 return Err(SQLError::TypeMismatch(format!(
-                    "SUM/AVG requires a numeric value, got {value:?}"
+                    "SUM/AVG requires a numeric or interval value, got {value:?}"
                 )))
             }
         }
@@ -598,13 +638,17 @@ impl AggregateAccumulator {
         Ok(())
     }
 
+    /// Ordered inputs reach the transition only after sorting, so array inputs are checked when the aggregate finishes.
     pub(super) fn observe_with_sort_keys(
         &mut self,
         value: &Value,
-        keys: Vec<(Value, bool)>,
+        keys: Vec<super::ordering::AggregateSortKey>,
     ) -> Result<(), SQLError> {
         if matches!(value, Value::Null) {
-            return Ok(());
+            return match self.state_plan {
+                AggregateStatePlan::BufferedArrays => self.values.push(Value::Null, keys),
+                _ => self.observe_null(keys),
+            };
         }
         if self.state_plan.retains_values() {
             self.observe_state(value)?;
@@ -613,18 +657,29 @@ impl AggregateAccumulator {
         Ok(())
     }
 
-    pub(super) fn observe_including_null(
+    /// A NULL input is part of the aggregate's input only for aggregates that retain NULLs.
+    fn observe_null(
         &mut self,
-        value: &Value,
-        keys: Vec<(Value, bool)>,
+        keys: Vec<super::ordering::AggregateSortKey>,
     ) -> Result<(), SQLError> {
-        self.values.push(value.clone(), keys)
+        match self.state_plan {
+            AggregateStatePlan::BufferedWithNulls => self.values.push(Value::Null, keys),
+            _ => Ok(()),
+        }
+    }
+
+    /// Whether DISTINCT keeps a NULL input. Array accumulation rejects it when the transition sees it.
+    pub(super) fn admits_null_input(&self) -> bool {
+        matches!(
+            self.state_plan,
+            AggregateStatePlan::BufferedWithNulls | AggregateStatePlan::BufferedArrays
+        )
     }
 
     pub(super) fn observe_registered(
         &mut self,
         values: Vec<Value>,
-        sort_keys: Vec<(Value, bool)>,
+        sort_keys: Vec<super::ordering::AggregateSortKey>,
     ) -> Result<(), SQLError> {
         if sort_keys.is_empty() {
             let state = self

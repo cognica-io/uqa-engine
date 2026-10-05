@@ -34,6 +34,7 @@ impl Engine {
             namespace: self,
             publication: self,
             vectors: self,
+            notices: &self.runtime.notices,
         }
     }
 }
@@ -103,6 +104,7 @@ impl TableAsPublication for Engine {
             persistence,
             on_commit,
             owner,
+            None,
         )
         .map_err(|error| storage_error("CREATE TABLE AS", &error))
     }
@@ -170,6 +172,7 @@ impl Engine {
             ownership: self.implicit_ownership_context(),
             schema_transactions: self,
             publication: self,
+            identities: self.catalog_identity_reservation_context(),
             notices: runtime.notices,
         }
     }
@@ -191,6 +194,7 @@ impl uqa_execution::schema::table_creation::TableCreationPublication for Engine 
         persistence: RelationPersistence,
         on_commit: OnCommitAction,
         owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
+        catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
     ) -> uqa_storage::StorageBackendResult<()> {
         self.create_table_with_lifecycle(
             name,
@@ -199,6 +203,7 @@ impl uqa_execution::schema::table_creation::TableCreationPublication for Engine 
             persistence,
             on_commit,
             owner,
+            Some(catalog_oids),
         )
     }
     fn create_vector_field(
@@ -215,6 +220,17 @@ impl uqa_execution::schema::table_creation::TableCreationPublication for Engine 
         hierarchy: uqa_sql::ast::TableHierarchy,
     ) -> uqa_storage::StorageBackendResult<()> {
         self.install_table_hierarchy(table, hierarchy)
+    }
+    fn validate_default_partition_rows(
+        &self,
+        parent: &str,
+        bound: &uqa_sql::ast::PartitionBound,
+    ) -> Result<(), SQLError> {
+        uqa_execution::schema::hierarchy::validate_default_partition_exclusion(
+            &self.hierarchy_execution_context(),
+            parent,
+            bound,
+        )
     }
     fn persist_schema(&self, table: &str) -> uqa_storage::StorageBackendResult<bool> {
         self.try_persist_table_schema(table)

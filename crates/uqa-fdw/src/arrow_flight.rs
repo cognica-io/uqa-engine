@@ -47,6 +47,12 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
                 "void values have no Flight SQL literal".into(),
             ));
         }
+        // Label text is owned by the SQL catalog, which the wrapper cannot consult.
+        Value::Enum(_) => {
+            return Err(ArrowFlightPrepareError::UnsupportedLiteral(
+                "enum values have no catalog-independent Flight SQL literal".into(),
+            ));
+        }
         Value::Bool(b) => {
             if *b {
                 "TRUE".into()

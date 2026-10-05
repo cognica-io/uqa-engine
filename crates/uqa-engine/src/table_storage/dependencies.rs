@@ -8,35 +8,17 @@
 
 mod regclass;
 mod routines;
+mod types;
 
 use super::{
     rename_schema_expr_column, rename_schema_expr_qualified_column, rename_schema_expr_relation,
     schema_expr_references_column, schema_expr_references_relation,
-    stored_relation_reference_matches, table_not_found, Arc, CatalogIndexRow, Engine,
-    RelationIdentity, StorageBackendError, StorageBackendResult, TableState,
+    stored_relation_reference_matches, Arc, CatalogIndexRow, Engine, RelationIdentity,
+    StorageBackendError, StorageBackendResult, TableState,
 };
 use crate::VectorIndexSpec;
 
 impl Engine {
-    pub(crate) fn generated_columns_referencing_column(
-        &self,
-        table_name: &str,
-        column: &str,
-    ) -> StorageBackendResult<Vec<String>> {
-        let table = self
-            .table_entries()
-            .into_iter()
-            .find(|(name, _)| name == table_name)
-            .map(|(_, state)| state)
-            .ok_or_else(|| table_not_found(table_name))?;
-        let columns = table.columns.read();
-        Ok(
-            uqa_sql::schema::columns::alteration::generated_columns_referencing_column(
-                &columns, column,
-            ),
-        )
-    }
-
     pub(crate) fn resolve_table_ddl_target(
         &self,
         name: &str,
@@ -191,6 +173,7 @@ impl Engine {
             foreign_keys: foreign_keys.to_vec(),
             key_constraints: key_constraints.to_vec(),
             hierarchy: hierarchy.clone(),
+            catalog_oids: table.recorded_catalog_oids(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }

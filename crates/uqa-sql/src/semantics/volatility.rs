@@ -105,6 +105,8 @@ pub fn function_volatility_with_binding(
                 | "current_schemas"
                 | "current_setting"
                 | "pg_backend_pid"
+                | "pg_my_temp_schema"
+                | "pg_is_other_temp_schema"
                 | "pg_trigger_depth"
                 | "version"
                 | "pg_listening_channels"
@@ -128,13 +130,24 @@ pub fn function_volatility_with_binding(
                 | "pg_get_ruledef"
                 | "pg_get_viewdef"
                 | "pg_get_indexdef"
+                | "pg_get_constraintdef"
+                | "pg_get_function_arguments"
+                | "pg_get_function_identity_arguments"
+                | "pg_get_function_result"
+                | "pg_get_function_sqlbody"
                 | "format_type"
+                | "pg_describe_object"
                 | "pg_has_role"
                 | "pg_get_userbyid"
                 | "has_database_privilege"
                 | "has_schema_privilege"
                 | "has_sequence_privilege"
                 | "has_function_privilege"
+                | "has_type_privilege"
+                // The enum support functions that read a type's label list see labels added later in the transaction.
+                | "enum_first"
+                | "enum_last"
+                | "enum_range"
         )
         || (lower == "age" && argument_count == 1)
     {
@@ -501,7 +514,7 @@ mod tests {
             Ok(None)
         }
     }
-    use crate::ast::FrameMode;
+    use crate::ast::{FrameExclusion, FrameMode};
     use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
 
     #[test]
@@ -540,8 +553,12 @@ mod tests {
                         filter: None,
                     })),
                     end: ScalarFrameBound::CurrentRow,
+                    between: true,
+                    exclusion: FrameExclusion::NoOthers,
                 }),
             },
+            filter: None,
+            modifiers: crate::ast::WindowCallModifiers::default(),
         };
         assert!(expr_contains_volatile_function(&EmptyCatalog, &expression));
     }

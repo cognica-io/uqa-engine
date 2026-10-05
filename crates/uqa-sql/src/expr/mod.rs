@@ -20,6 +20,7 @@ use crate::result::ResultRow;
 mod array_transform;
 mod encoding;
 mod floating;
+mod in_range;
 pub(crate) mod integer_input;
 mod json;
 mod json_strip;
@@ -38,6 +39,7 @@ pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
     multirange_from_ranges, parse_multirange, parse_range, CanonicalMultirange, CanonicalRange,
 };
+pub use time::IntervalFields;
 use time::{
     age_between, coerce_temporal, format_pg_number, format_temporal, hex_encode, make_timestamp,
     parse_timestamp, pg_to_chrono_fmt,
@@ -46,8 +48,11 @@ pub use uuid::parse_uuid_bytes;
 use uuid::{generate_random_uuid, generate_uuid_v7};
 mod binary;
 mod casting;
+pub mod composites;
 mod conversion;
 mod current_time;
+pub mod enums;
+pub(crate) mod hashing;
 mod scalar_array;
 mod scalar_core;
 mod scalar_dispatch;
@@ -60,6 +65,7 @@ mod scalar_range;
 mod scalar_temporal;
 mod session_settings;
 mod session_sleep;
+pub mod variadic_any;
 
 #[cfg(test)]
 use binary::eval_comparison_op;
@@ -71,17 +77,19 @@ pub use binary::{
     type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
-pub(crate) use binary::{division_by_zero, out_of_range};
+pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};
 pub use casting::{
-    array_dimensions, cast_value, cast_value_from, cast_value_from_with_control, negate_value,
-    negate_value_with_control, parse_pg_array_literal, parse_pg_array_literal_with_control,
+    array_dimensions, cast_value, cast_value_from, cast_value_from_with_control,
+    invalid_boolean_input, negate_value, negate_value_with_control, parse_boolean_input,
+    parse_pg_array_literal, parse_pg_array_literal_with_control,
 };
 use conversion::{
-    allocation_error, coerce_i64, float_to_i64_rounded, float_to_i64_trunc, nonnegative_usize,
-    to_decimal, to_i64,
+    allocation_error, float_to_i64_rounded, float_to_i64_trunc, nonnegative_usize, to_decimal,
+    to_i64,
 };
 pub use conversion::{
-    array_value_to_string, value_to_string, value_to_string_with_control, vector_value_to_string,
+    array_value_to_string, catalog_output_required, value_to_string, value_to_string_with_control,
+    vector_value_to_string,
 };
 pub(crate) use conversion::{tensor_items, vector_element, vector_items};
 pub use conversion::{
@@ -91,6 +99,7 @@ pub use current_time::clock_timestamp_micros;
 pub use floating::{
     eval_float_arithmetic, eval_float_arithmetic_with_control, format_real, FloatWidth,
 };
+pub use in_range::in_range;
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
 use scalar_helpers::{point_xy, typeof_value};

@@ -29,6 +29,7 @@ pub mod database_lifecycle;
 pub mod routine_inquiry;
 pub mod sequence_inquiry;
 pub mod sequence_lifecycle;
+pub mod type_inquiry;
 
 pub mod table_inquiry;
 

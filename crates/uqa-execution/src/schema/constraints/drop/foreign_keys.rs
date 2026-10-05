@@ -18,14 +18,14 @@ use uqa_sql::{
     SQLError,
 };
 
-pub struct ForeignKeyRemovalTarget {
+pub(super) struct ForeignKeyRemovalTarget {
     table: String,
     table_id: [u8; 16],
     constraint_id: [u8; 16],
 }
 
 /// Capture every selected constraint and partition clone before acquiring any dependent lock.
-pub fn capture_foreign_key_dependencies(
+pub(super) fn capture_foreign_key_dependencies(
     context: &ConstraintAlterContext<'_>,
     dependents: impl IntoIterator<Item = (String, String)>,
 ) -> Result<Vec<ForeignKeyRemovalTarget>, SQLError> {
@@ -101,17 +101,9 @@ pub(super) fn ensure_direct_removal(
     ensure_inherited_constraint_removable(table, name, usize::from(inherited))
 }
 
-pub fn drop_foreign_key_dependencies(
-    context: &ConstraintAlterContext<'_>,
-    targets: Vec<ForeignKeyRemovalTarget>,
-) -> Result<(), SQLError> {
-    drop_targets(context, targets, false)
-}
-
 pub(super) fn drop_targets(
     context: &ConstraintAlterContext<'_>,
     targets: Vec<ForeignKeyRemovalTarget>,
-    direct: bool,
 ) -> Result<(), SQLError> {
     for target in targets {
         let Some(table) = lock_relation_identity(
@@ -128,12 +120,6 @@ pub(super) fn drop_targets(
         let (columns, constraints) = table_constraint_state(context, &table)?;
         if ForeignKeyTarget::by_id(&columns, &constraints, target.constraint_id)?.is_none() {
             continue;
-        }
-        // A dependency cascade removes child-side pending events; a direct drop rejects them.
-        if direct {
-            context
-                .access
-                .ensure_no_pending_events(&table, "ALTER TABLE")?;
         }
         drop_one(context, &table, target.constraint_id)?;
     }

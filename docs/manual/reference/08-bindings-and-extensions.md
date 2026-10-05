@@ -264,6 +264,8 @@ The 0.4.9 Python, Node.js and WASM artifacts retain complete upstream Nori and K
 
 Scalar functions return one value per call. Table functions return a relation. Aggregate functions create per-group state, observe input rows, and finish with one result.
 
+Arguments of enum types reach callbacks as their current label strings, including inside arrays and records, as PostgreSQL procedural languages receive them; the `sql`, `sqlSync`, `sql_batch` and `sqlBatch` methods of every binding likewise return enum values as labels. A callback that returns a label returns text; cast it, for example with `my_function()::mood`, where an enum value is required.
+
 Python table callbacks accept a dictionary with `columns` and `rows`, a `(columns, rows)` tuple, or iterable dictionary rows. Node.js and browser WASM callbacks accept `{ columns, rows }`, a `[columns, rows]` pair, or an array of object rows. Aggregate factories return a new state object for each SQL group; that object must provide `observe` or `step` and `finish` or `finalize` methods. Errors thrown by a host callback become SQL errors.
 
 Registration options communicate optimizer safety:

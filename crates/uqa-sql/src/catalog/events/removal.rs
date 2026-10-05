@@ -7,7 +7,6 @@
 //! Candidate event catalogs and constraint identities for relation and dependency removal.
 use super::{RuleCatalog, TriggerCatalog};
 use crate::catalog::constraints::ConstraintIdentity;
-use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 pub struct RemovedRelationEvents {
     pub triggers: TriggerCatalog,
@@ -57,26 +56,4 @@ pub fn removed_relation_events(
         rules: next_rules,
         constraints: removed_constraint_identities,
     }))
-}
-pub fn removed_dependent_rules(
-    rules: &RuleCatalog,
-    dependents: &[(RelationIdentity, String)],
-) -> Result<RuleCatalog, String> {
-    let mut next = rules.clone();
-    for (event_relation, name) in dependents {
-        let removed = next
-            .get_mut(event_relation)
-            .and_then(|entries| entries.remove(name));
-        if removed.is_none() {
-            return Err(format!(
-                "dependent rule `{name}` on `{}` disappeared after DROP preflight",
-                event_relation.qualified_name()
-            ));
-        }
-        if next.get(event_relation).is_some_and(BTreeMap::is_empty) {
-            next.remove(event_relation);
-        }
-    }
-
-    Ok(next)
 }

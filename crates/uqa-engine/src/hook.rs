@@ -52,11 +52,27 @@ impl uqa_sql::expr::EngineHook for Engine {
         uqa_execution::catalog::projection::resolve_regclass_oid(&self.catalog_execution(), name)
     }
 
+    fn resolve_regproc(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_regproc_input_oid(
+            &self.catalog_execution(),
+            name,
+        )
+        .map(Some)
+    }
+
     fn resolve_regprocedure(&self, name: &str) -> std::result::Result<Option<i64>, String> {
         uqa_execution::catalog::projection::resolve_regprocedure_oid(
             &self.catalog_execution(),
             name,
         )
+    }
+
+    fn resolve_regprocedure_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_regprocedure_input_oid(
+            &self.catalog_execution(),
+            name,
+        )
+        .map(Some)
     }
 
     fn resolve_regrole(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
@@ -92,6 +108,14 @@ impl uqa_sql::expr::EngineHook for Engine {
             ty,
             oid,
         )
+    }
+
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        Some(self)
+    }
+
+    fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
+        Some(self)
     }
 
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {

@@ -547,8 +547,5 @@ fn function_resolution_error_borrowed<'a>(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    SQLError::Routine {
-        sqlstate: sqlstate.into(),
-        message: format!("function {name}({signature}) {description}"),
-    }
+    SQLError::function_call_resolution(sqlstate, &format!("{name}({signature})"), description)
 }

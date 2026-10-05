@@ -20,9 +20,18 @@ pub fn domain_object_oid(object_id: &[u8; 16]) -> u32 {
 pub struct StoredDomain<Owner = RoleIdentity> {
     pub object_id: [u8; 16],
     pub oid: u32,
+    /// The OID of the generated array type, allocated before the domain's own as `DefineDomain` does. Domains created before array OIDs were recorded derive both OIDs from their identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub array_oid: Option<u32>,
     pub identity: RelationIdentity,
     pub owner: Owner,
     pub definition: CreateDomain,
+    /// Name of the generated array type, chosen as `makeArrayTypeName` chooses it. Domains created before array names were recorded use the uncontested name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub array_name: Option<String>,
+    /// Explicit `USAGE` privileges; `None` is the default ACL (PUBLIC and the owner).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_acl: Option<Vec<crate::ast::ObjectAclEntry>>,
 }
 
 impl<Owner> StoredDomain<Owner> {
@@ -31,8 +40,16 @@ impl<Owner> StoredDomain<Owner> {
             schema: self.identity.schema.clone(),
             name: self.identity.name.clone(),
             oid: self.oid,
+            array_oid: self.array_oid,
             base: Box::new(self.definition.base.clone()),
         }
+    }
+
+    /// The name of the domain's generated array type.
+    pub fn array_type_name(&self) -> String {
+        self.array_name
+            .clone()
+            .unwrap_or_else(|| super::array_type_names::array_type_name(&self.identity.name, 0))
     }
 }
 
@@ -49,9 +66,12 @@ impl StoredDomain<String> {
         Ok(StoredDomain {
             object_id: self.object_id,
             oid: self.oid,
+            array_oid: self.array_oid,
             identity: self.identity,
             owner,
             definition: self.definition,
+            array_name: self.array_name,
+            usage_acl: self.usage_acl,
         })
     }
 }
@@ -79,9 +99,18 @@ pub fn validate_domain_definitions(
     let mut constraint_objects = BTreeSet::new();
     let mut constraint_oids = BTreeSet::new();
     for (name, domain) in registry {
+        // A domain with a recorded array OID drew both OIDs from the database's counter; an earlier one derives its OID from its identity.
+        let oids_valid = match domain.array_oid {
+            Some(array_oid) => {
+                domain.oid >= super::oids::FIRST_NORMAL_OBJECT_ID
+                    && array_oid >= super::oids::FIRST_NORMAL_OBJECT_ID
+                    && oids.insert(array_oid)
+            }
+            None => domain.oid == domain_object_oid(&domain.object_id),
+        };
         if domain.object_id == [0; 16]
             || !identities.insert(domain.object_id)
-            || domain.oid != domain_object_oid(&domain.object_id)
+            || !oids_valid
             || !oids.insert(domain.oid)
         {
             return Err(format!("invalid or duplicate domain identity for `{name}`"));

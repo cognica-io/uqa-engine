@@ -4,29 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! DROP relation target binding, label protection and declared dependency discovery.
-use crate::{
-    ast::{DropKind, DropStmt},
-    catalog::resolution::RelationResolution,
-    SQLError,
-};
-use std::collections::BTreeSet;
+//! DROP relation target binding and label protection.
+use crate::{ast::DropKind, catalog::resolution::RelationResolution, SQLError};
 
 pub trait RelationDropCatalog {
     fn resolve_relation_kind(&self, name: &str) -> Result<RelationResolution, SQLError>;
     fn resolve_age_label_relation_name(&self, name: &str) -> Result<Option<String>, SQLError>;
-}
-pub trait ForeignTableDropDependencies {
-    fn views_depending_on_relation(&self, name: &str) -> Result<Vec<String>, SQLError>;
-    fn rules_depending_on_relations(
-        &self,
-        names: &[String],
-    ) -> Result<Vec<(uqa_core::RelationIdentity, String)>, SQLError>;
-    fn sequence_external_dependents_for_owner_drop(
-        &self,
-        name: &str,
-        targets: &BTreeSet<String>,
-    ) -> Result<Vec<String>, SQLError>;
 }
 pub fn validate_drop_table_label_target(
     catalog: &dyn RelationDropCatalog,
@@ -60,6 +43,28 @@ pub fn drop_relation_kind(kind: DropKind) -> &'static str {
         DropKind::Index => "index",
         DropKind::Schema => "schema",
         DropKind::Domain => "domain",
+        DropKind::Type => "type",
+    }
+}
+
+/// `DropErrorMsgWrongType`: a DROP names a relation of another kind, and the hint names the command that drops the kind it is.
+pub fn wrong_drop_kind_error(local: &str, expected: &str, found: &str) -> SQLError {
+    let article = if expected == "index" { "an" } else { "a" };
+    let hint = match found {
+        "table" => Some("Use DROP TABLE to remove a table."),
+        "sequence" => Some("Use DROP SEQUENCE to remove a sequence."),
+        "view" => Some("Use DROP VIEW to remove a view."),
+        "materialized view" => Some("Use DROP MATERIALIZED VIEW to remove a materialized view."),
+        "index" => Some("Use DROP INDEX to remove an index."),
+        "foreign table" => Some("Use DROP FOREIGN TABLE to remove a foreign table."),
+        "type" | "composite type" => Some("Use DROP TYPE to remove a type."),
+        _ => None,
+    };
+    SQLError::Diagnostic {
+        sqlstate: "42809".into(),
+        message: format!("\"{local}\" is not {article} {expected}"),
+        detail: None,
+        hint: hint.map(str::to_string),
     }
 }
 
@@ -79,10 +84,7 @@ pub fn bind_relation_drop_target(
         uqa_core::RelationIdentity::parse_reference(name).map_err(SQLError::Internal)?;
     match catalog.resolve_relation_kind(name)? {
         RelationResolution::Found(canonical, found) if found == expected => Ok(Some(canonical)),
-        RelationResolution::Found(_, _) => Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("\"{local}\" is not a {expected}"),
-        }),
+        RelationResolution::Found(_, found) => Err(wrong_drop_kind_error(&local, expected, found)),
         RelationResolution::MissingSchema(schema) if if_exists => {
             notice(&format!("schema \"{schema}\" does not exist, skipping"));
             Ok(None)
@@ -105,53 +107,6 @@ pub fn bind_relation_drop_target(
             message: format!("{expected} \"{local}\" does not exist"),
         }),
     }
-}
-
-pub fn bind_relation_drop_targets(
-    catalog: &dyn RelationDropCatalog,
-    stmt: &DropStmt,
-    notice: &mut dyn FnMut(&str),
-) -> Result<Vec<String>, SQLError> {
-    let mut targets = Vec::new();
-    let mut seen = BTreeSet::new();
-    for name in &stmt.names {
-        if let Some(canonical) =
-            bind_relation_drop_target(catalog, name, stmt.kind, stmt.if_exists, notice)?
-        {
-            if seen.insert(canonical.clone()) {
-                targets.push(canonical);
-            }
-        }
-    }
-    Ok(targets)
-}
-
-pub fn foreign_table_drop_dependents(
-    catalog: &dyn ForeignTableDropDependencies,
-    foreign_tables: &[String],
-    owned_sequences: &BTreeSet<String>,
-    target_names: &BTreeSet<String>,
-) -> Result<BTreeSet<String>, SQLError> {
-    let mut dependents = std::collections::BTreeSet::new();
-    for table in foreign_tables {
-        dependents.extend(
-            catalog
-                .views_depending_on_relation(table)?
-                .into_iter()
-                .map(|view| format!("view {view}")),
-        );
-    }
-    dependents.extend(
-        catalog
-            .rules_depending_on_relations(foreign_tables)?
-            .into_iter()
-            .map(|(table, rule)| format!("rule {rule} on table {}", table.qualified_name())),
-    );
-    for sequence in owned_sequences {
-        dependents
-            .extend(catalog.sequence_external_dependents_for_owner_drop(sequence, target_names)?);
-    }
-    Ok(dependents)
 }
 
 pub mod hierarchy;

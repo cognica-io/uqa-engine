@@ -16,6 +16,8 @@ const FOREIGN_TABLE_SCHEMA_VERSION: u8 = 1;
 pub struct StoredForeignTable {
     pub name: String,
     pub object_id: [u8; 16],
+    /// The public OIDs allocated when the foreign table was created; `None` for one created before OIDs were recorded.
+    pub catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
     pub server_name: String,
     pub columns: Vec<ColumnDef>,
     pub checks: Vec<TableCheck>,
@@ -27,6 +29,8 @@ struct PersistedForeignTableSchema {
     version: u8,
     #[serde(default)]
     object_id: [u8; 16],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
     columns: Vec<ColumnDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     checks: Vec<TableCheck>,
@@ -47,7 +51,7 @@ impl StoredForeignTable {
         schema_json: &str,
     ) -> StorageBackendResult<(Self, bool)> {
         let schema = serde_json::from_str::<ForeignTableSchemaFormat>(schema_json)?;
-        let (object_id, columns, checks, legacy) = match schema {
+        let (object_id, catalog_oids, columns, checks, legacy) = match schema {
             ForeignTableSchemaFormat::Current(schema) => {
                 if schema.version != FOREIGN_TABLE_SCHEMA_VERSION {
                     return Err(StorageBackendError::Other(format!(
@@ -55,14 +59,30 @@ impl StoredForeignTable {
                         schema.version
                     )));
                 }
-                (schema.object_id, schema.columns, schema.checks, false)
+                if schema.catalog_oids.is_some_and(|oids| {
+                    !oids.is_valid_for(
+                        uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
+                    )
+                }) {
+                    return Err(StorageBackendError::Other(format!(
+                        "foreign table `{name}` records invalid catalog OIDs"
+                    )));
+                }
+                (
+                    schema.object_id,
+                    schema.catalog_oids,
+                    schema.columns,
+                    schema.checks,
+                    false,
+                )
             }
-            ForeignTableSchemaFormat::Legacy(columns) => ([0; 16], columns, Vec::new(), true),
+            ForeignTableSchemaFormat::Legacy(columns) => ([0; 16], None, columns, Vec::new(), true),
         };
         Ok((
             Self {
                 name,
                 object_id,
+                catalog_oids,
                 server_name,
                 columns,
                 checks,
@@ -72,10 +92,21 @@ impl StoredForeignTable {
         ))
     }
 
+    /// The foreign table's public OIDs: the recorded ones, or those its identity derives.
+    pub fn relation_oids(&self) -> uqa_sql::catalog::relation_oids::RelationCatalogOids {
+        self.catalog_oids.unwrap_or_else(|| {
+            uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
+                uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
+                &self.object_id,
+            )
+        })
+    }
+
     pub fn schema_json(&self) -> StorageBackendResult<String> {
         serde_json::to_string(&PersistedForeignTableSchema {
             version: FOREIGN_TABLE_SCHEMA_VERSION,
             object_id: self.object_id,
+            catalog_oids: self.catalog_oids,
             columns: self.columns.clone(),
             checks: self.checks.clone(),
         })
@@ -179,11 +210,22 @@ pub fn sql_column_type_to_fdw(column_type: &uqa_sql::ast::ColumnType) -> uqa_fdw
         uqa_sql::ast::ColumnType::Array(element) => {
             uqa_fdw::ColumnType::Array(Box::new(sql_column_type_to_fdw(element)))
         }
+        uqa_sql::ast::ColumnType::Enum(reference) => uqa_fdw::ColumnType::Enum {
+            schema: reference.schema.clone(),
+            name: reference.name.clone(),
+            oid: reference.oid,
+        },
+        uqa_sql::ast::ColumnType::Composite(reference) => uqa_fdw::ColumnType::Composite {
+            schema: reference.schema.clone(),
+            name: reference.name.clone(),
+            oid: reference.oid,
+        },
         uqa_sql::ast::ColumnType::Domain {
             schema,
             name,
             oid,
             base,
+            ..
         } => uqa_fdw::ColumnType::Domain {
             schema: schema.clone(),
             name: name.clone(),

@@ -4,14 +4,17 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Report a row that fails a NOT NULL, CHECK or partition constraint as `PostgreSQL` reports it: a row a statement writes with a description of the row that shows what the role may see, an existing row that a table alteration validates without one.
+//! Report a row that fails a NOT NULL, CHECK, partition or view check option constraint as `PostgreSQL` reports it: a row a statement writes with a description of the row that shows what the role may see, an existing row that a table alteration validates without one.
 
-use super::{diagnostics::OutputNames, ConstraintContext, ConstraintStatement};
+use super::{ConstraintContext, ConstraintStatement};
+use crate::catalog::projection::CatalogOutput;
 use crate::mutation::errors::dml_storage_error;
 use uqa_core::Value;
 use uqa_sql::{
-    ast::GeneratedColumnKind, result::format_postgres_text,
-    semantics::partition::PartitionRejection, SQLError,
+    ast::{ColumnType, GeneratedColumnKind},
+    result::format_postgres_text,
+    semantics::{partition::PartitionRejection, view_mutation::ViewMutationTarget},
+    SQLError,
 };
 use uqa_storage::document_store::Document;
 
@@ -95,6 +98,42 @@ pub fn partition_rejection_error(
     }
 }
 
+/// A row that a view's check option rejects: `new row violates check option for view "v"` with a description of the row, which `ExecWithCheckOptions` builds as it does for a CHECK constraint.
+pub fn view_check_violation(
+    context: ConstraintContext<'_>,
+    statement: ConstraintStatement<'_>,
+    view: &str,
+    table: &str,
+    document: &Document,
+) -> SQLError {
+    violation(
+        "44000",
+        format!(
+            "new row violates check option for view \"{}\"",
+            relation_name(view)
+        ),
+        failing_row_detail(context, statement, table, document),
+    )
+}
+
+/// A row that a view's check option rejects once an `INSTEAD OF` trigger of `target`, the view the statement was rewritten to, returned it: `ExecWithCheckOptions` describes the row in the columns of `target`, the statement's result relation, showing a role that may not read `target` the columns it may read or `supplied` names.
+pub fn trigger_view_check_violation(
+    context: ConstraintContext<'_>,
+    view: &str,
+    target: &ViewMutationTarget,
+    supplied: &[String],
+    values: &[Value],
+) -> SQLError {
+    violation(
+        "44000",
+        format!(
+            "new row violates check option for view \"{}\"",
+            relation_name(view)
+        ),
+        view_row_detail(context, target, supplied, values),
+    )
+}
+
 /// The violation, or the error that describing the row raised instead.
 fn violation(
     sqlstate: &str,
@@ -131,27 +170,95 @@ fn failing_row_detail(
         statement.columns,
         statement.referential_action,
     )?;
-    let output = OutputNames(diagnostics.catalog);
+    let output = CatalogOutput(diagnostics.catalog);
+    describe_row(
+        visible.as_deref(),
+        columns.iter().map(|column| {
+            let virtual_column = column
+                .generated
+                .as_ref()
+                .is_some_and(|generated| generated.kind == GeneratedColumnKind::Virtual);
+            DescribedColumn {
+                name: &column.name,
+                value: if virtual_column {
+                    DescribedValue::Virtual
+                } else {
+                    DescribedValue::Stored(document.get(&column.name))
+                },
+                ty: Some(&column.ty),
+            }
+        }),
+        &output,
+    )
+}
+
+/// The description of a row an `INSTEAD OF` trigger of `target` returned, in the columns of `target`.
+fn view_row_detail(
+    context: ConstraintContext<'_>,
+    target: &ViewMutationTarget,
+    supplied: &[String],
+    values: &[Value],
+) -> Result<Option<String>, SQLError> {
+    let diagnostics = context.diagnostics.diagnostic_context();
+    let visible = diagnostics.authorization.view_row_description_columns(
+        &target.definition,
+        &target.columns,
+        supplied,
+    )?;
+    let output = CatalogOutput(diagnostics.catalog);
+    describe_row(
+        visible.as_deref(),
+        target
+            .columns
+            .iter()
+            .zip(&target.types)
+            .zip(values)
+            .map(|((name, ty), value)| DescribedColumn {
+                name,
+                value: DescribedValue::Stored(Some(value)),
+                ty: ty.as_ref(),
+            }),
+        &output,
+    )
+}
+
+/// One column of a described row.
+struct DescribedColumn<'a> {
+    name: &'a str,
+    value: DescribedValue<'a>,
+    /// The column's type, whose output function shows the value; a view column whose type is unknown shows the value as it is.
+    ty: Option<&'a ColumnType>,
+}
+
+enum DescribedValue<'a> {
+    /// A stored value; a missing value is NULL.
+    Stored(Option<&'a Value>),
+    /// A virtual generated column, whose value is not computed for the description.
+    Virtual,
+}
+
+/// `Failing row contains (1, x).`, or `Failing row contains (a, b) = (1, x).` when `visible` names the columns the role may see, or nothing when it may see none.
+fn describe_row<'a>(
+    visible: Option<&[String]>,
+    columns: impl Iterator<Item = DescribedColumn<'a>>,
+    output: &CatalogOutput<'_>,
+) -> Result<Option<String>, SQLError> {
     let mut names = Vec::new();
     let mut values = Vec::new();
-    for column in &columns {
-        if let Some(visible) = visible.as_ref() {
-            if !visible.contains(&column.name) {
+    for column in columns {
+        if let Some(visible) = visible {
+            if !visible.iter().any(|name| name == column.name) {
                 continue;
             }
-            names.push(column.name.as_str());
+            names.push(column.name);
         }
-        let virtual_column = column
-            .generated
-            .as_ref()
-            .is_some_and(|generated| generated.kind == GeneratedColumnKind::Virtual);
-        values.push(if virtual_column {
-            "virtual".to_string()
-        } else {
-            match document.get(&column.name) {
-                None | Some(Value::Null) => "null".to_string(),
-                Some(value) => clip(format_postgres_text(value, &column.ty, Some(&output))?),
-            }
+        values.push(match column.value {
+            DescribedValue::Virtual => "virtual".to_string(),
+            DescribedValue::Stored(None | Some(Value::Null)) => "null".to_string(),
+            DescribedValue::Stored(Some(value)) => clip(match column.ty {
+                Some(ty) => format_postgres_text(value, ty, Some(output))?,
+                None => uqa_sql::expr::value_to_string(value)?,
+            }),
         });
     }
     Ok(match visible {
@@ -203,7 +310,7 @@ fn partition_key_detail(
         &resolution,
         relation,
     )?;
-    let output = OutputNames(diagnostics.catalog);
+    let output = CatalogOutput(diagnostics.catalog);
     let values = keys
         .iter()
         .zip(&types)

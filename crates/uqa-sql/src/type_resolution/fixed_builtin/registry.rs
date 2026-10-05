@@ -147,6 +147,9 @@ declarations! { fn lookup_local(local);
         "uuid_extract_version" => &[Signature::new(&[ColumnType::Uuid],
             ColumnType::SmallInteger,
         )],
+        "justify_days" | "justify_hours" | "justify_interval" => &[Signature::new(&[ColumnType::Interval],
+            ColumnType::Interval,
+        )],
         "gen_random_uuid" | "uuidv4" => &[Signature::new(&[], ColumnType::Uuid)],
         "uuidv7" => &[
             Signature::new(&[], ColumnType::Uuid),
@@ -177,6 +180,8 @@ declarations! { fn lookup_local(local);
         "pg_get_partkeydef" => &[Signature::new(&[ColumnType::Oid], ColumnType::Text)],
         "pg_get_userbyid" => &[Signature::new(&[ColumnType::Oid], ColumnType::Name)],
         "pg_backend_pid" => &[Signature::new(&[], ColumnType::Integer)],
+        "pg_my_temp_schema" => &[Signature::new(&[], ColumnType::Oid)],
+        "pg_is_other_temp_schema" => &[Signature::new(&[ColumnType::Oid], ColumnType::Boolean)],
         "pg_trigger_depth" => &[Signature::new(&[], ColumnType::Integer)],
         "pg_sleep" => &[Signature::new(&[ColumnType::DoublePrecision], ColumnType::Void)],
         "pg_sleep_for" => &[Signature::new(&[ColumnType::Interval], ColumnType::Void)],
@@ -214,9 +219,22 @@ declarations! { fn lookup_local(local);
                 ColumnType::Text,
             ),
         ],
+        "pg_describe_object" => &[Signature::new(&[ColumnType::Oid, ColumnType::Oid, ColumnType::Integer],
+            ColumnType::Text,
+        )],
         "format_type" => &[Signature::new(&[ColumnType::Oid, ColumnType::Integer],
             ColumnType::Text,
         )],
+        "pg_get_constraintdef" => &[
+            Signature::new(&[ColumnType::Oid], ColumnType::Text),
+            Signature::new(&[ColumnType::Oid, ColumnType::Boolean],
+                ColumnType::Text,
+            ),
+        ],
+        "pg_get_function_arguments"
+        | "pg_get_function_identity_arguments"
+        | "pg_get_function_result"
+        | "pg_get_function_sqlbody" => &[Signature::new(&[ColumnType::Oid], ColumnType::Text)],
         "pg_get_indexdef" => &[
             Signature::new(&[ColumnType::Oid], ColumnType::Text),
             Signature::new(&[ColumnType::Oid, ColumnType::Integer, ColumnType::Boolean],
@@ -338,7 +356,8 @@ declarations! { fn lookup_local(local);
         | "has_database_privilege"
         | "has_schema_privilege"
         | "has_sequence_privilege"
-        | "has_function_privilege" => &[
+        | "has_function_privilege"
+        | "has_type_privilege" => &[
             Signature::new(&[ColumnType::Name, ColumnType::Text, ColumnType::Text],
                 ColumnType::Boolean,
             ),

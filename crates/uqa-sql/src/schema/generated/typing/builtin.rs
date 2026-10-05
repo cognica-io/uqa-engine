@@ -442,13 +442,6 @@ pub(super) fn infer_builtin_function(
             require_class(name, args, TypeClass::Numeric)?;
             GenerationType::Interval
         }
-        "justify_hours" => {
-            require_arity(name, args, 1, 1)?;
-            if !matches!(args[0], GenerationType::Interval) {
-                return Err(function_type_error(name, &args[0], "interval"));
-            }
-            GenerationType::Interval
-        }
         "isfinite" => {
             require_signature(name, args, &[TypeClass::Temporal])?;
             GenerationType::Boolean
@@ -529,10 +522,10 @@ fn require_containment_operands(name: &str, args: &[GenerationType]) -> Result<(
         Ok(())
     } else {
         let symbol = if name == "contains_op" { "@>" } else { "<@" };
-        Err(SQLError::TypeMismatch(format!(
-            "operator does not exist: {} {symbol} {}",
-            generation_type_name(&args[0]),
-            generation_type_name(&args[1])
-        )))
+        Err(crate::type_resolution::undefined_binary_operator_named(
+            &generation_type_name(&args[0]),
+            symbol,
+            &generation_type_name(&args[1]),
+        ))
     }
 }

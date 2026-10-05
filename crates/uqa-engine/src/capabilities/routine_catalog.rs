@@ -127,4 +127,11 @@ impl RoutineRestoreSchemas for Engine {
     fn routine_schema_exists(&self, schema: &str) -> bool {
         self.durable.schemas.read().contains_key(schema)
     }
+    fn routine_user_type_identity(&self, type_name: &str) -> Option<String> {
+        uqa_execution::catalog::projection::resolve_catalog_column_type(
+            &self.catalog_execution(),
+            type_name,
+        )
+        .and_then(|ty| ty.user_type_identity())
+    }
 }

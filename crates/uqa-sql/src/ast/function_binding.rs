@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::RangeSubtype;
+use super::{EnumFunctionOperation, RangeSubtype};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionBinding {
@@ -44,14 +44,15 @@ pub struct OperatorResolutionError {
 impl FunctionResolutionError {
     #[must_use]
     pub fn sql_error(&self) -> crate::SQLError {
-        let (sqlstate, message) = match self {
-            Self::UndefinedFunction { signature } => (
-                "42883".to_string(),
-                format!("function {signature} does not exist"),
-            ),
-            Self::Operator(error) => (error.sqlstate.clone(), error.message.clone()),
-        };
-        crate::SQLError::Routine { sqlstate, message }
+        match self {
+            Self::UndefinedFunction { signature } => {
+                crate::SQLError::undefined_function_call(signature)
+            }
+            Self::Operator(error) => crate::SQLError::Routine {
+                sqlstate: error.sqlstate.clone(),
+                message: error.message.clone(),
+            },
+        }
     }
 }
 
@@ -65,6 +66,8 @@ pub enum FunctionDispatch {
     ArraySlices,
     Subscript,
     Slice,
+    /// `(expression).field`: the field of a composite value, or the key of a document map.
+    FieldSelect,
     AnyOperator,
     AllOperator,
     IsDistinct,
@@ -87,6 +90,11 @@ pub enum FunctionDispatch {
         operation: RangeFunctionOperation,
         subtype: RangeSubtype,
         multirange: bool,
+    },
+    /// An `anyenum` support function bound to one concrete enum type.
+    Enum {
+        operation: EnumFunctionOperation,
+        type_oid: u32,
     },
 }
 
@@ -118,6 +126,7 @@ impl FunctionDispatch {
             Self::VariadicArgument => "VARIADIC argument",
             Self::ArraySubscripts | Self::Subscript => "subscript",
             Self::ArraySlices | Self::Slice => "slice",
+            Self::FieldSelect => "field selection",
             Self::AnyOperator => "ANY operator",
             Self::AllOperator => "ALL operator",
             Self::IsDistinct => "IS DISTINCT FROM",
@@ -132,6 +141,7 @@ impl FunctionDispatch {
             Self::JsonExtract { as_text: false, .. } => "JSON extraction operator",
             Self::JsonExtract { as_text: true, .. } => "JSON text extraction operator",
             Self::Range { operation, .. } => operation.label(),
+            Self::Enum { operation, .. } => operation.label(),
         }
     }
 

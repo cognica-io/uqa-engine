@@ -112,6 +112,7 @@ pub fn copy_from(
             table: relation.clone(),
             target_relation_bound: false,
             target_qualifier: qualifier.clone(),
+            target_alias: None,
             include_descendants: true,
             columns: columns.into_iter().map(Into::into).collect(),
             // COPY FROM writes the values its input supplies, also to a GENERATED ALWAYS identity column.

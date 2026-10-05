@@ -23,6 +23,7 @@ fn information_schema_catalog_name_preserves_its_pg18_composite_identity() {
             schema: "information_schema".into(),
             name: "sql_identifier".into(),
             oid: 13_312,
+            array_oid: Some(13_311),
             base: Box::new(ColumnType::Name),
         })]
     );
