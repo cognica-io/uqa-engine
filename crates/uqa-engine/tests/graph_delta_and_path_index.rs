@@ -123,3 +123,76 @@ fn graph_mutation_does_not_resurrect_a_stale_path_index_after_reopen() {
         .unwrap();
     assert_eq!(vertices.into_iter().collect::<Vec<_>>(), vec![1, 2, 3]);
 }
+
+#[test]
+fn graph_delta_with_spilled_endpoints_preserves_atomicity_across_providers() {
+    use std::sync::Arc;
+    use uqa_storage::mvcc::VersionedSessionOptions;
+    use uqa_storage_sqlite::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorageProvider};
+
+    let directory = tempdir().unwrap();
+    let options = VersionedSessionOptions {
+        retained_bytes: 1 << 20,
+    };
+    for provider in 0..3 {
+        let engine = match provider {
+            0 => {
+                let connection =
+                    ManagedConnection::open(&directory.path().join("native.db")).unwrap();
+                connection.bind_native_records(options).unwrap();
+                Engine::from_persistent_provider(Arc::new(SQLiteStorageProvider::new(connection)))
+                    .unwrap()
+            }
+            1 => Engine::from_persistent_provider(Arc::new(
+                SQLiteKeyValueStorage::open_with_options(
+                    &directory.path().join("key-value.db"),
+                    options,
+                )
+                .unwrap(),
+            ))
+            .unwrap(),
+            _ => Engine::from_persistent_provider(Arc::new(
+                uqa_storage_redb::RedbStorage::open_with_options(
+                    directory.path().join("store.redb"),
+                    options,
+                )
+                .unwrap(),
+            ))
+            .unwrap(),
+        };
+        let mut delta = GraphDelta::new();
+        // Canonical endpoint payloads alone exceed the session allowance, forcing private spills before the edges reuse those endpoints.
+        for id in 1..=128 {
+            let mut vertex = Vertex::new(id, "node");
+            vertex
+                .properties
+                .insert("body".into(), uqa_core::Value::Str("x".repeat(16 << 10)));
+            delta.add_vertex(vertex);
+        }
+        for id in 1..=384 {
+            delta.add_edge(Edge::new(id, (id - 1) % 128 + 1, id % 128 + 1, "link"));
+        }
+        engine.apply_graph_delta("g", &delta).unwrap();
+        let peer = engine.new_session().unwrap();
+        let counts = || {
+            peer.graph_with("g", |store| {
+                (
+                    store.vertex_ids_in_graph("g").unwrap().len(),
+                    store.edge_id_page("g", None, 4096).unwrap().len(),
+                )
+            })
+            .unwrap()
+            .unwrap()
+        };
+        assert_eq!(counts(), (128, 384));
+        let mut rejected = GraphDelta::new();
+        rejected.add_vertex(Vertex::new(129, "node"));
+        rejected.add_edge(Edge::new(385, 129, 999, "link"));
+        assert!(engine.apply_graph_delta("g", &rejected).is_err());
+        assert_eq!(counts(), (128, 384));
+        assert!(peer
+            .graph_with("g", |store| store.get_vertex(129).unwrap().is_none())
+            .unwrap()
+            .unwrap());
+    }
+}

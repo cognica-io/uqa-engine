@@ -6,6 +6,8 @@
 
 //! Undo releases empty evaluated buffers without discarding retained record readers.
 
+mod requirements;
+
 use super::*;
 use crate::mvcc::vector::{IndexKind, Mutation};
 use crate::mvcc::{GraphMutation, MemoryVersionStore};
