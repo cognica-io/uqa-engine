@@ -27,15 +27,20 @@ pub struct RowChangePublication<'manager> {
 impl RowChangeSnapshot<'_> {
     pub fn baseline(&self) -> Result<RowChangeBaseline, SQLError> {
         let epoch = self.manager.current_change_epoch();
-        let cross_sequence = match self.manager.cross.as_ref() {
+        let (cross_sequence, retention) = match self.manager.cross.as_ref() {
             Some(CrossAttachment::Active(coordinator)) => {
-                coordinator.change_sequence().map_err(SQLError::Internal)?
+                let (sequence, lease) = coordinator
+                    .pin_change_sequence()
+                    .map_err(SQLError::Internal)?;
+                (sequence, Some(lease))
             }
-            _ => 0,
+            _ => (0, None),
         };
         Ok(RowChangeBaseline {
             epoch,
             cross_sequence,
+            _retention: retention,
+            _manager: self.manager.baseline_owner.upgrade(),
         })
     }
 }

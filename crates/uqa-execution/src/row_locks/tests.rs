@@ -472,11 +472,13 @@ fn row_change_epochs_ignore_unrelated_commits() {
     let baseline = RowChangeBaseline {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
+        _retention: None,
+        _manager: None,
     };
     let table = manager.table_key("public.accounts");
     let target = RowLockKey { table, doc_id: 1 };
     let unrelated = RowLockKey { table, doc_id: 2 };
-    let changed_after = |doc_id, baseline| {
+    let changed_after = |doc_id, baseline: &RowChangeBaseline| {
         manager
             .conflicting_change_target_after(
                 "public.accounts",
@@ -497,12 +499,14 @@ fn row_change_epochs_ignore_unrelated_commits() {
             }],
         )
         .unwrap();
-    assert!(!changed_after(1, baseline));
-    assert!(changed_after(2, baseline));
+    assert!(!changed_after(1, &baseline));
+    assert!(changed_after(2, &baseline));
 
     let retry_baseline = RowChangeBaseline {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
+        _retention: None,
+        _manager: None,
     };
     manager
         .publish_row_changes(
@@ -513,8 +517,8 @@ fn row_change_epochs_ignore_unrelated_commits() {
             }],
         )
         .unwrap();
-    assert!(changed_after(1, retry_baseline));
-    assert!(!changed_after(2, retry_baseline));
+    assert!(changed_after(1, &retry_baseline));
+    assert!(!changed_after(2, &retry_baseline));
 }
 
 #[test]
@@ -525,6 +529,8 @@ fn key_share_ignores_compatible_non_key_mutations() {
     let baseline = RowChangeBaseline {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
+        _retention: None,
+        _manager: None,
     };
     let key = RowLockKey {
         table: manager.table_key("public.accounts"),
@@ -554,7 +560,7 @@ fn key_share_ignores_compatible_non_key_mutations() {
             .conflicting_change_target_after(
                 "public.accounts",
                 1,
-                baseline,
+                &baseline,
                 LockStrength::ForKeyShare
             )
             .unwrap(),
@@ -562,7 +568,12 @@ fn key_share_ignores_compatible_non_key_mutations() {
     );
     assert_eq!(
         manager
-            .conflicting_change_target_after("public.accounts", 1, baseline, LockStrength::ForShare)
+            .conflicting_change_target_after(
+                "public.accounts",
+                1,
+                &baseline,
+                LockStrength::ForShare
+            )
             .unwrap(),
         RowChangeTarget::Present(1)
     );
@@ -576,6 +587,8 @@ fn conflicting_change_targets_follow_primary_key_rewrites() {
     let baseline = RowChangeBaseline {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
+        _retention: None,
+        _manager: None,
     };
     let table = manager.table_key("public.accounts");
     let old = RowLockKey { table, doc_id: 1 };
@@ -605,7 +618,7 @@ fn conflicting_change_targets_follow_primary_key_rewrites() {
             .conflicting_change_target_after(
                 "public.accounts",
                 1,
-                baseline,
+                &baseline,
                 LockStrength::ForUpdate,
             )
             .unwrap(),
@@ -621,6 +634,8 @@ fn physical_change_targets_follow_rewrites_across_relations() {
     let baseline = RowChangeBaseline {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
+        _retention: None,
+        _manager: None,
     };
     let source = RowLockKey {
         table: manager.table_key("public.items_low"),
@@ -651,7 +666,7 @@ fn physical_change_targets_follow_rewrites_across_relations() {
         .unwrap();
     assert_eq!(
         manager
-            .physical_row_successor_after("public.items_low", 1, baseline)
+            .physical_row_successor_after("public.items_low", 1, &baseline)
             .unwrap(),
         PhysicalRowChangeTarget::Present {
             table_hash: RowLockManager::stable_table_hash("public.items_high"),
@@ -660,7 +675,7 @@ fn physical_change_targets_follow_rewrites_across_relations() {
     );
     assert_eq!(
         manager
-            .row_successor_after("public.items_low", 1, baseline)
+            .row_successor_after("public.items_low", 1, &baseline)
             .unwrap(),
         RowChangeTarget::Deleted
     );
@@ -674,6 +689,8 @@ fn delete_then_reinsert_of_the_same_key_terminates_the_old_generation() {
     let baseline = RowChangeBaseline {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
+        _retention: None,
+        _manager: None,
     };
     let key = RowLockKey {
         table: manager.table_key("public.accounts"),
@@ -699,7 +716,7 @@ fn delete_then_reinsert_of_the_same_key_terminates_the_old_generation() {
             .conflicting_change_target_after(
                 "public.accounts",
                 1,
-                baseline,
+                &baseline,
                 LockStrength::ForUpdate,
             )
             .unwrap(),
@@ -715,6 +732,8 @@ fn primary_key_rewrite_chains_keep_commit_order() {
     let baseline = RowChangeBaseline {
         epoch: manager.current_change_epoch(),
         cross_sequence: 0,
+        _retention: None,
+        _manager: None,
     };
     let table = manager.table_key("public.accounts");
     let three = RowLockKey { table, doc_id: 3 };
@@ -756,7 +775,7 @@ fn primary_key_rewrite_chains_keep_commit_order() {
             .conflicting_change_target_after(
                 "public.accounts",
                 3,
-                baseline,
+                &baseline,
                 LockStrength::ForUpdate,
             )
             .unwrap(),
@@ -819,7 +838,7 @@ fn durable_change_journal_retains_history_beyond_the_old_ring_capacity() {
             .conflicting_change_target_after(
                 "public.accounts",
                 1,
-                baseline,
+                &baseline,
                 LockStrength::ForUpdate,
             )
             .unwrap(),

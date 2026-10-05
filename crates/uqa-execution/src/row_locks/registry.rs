@@ -28,6 +28,7 @@ impl RowLockManager {
 
     fn with_cross_attachment(cross: Option<CrossAttachment>) -> Self {
         Self {
+            baseline_owner: Weak::new(),
             next_session: AtomicU64::new(1),
             next_transaction_xid: AtomicU64::new(3),
             catalog_oids: crate::catalog::identity::CatalogOidCounter::default(),
@@ -57,7 +58,7 @@ impl RowLockManager {
         #[cfg(any(unix, windows))]
         {
             let cross = match FileLockCoordinator::open(path) {
-                Ok(coordinator) => CrossAttachment::Active(Box::new(coordinator)),
+                Ok(coordinator) => CrossAttachment::Active(Arc::new(coordinator)),
                 Err(reason) => CrossAttachment::Unavailable(reason),
             };
             Self::with_cross_attachment(Some(cross))
@@ -274,12 +275,47 @@ fn shared_manager(
     if let Some(manager) = registry.get(&identity).and_then(Weak::upgrade) {
         return manager;
     }
-    let manager = match &identity {
-        ManagerIdentity::Durable(uqa_storage::PersistentStorageIdentity::File(path)) => {
-            Arc::new(RowLockManager::for_database_file(path))
-        }
-        _ => Arc::new(RowLockManager::new()),
-    };
+    let manager = Arc::new_cyclic(|owner| {
+        let mut manager = match &identity {
+            ManagerIdentity::Durable(uqa_storage::PersistentStorageIdentity::File(path)) => {
+                RowLockManager::for_database_file(path)
+            }
+            _ => RowLockManager::new(),
+        };
+        manager.baseline_owner = owner.clone();
+        manager
+    });
     registry.insert(identity, Arc::downgrade(&manager));
     manager
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_retained_baseline_preserves_the_single_registered_coordinator() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("retained.db");
+        let open = || {
+            shared_manager(
+                Some(uqa_storage::PersistentStorageIdentity::File(path.clone())),
+                ManagerIdentity::Provider(0),
+            )
+        };
+        let manager = open();
+        let identity = Arc::downgrade(&manager);
+        let baseline = manager
+            .begin_change_snapshot(&uqa_core::CancellationToken::new())
+            .unwrap()
+            .baseline()
+            .unwrap();
+        drop(manager);
+        let reopened = open();
+        assert!(Arc::ptr_eq(&identity.upgrade().unwrap(), &reopened));
+        drop(reopened);
+        assert!(identity.upgrade().is_some());
+        drop(baseline);
+        assert!(identity.upgrade().is_none());
+    }
 }
