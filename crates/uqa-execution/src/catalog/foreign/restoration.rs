@@ -35,17 +35,12 @@ pub fn restore(
     let restored_servers =
         super::servers::restore(catalog, &context.roles.role_definitions(), allow_migration)?;
     let servers = &restored_servers.definitions;
+    let current_references = super::reference::check_format(catalog)?;
     let mut migrations = Vec::new();
     let mut tables = BTreeMap::new();
     let mut securities = BTreeMap::new();
     for row in catalog.load_foreign_tables()? {
         let relation_name = row.relation.qualified_name();
-        if !servers.contains_key(&row.server_name) {
-            return Err(StorageBackendError::Other(format!(
-                "foreign table `{}` references missing server `{}`",
-                relation_name, row.server_name
-            )));
-        }
         let options: BTreeMap<String, String> = serde_json::from_str(&row.options_json)?;
         let (mut table, legacy_schema) = super::StoredForeignTable::from_catalog(
             relation_name.clone(),
@@ -53,6 +48,8 @@ pub fn restore(
             options,
             &row.columns_json,
         )?;
+        let reference_migration =
+            super::reference::restore(&mut table, servers, current_references, allow_migration)?;
         if table.object_id == [0; 16] {
             return Err(StorageBackendError::Other(format!(
                     "foreign table `{relation_name}` has no object identity and requires an initial-open migration"
@@ -78,7 +75,7 @@ pub fn restore(
             })?;
         let schema_after_binding = table.schema_json()?;
         let schema_requires_migration =
-            legacy_schema || schema_before_binding != schema_after_binding;
+            legacy_schema || reference_migration || schema_before_binding != schema_after_binding;
         let column_names = table
             .columns
             .iter()
@@ -113,6 +110,9 @@ pub fn restore(
     restored_servers.persist_migrations(catalog)?;
     for row in migrations {
         catalog.save_foreign_table(&row)?;
+    }
+    if !current_references && allow_migration {
+        super::reference::initialize_format(catalog)?;
     }
     Ok(RestoredForeignCatalog {
         servers: restored_servers.definitions,

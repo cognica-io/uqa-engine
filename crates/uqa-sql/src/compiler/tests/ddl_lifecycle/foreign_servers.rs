@@ -59,3 +59,27 @@ fn foreign_server_unicode_escape_clauses_preserve_empty_declaration_strings() {
         assert_eq!(server.version.as_deref(), Some(""), "{sql}");
     }
 }
+
+#[test]
+fn drop_server_preserves_written_targets_and_uses_its_own_command_tag() {
+    for (prefix, suffix, if_exists, cascade) in [
+        ("", "", false, false),
+        ("IF EXISTS ", " RESTRICT", true, false),
+        ("IF EXISTS ", " CASCADE", true, true),
+    ] {
+        let statement = first(&format!(
+            "DROP SERVER {prefix}\"First.Server\", last_server, \"First.Server\"{suffix}"
+        ));
+        let Statement::Drop(drop) = &statement else {
+            panic!("expected DROP SERVER");
+        };
+        assert_eq!(drop.kind, crate::ast::DropKind::ForeignServer);
+        assert_eq!(drop.names, ["First.Server", "last_server", "First.Server"]);
+        assert_eq!(drop.if_exists, if_exists);
+        assert_eq!(drop.cascade, cascade);
+        let plan = crate::plan::UnifiedPlan::lower(statement);
+        let mut result = crate::SQLResult::empty();
+        crate::result::completion::set_command_completion(&plan, &mut result, false);
+        assert_eq!(result.command_tag.as_deref(), Some("DROP SERVER"));
+    }
+}

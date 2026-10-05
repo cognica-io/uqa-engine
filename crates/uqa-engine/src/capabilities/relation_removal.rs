@@ -7,7 +7,7 @@
 //! Bind relation removal to active registries, session locks and existing publication boundaries.
 use crate::Engine;
 use uqa_execution::schema::removal::entry::{
-    DomainRemovalWrite, DropStatementBindings, SchemaRemovalWrite,
+    DomainRemovalWrite, DropStatementBindings, ForeignServerRemovalWrite, SchemaRemovalWrite,
 };
 use uqa_execution::schema::removal::{
     RelationRemovalContext, RelationRemovalEvents, RelationRemovalLocks, RelationRemovalPrivileges,
@@ -19,6 +19,14 @@ use uqa_sql::{
 };
 
 impl DropStatementBindings for Engine {
+    fn with_foreign_server_removal_write(
+        &self,
+        write: ForeignServerRemovalWrite<'_>,
+    ) -> Result<SQLResult, SQLError> {
+        self.with_implicit_definition_transaction(|engine| {
+            write(&engine.foreign_server_removal_context())
+        })
+    }
     fn with_schema_removal_write(
         &self,
         write: SchemaRemovalWrite<'_>,

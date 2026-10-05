@@ -8,7 +8,8 @@
 
 use super::RelationRemovalWrite;
 use crate::schema::{
-    domains::removal::DomainRemovalContext, namespaces::removal::SchemaRemovalContext,
+    domains::removal::DomainRemovalContext, foreign_server_removal::ForeignServerRemovalContext,
+    namespaces::removal::SchemaRemovalContext,
 };
 use uqa_sql::{
     ast::{DropKind, DropStmt},
@@ -20,7 +21,14 @@ pub type SchemaRemovalWrite<'a> =
 pub type DomainRemovalWrite<'a> =
     Box<dyn FnOnce(&DomainRemovalContext<'_>) -> Result<SQLResult, SQLError> + 'a>;
 
+pub type ForeignServerRemovalWrite<'a> =
+    Box<dyn FnOnce(&ForeignServerRemovalContext<'_>) -> Result<SQLResult, SQLError> + 'a>;
+
 pub trait DropStatementBindings {
+    fn with_foreign_server_removal_write(
+        &self,
+        write: ForeignServerRemovalWrite<'_>,
+    ) -> Result<SQLResult, SQLError>;
     fn with_schema_removal_write(
         &self,
         write: SchemaRemovalWrite<'_>,
@@ -40,6 +48,12 @@ pub fn run_drop_statement(
     statement: DropStmt,
 ) -> Result<SQLResult, SQLError> {
     match statement.kind {
+        DropKind::ForeignServer => {
+            bindings.with_foreign_server_removal_write(Box::new(move |context| {
+                context.drop_servers(&statement)?;
+                Ok(SQLResult::empty())
+            }))
+        }
         DropKind::Schema => bindings.with_schema_removal_write(Box::new(move |context| {
             crate::schema::namespaces::removal::drop_schemas(context, &statement)?;
             Ok(SQLResult::empty())

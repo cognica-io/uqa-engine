@@ -253,6 +253,7 @@ fn occupied(oid: i64) -> CatalogReadView {
             catalog_oids: None,
             row_type_array_name: None,
             server_name: "memory".into(),
+            server_reference: None,
             columns,
             checks: Vec::new(),
             options: std::collections::BTreeMap::default(),

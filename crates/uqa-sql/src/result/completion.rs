@@ -91,6 +91,7 @@ pub fn command_tag_name(command: &CommandPlan) -> &'static str {
         CommandPlan::Drop(statement) => match statement.kind {
             DropKind::Table => "DROP TABLE",
             DropKind::ForeignTable => "DROP FOREIGN TABLE",
+            DropKind::ForeignServer => "DROP SERVER",
             DropKind::Index => "DROP INDEX",
             DropKind::View => "DROP VIEW",
             DropKind::MaterializedView => "DROP MATERIALIZED VIEW",

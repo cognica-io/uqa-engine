@@ -83,6 +83,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
     let kind = match stmt.remove_type() {
         ObjectType::ObjectTable => DropKind::Table,
         ObjectType::ObjectForeignTable => DropKind::ForeignTable,
+        ObjectType::ObjectForeignServer => DropKind::ForeignServer,
         ObjectType::ObjectIndex => DropKind::Index,
         ObjectType::ObjectView => DropKind::View,
         ObjectType::ObjectMatview => DropKind::MaterializedView,

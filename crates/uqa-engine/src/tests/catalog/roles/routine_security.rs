@@ -279,9 +279,10 @@ fn stored_private_routines_do_not_require_rollback_callers_to_access_their_schem
         let (_directory, engine, peer) = sessions(provider);
         drop(peer);
         sql(&engine, "CREATE ROLE caller; GRANT CREATE ON SCHEMA public TO caller; CREATE SCHEMA hidden; CREATE TABLE hidden.items(v int); INSERT INTO hidden.items VALUES(7); CREATE FUNCTION hidden.read_item() RETURNS int LANGUAGE SQL BEGIN ATOMIC SELECT v FROM hidden.items; END");
+        sql(&engine, "SET ROLE caller");
         sql(
             &engine,
-            "SET ROLE caller; BEGIN; CREATE TABLE public.discarded(v int); ROLLBACK",
+            "BEGIN; CREATE TABLE public.discarded(v int); ROLLBACK",
         );
         error(&engine, "CREATE FUNCTION public.forbidden() RETURNS int LANGUAGE SQL BEGIN ATOMIC SELECT v FROM hidden.items; END", "42501");
         sql(&engine, "RESET ROLE");

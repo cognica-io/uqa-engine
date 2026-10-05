@@ -124,15 +124,6 @@ impl ForeignCreationContext<'_> {
         }
         Ok(Some((name, relation)))
     }
-    fn ensure_foreign_server_exists(&self, server_name: &str) -> Result<(), uqa_sql::SQLError> {
-        if self.registry.servers().contains_key(server_name) {
-            return Ok(());
-        }
-        Err(uqa_sql::SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("server \"{server_name}\" does not exist"),
-        })
-    }
     pub fn register_foreign_table_inner(
         &self,
         name: &str,
@@ -207,7 +198,14 @@ impl ForeignCreationContext<'_> {
             uqa_sql::ast::RelationPersistence::Permanent,
         )?;
         let catalog_oids = self.prepare_foreign_table_definition(&relation, &mut statement)?;
-        self.ensure_foreign_server_exists(&statement.server_name)?;
+        let server_reference = self
+            .registry
+            .servers()
+            .get(&statement.server_name)
+            .map(crate::catalog::foreign::ForeignServerReference::from)
+            .ok_or_else(|| {
+                uqa_sql::schema::foreign_servers::missing_server(&statement.server_name)
+            })?;
         self.creation.reserve_row_type_name(name)?;
         let object_id = (self.allocate_identity)().map_err(|error| {
             uqa_sql::SQLError::Internal(format!(
@@ -225,6 +223,7 @@ impl ForeignCreationContext<'_> {
                 &relation.name,
             )?),
             server_name: statement.server_name,
+            server_reference: Some(server_reference),
             columns: statement.columns,
             checks: statement.checks,
             options: statement.options.into_iter().collect(),
@@ -297,35 +296,6 @@ impl ForeignCreationContext<'_> {
             not_nulls,
         )?;
         Ok(catalog_oids)
-    }
-    pub fn drop_foreign_server_inner(&self, name: &str) -> Result<bool, String> {
-        self.namespace
-            .synchronize_catalog_registries()
-            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        // Reject when any foreign table references this server.
-        let referenced = self
-            .registry
-            .tables()
-            .values()
-            .any(|t| t.server_name == name);
-        if referenced {
-            return Err(format!(
-                "foreign server `{name}` is referenced by a foreign table"
-            ));
-        }
-        if !self.registry.servers().contains_key(name) {
-            return Ok(false);
-        }
-        if let Some(catalog) = self.catalog {
-            catalog
-                .drop_foreign_server(name)
-                .map_err(|err| format!("drop foreign server `{name}`: {err}"))?;
-        }
-        let removed = self.registry.servers_write().remove(name).is_some();
-        if removed {
-            self.changes.catalog_registry_changed();
-        }
-        Ok(removed)
     }
     pub fn register_deferred_foreign_table(
         &self,

@@ -37,6 +37,7 @@ pub fn drop_relation_kind(kind: DropKind) -> &'static str {
     match kind {
         DropKind::Table => "table",
         DropKind::ForeignTable => "foreign table",
+        DropKind::ForeignServer => "server",
         DropKind::View => "view",
         DropKind::MaterializedView => "materialized view",
         DropKind::Sequence => "sequence",

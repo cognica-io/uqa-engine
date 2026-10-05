@@ -29,6 +29,11 @@ pub struct PhysicalExplainContext<'a> {
     pub statistics: &'a dyn PlannerStatisticsCatalog,
     pub filters: FilterPushdownContext<'a>,
     pub evaluate: &'a ConstantEvaluator<'a>,
+    /// Validate the retained provider metadata for a concrete source after CTE and view expansion.
+    pub validate_source: &'a dyn Fn(
+        &uqa_sql::catalog::resolution::RelationNameResolution,
+        &str,
+    ) -> Result<(), SQLError>,
 }
 
 #[derive(Clone)]

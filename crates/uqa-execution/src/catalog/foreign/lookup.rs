@@ -75,6 +75,43 @@ impl ForeignLookupContext<'_> {
             .get(&relation)
             .map(StoredForeignTable::fdw_definition))
     }
+    /// Select the connection from the same retained catalog as its table and validate the captured server identity before invoking a handler.
+    pub fn foreign_table_source(
+        &self,
+        name: &str,
+    ) -> Result<(uqa_fdw::ForeignTable, uqa_fdw::ForeignServer), String> {
+        if let (Some(tables), Some(servers)) =
+            (self.state.query_tables(), self.state.query_servers())
+        {
+            return self.table_source(name, tables, servers);
+        }
+        self.state
+            .synchronize_catalog_registries()
+            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
+        self.table_source(name, &self.registry.tables(), &self.registry.servers())
+    }
+
+    fn table_source(
+        &self,
+        name: &str,
+        tables: &BTreeMap<RelationIdentity, StoredForeignTable>,
+        servers: &BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
+    ) -> Result<(uqa_fdw::ForeignTable, uqa_fdw::ForeignServer), String> {
+        let table = self
+            .state
+            .relation_lookup_candidates(name)
+            .map_err(|err| format!("resolve foreign table: {err}"))?
+            .into_iter()
+            .find_map(|relation| tables.get(&relation))
+            .ok_or_else(|| format!("Foreign table `{name}` does not exist"))?;
+        let server = table
+            .bound_server(servers)
+            .map_err(|error| error.to_string())?;
+        Ok((
+            table.fdw_definition(),
+            super::servers::fdw_definition(server),
+        ))
+    }
     pub fn list_foreign_servers(&self) -> Result<Vec<String>, String> {
         if let Some(snapshot) = self.state.query_servers() {
             let mut out = snapshot.keys().cloned().collect::<Vec<_>>();

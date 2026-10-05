@@ -1,0 +1,39 @@
+{
+  "provenance": {"reference": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit", "capture_script_sha256": "ca9327cb9da9de186894288fca310cd7e6f724b111ac9e48788905b0f525ec54", "raw_capture_sha256": "ae62fd953f1ecfdf94d7848c0f8f9aea3381e433862b4aaf931a62040d7fb584", "method": "Three libpq sessions in a disposable database. B completed DROP SERVER successfully before A COMMIT, confirmed by PQisBusy/PQgetResult; no timing threshold establishes completion. Before and after same-name server recreation, separate new connections captured the references and query errors. memory_fdw is a disposable wrapper without a handler.", "normalization": "Only the original server OID and its occurrence in error messages become $server_oid; the independently allocated replacement OID becomes $replacement_server_oid. The two captured OIDs differ. reference_only marks PostgreSQL-only setup or pg_foreign_table/pg_foreign_server introspection."},
+  "original_server_oid": "$server_oid",
+  "setup": [
+    {"sql": "CREATE FOREIGN DATA WRAPPER memory_fdw", "command_tag": "CREATE FOREIGN DATA WRAPPER", "error": null, "columns": [], "rows": [], "notices": [], "reference_only": true},
+    {"sql": "CREATE SCHEMA ds414_orphan", "command_tag": "CREATE SCHEMA", "error": null, "columns": [], "rows": [], "notices": []},
+    {"sql": "CREATE SERVER competing TYPE 'original' FOREIGN DATA WRAPPER memory_fdw", "command_tag": "CREATE SERVER", "error": null, "columns": [], "rows": [], "notices": []}
+  ],
+  "session_a": [
+    {"sql": "BEGIN", "command_tag": "BEGIN", "error": null, "columns": [], "rows": [], "notices": []},
+    {"sql": "CREATE FOREIGN TABLE ds414_orphan.remote(a integer) SERVER competing OPTIONS(source 'memory')", "command_tag": "CREATE FOREIGN TABLE", "error": null, "columns": [], "rows": [], "notices": []}
+  ],
+  "session_b": {"sql": "DROP SERVER competing RESTRICT", "command_tag": "DROP SERVER", "error": null, "columns": [], "rows": [], "notices": []},
+  "completed_before_a_commit": true,
+  "session_a_commit": {"sql": "COMMIT", "command_tag": "COMMIT", "error": null, "columns": [], "rows": [], "notices": []},
+  "reference_before_recreate": [
+    {"sql": "SELECT c.relname,f.ftserver::text,s.srvname,s.oid IS NULL AS missing_server FROM pg_foreign_table f JOIN pg_class c ON c.oid=f.ftrelid LEFT JOIN pg_foreign_server s ON s.oid=f.ftserver WHERE c.relnamespace='ds414_orphan'::regnamespace ORDER BY c.relname", "command_tag": "SELECT 1", "error": null, "columns": ["relname", "ftserver", "srvname", "missing_server"], "rows": [["remote", "$server_oid", null, "t"]], "notices": [], "reference_only": true},
+    {"sql": "SELECT d.classid::regclass::text,d.objid::regclass::text,d.refclassid::regclass::text,d.refobjid::text,d.deptype::text FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid='ds414_orphan.remote'::regclass AND d.refclassid='pg_foreign_server'::regclass ORDER BY d.refobjid", "command_tag": "SELECT 1", "error": null, "columns": ["classid", "objid", "refclassid", "refobjid", "deptype"], "rows": [["pg_class", "ds414_orphan.remote", "pg_foreign_server", "$server_oid", "n"]], "notices": []}
+  ],
+  "query_before_recreate": [
+    {"sql": "SELECT * FROM ds414_orphan.remote", "command_tag": "", "error": {"severity": "ERROR", "sqlstate": "XX000", "message": "cache lookup failed for foreign server $server_oid", "detail": null, "hint": null}, "columns": [], "rows": [], "notices": []},
+    {"sql": "SELECT * FROM ds414_orphan.remote LIMIT 0", "command_tag": "", "error": {"severity": "ERROR", "sqlstate": "XX000", "message": "cache lookup failed for foreign server $server_oid", "detail": null, "hint": null}, "columns": [], "rows": [], "notices": []},
+    {"sql": "EXPLAIN SELECT * FROM ds414_orphan.remote LIMIT 0", "command_tag": "", "error": {"severity": "ERROR", "sqlstate": "XX000", "message": "cache lookup failed for foreign server $server_oid", "detail": null, "hint": null}, "columns": [], "rows": [], "notices": []}
+  ],
+  "recreate": {"sql": "CREATE SERVER competing TYPE 'replacement' FOREIGN DATA WRAPPER memory_fdw", "command_tag": "CREATE SERVER", "error": null, "columns": [], "rows": [], "notices": []},
+  "replacement_server_oid": "$replacement_server_oid",
+  "reference_after_recreate": [
+    {"sql": "SELECT c.relname,f.ftserver::text,s.srvname,s.oid IS NULL AS missing_server FROM pg_foreign_table f JOIN pg_class c ON c.oid=f.ftrelid LEFT JOIN pg_foreign_server s ON s.oid=f.ftserver WHERE c.relnamespace='ds414_orphan'::regnamespace ORDER BY c.relname", "command_tag": "SELECT 1", "error": null, "columns": ["relname", "ftserver", "srvname", "missing_server"], "rows": [["remote", "$server_oid", null, "t"]], "notices": [], "reference_only": true},
+    {"sql": "SELECT d.classid::regclass::text,d.objid::regclass::text,d.refclassid::regclass::text,d.refobjid::text,d.deptype::text FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid='ds414_orphan.remote'::regclass AND d.refclassid='pg_foreign_server'::regclass ORDER BY d.refobjid", "command_tag": "SELECT 1", "error": null, "columns": ["classid", "objid", "refclassid", "refobjid", "deptype"], "rows": [["pg_class", "ds414_orphan.remote", "pg_foreign_server", "$server_oid", "n"]], "notices": []}
+  ],
+  "query_after_recreate": [
+    {"sql": "SELECT * FROM ds414_orphan.remote", "command_tag": "", "error": {"severity": "ERROR", "sqlstate": "XX000", "message": "cache lookup failed for foreign server $server_oid", "detail": null, "hint": null}, "columns": [], "rows": [], "notices": []},
+    {"sql": "SELECT * FROM ds414_orphan.remote LIMIT 0", "command_tag": "", "error": {"severity": "ERROR", "sqlstate": "XX000", "message": "cache lookup failed for foreign server $server_oid", "detail": null, "hint": null}, "columns": [], "rows": [], "notices": []},
+    {"sql": "EXPLAIN SELECT * FROM ds414_orphan.remote LIMIT 0", "command_tag": "", "error": {"severity": "ERROR", "sqlstate": "XX000", "message": "cache lookup failed for foreign server $server_oid", "detail": null, "hint": null}, "columns": [], "rows": [], "notices": []}
+  ],
+  "drop_replacement_restrict": {"sql": "DROP SERVER competing RESTRICT", "command_tag": "DROP SERVER", "error": null, "columns": [], "rows": [], "notices": []},
+  "orphan_after_replacement_drop": {"sql": "SELECT c.relname,f.ftserver::text,s.srvname,s.oid IS NULL AS missing_server FROM pg_foreign_table f JOIN pg_class c ON c.oid=f.ftrelid LEFT JOIN pg_foreign_server s ON s.oid=f.ftserver WHERE c.relnamespace='ds414_orphan'::regnamespace ORDER BY c.relname", "command_tag": "SELECT 1", "error": null, "columns": ["relname", "ftserver", "srvname", "missing_server"], "rows": [["remote", "$server_oid", null, "t"]], "notices": [], "reference_only": true},
+  "drop_orphan": {"sql": "DROP FOREIGN TABLE ds414_orphan.remote", "command_tag": "DROP FOREIGN TABLE", "error": null, "columns": [], "rows": [], "notices": []}
+}

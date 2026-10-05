@@ -32,6 +32,7 @@ pub fn run_single_foreign_select_output<'a, S: Clone + Send + Sync + 'static>(
         .foreign_table_resolved(&resolution, table)?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let predicates = fdw_predicates_from_where(stmt.r#where.as_ref(), params);
+    foreign_table.bound_server(&catalog.snapshot().definitions.foreign_servers)?;
     let scanned = context
         .foreign_tables
         .scan_foreign_source(table, &predicates)

@@ -16,6 +16,29 @@ use uqa_execution::{
 };
 use uqa_storage::StorageBackendResult;
 impl Engine {
+    pub(crate) fn foreign_server_removal_publication(
+        &self,
+    ) -> uqa_execution::schema::foreign_server_removal::ForeignServerRemovalPublication<'_> {
+        uqa_execution::schema::foreign_server_removal::ForeignServerRemovalPublication {
+            registry: self,
+            catalog: self.storage.catalog.as_deref(),
+            changes: self,
+        }
+    }
+    pub(crate) fn foreign_server_removal_context(
+        &self,
+    ) -> uqa_execution::schema::foreign_server_removal::ForeignServerRemovalContext<'_> {
+        uqa_execution::schema::foreign_server_removal::ForeignServerRemovalContext {
+            publication: self.foreign_server_removal_publication(),
+            namespace: self,
+            locks: self,
+            writer: self,
+            roles: self,
+            session: self,
+            deletion: self,
+            notices: self.query_runtime_view().notices,
+        }
+    }
     pub(crate) fn foreign_lookup_context(&self) -> ForeignLookupContext<'_> {
         ForeignLookupContext {
             state: self,

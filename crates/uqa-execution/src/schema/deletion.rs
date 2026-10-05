@@ -34,6 +34,7 @@ pub struct CatalogRemovalContext<'a> {
     /// Tables, and through it views, sequences, routines, triggers, rules, columns, defaults and constraints.
     pub tables: TableRemovalContext<'a>,
     pub foreign_tables: ForeignTableRemovalContext<'a>,
+    pub foreign_servers: crate::schema::foreign_server_removal::ForeignServerRemovalPublication<'a>,
     pub indexes: IndexRemovalContext<'a>,
     pub domains: DomainDependencyContext<'a>,
     /// Attributes of standalone composite types, whose removal rewrites the stored values of the type.

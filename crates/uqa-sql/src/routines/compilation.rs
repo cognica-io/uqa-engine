@@ -280,6 +280,12 @@ pub fn lower_sql_routine_statement(
 
 /// Foreign server and table utilities are analyzed when it executes and cannot be retained as an analyzed SQL-standard body. Quoted source bodies keep their separate execution-time path.
 pub(super) fn validate_sql_standard_statement(statement: &Statement) -> Result<(), SQLError> {
+    if matches!(statement, Statement::Drop(drop) if drop.kind == crate::ast::DropKind::ForeignServer)
+    {
+        return Err(SQLError::Unsupported(
+            "DROP SERVER is not yet supported in unquoted SQL function body".into(),
+        ));
+    }
     if matches!(statement, Statement::CreateForeignServer(_)) {
         return Err(SQLError::Unsupported(
             "CREATE SERVER is not yet supported in unquoted SQL function body".into(),
