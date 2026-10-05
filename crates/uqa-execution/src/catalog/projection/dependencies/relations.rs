@@ -10,7 +10,7 @@ use super::{ColumnScope, DependencyBuilder, References, RelationObject};
 use uqa_core::RelationIdentity;
 use uqa_sql::ast::ColumnDef;
 use uqa_sql::catalog::dependencies::{
-    DependencyKind, ObjectAddress, RELATION_CLASS, REWRITE_CLASS, TYPE_CLASS,
+    DependencyKind, ObjectAddress, FOREIGN_SERVER_CLASS, RELATION_CLASS, REWRITE_CLASS, TYPE_CLASS,
 };
 use uqa_sql::catalog::relation_oids::RelationCatalogOids;
 use uqa_sql::SQLError;
@@ -35,6 +35,14 @@ impl DependencyBuilder<'_> {
         for (identity, table) in snapshot.definitions.foreign_tables.iter() {
             let oids = table.relation_oids();
             self.record_relation(identity, oids.relation, &table.columns, oids);
+            let server = ObjectAddress::whole(FOREIGN_SERVER_CLASS, table.server_oid()?);
+            // A concurrently removed server is still an unpinned reference; it must not disappear or bind a same-name replacement.
+            self.objects.unpin(server);
+            self.recorder.record(
+                ObjectAddress::whole(RELATION_CLASS, oids.relation),
+                server,
+                DependencyKind::Normal,
+            );
         }
         for (identity, object_id) in snapshot.definitions.sequence_object_ids.iter() {
             let oid = super::catalog_oid(

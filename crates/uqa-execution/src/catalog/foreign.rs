@@ -10,7 +10,10 @@ use uqa_core::RelationIdentity;
 use uqa_sql::ast::{ColumnDef, TableCheck};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-const FOREIGN_TABLE_SCHEMA_VERSION: u8 = 1;
+const FOREIGN_TABLE_SCHEMA_VERSION: u8 = 2;
+
+pub mod reference;
+pub use reference::ForeignServerReference;
 
 #[derive(Debug, Clone)]
 pub struct StoredForeignTable {
@@ -20,6 +23,8 @@ pub struct StoredForeignTable {
     pub catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
     pub row_type_array_name: Option<String>,
     pub server_name: String,
+    /// Captured server identity; absent only while converting a legacy definition at initial open.
+    pub server_reference: Option<ForeignServerReference>,
     pub columns: Vec<ColumnDef>,
     pub checks: Vec<TableCheck>,
     pub options: BTreeMap<String, String>,
@@ -34,6 +39,8 @@ struct PersistedForeignTableSchema {
     catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     row_type_array_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    server_reference: Option<ForeignServerReference>,
     columns: Vec<ColumnDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     checks: Vec<TableCheck>,
@@ -54,14 +61,19 @@ impl StoredForeignTable {
         schema_json: &str,
     ) -> StorageBackendResult<(Self, bool)> {
         let schema = serde_json::from_str::<ForeignTableSchemaFormat>(schema_json)?;
-        let (object_id, catalog_oids, row_type_array_name, columns, checks, legacy) = match schema {
+        let (schema, legacy) = match schema {
             ForeignTableSchemaFormat::Current(schema) => {
-                if schema.version != FOREIGN_TABLE_SCHEMA_VERSION {
+                if !matches!(schema.version, 1 | FOREIGN_TABLE_SCHEMA_VERSION) {
                     return Err(StorageBackendError::Other(format!(
                         "foreign table `{name}` has unsupported schema version {}",
                         schema.version
                     )));
                 }
+                reference::validate_schema_reference(
+                    &name,
+                    schema.version,
+                    schema.server_reference,
+                )?;
                 if schema.catalog_oids.is_some_and(|oids| {
                     !oids.is_valid_for(
                         uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
@@ -71,28 +83,31 @@ impl StoredForeignTable {
                         "foreign table `{name}` records invalid catalog OIDs"
                     )));
                 }
-                (
-                    schema.object_id,
-                    schema.catalog_oids,
-                    schema.row_type_array_name,
-                    schema.columns,
-                    schema.checks,
-                    false,
-                )
+                (schema, false)
             }
-            ForeignTableSchemaFormat::Legacy(columns) => {
-                ([0; 16], None, None, columns, Vec::new(), true)
-            }
+            ForeignTableSchemaFormat::Legacy(columns) => (
+                PersistedForeignTableSchema {
+                    version: 1,
+                    object_id: [0; 16],
+                    catalog_oids: None,
+                    row_type_array_name: None,
+                    server_reference: None,
+                    columns,
+                    checks: Vec::new(),
+                },
+                true,
+            ),
         };
         Ok((
             Self {
                 name,
-                object_id,
-                catalog_oids,
-                row_type_array_name,
+                object_id: schema.object_id,
+                catalog_oids: schema.catalog_oids,
+                row_type_array_name: schema.row_type_array_name,
                 server_name,
-                columns,
-                checks,
+                server_reference: schema.server_reference,
+                columns: schema.columns,
+                checks: schema.checks,
                 options,
             },
             legacy,
@@ -111,10 +126,15 @@ impl StoredForeignTable {
 
     pub fn schema_json(&self) -> StorageBackendResult<String> {
         serde_json::to_string(&PersistedForeignTableSchema {
-            version: FOREIGN_TABLE_SCHEMA_VERSION,
+            version: if self.server_reference.is_some() {
+                FOREIGN_TABLE_SCHEMA_VERSION
+            } else {
+                1
+            },
             object_id: self.object_id,
             catalog_oids: self.catalog_oids,
             row_type_array_name: self.row_type_array_name.clone(),
+            server_reference: self.server_reference,
             columns: self.columns.clone(),
             checks: self.checks.clone(),
         })

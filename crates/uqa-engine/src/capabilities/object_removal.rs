@@ -17,6 +17,7 @@ impl CatalogRemovalInputs for Engine {
             identities: self,
             tables: self.table_removal_context(),
             foreign_tables: self.foreign_removal_context(),
+            foreign_servers: self.foreign_server_removal_publication(),
             indexes: self.index_removal_context(),
             domains: self.domain_dependency_context(),
             composites: self.composite_attribute_context(),

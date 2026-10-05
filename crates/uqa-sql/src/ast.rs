@@ -155,6 +155,7 @@ pub enum DropKind {
     Domain,
     /// `DROP TYPE`, which removes user-defined types of every implemented kind.
     Type,
+    ForeignServer,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

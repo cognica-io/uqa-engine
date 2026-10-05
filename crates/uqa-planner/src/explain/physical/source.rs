@@ -106,6 +106,7 @@ impl Collector<'_> {
             }
             return Ok(());
         }
+        (self.context.validate_source)(correlation.resolution, name)?;
         let Some(mut predicate) = predicate else {
             return Ok(());
         };

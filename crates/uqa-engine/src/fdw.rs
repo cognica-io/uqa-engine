@@ -95,11 +95,10 @@ impl Engine {
     }
 
     pub fn drop_foreign_server(&self, name: &str) -> Result<bool, String> {
-        self.with_implicit_string_transaction(|engine| {
-            engine
-                .foreign_creation_context()
-                .drop_foreign_server_inner(name)
+        self.with_implicit_definition_transaction(|engine| {
+            engine.foreign_server_removal_context().drop_server(name)
         })
+        .map_err(|error| error.to_string())
     }
 
     pub fn drop_foreign_table(&self, name: &str) -> Result<bool, String> {
@@ -164,14 +163,9 @@ impl Engine {
             .map_err(|err| format!("resolve foreign table: {err}"))?
             .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
         let relation = RelationIdentity::from_legacy_name(&table_name)?;
-        let table = self
+        let (table, server) = self
             .foreign_lookup_context()
-            .foreign_table(&table_name)?
-            .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
-        let server = self
-            .foreign_lookup_context()
-            .foreign_server(&table.server_name)?
-            .ok_or_else(|| format!("Foreign server `{}` does not exist", table.server_name))?;
+            .foreign_table_source(&table_name)?;
         if server.fdw_type != "memory_fdw" {
             return Err(format!(
                 "Foreign table `{table_name}` is backed by `{}` not `memory_fdw`",
@@ -208,14 +202,9 @@ impl Engine {
         #[cfg(not(target_os = "emscripten"))]
         use uqa_fdw::FDWHandler as _;
 
-        let table = self
+        let (table, server) = self
             .foreign_lookup_context()
-            .foreign_table(table_name)?
-            .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
-        let server = self
-            .foreign_lookup_context()
-            .foreign_server(&table.server_name)?
-            .ok_or_else(|| format!("Foreign server `{}` does not exist", table.server_name))?;
+            .foreign_table_source(table_name)?;
         let array_columns = table
             .columns
             .iter()

@@ -80,6 +80,13 @@ impl context::PhysicalExplainPlanning for Engine {
             uqa_planner::explain::PhysicalExplainContext {
                 retrieval: self,
                 statistics: self,
+                validate_source: &|source_resolution, name| {
+                    uqa_execution::catalog::foreign::reference::validate_query_source(
+                        &catalog,
+                        source_resolution,
+                        name,
+                    )
+                },
                 filters: uqa_planner::filter_pushdown::context::FilterPushdownContext {
                     volatility: self,
                     correlation: uqa_sql::binding::correlation::CorrelationContext {

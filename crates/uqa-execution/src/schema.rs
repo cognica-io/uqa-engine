@@ -52,5 +52,6 @@ pub mod foreign_creation;
 pub mod foreign_definitions;
 
 pub mod foreign_removal;
+pub mod foreign_server_removal;
 
 pub mod table_removal;

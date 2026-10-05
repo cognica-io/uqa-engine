@@ -10,7 +10,7 @@ use crate::Engine;
 use std::{path::Path, sync::Arc};
 use uqa_sql::catalog::{foreign_server::ForeignServerDefinition, roles::RoleIdentity};
 
-fn open(provider: usize, path: &Path) -> Engine {
+pub(super) fn open(provider: usize, path: &Path) -> Engine {
     match provider {
         0 => Engine::new(),
         1 => Engine::open(path).unwrap(),

@@ -23,7 +23,10 @@ use crate::{
             StoredRelationCatalog,
         },
     },
-    catalog::regrole_dependencies::{StoredRegroleConstants, StoredRegroleResolver},
+    catalog::{
+        regrole_dependencies::{StoredRegroleConstants, StoredRegroleResolver},
+        resolution::RelationLookupMode,
+    },
     plan::UnifiedPlan,
     plpgsql::PlpgsqlCatalog,
     type_resolution::canonical_routine_type_name,
@@ -252,6 +255,11 @@ pub fn lower_sql_routine_statement(
                 stored_relations::bind_stored_query_relations(
                     &StoredQueryBindingContext {
                         relations: context.relations,
+                        lookup_mode: if lowering.persisted_definition {
+                            RelationLookupMode::Bound
+                        } else {
+                            RelationLookupMode::Dynamic
+                        },
                         sequences: context.sequences,
                         temporary_schema: &namespace.temporary_schema,
                         transition_relations: &namespace.transition_relations,
@@ -272,6 +280,12 @@ pub fn lower_sql_routine_statement(
 
 /// Foreign server and table utilities are analyzed when it executes and cannot be retained as an analyzed SQL-standard body. Quoted source bodies keep their separate execution-time path.
 pub(super) fn validate_sql_standard_statement(statement: &Statement) -> Result<(), SQLError> {
+    if matches!(statement, Statement::Drop(drop) if drop.kind == crate::ast::DropKind::ForeignServer)
+    {
+        return Err(SQLError::Unsupported(
+            "DROP SERVER is not yet supported in unquoted SQL function body".into(),
+        ));
+    }
     if matches!(statement, Statement::CreateForeignServer(_)) {
         return Err(SQLError::Unsupported(
             "CREATE SERVER is not yet supported in unquoted SQL function body".into(),

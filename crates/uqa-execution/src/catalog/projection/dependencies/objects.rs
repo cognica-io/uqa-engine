@@ -115,7 +115,7 @@ pub(super) struct CatalogObjects {
     namespaces: BTreeMap<String, u32>,
     members: BTreeMap<(u32, u32), MemberObject>,
     roles: BTreeMap<u32, String>,
-    foreign_servers: BTreeMap<u32, String>,
+    foreign_servers: BTreeMap<u32, (String, [u8; 16])>,
     unpinned: BTreeSet<(u32, u32)>,
 }
 
@@ -131,9 +131,10 @@ impl CatalogObjects {
         objects.collect_relations(context, catalog, resolution)?;
         objects.collect_types(catalog);
         for server in catalog.snapshot().definitions.foreign_servers.values() {
-            objects
-                .foreign_servers
-                .insert(server.metadata.oid, server.name.clone());
+            objects.foreign_servers.insert(
+                server.metadata.oid,
+                (server.name.clone(), server.metadata.object_id),
+            );
             objects.unpin(ObjectAddress::whole(
                 uqa_sql::catalog::dependencies::FOREIGN_SERVER_CLASS,
                 server.metadata.oid,
@@ -451,7 +452,15 @@ impl CatalogObjects {
     }
 
     pub(super) fn foreign_server_name(&self, oid: u32) -> Option<&str> {
-        self.foreign_servers.get(&oid).map(String::as_str)
+        self.foreign_servers
+            .get(&oid)
+            .map(|(name, _)| name.as_str())
+    }
+
+    pub(super) fn foreign_server_object(&self, oid: u32) -> Option<(&str, [u8; 16])> {
+        self.foreign_servers
+            .get(&oid)
+            .map(|(name, object_id)| (name.as_str(), *object_id))
     }
 
     pub(super) fn role_name(&self, oid: u32) -> Option<&str> {

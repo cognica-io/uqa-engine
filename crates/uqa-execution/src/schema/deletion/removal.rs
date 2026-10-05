@@ -102,6 +102,9 @@ impl DeletionPlan {
                     })?;
                 }
                 CatalogObject::Schema(name) => remove_schema(context, name)?,
+                CatalogObject::ForeignServer { name, object_id } => {
+                    context.foreign_servers.remove(name, *object_id)?;
+                }
                 CatalogObject::ArrayType { .. } | CatalogObject::RowType { .. } => {}
             }
             if Some(position) == last_column {

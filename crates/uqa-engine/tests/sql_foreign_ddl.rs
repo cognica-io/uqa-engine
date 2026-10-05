@@ -19,6 +19,8 @@ use uqa_sql::ast::{ColumnDef, ColumnType};
 
 #[path = "sql_foreign_ddl/declarations.rs"]
 mod declarations;
+#[path = "sql_foreign_ddl/server_deletion.rs"]
+mod server_deletion;
 #[path = "sql_foreign_ddl/servers.rs"]
 mod servers;
 

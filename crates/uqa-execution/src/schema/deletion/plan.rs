@@ -101,7 +101,8 @@ impl DeletionPlan {
                 | CatalogObject::RowType { .. }
                 | CatalogObject::DomainConstraint { .. }
                 | CatalogObject::Routine { .. }
-                | CatalogObject::Schema(_) => None,
+                | CatalogObject::Schema(_)
+                | CatalogObject::ForeignServer { .. } => None,
             })
             .collect()
     }
@@ -274,7 +275,8 @@ fn removed_with_another_target(
         | CatalogObject::Type(_)
         | CatalogObject::Trigger { .. }
         | CatalogObject::Routine { .. }
-        | CatalogObject::Schema(_) => false,
+        | CatalogObject::Schema(_)
+        | CatalogObject::ForeignServer { .. } => false,
     }
 }
 
