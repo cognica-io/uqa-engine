@@ -79,6 +79,18 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
         self.check_transform_subquery(expression)?;
+        if self.transform_catalog.is_some() {
+            if let ScalarExpr::QualifiedColumn { qualifier, .. }
+            | ScalarExpr::QualifiedStar(qualifier) = expression
+            {
+                if !input.has_qualifier(qualifier) {
+                    return Err(error(
+                        "42P01",
+                        format!("missing FROM-clause entry for table \"{qualifier}\""),
+                    ));
+                }
+            }
+        }
         let ty = match expression {
             ScalarExpr::Param(index) => return self.parameters.reference(*index),
             ScalarExpr::Literal(Value::Null) => return Ok(ExpressionType::unknown()),
@@ -216,30 +228,7 @@ impl Preparation<'_> {
                 self.binary(BinaryOp::Equal, &mut value, &mut result)?;
                 Some(ColumnType::Boolean)
             }
-            ScalarExpr::Func {
-                name,
-                binding,
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                let selected =
-                    self.call_binding(name, binding.as_ref(), args, input, subqueries)?;
-                for order in order_by {
-                    self.expression(&order.expr, input, subqueries)?;
-                }
-                if let Some(filter) = filter {
-                    self.require_boolean(filter, input, subqueries, "FILTER")?;
-                }
-                let ty = self.known_type(expression, input, subqueries)?;
-                self.check_transform_function(
-                    expression,
-                    selected.as_ref().or(binding.as_ref()),
-                    input,
-                )?;
-                ty
-            }
+            ScalarExpr::Func { .. } => self.function_expression(expression, input, subqueries)?,
             ScalarExpr::WindowCall {
                 name,
                 args,
@@ -259,6 +248,57 @@ impl Preparation<'_> {
         })
     }
 
+    fn function_expression(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<Option<ColumnType>, SQLError> {
+        let ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } = expression
+        else {
+            unreachable!("function expression");
+        };
+        let selected = self.call_binding(name, binding.as_ref(), args, input, subqueries)?;
+        for order in order_by {
+            self.expression(&order.expr, input, subqueries)?;
+        }
+        if let Some(filter) = filter {
+            self.require_boolean(filter, input, subqueries, "FILTER")?;
+        }
+        let ty = match selected
+            .as_ref()
+            .filter(|selected| !selected.binding.builtin)
+        {
+            Some(selected) => {
+                self.check_selected_scalar_modifiers(
+                    name,
+                    &selected.binding,
+                    *distinct,
+                    order_by,
+                    filter.is_some(),
+                )?;
+                Some(selected.return_type.clone())
+            }
+            None => self.known_type(expression, input, subqueries)?,
+        };
+        self.check_transform_function(
+            expression,
+            selected
+                .as_ref()
+                .map(|selected| &selected.binding)
+                .or(binding.as_ref()),
+            input,
+        )?;
+        Ok(ty)
+    }
+
     fn check_transform_subquery(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
         if self.transform_catalog.is_some()
             && matches!(
@@ -274,6 +314,34 @@ impl Preparation<'_> {
             ));
         }
         Ok(())
+    }
+
+    fn check_selected_scalar_modifiers(
+        &self,
+        name: &str,
+        binding: &FunctionBinding,
+        distinct: bool,
+        order_by: &[crate::ScalarOrder],
+        filtered: bool,
+    ) -> Result<(), SQLError> {
+        if !self.routines.is_scalar_function_binding(binding)? {
+            return Ok(());
+        }
+        let modifier = if distinct {
+            Some("DISTINCT")
+        } else if !order_by.is_empty() {
+            Some("ORDER BY")
+        } else if filtered {
+            Some("FILTER")
+        } else {
+            None
+        };
+        modifier.map_or(Ok(()), |modifier| {
+            Err(error(
+                "42809",
+                format!("{modifier} specified, but {name} is not an aggregate function"),
+            ))
+        })
     }
 
     fn check_transform_window(
@@ -360,7 +428,7 @@ impl Preparation<'_> {
         args: &[ScalarExpr],
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<Option<FunctionBinding>, SQLError> {
+    ) -> Result<Option<crate::type_resolution::ResolvedFunctionOverload>, SQLError> {
         let arguments = crate::scalar_call_arguments(args)?;
         let mut observed = arguments
             .iter()
@@ -389,7 +457,7 @@ impl Preparation<'_> {
             for (value, target) in observed.iter_mut().zip(&selected.arguments) {
                 self.parameters.coerce_unknown(value, target)?;
             }
-            return Ok(binding.cloned());
+            return Ok(None);
         }
         if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
             if name == "nullif" {
@@ -403,7 +471,7 @@ impl Preparation<'_> {
                     &mut observed,
                 )?;
             }
-            return Ok(binding.cloned());
+            return Ok(None);
         }
         let (selected, positions) = if let Some(fixed) = crate::resolve_fixed_builtin_call(
             name,
@@ -455,6 +523,6 @@ impl Preparation<'_> {
                 self.parameters.coerce_unknown(value, target)?;
             }
         }
-        Ok(selected.map(|selected| selected.binding))
+        Ok(selected)
     }
 }

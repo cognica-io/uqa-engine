@@ -8,6 +8,7 @@ use super::*;
 use crate::ast::{FunctionBinding, FunctionVolatility};
 use crate::schema::SchemaExpressionCatalog;
 use crate::{expr::EngineHook, routines::RoutineResolution, FunctionTypeResolver};
+use std::sync::Arc;
 use uqa_core::Value;
 
 struct Catalog;
@@ -28,31 +29,30 @@ impl FunctionTypeResolver for Catalog {
     fn resolve_function_overload(
         &self,
         name: &str,
-        _: Option<&FunctionBinding>,
+        binding: Option<&FunctionBinding>,
         _: &[Option<String>],
         types: &[Option<ColumnType>],
         _: bool,
     ) -> Result<Option<crate::type_resolution::ResolvedFunctionOverload>, SQLError> {
-        Ok(
-            (name == "sum" && types == [Some(ColumnType::Text)]).then(|| {
-                crate::type_resolution::ResolvedFunctionOverload {
-                    binding: FunctionBinding {
-                        object_id: Some([7; 16]),
-                        name: "public.sum".into(),
-                        argument_types: vec!["text".into()],
-                        builtin: false,
-                        dispatch: None,
-                        invocation: None,
-                        resolution_error: None,
-                    },
-                    return_type: ColumnType::Integer,
-                    exact_matches: 1,
-                    known_arguments: 1,
-                    preferred_matches: 0,
-                    precedes_pg_catalog: true,
-                }
-            }),
-        )
+        Ok((matches!(name, "sum" | "public.sum")
+            && types == [Some(ColumnType::Text)]
+            && binding.is_none_or(|binding| binding.object_id == Some([7; 16])))
+        .then(|| crate::type_resolution::ResolvedFunctionOverload {
+            binding: FunctionBinding {
+                object_id: Some([7; 16]),
+                name: "public.sum".into(),
+                argument_types: vec!["text".into()],
+                builtin: false,
+                dispatch: None,
+                invocation: None,
+                resolution_error: None,
+            },
+            return_type: ColumnType::Integer,
+            exact_matches: 1,
+            known_arguments: 1,
+            preferred_matches: 0,
+            precedes_pg_catalog: true,
+        }))
     }
 
     fn is_scalar_function_binding(&self, binding: &FunctionBinding) -> Result<bool, SQLError> {
@@ -60,7 +60,34 @@ impl FunctionTypeResolver for Catalog {
     }
 }
 
-impl RoutineResolution for Catalog {}
+impl RoutineResolution for Catalog {
+    fn resolve_static_sql_function(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        names: &[Option<String>],
+        types: &[Option<ColumnType>],
+        variadic: bool,
+    ) -> Result<Option<Arc<crate::routines::SQLUserFunction>>, SQLError> {
+        if self
+            .resolve_function_overload(name, binding, names, types, variadic)?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        let crate::Statement::CreateFunction(mut definition) = crate::compile(
+            "CREATE FUNCTION public.sum(text) RETURNS integer LANGUAGE SQL IMMUTABLE AS 'SELECT 3'",
+        )?
+        .remove(0) else {
+            unreachable!("fixture routine declaration");
+        };
+        definition.object_id = Some([7; 16]);
+        Ok(Some(Arc::new(crate::routines::SQLUserFunction::new(
+            *definition,
+            crate::routines::RoutineBody::Source,
+        ))))
+    }
+}
 
 impl crate::catalog::domain::DomainCatalog for Catalog {
     fn domain_by_oid(&self, _: u32) -> Option<crate::catalog::domain::StoredDomain> {
@@ -252,6 +279,34 @@ fn transform_analysis_uses_the_selected_scalar_overload_of_an_aggregate_name() {
     assert!(
         matches!(transform.plan.scalar, ScalarExpr::Func { binding: Some(binding), .. } if binding.object_id == Some([7; 16]))
     );
+    let error = analyze(&context, "sum(DISTINCT t)").err().unwrap();
+    assert_eq!(error.sqlstate(), Some("42809"));
+    assert_eq!(
+        error.to_string(),
+        "DISTINCT specified, but sum is not an aggregate function"
+    );
+}
+
+#[test]
+fn transform_analysis_retains_the_fixed_repeat_signature_and_rejects_other_types() {
+    let binding = crate::binding::fixture::empty_binding_context();
+    let context = SchemaBindingContext {
+        catalog: &Catalog,
+        binding: &binding,
+    };
+    let transform = analyze(&context, "repeat('x', 3)").unwrap();
+    assert_eq!(transform.source_type, Some(ColumnType::Text));
+    assert!(matches!(
+        transform.plan.scalar,
+        ScalarExpr::Func { binding: Some(binding), .. }
+            if binding.builtin && binding.object_id.is_none()
+                && binding.name == "pg_catalog.repeat"
+                && binding.argument_types == ["text", "integer"]
+    ));
+    for source in ["repeat('x')", "repeat(1, 3)", "repeat('x', 3::bigint)"] {
+        let error = analyze(&context, source).err().unwrap();
+        assert_eq!(error.sqlstate(), Some("42883"), "{source}: {error}");
+    }
 }
 
 #[test]

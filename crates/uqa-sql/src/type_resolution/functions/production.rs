@@ -491,7 +491,10 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         infer,
         control,
     )?;
-    if name.contains('.') && binding.and_then(|binding| binding.dispatch).is_none() {
+    if (name.contains('.')
+        || (resolver.is_some() && binding.is_some_and(|binding| !binding.builtin)))
+        && binding.and_then(|binding| binding.dispatch).is_none()
+    {
         return extension_type(
             resolver,
             FunctionTypeCall {
