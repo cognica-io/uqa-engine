@@ -55,6 +55,7 @@ fn change_bound_view_column(
         standalone: false,
         indent: true,
         routine: None,
+        aliases: std::cell::OnceCell::new(),
     };
     let rename = Rename {
         table,

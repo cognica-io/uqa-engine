@@ -963,6 +963,8 @@ mod default_cooking;
 mod merge_attributes;
 #[path = "pg18_constraint_lifecycle/not_null_constraints.rs"]
 mod not_null_constraints;
+#[path = "pg18_constraint_lifecycle/oid_alias_input.rs"]
+mod oid_alias_input;
 #[path = "pg18_constraint_lifecycle/partition_column_options.rs"]
 mod partition_column_options;
 #[path = "pg18_constraint_lifecycle/regclass_input.rs"]

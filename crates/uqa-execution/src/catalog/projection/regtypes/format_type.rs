@@ -6,7 +6,9 @@
 
 //! `PostgreSQL` type display with nullable typmods and catalog-visible names.
 
-use super::{format_regtype, regtype_output_catalog, CatalogContext, SQLError, Value};
+use super::{
+    format_regtype, regtype_output_catalog, CatalogContext, OutputVisibility, SQLError, Value,
+};
 use uqa_sql::ColumnType;
 
 /// The name `PostgreSQL`'s `format_type_be` gives a type in messages: a built-in type by its SQL name without type modifiers, and a domain by its name, qualified only when the search path does not find it.
@@ -59,8 +61,8 @@ pub fn format_type_value(context: &CatalogContext<'_>, args: &[Value]) -> Result
         .get(&entry.element_oid)
         .is_some_and(|element| element.array_oid == oid);
     let oid = if array { entry.element_oid } else { oid };
-    let default =
-        || format_regtype(context, &catalog, oid).map(|name| name.unwrap_or_else(|| "???".into()));
+    let visibility = OutputVisibility::from_context(context)?;
+    let default = || format_regtype(&visibility, &catalog, oid).unwrap_or_else(|| "???".into());
     let with_modifier = modifier.filter(|modifier| *modifier >= 0);
     let mut name = match oid {
         16 => "boolean".into(),
@@ -109,8 +111,8 @@ pub fn format_type_value(context: &CatalogContext<'_>, args: &[Value]) -> Result
         }
         1186 => interval_name(with_modifier)?,
         _ => match with_modifier {
-            Some(modifier) => format!("{}({modifier})", default()?),
-            None => default()?,
+            Some(modifier) => format!("{}({modifier})", default()),
+            None => default(),
         },
     };
     if array {

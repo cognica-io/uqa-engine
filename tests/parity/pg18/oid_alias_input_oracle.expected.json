@@ -1,0 +1,1714 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA rt_s;",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE rt_s.hidden_enum AS ENUM ('a');",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TYPE rt_vis_enum AS ENUM ('b');",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION rt_s.hidden_fn(int) RETURNS int LANGUAGE sql AS 'SELECT $1';",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION rt_vis_fn(int, text) RETURNS int LANGUAGE sql AS 'SELECT $1';",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION rt_fn(int) RETURNS int LANGUAGE sql AS 'SELECT $1';",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_t (a regtype DEFAULT 'int4', b regtype DEFAULT 'varchar'::regtype, c regtype[] DEFAULT '{int4,text}', d regproc DEFAULT 'rt_fn', e regprocedure DEFAULT 'rt_fn(int)', f regnamespace DEFAULT 'pg_catalog', g regnamespace[] DEFAULT '{public,pg_catalog}');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rt_t'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'integer'::regtype"
+            ],
+            [
+              "2",
+              "'character varying'::regtype"
+            ],
+            [
+              "3",
+              "'{integer,text}'::regtype[]"
+            ],
+            [
+              "4",
+              "'rt_fn'::regproc"
+            ],
+            [
+              "5",
+              "'rt_fn(integer)'::regprocedure"
+            ],
+            [
+              "6",
+              "'pg_catalog'::regnamespace"
+            ],
+            [
+              "7",
+              "'{public,pg_catalog}'::regnamespace[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rt_t DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text, b::text, c::text, d::text, e::text, f::text, g::text FROM rt_t;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f",
+            "g"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "integer",
+              "character varying",
+              "{integer,text}",
+              "rt_fn",
+              "rt_fn(integer)",
+              "pg_catalog",
+              "{public,pg_catalog}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_u (a regtype DEFAULT 'nosuchtype');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_v (a regproc DEFAULT 'abs');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "more than one function named \"abs\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_w (a regproc DEFAULT 'nosuchfn');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"nosuchfn\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_x (a regprocedure DEFAULT 'rt_fn(text)');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"rt_fn(text)\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_y (a regnamespace DEFAULT 'nosuchschema');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"nosuchschema\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_z (a regtype DEFAULT 'int4', CHECK (coalesce(a, 'int8'::regtype) IS NOT NULL));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'rt_z'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK ((COALESCE(a, 'bigint'::regtype) IS NOT NULL))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_e (a regtype DEFAULT 'rt_vis_enum');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rt_e'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "'rt_vis_enum'::regtype"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE rt_vis_enum RENAME TO rt_vis_enum2;",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rt_e'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "'rt_vis_enum2'::regtype"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rt_e DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text FROM rt_e;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "rt_vis_enum2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_f (a regproc DEFAULT 'rt_fn', b regprocedure DEFAULT 'rt_fn(int)');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rt_f'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'rt_fn'::regproc"
+            ],
+            [
+              "2",
+              "'rt_fn(integer)'::regprocedure"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER FUNCTION rt_fn(int) RENAME TO rt_fn2;",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rt_f'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'rt_fn2'::regproc"
+            ],
+            [
+              "2",
+              "'rt_fn2(integer)'::regprocedure"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rt_f DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text, b::text FROM rt_f;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rt_fn2",
+              "rt_fn2(integer)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_a (a regtype DEFAULT 'rt_s.hidden_enum', b regtype DEFAULT 'pg_catalog.int4', c regtype[] DEFAULT '{int4,text,rt_vis_enum2}', d regproc DEFAULT 'rt_s.hidden_fn', e regprocedure DEFAULT 'public.rt_vis_fn(int, text)', f regnamespace DEFAULT 'rt_s', h regtype DEFAULT 'character varying(10)', i regtype DEFAULT 'int4[]');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rt_a'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'rt_s.hidden_enum'::regtype"
+            ],
+            [
+              "2",
+              "'integer'::regtype"
+            ],
+            [
+              "3",
+              "'{integer,text,rt_vis_enum2}'::regtype[]"
+            ],
+            [
+              "4",
+              "'rt_s.hidden_fn'::regproc"
+            ],
+            [
+              "5",
+              "'rt_vis_fn(integer,text)'::regprocedure"
+            ],
+            [
+              "6",
+              "'rt_s'::regnamespace"
+            ],
+            [
+              "7",
+              "'character varying'::regtype"
+            ],
+            [
+              "8",
+              "'integer[]'::regtype"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rt_a DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text, b::text, c::text, d::text, e::text, f::text, h::text, i::text FROM rt_a;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f",
+            "h",
+            "i"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rt_s.hidden_enum",
+              "integer",
+              "{integer,text,rt_vis_enum2}",
+              "rt_s.hidden_fn",
+              "rt_vis_fn(integer,text)",
+              "rt_s",
+              "character varying",
+              "integer[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::oid = (SELECT oid FROM pg_type WHERE typname = 'hidden_enum'), d::oid = (SELECT oid FROM pg_proc WHERE proname = 'hidden_fn'), f::oid = (SELECT oid FROM pg_namespace WHERE nspname = 'rt_s') FROM rt_a;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TYPE rt_s.hidden_enum;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type rt_s.hidden_enum because other objects depend on it",
+        "detail": "default value for column a of table rt_a depends on type rt_s.hidden_enum",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP FUNCTION rt_s.hidden_fn(int);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop function rt_s.hidden_fn(integer) because other objects depend on it",
+        "detail": "default value for column d of table rt_a depends on function rt_s.hidden_fn(integer)",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DROP SCHEMA rt_s;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop schema rt_s because other objects depend on it",
+        "detail": "type rt_s.hidden_enum depends on schema rt_s\ndefault value for column a of table rt_a depends on type rt_s.hidden_enum\nfunction rt_s.hidden_fn(integer) depends on schema rt_s\ndefault value for column d of table rt_a depends on function rt_s.hidden_fn(integer)\ndefault value for column f of table rt_a depends on schema rt_s",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE rt_vis_enum2 RENAME TO rt_vis_enum3;",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER FUNCTION rt_vis_fn(int, text) RENAME TO rt_vis_fn2;",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT adnum, pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rt_a'::regclass ORDER BY adnum;",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "adnum",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "'rt_s.hidden_enum'::regtype"
+            ],
+            [
+              "2",
+              "'integer'::regtype"
+            ],
+            [
+              "3",
+              "'{integer,text,rt_vis_enum3}'::regtype[]"
+            ],
+            [
+              "4",
+              "'rt_s.hidden_fn'::regproc"
+            ],
+            [
+              "5",
+              "'rt_vis_fn2(integer,text)'::regprocedure"
+            ],
+            [
+              "6",
+              "'rt_s'::regnamespace"
+            ],
+            [
+              "7",
+              "'character varying'::regtype"
+            ],
+            [
+              "8",
+              "'integer[]'::regtype"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_b (a regtype DEFAULT 'rt_vis_enum3');",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef WHERE adrelid = 'rt_b'::regclass;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "'rt_vis_enum3'::regtype"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rt_b ALTER COLUMN a SET DEFAULT 'nosuchtype';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rt_b ADD COLUMN b regproc DEFAULT 'nosuchfn';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"nosuchfn\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE rt_b ADD CONSTRAINT rt_b_chk CHECK (coalesce(a, 'nosuchtype'::regtype) IS NOT NULL);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN rt_dom AS regtype DEFAULT 'nosuchtype';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN rt_dom2 AS regproc DEFAULT 'abs';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "more than one function named \"abs\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN rt_dom3 AS regnamespace DEFAULT 'public';",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_g (a rt_dom3);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rt_g DEFAULT VALUES;",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::text FROM rt_g;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "public"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rt_v AS SELECT 'int4'::regtype AS t, 'rt_vis_fn2'::regproc AS p, 'rt_vis_fn2(int, text)'::regprocedure AS pp, 'public'::regnamespace AS n, '{int8,text}'::regtype[] AS ts, 'rt_fn2'::regproc::text AS pt;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rt_v'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT 'integer'::regtype AS t,\n    'rt_vis_fn2'::regproc AS p,\n    'rt_vis_fn2(integer,text)'::regprocedure AS pp,\n    'public'::regnamespace AS n,\n    '{bigint,text}'::regtype[] AS ts,\n    'rt_fn2'::regproc::text AS pt;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER FUNCTION rt_vis_fn2(int, text) RENAME TO rt_vis_fn3;",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rt_v'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT 'integer'::regtype AS t,\n    'rt_vis_fn3'::regproc AS p,\n    'rt_vis_fn3(integer,text)'::regprocedure AS pp,\n    'public'::regnamespace AS n,\n    '{bigint,text}'::regtype[] AS ts,\n    'rt_fn2'::regproc::text AS pt;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT t::text, p::text, pp::text, n::text, ts::text, pt FROM rt_v;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "t",
+            "p",
+            "pp",
+            "n",
+            "ts",
+            "pt"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "integer",
+              "rt_vis_fn3",
+              "rt_vis_fn3(integer,text)",
+              "public",
+              "{bigint,text}",
+              "rt_fn2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP FUNCTION rt_vis_fn3(int, text);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop function rt_vis_fn3(integer,text) because other objects depend on it",
+        "detail": "default value for column e of table rt_a depends on function rt_vis_fn3(integer,text)\nview rt_v depends on function rt_vis_fn3(integer,text)",
+        "hint": "Use DROP ... CASCADE to drop the dependent objects too."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rt_bad AS SELECT 'nosuchtype'::regtype;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rt_bad2 AS SELECT 1 WHERE 'nosuchfn'::regproc::text = 'x';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"nosuchfn\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rt_bad3 AS SELECT 'nosuchschema'::regnamespace;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"nosuchschema\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rt_bad4 AS SELECT 'abs'::regproc;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "more than one function named \"abs\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE rt_p1 AS SELECT 'nosuchtype'::regtype;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE rt_p2 AS SELECT 'abs'::regproc;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "more than one function named \"abs\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE rt_p3 AS SELECT 'nosuchschema'::regnamespace;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"nosuchschema\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE rt_p4 AS SELECT 'rt_fn2(text)'::regprocedure;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"rt_fn2(text)\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE rt_p5 AS SELECT 'rt_vis_fn3'::regproc::text, 'rt_vis_enum3'::regtype::text;",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "EXECUTE rt_p5;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "text"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rt_vis_fn3",
+              "rt_vis_enum3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER FUNCTION rt_vis_fn3(int, text) RENAME TO rt_vis_fn4;",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE rt_vis_enum3 RENAME TO rt_vis_enum4;",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "EXECUTE rt_p5;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "text"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "rt_vis_fn4",
+              "rt_vis_enum4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rt_q (a int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'nosuch'::regclass FROM rt_q;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'nosuch'::regtype FROM rt_q;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'nosuchfn'::regproc FROM rt_q;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"nosuchfn\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'nosuchschema'::regnamespace FROM rt_q;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"nosuchschema\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 FROM rt_q WHERE a = 'nosuch'::regclass::oid::int;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 1::oid ELSE 'nosuch'::regclass END;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT COALESCE(1::oid, 'nosuch'::regtype);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{nosuch}'::regclass[] FROM rt_q;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "UPDATE rt_q SET a = 1 WHERE 'nosuch'::regclass IS NULL;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "DELETE FROM rt_q WHERE 'nosuch'::regclass IS NULL;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (SELECT 'nosuch'::regclass FROM rt_q);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 WHERE EXISTS (SELECT 'nosuch'::regclass FROM rt_q);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "WITH c AS (SELECT 'nosuch'::regclass AS r FROM rt_q) SELECT 1;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"nosuch\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'int4'::regtype::text, 'character varying(10)'::regtype::text, 'int4[]'::regtype::text, 'pg_catalog.int4'::regtype::text, 'timestamp(3) with time zone'::regtype::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "text",
+            "text",
+            "text",
+            "text"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "integer",
+              "character varying",
+              "integer[]",
+              "integer",
+              "timestamp with time zone"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{int4,nosuchtype}'::regtype[];",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{abs}'::regproc[];",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "more than one function named \"abs\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{public,nosuchschema}'::regnamespace[];",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"nosuchschema\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'nosuchtype'::regtype;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'nosuchschema.int4'::regtype;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"nosuchschema\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'nosuchfn'::regproc;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"nosuchfn\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'abs'::regproc;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "more than one function named \"abs\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'abs(int)'::regprocedure::text, 'rt_vis_fn4(int4, varchar)'::regprocedure;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"rt_vis_fn4(int4, varchar)\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'nosuchschema'::regnamespace;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"nosuchschema\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'public'::regnamespace::text, 'pg_catalog'::regnamespace::oid, '\"public\"'::regnamespace::text, 'PUBLIC'::regnamespace::text;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "oid",
+            "text",
+            "text"
+          ],
+          "type_oids": [
+            25,
+            26,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "public",
+              "11",
+              "public",
+              "public"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 'nosuchtype'::regtype ELSE 1 END;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 'nosuchrole'::regrole ELSE 1 END;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "role \"nosuchrole\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    }
+  ]
+}

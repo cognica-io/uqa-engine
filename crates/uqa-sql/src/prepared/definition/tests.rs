@@ -55,7 +55,7 @@ fn analyze(scopes: &Scopes, declared: &[ColumnType]) -> Result<PreparedDefinitio
             types: &NoRoutines,
             routines: &NoRoutines,
             scopes,
-            regclasses: &NoRoutines,
+            aliases: &NoRoutines,
         },
         UnifiedPlan::lower(
             crate::compile("SELECT $1::integer AS value")

@@ -59,6 +59,8 @@ pub struct StatementValidationContext<'a> {
     pub rules: &'a dyn RuleCatalog,
     pub effects: &'a dyn StatementEffects,
     pub transactions: &'a dyn super::transactions::StatementTransactions,
+    /// Reads the objects the statement's `reg*` constants name, as their input functions read them when the statement is analyzed.
+    pub aliases: &'a dyn uqa_sql::schema::dependencies::oid_alias::OidAliasInput,
 }
 
 /// Capture live subsystem inputs only when a statement is ready to execute.

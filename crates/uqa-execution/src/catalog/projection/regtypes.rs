@@ -22,10 +22,11 @@ use uqa_sql::ast::ColumnType;
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::catalog::context::CatalogContext;
+use crate::catalog::{CatalogReadView, RelationNameResolution};
 
-use super::pg_catalog::{build_pg_type, catalog_index_relations};
+use super::pg_catalog::{build_pg_type_without_defaults, catalog_index_relations};
 use super::pg_namespace::build_pg_namespace;
-use super::pg_proc::build_pg_proc;
+use super::pg_proc::build_pg_proc_without_defaults;
 use super::relation_catalog::build_pg_class;
 
 mod procedures;
@@ -507,15 +508,6 @@ impl RegtypeOutputCatalog {
         // Output functions read catalog rows, which name relations canonically; they need no privilege on their schemas, as `regclassout` and `regtypeout` do not.
         let mut resolution = context.session_execution_view().relation_name_resolution();
         resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
-        let namespaces = build_pg_namespace(&catalog)?
-            .into_iter()
-            .filter_map(|row| {
-                Some((
-                    catalog_int(&row, "oid")?,
-                    catalog_str(&row, "nspname")?.to_string(),
-                ))
-            })
-            .collect();
         let classes = build_pg_class(context, &catalog, &resolution)?
             .into_iter()
             .filter_map(|row| {
@@ -532,11 +524,38 @@ impl RegtypeOutputCatalog {
                 ))
             })
             .collect();
+        Self::assemble(&catalog, &resolution, classes)
+    }
 
+    /// The catalog without its relations, for the output of `regtype`, `regproc`, `regprocedure` and `regnamespace` constants where a catalog view and the session's name resolution are at hand without a catalog context.
+    pub(crate) fn without_relations(
+        catalog: &CatalogReadView,
+        resolution: &RelationNameResolution,
+    ) -> Result<Self, SQLError> {
+        let catalog = catalog.metadata_view();
+        let mut resolution = resolution.clone();
+        resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
+        Self::assemble(&catalog, &resolution, BTreeMap::new())
+    }
+
+    fn assemble(
+        catalog: &CatalogReadView,
+        resolution: &RelationNameResolution,
+        classes: BTreeMap<i64, RegtypeCatalogEntry>,
+    ) -> Result<Self, SQLError> {
+        let namespaces = build_pg_namespace(catalog)?
+            .into_iter()
+            .filter_map(|row| {
+                Some((
+                    catalog_int(&row, "oid")?,
+                    catalog_str(&row, "nspname")?.to_string(),
+                ))
+            })
+            .collect();
         let mut procs = BTreeMap::new();
         let mut proc_name_counts = BTreeMap::new();
         let mut proc_names_by_namespace = BTreeMap::<i64, BTreeSet<String>>::new();
-        for row in build_pg_proc(&catalog, &resolution)? {
+        for row in build_pg_proc_without_defaults(catalog, resolution)? {
             let Some(oid) = catalog_int(&row, "oid") else {
                 continue;
             };
@@ -575,7 +594,7 @@ impl RegtypeOutputCatalog {
                 .is_some_and(|count| *count > 1);
         }
 
-        let types = build_pg_type(&catalog, &resolution)?
+        let types = build_pg_type_without_defaults(catalog, resolution)?
             .into_iter()
             .filter_map(|row| {
                 Some((
@@ -599,6 +618,77 @@ impl RegtypeOutputCatalog {
             types,
             dependencies: std::sync::OnceLock::new(),
         })
+    }
+}
+
+impl RegtypeOutputCatalog {
+    /// The OID of the namespace named `name`.
+    fn namespace_oid(&self, name: &str) -> Option<i64> {
+        self.namespaces
+            .iter()
+            .find_map(|(oid, schema)| (schema == name).then_some(*oid))
+    }
+}
+
+/// The namespaces the output functions treat as visible: `current_schemas(true)` for routine names, as `regprocout` and `regprocedureout` test a function's visibility, and the search path for type names, as `format_type` tests a type's.
+pub(crate) struct OutputVisibility {
+    schemas: Vec<String>,
+    search_path: Vec<String>,
+}
+
+impl OutputVisibility {
+    fn from_context(context: &CatalogContext<'_>) -> Result<Self, SQLError> {
+        Ok(Self {
+            schemas: context.current_schema_names(true)?,
+            search_path: context
+                .session
+                .relation_name_resolution()
+                .search_path()
+                .to_vec(),
+        })
+    }
+
+    fn from_resolution(catalog: &CatalogReadView, resolution: &RelationNameResolution) -> Self {
+        Self {
+            schemas: crate::catalog::namespaces::current_schema_names(
+                catalog,
+                resolution,
+                &resolution.current_user,
+                true,
+            ),
+            search_path: resolution.search_path().to_vec(),
+        }
+    }
+}
+
+/// The output of `regtype`, `regproc`, `regprocedure` and `regnamespace` constants in reconstructed SQL, built from a catalog view and the session's name resolution when a deparser first prints one.
+pub(crate) struct AliasConstantOutput {
+    catalog: RegtypeOutputCatalog,
+    visibility: OutputVisibility,
+}
+
+impl AliasConstantOutput {
+    pub(crate) fn build(
+        catalog: &CatalogReadView,
+        resolution: &RelationNameResolution,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            catalog: RegtypeOutputCatalog::without_relations(catalog, resolution)?,
+            visibility: OutputVisibility::from_resolution(catalog, resolution),
+        })
+    }
+
+    /// The constant's output text, or `None` when no object holds the OID or the type is not one this output prints.
+    pub(crate) fn text(&self, ty: &ColumnType, oid: i64) -> Option<String> {
+        match ty {
+            ColumnType::Regtype => format_regtype(&self.visibility, &self.catalog, oid),
+            ColumnType::Regproc => format_regproc(&self.visibility, &self.catalog, oid),
+            ColumnType::Regprocedure => format_regprocedure(&self.visibility, &self.catalog, oid),
+            ColumnType::Regnamespace => {
+                namespace_name(&self.catalog, oid).map(uqa_sql::expr::quote_ident)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -716,71 +806,46 @@ fn format_regclass(
 }
 
 fn format_regproc(
-    context: &CatalogContext<'_>,
+    visibility: &OutputVisibility,
     catalog: &RegtypeOutputCatalog,
     oid: i64,
-) -> Result<Option<String>, SQLError> {
-    let Some(entry) = catalog.procs.get(&oid) else {
-        return Ok(None);
-    };
-    let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
-        return Ok(None);
-    };
-    let schemas = context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
-    let visible_schema = schemas.into_iter().find(|candidate_schema| {
-        let Some((&candidate_oid, _)) = catalog
-            .namespaces
-            .iter()
-            .find(|(_, name)| *name == candidate_schema)
-        else {
-            return false;
-        };
+) -> Option<String> {
+    let entry = catalog.procs.get(&oid)?;
+    let schema = namespace_name(catalog, entry.namespace_oid)?;
+    let visible_schema = visibility.schemas.iter().find(|candidate_schema| {
         catalog
-            .proc_names_by_namespace
-            .get(&candidate_oid)
+            .namespace_oid(candidate_schema)
+            .and_then(|candidate_oid| catalog.proc_names_by_namespace.get(&candidate_oid))
             .is_some_and(|names| names.contains(entry.name.as_str()))
     });
-    Ok(Some(
-        if !entry.overloaded && visible_schema.as_deref() == Some(schema) {
+    Some(
+        if !entry.overloaded && visible_schema.map(String::as_str) == Some(schema) {
             uqa_sql::expr::quote_ident(&entry.name)
         } else {
             qualified_name(schema, &entry.name)
         },
-    ))
+    )
 }
 
 fn format_regprocedure(
-    context: &CatalogContext<'_>,
+    visibility: &OutputVisibility,
     catalog: &RegtypeOutputCatalog,
     oid: i64,
-) -> Result<Option<String>, SQLError> {
-    let Some(entry) = catalog.procs.get(&oid) else {
-        return Ok(None);
-    };
-    let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
-        return Ok(None);
-    };
-    let visible_schema = context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
-        .into_iter()
-        .find(|candidate_schema| {
-            let Some((&namespace_oid, _)) = catalog
-                .namespaces
-                .iter()
-                .find(|(_, name)| *name == candidate_schema)
-            else {
-                return false;
-            };
-            catalog.procs.values().any(|candidate| {
-                candidate.namespace_oid == namespace_oid
-                    && candidate.name == entry.name
-                    && candidate.argument_types == entry.argument_types
+) -> Option<String> {
+    let entry = catalog.procs.get(&oid)?;
+    let schema = namespace_name(catalog, entry.namespace_oid)?;
+    let visible_schema = visibility.schemas.iter().find(|candidate_schema| {
+        catalog
+            .namespace_oid(candidate_schema)
+            .is_some_and(|namespace_oid| {
+                catalog.procs.values().any(|candidate| {
+                    candidate.namespace_oid == namespace_oid
+                        && candidate.name == entry.name
+                        && candidate.argument_types == entry.argument_types
+                })
             })
-        });
-    let routine_name = if visible_schema.as_deref() == Some(schema) {
+    });
+    let routine_name = if visible_schema.map(String::as_str) == Some(schema) {
         uqa_sql::expr::quote_ident(&entry.name)
     } else {
         qualified_name(schema, &entry.name)
@@ -788,12 +853,9 @@ fn format_regprocedure(
     let arguments = entry
         .argument_types
         .iter()
-        .map(|oid| {
-            format_regtype(context, catalog, *oid)
-                .map(|name| name.unwrap_or_else(|| oid.to_string()))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Some(format!("{routine_name}({})", arguments.join(","))))
+        .map(|oid| format_regtype(visibility, catalog, *oid).unwrap_or_else(|| oid.to_string()))
+        .collect::<Vec<_>>();
+    Some(format!("{routine_name}({})", arguments.join(",")))
 }
 
 fn pg_catalog_type_output(typname: &str) -> String {
@@ -809,36 +871,32 @@ fn pg_catalog_type_output(typname: &str) -> String {
 }
 
 fn format_regtype(
-    context: &CatalogContext<'_>,
+    visibility: &OutputVisibility,
     catalog: &RegtypeOutputCatalog,
     oid: i64,
-) -> Result<Option<String>, SQLError> {
-    let Some(entry) = catalog.types.get(&oid) else {
-        return Ok(None);
-    };
+) -> Option<String> {
+    let entry = catalog.types.get(&oid)?;
     if catalog
         .types
         .get(&entry.element_oid)
         .is_some_and(|element| element.array_oid == oid)
     {
-        return format_regtype(context, catalog, entry.element_oid)
-            .map(|element| element.map(|name| format!("{name}[]")));
+        return format_regtype(visibility, catalog, entry.element_oid)
+            .map(|name| format!("{name}[]"));
     }
-    let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
-        return Ok(None);
-    };
+    let schema = namespace_name(catalog, entry.namespace_oid)?;
     let local = if schema == "pg_catalog" {
         pg_catalog_type_output(&entry.name)
     } else {
         uqa_sql::expr::quote_ident(&entry.name)
     };
-    Ok(Some(
-        if schema == "pg_catalog" || context.search_path_contains(schema) {
+    Some(
+        if schema == "pg_catalog" || visibility.search_path.iter().any(|name| name == schema) {
             local
         } else {
             format!("{}.{}", uqa_sql::expr::quote_ident(schema), local)
         },
-    ))
+    )
 }
 
 fn format_regrole(context: &CatalogContext<'_>, oid: i64) -> Option<String> {
@@ -866,15 +924,16 @@ pub fn resolve_regtype_output(
         return Ok(None);
     }
     let catalog = regtype_output_catalog(context).map_err(|error| error.to_string())?;
+    let visibility = OutputVisibility::from_context(context).map_err(|error| error.to_string())?;
     let output = match ty {
-        ColumnType::Regproc => format_regproc(context, &catalog, oid),
-        ColumnType::Regprocedure => format_regprocedure(context, &catalog, oid),
+        ColumnType::Regproc => Ok(format_regproc(&visibility, &catalog, oid)),
+        ColumnType::Regprocedure => Ok(format_regprocedure(&visibility, &catalog, oid)),
         ColumnType::Regclass => format_regclass(context, &catalog, oid),
         ColumnType::Regnamespace => {
             Ok(namespace_name(&catalog, oid).map(uqa_sql::expr::quote_ident))
         }
         ColumnType::Regrole => Ok(format_regrole(context, oid)),
-        ColumnType::Regtype => format_regtype(context, &catalog, oid),
+        ColumnType::Regtype => Ok(format_regtype(&visibility, &catalog, oid)),
         _ => unreachable!(),
     };
     output.map_err(|error| error.to_string())

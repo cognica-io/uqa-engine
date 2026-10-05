@@ -99,8 +99,8 @@ pub fn prepare_generated_column(
         });
     }
     prepared.function_dependencies = function_dependencies;
-    // `regclassin` reads the relations a generation expression names when the column is defined, so the stored constants follow renames.
-    super::dependencies::regclass::read_regclass_constants(engine, &mut prepared.expression)?;
+    // The `reg*` input functions read the objects a generation expression names when the column is defined, so the stored constants follow renames.
+    super::dependencies::oid_alias::read_oid_alias_constants(engine, &mut prepared.expression)?;
     // The generation result is assigned to the column; its routines, user-defined types and enum constants are stored by identity as parse analysis stores them.
     crate::catalog::stored_ast::fold_assigned_stored_literal(
         &mut prepared.expression,

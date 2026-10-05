@@ -22,6 +22,10 @@ pub fn validate_plan(
         },
         plan,
     )?;
+    uqa_sql::schema::dependencies::oid_alias::check_statement_oid_alias_constants(
+        context.aliases,
+        plan,
+    )?;
     super::transactions::validate_transaction_plan(
         context.transactions,
         &context.effects.query_effect_context(),

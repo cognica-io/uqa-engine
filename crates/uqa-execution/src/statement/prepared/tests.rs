@@ -87,7 +87,7 @@ fn register(registry: &Registry) -> Result<(), SQLError> {
                 types: &NoRoutines,
                 routines: &NoRoutines,
                 scopes: registry,
-                regclasses: &NoRoutines,
+                aliases: &NoRoutines,
             },
             aggregates: registry,
             registry,
