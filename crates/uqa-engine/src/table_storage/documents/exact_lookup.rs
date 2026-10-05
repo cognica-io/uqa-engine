@@ -129,7 +129,14 @@ impl Engine {
                 overlay: &overlay,
                 read: read.as_ref(),
             }
-            .find_field(field, value)
+            .find_field_with_index(field, value, |field, value| {
+                engine.read_value_index_state(
+                    name,
+                    table,
+                    &ValueIndexKey::Column(field.into()),
+                    |index| Ok(index.field_candidates(value)),
+                )
+            })
         })
     }
 
@@ -149,7 +156,14 @@ impl Engine {
             overlay: &overlay,
             read: None,
         }
-        .find_field(field, value)
+        .find_field_with_index(field, value, |field, value| {
+            self.read_value_index_state(
+                table,
+                &table_state,
+                &ValueIndexKey::Column(field.into()),
+                |index| Ok(index.field_candidates(value)),
+            )
+        })
     }
 
     /// Find a matching conflict key in the caller's transaction snapshot. Execution selects the integer primary-key mapping, an answerable value index, or an evaluated scan and records the corresponding serializable read.

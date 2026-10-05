@@ -16,6 +16,7 @@ use uqa_storage::mvcc::SerializableTransactionId;
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ExactRead {
     Field,
+    IndexedField,
     Primary,
     Indexed,
     Composite,
@@ -25,8 +26,9 @@ pub(crate) enum ExactRead {
 }
 
 impl ExactRead {
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 8] = [
         Self::Field,
+        Self::IndexedField,
         Self::Primary,
         Self::Indexed,
         Self::Composite,
@@ -43,6 +45,9 @@ impl ExactRead {
     ) -> Result<Option<DocId>, SQLError> {
         match self {
             Self::Field => engine.find_doc_id_by_field(table, "v", &Value::Int(value)),
+            Self::IndexedField => {
+                engine.find_doc_id_by_field(table, "k", &Value::Str(format!("key{value}")))
+            }
             Self::Primary => engine.find_conflict(table, &["id".into()], &[Value::Int(1)]),
             Self::Indexed => {
                 engine.find_conflict(table, &["k".into()], &[Value::Str(format!("key{value}"))])
@@ -117,6 +122,7 @@ fn fixed_exact_queries_merge_private_updates_inserts_deletes_and_savepoint_undo(
         a.sql("BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT v FROM lookup_t; SAVEPOINT original; UPDATE lookup_t SET v = 2, k = 'key2'");
         for read in [
             ExactRead::Field,
+            ExactRead::IndexedField,
             ExactRead::Indexed,
             ExactRead::Composite,
             ExactRead::Scan,
@@ -146,6 +152,7 @@ fn fixed_exact_queries_merge_private_updates_inserts_deletes_and_savepoint_undo(
         assert!(inserted.is_some());
         for read in [
             ExactRead::Field,
+            ExactRead::IndexedField,
             ExactRead::Indexed,
             ExactRead::Composite,
             ExactRead::Scan,
@@ -223,6 +230,27 @@ fn composite_candidate_rechecks_and_sequential_misses_retain_dependencies() {
             b.sql("UPDATE lookup_t SET v = 99");
             assert_cycle(&a, &b);
         }
+    }
+}
+
+#[test]
+fn indexed_field_misses_keep_their_relation_observation() {
+    let (_directory, sessions) = fixtures();
+    for a in sessions {
+        prepare(&a);
+        let b = a.sibling();
+        a.begin();
+        b.begin();
+        assert_eq!(
+            ExactRead::IndexedField
+                .read(&a.engine, "lookup_t", 99)
+                .unwrap(),
+            None
+        );
+        b.sql("SELECT v FROM right_t");
+        a.sql("UPDATE right_t SET v = 2");
+        b.sql("UPDATE lookup_t SET k = 'key200'");
+        assert_cycle(&a, &b);
     }
 }
 
