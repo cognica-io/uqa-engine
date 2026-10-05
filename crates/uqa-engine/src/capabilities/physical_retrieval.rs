@@ -60,6 +60,12 @@ impl RetrievalRelations for Engine {
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         self.query_table_doc_ids(table)
     }
+    fn command_overlay_changes(
+        &self,
+        table: &str,
+    ) -> Result<Option<uqa_execution::query::document_changes::DocumentChanges>, SQLError> {
+        self.command_overlay_changes(table)
+    }
     fn get_document_fields(
         &self,
         table: &str,

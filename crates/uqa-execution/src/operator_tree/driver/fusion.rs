@@ -261,14 +261,11 @@ impl PhysicalRetrievalDriver<'_> {
                 "index {index_name:?} does not cover leading field {field:?}"
             )));
         }
-        self.context
-            .indexes
-            .value_index_scan(self.table, field, predicate)?
-            .ok_or_else(|| {
-                SQLError::Unsupported(format!(
-                    "index {index_name:?} cannot evaluate predicate {predicate:?}"
-                ))
-            })
+        self.value_index_scan(field, predicate)?.ok_or_else(|| {
+            SQLError::Unsupported(format!(
+                "index {index_name:?} cannot evaluate predicate {predicate:?}"
+            ))
+        })
     }
 
     pub(super) fn execute_vector_exclusion(

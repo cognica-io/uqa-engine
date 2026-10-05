@@ -43,6 +43,10 @@ pub trait RetrievalRelations: Sync {
     fn has_table(&self, table: &str) -> StorageBackendResult<bool>;
     fn column_type(&self, table: &str, field: &str) -> StorageBackendResult<Option<ColumnType>>;
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
+    fn command_overlay_changes(
+        &self,
+        table: &str,
+    ) -> Result<Option<crate::query::document_changes::DocumentChanges>, SQLError>;
     fn get_document_fields(
         &self,
         table: &str,
