@@ -8,6 +8,8 @@
 
 mod fingerprint;
 mod last;
+mod selected;
+pub use selected::SelectedRecordRead;
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -531,6 +533,16 @@ impl MergedRecordSnapshot {
         self.private.revision_scopes(after, limit, control)
     }
 
+    /// Stream private entries on this command boundary without repeated key lookups. Providers can merge their committed rows with each entry's metadata or requested payload.
+    pub fn private_cursor(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        control: &StorageReadControl,
+    ) -> VersionResult<super::PrivateRecordCursor<'_>> {
+        self.private.cursor(prefix, after, control)
+    }
+
     pub fn visit_value(
         &self,
         key: &[u8],
@@ -555,25 +567,7 @@ impl MergedRecordSnapshot {
         control: &StorageReadControl,
         visit: &mut RecordPointVisitor<'_>,
     ) -> VersionResult<()> {
-        if self.private_revision().is_none() {
-            return self.committed.visit_values(keys, control, visit);
-        }
-        loop {
-            control.check()?;
-            let Some(key) = keys.next() else {
-                return Ok(());
-            };
-            let key = key?;
-            let mut more = true;
-            self.visit_value(&key, control, &mut |record| {
-                more = visit(&key, record)?;
-                Ok(())
-            })?;
-            control.check()?;
-            if !more {
-                return Ok(());
-            }
-        }
+        self.selected(control).visit_values(keys, control, visit)
     }
 
     /// Preserve private replacement/tombstone precedence while enforcing the physical source's encoded-value cap.

@@ -11,6 +11,9 @@ use crate::mvcc::CommitSequence;
 
 type Model = BTreeMap<Vec<u8>, (Option<CommitSequence>, Option<Vec<u8>>)>;
 
+mod cursors;
+mod selection;
+
 #[test]
 fn forked_private_roots_share_prefix_and_undo_independently() {
     let control = StorageReadControl::with_limit(1 << 20);

@@ -20,16 +20,20 @@ use uqa_storage::{
         },
         Document,
     },
+    mvcc::{SelectedRecordRead, VersionError},
     DocumentMetadata, RetainedDocumentFields, RetainedStoredDocument,
 };
 
 use super::NativeDocumentRead;
 use crate::document_store::{controlled, sqlite_doc_id, DocId, SQLiteError, SQLiteResult};
-use crate::mvcc::native::NativeRecordFamily as Family;
+use crate::mvcc::native::{decode_record, NativeRecordFamily as Family, NativeRecordIdentity};
 
 mod borrowed;
 mod points;
 mod presence;
+
+#[cfg(test)]
+mod tests;
 
 struct Decoded {
     fields: Document,
@@ -117,22 +121,43 @@ impl NativeDocumentRead<'_> {
 
     fn projected(
         &self,
+        selected: &mut SelectedRecordRead<'_>,
         id: DocId,
         fields: &[&str],
     ) -> SQLiteResult<Option<RetainedStoredDocument>> {
-        let key = sqlite_doc_id(id)?;
+        let Some(key) = self.selection_key(id)? else {
+            return Ok(None);
+        };
+        self.snapshot.control.check()?;
+        self.control.check()?;
+        let mut row = None;
+        selected.visit_value(&key, self.control, &mut |record| {
+            self.snapshot.control.check()?;
+            self.control.check()?;
+            if let Some(bytes) = record.and_then(|record| record.value) {
+                let (_, values) = decode_record(&key, bytes, self.control)?;
+                row = Some(
+                    self.decode_body_with_projection(id, &values, Some(fields))
+                        .map_err(|error| VersionError::Storage(error.into()))?,
+                );
+            }
+            self.control.check()?;
+            self.snapshot.control.check()?;
+            Ok(())
+        })?;
+        row.map(|row| self.hydrate_decoded(id, row, Some(fields)))
+            .transpose()
+    }
+
+    fn selection_key(&self, id: DocId) -> SQLiteResult<Option<BudgetedVec<u8>>> {
+        let id = sqlite_doc_id(id)?;
         let Some(owner) = self.owner else {
             return Ok(None);
         };
-        let row = self.snapshot.borrow_row_controlled(
-            Family::Documents,
-            owner,
-            &[ValueRef::Integer(key)],
-            self.control,
-            |row| self.decode_body_with_projection(id, row, Some(fields)),
-        )?;
-        row.map(|row| self.hydrate_decoded(id, row, Some(fields)))
-            .transpose()
+        Ok(Some(
+            NativeRecordIdentity::new(Family::Documents, owner)?
+                .encode_key(&[ValueRef::Integer(id)], self.control)?,
+        ))
     }
 
     fn hydrate_decoded(
@@ -214,14 +239,18 @@ impl NativeDocumentRead<'_> {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> SQLiteResult<()> {
+        self.snapshot.control.check()?;
+        self.control.check()?;
         if fields.is_empty() {
             return self.visit_presence(ids, visitor);
         }
+        let mut selected = self.snapshot.view.selected(self.control);
         for id in ids {
             self.snapshot.control.check()?;
-            let document = self.projected(*id, fields)?;
+            self.control.check()?;
+            let document = self.projected(&mut selected, *id, fields)?;
             let present = document.is_some();
-            let mut projected = BudgetedVec::new(self.snapshot.control.memory());
+            let mut projected = BudgetedVec::new(self.control.memory());
             projected.reserve(fields.len())?;
             for field in fields {
                 projected.push(
@@ -234,6 +263,7 @@ impl NativeDocumentRead<'_> {
             // Native row visitors have returned, so the callback can safely reenter persistence while this immutable snapshot and its decoded row stay alive.
             let keep_going = visitor(*id, present, &projected);
             self.snapshot.control.check()?;
+            self.control.check()?;
             if !keep_going {
                 break;
             }
