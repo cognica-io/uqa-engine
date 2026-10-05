@@ -177,7 +177,7 @@
       "macos/aarch64/64": {
         "commit_batch_256/0": {
           "bytes_net": 1919112,
-          "bytes_peak": 8292278,
+          "bytes_peak": 8292342,
           "bytes_total": 469391264,
           "count_net": 352,
           "count_peak": 11463,
@@ -197,7 +197,7 @@
           "bytes_total": 172690252,
           "count_net": 534,
           "count_peak": 3935,
-          "count_total": 181855
+          "count_total": 181866
         },
         "rollback_batch_16/2048": {
           "bytes_net": 12405364,
@@ -211,7 +211,7 @@
       "linux/x86_64/64": {
         "commit_batch_256/0": {
           "bytes_net": 1919864,
-          "bytes_peak": 8292278,
+          "bytes_peak": 8292342,
           "bytes_total": 469390665,
           "count_net": 352,
           "count_peak": 11463,
@@ -231,7 +231,7 @@
           "bytes_total": 172690020,
           "count_net": 534,
           "count_peak": 3935,
-          "count_total": 181833
+          "count_total": 181834
         },
         "rollback_batch_16/2048": {
           "bytes_net": 12405948,
@@ -347,6 +347,81 @@
           "expected_peak": 8292278,
           "validation": "Derived from the CI observation and the matching 64-bit layout reduction; final Linux runtime has not been remeasured."
         }
+      },
+      "bounded_revision_scopes": {
+        "introduced_by": "94d825d5e",
+        "workload": "commit_batch_256/0",
+        "metric": "bytes_peak",
+        "previous_ceiling": 8292278,
+        "ceiling": 8292342,
+        "fixed_metadata_bytes": 64,
+        "explanation": "Private overlays summarize their newest revision per provider-selected scope (crates/uqa-storage/src/mvcc/overlay/scopes.rs). Each prepared write batch allocates the summaries' shared owner reservation, a fixed sixty-four bytes at the peak on the reviewed 64-bit targets; the summary keys and records are charged as resident private records. Every other allocation ceiling and every output expectation is unchanged by that commit.",
+        "observations": [
+          {
+            "source": "bisect/94d825d5e.json",
+            "sha256": "e0b012e7c691db0e1697ec9fccbd02b9e955eb30d24b93b038904aba0898bba7",
+            "bytes": 5481,
+            "revision": "94d825d5e62a3ca6e5842316d371ffcc18573278",
+            "commit_batch_256/0/bytes_peak": 8292342,
+            "commit_batch_16/2048/count_total": 181809,
+            "gate_passed_at_collection": false
+          },
+          {
+            "source": "https://github.com/cognica-io/uqa-engine/actions/runs/37286337834/artifacts/11334652827",
+            "artifact_file": "nori-redb-native.json",
+            "sha256": "17dd272b7aa9383865ccbc84e927ed9f501b3eb6ce5116e64638291826a90793",
+            "bytes": 5006,
+            "revision": "b04e1774ee8bd61192521cb773973dcc4191a27e",
+            "target": "linux/x86_64/64",
+            "commit_batch_256/0/bytes_peak": 8292342,
+            "commit_batch_16/2048/count_total": 181777,
+            "gate_passed_at_collection": false
+          }
+        ],
+        "bisection": "First-parent commits between 10b9678dd and b04e1774e measured one by one on macos/aarch64/64 with deterministic allocation counts: 7c911c7c2, 894b2baad, 5363512dd and 12374d92c observe 8292278; 94d825d5e observes 8292342. The count bisection between 94d825d5e and b9e6c1418: ef4c85176 and 676c9933b observe 181809; f26d63fe2 observes 181866."
+      },
+      "bounded_private_record_streaming": {
+        "introduced_by": "f26d63fe2",
+        "workload": "commit_batch_16/2048",
+        "metric": "count_total",
+        "previous_ceilings": {
+          "macos/aarch64/64": 181855,
+          "linux/x86_64/64": 181833
+        },
+        "ceilings": {
+          "macos/aarch64/64": 181866,
+          "linux/x86_64/64": 181834
+        },
+        "linux_derivation": {
+          "source": "https://github.com/cognica-io/uqa-engine/actions/runs/37286337834/artifacts/11334652827",
+          "artifact_file": "nori-redb-native.json",
+          "observed_count_total_before_change": 181777,
+          "revision": "b04e1774ee8bd61192521cb773973dcc4191a27e",
+          "added_allocations": 57,
+          "expected_count_total": 181834,
+          "validation": "The fifty-seven allocations added by f26d63fe2 are the same on both 64-bit targets in the macOS bisection; the Linux runtime after that commit has not been remeasured because the push workflow runs only for manifest changes."
+        },
+        "explanation": "Stream private record entries through native row merges (#386): native row merges stream the private record entries of each committing transaction through their own cursors, fifty-seven more allocations over the sixteen-commit workload than the previous observation on macos/aarch64/64 (181809 at 676c9933b, 181866 at f26d63fe2 and at b9e6c1418), eleven above the ceiling established at 181855 there; the Linux ceiling follows by the same fifty-seven from its last observation. Peak and total bytes stay within their ceilings, and every other allocation ceiling is unchanged.",
+        "observations": [
+          {
+            "source": "bisect/f26d63fe2.json",
+            "sha256": "9b2d98eaffc6688007213ed41029987db7e18721ea7ed4f0eac75d9b3ac42af6",
+            "bytes": 5481,
+            "revision": "f26d63fe29c7c9d1517e6df94a493d63cd4aaa99",
+            "commit_batch_256/0/bytes_peak": 8292342,
+            "commit_batch_16/2048/count_total": 181866,
+            "gate_passed_at_collection": false
+          },
+          {
+            "source": "bisect/b9e6c1418.json",
+            "sha256": "f7d5095db1d0db6303d72ecab6c86d33d3a7f5d782ca8f6406bfceb82251100e",
+            "bytes": 5481,
+            "revision": "b9e6c14185afd8dfec019570efe2acf864b3e813",
+            "commit_batch_256/0/bytes_peak": 8292342,
+            "commit_batch_16/2048/count_total": 181866,
+            "gate_passed_at_collection": false
+          }
+        ]
       }
     },
     "transaction_model": "versioned_concurrent"
