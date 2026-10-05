@@ -20,7 +20,7 @@ pub mod arrays;
 mod lifecycle;
 mod privileges;
 
-pub use lifecycle::alter_type_object;
+pub use lifecycle::{alter_type_object, relocate_type_object};
 pub use privileges::grant_type;
 
 /// Stored definitions outside the type registries that embed a user-defined type's catalog name: table and foreign table columns and view output types. A rename or schema move rewrites them in the caller's transaction.

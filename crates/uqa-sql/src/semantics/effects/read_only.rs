@@ -111,6 +111,7 @@ pub fn forbidden_command(
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::AlterSchemaOwner { .. }
+        | CommandPlan::RenameSchema { .. }
         | CommandPlan::Truncate { .. }
         | CommandPlan::CreateSequence(_)
         | CommandPlan::AlterSequence(_)

@@ -271,6 +271,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `types.oid-alias-input` | `M3` | `partial` |
 | `types.oid-alias-operators` | `M3` | `partial` |
 | `expressions.operator-selection` | `M3` | `partial` |
+| `ddl.alter-schema-rename` | `M3` | `partial` |
 | `ddl.create-table-analysis-order` | `M3` | `partial` |
 | `types.type-object-lifecycle` | `M3` | `verified` |
 | `catalog.object-dependencies` | `M3` | `partial` |

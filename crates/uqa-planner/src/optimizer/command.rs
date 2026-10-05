@@ -165,6 +165,7 @@ pub(super) fn optimize_command(
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::AlterSchemaOwner { .. }
+        | CommandPlan::RenameSchema { .. }
         | CommandPlan::Notify { .. }
         | CommandPlan::Listen { .. }
         | CommandPlan::Unlisten { .. }

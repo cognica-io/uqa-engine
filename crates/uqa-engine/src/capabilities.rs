@@ -476,6 +476,7 @@ mod relation_removal;
 
 mod foreign_table_alteration;
 mod relation_alteration;
+mod schema_rename;
 mod view_alteration;
 mod view_creation;
 mod view_restoration;

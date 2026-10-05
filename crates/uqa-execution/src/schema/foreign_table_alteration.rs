@@ -260,6 +260,40 @@ fn rename_foreign_table(
         new_name,
         "ALTER FOREIGN TABLE RENAME TO",
     )?;
+    rename_foreign_table_to(context, relation, target)
+}
+
+/// Move a foreign table into `schema` under its own name while its schema is renamed.
+pub fn relocate_foreign_table(
+    context: &ForeignTableAlterContext<'_>,
+    relation: &RelationIdentity,
+    schema: &str,
+) -> Result<(), SQLError> {
+    let target = RelationIdentity::new(schema, &relation.name);
+    if context
+        .names
+        .relation_kind_at(&target.qualified_name())
+        .map_err(|error| {
+            SQLError::Internal(format!(
+                "check schema rename target `{}`: {error}",
+                target.qualified_name()
+            ))
+        })?
+        .is_some()
+    {
+        return Err(SQLError::Internal(format!(
+            "schema rename target `{}` already exists",
+            target.qualified_name()
+        )));
+    }
+    rename_foreign_table_to(context, relation, target)
+}
+
+fn rename_foreign_table_to(
+    context: &ForeignTableAlterContext<'_>,
+    relation: &RelationIdentity,
+    target: RelationIdentity,
+) -> Result<(), SQLError> {
     context
         .creation
         .reserve_row_type_name(&target.qualified_name())?;

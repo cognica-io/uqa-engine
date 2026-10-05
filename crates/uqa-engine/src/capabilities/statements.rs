@@ -40,6 +40,7 @@ impl Engine {
                 sequence_creation: self,
                 sequence_alteration: self,
                 owners: self,
+                renames: self,
                 inputs: self,
             },
             routines: context::routines::RoutineStatements {

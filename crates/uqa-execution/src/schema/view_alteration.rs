@@ -252,6 +252,42 @@ fn rename_view(
         new_name,
         "ALTER VIEW RENAME TO",
     )?;
+    rename_view_to(context, relation, target, expected_kind)
+}
+
+/// Move a view into `schema` under its own name while its schema is renamed: the destination holds no relation of that name, so only the move itself is performed.
+pub fn relocate_view(
+    context: &ViewAlterContext<'_>,
+    relation: &RelationIdentity,
+    schema: &str,
+    expected_kind: &str,
+) -> Result<(), SQLError> {
+    let target = RelationIdentity::new(schema, &relation.name);
+    if context
+        .names
+        .relation_kind_at(&target.qualified_name())
+        .map_err(|error| {
+            SQLError::Internal(format!(
+                "check schema rename target `{}`: {error}",
+                target.qualified_name()
+            ))
+        })?
+        .is_some()
+    {
+        return Err(SQLError::Internal(format!(
+            "schema rename target `{}` already exists",
+            target.qualified_name()
+        )));
+    }
+    rename_view_to(context, relation, target, expected_kind)
+}
+
+fn rename_view_to(
+    context: &ViewAlterContext<'_>,
+    relation: &RelationIdentity,
+    target: RelationIdentity,
+    expected_kind: &str,
+) -> Result<(), SQLError> {
     context
         .creation
         .reserve_row_type_name(&target.qualified_name())?;

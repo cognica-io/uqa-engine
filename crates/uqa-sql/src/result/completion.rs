@@ -112,7 +112,7 @@ pub fn command_tag_name(command: &CommandPlan) -> &'static str {
         CommandPlan::CreateView { .. } => "CREATE VIEW",
         CommandPlan::RefreshMaterializedView { .. } => "REFRESH MATERIALIZED VIEW",
         CommandPlan::CreateSchema { .. } => "CREATE SCHEMA",
-        CommandPlan::AlterSchemaOwner { .. } => "ALTER SCHEMA",
+        CommandPlan::AlterSchemaOwner { .. } | CommandPlan::RenameSchema { .. } => "ALTER SCHEMA",
         CommandPlan::Notify { .. } => "NOTIFY",
         CommandPlan::Listen { .. } => "LISTEN",
         CommandPlan::Unlisten { .. } => "UNLISTEN",

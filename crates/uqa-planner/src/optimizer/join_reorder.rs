@@ -142,6 +142,7 @@ fn reorder_command_joins(
         | CommandPlan::AlterView(_)
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::AlterSchemaOwner { .. }
+        | CommandPlan::RenameSchema { .. }
         | CommandPlan::Notify { .. }
         | CommandPlan::Listen { .. }
         | CommandPlan::Unlisten { .. }

@@ -658,6 +658,14 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                     crate::schema::namespaces::alter_schema_owner(context, name, new_owner)?;
                     Ok(SQLResult::empty())
                 })),
+            CommandPlan::RenameSchema { name, new_name } => self
+                .context
+                .schemas
+                .renames
+                .with_rename_write(Box::new(|context| {
+                    crate::schema::namespaces::rename::rename_schema(context, name, new_name)?;
+                    Ok(SQLResult::empty())
+                })),
             CommandPlan::Notify { channel, payload } => {
                 self.context.notifications.notify(channel, payload)?;
                 Ok(SQLResult::empty())

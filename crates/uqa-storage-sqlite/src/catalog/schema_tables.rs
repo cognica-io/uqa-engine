@@ -431,11 +431,7 @@ impl Catalog {
         if from_relation == to_relation {
             return Ok(());
         }
-        if from_relation.schema != to_relation.schema {
-            return Err(SQLiteError::StorageBackend(
-                "moving a table between schemas is not supported by the catalog".into(),
-            ));
-        }
+        // A rename within a schema and a move into another schema, which ALTER SCHEMA RENAME performs for every table the schema holds, re-key the same rows: the schema and relation names of `_tables` and the qualified table name every data table carries.
         if self
             .rename_native_table(from, to, &from_relation, &to_relation)?
             .is_some()

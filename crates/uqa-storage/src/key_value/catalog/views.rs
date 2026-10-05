@@ -51,11 +51,7 @@ impl KeyValueCatalog {
         if from == to {
             return Ok(self.store.get(&from_key)?.is_some());
         }
-        if from.schema != to.schema {
-            return Err(StorageBackendError::Other(
-                "moving a view between schemas is not supported by the catalog".into(),
-            ));
-        }
+        // A move into another schema, which ALTER SCHEMA RENAME performs for every view the schema holds, re-keys the same entries as a rename.
         let mut found = false;
         self.store.with_mutation(&mut |read, batch| {
             let Some(value) = read.get(&from_key)? else {

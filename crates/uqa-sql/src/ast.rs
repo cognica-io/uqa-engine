@@ -485,6 +485,11 @@ pub enum Statement {
         name: String,
         new_owner: RoleSpecification,
     },
+    /// `ALTER SCHEMA name RENAME TO new_name` keeps the namespace's identity and privileges under the new name; every object it holds follows.
+    RenameSchema {
+        name: String,
+        new_name: String,
+    },
     /// `NOTIFY channel [, 'payload']` queues one asynchronous notification for delivery when the outer transaction commits.
     Notify {
         channel: String,

@@ -827,6 +827,7 @@ impl Statement {
             | Self::RefreshMaterializedView { .. }
             | Self::CreateSchema { .. }
             | Self::AlterSchemaOwner { .. }
+            | Self::RenameSchema { .. }
             | Self::Notify { .. }
             | Self::Listen { .. }
             | Self::Unlisten { .. }

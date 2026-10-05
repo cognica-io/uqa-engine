@@ -20,7 +20,7 @@ use uqa_sql::{catalog::security::BoundSchemaSecurity, SQLError};
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
-    fn schema_lock_context(
+    pub(super) fn schema_lock_context(
         &self,
     ) -> uqa_execution::schema::namespaces::locking::SchemaLockContext<'_> {
         uqa_execution::schema::namespaces::locking::SchemaLockContext {
