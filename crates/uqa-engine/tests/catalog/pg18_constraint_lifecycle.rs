@@ -965,6 +965,8 @@ mod merge_attributes;
 mod not_null_constraints;
 #[path = "pg18_constraint_lifecycle/oid_alias_input.rs"]
 mod oid_alias_input;
+#[path = "pg18_constraint_lifecycle/oid_relabel.rs"]
+mod oid_relabel;
 #[path = "pg18_constraint_lifecycle/partition_column_options.rs"]
 mod partition_column_options;
 #[path = "pg18_constraint_lifecycle/regclass_input.rs"]

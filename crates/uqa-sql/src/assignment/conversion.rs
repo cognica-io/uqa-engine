@@ -141,7 +141,13 @@ pub fn convert_declared_value_to_column_type(
 /// Whether converting a value to `ty` needs the statement's catalog: enum labels, domain constraints, composite attributes or role names.
 pub(crate) fn type_requires_catalog_resolution(ty: &ColumnType) -> bool {
     match ty {
+        // The OID alias types read a name through the catalog, so an assigned text value becomes the object's OID, as `regclassin` and its siblings read it.
         ColumnType::Regrole
+        | ColumnType::Regclass
+        | ColumnType::Regtype
+        | ColumnType::Regproc
+        | ColumnType::Regprocedure
+        | ColumnType::Regnamespace
         | ColumnType::Domain { .. }
         | ColumnType::Enum(_)
         | ColumnType::Composite(_) => true,

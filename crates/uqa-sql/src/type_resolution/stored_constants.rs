@@ -38,31 +38,39 @@ pub fn fold_stored_enum_constants(
     else {
         return Ok(false);
     };
-    transfer(expression, &bound, catalog)
+    transfer(expression, &bound, &mut EnumConstants { catalog })
 }
 
-/// Casts that binding added around a node are not part of the stored tree. A cast the stored tree already has keeps its written type name, which binding never changes.
-fn without_added_casts<'a>(stored: &ScalarExpr, mut bound: &'a ScalarExpr) -> &'a ScalarExpr {
-    while let ScalarExpr::Cast { expr, ty } = bound {
-        if matches!(stored, ScalarExpr::Cast { ty: written, .. } if written == ty) {
-            break;
-        }
-        bound = expr;
-    }
-    bound
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "one structural walk pairs every scalar variant with its bound counterpart"
-)]
-fn transfer(
-    stored: &mut ScalarExpr,
-    bound: &ScalarExpr,
-    catalog: &dyn EnumLabelCatalog,
+/// Store the coercions to `oid` that binding adds to a comparison on `oid` or one of its alias types, as `PostgreSQL` stores the `RelabelType` nodes and coerced constants of an analyzed expression: an alias operand gains its cast to `oid`, an integer operand its cast to `oid`, an array operand its cast to `oid[]`, and an `unknown` literal becomes the `oid` constant the input function read. Returns whether anything changed.
+pub fn relabel_stored_oid_operands(
+    expression: &mut ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
 ) -> Result<bool, SQLError> {
-    let bound = without_added_casts(stored, bound);
-    if is_unknown_literal(stored) {
+    let bound = super::introspection::bind_type_introspection_with_resolver(
+        expression.clone(),
+        schema,
+        params,
+        resolver,
+    );
+    transfer(expression, &bound, &mut OidRelabels)
+}
+
+/// What a transfer takes from the bound copy of a stored expression.
+trait Folding {
+    /// A stored `unknown` literal and what binding made of it.
+    fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError>;
+    /// The casts binding added around a node, outermost first, which the stored node may take over.
+    fn added_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool;
+}
+
+struct EnumConstants<'a> {
+    catalog: &'a dyn EnumLabelCatalog,
+}
+
+impl Folding for EnumConstants<'_> {
+    fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError> {
         let ScalarExpr::TypedLiteral {
             bound_type: Some(target),
             ..
@@ -70,19 +78,101 @@ fn transfer(
         else {
             return Ok(false);
         };
-        return fold_literal(stored, target, catalog);
+        fold_literal(stored, target, self.catalog)
     }
+
+    fn added_casts(&mut self, _: &mut ScalarExpr, _: &[&str]) -> bool {
+        false
+    }
+}
+
+struct OidRelabels;
+
+impl Folding for OidRelabels {
+    fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError> {
+        let ScalarExpr::TypedLiteral {
+            value,
+            bound_type: Some(ColumnType::Oid),
+            ..
+        } = bound
+        else {
+            return Ok(false);
+        };
+        *stored = ScalarExpr::TypedLiteral {
+            value: value.clone(),
+            ty: ColumnType::Oid.catalog_name(),
+            bound_type: None,
+            parameter_index: None,
+        };
+        Ok(true)
+    }
+
+    fn added_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool {
+        if casts.is_empty() || !casts.iter().all(|ty| *ty == "oid" || *ty == "oid[]") {
+            return false;
+        }
+        for ty in casts.iter().rev() {
+            let inner = std::mem::replace(stored, ScalarExpr::Literal(Value::Null));
+            *stored = ScalarExpr::Cast {
+                expr: Box::new(inner),
+                ty: (*ty).to_string(),
+            };
+        }
+        true
+    }
+}
+
+/// Casts that binding added around a node are not part of the stored tree. A cast the stored tree already has keeps its written type name, which binding never changes. Returns the node under the added casts and their type names, outermost first.
+fn split_added_casts<'a>(
+    stored: &ScalarExpr,
+    mut bound: &'a ScalarExpr,
+) -> (&'a ScalarExpr, Vec<&'a str>) {
+    let mut added = Vec::new();
+    while let ScalarExpr::Cast { expr, ty } = bound {
+        if matches!(stored, ScalarExpr::Cast { ty: written, .. } if written == ty) {
+            break;
+        }
+        added.push(ty.as_str());
+        bound = expr;
+    }
+    (bound, added)
+}
+
+fn transfer(
+    stored: &mut ScalarExpr,
+    bound: &ScalarExpr,
+    folding: &mut dyn Folding,
+) -> Result<bool, SQLError> {
+    let (bound, added) = split_added_casts(stored, bound);
+    let mut changed = if is_unknown_literal(stored) {
+        folding.literal(stored, bound)?
+    } else {
+        transfer_children(stored, bound, folding)?
+    };
+    changed |= folding.added_casts(stored, &added);
+    Ok(changed)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "one structural walk pairs every scalar variant with its bound counterpart"
+)]
+fn transfer_children(
+    stored: &mut ScalarExpr,
+    bound: &ScalarExpr,
+    folding: &mut dyn Folding,
+) -> Result<bool, SQLError> {
     Ok(match (stored, bound) {
         // An explicit cast of a literal whose conversion binding folded: the constant replaces the literal and the cast remains, converting a value of its own type.
         (ScalarExpr::Cast { expr, .. }, ScalarExpr::TypedLiteral { .. }) => {
-            transfer(expr, bound, catalog)?
+            transfer(expr, bound, folding)?
         }
         (ScalarExpr::Cast { expr, .. }, ScalarExpr::Cast { expr: bound, .. })
         | (ScalarExpr::UnaryMinus(expr), ScalarExpr::UnaryMinus(bound))
         | (ScalarExpr::Not(expr), ScalarExpr::Not(bound))
         | (ScalarExpr::IsNull { expr, .. }, ScalarExpr::IsNull { expr: bound, .. })
         | (ScalarExpr::InSubquery { expr, .. }, ScalarExpr::InSubquery { expr: bound, .. }) => {
-            transfer(expr, bound, catalog)?
+            transfer(expr, bound, folding)?
         }
         (
             ScalarExpr::Func {
@@ -108,19 +198,19 @@ fn transfer(
             {
                 return Ok(false);
             }
-            let mut changed = transfer_all(args, bound_args, catalog)?;
+            let mut changed = transfer_all(args, bound_args, folding)?;
             for (order, bound) in order_by.iter_mut().zip(bound_order) {
-                changed |= transfer(&mut order.expr, &bound.expr, catalog)?;
+                changed |= transfer(&mut order.expr, &bound.expr, folding)?;
             }
             if let (Some(filter), Some(bound)) = (filter, bound_filter) {
-                changed |= transfer(filter, bound, catalog)?;
+                changed |= transfer(filter, bound, folding)?;
             }
             changed
         }
         (ScalarExpr::Array(items), ScalarExpr::Array(bound))
         | (ScalarExpr::Row(items), ScalarExpr::Row(bound))
         | (ScalarExpr::And(items), ScalarExpr::And(bound))
-        | (ScalarExpr::Or(items), ScalarExpr::Or(bound)) => transfer_all(items, bound, catalog)?,
+        | (ScalarExpr::Or(items), ScalarExpr::Or(bound)) => transfer_all(items, bound, folding)?,
         (
             ScalarExpr::Binary { lhs, rhs, .. },
             ScalarExpr::Binary {
@@ -128,7 +218,7 @@ fn transfer(
                 rhs: bound_rhs,
                 ..
             },
-        ) => transfer(lhs, bound_lhs, catalog)? | transfer(rhs, bound_rhs, catalog)?,
+        ) => transfer(lhs, bound_lhs, folding)? | transfer(rhs, bound_rhs, folding)?,
         (
             ScalarExpr::Between { expr, low, high },
             ScalarExpr::Between {
@@ -137,9 +227,9 @@ fn transfer(
                 high: bound_high,
             },
         ) => {
-            transfer(expr, bound_expr, catalog)?
-                | transfer(low, bound_low, catalog)?
-                | transfer(high, bound_high, catalog)?
+            transfer(expr, bound_expr, folding)?
+                | transfer(low, bound_low, folding)?
+                | transfer(high, bound_high, folding)?
         }
         (
             ScalarExpr::InList { expr, list, .. },
@@ -148,7 +238,7 @@ fn transfer(
                 list: bound_list,
                 ..
             },
-        ) => transfer(expr, bound_expr, catalog)? | transfer_all(list, bound_list, catalog)?,
+        ) => transfer(expr, bound_expr, folding)? | transfer_all(list, bound_list, folding)?,
         (
             ScalarExpr::WindowCall {
                 name,
@@ -173,17 +263,17 @@ fn transfer(
             {
                 return Ok(false);
             }
-            let mut changed = transfer_all(args, bound_args, catalog)?;
+            let mut changed = transfer_all(args, bound_args, folding)?;
             if let (Some(filter), Some(bound)) = (filter, bound_filter) {
-                changed |= transfer(filter, bound, catalog)?;
+                changed |= transfer(filter, bound, folding)?;
             }
-            changed |= transfer_all(&mut spec.partition_by, &bound_spec.partition_by, catalog)?;
+            changed |= transfer_all(&mut spec.partition_by, &bound_spec.partition_by, folding)?;
             for (order, bound) in spec.order_by.iter_mut().zip(&bound_spec.order_by) {
-                changed |= transfer(&mut order.expr, &bound.expr, catalog)?;
+                changed |= transfer(&mut order.expr, &bound.expr, folding)?;
             }
             if let (Some(frame), Some(bound)) = (spec.frame.as_mut(), bound_spec.frame.as_ref()) {
-                changed |= transfer_frame_bound(&mut frame.start, &bound.start, catalog)?;
-                changed |= transfer_frame_bound(&mut frame.end, &bound.end, catalog)?;
+                changed |= transfer_frame_bound(&mut frame.start, &bound.start, folding)?;
+                changed |= transfer_frame_bound(&mut frame.end, &bound.end, folding)?;
             }
             changed
         }
@@ -207,16 +297,16 @@ fn transfer(
             }
             let mut changed = false;
             if let (Some(base), Some(bound)) = (base, bound_base) {
-                changed |= transfer(base, bound, catalog)?;
+                changed |= transfer(base, bound, folding)?;
             }
             for ((condition, result), (bound_condition, bound_result)) in
                 when.iter_mut().zip(bound_when)
             {
-                changed |= transfer(condition, bound_condition, catalog)?;
-                changed |= transfer(result, bound_result, catalog)?;
+                changed |= transfer(condition, bound_condition, folding)?;
+                changed |= transfer(result, bound_result, folding)?;
             }
             if let (Some(branch), Some(bound)) = (else_branch, bound_else) {
-                changed |= transfer(branch, bound, catalog)?;
+                changed |= transfer(branch, bound, folding)?;
             }
             changed
         }
@@ -227,14 +317,14 @@ fn transfer(
 fn transfer_all(
     stored: &mut [ScalarExpr],
     bound: &[ScalarExpr],
-    catalog: &dyn EnumLabelCatalog,
+    folding: &mut dyn Folding,
 ) -> Result<bool, SQLError> {
     if stored.len() != bound.len() {
         return Ok(false);
     }
     let mut changed = false;
     for (stored, bound) in stored.iter_mut().zip(bound) {
-        changed |= transfer(stored, bound, catalog)?;
+        changed |= transfer(stored, bound, folding)?;
     }
     Ok(changed)
 }
@@ -242,12 +332,12 @@ fn transfer_all(
 fn transfer_frame_bound(
     stored: &mut ScalarFrameBound,
     bound: &ScalarFrameBound,
-    catalog: &dyn EnumLabelCatalog,
+    folding: &mut dyn Folding,
 ) -> Result<bool, SQLError> {
     match (stored, bound) {
         (ScalarFrameBound::Preceding(stored), ScalarFrameBound::Preceding(bound))
         | (ScalarFrameBound::Following(stored), ScalarFrameBound::Following(bound)) => {
-            transfer(stored, bound, catalog)
+            transfer(stored, bound, folding)
         }
         _ => Ok(false),
     }

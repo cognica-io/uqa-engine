@@ -52,6 +52,57 @@ fn numeric_comparison_binding_retains_selected_casts_without_masking_exact_colum
 }
 
 #[test]
+fn oid_alias_comparisons_relabel_their_operands_to_oid() {
+    let schema = RowSchema::with_types(
+        vec!["a".into(), "e".into()],
+        vec![Some(ColumnType::Regclass), Some(ColumnType::Oid)],
+    );
+    // Both operands of `regclass <> regclass` are relabeled to the `oid` operator's operand type, as `RelabelType` nodes record it.
+    let scalar =
+        crate::bind_type_introspection(expression("a <> 'pg_class'::regclass"), &schema, &[]);
+    let ScalarExpr::Binary { lhs, rhs, .. } = scalar else {
+        panic!("binary comparison: {scalar:?}")
+    };
+    assert!(
+        matches!(*lhs, ScalarExpr::Cast { ref ty, ref expr } if ty == "oid" && matches!(**expr, ScalarExpr::Column(_))),
+        "{lhs:?}"
+    );
+    assert!(
+        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr } if ty == "oid" && matches!(**expr, ScalarExpr::Cast { .. })),
+        "{rhs:?}"
+    );
+    // An `oid` operand needs no relabel; an integer literal is cast to `oid`; an `unknown` literal is read as `oid`.
+    let scalar = crate::bind_type_introspection(expression("a = e"), &schema, &[]);
+    let ScalarExpr::Binary { lhs, rhs, .. } = scalar else {
+        panic!("binary comparison: {scalar:?}")
+    };
+    assert!(
+        matches!(*lhs, ScalarExpr::Cast { ref ty, .. } if ty == "oid"),
+        "{lhs:?}"
+    );
+    assert!(
+        matches!(*rhs, ScalarExpr::Column(ref name) if name == "e"),
+        "{rhs:?}"
+    );
+    let scalar = crate::bind_type_introspection(expression("a <> 16384"), &schema, &[]);
+    let ScalarExpr::Binary { rhs, .. } = scalar else {
+        panic!("binary comparison: {scalar:?}")
+    };
+    assert!(
+        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr } if ty == "oid" && matches!(**expr, ScalarExpr::Literal(_))),
+        "{rhs:?}"
+    );
+    let scalar = crate::bind_type_introspection(expression("e <> '16384'"), &schema, &[]);
+    let ScalarExpr::Binary { rhs, .. } = scalar else {
+        panic!("binary comparison: {scalar:?}")
+    };
+    assert!(
+        matches!(*rhs, ScalarExpr::TypedLiteral { ref ty, .. } if ty == "oid"),
+        "{rhs:?}"
+    );
+}
+
+#[test]
 fn controlled_numeric_comparison_binding_preserves_operand_cast_ownership() {
     let schema = RowSchema::default();
     let budget = MemoryBudget::new(1 << 20);

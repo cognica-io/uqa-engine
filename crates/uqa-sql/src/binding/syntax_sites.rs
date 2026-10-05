@@ -21,6 +21,21 @@ pub enum ValueSite {
     Literal,
     /// An `unknown` literal that binding converted to a typed constant.
     Constant { value: Value, ty: String },
+    /// A cast binding wrapped around the syntax, coercing an operand to the type its operator declares, as a `RelabelType` or an implicit coercion does.
+    Relabel(String),
+    /// Any other node of a stored expression, which keeps the sites in step with the syntax so that a relabel reaches the node it wraps.
+    Node,
+}
+
+/// The casts a node begins with.
+fn cast_depth(expression: &ScalarExpr) -> usize {
+    let mut depth = 0;
+    let mut node = expression;
+    while let ScalarExpr::Cast { expr, .. } = node {
+        depth += 1;
+        node = expr;
+    }
+    depth
 }
 
 /// Everything binding recorded for one piece of stored syntax, in syntax order.
@@ -32,12 +47,15 @@ pub struct SyntaxSites {
     pub values: Vec<ValueSite>,
 }
 
-/// Sites of a stored expression: `lowered` is the plan lowered from the syntax and `bound` its bound copy.
+/// Sites of a stored expression: `lowered` is the plan lowered from the syntax and `bound` its bound copy. The expression visitor reads a site at every node, so the casts binding adds around a node reach it as relabels.
 pub fn expression_syntax_sites(
     lowered: &ExpressionPlan,
     bound: &ExpressionPlan,
 ) -> Result<SyntaxSites, SQLError> {
-    let mut walk = Walk::default();
+    let mut walk = Walk {
+        aligned: true,
+        ..Walk::default()
+    };
     walk.scalar(
         &lowered.scalar,
         &bound.scalar,
@@ -85,6 +103,8 @@ fn optional_pair<'a, T>(
 #[derive(Default)]
 struct Walk {
     sites: SyntaxSites,
+    /// Whether every node records a site. The expression visitor keeps in step with the walk node by node, so a relabel can name the node it wraps; the statement visitor pairs casts and literals only, so the casts binding adds are left to binding at execution and recorded for no node.
+    aligned: bool,
 }
 
 impl Walk {
@@ -341,6 +361,17 @@ impl Walk {
         bound: &ScalarExpr,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
+        // Binding wraps an operand in the casts its operator needs, outside the casts the syntax writes.
+        let mut bound = bound;
+        for _ in 0..cast_depth(bound).saturating_sub(cast_depth(lowered)) {
+            let ScalarExpr::Cast { expr, ty } = bound else {
+                return Err(shape_error("relabel"));
+            };
+            if self.aligned {
+                self.sites.values.push(ValueSite::Relabel(ty.clone()));
+            }
+            bound = expr;
+        }
         match lowered {
             ScalarExpr::Literal(Value::Str(_) | Value::Null) => {
                 self.sites.values.push(match bound {
@@ -359,7 +390,11 @@ impl Walk {
                 };
                 self.sites.values.push(ValueSite::Cast(ty.clone()));
             }
-            _ => {}
+            _ => {
+                if self.aligned {
+                    self.sites.values.push(ValueSite::Node);
+                }
+            }
         }
         match (lowered, bound) {
             (

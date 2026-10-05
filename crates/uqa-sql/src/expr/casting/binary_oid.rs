@@ -191,30 +191,39 @@ fn parse_bytea_input(text: &str, control: &ProductionControl<'_>) -> Result<Prod
     finish_bytes(bytes, control)
 }
 
+/// `uint32in_subr`: the text is read as `strtoul` with base 0 reads it, so surrounding whitespace is ignored, a `0x` prefix selects hexadecimal digits and a leading `0` octal ones; digits the base rejects report `22P02` and a value past `uint32` reports `22003`.
 fn parse_uint32_input(text: &str, target: &str, control: &ProductionControl<'_>) -> Result<Value> {
     for _ in text.as_bytes().chunks(4096) {
         control.check()?;
     }
-    let trimmed = text.trim();
-    let digits = trimmed
-        .strip_prefix('+')
-        .or_else(|| trimmed.strip_prefix('-'))
-        .unwrap_or(trimmed);
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(SQLError::Routine {
-            sqlstate: "22P02".into(),
-            message: format!("invalid input syntax for type {target}: \"{text}\""),
-        });
-    }
-    let parsed = trimmed.parse::<i128>().map_err(|_| SQLError::Routine {
+    let invalid = || SQLError::Routine {
+        sqlstate: "22P02".into(),
+        message: format!("invalid input syntax for type {target}: \"{text}\""),
+    };
+    let out_of_range = || SQLError::Routine {
         sqlstate: "22003".into(),
         message: format!("value \"{text}\" is out of range for type {target}"),
-    })?;
+    };
+    let trimmed = text.trim();
+    let (negative, body) = match trimmed.strip_prefix('-') {
+        Some(body) => (true, body),
+        None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+    };
+    let (radix, digits) =
+        if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
+            (16, hex)
+        } else if body.len() > 1 && body.starts_with('0') {
+            (8, &body[1..])
+        } else {
+            (10, body)
+        };
+    if digits.is_empty() || !digits.chars().all(|digit| digit.is_digit(radix)) {
+        return Err(invalid());
+    }
+    let magnitude = i128::from(u64::from_str_radix(digits, radix).map_err(|_| out_of_range())?);
+    let parsed = if negative { -magnitude } else { magnitude };
     if !((i128::from(i32::MIN))..=i128::from(u32::MAX)).contains(&parsed) {
-        return Err(SQLError::Routine {
-            sqlstate: "22003".into(),
-            message: format!("value \"{text}\" is out of range for type {target}"),
-        });
+        return Err(out_of_range());
     }
     let value = if parsed < 0 {
         u32::from_ne_bytes((parsed as i32).to_ne_bytes())

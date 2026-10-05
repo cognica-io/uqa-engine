@@ -54,7 +54,8 @@ pub use scalar_input::{
     scalar_operand_type_name_with_control,
 };
 pub use stored_constants::{
-    contains_unknown_literal, fold_stored_enum_constants, stored_enum_constant,
+    contains_unknown_literal, fold_stored_enum_constants, relabel_stored_oid_operands,
+    stored_enum_constant,
 };
 mod string_binary;
 

@@ -58,7 +58,9 @@ pub fn convert_value_to_column_type_with_control(
         ColumnType::SmallInteger => cast_value_from_with_control(&value, "smallint", None, control),
         ColumnType::Integer => cast_value_from_with_control(&value, "integer", None, control),
         ColumnType::BigInteger => cast_value_from_with_control(&value, "bigint", None, control),
-        ColumnType::Oid | ColumnType::Xid => {
+        // `oidin` reads the text, so its diagnostics name `oid`.
+        ColumnType::Oid => cast_value_from_with_control(&value, "oid", None, control),
+        ColumnType::Xid => {
             let converted = cast_value_from_with_control(&value, "bigint", None, control)?;
             let Value::Int(number) = &*converted else {
                 unreachable!("bigint cast returned a non-integer value");

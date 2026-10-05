@@ -35,8 +35,10 @@ enum Syntax<'a> {
 }
 
 fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError> {
+    // A stored expression's sites name every node, a statement's only its casts and literals.
+    let aligned = matches!(syntax, Syntax::Expression(_));
     let mut routines = sites.routines.iter();
-    let mut values = sites.values.iter();
+    let mut values = sites.values.iter().peekable();
     let mut routines_changed = false;
     let mut values_changed = false;
     let mut relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
@@ -52,7 +54,7 @@ fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError
         Ok(())
     };
     let mut expression = |node: &mut Expr| -> Result<(), SQLError> {
-        values_changed |= apply_value_site(node, &mut values)?;
+        values_changed |= apply_value_site(node, &mut values, aligned)?;
         Ok(())
     };
     let mut visitor = StoredAstVisitor {
@@ -84,13 +86,25 @@ fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError
 
 fn apply_value_site<'a>(
     node: &mut Expr,
-    sites: &mut impl Iterator<Item = &'a ValueSite>,
+    sites: &mut std::iter::Peekable<impl Iterator<Item = &'a ValueSite>>,
+    aligned: bool,
 ) -> Result<bool, SQLError> {
     let mismatch = |what: &str| {
         SQLError::Internal(format!(
             "stored catalog binding does not match the {what} of its syntax"
         ))
     };
+    // A relabel wraps the node, whose own site the visitor reads when it descends into the wrapped node.
+    if let Some(ValueSite::Relabel(ty)) = sites.peek() {
+        let ty = (*ty).clone();
+        sites.next();
+        let inner = std::mem::replace(node, Expr::Literal(Value::Null));
+        *node = Expr::Cast {
+            expr: Box::new(inner),
+            ty,
+        };
+        return Ok(true);
+    }
     match node {
         Expr::Cast { ty, .. } => {
             let Some(ValueSite::Cast(bound)) = sites.next() else {
@@ -113,6 +127,10 @@ fn apply_value_site<'a>(
                 Ok(true)
             }
             _ => Err(mismatch("literal")),
+        },
+        _ if aligned => match sites.next() {
+            Some(ValueSite::Node) => Ok(false),
+            _ => Err(mismatch("expression")),
         },
         _ => Ok(false),
     }

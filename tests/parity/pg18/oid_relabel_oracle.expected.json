@@ -1,0 +1,967 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rl_t (a regclass, b regtype, c regproc, d regnamespace, e oid, f regclass[], n int);",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION rl_fn(int) RETURNS int LANGUAGE sql AS 'SELECT $1';",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rl_c (a regclass CHECK (a <> 'rl_t'::regclass), b regtype CHECK (b = 'int4'::regtype OR b IS NULL), d regclass CHECK (d::oid > 0), e regclass CHECK (e <> 16384), g oid CHECK (g <> 'rl_t'::regclass), h regproc CHECK (h <> 'rl_fn'::regproc), i regnamespace CHECK (i <> 'public'::regnamespace), j regclass CHECK (j <> '9999999'), k regclass CHECK (k <> 16384::oid), l oid CHECK (l <> '16384'), m regclass CHECK (m IS DISTINCT FROM 'rl_t'::regclass), o regclass CHECK (NULLIF(o, 'rl_t'::regclass) IS NULL), p regclass CHECK (p BETWEEN 1 AND 100), q regclass CHECK (q = ANY ('{rl_t}'::regclass[])), r regclass CHECK (CASE WHEN r = 1 THEN 1 ELSE 2 END = 2), s regtype CHECK (s <> 23));",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'rl_c'::regclass ORDER BY conname;",
+      "command_tags": [
+        "SELECT 16"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "rl_c_a_check",
+              "CHECK (((a)::oid <> ('rl_t'::regclass)::oid))"
+            ],
+            [
+              "rl_c_b_check",
+              "CHECK ((((b)::oid = ('integer'::regtype)::oid) OR (b IS NULL)))"
+            ],
+            [
+              "rl_c_d_check",
+              "CHECK (((d)::oid > (0)::oid))"
+            ],
+            [
+              "rl_c_e_check",
+              "CHECK (((e)::oid <> (16384)::oid))"
+            ],
+            [
+              "rl_c_g_check",
+              "CHECK ((g <> ('rl_t'::regclass)::oid))"
+            ],
+            [
+              "rl_c_h_check",
+              "CHECK (((h)::oid <> ('rl_fn'::regproc)::oid))"
+            ],
+            [
+              "rl_c_i_check",
+              "CHECK (((i)::oid <> ('public'::regnamespace)::oid))"
+            ],
+            [
+              "rl_c_j_check",
+              "CHECK (((j)::oid <> '9999999'::oid))"
+            ],
+            [
+              "rl_c_k_check",
+              "CHECK (((k)::oid <> (16384)::oid))"
+            ],
+            [
+              "rl_c_l_check",
+              "CHECK ((l <> '16384'::oid))"
+            ],
+            [
+              "rl_c_m_check",
+              "CHECK (((m)::oid IS DISTINCT FROM ('rl_t'::regclass)::oid))"
+            ],
+            [
+              "rl_c_o_check",
+              "CHECK ((NULLIF((o)::oid, ('rl_t'::regclass)::oid) IS NULL))"
+            ],
+            [
+              "rl_c_p_check",
+              "CHECK ((((p)::oid >= (1)::oid) AND ((p)::oid <= (100)::oid)))"
+            ],
+            [
+              "rl_c_q_check",
+              "CHECK (((q)::oid = ANY (('{rl_t}'::regclass[])::oid[])))"
+            ],
+            [
+              "rl_c_r_check",
+              "CHECK ((\nCASE\n    WHEN ((r)::oid = (1)::oid) THEN 1\n    ELSE 2\nEND = 2))"
+            ],
+            [
+              "rl_c_s_check",
+              "CHECK (((s)::oid <> (23)::oid))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rl_m (a regclass CHECK (a <> 'rl_missing'));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"rl_missing\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE rl_m2 (a regclass CHECK (a <> 'rl_t'));",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"rl_t\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rl_v AS SELECT a, b FROM rl_t WHERE a = 'rl_t'::regclass AND b <> 'int4'::regtype AND c = 'rl_fn'::regproc AND d = 'public'::regnamespace AND e = a AND a::oid = 1 AND f = '{rl_t}'::regclass[];",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rl_v'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT a,\n    b\n   FROM rl_t\n  WHERE a::oid = 'rl_t'::regclass::oid AND b::oid <> 'integer'::regtype::oid AND c::oid = 'rl_fn'::regproc::oid AND d::oid = 'public'::regnamespace::oid AND e = a::oid AND a::oid = 1::oid AND f = '{rl_t}'::regclass[];"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rl_w AS SELECT a FROM rl_t WHERE a > 'rl_t'::regclass ORDER BY a, b;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rl_w'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT a\n   FROM rl_t\n  WHERE a::oid > 'rl_t'::regclass::oid\n  ORDER BY a, b;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW rl_x AS SELECT a = b::oid::regclass AS same, a::oid AS o, a::text AS t, a::oid::integer AS i, a = e AS ae, e = a AS ea, a <> '1259' AS x1, a <> 1259 AS x2, e <> '1259' AS x3, a::oid = 1 AS x5, a BETWEEN 1 AND 100 AS x8, a IS DISTINCT FROM 'pg_class'::regclass AS x9, NULLIF(a, 'pg_class'::regclass) AS x10, a = ANY ('{pg_class}'::regclass[]) AS x12, CASE WHEN a = 1 THEN 1 ELSE 2 END AS x16 FROM rl_t;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('rl_x'::regclass, true);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT a::oid = b::oid::regclass::oid AS same,\n    a::oid AS o,\n    a::text AS t,\n    a::oid::integer AS i,\n    a::oid = e AS ae,\n    e = a::oid AS ea,\n    a::oid <> '1259'::oid AS x1,\n    a::oid <> 1259::oid AS x2,\n    e <> '1259'::oid AS x3,\n    a::oid = 1::oid AS x5,\n    a::oid >= 1::oid AND a::oid <= 100::oid AS x8,\n    a::oid IS DISTINCT FROM 'pg_class'::regclass::oid AS x9,\n    NULLIF(a::oid, 'pg_class'::regclass::oid) AS x10,\n    a::oid = ANY ('{pg_class}'::regclass[]::oid[]) AS x12,\n        CASE\n            WHEN a::oid = 1::oid THEN 1\n            ELSE 2\n        END AS x16\n   FROM rl_t;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rl_t VALUES ('pg_class', 'int4', 'rl_fn', 'public', 1259, '{pg_class}', 1);",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT same, o, t, i, ae, ea, x1, x2, x3, x5, x8, x9, x10::text, x12, x16 FROM rl_x;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same",
+            "o",
+            "t",
+            "i",
+            "ae",
+            "ea",
+            "x1",
+            "x2",
+            "x3",
+            "x5",
+            "x8",
+            "x9",
+            "x10",
+            "x12",
+            "x16"
+          ],
+          "type_oids": [
+            16,
+            26,
+            25,
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            25,
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "f",
+              "1259",
+              "pg_class",
+              "1259",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              null,
+              "t",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a FROM rl_v;",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            2205
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(max(a))::text, max(a) = 1259::oid, min(a)::text, pg_typeof(min(b))::text FROM rl_t;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "?column?",
+            "min",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25,
+            16,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "oid",
+              "t",
+              "1259",
+              "oid"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a::oid > 0, a = e, b::oid = 23, a = 'pg_class'::regclass, a <> 'pg_type'::regclass, a < 'pg_type'::regclass FROM rl_t;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT n FROM rl_t WHERE a IN ('pg_class', 'pg_type');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT n FROM rl_t WHERE a IN ('pg_class'::regclass, 'pg_type'::regclass);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT n FROM rl_t WHERE a = 'pg_class';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"pg_class\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT n FROM rl_t WHERE a = 'rl_missing';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"rl_missing\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a = 'rl_missing' FROM rl_t;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"rl_missing\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 WHERE 'rl_t'::regclass <> 'rl_missing';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"rl_missing\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 WHERE 'int4'::regtype = 'nosuchtype';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"nosuchtype\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'rl_t'::regclass = 'rl_t'::regclass, 'rl_t'::regclass < 'rl_t'::regclass, 'pg_class'::regclass = 1259::oid, 'pg_class'::regclass = 1259;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'rl_t'::regclass = 'rl_t';",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"rl_t\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'int4'::regtype = 23, 'int4'::regtype <> 'int8'::regtype, 'public'::regnamespace = 'public'::regnamespace, 'rl_fn'::regproc = 'rl_fn'::regproc;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '{1,2}'::regclass[]::oid[];",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid"
+          ],
+          "type_oids": [
+            1028
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1 = ANY ('{1,2}'::regclass[]::oid[]);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT a FROM rl_t ORDER BY a DESC;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            2205
+          ],
+          "rows": [
+            [
+              "pg_class"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT DISTINCT a::text FROM rl_t;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "pg_class"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT count(*) FROM rl_t GROUP BY a;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '010'::oid, ' 12 '::oid, '+7'::oid, '0x10'::oid;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "oid",
+            "oid",
+            "oid"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "8",
+              "12",
+              "7",
+              "16"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '08'::oid;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"08\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '4294967296'::oid;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"4294967296\" is out of range for type oid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'abc'::oid;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"abc\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ''::oid;",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type oid: \"\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 1::oid = '1';",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rl_c (a) VALUES ('pg_class');",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rl_c (a) VALUES ('rl_t');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"rl_c\" violates check constraint \"rl_c_a_check\"",
+        "detail": "Failing row contains (rl_t, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rl_c (j) VALUES (9999999);",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"rl_c\" violates check constraint \"rl_c_j_check\"",
+        "detail": "Failing row contains (null, null, null, null, null, null, null, 9999999, null, null, null, null, null, null, null, null).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rl_c (p) VALUES ('pg_class');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"rl_c\" violates check constraint \"rl_c_p_check\"",
+        "detail": "Failing row contains (null, null, null, null, null, null, null, null, null, null, null, null, pg_class, null, null, null).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rl_c (q) VALUES ('rl_t');",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO rl_c (q) VALUES ('pg_class');",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"rl_c\" violates check constraint \"rl_c_q_check\"",
+        "detail": "Failing row contains (null, null, null, null, null, null, null, null, null, null, null, null, null, pg_class, null, null).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT count(*) FROM rl_c;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}
