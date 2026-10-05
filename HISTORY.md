@@ -29,6 +29,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve prepared input constants and reanalyze original syntax after changes to selected catalog dependencies or the effective namespace. Match PostgreSQL's DDL rollback behavior, identical routine replacement, enum label identity and sequence OID diagnostics; refresh domain checks without rereading unrelated inputs.
 - Analyze `ALTER COLUMN TYPE USING` before the target and new type, including on empty tables. Preserve PostgreSQL's inherited and partition-key rejection, generated-column and identity-sequence diagnostics, assignment errors, constant-planning errors and lazy conditional evaluation.
 - Check an added column's target before its type and clauses: a directly targeted partition reports `42809`, duplicate and system-column names report `42701`, and `IF NOT EXISTS` skips an existing ordinary column with PostgreSQL's notice. Preserve recursive additions and statement and savepoint rollback.
 - Release the selected role catalog guard before describing DROP ROLE dependencies, preventing a fixed-snapshot catalog refresh from deadlocking while preserving dependency errors and role tuple identity checks.
