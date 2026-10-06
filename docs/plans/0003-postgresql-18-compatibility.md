@@ -1360,13 +1360,15 @@ Verification: all 102 independently captured PostgreSQL observations (91 initial
 
 ## Foreign-table column deletion
 
-Issue [#523](https://github.com/cognica-io/uqa-engine/issues/523) reproduces two independent foreign DDL omissions. First, `ALTER FOREIGN TABLE ... DROP COLUMN` and ordinary `ALTER TABLE` spelling on a foreign relation must reach the existing dependency deletion lifecycle. SQL wrapper creation follows in a separate logical PR after this unit merges. Keep #523 open until both are implemented and verified; preserve all 75 inherited records and 30 original open tasks throughout.
+[PR #524](https://github.com/cognica-io/uqa-engine/pull/524) starts issue [#523](https://github.com/cognica-io/uqa-engine/issues/523), which reproduces two independent foreign DDL omissions. First, `ALTER FOREIGN TABLE ... DROP COLUMN` and ordinary `ALTER TABLE` spelling on a foreign relation must reach the existing dependency deletion lifecycle. SQL wrapper creation follows in a separate logical PR after this unit merges. Keep #523 open until both are implemented and verified; preserve all 75 inherited records and 30 original open tasks throughout.
 
 SQL owns syntax, statement serialization, relation-kind checks and column diagnostics. Execution owns authorization and locks, ordered action execution, dependency deletion and transactional publication. Engine supplies existing retained catalog and transaction/deletion adapters. The current SQL, Execution, Engine and FDW manifests/features, dependency policy and manual boundaries use their existing directions; no new runtime dependency is needed. Reuse the dropped-slot model and generic dependency deletion merged in #522, including foreign defaults, checks, views, routines and owned sequences. Removing a column preserves the same relational carrier and surviving data; it adds no algebraic operator.
 
 - [x] Capture an independent PostgreSQL 18.4 reference for foreign-column DROP, both ALTER spellings, missing targets, IF EXISTS, wrong relation kinds, system columns, multi-action atomicity, RESTRICT/CASCADE, serial ownership, savepoints, authority and fresh-connection observations.
-- [ ] Implement foreign-column declaration/binding and schedule it through the existing deletion owner without duplicating Engine algorithms.
+- [x] Implement foreign-column declaration/binding and schedule it through the existing deletion owner without duplicating Engine algorithms.
 - [ ] Verify exact PostgreSQL results on all four providers and persistent reopen, plus focused owning-crate and lifecycle regressions.
 - [ ] Synchronize public documentation and task status, merge and remove the completed branch; continue SQL wrapper definitions and close #523 only when that follow-up is complete.
 
 The initial reference contains 35 initial messages and four observations from a new PostgreSQL connection. PostgreSQL setup provisions `memory_fdw` to match UQA’s existing native wrapper; this does not claim SQL wrapper-creation support. No manual CI intervention or performance measurements are planned.
+
+The implementation passes strict Clippy over SQL, Execution and Engine libraries/integration targets, plus 33 focused SQL declaration, column and target tests. The focused Engine/Execution test build and runtime verification are still in progress; no provider-pass claim is made yet. The public DDL example, upgrade note, history and evidence manifest describe this correction.

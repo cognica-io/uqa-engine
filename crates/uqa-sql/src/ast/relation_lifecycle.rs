@@ -62,7 +62,15 @@ pub struct AlterViewStmt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DropColumnAction {
+    pub name: String,
+    pub if_exists: bool,
+    pub cascade: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlterForeignTableAction {
+    DropColumns(Vec<DropColumnAction>),
     OwnerTo(RoleSpecification),
     RenameTo(String),
     SetSchema(String),
@@ -85,6 +93,8 @@ struct AlterForeignTableStmtSerde {
     rename_to: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     set_schema: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    drop_columns: Option<Vec<DropColumnAction>>,
 }
 
 impl Serialize for AlterForeignTableStmt {
@@ -92,10 +102,13 @@ impl Serialize for AlterForeignTableStmt {
     where
         S: serde::Serializer,
     {
-        let (owner, rename_to, set_schema) = match &self.action {
-            AlterForeignTableAction::OwnerTo(owner) => (Some(owner.clone()), None, None),
-            AlterForeignTableAction::RenameTo(name) => (None, Some(name.clone()), None),
-            AlterForeignTableAction::SetSchema(schema) => (None, None, Some(schema.clone())),
+        let (owner, rename_to, set_schema, drop_columns) = match &self.action {
+            AlterForeignTableAction::OwnerTo(owner) => (Some(owner.clone()), None, None, None),
+            AlterForeignTableAction::RenameTo(name) => (None, Some(name.clone()), None, None),
+            AlterForeignTableAction::SetSchema(schema) => (None, None, Some(schema.clone()), None),
+            AlterForeignTableAction::DropColumns(columns) => {
+                (None, None, None, Some(columns.clone()))
+            }
         };
         AlterForeignTableStmtSerde {
             name: self.name.clone(),
@@ -103,6 +116,7 @@ impl Serialize for AlterForeignTableStmt {
             owner,
             rename_to,
             set_schema,
+            drop_columns,
         }
         .serialize(serializer)
     }
@@ -114,18 +128,26 @@ impl<'de> Deserialize<'de> for AlterForeignTableStmt {
         D: serde::Deserializer<'de>,
     {
         let value = AlterForeignTableStmtSerde::deserialize(deserializer)?;
-        let action = match (value.owner, value.rename_to, value.set_schema) {
-            (Some(owner), None, None) => AlterForeignTableAction::OwnerTo(owner),
-            (None, Some(name), None) => AlterForeignTableAction::RenameTo(name),
-            (None, None, Some(schema)) => AlterForeignTableAction::SetSchema(schema),
-            (Some(_), Some(_), None) => {
+        let action = match (
+            value.owner,
+            value.rename_to,
+            value.set_schema,
+            value.drop_columns,
+        ) {
+            (Some(owner), None, None, None) => AlterForeignTableAction::OwnerTo(owner),
+            (None, Some(name), None, None) => AlterForeignTableAction::RenameTo(name),
+            (None, None, Some(schema), None) => AlterForeignTableAction::SetSchema(schema),
+            (None, None, None, Some(columns)) if !columns.is_empty() => {
+                AlterForeignTableAction::DropColumns(columns)
+            }
+            (Some(_), Some(_), None, None) => {
                 return Err(serde::de::Error::custom(
                     "ALTER FOREIGN TABLE cannot contain both owner and rename_to",
                 ));
             }
             _ => {
                 return Err(serde::de::Error::custom(
-                    "ALTER FOREIGN TABLE requires exactly one of owner, rename_to or set_schema",
+                    "ALTER FOREIGN TABLE requires exactly one of owner, rename_to, set_schema or nonempty drop_columns",
                 ));
             }
         };

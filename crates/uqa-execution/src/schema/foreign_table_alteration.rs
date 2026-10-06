@@ -72,7 +72,10 @@ pub trait ForeignTableAlterPublication {
         security: &BoundTableSecurity,
     ) -> Result<(), SQLError>;
 }
+mod columns;
+
 pub struct ForeignTableAlterContext<'a> {
+    pub deletion: &'a dyn crate::schema::deletion::CatalogRemovalInputs,
     pub schema_moves: super::relation_alteration::relocation::RelationSchemaContext<'a>,
     pub names: &'a dyn RelationAlterNames,
     pub catalog: &'a dyn ForeignTableAlterCatalog,
@@ -159,6 +162,9 @@ pub fn alter_foreign_table(
         };
         let canonical = binding.name;
         match &statement.action {
+            AlterForeignTableAction::DropColumns(columns) => {
+                columns::drop_columns(context, &binding.value.relation, columns)
+            }
             AlterForeignTableAction::OwnerTo(owner) => {
                 alter_foreign_table_role_owner(context, &canonical, owner)
             }

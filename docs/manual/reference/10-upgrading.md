@@ -16,6 +16,8 @@ Rust constructors of `QueryBlockPlan` also supply `privilege_columns: Default::d
 
 ### Relation attribute numbers
 
+Foreign-column deletion is now available through `ALTER FOREIGN TABLE` and `ALTER TABLE`, using the existing dependency and attribute-slot formats. Existing foreign definitions require no further conversion for this correction. Stored serialized ALTER statements with the new column-drop action require a reader that supports that action.
+
 Table columns now retain their PostgreSQL attribute numbers, including the slots of deleted columns. Initial open converts older ordinary and foreign table metadata in the existing atomic catalog transaction. If any subsequent restoration fails, the conversion rolls back with it. Later refreshes and peer sessions validate the recorded layout without repairing it. Older catalogs contain only the surviving columns, so conversion numbers those columns in their retained order; it cannot reconstruct previously discarded slots. Use a binary with attribute-slot support after this upgrade.
 
 Rust code constructing `ColumnDef` supplies `attribute_number: None` for a new declaration; publication assigns its relation-local number. `TableConstraintSet` and Execution’s foreign-table metadata retain `dropped_attributes`, initially empty. Catalog adapters provide `ColumnPrivilegeRelation.columns` as `(attribute_number, name)` pairs, because a positive PostgreSQL attribute number is no longer a vector index. Engine adapters snapshot the same metadata across transactions and sessions.

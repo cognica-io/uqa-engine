@@ -17,6 +17,8 @@ use uqa_core::{ArrayValue, Value};
 use uqa_engine::Engine;
 use uqa_sql::ast::{ColumnDef, ColumnType};
 
+#[path = "sql_foreign_ddl/columns.rs"]
+mod columns;
 #[path = "sql_foreign_ddl/declarations.rs"]
 mod declarations;
 #[path = "sql_foreign_ddl/server_deletion.rs"]

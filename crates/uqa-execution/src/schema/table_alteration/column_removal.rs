@@ -9,7 +9,7 @@
 use super::{ddl_storage_error, TableAlterContext};
 use crate::schema::columns::deletion::{ColumnDrop, LocalizedColumn};
 use crate::schema::publication::hierarchy::{replace_hierarchy_components, HierarchySchemaChange};
-use uqa_sql::{SQLError, SQLNotice};
+use uqa_sql::SQLError;
 
 pub(super) fn drop_column<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
@@ -28,9 +28,11 @@ pub(super) fn drop_column<S: Clone + 'static>(
         &mut |localized| declare_local_column(context, localized),
     )?;
     if let ColumnDrop::Missing(relation) = outcome {
-        deletion.notices.push(SQLNotice::notice(format!(
-            "column \"{column}\" of relation \"{relation}\" does not exist, skipping"
-        )));
+        deletion
+            .notices
+            .push(uqa_sql::schema::columns::missing_drop_column_notice(
+                &relation, column,
+            ));
     }
     Ok(())
 }

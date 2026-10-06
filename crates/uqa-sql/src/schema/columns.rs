@@ -72,6 +72,36 @@ pub fn append_registered_column(
     Ok(())
 }
 
+/// Check a DROP target before dependency traversal. Missing `IF EXISTS` targets return false so execution can publish its notice without changing the relation.
+pub fn validate_drop_column(
+    columns: &[crate::ast::ColumnDef],
+    table: &str,
+    column: &str,
+    if_exists: bool,
+) -> Result<bool, SQLError> {
+    if POSTGRES_SYSTEM_COLUMNS.contains(&column) {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: format!("cannot drop system column \"{column}\""),
+        });
+    }
+    if columns.iter().any(|definition| definition.name == column) {
+        return Ok(true);
+    }
+    if if_exists {
+        Ok(false)
+    } else {
+        Err(undefined_relation_column(table, column))
+    }
+}
+
+/// The notice for a missing column, using the unqualified name of the already bound relation.
+pub fn missing_drop_column_notice(table: &str, column: &str) -> crate::SQLNotice {
+    crate::SQLNotice::notice(format!(
+        "column \"{column}\" of relation \"{table}\" does not exist, skipping"
+    ))
+}
+
 /// The column an `ALTER TABLE ... ALTER COLUMN` action names, as `get_attnum` finds it for `ATExecColumnDefault` and its siblings.
 pub fn altered_column<'a>(
     table: &str,

@@ -156,3 +156,30 @@ pub(super) fn not_null_declarations(
     }
     Ok(declarations)
 }
+
+/// Retain a foreign-column deletion list in written order before catalog binding.
+pub(super) fn column_drops(
+    commands: &[pg_query::protobuf::Node],
+) -> Option<Vec<crate::ast::DropColumnAction>> {
+    if commands.is_empty() {
+        return None;
+    }
+    commands
+        .iter()
+        .map(|node| {
+            let Some(NodeEnum::AlterTableCmd(command)) = node.node.as_ref() else {
+                return None;
+            };
+            (command.subtype() == pg_query::protobuf::AlterTableType::AtDropColumn).then(|| {
+                crate::ast::DropColumnAction {
+                    name: command.name.clone(),
+                    if_exists: command.missing_ok,
+                    cascade: matches!(
+                        command.behavior(),
+                        pg_query::protobuf::DropBehavior::DropCascade
+                    ),
+                }
+            })
+        })
+        .collect()
+}

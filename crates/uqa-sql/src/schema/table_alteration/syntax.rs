@@ -138,7 +138,7 @@ pub fn alter_view_from_table_syntax(
     })
 }
 
-/// Return a native foreign-table owner or name change, or None for valid trigger actions.
+/// Return native foreign-table column, owner or name changes, or None for valid trigger actions.
 pub fn alter_foreign_table_from_table_syntax(
     canonical: &str,
     stmt: &AlterTableStmt,
@@ -150,6 +150,29 @@ pub fn alter_foreign_table_from_table_syntax(
         )
     }) {
         return Ok(None);
+    }
+    let drops = stmt
+        .actions
+        .iter()
+        .map(|action| match action {
+            AlterTableAction::DropColumn {
+                name,
+                if_exists,
+                cascade,
+            } => Some(crate::ast::DropColumnAction {
+                name: name.clone(),
+                if_exists: *if_exists,
+                cascade: *cascade,
+            }),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>();
+    if let Some(columns) = drops {
+        return Ok(Some(crate::ast::AlterForeignTableStmt {
+            name: canonical.to_string(),
+            if_exists: stmt.if_exists,
+            action: crate::ast::AlterForeignTableAction::DropColumns(columns),
+        }));
     }
     let action = match stmt.actions.as_slice() {
         [AlterTableAction::ChangeOwner { owner }] => {
