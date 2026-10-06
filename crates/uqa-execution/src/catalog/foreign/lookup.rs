@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_storage::StorageBackendResult;
 pub trait ForeignLookupState {
+    fn query_wrappers(&self) -> Option<&uqa_sql::catalog::foreign_wrapper::ForeignWrappers>;
     fn query_servers(
         &self,
     ) -> Option<&BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>;
@@ -80,15 +81,22 @@ impl ForeignLookupContext<'_> {
         &self,
         name: &str,
     ) -> Result<(uqa_fdw::ForeignTable, uqa_fdw::ForeignServer), String> {
-        if let (Some(tables), Some(servers)) =
-            (self.state.query_tables(), self.state.query_servers())
-        {
-            return self.table_source(name, tables, servers);
+        if let (Some(tables), Some(servers), Some(wrappers)) = (
+            self.state.query_tables(),
+            self.state.query_servers(),
+            self.state.query_wrappers(),
+        ) {
+            return self.table_source(name, tables, servers, wrappers);
         }
         self.state
             .synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        self.table_source(name, &self.registry.tables(), &self.registry.servers())
+        self.table_source(
+            name,
+            &self.registry.tables(),
+            &self.registry.servers(),
+            &self.registry.wrappers(),
+        )
     }
 
     fn table_source(
@@ -96,6 +104,7 @@ impl ForeignLookupContext<'_> {
         name: &str,
         tables: &BTreeMap<RelationIdentity, StoredForeignTable>,
         servers: &BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
+        wrappers: &uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
     ) -> Result<(uqa_fdw::ForeignTable, uqa_fdw::ForeignServer), String> {
         let table = self
             .state
@@ -107,10 +116,23 @@ impl ForeignLookupContext<'_> {
         let server = table
             .bound_server(servers)
             .map_err(|error| error.to_string())?;
-        Ok((
-            table.fdw_definition(),
-            super::servers::fdw_definition(server),
-        ))
+        let wrapper = server
+            .bound_wrapper(wrappers)
+            .map_err(|error| error.to_string())?;
+        let mut source = super::servers::fdw_definition(server);
+        wrapper
+            .require_handler()
+            .map_err(|error| error.to_string())?;
+        let uqa_sql::catalog::foreign_wrapper::ForeignWrapperHandler::Native(native) =
+            wrapper.handler
+        else {
+            return Err(format!(
+                "foreign-data wrapper `{}` has no registered source adapter",
+                wrapper.name
+            ));
+        };
+        source.fdw_type = native.name().into();
+        Ok((table.fdw_definition(), source))
     }
     pub fn list_foreign_servers(&self) -> Result<Vec<String>, String> {
         if let Some(snapshot) = self.state.query_servers() {

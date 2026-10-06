@@ -146,13 +146,7 @@ pub fn largest_catalog_oid(
         oids.push(uqa_sql::catalog::type_metadata::pg_type_oid(&ty));
         oids.push(uqa_sql::catalog::type_metadata::pg_type_array_oid(&ty));
     }
-    oids.extend(
-        snapshot
-            .definitions
-            .foreign_servers
-            .values()
-            .map(|server| i64::from(server.metadata.oid)),
-    );
+    oids.extend(foreign_object_oids(&snapshot.definitions));
     for function in snapshot.definitions.sql_user_functions.values().flatten() {
         oids.push(super::user_routine_catalog_oid(function)?);
     }
@@ -192,6 +186,21 @@ pub fn largest_catalog_oid(
         .filter_map(|oid| u32::try_from(oid).ok())
         .filter(|oid| *oid >= uqa_sql::catalog::oids::FIRST_NORMAL_OBJECT_ID)
         .max())
+}
+
+fn foreign_object_oids(
+    definitions: &crate::catalog::CatalogDefinitionSnapshot,
+) -> impl Iterator<Item = i64> + '_ {
+    definitions
+        .foreign_servers
+        .values()
+        .map(|server| i64::from(server.metadata.oid))
+        .chain(
+            definitions
+                .foreign_wrappers
+                .values()
+                .map(|wrapper| i64::from(wrapper.identity.oid)),
+        )
 }
 
 /// User rules and the `_RETURN` rules of views and materialized views occupy `pg_rewrite` OIDs.

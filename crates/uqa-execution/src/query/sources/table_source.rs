@@ -384,7 +384,11 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
             if let Some((foreign_name, foreign_table)) =
                 catalog.foreign_table_entry_resolved(&resolution, name)?
             {
-                foreign_table.bound_server(&catalog.snapshot().definitions.foreign_servers)?;
+                let definitions = &catalog.snapshot().definitions;
+                foreign_table
+                    .bound_server(&definitions.foreign_servers)?
+                    .bound_wrapper(&definitions.foreign_wrappers)?
+                    .require_handler()?;
                 let rows = context
                     .foreign_tables
                     .scan_foreign_source(&foreign_name, &[])

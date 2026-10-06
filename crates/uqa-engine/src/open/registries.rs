@@ -96,6 +96,7 @@ impl Engine {
             catalog,
             mode.allows_migration(),
         )?;
+        *self.durable.foreign_wrappers.write() = restored.wrappers;
         *self.durable.foreign_servers.write() = restored.servers;
         *self.durable.foreign_tables.write() = restored.tables;
         *self.durable.foreign_table_security.write() = restored.security;

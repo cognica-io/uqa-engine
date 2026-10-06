@@ -23,6 +23,7 @@ pub struct ForeignRestoreContext<'a> {
 }
 
 pub struct RestoredForeignCatalog {
+    pub wrappers: uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
     pub servers: BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
     pub tables: BTreeMap<RelationIdentity, super::StoredForeignTable>,
     pub security: BTreeMap<RelationIdentity, BoundTableSecurity>,
@@ -62,8 +63,14 @@ pub fn restore(
     catalog: &dyn CatalogFacade,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredForeignCatalog> {
-    let restored_servers =
+    let mut restored_servers =
         super::servers::restore(catalog, &context.roles.role_definitions(), allow_migration)?;
+    let restored_wrappers = restore_wrappers(
+        context,
+        catalog,
+        &mut restored_servers.definitions,
+        allow_migration,
+    )?;
     let servers = &restored_servers.definitions;
     let current_references = super::reference::check_format(catalog)?;
     let mut migrations = Vec::new();
@@ -139,6 +146,7 @@ pub fn restore(
         securities.insert(row.relation, security);
     }
     restored_servers.persist_migrations(catalog)?;
+    restored_wrappers.persist_migrations(catalog)?;
     for row in migrations {
         catalog.save_foreign_table(&row)?;
     }
@@ -146,11 +154,32 @@ pub fn restore(
         super::reference::initialize_format(catalog)?;
     }
     let mut restored = RestoredForeignCatalog {
+        wrappers: restored_wrappers.definitions,
         servers: restored_servers.definitions,
         tables,
         security: securities,
     };
     restored.retain_temporary(context.registry)?;
+    Ok(restored)
+}
+
+fn restore_wrappers(
+    context: &ForeignRestoreContext<'_>,
+    catalog: &dyn CatalogFacade,
+    servers: &mut BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
+    allow_migration: bool,
+) -> StorageBackendResult<super::wrappers::RestoredWrappers> {
+    let restored = super::wrappers::restore(
+        catalog,
+        &context.roles.role_definitions(),
+        servers,
+        allow_migration,
+    )?;
+    uqa_sql::catalog::foreign_wrapper::validate_functions(
+        &restored.definitions,
+        context.schema.types,
+    )
+    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
     Ok(restored)
 }
 

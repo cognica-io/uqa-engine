@@ -101,6 +101,7 @@ pub struct CatalogDefinitionSnapshot {
         Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub sequence_persistence: Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub foreign_tables: Arc<BTreeMap<RelationIdentity, foreign::StoredForeignTable>>,
+    pub foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub foreign_servers:
         Arc<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
     pub sql_user_functions: Arc<BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>>>,

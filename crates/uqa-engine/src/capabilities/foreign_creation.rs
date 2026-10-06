@@ -41,6 +41,9 @@ impl Engine {
     }
 }
 impl ForeignRegistryReads for Engine {
+    fn wrappers(&self) -> uqa_execution::catalog::foreign::reads::ForeignWrappersRead<'_> {
+        Box::new(self.durable.foreign_wrappers.read())
+    }
     fn servers(&self) -> ForeignServersRead<'_> {
         Box::new(self.durable.foreign_servers.read())
     }

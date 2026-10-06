@@ -30,6 +30,9 @@ pub const LANGUAGE_CLASS: u32 = 2612;
 pub const ROLE_CLASS: u32 = 1260;
 /// `pg_auth_members`: role memberships, which every database shares.
 pub const ROLE_MEMBERSHIP_CLASS: u32 = 1261;
+/// `pg_foreign_data_wrapper`.
+pub const FOREIGN_WRAPPER_CLASS: u32 = 2328;
+
 /// `pg_foreign_server`.
 pub const FOREIGN_SERVER_CLASS: u32 = 1417;
 /// `pg_database`, which every database shares.
