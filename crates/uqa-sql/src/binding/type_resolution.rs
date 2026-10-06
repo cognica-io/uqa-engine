@@ -142,6 +142,10 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         self.routines.enum_labels()
     }
 
+    fn catalog_input_functions(&self) -> Option<&dyn crate::expr::CatalogInputFunctions> {
+        self.routines.catalog_input_functions()
+    }
+
     fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
         self.routines.composite_types()
     }

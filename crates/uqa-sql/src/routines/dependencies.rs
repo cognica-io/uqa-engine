@@ -119,6 +119,8 @@ pub fn bind_sql_standard_body_routines(
     if !matches!(def.body, FunctionBody::Statements(_)) {
         return Ok(false);
     }
+    // Declaration errors precede body input functions, which can execute domain checks.
+    super::compilation::validate_routine_signature(context, def)?;
     let positional = super::body_validation::routine_parameter_values(context.types, def);
     let parameters = super::body_parameters::sql_body_parameter_scope(def, &positional)?;
     let result_types = def_result_types(context, &def.params, &def.returns)?;

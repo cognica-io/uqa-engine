@@ -47,7 +47,14 @@ pub fn bind_type_introspection_with_control(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<ScalarExpr>, SQLError> {
-    bind_owned(expression, schema, params, None, control, false)
+    bind_owned(
+        expression,
+        schema,
+        params,
+        None,
+        control,
+        LiteralBinding::Ordinary,
+    )
 }
 
 /// Convert the `unknown` literals that binding coerces to catalog enum types, reporting the first invalid input as `PostgreSQL` parse analysis does. Binding at execution then folds the same literals without failing.
@@ -65,7 +72,15 @@ pub fn validate_catalog_literals(
     }
     let control = ProductionControl::uncontrolled();
     let expression = control.finish(expression.clone(), None)?;
-    bind_owned(expression, schema, params, Some(resolver), &control, true).map(drop)
+    bind_owned(
+        expression,
+        schema,
+        params,
+        Some(resolver),
+        &control,
+        LiteralBinding::Validate,
+    )
+    .map(drop)
 }
 
 /// Bind a copy of a stored expression as parse analysis does, so the caller can keep the enum constants that binding coerces from `unknown` literals. Returns `None` when the statement catalog defines no enum type. Input that no label matches stays unconverted for the literal's own validation to report.
@@ -83,10 +98,45 @@ pub fn bind_catalog_constants(
     }
     let control = ProductionControl::uncontrolled();
     let expression = control.finish(expression.clone(), None)?;
-    bind_owned(expression, schema, params, Some(resolver), &control, false)?
-        .into_uncontrolled()
-        .map(Some)
-        .map_err(|_| SQLError::Internal("uncontrolled binding retained a reservation".into()))
+    bind_owned(
+        expression,
+        schema,
+        params,
+        Some(resolver),
+        &control,
+        LiteralBinding::Ordinary,
+    )?
+    .into_uncontrolled()
+    .map(Some)
+    .map_err(|_| SQLError::Internal("uncontrolled binding retained a reservation".into()))
+}
+
+/// Preserve input constants only at the stored-expression binding boundary, where catalog input functions may run once and their result survives reopening.
+pub(super) fn bind_stored_inputs(
+    expression: ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<ScalarExpr, SQLError> {
+    let control = ProductionControl::uncontrolled();
+    let expression = control.finish(expression, None)?;
+    bind_owned(
+        expression,
+        schema,
+        params,
+        Some(resolver),
+        &control,
+        LiteralBinding::Stored,
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("stored binding retained a reservation".into()))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LiteralBinding {
+    Ordinary,
+    Validate,
+    Stored,
 }
 
 fn bind_ordinary(
@@ -99,10 +149,17 @@ fn bind_ordinary(
     let expression = control
         .finish(expression, None)
         .expect("ordinary scalar owner");
-    bind_owned(expression, schema, params, resolver, &control, false)
-        .expect("ordinary binding cannot be cancelled or limited")
-        .into_uncontrolled()
-        .expect("ordinary binding has no reservation")
+    bind_owned(
+        expression,
+        schema,
+        params,
+        resolver,
+        &control,
+        LiteralBinding::Ordinary,
+    )
+    .expect("ordinary binding cannot be cancelled or limited")
+    .into_uncontrolled()
+    .expect("ordinary binding has no reservation")
 }
 
 struct RootOwner {
@@ -116,7 +173,7 @@ fn bind_owned(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
     control: &ProductionControl<'_>,
-    strict_literals: bool,
+    literal_binding: LiteralBinding,
 ) -> Result<Produced<ScalarExpr>, SQLError> {
     assert!(
         control.budget().is_none() || resolver.is_none(),
@@ -132,7 +189,7 @@ fn bind_owned(
         resolver,
         control: *control,
         memory: &mut root.memory,
-        strict_literals,
+        literal_binding,
     }
     .bind(expression)?;
     Ok(control.finish(root.expression, root.memory)?)
@@ -145,7 +202,7 @@ struct Binder<'a, 'b> {
     control: ProductionControl<'a>,
     memory: &'b mut Option<MemoryReservation>,
     /// Report an `unknown` literal that its coerced type rejects instead of leaving the conversion to evaluation.
-    strict_literals: bool,
+    literal_binding: LiteralBinding,
 }
 
 impl Binder<'_, '_> {
@@ -383,7 +440,9 @@ impl Binder<'_, '_> {
                 if let Some(source) = source {
                     self.wrap_declared(&mut expr, &source)?;
                 }
-                self.read_explicit_literal_input(&mut expr, &ty)?;
+                if self.literal_binding == LiteralBinding::Stored {
+                    self.read_explicit_literal_input(&mut expr, &ty)?;
+                }
                 ScalarExpr::Cast { implicit, expr, ty }
             }
             ScalarExpr::InSubquery {

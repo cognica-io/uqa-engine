@@ -5,8 +5,8 @@
 //
 
 use super::{
-    Binder, BindingCall, ColumnType, FunctionBinding, FunctionTypeResolver, Produced, SQLError,
-    SQLParam, ScalarExpr, ScalarTypeSchema, Value,
+    Binder, BindingCall, ColumnType, FunctionBinding, FunctionTypeResolver, LiteralBinding,
+    Produced, SQLError, SQLParam, ScalarExpr, ScalarTypeSchema, Value,
 };
 use crate::type_resolution::{
     common::{base_type, local_routine_name},
@@ -227,9 +227,15 @@ impl Binder<'_, '_> {
         let target = match ColumnType::from_sql_name_with_control(ty, &self.control) {
             Ok(target) => target,
             Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
-            Err(_) => return Ok(()),
+            Err(_) => {
+                let Some(target) = self.user_cast_target(ty)? else {
+                    return Ok(());
+                };
+                target.clone_with_control(&self.control)?
+            }
         };
-        let input = target.without_type_modifiers_with_control(&self.control)?;
+        let input =
+            crate::type_resolution::literal_input_type_with_control(&target, &self.control)?;
         if let Some(constant) = self.read_unknown_literal(expression, &input)? {
             *expression = constant;
         }
@@ -242,21 +248,37 @@ impl Binder<'_, '_> {
         expression: &ScalarExpr,
         target: &ColumnType,
     ) -> Result<Option<ScalarExpr>, SQLError> {
-        let ScalarExpr::Literal(value @ Value::Str(_)) = expression else {
+        let ScalarExpr::Literal(value @ Value::Str(text)) = expression else {
             return Ok(None);
         };
         if crate::type_resolution::catalog_input_type(target) {
             return Ok(None);
         }
         // Binding reports no semantic errors: a literal the type rejects keeps its cast, which analysis and evaluation report.
-        let value = match crate::assignment::conversion::convert_value_to_column_type_with_control(
-            self.control.copy_value(value)?,
-            target,
-            &self.control,
-        ) {
+        let converted = if self.literal_binding == LiteralBinding::Stored
+            && crate::expr::requires_domain_array_input(target)
+        {
+            let Some(catalog) = self
+                .resolver
+                .and_then(FunctionTypeResolver::catalog_input_functions)
+            else {
+                return Ok(None);
+            };
+            Ok(self
+                .control
+                .retain_external_value(catalog.read_unknown_input(text, target)?)?)
+        } else {
+            crate::assignment::conversion::convert_value_to_column_type_with_control(
+                self.control.copy_value(value)?,
+                target,
+                &self.control,
+            )
+        };
+        let value = match converted {
             Ok(value) => value,
             Err(error)
-                if self.strict_literals || matches!(error.sqlstate(), Some("53200" | "57014")) =>
+                if self.literal_binding == LiteralBinding::Validate
+                    || matches!(error.sqlstate(), Some("53200" | "57014")) =>
             {
                 return Err(error);
             }

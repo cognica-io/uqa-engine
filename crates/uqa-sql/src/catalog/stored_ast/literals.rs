@@ -12,7 +12,7 @@ use crate::{
 };
 use uqa_core::Value;
 
-/// Read an `unknown` literal with the input function of `target`, which reports what the type's input rejects, and store the typed constant. `coerce_type` passes the input function no type modifier, so a length or precision the column declares applies when a row is assigned, not here; the constant keeps the modifier only when `keep_modifier` says a cast wrote it.
+/// Read an `unknown` literal with the input function of `target`, which reports what the type's input rejects, and store the typed constant. `coerce_type` passes interval modifiers to input; other length and precision modifiers apply when a row is assigned. The constant keeps a written cast's modifier when `keep_modifier` says so.
 pub fn read_unknown_stored_literal(
     catalog: Option<&dyn crate::expr::enums::EnumLabelCatalog>,
     inputs: Option<&dyn crate::expr::CatalogInputFunctions>,
@@ -42,7 +42,12 @@ pub fn read_unknown_stored_literal(
         };
         return Ok(());
     }
-    let input_type = base.without_type_modifiers();
+    let input_type = crate::type_resolution::literal_input_type_with_control(
+        base,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary stored input has no reservation");
     let value = match value {
         Value::Str(text) if crate::expr::requires_domain_array_input(&input_type) => inputs
             .ok_or_else(|| {
@@ -64,6 +69,24 @@ pub fn read_unknown_stored_literal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interval_input_applies_the_declared_fields_before_storage() {
+        let target = ColumnType::from_sql_name("interval year").unwrap();
+        let mut expression = Expr::Literal(Value::Str("1-2".into()));
+        read_unknown_stored_literal(None, None, &mut expression, &target, false).unwrap();
+        assert!(matches!(
+            expression,
+            Expr::TypedLiteral {
+                value: Value::Temporal(uqa_core::TemporalValue::Interval {
+                    months: 12,
+                    days: 0,
+                    micros: 0
+                }),
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn unknown_assignment_reads_base_input_and_keeps_null_default() {

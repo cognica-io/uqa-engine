@@ -48,12 +48,8 @@ pub fn store_operand_coercions(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<bool, SQLError> {
-    let bound = super::introspection::bind_type_introspection_with_resolver(
-        expression.clone(),
-        schema,
-        params,
-        resolver,
-    );
+    let bound =
+        super::introspection::bind_stored_inputs(expression.clone(), schema, params, resolver)?;
     transfer(
         expression,
         &bound,

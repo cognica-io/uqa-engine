@@ -79,12 +79,15 @@ pub fn compile_catalog_bound_routine(
     if matches!(mode, RoutineCompilationMode::Definition) {
         changed |= record_sql_standard_body_parameters(&context.compilation.analysis, def)?;
     }
-    let mut compiled = compile_routine_body(&context.compilation, def, bodies)?;
+    // Keep definition-time input values in syntax before compiling the executable body, so domain-array input checks run once rather than in two discarded copies.
     let body_changed = with_creation_search_path(context, def, |def| {
         dependencies::bind_sql_standard_body_routines(&context.compilation.analysis, def, mode)
-    })? | bind_routine_regclass_constants(context, def)?;
+    })?;
     changed |= body_changed;
-    if body_changed {
+    let mut compiled = compile_routine_body(&context.compilation, def, bodies)?;
+    let regclass_changed = bind_routine_regclass_constants(context, def)?;
+    changed |= regclass_changed;
+    if regclass_changed {
         compiled = compile_routine_body(&context.compilation, def, bodies)?;
     }
     if !matches!(def.body, FunctionBody::Statements(_)) {

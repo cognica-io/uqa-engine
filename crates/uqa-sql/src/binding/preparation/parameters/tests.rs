@@ -10,6 +10,27 @@ use std::sync::Arc;
 use uqa_core::EnumLabelKey;
 
 #[test]
+fn interval_input_applies_fields_before_parameter_type_modifiers_are_removed() {
+    let expression = ScalarExpr::Literal(Value::Str("1-2".into()));
+    let target = ColumnType::from_sql_name("interval year").unwrap();
+    let mut parameters = ParameterTypes::with_input_constants(&[], None, None, None);
+    let mut inferred = ExpressionType::unknown_literal(&expression, "1-2".into());
+    parameters.coerce_unknown(&mut inferred, &target).unwrap();
+    assert_eq!(inferred.ty, Some(ColumnType::Interval));
+    assert!(matches!(
+        parameters.take_literal(&expression).unwrap(),
+        ScalarExpr::TypedLiteral {
+            value: Value::Temporal(uqa_core::TemporalValue::Interval {
+                months: 12,
+                days: 0,
+                micros: 0
+            }),
+            ..
+        }
+    ));
+}
+
+#[test]
 fn copied_membership_constants_keep_input_cache_volatility() {
     for (text, target, reusable) in [
         ("1", ColumnType::Integer, true),

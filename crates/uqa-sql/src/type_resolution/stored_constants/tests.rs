@@ -135,6 +135,7 @@ fn stored_explicit_temporal_inputs_keep_creation_values_and_written_modifiers() 
 
     for (sql, expected) in [
         ("DATE '02/03/2020'", "2020-03-02"),
+        ("'1-2'::interval year", "1 year"),
         (
             "'02/03/2020 10:20:30.123456'::timestamp(3)",
             "2020-03-02 10:20:30.123456",
@@ -167,4 +168,66 @@ fn stored_explicit_temporal_inputs_keep_creation_values_and_written_modifiers() 
         assert!(!store_operand_coercions(&mut stored, &schema(), &[], &Catalog).unwrap());
         assert_eq!(stored, once);
     }
+}
+
+#[test]
+fn stored_domain_inputs_are_read_once_without_invoking_checks_during_introspection() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Inputs(AtomicUsize);
+    impl FunctionTypeResolver for Inputs {
+        fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+            let day = ColumnType::Domain {
+                schema: "public".into(),
+                name: "day".into(),
+                oid: 50_020,
+                array_oid: Some(50_021),
+                base: Box::new(ColumnType::Date),
+            };
+            Ok(match name.replace('"', "").as_str() {
+                "day" => Some(day),
+                "day[]" => Some(ColumnType::Array(Box::new(day))),
+                _ => None,
+            })
+        }
+        fn resolve_function_type(
+            &self,
+            _: &str,
+            _: Option<&crate::ast::FunctionBinding>,
+            _: &[Option<String>],
+            _: &[Option<ColumnType>],
+            _: bool,
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+        fn catalog_input_functions(&self) -> Option<&dyn crate::expr::CatalogInputFunctions> {
+            Some(self)
+        }
+    }
+    impl crate::expr::CatalogInputFunctions for Inputs {
+        fn read_unknown_input(&self, text: &str, target: &ColumnType) -> Result<Value, SQLError> {
+            assert!(crate::expr::requires_domain_array_input(target));
+            self.0.fetch_add(1, Ordering::SeqCst);
+            crate::expr::cast_value(&Value::Str(text.into()), "date[]")
+        }
+    }
+    let catalog = Inputs(AtomicUsize::new(0));
+    let _order = crate::expr::DateOrderScope::enter(uqa_core::TemporalDateOrder::DayMonthYear);
+    for sql in ["'02/03/2020'::day", "'{02/03/2020}'::day[]"] {
+        let mut stored = expression(sql);
+        super::super::introspection::bind_type_introspection_with_resolver(
+            stored.clone(),
+            &schema(),
+            &[],
+            &catalog,
+        );
+        assert_eq!(catalog.0.load(Ordering::SeqCst), 0);
+        assert!(
+            store_operand_coercions(&mut stored, &schema(), &[], &catalog).unwrap(),
+            "{sql}"
+        );
+        let once = stored.clone();
+        assert!(!store_operand_coercions(&mut stored, &schema(), &[], &catalog).unwrap());
+        assert_eq!(stored, once);
+    }
+    assert_eq!(catalog.0.load(Ordering::SeqCst), 1);
 }
