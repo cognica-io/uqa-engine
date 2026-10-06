@@ -117,7 +117,7 @@ pub(crate) unsafe fn parse_error(error: *const PgQueryError, diagnostics: &[Diag
         .rev()
         .find(|diagnostic| diagnostic.severity >= 21)
     {
-        Error::ParseDiagnostic(diagnostic.clone())
+        Error::ParseDiagnostic(Box::new(diagnostic.clone()))
     } else {
         Error::Parse(
             CStr::from_ptr((*error).message)

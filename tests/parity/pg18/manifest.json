@@ -61,7 +61,7 @@
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
     "wrapper_repository": "https://github.com/jaepil/pg_query.rs",
-    "wrapper_revision": "94c2dbedfaa653ebb626e971dcbbeeb9f4d731b9",
+    "wrapper_revision": "521df17ffb14b831145a148cb3f4b432a746b544",
     "library_repository": "https://github.com/jaepil/libpg_query",
     "library_revision": "942f2a62b2c5747587fba9bfbb42dd958f9a0ca2"
   },

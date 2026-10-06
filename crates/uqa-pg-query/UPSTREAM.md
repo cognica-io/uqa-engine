@@ -2,7 +2,7 @@
 
 This crate is an imported snapshot of the UQA Engine PostgreSQL 18 parser chain.
 
-- Wrapper: `https://github.com/jaepil/pg_query.rs` at `94c2dbedfaa653ebb626e971dcbbeeb9f4d731b9`
+- Wrapper: `https://github.com/jaepil/pg_query.rs` at `521df17ffb14b831145a148cb3f4b432a746b544`
 - C library: `https://github.com/jaepil/libpg_query` at `942f2a62b2c5747587fba9bfbb42dd958f9a0ca2`
 
 The wrapper is MIT. `libpg_query` is BSD-3-Clause and includes PostgreSQL server source under the PostgreSQL license. See `LICENSE` and `LIBPG_QUERY-LICENSE`.

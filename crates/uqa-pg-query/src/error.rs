@@ -10,7 +10,7 @@ pub enum Error {
     #[error("Invalid statement: {0}")]
     Parse(String),
     #[error("Invalid statement: {0}")]
-    ParseDiagnostic(crate::Diagnostic),
+    ParseDiagnostic(Box<crate::Diagnostic>),
     #[error("Error parsing JSON: {0}")]
     InvalidJson(String),
     #[error("Invalid pointer")]
