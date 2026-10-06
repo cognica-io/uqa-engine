@@ -397,3 +397,36 @@ fn eras_count_years_before_the_common_era() {
         );
     }
 }
+
+#[test]
+fn timestamp_input_checks_the_julian_boundary_after_the_zone_offset() {
+    const MINIMUM: i64 = -210_866_803_200_000_000;
+    assert_eq!(
+        TemporalValue::timestamp_input("4714-11-24 BC", NOW),
+        Ok(TemporalValue::Timestamp { micros: MINIMUM })
+    );
+    assert_eq!(
+        TemporalValue::timestamp_input("4714-11-23 23:59:59.999999 BC", NOW),
+        Err(TemporalInputError::OutOfRange)
+    );
+    for text in ["4714-11-24 00:00:00+00 BC", "4714-11-23 12:00:00-12 BC"] {
+        assert_eq!(
+            TemporalValue::timestamp_tz_input(text, NOW),
+            Ok(TemporalValue::TimestampTz { micros: MINIMUM }),
+            "{text}"
+        );
+    }
+    for text in [
+        "4714-11-24 00:00:00+00:00:01 BC",
+        "4714-11-23 23:59:59.999999+00 BC",
+    ] {
+        assert_eq!(
+            TemporalValue::timestamp_tz_input(text, NOW),
+            Err(TemporalInputError::OutOfRange),
+            "{text}"
+        );
+    }
+    assert!(!TemporalValue::timestamp_micros_in_range(MINIMUM - 1));
+    assert!(TemporalValue::timestamp_micros_in_range(MINIMUM));
+    assert!(TemporalValue::timestamp_micros_in_range(i64::MAX));
+}
