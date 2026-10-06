@@ -163,6 +163,7 @@ fn hash_join_prepares_constant_like_residual_once() {
         ],
     );
     let predicate = ScalarExpr::Not(Box::new(ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: "like".into(),
         binding: None,
         args: vec![

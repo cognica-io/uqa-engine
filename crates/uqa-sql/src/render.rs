@@ -377,6 +377,7 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
             args,
             distinct,
             order_by,
+            order_syntax,
             filter,
             ..
         } => {
@@ -404,7 +405,8 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
             if *distinct {
                 arguments = format!("DISTINCT {arguments}");
             }
-            if !order_by.is_empty() {
+            if !order_by.is_empty() && *order_syntax != crate::ast::FunctionOrderSyntax::WithinGroup
+            {
                 if !arguments.is_empty() {
                     arguments.push(' ');
                 }
@@ -412,6 +414,14 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
                 arguments.push_str(&order_by_sql(order_by)?);
             }
             let mut rendered = format!("{name}({arguments})");
+            if *order_syntax == crate::ast::FunctionOrderSyntax::WithinGroup {
+                write!(
+                    &mut rendered,
+                    " WITHIN GROUP (ORDER BY {})",
+                    order_by_sql(order_by)?
+                )
+                .expect("writing to a String cannot fail");
+            }
             if let Some(filter) = filter {
                 write!(&mut rendered, " FILTER (WHERE {})", render_expr(filter)?)
                     .expect("writing to a String cannot fail");

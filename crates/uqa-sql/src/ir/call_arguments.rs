@@ -82,6 +82,7 @@ pub fn validate_scalar_call_arguments(
 #[doc(hidden)]
 pub fn scalar_call_argument(expression: &ScalarExpr) -> Result<ScalarCallArgument<'_>, SQLError> {
     let ScalarExpr::Func {
+        order_syntax,
         name,
         args,
         binding,
@@ -104,6 +105,7 @@ pub fn scalar_call_argument(expression: &ScalarExpr) -> Result<ScalarCallArgumen
             FunctionDispatch::NamedArgument,
             *distinct,
             order_by,
+            *order_syntax,
             filter.as_deref(),
             name,
         )?;
@@ -141,6 +143,7 @@ pub fn scalar_call_argument(expression: &ScalarExpr) -> Result<ScalarCallArgumen
 
 fn direct_variadic_argument(expression: &ScalarExpr) -> Result<(&ScalarExpr, bool), SQLError> {
     let ScalarExpr::Func {
+        order_syntax,
         name,
         args,
         binding,
@@ -161,6 +164,7 @@ fn direct_variadic_argument(expression: &ScalarExpr) -> Result<(&ScalarExpr, boo
         FunctionDispatch::VariadicArgument,
         *distinct,
         order_by,
+        *order_syntax,
         filter.as_deref(),
         name,
     )?;
@@ -189,6 +193,7 @@ fn validate_marker_shape(
     expected_dispatch: FunctionDispatch,
     distinct: bool,
     order_by: &[ScalarOrder],
+    order_syntax: crate::ast::FunctionOrderSyntax,
     filter: Option<&ScalarExpr>,
     name: &str,
 ) -> Result<(), SQLError> {
@@ -200,6 +205,7 @@ fn validate_marker_shape(
             || binding.resolution_error.is_some()
     }) || distinct
         || !order_by.is_empty()
+        || order_syntax == crate::ast::FunctionOrderSyntax::WithinGroup
         || filter.is_some()
     {
         return Err(malformed_call_argument(&format!(

@@ -119,6 +119,7 @@ where
             Expr::Literal(result)
         }
         Expr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -126,6 +127,7 @@ where
             order_by,
             filter,
         } => Expr::Func {
+            order_syntax: *order_syntax,
             name: name.clone(),
             binding: binding.clone(),
             args: bind_rule_condition_expressions(context, args, resolver)?,

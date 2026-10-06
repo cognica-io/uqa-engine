@@ -328,6 +328,7 @@ fn deferred_defaults_retain_types_for_constant_and_volatile_results() {
         ty: fixture.target().catalog_name(),
     };
     let volatile = Expr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: "volatile_input".into(),
         binding: None,
         args: Vec::new(),

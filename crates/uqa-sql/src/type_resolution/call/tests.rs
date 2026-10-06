@@ -30,6 +30,7 @@ fn call(name: &str, values: &[Value], control: &ProductionControl<'_>) -> Produc
                 binding: None,
                 arguments,
                 distinct: false,
+                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                 order_by: Vec::new(),
                 filter: None,
             },
@@ -226,6 +227,7 @@ fn named(name: &str, value: &Value, control: &ProductionControl<'_>) -> Produced
     control
         .finish(
             ScalarExpr::Func {
+                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                 name: String::new(),
                 binding: Some(binding),
                 args,
@@ -301,6 +303,7 @@ fn ordinary_optional_array_binding_does_not_panic_on_resolver_resource_errors() 
     for sqlstate in ["53200", "57014"] {
         let resolver = FailingResolver(sqlstate);
         let mut args = vec![ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: "fixture_function".into(),
             binding: None,
             args: Vec::new(),

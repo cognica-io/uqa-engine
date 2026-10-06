@@ -51,6 +51,7 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         (ScalarExpr::InternalColumn(a), ScalarExpr::InternalColumn(b)) => a == b,
         (
             ScalarExpr::Func {
+                order_syntax: aos,
                 name: an,
                 binding: ab,
                 args: aa,
@@ -59,6 +60,7 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
                 filter: af,
             },
             ScalarExpr::Func {
+                order_syntax: bos,
                 name: bn,
                 binding: bb,
                 args: ba,
@@ -70,6 +72,7 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
             an.eq_ignore_ascii_case(bn)
                 && ab == bb
                 && ad == bd
+                && aos == bos
                 && aa.len() == ba.len()
                 && aa.iter().zip(ba.iter()).all(|(x, y)| exprs_match(x, y))
                 && ao.len() == bo.len()

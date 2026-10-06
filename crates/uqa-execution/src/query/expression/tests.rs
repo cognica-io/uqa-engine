@@ -147,6 +147,7 @@ fn binding(builtin: bool) -> FunctionBinding {
 
 fn call(name: &str, binding: Option<FunctionBinding>) -> ScalarExpr {
     ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: name.into(),
         binding,
         args: vec![ScalarExpr::Literal(Value::Int(0))],

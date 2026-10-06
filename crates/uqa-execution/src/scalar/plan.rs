@@ -397,6 +397,7 @@ mod tests {
     fn physical_call_arguments_preserve_and_unwrap_explicit_variadic_syntax() {
         let variadic_binding = FunctionBinding::dispatched(FunctionDispatch::VariadicArgument);
         let variadic = Expr::Func {
+            order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
             name: variadic_binding.name.clone(),
             binding: Some(variadic_binding),
             args: vec![Expr::Literal(Value::Int(42))],
@@ -406,6 +407,7 @@ mod tests {
         };
         let named_binding = FunctionBinding::dispatched(FunctionDispatch::NamedArgument);
         let named = Expr::Func {
+            order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
             name: named_binding.name.clone(),
             binding: Some(named_binding),
             args: vec![Expr::Literal(Value::Str("items".into())), variadic],

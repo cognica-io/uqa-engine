@@ -628,6 +628,17 @@ impl SchemaScope {
             if failure.is_some() {
                 return;
             }
+            if matches!(expression, ScalarExpr::Func { order_syntax, name, binding, order_by, .. }
+                if super::ordered_calls::uses_ordered_arguments(*order_syntax, name, binding.as_ref(), order_by.len())
+                    || super::ordered_calls::is_ordered_set(name))
+            {
+                if let Err(error) = self.bind_ordered_function_for_storage(
+                    engine, expression, schema, subqueries, params, outer,
+                ) {
+                    failure = Some(error);
+                }
+                return;
+            }
             let ScalarExpr::Func {
                 name,
                 binding,

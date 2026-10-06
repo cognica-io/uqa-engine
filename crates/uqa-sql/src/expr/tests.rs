@@ -51,6 +51,7 @@ fn literal_passthrough() {
 fn variadic_argument_helpers_preserve_names_and_evaluate_marker_values() {
     let binding = FunctionBinding::dispatched(FunctionDispatch::NamedArgument);
     let named = Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: binding.name.clone(),
         binding: Some(binding),
         args: vec![

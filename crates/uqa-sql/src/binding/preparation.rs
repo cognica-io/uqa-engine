@@ -10,6 +10,7 @@ mod commands;
 mod ctes;
 mod expression_contexts;
 mod expressions;
+mod function_calls;
 mod parameters;
 mod queries;
 mod routines;

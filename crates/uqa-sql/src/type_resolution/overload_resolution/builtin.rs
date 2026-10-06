@@ -23,6 +23,9 @@ use uqa_core::{
 };
 
 impl SignatureParameters for BuiltinFunctionOverload {
+    fn accepts_polymorphic_types(&self) -> bool {
+        true
+    }
     fn parameter_count(&self) -> usize {
         self.argument_types.len()
     }

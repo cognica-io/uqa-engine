@@ -160,6 +160,7 @@ impl Binder<'_, '_> {
                 binding,
                 args,
                 distinct,
+                order_syntax,
                 order_by,
                 filter,
             } => self.bind_call(BindingCall {
@@ -167,6 +168,7 @@ impl Binder<'_, '_> {
                 binding,
                 arguments: args,
                 distinct,
+                order_syntax,
                 order_by,
                 filter,
             })?,
@@ -494,6 +496,7 @@ impl BindingCall {
             binding: self.binding,
             args: self.arguments,
             distinct: self.distinct,
+            order_syntax: self.order_syntax,
             order_by: self.order_by,
             filter: self.filter,
         }

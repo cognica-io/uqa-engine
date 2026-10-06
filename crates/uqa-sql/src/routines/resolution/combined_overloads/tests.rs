@@ -281,3 +281,44 @@ fn overload_ranking_and_ambiguity_include_procedures_before_rejecting_the_winner
         assert_eq!(hint.as_deref(), Some("To call a function, use SELECT."));
     }
 }
+
+#[test]
+fn concrete_sql_overload_wins_over_polymorphic_builtin_without_false_exact_matches() {
+    let catalog = Catalog::new(
+        &["CREATE FUNCTION app.mode(value integer) RETURNS integer LANGUAGE SQL AS $$SELECT value$$"],
+        &["pg_catalog", "app"],
+    );
+    let builtins = [BuiltinFunctionOverload {
+        name: "pg_catalog.mode".into(),
+        argument_names: vec![None],
+        argument_types: vec![ColumnType::Named("anyelement".into())],
+        default_arguments: 0,
+        return_type: ColumnType::Named("anyelement".into()),
+    }];
+    let resolver = RoutineOverloadContext { catalog: &catalog };
+    let selected = resolve(
+        &resolver,
+        "mode",
+        None,
+        &[None],
+        &[Some(ColumnType::Integer)],
+        false,
+        &builtins,
+    )
+    .unwrap();
+    assert!(!selected.binding.builtin);
+    assert_eq!(selected.binding.name, "app.mode");
+    let selected = resolve(
+        &resolver,
+        "mode",
+        None,
+        &[None],
+        &[Some(ColumnType::Text)],
+        false,
+        &builtins,
+    )
+    .unwrap();
+    assert!(selected.binding.builtin);
+    assert_eq!(selected.exact_matches, 0);
+    assert_eq!(selected.binding.argument_types, vec!["anyelement"]);
+}

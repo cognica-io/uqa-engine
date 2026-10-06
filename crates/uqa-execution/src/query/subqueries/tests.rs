@@ -263,6 +263,7 @@ fn evaluated_exists_keys_use_scoped_function_and_subquery_callbacks() {
     for (expression, expected_event) in [
         (
             ScalarExpr::Func {
+                order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
                 name: "key_value".into(),
                 args: vec![],
                 distinct: false,

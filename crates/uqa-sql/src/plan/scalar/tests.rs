@@ -6,8 +6,8 @@
 
 use super::*;
 use crate::ast::{
-    FunctionBinding, FunctionResolutionError, OperatorResolutionError, RoutineInvocationBinding,
-    RoutineVariadicMode, Statement,
+    FunctionBinding, FunctionOrderSyntax, FunctionResolutionError, OperatorResolutionError,
+    RoutineInvocationBinding, RoutineVariadicMode, Statement,
 };
 use crate::plan::ExpressionPlan;
 use uqa_core::{memory::MemoryError, Value};
@@ -44,6 +44,7 @@ fn controlled_column_lowering_preserves_existing_scalar_shapes_and_input() {
         "SELECT CASE WHEN a THEN 'yes' END",
         "SELECT CAST(a AS text)",
         "SELECT sum(a ORDER BY b DESC NULLS FIRST) FILTER (WHERE c)",
+        "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY a DESC NULLS LAST) FILTER (WHERE b)",
         "SELECT sum(a) OVER (PARTITION BY b ORDER BY c ROWS BETWEEN 2 PRECEDING AND 1 FOLLOWING)",
         "SELECT sum(a) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)",
         "SELECT sum(a) OVER (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)",
@@ -62,6 +63,88 @@ fn controlled_column_lowering_preserves_existing_scalar_shapes_and_input() {
 }
 
 #[test]
+fn function_order_syntax_preserves_direct_arguments_through_lowering() {
+    for (sql, expected, direct_count, order_count) in [
+        ("SELECT f(a)", FunctionOrderSyntax::Ordinary, 1, 0),
+        (
+            "SELECT f(a ORDER BY b DESC NULLS FIRST)",
+            FunctionOrderSyntax::Ordinary,
+            1,
+            1,
+        ),
+        (
+            "SELECT f(a) WITHIN GROUP (ORDER BY b DESC NULLS FIRST)",
+            FunctionOrderSyntax::WithinGroup,
+            1,
+            1,
+        ),
+        (
+            "SELECT mode() WITHIN GROUP (ORDER BY b)",
+            FunctionOrderSyntax::WithinGroup,
+            0,
+            1,
+        ),
+    ] {
+        let source = expression(sql);
+        let Expr::Func {
+            args,
+            order_by,
+            order_syntax,
+            ..
+        } = &source
+        else {
+            panic!("function expression expected");
+        };
+        assert_eq!(*order_syntax, expected, "{sql}");
+        assert_eq!(args.len(), direct_count, "{sql}");
+        assert_eq!(order_by.len(), order_count, "{sql}");
+        let ScalarExpr::Func {
+            args,
+            order_by,
+            order_syntax,
+            ..
+        } = ExpressionPlan::lower(source).scalar
+        else {
+            panic!("function scalar expected");
+        };
+        assert_eq!(order_syntax, expected, "{sql}");
+        assert_eq!(args.len(), direct_count, "{sql}");
+        assert_eq!(order_by.len(), order_count, "{sql}");
+    }
+}
+
+#[test]
+fn function_order_syntax_round_trips_without_reclassifying_legacy_json() {
+    for syntax in [
+        FunctionOrderSyntax::Legacy,
+        FunctionOrderSyntax::Ordinary,
+        FunctionOrderSyntax::WithinGroup,
+    ] {
+        let mut source = expression("SELECT f(a) WITHIN GROUP (ORDER BY b)");
+        let Expr::Func { order_syntax, .. } = &mut source else {
+            unreachable!();
+        };
+        *order_syntax = syntax;
+        let encoded = serde_json::to_value(&source).unwrap();
+        assert_eq!(
+            encoded["Func"].get("order_syntax").is_none(),
+            syntax.is_legacy()
+        );
+        assert_eq!(serde_json::from_value::<Expr>(encoded).unwrap(), source);
+        let scalar = ExpressionPlan::lower(source).scalar;
+        let encoded = serde_json::to_value(&scalar).unwrap();
+        assert_eq!(
+            encoded["Func"].get("order_syntax").is_none(),
+            syntax.is_legacy()
+        );
+        assert_eq!(
+            serde_json::from_value::<ScalarExpr>(encoded).unwrap(),
+            scalar
+        );
+    }
+}
+
+#[test]
 fn copied_bindings_keep_invocation_identity_and_both_error_variants() {
     let budget = MemoryBudget::new(1 << 20);
     let cancellation = CancellationToken::new();
@@ -75,6 +158,7 @@ fn copied_bindings_keep_invocation_identity_and_both_error_variants() {
         })),
     ] {
         let source = Expr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: "f".into(),
             binding: Some(FunctionBinding {
                 object_id: Some([7; 16]),

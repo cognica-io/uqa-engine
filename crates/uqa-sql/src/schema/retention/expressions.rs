@@ -22,6 +22,7 @@ impl<'a> Walker<'a> {
                 self.text(ty)?;
             }
             Expr::Func {
+                order_syntax: _,
                 name,
                 binding,
                 args,

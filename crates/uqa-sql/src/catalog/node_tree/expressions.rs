@@ -120,6 +120,7 @@ impl ExpressionContext<'_> {
                 ],
             )?,
             Expr::Func {
+                order_syntax: _,
                 name,
                 binding,
                 args,

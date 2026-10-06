@@ -635,6 +635,7 @@ mod tests {
                 frame: Some(ScalarWindowFrame {
                     mode: FrameMode::Rows,
                     start: ScalarFrameBound::Preceding(Box::new(ScalarExpr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         name: "random".into(),
                         binding: None,
                         args: Vec::new(),

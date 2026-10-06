@@ -37,6 +37,7 @@ fn set_call_output_type(
     params: &[SQLParam],
 ) -> Option<ColumnType> {
     let expression = ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: call.name.clone(),
         binding: call.binding.clone(),
         args: call.args.clone(),

@@ -34,6 +34,7 @@ fn binding(name: &str, types: &[&str]) -> FunctionBinding {
 
 fn marked(dispatch: FunctionDispatch, args: Vec<ScalarExpr>) -> ScalarExpr {
     ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: dispatch.label().into(),
         binding: Some(FunctionBinding::dispatched(dispatch)),
         args,

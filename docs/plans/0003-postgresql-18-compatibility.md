@@ -140,7 +140,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | Milestone | Name | Status | Exit gate |
 | --- | --- | --- | --- |
 | `M0` | PG18 baseline | `in_progress` | PG18 parser pinned; all AST deltas audited; unsupported shapes fail explicitly; active names and fixtures use pg18; 22/22 TPC-H-derived results match PostgreSQL 18 |
-| `M1` | Discovered semantic fixes | `complete` | Bounded DML row-image, constraint-metadata, identified-function, and independently verified semantic slices pass their PostgreSQL 18.4 evidence |
+| `M1` | Discovered semantic fixes | `in_progress` | Bounded DML row-image, constraint-metadata, identified-function, and independently verified semantic slices pass their PostgreSQL 18.4 evidence |
 | `M2` | Protocol 3.2 | `complete` | Byte-exact codec tests and live PostgreSQL 18 libpq 3.0/3.2/latest negotiation and cancellation tests pass |
 | `M3` | PG18 DDL and types | `in_progress` | Generated columns, range/multirange, temporal constraints, catalogs, dump/restore, and reopen tests pass |
 | `M4` | Core regression parity | `in_progress` | PostgreSQL 18 core regression and isolation suites pass with every remaining failure recorded and reduced to zero |
@@ -176,7 +176,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.ctas-column-names` | `M1` | `verified` |
 | `ddl.ctas-with-no-data` | `M1` | `verified` |
 | `ddl.select-into` | `M1` | `verified` |
-| `ddl.view-column-aliases` | `M1` | `verified` |
+| `ddl.view-column-aliases` | `M1` | `partial` |
 | `functions.identified-pg18-additions` | `M1` | `verified` |
 | `functions.full-pg18-matrix` | `M4` | `partial` |
 | `functions.fixed-builtin-overload-resolution` | `M1` | `verified` |
@@ -279,6 +279,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `catalog.creation-ordered-oids` | `M3` | `partial` |
 | `ddl.relation-creation-namespaces` | `M3` | `partial` |
 | `ddl.rule-and-trigger-definitions` | `M3` | `partial` |
+| `aggregates.within-group-call-analysis` | `M1` | `verified` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -791,10 +792,27 @@ The reproduced #428 defect is the next bounded fixing unit after merged PR #427 
 - [x] Inspect the SQL, Planner and Engine manifests, enabled features, dependency policy and public ownership contract; capture 67 independent PostgreSQL 18.4 messages in ordinary/prepared and stored-expression references, including input-function effects, prepared lifetime and durable-default observations.
 - [x] Reuse SQL's catalog-aware array and domain conversion through a narrow catalog input capability. Preserve element constraints, NULL behavior, shape and bounds in ordinary statements, DEFAULT, USING and CHECK, without adding a dependency or Engine algorithm.
 - [x] Retain analyzed constants in the executable plan before optimization. Preserve scalar-domain runtime checks, explicit text conversions and prepared constants without evaluating a domain CHECK twice; keep the default expression's declared source type when Execution assigns or backfills its value.
-- [ ] Verify owner tests and the independent reference across four providers, update documentation and the inherited checklist, then close #428 and #430 with the fixing PR and clean the branch.
+- [x] Verify owner tests and the independent reference across four providers, update documentation and the inherited checklist, then close #428 and #430 with the fixing PR and clean the branch.
 
 ### Preservation obligations
 
 For an unknown array input $s$ with element domain $D$, analysis computes $v = \operatorname{arrayin}_D(s)$ once, in written analysis order, including each element's input constraints. The executable and prepared plans retain $(v,D[])$; executing an identity coercion on that value preserves both its value and its already completed input-effect trace. In contrast, an explicitly typed text expression retains a runtime conversion, and a scalar domain's base input leaves its outer domain constraints for execution. NULL arrays, NULL elements and array bounds retain their distinct meanings. No algebraic operator or carrier is introduced: preserving values, types, row order and the PostgreSQL input-effect trace preserves every surrounding UQA composition. Independent sequence-counter observations must establish the single-input premise, including PREPARE and repeated EXECUTE.
 
-The ordinary 32-message and stored-expression 35-message references pass on memory, native SQLite, SQLite Key/Value and redb. Persistent runs replay fourteen ordinary observations, two scalar-default failures and three stored-default observations after reopening, including a sequence observation before any default executes. The references reproduced and now cover source-type loss during DEFAULT assignment, removed scalar-domain runtime constraints (#430), and an enum domain base incorrectly resolved by an unqualified name. Execution retains the source type during immediate and deferred backfill, while SQL resolves domain bases by catalog identity. The wider enum reference also caught a bpchar identity cast trimming padding after input retention; the shared cast now preserves that padding, and text conversion still removes it. Final verification and source review are recorded in PR #429 before merge.
+The ordinary 32-message and stored-expression 35-message references pass on memory, native SQLite, SQLite Key/Value and redb. Persistent runs replay fourteen ordinary observations, two scalar-default failures and three stored-default observations after reopening, including a sequence observation before any default executes. The references reproduced and now cover source-type loss during DEFAULT assignment, removed scalar-domain runtime constraints (#430), and an enum domain base incorrectly resolved by an unqualified name. Execution retains the source type during immediate and deferred backfill, while SQL resolves domain bases by catalog identity. The wider enum reference also caught a bpchar identity cast trimming padding after input retention; the shared cast now preserves that padding, and text conversion still removes it. All 1,253 SQL tests, twelve Planner statement tests, three Execution backfill tests, the existing 328-message enum reference on all four providers and its three reopen tests pass. Focused PREPARE, sequence, domain-constraint, column-type, default-cooking, routine, foreign-table, cursor and manual regressions pass, as do strict Clippy, rustfmt and repository policies. Independent source review found no blocker. PR #429 merged as `0d725c268`, closing #428 and #430; both branches are removed and primary main is updated. All 75 original parent records remain preserved, with 44 original work items still open.
+
+
+## Ordinary WITHIN GROUP call analysis
+
+This bounded successor to PR #429 addresses the inherited task requiring ordinary calls with WITHIN GROUP to resolve their ordering expressions as function arguments before modifier rejection. SQL previously discarded the syntax distinction for non-window calls and resolved only direct arguments; the implementation now retains the syntax and selects the combined signature. The independent 46-message PostgreSQL 18.4 reference records exact values, command tags, SQLSTATE, message, DETAIL and HINT, including implicit input effects, FILTER order, selected user overloads, valid ordered aggregates and stored/prepared calls. Its compact fixture is `tests/parity/pg18/within_group_calls_oracle.expected.json`.
+
+- [x] Inspect SQL, Planner, Execution and Engine manifests/features, dependency policy, existing aggregate execution and stored-expression restoration; capture the independent PostgreSQL reference.
+- [x] Preserve the syntax distinction in SQL AST/IR and rendering, retaining separate direct and ordered argument vectors and legacy stored-expression behavior.
+- [x] Resolve ordinary calls with the correct borrowed argument sequence and selected function kind; reject invalid modifiers before implicit input coercion while preserving child and FILTER diagnostic order.
+- [x] Verify owner and four-provider/reopen behavior and update public documentation and the compatibility manifest.
+- [ ] Merge, update all inherited task records and clean the completed branch before starting the following unit.
+
+### Preservation obligations
+
+Let $A$ be a call's direct arguments and $O$ its ordered arguments. For explicit WITHIN GROUP, signature selection receives $A \mathbin{+\!+} O$ in that order, while execution retains the existing separate $(A,O)$ representation. Analysis evaluates each child input once, checks FILTER, selects the routine, validates its kind and argument split, and only then applies implicit input coercions for an accepted call. A rejected modifier therefore performs no implicit domain-array input effects. An accepted ordered aggregate receives the same direct values, ordered population, NULLs, ordering direction and filtering as before; ordinary aggregate ORDER BY remains distinct. These equalities preserve existing aggregate carriers and all surrounding relational/ranked compositions. No operator or carrier is introduced. Stored legacy expressions must retain their selected aggregate identity without interpreting missing syntax metadata as newly written ordinary ORDER BY.
+
+PR #431 passes all 46 PostgreSQL messages on all four providers, eighteen persistent-reopen observations and native legacy-view migration across two reopenings. SQL owner tests (1,265), Planner tests (129), Execution aggregation tests (42), prepared statements (67), window comparisons (2), aggregate integrations (68), domain-array integrations (8) and existing restoration/rollback tests (4) pass. Strict Clippy, Rustfmt, dependency/capability, integration-harness, file-header and file-size checks pass. The related prepared percentile fraction defect (#432) is corrected. The broader view suite passes 59 tests and reproduces the existing main-branch input-versus-alias error-order defect (#433); its manifest item is reopened and its separate correction follows immediately. All 75 inherited checklist records and 44 original open work items remain preserved until merge.

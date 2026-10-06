@@ -176,6 +176,7 @@ fn non_fixed_udf_introspection_retains_the_resolver_binding() {
     };
     let parameters = [SQLParam::Scalar(Value::Int(7))];
     let expression = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "stable_udf".into(),
         binding: None,
         args: vec![ScalarExpr::Param(1)],
@@ -248,6 +249,7 @@ fn non_fixed_udf_introspection_keeps_typed_text_distinct_from_unknown() {
     }
 
     let expression = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "typed_text".into(),
         binding: None,
         args: vec![ScalarExpr::Param(1)],
@@ -328,6 +330,7 @@ fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
             },
         };
         let expression = ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: routine_name.into(),
             binding: None,
             args: vec![ScalarExpr::Literal(Value::Int(7))],
@@ -378,6 +381,7 @@ fn scalar_introspection_does_not_resolve_builtin_aggregates_as_catalog_functions
 
     for name in ["sum", "PG_CATALOG.SUM"] {
         let expression = ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: name.into(),
             binding: None,
             args: vec![ScalarExpr::Literal(Value::Null)],
@@ -510,6 +514,7 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
         ),
     ] {
         let expression = ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: function.into(),
             binding: None,
             args: (1..=parameters.len()).map(ScalarExpr::Param).collect(),

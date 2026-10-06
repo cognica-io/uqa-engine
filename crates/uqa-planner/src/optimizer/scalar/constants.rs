@@ -89,6 +89,7 @@ fn is_constant(expression: &ScalarExpr) -> bool {
             ..
         } if is_coalesce(name, binding.as_ref()) => args.iter().all(is_constant),
         ScalarExpr::Func {
+            order_syntax: _,
             name,
             binding: Some(binding),
             args,

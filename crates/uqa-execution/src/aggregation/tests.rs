@@ -489,6 +489,16 @@ fn aggregate_finalizers_report_integer_width_overflow() {
 
 #[test]
 fn percentile_fraction_rejects_missing_and_out_of_range_values() {
+    for (value, expected) in [(Value::Float(0.5), 0.5), (Value::Int(1), 1.0)] {
+        let argument = ScalarExpr::TypedLiteral {
+            value,
+            ty: "double precision".into(),
+            bound_type: Some(uqa_sql::ColumnType::DoublePrecision),
+            parameter_index: Some(1),
+        };
+        assert_eq!(percentile_fraction(&[argument]).unwrap(), expected);
+    }
+
     assert!(percentile_fraction(&[]).is_err());
     for fraction in [-0.1, 1.1, f64::NAN] {
         assert!(percentile_fraction(&[ScalarExpr::Literal(Value::Float(fraction))]).is_err());

@@ -95,6 +95,7 @@ pub(super) fn bind_operator_argument(
     match expression {
         ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => Ok(expression.clone()),
         ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -106,12 +107,17 @@ pub(super) fn bind_operator_argument(
             .is_some_and(|argument| argument.name.is_some())
             || crate::registry::lookup(name).is_some() =>
         {
-            if *distinct || !order_by.is_empty() || filter.is_some() {
+            if *distinct
+                || !order_by.is_empty()
+                || filter.is_some()
+                || *order_syntax == crate::ast::FunctionOrderSyntax::WithinGroup
+            {
                 return Err(SQLError::TypeMismatch(format!(
                     "operator function `{name}` does not accept aggregate modifiers"
                 )));
             }
             Ok(ScalarExpr::Func {
+                order_syntax: *order_syntax,
                 name: name.clone(),
                 binding: binding.clone(),
                 args: args

@@ -106,6 +106,7 @@ fn normalize_expression(
             )
         }
         ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -120,6 +121,7 @@ fn normalize_expression(
                 .collect::<Result<Vec<_>, _>>()?;
             let targets = crate::builtin_function_argument_targets(&name, &argument_types);
             ScalarExpr::Func {
+                order_syntax,
                 name,
                 binding,
                 args: args

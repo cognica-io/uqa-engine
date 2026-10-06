@@ -558,6 +558,7 @@ mod tests {
     fn marker(dispatch: FunctionDispatch, args: Vec<Expr>) -> Expr {
         let binding = FunctionBinding::dispatched(dispatch);
         Expr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: binding.name.clone(),
             binding: Some(binding),
             args,

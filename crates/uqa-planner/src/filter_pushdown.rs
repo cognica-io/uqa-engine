@@ -705,6 +705,7 @@ pub fn rewrite_output_filter(
                 .collect::<Option<Vec<_>>>()?,
         ),
         ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -712,6 +713,7 @@ pub fn rewrite_output_filter(
             order_by,
             filter,
         } => ScalarExpr::Func {
+            order_syntax: *order_syntax,
             name: name.clone(),
             binding: binding.clone(),
             args: args

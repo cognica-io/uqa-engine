@@ -253,6 +253,7 @@ fn typed_scalar_parameter_evaluates_like_scalar() {
 #[test]
 fn parameter_detection_descends_into_nested_expressions() {
     let expression = ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: "knn_match".into(),
         binding: None,
         args: vec![
@@ -325,6 +326,7 @@ fn call_argument_markers_reject_duplicates_and_malformed_nesting() {
 fn marker(dispatch: FunctionDispatch, args: Vec<ScalarExpr>) -> ScalarExpr {
     let binding = FunctionBinding::dispatched(dispatch);
     ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: binding.name.clone(),
         binding: Some(binding),
         args,

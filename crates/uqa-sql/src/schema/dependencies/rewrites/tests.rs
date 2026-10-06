@@ -37,6 +37,7 @@ fn sequence_reference_rewriting_respects_selected_routines() {
         ("legacy_name", "pg_catalog.nextval", true, true),
     ] {
         let mut expression = Expr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: name.into(),
             binding: Some(FunctionBinding {
                 object_id: (!builtin).then_some([7; 16]),

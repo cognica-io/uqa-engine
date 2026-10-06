@@ -19,6 +19,7 @@ mod cte_controls;
 mod ctes;
 mod dependencies;
 mod merge_scopes;
+mod ordered_calls;
 mod preparation;
 mod projection;
 mod record_fields;

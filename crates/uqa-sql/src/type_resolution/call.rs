@@ -16,6 +16,7 @@ pub(super) struct BindingCall {
     pub(super) binding: Option<FunctionBinding>,
     pub(super) arguments: Vec<ScalarExpr>,
     pub(super) distinct: bool,
+    pub(super) order_syntax: crate::ast::FunctionOrderSyntax,
     pub(super) order_by: Vec<crate::ScalarOrder>,
     pub(super) filter: Option<Box<ScalarExpr>>,
 }
