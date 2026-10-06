@@ -71,6 +71,7 @@ pub(super) fn prepare(
             ));
         };
         *slot = Some(ScalarExpr::Cast {
+            implicit: true,
             expr: Box::new(ScalarExpr::Array(values)),
             ty: invocation.parameter_types[position].clone(),
         });
@@ -135,6 +136,7 @@ fn coerce(
         Ok(expression)
     } else {
         Ok(ScalarExpr::Cast {
+            implicit: true,
             expr: Box::new(expression),
             ty: target.catalog_name(),
         })

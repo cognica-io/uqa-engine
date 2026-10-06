@@ -201,7 +201,7 @@ fn emit_integer_expression(
             instructions.push(ProjectedIntegerInstruction::Literal(None));
             *stack_depth += 1;
         }
-        ScalarExpr::Cast { expr, ty }
+        ScalarExpr::Cast { expr, ty, .. }
             if (ty.eq_ignore_ascii_case("bigint") || ty.eq_ignore_ascii_case("int8"))
                 && compile_integer_operand(expr, input_schema).is_some() =>
         {

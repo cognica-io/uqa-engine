@@ -344,6 +344,7 @@ fn coerce_arguments(
             .flatten();
         if requires_cast(argument, actual.as_ref(), declared) {
             *argument = ScalarExpr::Cast {
+                implicit: true,
                 expr: Box::new(std::mem::replace(
                     argument,
                     ScalarExpr::Literal(Value::Null),

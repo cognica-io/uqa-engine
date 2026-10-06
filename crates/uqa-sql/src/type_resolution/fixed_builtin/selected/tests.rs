@@ -70,7 +70,7 @@ fn selected_constructors_keep_input_payload_and_admit_cast_defaults_and_metadata
     assert!(matched);
     assert_eq!(output.arguments.len(), 2);
     assert_eq!(output.arguments[1], ScalarExpr::Literal(Value::Bool(false)));
-    let ScalarExpr::Cast { expr, ty } = &output.arguments[0] else {
+    let ScalarExpr::Cast { expr, ty, .. } = &output.arguments[0] else {
         panic!()
     };
     let ScalarExpr::Literal(Value::Str(text)) = expr.as_ref() else {

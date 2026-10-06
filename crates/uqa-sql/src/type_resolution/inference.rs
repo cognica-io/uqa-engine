@@ -78,7 +78,7 @@ pub(super) fn scalar_type_inner_with_control(
             .map(|parameter| common::parameter_type_with_control(parameter, control))
             .transpose()
             .map(Option::flatten),
-        ScalarExpr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty, .. } => {
             let source = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
             let target = match ColumnType::from_sql_name_with_control(ty, control) {
                 Ok(ty) => Ok(Some(ty)),

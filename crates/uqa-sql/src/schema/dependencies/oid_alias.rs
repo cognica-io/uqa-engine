@@ -262,7 +262,7 @@ fn read_scalar_constant<C: OidAliasInput + ?Sized>(
         }
         return;
     }
-    let ScalarExpr::Cast { expr, ty } = expression else {
+    let ScalarExpr::Cast { expr, ty, .. } = expression else {
         return;
     };
     let Some((alias, array)) = alias_type(ty) else {
@@ -333,7 +333,7 @@ pub fn check_statement_oid_alias_constants<C: OidAliasInput + ?Sized>(
                 }
                 return;
             }
-            let ScalarExpr::Cast { expr, ty } = expression else {
+            let ScalarExpr::Cast { expr, ty, .. } = expression else {
                 return;
             };
             let Some((alias, array)) = alias_type(ty) else {

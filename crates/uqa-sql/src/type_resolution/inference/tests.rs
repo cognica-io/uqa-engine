@@ -92,6 +92,7 @@ fn scalar_inference_preserves_common_array_case_and_operator_types() {
         ),
         (
             ScalarExpr::Cast {
+                implicit: false,
                 expr: Box::new(ScalarExpr::Literal(Value::Null)),
                 ty: "integer[][]".into(),
             },
@@ -157,6 +158,7 @@ fn scalar_inference_preserves_cast_and_comparison_error_states() {
     let schema = RowSchema::default();
     for expression in [
         ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Array(vec![ScalarExpr::Literal(Value::Int(1))])),
             ty: "integer".into(),
         },

@@ -308,6 +308,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
     ];
     for (ty, value) in values {
         let expression = ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::TypedLiteral {
                 value,
                 ty: ty.catalog_name(),
@@ -323,6 +324,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
         assert_eq!(retained, expression);
     }
     let integer = ScalarExpr::Cast {
+        implicit: false,
         expr: Box::new(ScalarExpr::TypedLiteral {
             value: Value::Int(7),
             ty: "integer".into(),
@@ -365,6 +367,7 @@ fn analyzed_conditionals_discard_unreachable_mutable_calls() {
 fn null_casts_to_temporal_types_fold_without_calling_input_functions() {
     for ty in ["date", "time", "timestamp", "timestamptz", "interval"] {
         let expression = ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Literal(Value::Null)),
             ty: ty.into(),
         };

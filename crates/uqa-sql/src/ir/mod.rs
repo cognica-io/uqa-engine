@@ -101,6 +101,9 @@ pub enum ScalarExpr {
         else_branch: Option<Box<Self>>,
     },
     Cast {
+        /// Analysis introduced this coercion rather than retaining an explicit SQL cast. Stored definitions must distinguish array coercions from explicit constructor conversions.
+        #[serde(default, skip_serializing_if = "is_false")]
+        implicit: bool,
         expr: Box<Self>,
         ty: String,
     },
@@ -204,5 +207,46 @@ impl ScalarExpr {
             qualifier: qualifier.into(),
             column: column.into(),
         }
+    }
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires a borrowed field"
+)]
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScalarExpr;
+
+    #[test]
+    fn cast_origin_survives_storage_and_legacy_casts_remain_explicit() {
+        let legacy = r#"{"Cast":{"expr":{"Column":"value"},"ty":"bigint[]"}}"#;
+        let explicit: ScalarExpr = serde_json::from_str(legacy).unwrap();
+        assert!(matches!(
+            explicit,
+            ScalarExpr::Cast {
+                implicit: false,
+                ..
+            }
+        ));
+        assert_eq!(serde_json::to_string(&explicit).unwrap(), legacy);
+        let mut implicit = explicit.clone();
+        let ScalarExpr::Cast {
+            implicit: origin, ..
+        } = &mut implicit
+        else {
+            unreachable!()
+        };
+        *origin = true;
+        let stored = serde_json::to_string(&implicit).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ScalarExpr>(&stored).unwrap(),
+            implicit
+        );
+        assert_ne!(implicit, explicit);
     }
 }

@@ -100,7 +100,7 @@ impl Preparation<'_> {
             ScalarExpr::Literal(Value::Str(text)) => {
                 return Ok(ExpressionType::unknown_literal(expression, text.clone()));
             }
-            ScalarExpr::Cast { expr, ty } => {
+            ScalarExpr::Cast { expr, ty, .. } => {
                 Some(self.cast_expression(expr, ty, input, subqueries)?)
             }
             ScalarExpr::Binary { op, lhs, rhs } => {

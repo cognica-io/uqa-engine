@@ -363,7 +363,11 @@ impl Binder<'_, '_> {
                     else_branch,
                 }
             }
-            ScalarExpr::Cast { mut expr, ty } => {
+            ScalarExpr::Cast {
+                mut expr,
+                ty,
+                implicit,
+            } => {
                 self.fold_enum_array_constructor(&mut expr, &ty)?;
                 let source = if self.cast_requires_source(&ty)? {
                     let source = self.semantic(self.infer(&expr))?.flatten();
@@ -381,7 +385,7 @@ impl Binder<'_, '_> {
                 if let Some(source) = source {
                     self.wrap_declared(&mut expr, &source)?;
                 }
-                ScalarExpr::Cast { expr, ty }
+                ScalarExpr::Cast { implicit, expr, ty }
             }
             ScalarExpr::InSubquery {
                 mut expr,

@@ -244,7 +244,7 @@ pub(super) fn eval_scalar_inner(
             context,
             control,
         ),
-        ScalarExpr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty, .. } => {
             let source_ty = context.with_type_schema(|schema| {
                 uqa_sql::type_resolution::scalar_cast_source_type_name_with_control(
                     expr,

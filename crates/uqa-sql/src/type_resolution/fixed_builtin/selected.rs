@@ -65,6 +65,7 @@ impl Construction<'_, '_> {
         *self.memory = self.control.combine(self.memory.take(), memory);
         let ty = self.retain(name);
         Ok(ScalarExpr::Cast {
+            implicit: true,
             expr: Box::new(argument),
             ty,
         })

@@ -253,7 +253,7 @@ fn retained_identity_and_return_coercion_survive_inline_analysis() {
         .prepare(&binding, &[ScalarExpr::Param(3)], &[])
         .unwrap()
         .unwrap();
-    let ScalarExpr::Cast { expr, ty } = replacement.expression else {
+    let ScalarExpr::Cast { expr, ty, .. } = replacement.expression else {
         panic!("result assignment is required")
     };
     assert_eq!(
@@ -280,6 +280,7 @@ fn ordinary_cache_replanning_is_separate_from_the_execution_body_cache() {
         let mut plan = UnifiedPlan::lower(crate::compile("SELECT 1").unwrap().remove(0));
         plan.rewrite_scalar_expressions(&mut |expression| {
             *expression = ScalarExpr::Cast {
+                implicit: false,
                 expr: Box::new(call(catalog.binding(name, &[]), vec![])),
                 ty: "bigint".into(),
             };

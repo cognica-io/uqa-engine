@@ -104,9 +104,14 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         }
         (ScalarExpr::Not(a), ScalarExpr::Not(b))
         | (ScalarExpr::UnaryMinus(a), ScalarExpr::UnaryMinus(b)) => exprs_match(a, b),
-        (ScalarExpr::Cast { expr: a, ty: at }, ScalarExpr::Cast { expr: b, ty: bt }) => {
-            at == bt && exprs_match(a, b)
-        }
+        (
+            ScalarExpr::Cast {
+                expr: a, ty: at, ..
+            },
+            ScalarExpr::Cast {
+                expr: b, ty: bt, ..
+            },
+        ) => at == bt && exprs_match(a, b),
         _ => false,
     }
 }

@@ -43,7 +43,7 @@ fn regrole_constant_error() -> SQLError {
 }
 
 fn scalar_regrole_literal(expression: &ScalarExpr) -> Option<&str> {
-    let ScalarExpr::Cast { expr, ty } = expression else {
+    let ScalarExpr::Cast { expr, ty, .. } = expression else {
         return None;
     };
     if !scalar_regrole_type_name(ty) {

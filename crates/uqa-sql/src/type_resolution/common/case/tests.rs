@@ -108,6 +108,7 @@ fn constant_semantic_errors_preserve_fallback_but_resource_errors_propagate() {
     let cancellation = CancellationToken::new();
     let control = ProductionControl::new(&budget, &cancellation, &cancellation);
     let invalid = ScalarExpr::Cast {
+        implicit: false,
         expr: Box::new(ScalarExpr::Literal(Value::Str("bad".into()))),
         ty: "integer".into(),
     };

@@ -691,11 +691,13 @@ mod tests {
     fn mutable_visits_rewrite_nested_expressions() {
         let literal = || ScalarExpr::Literal(Value::Str("t".into()));
         let mut expression = ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Case {
                 base: None,
                 when: vec![(
                     literal(),
                     ScalarExpr::Cast {
+                        implicit: false,
                         expr: Box::new(literal()),
                         ty: "regclass".into(),
                     },

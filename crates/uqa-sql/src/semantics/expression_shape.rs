@@ -191,7 +191,8 @@ pub fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> Scalar
                 .as_ref()
                 .map(|expr| Box::new(qualify_unqualified_columns(expr, qualifier))),
         },
-        ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
+        ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
+            implicit: *implicit,
             expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
             ty: ty.clone(),
         },

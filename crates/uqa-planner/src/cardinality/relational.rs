@@ -301,7 +301,7 @@ fn scalar_column(expression: &ScalarExpr) -> Option<&str> {
 fn scalar_literal(expression: &ScalarExpr) -> Option<Value> {
     match expression {
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Some(value.clone()),
-        ScalarExpr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty, .. } => {
             let value = scalar_literal(expr)?;
             uqa_sql::expr::cast_value(&value, ty).ok()
         }

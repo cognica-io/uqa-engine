@@ -242,6 +242,7 @@ impl RoutineInliningContext<'_> {
         }
         if actual != Some(&layout.declared_type) {
             expression = ScalarExpr::Cast {
+                implicit: true,
                 expr: Box::new(expression),
                 ty: layout.declared_type.catalog_name(),
             };

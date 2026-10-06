@@ -130,6 +130,7 @@ pub(super) fn bind_unknown_arguments_in_place_with_control(
 fn install_cast(args: &mut [ScalarExpr], index: usize, ty: String) {
     let inner = std::mem::replace(&mut args[index], ScalarExpr::Literal(Value::Null));
     args[index] = ScalarExpr::Cast {
+        implicit: true,
         expr: Box::new(inner),
         ty,
     };

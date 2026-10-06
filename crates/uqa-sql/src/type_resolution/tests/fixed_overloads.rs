@@ -553,7 +553,7 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
             assert!(
                 matches!(
                     argument,
-                    ScalarExpr::Cast { expr, ty }
+                    ScalarExpr::Cast { expr, ty, .. }
                         if ty == expected_type
                             && matches!(expr.as_ref(), ScalarExpr::Param(index) if *index == position + 1)
                 ),

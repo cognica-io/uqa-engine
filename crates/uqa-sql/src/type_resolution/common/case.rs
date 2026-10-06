@@ -168,7 +168,7 @@ fn constant_value(
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
             Ok(Some(control.copy_value(value)?))
         }
-        ScalarExpr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty, .. } => {
             let Some(value) = constant_value(expr, control)? else {
                 return Ok(None);
             };

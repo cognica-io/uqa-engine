@@ -92,7 +92,7 @@ impl SchemaScope {
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map(|fields| Some(fields.into())),
-            ScalarExpr::Cast { expr, ty }
+            ScalarExpr::Cast { expr, ty, .. }
                 if crate::type_resolution::canonical_routine_type_name(ty) == "record" =>
             {
                 self.bind_record_fields(routines, expr, schema, subqueries, params)

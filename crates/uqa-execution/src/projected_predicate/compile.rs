@@ -130,7 +130,7 @@ pub(super) fn compile(
                 )?,
             }
         }
-        ScalarExpr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty, .. } => {
             // A cast to a type whose input function reads the catalog, such as `regclass`, resolves names through the engine, which the projected form has no access to.
             if uqa_sql::ast::ColumnType::from_sql_name(ty)
                 .map_or(true, |ty| uqa_sql::type_resolution::catalog_input_type(&ty))

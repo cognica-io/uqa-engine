@@ -435,6 +435,7 @@ pub(super) fn bind_call_in_place_with_control(
             let (ty, extra) = ty.into_parts();
             *memory = control.combine(memory.take(), extra);
             ScalarExpr::Cast {
+                implicit: true,
                 expr: Box::new(expression),
                 ty,
             }

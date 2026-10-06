@@ -812,7 +812,8 @@ fn rewrite_aggregate_dependencies(
                 ))
             }),
         },
-        ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
+        ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
+            implicit: *implicit,
             expr: Box::new(rewrite_aggregate_dependencies(
                 engine,
                 group_by,

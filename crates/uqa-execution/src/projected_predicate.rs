@@ -362,6 +362,7 @@ mod tests {
             op: BinaryOp::Less,
             lhs: Box::new(ScalarExpr::Column("day".into())),
             rhs: Box::new(ScalarExpr::Cast {
+                implicit: false,
                 expr: Box::new(ScalarExpr::Literal(Value::Str("1995-03-15".into()))),
                 ty: "date".into(),
             }),
@@ -384,6 +385,7 @@ mod tests {
         let expression = ScalarExpr::Binary {
             op: BinaryOp::Equal,
             lhs: Box::new(ScalarExpr::UnaryMinus(Box::new(ScalarExpr::Cast {
+                implicit: false,
                 expr: Box::new(ScalarExpr::Column("x".into())),
                 ty: "smallint".into(),
             }))),

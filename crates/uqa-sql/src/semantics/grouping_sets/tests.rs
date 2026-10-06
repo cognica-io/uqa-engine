@@ -214,6 +214,7 @@ fn grouping_identity_keeps_catalog_casts_for_the_catalog_resolver() {
     ] {
         let input = ScalarExpr::Literal(Value::Str("catalog-dependent input".into()));
         let expression = ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(input.clone()),
             ty: ty.into(),
         };

@@ -146,7 +146,7 @@ fn prepare_inference_expression(
         }
     });
     crate::plan::rewrite_scalar_expression(&mut plan.scalar, &mut |expression| {
-        if let Expr::Cast { expr, ty } = expression {
+        if let Expr::Cast { expr, ty, .. } = expression {
             if let Expr::Column(name) = expr.as_ref() {
                 if columns.iter().any(|column| {
                     column.name == *name

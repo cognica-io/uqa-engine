@@ -190,7 +190,8 @@ fn optimize_scalar(
             when,
             else_branch,
         } => optimize_case(base, when, else_branch, config)?,
-        ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
+        ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
+            implicit,
             expr: Box::new(optimize_scalar(*expr, config)?),
             ty,
         },
@@ -298,8 +299,27 @@ mod tests {
     use uqa_sql::ast::BinaryOp;
 
     #[test]
+    fn scalar_optimization_retains_array_coercion_origin() {
+        for implicit in [false, true] {
+            let expected = ScalarExpr::Cast {
+                implicit,
+                expr: Box::new(ScalarExpr::Array(vec![ScalarExpr::Column("value".into())])),
+                ty: "bigint[]".into(),
+            };
+            let mut expression = expected.clone();
+            optimize_scalar_slot(
+                &mut expression,
+                &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            )
+            .unwrap();
+            assert_eq!(expression, expected);
+        }
+    }
+
+    #[test]
     fn folds_literal_date_value_without_erasing_its_declared_type() {
         let mut expression = ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Literal(Value::Str("1993-07-01".into()))),
             ty: "date".into(),
         };
@@ -340,6 +360,7 @@ mod tests {
     #[test]
     fn reports_invalid_constant_input_during_planning() {
         let mut expression = ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Literal(Value::Str("not-an-integer".into()))),
             ty: "integer".into(),
         };

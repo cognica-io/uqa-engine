@@ -341,7 +341,7 @@ fn retained_ir_lease_equals_destination_containers_and_leaf_payloads() {
     let ScalarExpr::Column(name) = &items[0] else {
         panic!("column IR");
     };
-    let ScalarExpr::Cast { expr, ty } = &items[1] else {
+    let ScalarExpr::Cast { expr, ty, .. } = &items[1] else {
         panic!("cast IR");
     };
     let ScalarExpr::Literal(Value::Str(value)) = expr.as_ref() else {

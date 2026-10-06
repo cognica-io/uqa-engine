@@ -76,7 +76,7 @@ pub fn same_check_expression(
                 }
                 return;
             }
-            let ScalarExpr::Cast { expr, ty } = node else {
+            let ScalarExpr::Cast { expr, ty, .. } = node else {
                 return;
             };
             let Ok(target) = ColumnType::from_sql_name(ty) else {
