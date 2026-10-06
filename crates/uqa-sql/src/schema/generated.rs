@@ -64,6 +64,11 @@ pub fn prepare_generated_column(
         .generated
         .as_mut()
         .ok_or_else(|| SQLError::Internal("generated column disappeared".into()))?;
+    eligibility::check_host_return_types(&mut prepared.expression, |name| {
+        engine
+            .registered_runtime_function_volatility(name)
+            .is_some()
+    })?;
     bind_schema_column_references(&mut prepared.expression, qualifier);
     let planned = engine.plan_schema_expression(&prepared.expression, snapshot)?;
     if !planned.immutable {
