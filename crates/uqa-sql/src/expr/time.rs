@@ -11,10 +11,7 @@
 //! year/month decomposition.
 
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Timelike, Utc};
-use uqa_core::{
-    memory::{Produced, ProductionControl},
-    DecimalValue, TemporalValue, Value,
-};
+use uqa_core::{memory::ProductionControl, TemporalValue, Value};
 
 use crate::ast::BinaryOp;
 use crate::error::{Result, SQLError};
@@ -23,10 +20,13 @@ use super::conversion::to_f64_with_control;
 use super::{datetime_out_of_range, float_to_i64_rounded, out_of_range};
 
 mod date_trunc;
+mod extract;
 mod interval;
 mod number_format;
+mod units;
 
 pub(super) use date_trunc::zone::{truncate_explicit_zone, truncate_session_zone};
+pub(super) use extract::{extract_from_value, extract_from_value_with_offset};
 pub use interval::IntervalFields;
 
 const MICROS_PER_SECOND: i64 = 1_000_000;
@@ -415,174 +415,6 @@ pub(super) fn age_between(a: &TemporalValue, b: &TemporalValue) -> Result<Value>
         days: i32::try_from(sign * days).map_err(|_| datetime_out_of_range("interval"))?,
         micros: sign * time,
     }))
-}
-
-/// Numeric result with a fixed decimal scale (`extract(epoch ...)`
-/// renders `60.000000`).
-fn decimal_scaled(
-    value: f64,
-    scale: u32,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Value>> {
-    let text = control.format(format_args!("{value:.*}", scale as usize))?;
-    match DecimalValue::parse_with_control(&text, control)? {
-        Some(decimal) => {
-            let (value, memory) = decimal.into_parts();
-            Ok(control.finish(Value::Decimal(value), memory)?)
-        }
-        None => Ok(control.finish(Value::Float(value), control.empty_reservation())?),
-    }
-}
-
-/// `EXTRACT(field FROM x)` / `date_part(field, x)`. `as_numeric`
-/// selects EXTRACT's numeric result type (epoch/second render with a
-/// fixed scale); `date_part` keeps float8 semantics.
-#[expect(
-    clippy::too_many_lines,
-    reason = "temporal dispatch preserves PostgreSQL unit and error precedence"
-)]
-pub(super) fn extract_from_value(
-    field: &str,
-    value: &Value,
-    as_numeric: bool,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Value>> {
-    let inline = |value| -> Result<Produced<Value>> {
-        Ok(control.finish(value, control.empty_reservation())?)
-    };
-    if matches!(value, Value::Null) {
-        return inline(Value::Null);
-    }
-    let temporal = coerce_temporal_with_control(value, control)?;
-    let int_result = |n: i64| inline(Value::Int(n));
-    let seconds_result = |micros: i64| {
-        let secs = micros as f64 / 1e6;
-        if as_numeric {
-            decimal_scaled(secs, 6, control)
-        } else {
-            inline(Value::Float(secs))
-        }
-    };
-    if let TemporalValue::Interval {
-        months,
-        days,
-        micros,
-    } = &temporal
-    {
-        return match field {
-            "year" | "years" => int_result(i64::from(months / 12)),
-            "month" | "months" | "mon" | "mons" => int_result(i64::from(months % 12)),
-            "day" | "days" => int_result(i64::from(*days)),
-            "hour" | "hours" => int_result(micros / MICROS_PER_HOUR),
-            "minute" | "minutes" => int_result((micros % MICROS_PER_HOUR) / MICROS_PER_MINUTE),
-            "second" | "seconds" => {
-                let sub = micros % MICROS_PER_MINUTE;
-                if as_numeric {
-                    decimal_scaled(sub as f64 / 1e6, 6, control)
-                } else {
-                    inline(Value::Float(sub as f64 / 1e6))
-                }
-            }
-            "millisecond" | "milliseconds" => {
-                let sub = micros % MICROS_PER_MINUTE;
-                if as_numeric {
-                    decimal_scaled(sub as f64 / 1e3, 3, control)
-                } else {
-                    inline(Value::Float(sub as f64 / 1e3))
-                }
-            }
-            "microsecond" | "microseconds" => int_result(micros % MICROS_PER_MINUTE),
-            "epoch" => {
-                let total = (i64::from(*months) * 30 + i64::from(*days)) * MICROS_PER_DAY + micros;
-                if as_numeric {
-                    decimal_scaled(total as f64 / 1e6, 6, control)
-                } else {
-                    inline(Value::Float(total as f64 / 1e6))
-                }
-            }
-            "quarter" => {
-                let quarter = if *months < 0 {
-                    (months % 12) / 3 - 1
-                } else {
-                    (months % 12) / 3 + 1
-                };
-                int_result(i64::from(quarter))
-            }
-            "week" | "weeks" => int_result(i64::from(days / 7)),
-            other => Err(SQLError::Unsupported(format!("EXTRACT field `{other}`"))),
-        };
-    }
-    if let TemporalValue::Time { micros } | TemporalValue::TimeTz { micros, .. } = &temporal {
-        return match field {
-            "hour" | "hours" => int_result(micros / MICROS_PER_HOUR),
-            "minute" | "minutes" => int_result((micros % MICROS_PER_HOUR) / MICROS_PER_MINUTE),
-            "second" | "seconds" => seconds_result(micros % MICROS_PER_MINUTE),
-            "millisecond" | "milliseconds" => {
-                let sub = micros % MICROS_PER_MINUTE;
-                if as_numeric {
-                    decimal_scaled(sub as f64 / 1e3, 3, control)
-                } else {
-                    inline(Value::Float(sub as f64 / 1e3))
-                }
-            }
-            "microsecond" | "microseconds" => int_result(micros % MICROS_PER_MINUTE),
-            "epoch" => seconds_result(*micros),
-            other => Err(SQLError::Unsupported(format!("EXTRACT field `{other}`"))),
-        };
-    }
-    let dt = temporal_naive(&temporal)?;
-    match field {
-        "year" => int_result(i64::from(dt.year())),
-        "month" => int_result(i64::from(dt.month())),
-        "day" => int_result(i64::from(dt.day())),
-        "hour" => int_result(i64::from(dt.hour())),
-        "minute" => int_result(i64::from(dt.minute())),
-        "second" => {
-            let micros = i64::from(dt.second()) * MICROS_PER_SECOND
-                + i64::from(dt.and_utc().timestamp_subsec_micros());
-            if as_numeric {
-                decimal_scaled(micros as f64 / 1e6, 6, control)
-            } else {
-                inline(Value::Float(micros as f64 / 1e6))
-            }
-        }
-        "millisecond" | "milliseconds" => {
-            let micros = i64::from(dt.second()) * MICROS_PER_SECOND
-                + i64::from(dt.and_utc().timestamp_subsec_micros());
-            if as_numeric {
-                decimal_scaled(micros as f64 / 1e3, 3, control)
-            } else {
-                inline(Value::Float(micros as f64 / 1e3))
-            }
-        }
-        "microsecond" | "microseconds" => int_result(
-            i64::from(dt.second()) * MICROS_PER_SECOND
-                + i64::from(dt.and_utc().timestamp_subsec_micros()),
-        ),
-        "dow" => int_result(i64::from(dt.weekday().num_days_from_sunday())),
-        "isodow" => int_result(i64::from(dt.weekday().number_from_monday())),
-        "doy" => int_result(i64::from(dt.ordinal())),
-        "epoch" => {
-            let micros = micros_from_naive(dt);
-            if as_numeric {
-                decimal_scaled(micros as f64 / 1e6, 6, control)
-            } else {
-                let secs = micros as f64 / 1e6;
-                if secs.fract() == 0.0 {
-                    int_result(secs as i64)
-                } else {
-                    inline(Value::Float(secs))
-                }
-            }
-        }
-        "quarter" => int_result(i64::from(dt.month() - 1) / 3 + 1),
-        "week" => int_result(i64::from(dt.iso_week().week())),
-        "isoyear" => int_result(i64::from(dt.iso_week().year())),
-        "century" => int_result(i64::from((dt.year() + 99).div_euclid(100))),
-        "decade" => int_result(i64::from(dt.year().div_euclid(10))),
-        "millennium" => int_result(i64::from((dt.year() + 999).div_euclid(1000))),
-        other => Err(SQLError::Unsupported(format!("EXTRACT field `{other}`"))),
-    }
 }
 
 pub(super) fn date_trunc_value(

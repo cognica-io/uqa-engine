@@ -20,6 +20,7 @@ use super::scalar_dispatch::{eval_scalar_function, eval_sequence_function};
 
 mod named;
 mod production;
+mod temporal;
 use named::builtin_named_args;
 pub use production::eval_generated_function_call_with_control;
 
@@ -247,6 +248,9 @@ fn eval_function_call_inner(
         if let Some(result) = super::time::truncate_session_zone(&evaluated, ctx) {
             return result;
         }
+    }
+    if let Some(result) = temporal::extract_session_zone(lower, &evaluated, ctx) {
+        return result;
     }
     match eval_scalar_function(lower, &evaluated) {
         // Unknown built-in: fall through to user-defined functions,

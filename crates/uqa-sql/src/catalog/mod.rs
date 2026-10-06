@@ -10,6 +10,7 @@ use crate::ast::ColumnType;
 
 pub mod access_methods;
 pub mod expression_text;
+pub mod languages;
 pub mod node_tree;
 pub mod oids;
 pub mod resolution;
@@ -42,6 +43,7 @@ impl VirtualRelation {
                 | Self::PgRange
                 | Self::PgEnum
                 | Self::PgProc
+                | Self::PgLanguage
                 | Self::PgDatabase
                 | Self::PgAuthid
                 | Self::PgAuthMembers
@@ -482,6 +484,17 @@ impl VirtualRelation {
                 "prosqlbody" => ColumnType::PgNodeTree,
                 "proconfig" => array(ColumnType::Text),
                 "proacl" => array(ColumnType::AclItem),
+            ],
+            Self::PgLanguage => columns![
+                "oid" => ColumnType::Oid,
+                "lanname" => ColumnType::Name,
+                "lanowner" => ColumnType::Oid,
+                "lanispl" => ColumnType::Boolean,
+                "lanpltrusted" => ColumnType::Boolean,
+                "lanplcallfoid" => ColumnType::Oid,
+                "laninline" => ColumnType::Oid,
+                "lanvalidator" => ColumnType::Oid,
+                "lanacl" => array(ColumnType::AclItem),
             ],
             Self::PgDatabase => columns![
                 "oid" => ColumnType::Oid,

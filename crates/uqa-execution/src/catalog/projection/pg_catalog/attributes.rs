@@ -181,6 +181,7 @@ pub fn build_pg_attribute(
         }
     }
     out.extend(super::composites::composite_attribute_rows(catalog));
+    out.extend(super::languages::language_attribute_rows()?);
     out.extend(index_attributes(catalog, resolution)?);
     out.extend(super::super::ag_catalog::age_pg_attribute_rows(catalog)?);
     Ok(out)

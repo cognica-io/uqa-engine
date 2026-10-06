@@ -11,8 +11,9 @@ use super::super::helpers::oids::split_schema_name;
 use super::super::helpers::rows::{catalog_name, row, str_value};
 use super::super::helpers::type_metadata::{catalog_regtype_name, catalog_type_name};
 use super::super::pg_proc::user_routine_catalog_oid;
-use crate::catalog::CatalogReadView;
+use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::Value;
+use uqa_sql::catalog::languages::SQL_LANGUAGE;
 use uqa_sql::registry::registered_names;
 use uqa_sql::{ResultRow, SQLError};
 
@@ -20,7 +21,14 @@ use uqa_sql::{ResultRow, SQLError};
     clippy::too_many_lines,
     reason = "preserves catalog column and OID order"
 )]
-pub fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
+pub fn build_info_routines(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let builtin_owner = catalog.role_is_enabled_for(
+        resolution.current_user(),
+        &uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
+    );
     let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
         .flat_map(|group| group.iter())
@@ -63,10 +71,31 @@ pub fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, 
                     regtype_name.map_or(Value::Null, |_| str_value("pg_catalog")),
                 ),
                 ("type_udt_name", regtype_name.map_or(Value::Null, str_value)),
-                ("routine_body", str_value("EXTERNAL")),
-                ("routine_definition", Value::Null),
+                (
+                    "routine_body",
+                    str_value(if routine.language() == i64::from(SQL_LANGUAGE) {
+                        "SQL"
+                    } else {
+                        "EXTERNAL"
+                    }),
+                ),
+                (
+                    "routine_definition",
+                    if builtin_owner {
+                        str_value(routine.source)
+                    } else {
+                        Value::Null
+                    },
+                ),
                 ("external_name", Value::Null),
-                ("external_language", str_value("INTERNAL")),
+                (
+                    "external_language",
+                    str_value(if routine.language() == i64::from(SQL_LANGUAGE) {
+                        "SQL"
+                    } else {
+                        "INTERNAL"
+                    }),
+                ),
                 (
                     "is_deterministic",
                     str_value(if routine.volatility == "i" {

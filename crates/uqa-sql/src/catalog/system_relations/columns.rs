@@ -55,17 +55,6 @@ impl SystemRelation {
                 "seqcache",
                 "seqcycle",
             ],
-            Self::PgLanguage => &[
-                "oid",
-                "lanname",
-                "lanowner",
-                "lanispl",
-                "lanpltrusted",
-                "lanplcallfoid",
-                "laninline",
-                "lanvalidator",
-                "lanacl",
-            ],
             Self::InformationEnabledRoles => &["role_name"],
         };
         names.iter().map(|name| (*name).into()).collect()

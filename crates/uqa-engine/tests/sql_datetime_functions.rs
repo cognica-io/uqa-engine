@@ -6,9 +6,8 @@
 
 //! SQL date and time function coverage.
 //!
-//! The Rust core `Value` surface stores date/time values as ISO strings,
-//! so these tests assert the same observable SQL semantics through that
-//! representation rather than host-language date/datetime object types.
+//! SQL results retain typed temporal and numeric carriers; assertions check
+//! their values and `PostgreSQL` text output.
 
 use uqa_core::{DecimalValue, Value};
 use uqa_engine::{Engine, SQLResult};
@@ -253,8 +252,8 @@ fn extract_quarter() {
 fn extract_week() {
     let engine = ts_table();
     let result = exec(&engine, "SELECT EXTRACT(week FROM ts) AS w FROM log");
-    let week = int_value(&result.rows[0]["w"]);
-    assert!((1..=53).contains(&week));
+    assert!(matches!(result.rows[0]["w"], Value::Decimal(_)));
+    assert_eq!(result.rows[0]["w"], dec("24"));
 }
 
 #[test]

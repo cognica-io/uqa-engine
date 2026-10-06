@@ -22,7 +22,7 @@ const FIRST_UNPINNED_OBJECT_ID: u32 = 12_000;
 /// `PG_PUBLIC_NAMESPACE`, which `initdb` creates unpinned.
 pub(super) const PUBLIC_NAMESPACE: u32 = 2200;
 /// The `plpgsql` language, which `initdb` installs unpinned.
-pub(super) const PLPGSQL_LANGUAGE: u32 = 13_647;
+pub(super) use uqa_sql::catalog::languages::PLPGSQL_LANGUAGE;
 
 /// A relation of the catalog and the kind `getRelationDescription` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

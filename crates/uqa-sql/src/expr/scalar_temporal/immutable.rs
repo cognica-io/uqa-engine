@@ -64,23 +64,17 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                     micros: float_to_i64_rounded(secs * 1e6, "timestamp")?,
                 }))
             }
-            "extract" => {
+            "extract" | "date_part" => {
                 if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch(
-                        "extract takes 2 args (field, ts)".into(),
-                    ));
+                    return Err(SQLError::TypeMismatch(format!(
+                        "{name} takes 2 args (field, ts)"
+                    )));
                 }
-                let field = field_name(&args[0], control)?;
-                extract_from_value(&field, &args[1], true, control)
-            }
-            "date_part" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch(
-                        "date_part takes 2 args (field, ts)".into(),
-                    ));
+                if args.iter().any(|value| matches!(value, Value::Null)) {
+                    return inline(Value::Null);
                 }
-                let field = field_name(&args[0], control)?;
-                extract_from_value(&field, &args[1], false, control)
+                let field = value_to_string_with_control(&args[0], control)?;
+                extract_from_value(&field, &args[1], name == "extract", control)
             }
             "age" => {
                 let (a, b) = match args.len() {
