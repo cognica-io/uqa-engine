@@ -73,12 +73,17 @@ fn projection_output_schema(
     let labels = projection_columns(projections);
     let mut columns = Vec::new();
     let mut types = Vec::new();
+    let mut records = Vec::new();
     for (position, projection) in projections.iter().enumerate() {
         let expansion_schema = match projection.expr {
             ScalarExpr::QualifiedStar(_) => expression_schema,
             _ => star_schema,
         };
         if let Some(star_columns) = projection_star_columns(&projection.expr, expansion_schema)? {
+            records.extend(
+                super::record_fields::star_fields(&projection.expr, expansion_schema)
+                    .unwrap_or_default(),
+            );
             for (column, ty) in star_columns {
                 columns.push(column);
                 types.push(ty);
@@ -94,8 +99,29 @@ fn projection_output_schema(
             params,
             Some(expression_schema),
         )?);
+        records.push(
+            if types
+                .last()
+                .is_some_and(|ty| matches!(ty, Some(ColumnType::Record | ColumnType::Composite(_))))
+            {
+                scope.bind_record_fields(
+                    routines,
+                    &projection.expr,
+                    expression_schema,
+                    subqueries,
+                    params,
+                )?
+            } else {
+                None
+            },
+        );
     }
-    Ok(RowSchema::with_types(columns, types))
+    Ok(RowSchema::with_types(columns, types).with_record_fields(
+        records
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, fields)| fields.map(|fields| (index, fields))),
+    ))
 }
 
 /// Validate every scalar expression in a query block while the physical input still carries declared SQL types. This must precede polymorphic rewrites such as `pg_typeof`, because an invalid common type is an error, not an `unknown` result.
@@ -235,6 +261,7 @@ pub(super) fn rename_schema(
         }
         None => RowSchema::with_types(columns, schema.column_types().to_vec()),
     };
+    let renamed = renamed.with_record_fields_from(schema);
     let renamed = if schema.columns_are_open(None) {
         RowSchema::with_open_columns(&renamed, qualifier)
     } else {

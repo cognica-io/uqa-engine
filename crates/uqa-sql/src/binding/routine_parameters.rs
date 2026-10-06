@@ -122,6 +122,18 @@ pub(super) fn keep_column_labels(projections: &mut [ProjectionPlan], labels: Vec
 }
 
 impl SchemaScope {
+    /// Resolve a name at the point ordered semantic analysis visits it.
+    pub(super) fn routine_parameter_reference(
+        &self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+    ) -> Option<usize> {
+        self.routine_parameters
+            .as_ref()
+            .and_then(|parameters| parameters.parameter(expression, schema))
+            .map(|position| position + 1)
+    }
+
     /// Replace each reference in `expression` that resolves to a parameter of the routine whose body is bound with the positional parameter it names. `schema` is the row scope `expression` resolves against.
     pub(super) fn canonicalize_routine_parameters(
         &self,

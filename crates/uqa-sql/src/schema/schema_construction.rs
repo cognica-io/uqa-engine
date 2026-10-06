@@ -198,6 +198,7 @@ impl RowSchema {
         metadata: SchemaBuildMetadata,
     ) -> Self {
         let SchemaBuildMetadata {
+            record_fields,
             aliases,
             alias_types,
             internal,
@@ -278,6 +279,7 @@ impl RowSchema {
                 ambiguous_unqualified,
                 ambiguous_qualified,
                 cold: Box::new(SchemaColdMetadata {
+                    record_fields,
                     columns: types.into_boxed_slice(),
                     aliases: alias_types,
                     executor_attribute_types: internal_types,

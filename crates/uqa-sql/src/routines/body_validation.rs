@@ -19,7 +19,7 @@ use crate::{
     ast::{ColumnType, CreateFunction, FunctionBody},
     binding::{
         bind_routine_parameter_references,
-        statements::{analyze_plan_result, AnalyzedResult, StatementBindingScope},
+        statements::{AnalyzedResult, StatementBindingScope},
     },
     plan::{CommandPlan, ExpressionPlan, UnifiedPlan},
     type_resolution::routine_polymorphic_type,
@@ -63,6 +63,21 @@ pub fn validate_sql_function_body(
     let mut last = None;
     for plan in plans {
         let mut statement = plan.clone();
+        // Statement inputs are analyzed before the name-lowering pass derives its
+        // output schema, so a later bad name cannot hide an earlier input error.
+        let query_result = if matches!(&statement, UnifiedPlan::Command(command) if matches!(command.as_ref(), CommandPlan::Call { .. }))
+        {
+            None
+        } else {
+            Some(crate::binding::analyze_routine_body_inputs(
+                context.compilation.routines,
+                &statement,
+                &params,
+                &scope.context(),
+                context.compilation.catalog,
+                parameters.as_ref(),
+            )?)
+        };
         if let Some(parameters) = &parameters {
             bind_routine_parameter_references(
                 context.compilation.routines,
@@ -72,10 +87,10 @@ pub fn validate_sql_function_body(
                 parameters,
             )?;
         }
-        reject_undefined_parameters(&mut statement, params.len())?;
-        last = Some(analyze_body_statement(
-            context, &statement, &params, &scope,
-        )?);
+        last = Some(match query_result {
+            Some(result) => result,
+            None => analyze_body_statement(context, &statement, &params, &scope)?,
+        });
     }
     if check_result {
         check_sql_function_result(context.compilation.types, def, last.as_ref())?;
@@ -92,24 +107,53 @@ fn analyze_body_statement(
     if let UnifiedPlan::Command(command) = plan {
         if let CommandPlan::Call { name, args } = command.as_ref() {
             let binding = scope.binding_context()?;
-            reject_output_argument_call(
-                &context.overloads,
-                context.compilation.types,
-                name,
-                args,
-                &mut |argument| {
-                    crate::binding::analyze_expression_plan_type(
-                        context.compilation.routines,
-                        argument,
-                        params,
-                        &binding,
-                    )
-                },
-            )?;
+            let call = ProcedureCallAnalysis::new(args)?;
+            let infer = |argument: &ExpressionPlan, target: Option<&ColumnType>| {
+                crate::binding::analyze_routine_body_argument(
+                    context.compilation.routines,
+                    argument,
+                    params,
+                    &binding,
+                    context.compilation.catalog,
+                    target,
+                )
+            };
+            let resolved = call.resolve(name, &context.overloads, &mut |argument| {
+                infer(argument, None)
+            })?;
+            let (arguments, _) = crate::ir::analyze_expression_call_arguments(args)?;
+            for (argument, target) in arguments.iter().zip(&resolved.invocation.argument_targets) {
+                if matches!(
+                    argument.value,
+                    ScalarExpr::Literal(Value::Str(_) | Value::Null)
+                ) {
+                    let target = context
+                        .compilation
+                        .types
+                        .resolve_catalog_column_type_name(target)?;
+                    infer(
+                        &ExpressionPlan {
+                            scalar: argument.value.clone(),
+                            subqueries: Vec::new(),
+                        },
+                        Some(&target),
+                    )?;
+                }
+            }
+            if !resolved.function.def.output_params().is_empty() {
+                return Err(output_argument_call_error());
+            }
             return Ok(AnalyzedResult::Command);
         }
     }
-    analyze_plan_result(context.compilation.routines, plan, params, scope)
+    crate::binding::analyze_routine_body_inputs(
+        context.compilation.routines,
+        plan,
+        params,
+        &scope.binding_context()?,
+        context.compilation.catalog,
+        None,
+    )
 }
 
 /// Resolve the procedure a `CALL` names and reject one with output arguments, which `PostgreSQL` does not support in SQL functions.
@@ -124,13 +168,17 @@ pub fn reject_output_argument_call(
         .result_schema(name, overloads, types, infer)?
         .is_some()
     {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: "calling procedures with output arguments is not supported in SQL functions"
-                .into(),
-        });
+        return Err(output_argument_call_error());
     }
     Ok(())
+}
+
+fn output_argument_call_error() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "0A000".into(),
+        message: "calling procedures with output arguments is not supported in SQL functions"
+            .into(),
+    }
 }
 
 /// Reject a reference to a parameter the routine does not declare, as `PostgreSQL`'s parser reports it.

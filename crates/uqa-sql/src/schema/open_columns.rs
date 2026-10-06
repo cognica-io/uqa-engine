@@ -20,6 +20,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
                 internal: input.index.executor_attributes.clone(),

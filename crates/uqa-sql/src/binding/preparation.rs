@@ -12,6 +12,8 @@ mod expression_contexts;
 mod expressions;
 mod parameters;
 mod queries;
+mod routines;
+pub(crate) use routines::{analyze_routine_body_argument, analyze_routine_body_inputs};
 mod schema_expressions;
 mod sources;
 #[cfg(test)]
@@ -181,10 +183,14 @@ struct QueryOutput {
 
 impl QueryOutput {
     fn schema(&self) -> RowSchema {
-        let schema = RowSchema::with_types(
-            self.columns.clone(),
-            self.types.iter().map(|value| value.ty.clone()).collect(),
-        );
+        let schema =
+            RowSchema::with_types(
+                self.columns.clone(),
+                self.types.iter().map(|value| value.ty.clone()).collect(),
+            )
+            .with_record_fields(self.types.iter().enumerate().filter_map(
+                |(index, value)| value.record_fields.clone().map(|fields| (index, fields)),
+            ));
         if self.open {
             RowSchema::with_open_columns(&schema, None)
         } else {
@@ -212,6 +218,15 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<Option<ColumnType>, SQLError> {
+        let mut canonical;
+        let expression = if self.scope.routine_parameters.is_some() {
+            canonical = expression.clone();
+            self.scope
+                .canonicalize_routine_parameters(&mut canonical, input);
+            &canonical
+        } else {
+            expression
+        };
         self.scope.bind_expression_type(
             self.routines,
             expression,

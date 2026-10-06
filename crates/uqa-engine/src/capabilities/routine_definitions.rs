@@ -59,6 +59,17 @@ impl RoutineTypeCatalog for Engine {
     fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError> {
         uqa_execution::catalog::projection::format_type_name(&self.catalog_execution(), ty)
     }
+    fn format_type_oid(&self, oid: u32) -> Result<String, SQLError> {
+        uqa_execution::catalog::projection::format_type_object(
+            &self.catalog_execution(),
+            i64::from(oid),
+        )
+        .map_err(SQLError::Internal)?
+        .ok_or_else(|| SQLError::Internal(format!("cache lookup failed for type {oid}")))
+    }
+    fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
+        Some(self)
+    }
     fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
         uqa_execution::catalog::security::type_inquiry::require_type_usage(
             &self.catalog_execution(),

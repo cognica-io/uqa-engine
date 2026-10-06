@@ -31,6 +31,7 @@ impl<T: EngineHook + ?Sized> OidAliasInput for T {
             ColumnType::Regproc => EngineHook::resolve_regproc(self, name),
             ColumnType::Regprocedure => EngineHook::resolve_regprocedure_input(self, name),
             ColumnType::Regnamespace => EngineHook::resolve_regnamespace(self, name),
+            ColumnType::Regrole => EngineHook::resolve_regrole(self, name),
             other => Err(SQLError::Internal(format!(
                 "{} is not an OID alias type read at analysis",
                 other.sql_name()
@@ -72,6 +73,7 @@ fn missing_object(ty: &ColumnType, name: &str) -> SQLError {
     let (sqlstate, object) = match ty {
         ColumnType::Regclass => ("42P01", "relation"),
         ColumnType::Regtype => ("42704", "type"),
+        ColumnType::Regrole => ("42704", "role"),
         ColumnType::Regproc | ColumnType::Regprocedure => ("42883", "function"),
         _ => ("3F000", "schema"),
     };
@@ -141,10 +143,14 @@ pub(crate) fn read_unknown_constant(
     text: &str,
 ) -> Result<Option<Value>, SQLError> {
     match ty {
-        ColumnType::Array(element) if is_alias(element) => {
+        ColumnType::Array(element)
+            if is_alias(element) || matches!(element.as_ref(), ColumnType::Regrole) =>
+        {
             read_constant(catalog, element, text, true).map(Some)
         }
-        scalar if is_alias(scalar) => read_constant(catalog, scalar, text, false).map(Some),
+        scalar if is_alias(scalar) || matches!(scalar, ColumnType::Regrole) => {
+            read_constant(catalog, scalar, text, false).map(Some)
+        }
         _ => Ok(None),
     }
 }

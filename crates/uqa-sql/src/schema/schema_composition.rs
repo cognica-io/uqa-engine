@@ -52,6 +52,7 @@ impl RowSchema {
             slots,
             base + names.len(),
             SchemaBuildMetadata {
+                record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
                 internal: input.index.executor_attributes.clone(),
@@ -76,6 +77,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width() + types.len(),
             SchemaBuildMetadata {
+                record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
                 internal: input.index.executor_attributes.clone(),
@@ -109,6 +111,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             base + columns.len(),
             SchemaBuildMetadata {
+                record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
                 internal,
@@ -153,14 +156,8 @@ impl RowSchema {
                 },
             )
         }));
-        alias_types.extend(
-            right
-                .index
-                .cold
-                .aliases
-                .iter()
-                .map(|(name, ty)| (name.clone(), ty.clone())),
-        );
+        let right_aliases = right.index.cold.aliases.iter();
+        alias_types.extend(right_aliases.map(|(name, ty)| (name.clone(), ty.clone())));
         for (column, slot) in &right.index.executor_attributes {
             let shifted = if *slot == NULL_SLOT {
                 NULL_SLOT
@@ -219,6 +216,7 @@ impl RowSchema {
             slots,
             left.physical_width() + right.physical_width(),
             SchemaBuildMetadata {
+                record_fields: Self::joined_record_fields(left, right, right_base),
                 aliases,
                 alias_types,
                 internal,

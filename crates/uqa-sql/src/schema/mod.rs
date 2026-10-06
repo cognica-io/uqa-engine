@@ -13,11 +13,13 @@ use std::sync::Arc;
 mod name_binding;
 mod open_columns;
 mod outer_scope;
+mod record_fields;
 mod schema_composition;
 mod schema_construction;
 mod schema_layout;
 mod schema_projection;
 mod schema_remap;
+pub use record_fields::RecordFields;
 
 const NULL_SLOT: usize = usize::MAX;
 
@@ -70,7 +72,7 @@ impl ColumnIdentity {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SchemaIndex {
     /// Public/materialized output labels in logical order.
     columns: Box<[String]>,
@@ -96,8 +98,9 @@ struct SchemaIndex {
     cold: Box<SchemaColdMetadata>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SchemaColdMetadata {
+    record_fields: HashMap<usize, RecordFields>,
     /// `None` is an as-yet unresolved type, not a runtime NULL value.
     columns: Box<[Option<ColumnType>]>,
     aliases: HashMap<ColumnIdentity, Option<ColumnType>>,
@@ -119,6 +122,7 @@ struct SchemaColdMetadata {
 
 #[derive(Default)]
 struct SchemaBuildMetadata {
+    record_fields: HashMap<usize, RecordFields>,
     aliases: HashMap<ColumnIdentity, usize>,
     alias_types: HashMap<ColumnIdentity, Option<ColumnType>>,
     internal: HashMap<InternalColumnRef, usize>,

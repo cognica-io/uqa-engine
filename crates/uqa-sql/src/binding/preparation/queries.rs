@@ -72,7 +72,8 @@ impl Preparation<'_> {
                 for order in order_by {
                     self.expression(&order.expr, &schema, subqueries)?;
                 }
-                self.slice(limit.as_deref(), offset.as_deref(), subqueries)?;
+                let input = overlay_outer_schema(&RowSchema::default(), outer);
+                self.slice(limit.as_deref(), offset.as_deref(), &input, subqueries)?;
                 Ok(output)
             }
         }
@@ -104,8 +105,13 @@ impl Preparation<'_> {
                 crate::type_resolution::CommonTypeContext::set_operation(kind),
                 &mut values,
             )?;
+            let fields = super::super::record_fields::common_fields(
+                values.iter().map(|value| value.record_fields.as_ref()),
+            );
             *left = ExpressionType::resolved(ty.clone());
+            left.record_fields.clone_from(&fields);
             *right = ExpressionType::resolved(ty);
+            right.record_fields = fields;
         }
         super::super::type_resolution::set_operation_output_schema(
             &left.schema(),
@@ -153,7 +159,7 @@ impl Preparation<'_> {
                     expression,
                     &block.projections,
                     &source,
-                    None,
+                    outer,
                     &self.parameters.values(),
                 )?;
             let mut value = self.expression(expression, &input, &block.subqueries)?;
@@ -166,13 +172,14 @@ impl Preparation<'_> {
         self.slice(
             block.limit.as_ref(),
             block.offset.as_ref(),
+            &input,
             &block.subqueries,
         )?;
         crate::semantics::grouping_sets::validate_grouped_expressions(
             self.routines,
             block,
             &source,
-            None,
+            outer,
             &self.parameters.values(),
         )?;
         if !preserve_unknown {
@@ -207,9 +214,13 @@ impl Preparation<'_> {
                     }
                     _ => expansion.columns_are_open(None),
                 };
-                for (column, ty) in columns {
+                let fields = super::super::record_fields::star_fields(&projection.expr, expansion)
+                    .unwrap_or_default();
+                for ((column, ty), fields) in columns.into_iter().zip(fields) {
                     output.columns.push(column);
-                    output.types.push(ExpressionType::resolved(ty));
+                    let mut value = ExpressionType::resolved(ty);
+                    value.record_fields = fields;
+                    output.types.push(value);
                 }
             } else {
                 output.columns.push(label);
@@ -252,8 +263,12 @@ impl Preparation<'_> {
         let types = columns
             .iter_mut()
             .map(|column| {
-                self.common(crate::type_resolution::CommonTypeContext::Values, column)
-                    .map(ExpressionType::resolved)
+                let ty = self.common(crate::type_resolution::CommonTypeContext::Values, column)?;
+                let mut value = ExpressionType::resolved(ty);
+                value.record_fields = super::super::record_fields::common_fields(
+                    column.iter().map(|item| item.record_fields.as_ref()),
+                );
+                Ok::<ExpressionType, SQLError>(value)
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(QueryOutput {
@@ -287,15 +302,15 @@ impl Preparation<'_> {
         &mut self,
         limit: Option<&ScalarExpr>,
         offset: Option<&ScalarExpr>,
+        input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        let empty = RowSchema::default();
         for (expression, context) in offset
             .map(|value| (value, "OFFSET"))
             .into_iter()
             .chain(limit.map(|value| (value, "LIMIT")))
         {
-            let mut value = self.expression(expression, &empty, subqueries)?;
+            let mut value = self.expression(expression, input, subqueries)?;
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::BigInteger)?;
             let ty = value.ty.as_ref().expect("coerced slice expression");
@@ -306,6 +321,12 @@ impl Preparation<'_> {
                         "argument of {context} must be type bigint, not type {}",
                         ty.regtype_name()
                     ),
+                ));
+            }
+            if analysis::references_local_column(expression, input) {
+                return Err(error(
+                    "42P10",
+                    format!("argument of {context} must not contain variables"),
                 ));
             }
         }

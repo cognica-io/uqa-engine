@@ -17,7 +17,11 @@ impl Preparation<'_> {
         let lookup = self.scope.resolution.lookup_mode();
         self.scope.set_command_lookup_mode(command);
         let result = (|| {
-            let previous = self.ctes(command.ctes(), None)?;
+            let parameters = self.scope.routine_parameters.clone();
+            let outer = parameters
+                .as_ref()
+                .map(crate::binding::RoutineParameterScope::schema);
+            let previous = self.ctes(command.ctes(), outer)?;
             let result = self.command_inner(command);
             self.scope.restore_cte_schemas(previous);
             result
@@ -27,30 +31,39 @@ impl Preparation<'_> {
     }
 
     fn command_inner(&mut self, command: &CommandPlan) -> Result<Option<RowSchema>, SQLError> {
+        let parameters = self.scope.routine_parameters.clone();
+        let outer = parameters
+            .as_ref()
+            .map(crate::binding::RoutineParameterScope::schema);
         if command.mutation_target().is_none() {
             for query in command.query_inputs() {
-                self.query(query, None)?;
+                self.query(query, outer)?;
             }
             return Ok(None);
         }
         if let Some(source) = command.source_input() {
-            self.source(source, command.scalar_subqueries(), None)?;
+            self.source(source, command.scalar_subqueries(), outer)?;
         }
         let (target, input) = self.scope.command_expression_schema(
             self.routines,
             command,
             &self.parameters.values(),
+            outer,
         )?;
+        let input = outer.map_or(input.clone(), |outer| {
+            RowSchema::with_outer_schema(&input, outer)
+        });
         let subqueries = command.scalar_subqueries();
         match command {
             CommandPlan::Insert(insert) => {
                 targets::validate_repeated_targets(&insert.columns, true)?;
                 validate_target_columns(&insert.table, insert.columns.iter(), &target)?;
+                let values_input = outer.cloned().unwrap_or_default();
                 for row in &insert.rows {
-                    self.insert_row(row, &insert.columns, &target, &input, subqueries)?;
+                    self.insert_row(row, &insert.columns, &target, &values_input, subqueries)?;
                 }
                 if let Some(source) = &insert.source {
-                    let mut output = self.query_output(source, None, true)?;
+                    let mut output = self.query_output(source, outer, true)?;
                     self.insert_values(
                         &mut output.types,
                         &insert.columns,
@@ -112,11 +125,20 @@ impl Preparation<'_> {
             CommandPlan::Merge(merge) => self.merge(merge, &target, &input, subqueries)?,
             _ => {}
         }
+        self.command_result(command, &target, &input)
+    }
+
+    fn command_result(
+        &mut self,
+        command: &CommandPlan,
+        target: &RowSchema,
+        input: &RowSchema,
+    ) -> Result<Option<RowSchema>, SQLError> {
         let returning = command.returning().unwrap_or_default();
         if returning.is_empty() {
             return Ok(None);
         }
-        let mut output = self.projections(returning, &target, &input, subqueries)?;
+        let mut output = self.projections(returning, target, input, command.scalar_subqueries())?;
         self.resolve_targets(&mut output)?;
         Ok(Some(output.schema()))
     }

@@ -4,13 +4,52 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::check_sql_function_result;
+use super::{check_sql_function_result, sql_function_result_layout, SQLFunctionResultKind};
 use crate::{
-    ast::{ColumnDef, ColumnType, CreateFunction, Statement},
+    ast::{ColumnDef, ColumnType, CompositeTypeReference, CreateFunction, Statement},
     binding::statements::AnalyzedResult,
+    expr::composites::{CompositeAttribute, CompositeTypeCatalog, CompositeTypeDescriptor},
     routines::declaration::RoutineTypeCatalog,
     SQLError,
 };
+
+#[test]
+fn caller_record_types_distinguish_sql_target_columns_from_whole_records() {
+    let source = [Some(ColumnType::Integer), Some(ColumnType::Text)];
+    let target = [
+        super::SQLFunctionResultColumn {
+            name: "widened".into(),
+            ty: ColumnType::BigInteger,
+        },
+        super::SQLFunctionResultColumn {
+            name: "label".into(),
+            ty: ColumnType::Varchar(Some(8)),
+        },
+    ];
+    super::validate_anonymous_record_result(
+        &Types,
+        &source,
+        &target,
+        Some(SQLFunctionResultKind::Tuple),
+    )
+    .unwrap();
+    let whole = super::validate_anonymous_record_result(
+        &Types,
+        &source,
+        &target,
+        Some(SQLFunctionResultKind::Value),
+    )
+    .unwrap_err();
+    assert_eq!(whole.sqlstate(), Some("42804"));
+    assert_eq!(
+        whole.detail(),
+        Some("Returned type integer at ordinal position 1, but query expects bigint.")
+    );
+    let procedural =
+        super::validate_anonymous_record_result(&Types, &source, &target, None).unwrap_err();
+    assert_eq!(procedural.sqlstate(), Some("42804"));
+    assert_eq!(procedural.detail(), Some("Returned type integer does not match expected type bigint in column \"widened\" (position 1)."));
+}
 
 struct Types;
 
@@ -20,11 +59,22 @@ impl RoutineTypeCatalog for Types {
     }
 
     fn resolve_catalog_column_type(&self, name: &str) -> Option<ColumnType> {
-        ColumnType::from_sql_name(name).ok()
+        self.resolve_catalog_column_type_name(name).ok()
     }
 
     fn resolve_catalog_column_type_name(&self, name: &str) -> Result<ColumnType, SQLError> {
-        ColumnType::from_sql_name(name)
+        match name {
+            "rb.pair" => Ok(pair(16384)),
+            "rb.other" => Ok(pair(16385)),
+            "rb.pair_domain" => Ok(ColumnType::Domain {
+                schema: "rb".into(),
+                name: "pair_domain".into(),
+                array_oid: Some(16396),
+                oid: 16386,
+                base: Box::new(pair(16384)),
+            }),
+            _ => ColumnType::from_sql_name(name),
+        }
     }
 
     fn resolve_catalog_user_type_by_oid(&self, _: u32) -> Option<ColumnType> {
@@ -37,6 +87,44 @@ impl RoutineTypeCatalog for Types {
 
     fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError> {
         Ok(ty.regtype_name())
+    }
+
+    fn composite_types(&self) -> Option<&dyn CompositeTypeCatalog> {
+        Some(self)
+    }
+}
+
+fn pair(oid: u32) -> ColumnType {
+    ColumnType::Composite(CompositeTypeReference {
+        schema: "rb".into(),
+        name: if oid == 16384 { "pair" } else { "other" }.into(),
+        oid,
+        array_oid: oid + 10,
+        relation_oid: oid + 20,
+    })
+}
+
+impl CompositeTypeCatalog for Types {
+    fn composite_type(
+        &self,
+        type_oid: u32,
+    ) -> Result<Option<std::sync::Arc<CompositeTypeDescriptor>>, SQLError> {
+        Ok(Some(std::sync::Arc::new(CompositeTypeDescriptor {
+            type_oid,
+            relation_oid: type_oid + 20,
+            attributes: vec![
+                CompositeAttribute {
+                    name: "a".into(),
+                    ty: ColumnType::Integer,
+                    number: 1,
+                },
+                CompositeAttribute {
+                    name: "b".into(),
+                    ty: ColumnType::Text,
+                    number: 3,
+                },
+            ],
+        })))
     }
 }
 
@@ -237,5 +325,102 @@ fn a_record_without_output_parameters_accepts_any_row() {
                     .to_string()
             ))
         );
+    }
+}
+
+#[test]
+fn named_composite_results_distinguish_one_value_from_live_attribute_columns() {
+    for header in [
+        "FUNCTION f() RETURNS rb.pair",
+        "FUNCTION f() RETURNS SETOF rb.pair",
+        "FUNCTION f(OUT result rb.pair)",
+    ] {
+        let definition = definition(header);
+        let expanded =
+            AnalyzedResult::Rows(vec![Some(ColumnType::Integer), Some(ColumnType::Text)]);
+        let layout = sql_function_result_layout(&Types, &definition, Some(&expanded)).unwrap();
+        assert_eq!(layout.kind, SQLFunctionResultKind::Tuple);
+        assert_eq!(
+            layout
+                .columns
+                .unwrap()
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+        let whole = AnalyzedResult::Rows(vec![Some(pair(16384))]);
+        assert_eq!(
+            sql_function_result_layout(&Types, &definition, Some(&whole))
+                .unwrap()
+                .kind,
+            SQLFunctionResultKind::Value
+        );
+    }
+    assert_eq!(
+        checked(
+            "FUNCTION f() RETURNS rb.pair",
+            rows(&[Some(ColumnType::Integer)])
+        ),
+        Some((
+            "return type mismatch in function declared to return rb.pair".into(),
+            "Final statement returns too few columns.".into()
+        ))
+    );
+    assert_eq!(
+        checked(
+            "FUNCTION f() RETURNS rb.pair_domain",
+            rows(&[Some(ColumnType::Integer), Some(ColumnType::Text)])
+        ),
+        Some((
+            "return type mismatch in function declared to return rb.pair_domain".into(),
+            "Final statement must return exactly one column.".into()
+        ))
+    );
+}
+
+#[test]
+fn anonymous_row_assignment_checks_shape_and_types_when_the_target_is_named() {
+    for (fields, detail) in [
+        (
+            vec![Some(ColumnType::Integer)],
+            "Input has too few columns.",
+        ),
+        (
+            vec![Some(ColumnType::Text), Some(ColumnType::Integer)],
+            "Cannot cast type text to integer in column 1.",
+        ),
+    ] {
+        let schema =
+            crate::RowSchema::with_types(vec!["row".into()], vec![Some(ColumnType::Record)])
+                .with_record_fields([(0, fields.into())]);
+        let error = check_sql_function_result(
+            &Types,
+            &definition("FUNCTION f() RETURNS rb.pair"),
+            Some(&AnalyzedResult::Schema(schema)),
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42846"));
+        assert_eq!(error.to_string(), "cannot cast type record to rb.pair");
+        assert_eq!(error.detail(), Some(detail));
+    }
+}
+
+#[test]
+fn a_whole_returned_record_preserves_integer_width_and_unknown_field_identity() {
+    let target = [ColumnType::Integer, ColumnType::Text];
+    for (source, detail) in [
+        (
+            vec![Some(ColumnType::BigInteger), Some(ColumnType::Text)],
+            "Returned type bigint at ordinal position 1, but query expects integer.",
+        ),
+        (
+            vec![None, None],
+            "Returned type unknown at ordinal position 1, but query expects integer.",
+        ),
+    ] {
+        let error = super::validate_sql_function_record(&Types, &source, &target).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42804"));
+        assert_eq!(error.detail(), Some(detail));
     }
 }
