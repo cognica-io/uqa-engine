@@ -123,3 +123,60 @@ fn analyzed_fixed_calls_retain_their_declaration_before_optimization() {
         assert!(observed, "{sql}");
     }
 }
+
+#[test]
+fn preparation_preserves_untyped_callback_identity_and_original_arguments() {
+    struct Callbacks;
+    impl FunctionTypeResolver for Callbacks {
+        fn has_untyped_function(&self, name: &str) -> bool {
+            name == "pg_get_viewdef"
+        }
+
+        fn resolve_function_type(
+            &self,
+            _: &str,
+            _: Option<&FunctionBinding>,
+            _: &[Option<String>],
+            _: &[Option<ColumnType>],
+            _: bool,
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+    }
+    impl RoutineResolution for Callbacks {
+        fn has_registered_scalar_function(&self, name: &str) -> bool {
+            self.has_untyped_function(name)
+        }
+    }
+
+    for sql in [
+        "SELECT pg_get_viewdef(0::oid)",
+        "SELECT pg_get_viewdef(true)",
+        "SELECT pg_get_viewdef('callback text, not oid input')",
+        "UPDATE assignment_target SET id=id RETURNING pg_get_viewdef('callback text')",
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        read_prepared_inputs(&Callbacks, &mut plan, &[], &assignment_context(), None).unwrap();
+        let mut observed = false;
+        plan.visit_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::Func { name, binding, .. } = expression {
+                if name == "pg_get_viewdef" {
+                    assert!(binding.is_none(), "{sql}");
+                    observed = true;
+                }
+            }
+        });
+        assert!(observed, "{sql}");
+    }
+    let mut plan = UnifiedPlan::lower(
+        crate::compile("SELECT pg_catalog.pg_get_viewdef(0::oid)")
+            .unwrap()
+            .remove(0),
+    );
+    read_prepared_inputs(&Callbacks, &mut plan, &[], &assignment_context(), None).unwrap();
+    plan.visit_scalar_expressions(&mut |expression| {
+        if let ScalarExpr::Func { binding, .. } = expression {
+            assert!(binding.as_ref().is_some_and(|binding| binding.builtin));
+        }
+    });
+}

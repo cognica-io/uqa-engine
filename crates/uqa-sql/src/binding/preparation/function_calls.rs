@@ -72,6 +72,13 @@ impl Preparation<'_> {
         binding: Option<&FunctionBinding>,
         arguments: &ObservedFunctionArguments,
     ) -> Result<SelectedFunctionArguments, SQLError> {
+        if binding.is_none() && self.routines.has_untyped_function(name) {
+            return Ok(SelectedFunctionArguments {
+                overload: None,
+                positions: None,
+                kind: None,
+            });
+        }
         let types = arguments.types();
         let (overload, positions) = if matches!(
             binding.and_then(|binding| binding.dispatch),
@@ -143,6 +150,9 @@ impl Preparation<'_> {
         arguments: &mut ObservedFunctionArguments,
         selection: &SelectedFunctionArguments,
     ) -> Result<(), SQLError> {
+        if binding.is_none() && self.routines.has_untyped_function(name) {
+            return Ok(());
+        }
         let types = arguments.types();
         if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
             binding.and_then(|binding| binding.dispatch)

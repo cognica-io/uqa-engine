@@ -42,7 +42,7 @@ pub struct ResolvedFixedBuiltinCall {
     pub builtin_non_immutable: bool,
 }
 
-/// Resolve an implemented fixed-signature built-in together with visible SQL routine overloads. `None` means `name` is outside the fixed registry.
+/// Resolve an implemented fixed-signature built-in together with visible SQL routine overloads. `None` leaves calls outside this registry or claimed by an untyped host callback to their existing dispatch.
 #[doc(hidden)]
 pub fn resolve_fixed_builtin_call(
     name: &str,
@@ -52,6 +52,9 @@ pub fn resolve_fixed_builtin_call(
     explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ResolvedFixedBuiltinCall>, SQLError> {
+    if binding.is_none() && resolver.is_some_and(|resolver| resolver.has_untyped_function(name)) {
+        return Ok(None);
+    }
     if super::range::function_type(name, binding, argument_types).is_some() {
         return Ok(None);
     }
