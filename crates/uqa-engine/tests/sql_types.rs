@@ -596,3 +596,42 @@ fn cast_text_to_bytea_returns_bytes() {
     let result = exec(&engine, "SELECT 'hello'::bytea AS v FROM t WHERE id = 1");
     assert_eq!(result.rows[0]["v"], Value::Bytes(b"hello".to_vec()));
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn multidimensional_array_input_matches_postgresql_and_survives_reopen(#[case] provider: usize) {
+    let open = |path: &std::path::Path| match provider {
+        0 => Engine::new(),
+        1 => Engine::open(path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("multidimensional.db");
+    let engine = open(&path);
+    let transcript = include_str!(
+        "../../../tests/parity/pg18/multidimensional_array_input_oracle.expected.json"
+    );
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider != 0 {
+        drop(engine);
+        let engine = open(&path);
+        let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+        restored["cases"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|case| case["id"] == "reopen_values");
+        assert_eq!(restored["cases"].as_array().unwrap().len(), 1);
+        crate::pg18_oracle::verify(&engine, &restored.to_string());
+    }
+}

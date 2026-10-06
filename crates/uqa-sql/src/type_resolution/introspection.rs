@@ -186,30 +186,32 @@ impl Binder<'_, '_> {
                 mut lhs,
                 mut rhs,
             } => {
-                let result = self
-                    .semantic(self.infer(&lhs).and_then(|left| {
-                        let right = self.infer(&rhs)?;
-                        super::operators::binary_result_type_with_control(
-                            op,
-                            left.as_deref(),
-                            right.as_deref(),
-                            &self.control,
-                        )
-                    }))?
+                let operands = self
+                    .semantic(self.binary_operand_types(op, &lhs, &rhs))?
                     .flatten();
-                let comparison = self
-                    .semantic(self.comparison_types(op, &lhs, &rhs))?
-                    .flatten();
+                let real_inputs = operands.as_deref().map_or([false; 2], |types| {
+                    [
+                        matches!(types[0], ColumnType::Real),
+                        matches!(types[1], ColumnType::Real),
+                    ]
+                });
                 self.in_place(&mut lhs)?;
                 self.in_place(&mut rhs)?;
-                if comparison.is_some() {
-                    self.coerce_comparison(comparison, &mut lhs, &mut rhs)?;
-                } else if let Some(ty) = result
-                    .as_deref()
-                    .filter(|ty| matches!(ty, ColumnType::Real | ColumnType::DoublePrecision))
-                {
-                    self.wrap_declared(&mut lhs, ty)?;
-                    self.wrap_declared(&mut rhs, ty)?;
+                self.coerce_comparison(operands, &mut lhs, &mut rhs)?;
+                if matches!(
+                    op,
+                    crate::ast::BinaryOp::Add
+                        | crate::ast::BinaryOp::Subtract
+                        | crate::ast::BinaryOp::Multiply
+                        | crate::ast::BinaryOp::Divide
+                ) {
+                    // Value erases float width. Runtime evaluation retains each selected real input even when SQL analysis needs no conversion.
+                    if real_inputs[0] {
+                        self.wrap_declared(&mut lhs, &ColumnType::Real)?;
+                    }
+                    if real_inputs[1] {
+                        self.wrap_declared(&mut rhs, &ColumnType::Real)?;
+                    }
                 }
                 ScalarExpr::Binary { op, lhs, rhs }
             }
@@ -252,13 +254,13 @@ impl Binder<'_, '_> {
                 mut high,
             } => {
                 let types = [
-                    self.semantic(self.comparison_types(
+                    self.semantic(self.binary_operand_types(
                         crate::ast::BinaryOp::GreaterEqual,
                         &expr,
                         &low,
                     ))?
                     .flatten(),
-                    self.semantic(self.comparison_types(
+                    self.semantic(self.binary_operand_types(
                         crate::ast::BinaryOp::LessEqual,
                         &expr,
                         &high,

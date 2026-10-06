@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Comparison operands take the argument types of their selected SQL operators before planning. An `unknown` literal or parameter is coerced to the type its operator declares, as `PostgreSQL` parse analysis coerces it, and numeric operands keep their selected coercions.
+//! Binary operator operands take the argument types of their selected SQL operators before planning. An `unknown` literal or parameter is coerced to the type its operator declares, as `PostgreSQL` parse analysis coerces it, and numeric operands keep their selected coercions.
 
 use super::{Binder, BindingCall, ColumnType, Produced, SQLError, ScalarExpr};
 use crate::ast::{BinaryOp, FunctionDispatch};
@@ -12,19 +12,13 @@ use crate::type_resolution::{common::base_type, operators::binary_operator_types
 use uqa_core::Value;
 
 impl Binder<'_, '_> {
-    /// Selected operand and result types for a comparison whose operands need coercion.
-    pub(super) fn comparison_types(
+    /// Selected operand and result types for a binary operator before its inputs are coerced.
+    pub(super) fn binary_operand_types(
         &self,
         op: BinaryOp,
         left: &ScalarExpr,
         right: &ScalarExpr,
     ) -> Result<Option<Produced<[ColumnType; 3]>>, SQLError> {
-        // An arithmetic operator reads an `unknown` operand with the operand type it selects, as `make_op` coerces it; two typed operands keep their own types.
-        let reads_unknown_operand =
-            is_arithmetic(op) && unknown_input(left) != unknown_input(right);
-        if !is_comparison(op) && !reads_unknown_operand {
-            return Ok(None);
-        }
         let left_type = self.common_context(left)?;
         let right_type = self.common_context(right)?;
         self.operator_types(op, left, left_type, right, right_type)
@@ -42,14 +36,6 @@ impl Binder<'_, '_> {
         if (left_type.is_none() && !unknown_input(left))
             || (right_type.is_none() && !unknown_input(right))
         {
-            return Ok(None);
-        }
-        let coerced = left_type
-            .as_deref()
-            .into_iter()
-            .chain(right_type.as_deref())
-            .any(|ty| coerced_operand_type(base_type(ty)));
-        if !coerced && left_type.is_some() && right_type.is_some() {
             return Ok(None);
         }
         binary_operator_types_with_control(
@@ -78,7 +64,7 @@ impl Binder<'_, '_> {
         self.common_cast(expression, target)
     }
 
-    /// Bind both operands of a comparison to the selected operator's argument types.
+    /// Bind both operands to the selected operator's argument types.
     pub(super) fn coerce_comparison(
         &mut self,
         types: Option<Produced<[ColumnType; 3]>>,
@@ -141,7 +127,7 @@ impl Binder<'_, '_> {
         }
         for item in list {
             if let Some(types) = self
-                .semantic(self.comparison_types(BinaryOp::Equal, value, item))?
+                .semantic(self.binary_operand_types(BinaryOp::Equal, value, item))?
                 .flatten()
             {
                 self.operand_cast(item, &types[1])?;
@@ -165,9 +151,9 @@ impl Binder<'_, '_> {
                     return Ok(());
                 };
                 let types = [
-                    self.semantic(self.comparison_types(BinaryOp::GreaterEqual, value, low))?
+                    self.semantic(self.binary_operand_types(BinaryOp::GreaterEqual, value, low))?
                         .flatten(),
-                    self.semantic(self.comparison_types(BinaryOp::LessEqual, value, high))?
+                    self.semantic(self.binary_operand_types(BinaryOp::LessEqual, value, high))?
                         .flatten(),
                 ];
                 self.coerce_between(types, value, low, high)
@@ -185,7 +171,7 @@ impl Binder<'_, '_> {
             return Ok(());
         };
         let types = self
-            .semantic(self.comparison_types(BinaryOp::Equal, left, right))?
+            .semantic(self.binary_operand_types(BinaryOp::Equal, left, right))?
             .flatten();
         self.coerce_comparison(types, left, right)
     }
@@ -235,25 +221,6 @@ impl Binder<'_, '_> {
     }
 }
 
-fn is_comparison(op: BinaryOp) -> bool {
-    matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    )
-}
-
-fn is_arithmetic(op: BinaryOp) -> bool {
-    matches!(
-        op,
-        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
-    )
-}
-
 fn comparison_operator(operator: &str) -> Option<BinaryOp> {
     Some(match operator {
         "=" => BinaryOp::Equal,
@@ -270,26 +237,6 @@ fn unknown_input(expression: &ScalarExpr) -> bool {
     matches!(
         expression,
         ScalarExpr::Literal(Value::Null | Value::Str(_)) | ScalarExpr::Param(_)
-    )
-}
-
-/// Operand types whose comparisons record their coercions: the numeric types, which select among several operator signatures, and `oid` with its alias types, whose comparisons are the `oid` operators that an alias operand is relabeled to, as `PostgreSQL` relabels it.
-fn coerced_operand_type(ty: &ColumnType) -> bool {
-    matches!(
-        ty,
-        ColumnType::SmallInteger
-            | ColumnType::Integer
-            | ColumnType::BigInteger
-            | ColumnType::Real
-            | ColumnType::DoublePrecision
-            | ColumnType::Numeric { .. }
-            | ColumnType::Oid
-            | ColumnType::Regclass
-            | ColumnType::Regtype
-            | ColumnType::Regproc
-            | ColumnType::Regprocedure
-            | ColumnType::Regnamespace
-            | ColumnType::Regrole
     )
 }
 

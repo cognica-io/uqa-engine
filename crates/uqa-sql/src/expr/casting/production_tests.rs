@@ -8,6 +8,50 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn multidimensional_casts_convert_scalar_leaves_and_retain_bounds_under_control() {
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let text = Value::Str("[-2:-1][4:5]={{1,2},{3,4}}".into());
+    let expected = Value::Array(
+        ArrayValue::with_lower_bounds(
+            vec![
+                Value::List(vec![Value::Int(1), Value::Int(2)]),
+                Value::List(vec![Value::Int(3), Value::Int(4)]),
+            ],
+            vec![-2, 4],
+        )
+        .unwrap(),
+    );
+    for target in ["integer[][]", "integer [] []", "integer[][][]"] {
+        let output = cast_value_from_with_control(&text, target, None, &control).unwrap();
+        assert_eq!(*output, expected);
+        assert_eq!(budget.used(), output.reserved_bytes());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+    let output =
+        cast_value_from_with_control(&expected, "bigint[][]", Some("integer[][]"), &control)
+            .unwrap();
+    assert_eq!(*output, expected);
+    assert_eq!(budget.used(), output.reserved_bytes());
+    drop(output);
+    let error = cast_value_from_with_control(
+        &Value::Str("{{1,invalid}}".into()),
+        "integer[][]",
+        None,
+        &control,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22P02"));
+    assert_eq!(budget.used(), 0);
+    token.cancel();
+    let error = cast_value_from_with_control(&text, "integer[][]", None, &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("57014"));
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn controlled_casts_preserve_arrays_character_numeric_temporal_and_binary_semantics() {
     let budget = MemoryBudget::new(1 << 20);
     let original = CancellationToken::new();

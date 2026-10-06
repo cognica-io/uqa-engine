@@ -41,7 +41,7 @@ pub fn fold_stored_enum_constants(
     transfer(expression, &bound, &mut EnumConstants { catalog })
 }
 
-/// Store the coercions binding adds to function arguments and the operands of an operator, as `PostgreSQL` stores the `RelabelType` nodes and coerced constants of an analyzed expression: an `unknown` literal becomes the constant the selected operand type's input function read (`1` in `a + '1'`, `'16384'::oid` against a `regclass` column), an operand of `oid` or one of its alias types gains its cast to `oid`, and an array operand its cast to `oid[]`. Selected function arguments and CASE result arms retain their input casts, including runtime text-to-regclass conversion, integer-to-bigint conversion, array coercions and domain-to-base relabels. Constants of the types whose input consults the catalog keep their cast, which the stored expression's binding resolves. Returns whether anything changed.
+/// Store the conversions selected for operator operands, function arguments and CASE result arms, as `PostgreSQL` stores analyzed casts and typed constants. Each operand keeps its operator's declared input type, including numeric conversions, array coercions and domain-to-base relabels. Runtime annotations of an unchanged carrier type do not become stored SQL casts. Catalog input constants keep their cast for identity binding; other unknown literals retain the selected input function's typed value. Returns whether anything changed.
 pub fn store_operand_coercions(
     expression: &mut ScalarExpr,
     schema: &dyn ScalarTypeSchema,
@@ -54,7 +54,15 @@ pub fn store_operand_coercions(
         params,
         resolver,
     );
-    transfer(expression, &bound, &mut OperatorCoercions)
+    transfer(
+        expression,
+        &bound,
+        &mut OperatorCoercions {
+            schema,
+            params,
+            resolver,
+        },
+    )
 }
 
 /// What a transfer takes from the bound copy of a stored expression.
@@ -90,9 +98,13 @@ impl Folding for EnumConstants<'_> {
     }
 }
 
-struct OperatorCoercions;
+struct OperatorCoercions<'a> {
+    schema: &'a dyn ScalarTypeSchema,
+    params: &'a [SQLParam],
+    resolver: &'a dyn FunctionTypeResolver,
+}
 
-impl Folding for OperatorCoercions {
+impl Folding for OperatorCoercions<'_> {
     fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError> {
         let ScalarExpr::TypedLiteral {
             value,
@@ -116,10 +128,26 @@ impl Folding for OperatorCoercions {
     }
 
     fn added_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool {
-        if casts.is_empty() || !casts.iter().all(|ty| *ty == "oid" || *ty == "oid[]") {
+        if casts.is_empty() {
             return false;
         }
-        store_casts(stored, casts)
+        let mut source =
+            super::scalar_type_with_resolver(stored, self.schema, self.params, self.resolver)
+                .ok()
+                .flatten()
+                .map(|ty| ty.without_type_modifiers());
+        let mut changed = false;
+        for ty in casts.iter().rev() {
+            let target = ColumnType::from_sql_name(ty)
+                .ok()
+                .map(|ty| ty.without_type_modifiers());
+            // Runtime binding annotates erased carrier widths with identity casts. The catalog retains actual analysis conversions, including domain-to-base relabels, without inventing those annotations in stored SQL.
+            if source.is_none() || source != target {
+                changed |= store_casts(stored, std::slice::from_ref(ty));
+            }
+            source = target;
+        }
+        changed
     }
 
     fn argument_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool {
@@ -454,3 +482,6 @@ pub fn stored_enum_constant(value: Value, target: &ColumnType) -> ScalarExpr {
         parameter_index: None,
     }
 }
+
+#[cfg(test)]
+mod tests;

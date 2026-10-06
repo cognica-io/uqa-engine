@@ -44,6 +44,10 @@ Text input to an integer type reads what PostgreSQL's `int2in`, `int4in` and `in
 
 Serial declarations allocate generated integer identities. Sequence functions `nextval`, `currval`, `lastval`, and `setval` are available, and standalone sequences can be created explicitly. Identity-owned sequence syntax is not implemented.
 
+## Array dimensions and input
+
+Array values retain their actual dimensions and lower bounds. Repeated brackets such as `integer[][]` record a declaration's dimensions but do not enforce the value's rank; both `integer[]` and `integer[][]` accept `{{1,2},{3,4}}` and convert each leaf to integer. Explicit bounds such as `[-2:-1][4:5]={{1,2},{3,4}}` survive compatible casts, assignment and reopen. Element modifiers apply to each scalar value, so `{{1.235,NULL}}` cast to `numeric(5,2)[][]` becomes `{{1.24,NULL}}`. Invalid integer leaves report `22P02` with the integer input diagnostic.
+
 ## Catalog vectors
 
 `int2vector` and `oidvector` accept space-separated integer text and preserve their declared identity through domains, assignment, prepared parameters and persistence. Elements are non-NULL signed 16-bit integers or unsigned 32-bit OIDs, respectively. Text input creates exactly one dimension with lower bound zero; an empty text vector has bounds `[0:-1]`, length zero and cardinality zero. `anyarray` functions preserve the vector type while changing its array metadata: `trim_array` and `array_sample` return nonempty results with lower bound one, or dimensionless empty results. The `anycompatiblearray` functions `array_cat`, `array_append`, `array_prepend`, `array_remove` and `array_replace` return ordinary arrays, with the common element type selected from their arguments; for example, appending a `smallint` to an `int2vector` returns `smallint[]`, while appending an `integer` returns `integer[]`. An outer `int2vector[]` or `oidvector[]` treats each vector as one element, even when its contents are empty or have different lengths.
