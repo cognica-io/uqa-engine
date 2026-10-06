@@ -12,7 +12,6 @@ use crate::{
     },
     expr::value_type_name,
     routines::declaration::RoutineTypeCatalog,
-    type_resolution::canonical_routine_type_name,
     SQLError,
 };
 use uqa_core::Value;
@@ -114,26 +113,6 @@ pub fn specialized_definition(
         }
     }
     Ok(Some(specialized))
-}
-
-pub fn validate_anonymous_record_column_types(
-    source_types: &[Option<crate::ast::ColumnType>],
-    target_types: &[String],
-) -> Result<(), SQLError> {
-    if source_types.len() != target_types.len() {
-        return Err(anonymous_record_shape_error());
-    }
-    for (source, target) in source_types.iter().zip(target_types) {
-        let Some(source) = source else {
-            continue;
-        };
-        let source = crate::type_resolution::canonical_column_type_name(source);
-        let target = canonical_routine_type_name(target);
-        if !crate::type_resolution::routine_type_accepts_implicit_cast(&source, &target) {
-            return Err(anonymous_record_shape_error());
-        }
-    }
-    Ok(())
 }
 
 pub fn runtime_record_column_type(value: &Value) -> Option<crate::ast::ColumnType> {

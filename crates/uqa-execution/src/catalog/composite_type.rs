@@ -15,6 +15,7 @@ use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 mod descriptors;
 mod records;
+pub mod relations;
 
 pub use descriptors::CompositeDescriptorCache;
 

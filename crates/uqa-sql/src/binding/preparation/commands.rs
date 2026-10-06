@@ -154,6 +154,10 @@ impl Preparation<'_> {
         if let Some(predicate) = &merge.target_predicate {
             self.require_boolean(predicate, input, subqueries, "WHERE")?;
         }
+        let parameters = self.scope.routine_parameters.clone();
+        let outer = parameters
+            .as_ref()
+            .map(crate::binding::RoutineParameterScope::schema);
         let target_qualifier = merge
             .target_alias
             .as_deref()
@@ -163,7 +167,9 @@ impl Preparation<'_> {
             target.columns().to_vec(),
             target.column_types().to_vec(),
         );
-        let source_input = self.source(&merge.source, subqueries, None)?;
+        let target_input = crate::binding::overlay_outer_schema(&target_input, outer);
+        let source_input = self.source(&merge.source, subqueries, outer)?;
+        let source_input = crate::binding::overlay_outer_schema(&source_input, outer);
         for clause in &merge.when_clauses {
             let input = match clause {
                 MergeWhenPlan::UpdateNotMatchedBySource { .. }

@@ -6,6 +6,12 @@
 
 //! Routine body validation under `check_function_bodies`, as `PostgreSQL` 18's `fmgr_sql_validator` and `plpgsql_validator` perform it: with the setting on, `CREATE FUNCTION` analyzes each statement of a SQL body against the catalog and checks the final statement against the declared result; with it off, no body is examined until the routine is called.
 
+#[path = "sql_function_bodies/body_inputs.rs"]
+mod body_inputs;
+
+#[path = "sql_function_bodies/body_results.rs"]
+mod body_results;
+
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::{SQLError, SQLResult};

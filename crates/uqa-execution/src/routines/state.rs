@@ -159,6 +159,7 @@ impl<'a> Interpreter<'a> {
             out_values,
             set_rows: self.set_rows,
             anonymous_record_column_types: self.ret_record_types,
+            sql_result_kind: None,
         }
     }
 

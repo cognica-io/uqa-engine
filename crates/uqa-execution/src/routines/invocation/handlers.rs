@@ -20,7 +20,10 @@ use uqa_sql::{
         invocation::{
             anonymous_record_shape_error, call_output_schema, call_signature,
             coerce_anonymous_record_value, output_column_names, routine_resolution_error,
-            runtime_record_column_type, validate_anonymous_record_column_types,
+            runtime_record_column_type,
+        },
+        result_check::{
+            validate_anonymous_record_result, SQLFunctionResultColumn, SQLFunctionResultKind,
         },
         routine_local_name,
     },
@@ -69,6 +72,7 @@ pub fn run_call(
         bound,
         &invocation,
         nonatomic_routine_entry_allowed(context.runtime.session, nested_statement),
+        None,
     )?;
     let Some(schema) =
         call_output_schema(context.types, &function.def, &invocation.parameter_types)?
@@ -157,7 +161,7 @@ fn execute_resolved_scalar_function(
         )?;
         return Ok(Value::Null);
     }
-    let outcome = execute_routine(context, &function, bound, &invocation, false)?;
+    let outcome = execute_routine(context, &function, bound, &invocation, false, None)?;
     let out_params = function.def.output_params();
     if outcome.out_values.len() != out_params.len() {
         return Err(SQLError::Internal(format!(
@@ -295,8 +299,19 @@ fn execute_resolved_table_function(
         });
     }
     let out_params = function.def.output_params();
+    let specialized =
+        uqa_sql::routines::invocation::specialized_definition(&function.def, &invocation)?;
+    let declared = uqa_sql::routines::result_check::declared_sql_function_result(
+        context.types,
+        specialized.as_ref().unwrap_or(&function.def),
+    )?;
+    let composite_columns = matches!(declared.declared_type, uqa_sql::ColumnType::Composite(_))
+        .then_some(declared.columns)
+        .flatten();
     let columns = if let Some((columns, _)) = record_definition {
         columns.to_vec()
+    } else if let Some(columns) = &composite_columns {
+        columns.iter().map(|column| column.name.clone()).collect()
     } else if out_params.is_empty() {
         vec![routine_local_name(&function.def.name)?]
     } else {
@@ -314,7 +329,17 @@ fn execute_resolved_table_function(
         };
         return Ok(SQLTableFunctionResult::new(columns, rows));
     }
-    let outcome = execute_routine(context, &function, bound, &invocation, false)?;
+    let record_target = record_definition
+        .map(|(columns, types)| anonymous_record_target(context, columns, types))
+        .transpose()?;
+    let outcome = execute_routine(
+        context,
+        &function,
+        bound,
+        &invocation,
+        false,
+        record_target.as_deref(),
+    )?;
     if let Some((columns, types)) = record_definition {
         if !uqa_sql::routines::routine_returns_anonymous_record(&function.def) {
             return Err(SQLError::Internal(format!(
@@ -328,15 +353,24 @@ fn execute_resolved_table_function(
             function.def.returns_set(),
             columns,
             types,
+            record_target.as_deref().unwrap_or_default(),
         );
     }
-    let rows = if function.def.returns_set() {
+    let mut rows = if function.def.returns_set() {
         outcome.set_rows
     } else if out_params.is_empty() {
         vec![vec![outcome.value]]
     } else {
         vec![outcome.out_values]
     };
+    if let Some(columns) = &composite_columns {
+        rows = rows
+            .into_iter()
+            .map(|mut row| {
+                super::super::sql_body::row_fields(row.pop().unwrap_or(Value::Null), columns.len())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+    }
     Ok(SQLTableFunctionResult::new(columns, rows))
 }
 
@@ -346,16 +380,17 @@ fn shape_anonymous_record_outcome(
     returns_set: bool,
     columns: &[String],
     types: &[String],
+    target: &[SQLFunctionResultColumn],
 ) -> Result<SQLTableFunctionResult, SQLError> {
-    if columns.len() != types.len() {
-        return Err(SQLError::Internal(format!(
-            "anonymous record definition has {} columns but {} types",
-            columns.len(),
-            types.len()
-        )));
-    }
-    if let Some(source_types) = outcome.anonymous_record_column_types.as_deref() {
-        validate_anonymous_record_column_types(source_types, types)?;
+    let sql_kind = outcome.sql_result_kind;
+    let tuple = sql_kind == Some(SQLFunctionResultKind::Tuple);
+    let validate_types = |source: &[Option<uqa_sql::ColumnType>]| {
+        validate_anonymous_record_result(context.types, source, target, sql_kind)
+    };
+    if tuple {
+        if let Some(source_types) = outcome.anonymous_record_column_types.as_deref() {
+            validate_types(source_types)?;
+        }
     }
     let source_rows = if returns_set {
         outcome.set_rows
@@ -364,6 +399,31 @@ fn shape_anonymous_record_outcome(
     };
     let mut rows = Vec::with_capacity(source_rows.len());
     for row in source_rows {
+        if !tuple && matches!(row.as_slice(), [Value::Null]) {
+            rows.push(vec![Value::Null; columns.len()]);
+            continue;
+        }
+        let runtime_descriptor = match row.as_slice() {
+            [Value::Row(row)] if sql_kind == Some(SQLFunctionResultKind::Value) => {
+                row.field_types()
+            }
+            _ => None,
+        };
+        if let Some(source) = runtime_descriptor {
+            uqa_sql::routines::result_check::validate_sql_function_record_identity(
+                context.types,
+                source,
+                &target
+                    .iter()
+                    .map(|column| column.ty.clone())
+                    .collect::<Vec<_>>(),
+            )?;
+        } else if !tuple {
+            if let Some(source_types) = outcome.anonymous_record_column_types.as_deref() {
+                validate_types(source_types)?;
+            }
+        }
+        let has_runtime_descriptor = runtime_descriptor.is_some();
         let mut values = match row.as_slice() {
             [Value::Record(fields)] => fields.iter().map(|(_, value)| value.clone()).collect(),
             [Value::Row(values)] => values.values().to_vec(),
@@ -374,12 +434,12 @@ fn shape_anonymous_record_outcome(
         if values.len() != columns.len() {
             return Err(anonymous_record_shape_error());
         }
-        if outcome.anonymous_record_column_types.is_none() {
+        if outcome.anonymous_record_column_types.is_none() && !has_runtime_descriptor {
             let source_types = values
                 .iter()
                 .map(runtime_record_column_type)
                 .collect::<Vec<_>>();
-            validate_anonymous_record_column_types(&source_types, types)?;
+            validate_types(&source_types)?;
         }
         for (value, type_name) in values.iter_mut().zip(types) {
             *value = coerce_anonymous_record_value(context.runtime.expressions, value, type_name)?;
@@ -387,4 +447,28 @@ fn shape_anonymous_record_outcome(
         rows.push(values);
     }
     Ok(SQLTableFunctionResult::new(columns.iter().cloned(), rows))
+}
+
+fn anonymous_record_target(
+    context: &RoutineInvocationContext<'_>,
+    columns: &[String],
+    types: &[String],
+) -> Result<Vec<SQLFunctionResultColumn>, SQLError> {
+    if columns.len() != types.len() {
+        return Err(SQLError::Internal(format!(
+            "anonymous record definition has {} columns but {} types",
+            columns.len(),
+            types.len()
+        )));
+    }
+    columns
+        .iter()
+        .zip(types)
+        .map(|(name, ty)| {
+            Ok(SQLFunctionResultColumn {
+                name: name.clone(),
+                ty: context.types.resolve_catalog_column_type_name(ty)?,
+            })
+        })
+        .collect()
 }

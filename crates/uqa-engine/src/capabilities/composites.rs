@@ -80,10 +80,17 @@ impl CompositeTypeCatalog for Engine {
         &self,
         type_oid: u32,
     ) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
-        Ok(self
+        let descriptor = self
             .runtime
             .composite_descriptor_cache
-            .descriptor(&self.composite_registry_snapshot(), type_oid))
+            .descriptor(&self.composite_registry_snapshot(), type_oid);
+        match descriptor {
+            Some(descriptor) => Ok(Some(descriptor)),
+            None => uqa_execution::catalog::composite_type::relations::descriptor(
+                &self.catalog_execution(),
+                type_oid,
+            ),
+        }
     }
 }
 

@@ -181,3 +181,14 @@ fn body_update_sources_retain_the_parameter_scope_without_seeing_target_columns(
     assert_eq!(error.sqlstate(), Some("42703"));
     assert_eq!(error.to_string(), "column \"legacy\" does not exist");
 }
+
+#[test]
+fn body_merge_sources_and_unmatched_actions_keep_the_routine_parameter_scope() {
+    for sql in [
+        "MERGE INTO assignment_target AS t USING (SELECT 99 AS k) s ON t.id=s.k WHEN NOT MATCHED THEN INSERT (id) VALUES (id) RETURNING t.id",
+        "MERGE INTO assignment_target AS t USING (SELECT id AS k) s ON t.id=s.k WHEN NOT MATCHED THEN INSERT (id) VALUES (s.k) RETURNING t.id",
+        "MERGE INTO assignment_target AS t USING (SELECT 99 AS k) s ON t.id=s.k WHEN NOT MATCHED BY SOURCE THEN UPDATE SET id=f.id RETURNING t.id",
+    ] {
+        analyze_with_named_parameter(sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+}

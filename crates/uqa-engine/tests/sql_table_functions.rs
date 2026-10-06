@@ -665,7 +665,6 @@ fn anonymous_record_column_definitions_enforce_assignment_compatibility() {
 
     for sql in [
         "SELECT * FROM parseable_text_record() AS (parsed INTEGER)",
-        "SELECT * FROM plpgsql_text_record() AS (parsed INTEGER)",
         "SELECT * FROM assignment_record() AS (only_column BIGINT)",
     ] {
         assert_sql_error(
@@ -675,6 +674,19 @@ fn anonymous_record_column_definitions_enforce_assignment_compatibility() {
             "return type mismatch in function declared to return record",
         );
     }
+
+    let error = eng
+        .sql(
+            "SELECT * FROM plpgsql_text_record() AS (parsed INTEGER)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(
+        error.to_string(),
+        "returned record type does not match expected record type"
+    );
+    assert_eq!(error.detail(), Some("Returned type text does not match expected type integer in column \"parsed\" (position 1)."));
 
     assert_sql_error(
         &eng,

@@ -4,11 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::cell::RefCell;
+
 use super::transaction::DirectRoutineCommandGuard;
-use super::{
-    CreateFunction, FunctionReturns, RoutineContext, RoutineOutcome, SQLError, SQLParam, SQLResult,
-    Value,
-};
+use super::{CreateFunction, RoutineContext, RoutineOutcome, SQLError, SQLParam, SQLResult, Value};
 use uqa_sql::{
     assignment::routines::coerce_routine_value_from,
     ast::FunctionBody,
@@ -20,13 +19,15 @@ use uqa_sql::{
         body_validation::{reject_output_argument_call, reject_undefined_parameters},
         declaration::RoutineTypeCatalog,
         resolution::RoutineOverloadContext,
-        result_check::check_sql_function_result,
+        result_check::{
+            check_sql_function_result, sql_function_result_layout, validate_sql_function_record,
+            SQLFunctionResultKind, SQLFunctionResultLayout,
+        },
         routine_returns_anonymous_record,
     },
 };
 
 /// `LANGUAGE sql` body: run every statement, each analyzed just before it runs as `PostgreSQL` analyzes them, with the final statement checked against the declared result before it runs; the last statement's result shapes the routine output. A body given as a string resolves the names of its parameters in each statement when that statement is analyzed.
-#[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
 pub fn execute_sql_language(
     context: RoutineContext<'_>,
     types: &dyn RoutineTypeCatalog,
@@ -34,6 +35,7 @@ pub fn execute_sql_language(
     def: &CreateFunction,
     plans: &[UnifiedPlan],
     bound: &[Value],
+    record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
 ) -> Result<RoutineOutcome, SQLError> {
     let call_params = def.call_params();
     if call_params.len() != bound.len() {
@@ -66,8 +68,24 @@ pub fn execute_sql_language(
     if plans.is_empty() {
         check_sql_function_result(types, def, None)?;
     }
-    let check_result =
-        |result: &AnalyzedResult| check_sql_function_result(types, def, Some(result));
+    let layout = RefCell::new(None);
+    let check_result = |result: &AnalyzedResult| {
+        let result_layout = sql_function_result_layout(types, def, Some(result))?;
+        if result_layout.kind == SQLFunctionResultKind::Tuple
+            && routine_returns_anonymous_record(def)
+        {
+            if let Some(target) = record_target {
+                uqa_sql::routines::result_check::validate_anonymous_record_result(
+                    types,
+                    result.column_types().unwrap_or_default(),
+                    target,
+                    Some(SQLFunctionResultKind::Tuple),
+                )?;
+            }
+        }
+        *layout.borrow_mut() = Some(result_layout);
+        Ok(())
+    };
     let parameters = matches!(def.body, FunctionBody::Source(_))
         .then(|| sql_body_parameter_scope(def, &params))
         .transpose()?;
@@ -110,139 +128,164 @@ pub fn execute_sql_language(
             .statements
             .execute_body_statement(statement, &params, check)?;
     }
-    let out_params = def.output_params();
-    let returns_anonymous_record = routine_returns_anonymous_record(def);
-    let returns_void = matches!(
-        &def.returns,
-        FunctionReturns::Scalar { type_name } if type_name == "void"
-    );
-    let expected = if out_params.is_empty() {
-        1
-    } else {
-        out_params.len()
-    };
+    let layout = layout
+        .into_inner()
+        .map_or_else(|| sql_function_result_layout(types, def, None), Ok)?;
+    shape_result(context.expressions, types, def, &last, &layout)
+}
+
+fn shape_result(
+    expressions: &dyn uqa_sql::assignment::routines::RoutineValueContext,
+    types: &dyn RoutineTypeCatalog,
+    def: &CreateFunction,
+    last: &SQLResult,
+    layout: &SQLFunctionResultLayout,
+) -> Result<RoutineOutcome, SQLError> {
+    let outputs = def.output_params();
+    let anonymous = routine_returns_anonymous_record(def);
+    let record_types = anonymous
+        .then(|| {
+            if layout.kind == SQLFunctionResultKind::Value {
+                layout.source_record.clone()
+            } else {
+                Some(last.column_types.clone())
+            }
+        })
+        .flatten();
+    let shape = |values| result_value(expressions, types, layout, last, values);
     if def.returns_set() {
-        let mut set_rows = Vec::with_capacity(last.rows.len());
-        for row_index in 0..last.rows.len() {
-            let values = result_row_values(&last, row_index).unwrap_or_default();
-            if returns_anonymous_record {
-                set_rows.push(vec![anonymous_record_value(&last.columns, values)]);
-                continue;
-            }
-            let (mut values, expanded) = expand_lone_row(values, expected)?;
-            if out_params.is_empty() {
-                if let FunctionReturns::SetOf { type_name } = &def.returns {
-                    values[0] = coerce_routine_value_from(
-                        context.expressions,
-                        &values[0],
-                        type_name,
-                        last.column_types.first().and_then(Option::as_ref),
-                    )?;
-                }
-            } else {
-                for (index, (value, parameter)) in values.iter_mut().zip(&out_params).enumerate() {
-                    let source = if expanded {
-                        None
-                    } else {
-                        last.column_types.get(index).and_then(Option::as_ref)
-                    };
-                    *value = coerce_routine_value_from(
-                        context.expressions,
-                        value,
-                        &parameter.type_name,
-                        source,
-                    )?;
-                }
-            }
-            set_rows.push(values);
+        if layout.kind == SQLFunctionResultKind::Value {
+            uqa_sql::routines::result_check::validate_sql_function_record_rows(last)?;
+        }
+        let mut rows = Vec::with_capacity(last.rows.len());
+        for index in 0..last.rows.len() {
+            let value = shape(result_row_values(last, index).unwrap_or_default())?;
+            rows.push(output_values(def, value, outputs.len())?);
         }
         return Ok(RoutineOutcome {
             value: Value::Null,
-            out_values: vec![Value::Null; out_params.len()],
-            set_rows,
-            anonymous_record_column_types: returns_anonymous_record
-                .then(|| last.column_types.clone()),
+            out_values: vec![Value::Null; outputs.len()],
+            set_rows: rows,
+            anonymous_record_column_types: record_types,
+            sql_result_kind: Some(layout.kind),
         });
     }
-    let first = result_row_values(&last, 0);
-    if !out_params.is_empty() {
-        let mut out_values = vec![Value::Null; out_params.len()];
-        if let Some(values) = first {
-            let (values, expanded) = expand_lone_row(values, expected)?;
-            for (idx, value) in values.into_iter().take(out_values.len()).enumerate() {
-                let source = if expanded {
-                    None
-                } else {
-                    last.column_types.get(idx).and_then(Option::as_ref)
-                };
-                out_values[idx] = coerce_routine_value_from(
-                    context.expressions,
-                    &value,
-                    &out_params[idx].type_name,
-                    source,
-                )?;
-            }
-        }
-        return Ok(RoutineOutcome {
-            value: Value::Null,
-            out_values,
-            set_rows: Vec::new(),
-            anonymous_record_column_types: None,
-        });
-    }
-    let value = match first {
-        Some(_) if returns_void => Value::Null,
-        Some(values) if returns_anonymous_record => anonymous_record_value(&last.columns, values),
-        Some(mut values) => {
-            if values.is_empty() {
-                Value::Null
-            } else {
-                let value = values.remove(0);
-                match &def.returns {
-                    FunctionReturns::Scalar { type_name } => coerce_routine_value_from(
-                        context.expressions,
-                        &value,
-                        type_name,
-                        last.column_types.first().and_then(Option::as_ref),
-                    )?,
-                    _ => value,
-                }
-            }
-        }
-        None => Value::Null,
+    let value = result_row_values(last, 0)
+        .map(shape)
+        .transpose()?
+        .unwrap_or(Value::Null);
+    let (value, out_values) = if outputs.is_empty() {
+        (value, Vec::new())
+    } else {
+        (Value::Null, output_values(def, value, outputs.len())?)
     };
     Ok(RoutineOutcome {
         value,
-        out_values: Vec::new(),
+        out_values,
         set_rows: Vec::new(),
-        anonymous_record_column_types: returns_anonymous_record.then(|| last.column_types.clone()),
+        anonymous_record_column_types: record_types,
+        sql_result_kind: Some(layout.kind),
     })
 }
 
-fn anonymous_record_value(columns: &[String], values: Vec<Value>) -> Value {
-    Value::Record(columns.iter().cloned().zip(values).collect())
+fn result_value(
+    expressions: &dyn uqa_sql::assignment::routines::RoutineValueContext,
+    types: &dyn RoutineTypeCatalog,
+    layout: &SQLFunctionResultLayout,
+    last: &SQLResult,
+    mut values: Vec<Value>,
+) -> Result<Value, SQLError> {
+    match layout.kind {
+        SQLFunctionResultKind::Void => Ok(Value::Null),
+        SQLFunctionResultKind::Value => {
+            let value = values.pop().unwrap_or(Value::Null);
+            if layout.declared_type == uqa_sql::ColumnType::Record {
+                if let Some(expected) = &layout.columns {
+                    if !matches!(value, Value::Null) {
+                        let target = expected
+                            .iter()
+                            .map(|column| column.ty.clone())
+                            .collect::<Vec<_>>();
+                        if let Value::Row(row) = &value {
+                            if let Some(source) = row.field_types() {
+                                uqa_sql::routines::result_check::validate_sql_function_record_identity(types, source, &target)?;
+                            } else if let Some(source) = &layout.source_record {
+                                validate_sql_function_record(types, source, &target)?;
+                            }
+                        } else if let Some(source) = &layout.source_record {
+                            validate_sql_function_record(types, source, &target)?;
+                        }
+                    }
+                    let fields = row_fields(value, expected.len())?;
+                    return Ok(Value::Record(
+                        expected
+                            .iter()
+                            .map(|column| column.name.clone())
+                            .zip(fields)
+                            .collect(),
+                    ));
+                }
+            }
+            coerce_routine_value_from(
+                expressions,
+                &value,
+                &layout.declared_type.catalog_name(),
+                last.column_types.first().and_then(Option::as_ref),
+            )
+        }
+        SQLFunctionResultKind::Tuple => {
+            let columns = if let Some(expected) = &layout.columns {
+                for (index, (value, column)) in values.iter_mut().zip(expected).enumerate() {
+                    *value = coerce_routine_value_from(
+                        expressions,
+                        value,
+                        &column.ty.catalog_name(),
+                        last.column_types.get(index).and_then(Option::as_ref),
+                    )?;
+                }
+                expected
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                last.columns.clone()
+            };
+            Ok(Value::Record(columns.into_iter().zip(values).collect()))
+        }
+    }
 }
 
-/// The output columns of a result row, and whether they came from a row value: a lone row value that the final statement returns for several output columns is the whole result, and its fields fill the columns in order, as `PostgreSQL` returns it.
-fn expand_lone_row(
-    mut values: Vec<Value>,
-    expected: usize,
-) -> Result<(Vec<Value>, bool), SQLError> {
-    if expected < 2 || values.len() != 1 {
-        return Ok((values, false));
+/// A single composite OUT parameter is a value for a function, but remains one independently assigned output column for a procedure.
+fn output_values(
+    def: &CreateFunction,
+    value: Value,
+    output_count: usize,
+) -> Result<Vec<Value>, SQLError> {
+    if output_count == 0 || (output_count == 1 && !def.is_procedure) {
+        Ok(vec![value])
+    } else {
+        row_fields(value, output_count)
     }
-    let fields = match values.remove(0) {
-        Value::Row(fields) => fields,
-        Value::Record(fields) => fields.into_iter().map(|(_, value)| value).collect(),
-        Value::Null => return Ok((vec![Value::Null; expected], true)),
-        other => {
-            return Err(SQLError::Internal(format!(
-                "the lone row column of a SQL function result held {other:?}"
-            )))
+}
+
+pub(super) fn row_fields(value: Value, expected: usize) -> Result<Vec<Value>, SQLError> {
+    let fields = match value {
+        Value::Record(fields) => fields
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect::<Vec<_>>(),
+        Value::Row(fields) => fields.into_values(),
+        Value::Null => return Ok(vec![Value::Null; expected]),
+        _ => {
+            return Err(SQLError::Internal(
+                "a SQL routine row result contained a scalar value".into(),
+            ))
         }
     };
-    if fields.len() != expected {
-        return Err(SQLError::Diagnostic {
+    if fields.len() == expected {
+        Ok(fields)
+    } else {
+        Err(SQLError::Diagnostic {
             sqlstate: "42804".into(),
             message: "function return row and query-specified return row do not match".into(),
             detail: Some(format!(
@@ -251,7 +294,9 @@ fn expand_lone_row(
                 if fields.len() == 1 { "" } else { "s" }
             )),
             hint: None,
-        });
+        })
     }
-    Ok((fields, true))
 }
+
+#[cfg(test)]
+mod tests;
