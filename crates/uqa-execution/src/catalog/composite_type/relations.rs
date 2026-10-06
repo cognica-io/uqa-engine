@@ -107,13 +107,25 @@ pub fn descriptor(
         table
             .columns
             .iter()
-            .map(|column| (column.name.clone(), column.ty.clone()))
+            .map(|column| {
+                (
+                    column.name.clone(),
+                    column.ty.clone(),
+                    column.attribute_number,
+                )
+            })
             .collect::<Vec<_>>()
     } else if let Some(table) = snapshot.definitions.foreign_tables.get(&identity) {
         table
             .columns
             .iter()
-            .map(|column| (column.name.clone(), column.ty.clone()))
+            .map(|column| {
+                (
+                    column.name.clone(),
+                    column.ty.clone(),
+                    column.attribute_number,
+                )
+            })
             .collect()
     } else if let Some(view) = snapshot.definitions.views.get(&identity) {
         let schema = context.stored_view_schema_with_catalog(
@@ -131,6 +143,7 @@ pub fn descriptor(
                     .iter()
                     .map(|ty| ty.clone().unwrap_or(ColumnType::Text)),
             )
+            .map(|(name, ty)| (name, ty, None))
             .collect()
     } else {
         return Ok(None);
@@ -138,13 +151,17 @@ pub fn descriptor(
     let attributes = columns
         .into_iter()
         .enumerate()
-        .map(|(index, (name, ty))| {
+        .map(|(index, (name, ty, number))| {
             Ok(CompositeAttribute {
                 name,
                 ty,
-                number: i16::try_from(index + 1).map_err(|_| {
-                    SQLError::Internal("relation row type has too many attributes".into())
-                })?,
+                number: if let Some(number) = number {
+                    number
+                } else {
+                    i16::try_from(index + 1).map_err(|_| {
+                        SQLError::Internal("relation row type has too many attributes".into())
+                    })?
+                },
             })
         })
         .collect::<Result<_, SQLError>>()?;

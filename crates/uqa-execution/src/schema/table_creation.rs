@@ -256,6 +256,7 @@ fn publish_catalog_state(
         // The created relation's state carries its OIDs; publication records them.
         catalog_oids: None,
         row_type_array_name: None,
+        dropped_attributes: Vec::new(),
     };
     context
         .schema_transactions

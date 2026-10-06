@@ -125,6 +125,7 @@ fn python_array_types_preserve_elements_and_dimensions() {
         name: "tags".into(),
         ty: ColumnType::Array(Box::new(ColumnType::Text)),
         object_id: None,
+        attribute_number: None,
         missing_value: None,
         primary_key: false,
         not_null: false,

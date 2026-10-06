@@ -63,8 +63,9 @@ impl DependencyBuilder<'_> {
         if expression.is_none() && !legacy_auto_increment {
             return Ok(());
         }
-        let number = i32::try_from(index + 1)
-            .map_err(|_| SQLError::Internal("column number is out of range".into()))?;
+        let number = i32::from(uqa_sql::catalog::relation_attributes::column_number(
+            column, index,
+        )?);
         let oid = super::catalog_oid(attrdef_catalog_oid(table_name, column))?;
         self.objects.add_member(
             ATTRIBUTE_DEFAULT_CLASS,

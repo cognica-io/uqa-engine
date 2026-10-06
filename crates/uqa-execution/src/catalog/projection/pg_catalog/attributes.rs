@@ -16,7 +16,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use super::super::helpers::information_schema_types::array_dimension_count;
 use super::super::helpers::oids::{split_schema_name, stable_oid};
 use super::super::helpers::rows::{
-    bool_value, catalog_ordinal, catalog_usize, int_value, row, str_value,
+    bool_value, catalog_ordinal, catalog_usize, column_ordinal, int_value, row, str_value,
 };
 use super::super::helpers::type_metadata::{
     pg_type_align, pg_type_by_value, pg_type_collation_oid, pg_type_len, pg_type_modifier,
@@ -78,13 +78,18 @@ pub fn build_pg_attribute(
                     .clone(),
             );
         }
+        out.extend(
+            table
+                .dropped_attributes
+                .iter()
+                .map(|attribute| dropped_attribute_row(relid, attribute)),
+        );
         for (idx, col) in table.columns.iter().enumerate() {
             let inheritance_count = inherited_columns
                 .iter()
                 .filter(|columns| columns.iter().any(|parent| parent.name == col.name))
                 .count();
-            let mut attribute =
-                pg_attribute_row(relid, catalog_ordinal(idx, "pg_attribute column")?, col);
+            let mut attribute = pg_attribute_row(relid, column_ordinal(idx, col)?, col);
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
@@ -154,12 +159,14 @@ pub fn build_pg_attribute(
     for (table_name, foreign_table) in catalog.foreign_tables() {
         let relid = crate::catalog::projection::foreign_table_relation_oid(&foreign_table);
         let security = catalog.foreign_table_security(&table_name)?;
+        out.extend(
+            foreign_table
+                .dropped_attributes
+                .iter()
+                .map(|attribute| dropped_attribute_row(relid, attribute)),
+        );
         for (idx, column) in foreign_table.columns.into_iter().enumerate() {
-            let mut attribute = pg_attribute_row(
-                relid,
-                catalog_ordinal(idx, "pg_attribute foreign-table column")?,
-                &column,
-            );
+            let mut attribute = pg_attribute_row(relid, column_ordinal(idx, &column)?, &column);
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
@@ -205,6 +212,7 @@ pub(super) fn attribute_column(name: &str, ty: ColumnType, not_null: bool) -> SQ
         name: name.into(),
         ty,
         object_id: None,
+        attribute_number: None,
         missing_value: None,
         primary_key: false,
         not_null,
@@ -297,6 +305,39 @@ pub fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> ResultRo
     ])
 }
 
+fn dropped_attribute_row(
+    relid: i64,
+    attribute: &uqa_sql::catalog::relation_attributes::DroppedAttribute,
+) -> ResultRow {
+    row([
+        ("attrelid", int_value(relid)),
+        ("attname", str_value(attribute.name())),
+        ("atttypid", int_value(0)),
+        ("attstattarget", Value::Null),
+        ("attlen", int_value(attribute.type_length)),
+        ("attnum", int_value(i64::from(attribute.number))),
+        ("attndims", int_value(attribute.dimensions)),
+        ("atttypmod", int_value(attribute.type_modifier)),
+        ("attbyval", bool_value(attribute.by_value)),
+        ("attalign", str_value(attribute.alignment.clone())),
+        ("attstorage", str_value(attribute.storage.clone())),
+        ("attcompression", str_value("")),
+        ("attnotnull", bool_value(false)),
+        ("atthasdef", bool_value(false)),
+        ("atthasmissing", bool_value(false)),
+        ("attidentity", str_value(attribute.identity.clone())),
+        ("attgenerated", str_value("")),
+        ("attisdropped", bool_value(true)),
+        ("attislocal", bool_value(attribute.is_local)),
+        ("attinhcount", int_value(attribute.inheritance_count)),
+        ("attcollation", int_value(attribute.collation)),
+        ("attacl", Value::Null),
+        ("attoptions", Value::Null),
+        ("attfdwoptions", Value::Null),
+        ("attmissingval", Value::Null),
+    ])
+}
+
 pub fn build_pg_attrdef(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
@@ -371,10 +412,7 @@ fn append_pg_attrdef_rows(
         out.push(row([
             ("oid", int_value(attrdef_catalog_oid(table_name, col))),
             ("adrelid", int_value(relid)),
-            (
-                "adnum",
-                int_value(catalog_ordinal(idx, "pg_attrdef column")?),
-            ),
+            ("adnum", int_value(column_ordinal(idx, col)?)),
             ("adbin", str_value(default)),
         ]));
     }

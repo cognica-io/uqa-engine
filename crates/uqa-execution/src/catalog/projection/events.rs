@@ -283,13 +283,9 @@ fn pg_trigger_row(
         .map(|name| {
             columns
                 .iter()
-                .position(|(column, _)| column == name)
+                .find(|(_, column)| column == name)
                 .ok_or_else(|| SQLError::UnknownColumn(name.clone()))
-                .and_then(|index| {
-                    i64::try_from(index + 1).map_err(|_| {
-                        SQLError::Internal("trigger column position exceeds i64".into())
-                    })
-                })
+                .map(|(number, _)| i64::from(*number))
                 .map(Value::Int)
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -376,26 +372,17 @@ fn event_relation_columns(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     relation: &str,
-) -> Result<Vec<(String, uqa_sql::ast::ColumnType)>, SQLError> {
+) -> Result<Vec<(i16, String)>, SQLError> {
     if let Some(table) = catalog.table_resolved(resolution, relation)? {
-        return Ok(table
-            .columns
-            .iter()
-            .map(|column| (column.name.clone(), column.ty.clone()))
-            .collect());
+        return uqa_sql::catalog::relation_attributes::column_names(&table.columns);
     }
     if let Some(view) = catalog.view_resolved(resolution, relation)? {
-        return Ok(view_columns_for(context, catalog, resolution, view)?
-            .into_iter()
-            .map(|column| (column.name, column.ty))
-            .collect());
+        return uqa_sql::catalog::relation_attributes::column_names(&view_columns_for(
+            context, catalog, resolution, view,
+        )?);
     }
     if let Some(foreign) = catalog.foreign_table_resolved(resolution, relation)? {
-        return Ok(foreign
-            .columns
-            .iter()
-            .map(|column| (column.name.clone(), column.ty.clone()))
-            .collect());
+        return uqa_sql::catalog::relation_attributes::column_names(&foreign.columns);
     }
     Err(SQLError::UnknownTable(relation.to_string()))
 }

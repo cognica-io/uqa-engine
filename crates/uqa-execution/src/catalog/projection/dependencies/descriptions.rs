@@ -149,8 +149,20 @@ fn column_name(objects: &CatalogObjects, relation: u32, column: i32) -> Option<S
     match objects.relation(relation) {
         Some(relation) => relation
             .columns
-            .get(index)
-            .map(|column| column.name.clone()),
+            .iter()
+            .enumerate()
+            .find(|(index, candidate)| {
+                uqa_sql::catalog::relation_attributes::column_number(candidate, *index)
+                    .is_ok_and(|number| i32::from(number) == column)
+            })
+            .map(|(_, column)| column.name.clone())
+            .or_else(|| {
+                relation
+                    .dropped_columns
+                    .iter()
+                    .find(|(number, _)| i32::from(*number) == column)
+                    .map(|(_, name)| name.clone())
+            }),
         None => system_relation(relation)?
             .column_names()
             .into_iter()

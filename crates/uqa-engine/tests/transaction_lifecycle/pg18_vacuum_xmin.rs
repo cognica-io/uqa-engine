@@ -609,6 +609,7 @@ fn legacy_user_xmin_values_are_not_overwritten_by_tuple_version_metadata() {
             name: "xmin".into(),
             ty: uqa_sql::ast::ColumnType::Text,
             object_id: None,
+            attribute_number: None,
             missing_value: None,
             primary_key: false,
             not_null: false,

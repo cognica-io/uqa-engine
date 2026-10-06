@@ -62,6 +62,7 @@ pub struct CatalogReadSnapshot {
 /// Immutable table-definition fields used by binding and catalog projection.
 #[derive(Clone)]
 pub struct CatalogTableSnapshot {
+    pub dropped_attributes: Arc<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
     pub object_id: [u8; 16],
     /// The table's public OIDs, recorded or derived from its identity.
     pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,

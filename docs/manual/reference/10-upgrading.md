@@ -14,6 +14,12 @@ Rust code constructing `uqa_sql::ast::GrantRoutineStmt` now supplies `schemas: N
 
 Rust constructors of `QueryBlockPlan` also supply `privilege_columns: Default::default()`. The field preserves authorization references when an unused derived expression is removed; older serialized plans default it to empty. `OptimizerConfig` now retains optional builtin execution authority for constant evaluation; standalone callers use `OptimizerConfig::new` and embedded catalog adapters supply current authority.
 
+### Relation attribute numbers
+
+Table columns now retain their PostgreSQL attribute numbers, including the slots of deleted columns. Initial open converts older ordinary and foreign table metadata in the existing atomic catalog transaction. If any subsequent restoration fails, the conversion rolls back with it. Later refreshes and peer sessions validate the recorded layout without repairing it. Older catalogs contain only the surviving columns, so conversion numbers those columns in their retained order; it cannot reconstruct previously discarded slots. Use a binary with attribute-slot support after this upgrade.
+
+Rust code constructing `ColumnDef` supplies `attribute_number: None` for a new declaration; publication assigns its relation-local number. `TableConstraintSet` and Execution’s foreign-table metadata retain `dropped_attributes`, initially empty. Catalog adapters provide `ColumnPrivilegeRelation.columns` as `(attribute_number, name)` pairs, because a positive PostgreSQL attribute number is no longer a vector index. Engine adapters snapshot the same metadata across transactions and sessions.
+
 ### Grouped mutation assignments
 
 UPDATE, ON CONFLICT DO UPDATE and MERGE assignment lists now use `AssignmentTargets<E>` around their target syntax. `Single` preserves the previous `AssignmentTarget<E>` encoding; `Multiple` retains one subquery source, ordered target syntax and stable source positions. Rust code that inspects assignments must visit every group target and visit the shared source expression once. INSERT column lists still use `AssignmentTarget<E>`. Existing serialized single-target functions and rules remain readable; new grouped definitions require a binary with grouped-assignment support.

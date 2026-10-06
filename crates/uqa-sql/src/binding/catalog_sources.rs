@@ -93,6 +93,7 @@ mod tests {
             name: "id".into(),
             ty: ColumnType::BigInteger,
             object_id: None,
+            attribute_number: None,
             missing_value: None,
             primary_key: true,
             not_null: true,

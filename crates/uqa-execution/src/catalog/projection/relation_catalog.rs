@@ -76,7 +76,10 @@ pub fn build_pg_class(
             &schema,
             &table,
             relkind,
-            catalog_usize(columns.len(), "pg_class column count")?,
+            catalog_usize(
+                columns.len() + table_snapshot.dropped_attributes.len(),
+                "pg_class column count",
+            )?,
             tuples as f64,
             catalog_indexes.iter().any(|index| index.table_name == name),
             table_snapshot.persistence,
@@ -212,7 +215,7 @@ pub fn build_pg_class(
             &table,
             "f",
             catalog_usize(
-                foreign_table.columns.len(),
+                foreign_table.columns.len() + foreign_table.dropped_attributes.len(),
                 "pg_class foreign-table column count",
             )?,
             0.0,

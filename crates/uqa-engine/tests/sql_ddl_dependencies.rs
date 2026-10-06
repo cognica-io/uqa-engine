@@ -13,6 +13,7 @@ fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
         name: name.to_string(),
         ty: ColumnType::Integer,
         object_id: None,
+        attribute_number: None,
         missing_value: None,
         primary_key: false,
         not_null: false,
@@ -58,7 +59,7 @@ fn wrong_relation_kinds_fail_before_side_effects() {
         ("DROP VIEW IF EXISTS app.items", "not a view"),
         (
             "ALTER TABLE IF EXISTS app.items_view ADD COLUMN bad INTEGER",
-            "not a table",
+            "ALTER action ADD COLUMN cannot be performed on relation \"items_view\"",
         ),
         ("DROP TABLE app.items, app.items_view", "not a table"),
     ] {

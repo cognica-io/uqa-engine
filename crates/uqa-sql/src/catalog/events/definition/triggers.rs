@@ -534,6 +534,7 @@ fn trigger_column(name: String, ty: ColumnType) -> ColumnDef {
         name,
         ty,
         object_id: None,
+        attribute_number: None,
         missing_value: None,
         primary_key: false,
         not_null: false,

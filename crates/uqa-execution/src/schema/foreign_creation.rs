@@ -219,6 +219,7 @@ impl ForeignCreationContext<'_> {
         })?;
         let owner_columns = statement.columns.clone();
         let table = StoredForeignTable {
+            dropped_attributes: Vec::new(),
             name: name.to_string(),
             persistence,
             object_id,

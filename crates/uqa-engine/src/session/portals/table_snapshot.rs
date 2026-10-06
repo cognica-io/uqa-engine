@@ -204,6 +204,9 @@ impl Engine {
             row_type_array_name: crate::state::CatalogCell::from_snapshot(
                 metadata.row_type_array_name.snapshot(),
             ),
+            dropped_attributes: crate::state::CatalogCell::from_snapshot(
+                metadata.dropped_attributes.snapshot(),
+            ),
         })
     }
 }

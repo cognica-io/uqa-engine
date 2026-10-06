@@ -16,6 +16,7 @@ impl<'a> Walker<'a> {
             name,
             ty,
             object_id: _,
+            attribute_number: _,
             missing_value,
             primary_key: _,
             not_null: _,

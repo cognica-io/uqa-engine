@@ -13,6 +13,8 @@ pub fn migrate_foreign_table_identities(
     catalog: &dyn CatalogFacade,
     roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
 ) -> StorageBackendResult<()> {
+    let attribute_format =
+        crate::schema::constraints::restoration::require_attribute_format(catalog, true)?;
     for mut row in catalog.load_foreign_tables()? {
         let relation_name = row.relation.qualified_name();
         let options = serde_json::from_str(&row.options_json)?;
@@ -22,6 +24,13 @@ pub fn migrate_foreign_table_identities(
             options,
             &row.columns_json,
         )?;
+        if attribute_format == crate::schema::constraints::restoration::AttributeFormat::Numbered {
+            uqa_sql::catalog::relation_attributes::validate(
+                &table.columns,
+                &table.dropped_attributes,
+            )
+            .map_err(|error| StorageBackendError::backend("foreign relation attributes", error))?;
+        }
         let mut changed = legacy_schema;
         if table.object_id == [0; 16] {
             table.object_id =
@@ -30,6 +39,7 @@ pub fn migrate_foreign_table_identities(
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
             checks: std::mem::take(&mut table.checks),
+            dropped_attributes: table.dropped_attributes.clone(),
             ..uqa_sql::ast::TableConstraintSet::default()
         };
         changed |=

@@ -163,6 +163,7 @@ fn column(name: &str, ty: ColumnType) -> ColumnDef {
         name: name.into(),
         ty,
         object_id: None,
+        attribute_number: None,
         missing_value: None,
         primary_key: false,
         not_null: false,

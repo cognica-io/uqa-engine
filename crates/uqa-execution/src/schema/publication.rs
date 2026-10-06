@@ -123,6 +123,12 @@ fn materialize_metadata(
     columns: &mut [ColumnDef],
     constraints: &mut TableConstraintSet,
 ) -> StorageBackendResult<bool> {
+    let previous = context
+        .catalog
+        .table_state(name)?
+        .ok_or_else(|| table_not_found(name))?
+        .columns();
+    uqa_sql::catalog::relation_attributes::retain_numbers(&previous, columns);
     let relation = RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
     let mut allocate = context.identity_allocator();
     let names = context.constraint_names().name_scope(&relation);
@@ -175,6 +181,7 @@ pub fn register_column(
     if let Some(reference) = &mut column.references {
         reference.table = resolve_table_name(context.catalog, &reference.table)?;
     }
+    let new_name = column.name.clone();
     let mut columns = state.columns();
     uqa_sql::schema::columns::append_registered_column(&table_name, &mut columns, column)
         .map_err(StorageBackendError::Other)?;
@@ -197,6 +204,23 @@ pub fn register_column(
         .map_err(StorageBackendError::Other)?;
     }
     let mut constraints = state.constraints();
+    let inherited = constraints
+        .hierarchy
+        .parents
+        .iter()
+        .try_fold(false, |found, parent| {
+            Ok::<_, StorageBackendError>(
+                found
+                    || context.catalog.table_state(parent)?.is_some_and(|state| {
+                        state.columns().iter().any(|column| column.name == new_name)
+                    }),
+            )
+        })?;
+    uqa_sql::schema::columns::publication::register_local_column(
+        &mut constraints.hierarchy,
+        &new_name,
+        inherited,
+    );
     constraints
         .key_constraints
         .extend_from_slice(key_constraints);
@@ -241,6 +265,7 @@ pub fn replace_constraint_state(
         .catalog
         .table_state(&table_name)?
         .ok_or_else(|| table_not_found(&table_name))?;
+    constraints.dropped_attributes = state.constraint_header().dropped_attributes;
     if constraints.row_type_array_name.is_none() {
         constraints.row_type_array_name = state.constraint_header().row_type_array_name;
     }

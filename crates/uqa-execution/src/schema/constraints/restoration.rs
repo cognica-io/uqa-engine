@@ -12,12 +12,39 @@ use uqa_sql::schema::constraint_metadata::identity::{
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult, TableSchema};
 
+pub const RELATION_ATTRIBUTE_METADATA_KEY: &str = "sql_relation_attribute_format";
+
 pub const IDENTITY_METADATA_KEY: &str = "sql_not_null_constraint_identity_version";
 pub const FOREIGN_KEY_IDENTITY_METADATA_KEY: &str = "sql_foreign_key_catalog_identity_version";
 pub const CATALOG_ADDRESS_METADATA_KEY: &str = "sql_constraint_catalog_address_version";
 
 mod addresses;
 mod hierarchy;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AttributeFormat {
+    Legacy,
+    Numbered,
+}
+
+pub fn require_attribute_format(
+    catalog: &dyn CatalogFacade,
+    allow_migration: bool,
+) -> StorageBackendResult<AttributeFormat> {
+    match catalog
+        .get_metadata(RELATION_ATTRIBUTE_METADATA_KEY)?
+        .as_deref()
+    {
+        Some("1") => Ok(AttributeFormat::Numbered),
+        None if allow_migration => Ok(AttributeFormat::Legacy),
+        None => Err(StorageBackendError::Other(
+            "relation attributes require initial catalog migration".into(),
+        )),
+        Some(_) => Err(StorageBackendError::Other(
+            "unsupported relation attribute format".into(),
+        )),
+    }
+}
 
 /// Validate a load-only catalog without allocating identities or publishing repairs.
 pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
@@ -36,10 +63,13 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
     }
     require_foreign_key_identity_format(catalog, false)?;
     addresses::require_format(catalog, false)?;
+    require_attribute_format(catalog, false)?;
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
     let mut validate = |columns: &[uqa_sql::ast::ColumnDef],
                         constraints: &uqa_sql::ast::TableConstraintSet| {
+        uqa_sql::catalog::relation_attributes::validate(columns, &constraints.dropped_attributes)
+            .map_err(|error| StorageBackendError::backend("relation attributes", error))?;
         validate_not_null_identities(columns)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         foreign_keys::validate(columns, constraints)
@@ -72,6 +102,7 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
             &table.columns,
             &uqa_sql::ast::TableConstraintSet {
                 checks: table.checks,
+                dropped_attributes: table.dropped_attributes,
                 ..Default::default()
             },
         )?;
@@ -91,8 +122,14 @@ pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackend
     };
     let foreign_legacy = require_foreign_key_identity_format(catalog, true)?;
     let address_legacy = addresses::require_format(catalog, true)?;
-    let mut migrations =
-        load_constraint_metadata_migrations(catalog, legacy, foreign_legacy, address_legacy)?;
+    let attribute_format = require_attribute_format(catalog, true)?;
+    let mut migrations = load_constraint_metadata_migrations(
+        catalog,
+        legacy,
+        foreign_legacy,
+        address_legacy,
+        attribute_format,
+    )?;
     hierarchy::repair(&mut migrations)?;
     let mut foreign_migrations = Vec::new();
     for row in catalog.load_foreign_tables()? {
@@ -104,6 +141,7 @@ pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackend
         )?;
         let mut constraints = uqa_sql::ast::TableConstraintSet {
             checks: std::mem::take(&mut table.checks),
+            dropped_attributes: table.dropped_attributes.clone(),
             ..Default::default()
         };
         let (changed, legacy_addresses) = materialize_metadata(
@@ -113,6 +151,7 @@ pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackend
             legacy,
             foreign_legacy,
             address_legacy,
+            attribute_format,
         )?;
         table.checks = constraints.checks;
         foreign_migrations.push(addresses::ForeignMigration {
@@ -139,6 +178,9 @@ pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackend
     if address_legacy {
         catalog.set_metadata(CATALOG_ADDRESS_METADATA_KEY, "1")?;
     }
+    if attribute_format == AttributeFormat::Legacy {
+        catalog.set_metadata(RELATION_ATTRIBUTE_METADATA_KEY, "1")?;
+    }
     Ok(())
 }
 
@@ -149,7 +191,24 @@ fn materialize_metadata(
     legacy: bool,
     foreign_legacy: bool,
     address_legacy: bool,
+    attribute_format: AttributeFormat,
 ) -> StorageBackendResult<(bool, BTreeSet<[u8; 16]>)> {
+    if columns
+        .iter()
+        .any(|column| column.attribute_number.is_none())
+        && (columns
+            .iter()
+            .any(|column| column.attribute_number.is_some())
+            || !constraints.dropped_attributes.is_empty())
+    {
+        return Err(StorageBackendError::Other(
+            "incomplete relation attribute metadata".into(),
+        ));
+    }
+    if attribute_format == AttributeFormat::Numbered {
+        uqa_sql::catalog::relation_attributes::validate(columns, &constraints.dropped_attributes)
+            .map_err(|error| StorageBackendError::backend("relation attributes", error))?;
+    }
     let before: BTreeSet<_> =
         uqa_sql::schema::constraint_metadata::identity::claims::identities(columns, constraints)
             .into_iter()
@@ -293,6 +352,7 @@ fn load_constraint_metadata_migrations(
     legacy: bool,
     foreign_legacy: bool,
     address_legacy: bool,
+    attribute_format: AttributeFormat,
 ) -> StorageBackendResult<Vec<ConstraintMetadataMigration>> {
     let mut migrations = Vec::new();
     let names = crate::schema::indexes::constraint_names::KeyConstraintNames::load(catalog)?;
@@ -315,6 +375,7 @@ fn load_constraint_metadata_migrations(
             legacy,
             foreign_legacy,
             address_legacy,
+            attribute_format,
         )?;
         migrations.push(ConstraintMetadataMigration {
             schema,

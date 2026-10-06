@@ -21,6 +21,10 @@ pub fn catalog_usize(value: usize, label: &str) -> Result<i64, SQLError> {
     })
 }
 
+pub fn column_ordinal(index: usize, column: &uqa_sql::ast::ColumnDef) -> Result<i64, SQLError> {
+    uqa_sql::catalog::relation_attributes::column_number(column, index).map(i64::from)
+}
+
 pub fn catalog_ordinal(index: usize, label: &str) -> Result<i64, SQLError> {
     let ordinal = index
         .checked_add(1)

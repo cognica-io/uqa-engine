@@ -97,6 +97,17 @@ impl ColumnDropTable for ColumnDropBinding<'_> {
     fn clear_value_indexes(&self) {
         self.state.value_indexes.write().clear();
     }
+    fn write_dropped_attributes(
+        &self,
+    ) -> SchemaWrite<'_, uqa_sql::catalog::relation_attributes::DroppedAttribute> {
+        Box::new(self.state.dropped_attributes.write())
+    }
+    fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy {
+        self.state.hierarchy.read().clone()
+    }
+    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy) {
+        *self.state.hierarchy.write() = hierarchy;
+    }
     fn write_columns(&self) -> SchemaWrite<'_, ColumnDef> {
         Box::new(self.state.columns.write())
     }

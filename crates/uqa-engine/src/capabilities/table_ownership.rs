@@ -74,6 +74,7 @@ impl TableOwnerState for OwnedTable<'_> {
             hierarchy: table.hierarchy.read().clone(),
             catalog_oids: table.recorded_catalog_oids(),
             row_type_array_name: table.row_type_array_name.read().clone(),
+            dropped_attributes: table.dropped_attributes.read().clone(),
         };
         TableOwnerSchema {
             columns,

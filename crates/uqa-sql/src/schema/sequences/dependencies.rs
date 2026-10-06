@@ -91,11 +91,15 @@ pub fn rewritten_view_sequence_references(
 pub fn detach_sequence_provenance(columns: &mut [crate::ast::ColumnDef], sequence: &str) -> bool {
     let mut changed = false;
     for column in columns {
-        if column
-            .auto_increment
-            .as_ref()
-            .is_some_and(|provenance| provenance.sequence.as_deref() == Some(sequence))
-        {
+        if column.auto_increment.as_ref().is_some_and(|provenance| {
+            provenance.sequence.as_deref() == Some(sequence)
+                    // An identity sequence is removed with its column. Keep the identity flag until the dropped attribute is captured; DROP IDENTITY clears it explicitly before deleting the sequence.
+                    && !matches!(
+                        provenance.kind,
+                        crate::ast::AutoIncrementKind::IdentityAlways
+                            | crate::ast::AutoIncrementKind::IdentityByDefault
+                    )
+        }) {
             column.auto_increment = None;
             changed = true;
         }

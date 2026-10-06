@@ -183,6 +183,7 @@ impl Engine {
         let hierarchy = t.hierarchy.read().clone();
         let columns_declared = *t.columns_declared.read();
         let row_type_array_name = t.row_type_array_name.read().clone();
+        let dropped_attributes = t.dropped_attributes.read().clone();
         Ok(uqa_sql::ast::TableConstraintSet {
             columns_declared: Some(columns_declared),
             persistence: t.persistence,
@@ -193,6 +194,7 @@ impl Engine {
             hierarchy,
             catalog_oids: t.recorded_catalog_oids(),
             row_type_array_name,
+            dropped_attributes,
         })
     }
 

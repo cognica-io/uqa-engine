@@ -14,6 +14,7 @@ mod hierarchy_restoration;
 mod index_drop_binding;
 mod index_identities;
 mod index_registry;
+mod relation_attributes;
 mod relations;
 mod roles;
 mod routines;

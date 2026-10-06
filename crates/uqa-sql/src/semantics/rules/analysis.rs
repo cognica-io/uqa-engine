@@ -240,6 +240,7 @@ pub fn rule_returning_columns(
             name,
             ty,
             object_id: None,
+            attribute_number: None,
             missing_value: None,
             primary_key: false,
             not_null: false,

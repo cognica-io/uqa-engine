@@ -32,6 +32,11 @@ pub trait ColumnDropTable: ColumnDependencyState {
     fn object_id(&self) -> [u8; 16];
     fn clear_value_indexes(&self);
     fn write_columns(&self) -> SchemaWrite<'_, ColumnDef>;
+    fn write_dropped_attributes(
+        &self,
+    ) -> SchemaWrite<'_, uqa_sql::catalog::relation_attributes::DroppedAttribute>;
+    fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy;
+    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy);
     fn write_checks(&self) -> SchemaWrite<'_, TableCheck>;
     fn write_keys(&self) -> SchemaWrite<'_, TableKeyConstraint>;
     fn write_foreign_keys(&self) -> SchemaWrite<'_, ForeignKey>;
@@ -128,7 +133,12 @@ pub fn drop_column(
     preflight_dependencies(context, &table_name, column)?;
     let prepared_rule_drop = context.rules.prepare(&table_name, column)?;
     crate::schema::indexes::diskann::retire_column(&context.registry, &table_name, column)?;
+    let mut hierarchy = state.hierarchy();
+    let dropped = dropped_attribute(context.catalog, state.as_ref(), column, &hierarchy)?;
     state.clear_value_indexes();
+    state.write_dropped_attributes().push(dropped);
+    uqa_sql::schema::columns::publication::remove_local_column(&mut hierarchy, column);
+    state.publish_hierarchy(hierarchy);
     removal_metadata::remove_column_declarations(&mut state.write_columns(), column);
     removal_metadata::remove_column_checks(&mut state.write_checks(), column);
     removal_metadata::remove_column_keys(
@@ -170,6 +180,47 @@ pub fn drop_column(
         .map_err(|error| StorageBackendError::Other(error.to_string()))?;
     Ok(true)
 }
+fn dropped_attribute(
+    catalog: &dyn ColumnDropCatalog,
+    state: &dyn ColumnDropTable,
+    column: &str,
+    hierarchy: &uqa_sql::ast::TableHierarchy,
+) -> StorageBackendResult<uqa_sql::catalog::relation_attributes::DroppedAttribute> {
+    let entries = catalog.entries();
+    let inheritance_count = entries
+        .iter()
+        .filter(|(name, parent)| {
+            hierarchy.parents.contains(name)
+                && parent
+                    .columns()
+                    .iter()
+                    .any(|candidate| candidate.name == column)
+        })
+        .count();
+    let is_local = if hierarchy.local_columns.is_empty() {
+        inheritance_count == 0
+    } else {
+        hierarchy.local_columns.iter().any(|name| name == column)
+    };
+    {
+        let columns = state.columns();
+        let (position, definition) = columns
+            .iter()
+            .enumerate()
+            .find(|(_, definition)| definition.name == column)
+            .ok_or_else(|| StorageBackendError::Other("dropped column disappeared".into()))?;
+        uqa_sql::catalog::relation_attributes::DroppedAttribute::from_column(
+            definition,
+            position,
+            is_local,
+            i64::try_from(inheritance_count).map_err(|_| {
+                StorageBackendError::Other("attribute inheritance count overflow".into())
+            })?,
+        )
+        .map_err(|error| StorageBackendError::backend("dropped attribute", error))
+    }
+}
+
 pub fn preflight_dependencies(
     context: &ColumnDropPublicationContext<'_>,
     table_name: &str,

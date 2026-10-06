@@ -176,9 +176,7 @@ fn foreign_key_definition(
         .column_ordinals
         .iter()
         .map(|ordinal| {
-            usize::try_from(*ordinal - 1)
-                .ok()
-                .and_then(|index| referenced.columns.get(index))
+            uqa_sql::catalog::relation_attributes::column_by_number(&referenced.columns, *ordinal)
                 .map(|column| quote_ident(&column.name))
                 .ok_or_else(|| SQLError::Internal("referenced key column disappeared".into()))
         })

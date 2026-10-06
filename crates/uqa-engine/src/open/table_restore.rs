@@ -254,6 +254,7 @@ impl Engine {
             on_commit: constraints.on_commit,
             catalog_oids: constraints.catalog_oids,
             row_type_array_name: crate::state::CatalogCell::new(constraints.row_type_array_name),
+            dropped_attributes: crate::state::CatalogCell::new(constraints.dropped_attributes),
         }))
     }
 }

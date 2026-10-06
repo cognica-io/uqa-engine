@@ -173,3 +173,6 @@ mod array_inspection_identities;
 
 #[path = "pg18_semantics/multiple_column_assignment.rs"]
 mod multiple_column_assignment;
+
+#[path = "pg18_semantics/relation_attribute_slots.rs"]
+mod relation_attribute_slots;

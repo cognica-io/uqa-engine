@@ -21,6 +21,7 @@ fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
     snapshot.tables.insert(
         identity.clone(),
         CatalogTableSnapshot {
+            dropped_attributes: std::sync::Arc::new(Vec::new()),
             object_id: [7; 16],
             catalog_oids: oids,
             row_type_array_name: None,

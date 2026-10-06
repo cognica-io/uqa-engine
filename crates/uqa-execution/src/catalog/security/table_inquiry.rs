@@ -217,7 +217,9 @@ impl TablePrivilegeCatalog for InquiryRead<'_, '_> {
                     .system_relation_security(*relation)
                     .resolve(roles)
                     .map_err(SQLError::Internal)?,
-                columns: relation.column_names(),
+                columns: uqa_sql::catalog::relation_attributes::consecutive_names(
+                    relation.column_names(),
+                )?,
                 has_system_columns: relation.kind() == "table",
             }),
             ResolvedTablePrivilegeTarget::Table(relation) => {
@@ -227,7 +229,11 @@ impl TablePrivilegeCatalog for InquiryRead<'_, '_> {
                     .tables()
                     .retained(relation)
                     .ok_or_else(|| disappeared("table", relation))?;
-                let columns = table.column_names();
+                let columns = if table.columns().is_empty() {
+                    uqa_sql::catalog::relation_attributes::consecutive_names(table.column_names())?
+                } else {
+                    uqa_sql::catalog::relation_attributes::column_names(&table.columns())?
+                };
                 Ok(ColumnPrivilegeRelation {
                     relation: relation.clone(),
                     security: table
@@ -255,7 +261,7 @@ impl TablePrivilegeCatalog for InquiryRead<'_, '_> {
                 Ok(ColumnPrivilegeRelation {
                     relation: relation.clone(),
                     security: view.security.resolve(roles).map_err(SQLError::Internal)?,
-                    columns,
+                    columns: uqa_sql::catalog::relation_attributes::consecutive_names(columns)?,
                     has_system_columns: false,
                 })
             }
@@ -270,11 +276,7 @@ impl TablePrivilegeCatalog for InquiryRead<'_, '_> {
                 Ok(ColumnPrivilegeRelation {
                     relation: relation.clone(),
                     security: self.table_privilege_security(target, roles)?,
-                    columns: table
-                        .columns
-                        .iter()
-                        .map(|column| column.name.clone())
-                        .collect(),
+                    columns: uqa_sql::catalog::relation_attributes::column_names(&table.columns)?,
                     has_system_columns: true,
                 })
             }

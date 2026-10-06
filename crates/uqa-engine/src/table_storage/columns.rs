@@ -305,15 +305,13 @@ impl Engine {
         };
         self.rewrite_column_rename_dependencies(&table_name, from, to)?;
         Self::value_indexes_clear(&t);
-        {
-            let mut cols = t.columns.write();
-            for c in cols.iter_mut() {
-                if c.name == from {
-                    c.name = to.to_string();
-                }
-            }
-        }
+        uqa_sql::schema::columns::publication::rename_column(&mut t.columns.write(), from, to);
         Self::rename_column_acl(&t, from, to);
+        uqa_sql::schema::columns::publication::rename_local_column(
+            &mut t.hierarchy.write(),
+            from,
+            to,
+        );
         for constraint in t.key_constraints.write().iter_mut() {
             for column in constraint
                 .columns

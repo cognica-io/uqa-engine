@@ -555,6 +555,7 @@ pub(in crate::compiler) fn compile_column_def_with_type(
         name,
         ty,
         object_id: None,
+        attribute_number: None,
         missing_value: None,
         primary_key,
         not_null,
