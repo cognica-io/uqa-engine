@@ -56,64 +56,6 @@ pub(crate) fn validate_builtin_name(name: &str) -> Result<(), SQLError> {
     Ok(())
 }
 
-pub(crate) fn fixed_builtin_is_non_immutable(name: &str) -> bool {
-    matches!(
-        name,
-        "random"
-            | "nextval"
-            | "currval"
-            | "setval"
-            | "gen_random_uuid"
-            | "uuidv4"
-            | "uuidv7"
-            | "pg_get_expr"
-            | "pg_get_partkeydef"
-            | "pg_backend_pid"
-            | "pg_my_temp_schema"
-            | "pg_is_other_temp_schema"
-            | "pg_trigger_depth"
-            | "current_setting"
-            | "set_config"
-            | "pg_sleep"
-            | "pg_sleep_for"
-            | "pg_sleep_until"
-            | "version"
-            | "pg_listening_channels"
-            | "pg_notify"
-            | "pg_notification_queue_usage"
-            | "pg_get_serial_sequence"
-            | "pg_get_sequence_data"
-            | "pg_sequence_last_value"
-            | "pg_sequence_parameters"
-            | "pg_get_triggerdef"
-            | "pg_get_ruledef"
-            | "pg_get_viewdef"
-            | "pg_get_indexdef"
-            | "pg_get_constraintdef"
-            | "pg_get_function_arguments"
-            | "pg_get_function_identity_arguments"
-            | "pg_get_function_result"
-            | "pg_get_function_sqlbody"
-            | "format_type"
-            | "pg_describe_object"
-            | "pg_has_role"
-            | "pg_get_userbyid"
-            | "has_table_privilege"
-            | "has_column_privilege"
-            | "has_database_privilege"
-            | "has_schema_privilege"
-            | "has_sequence_privilege"
-            | "has_function_privilege"
-            | "has_type_privilege"
-            | "to_regproc"
-            | "to_regprocedure"
-            | "to_regclass"
-            | "to_regnamespace"
-            | "to_regrole"
-            | "to_regtype"
-    )
-}
-
 pub(crate) fn non_immutable_function() -> SQLError {
     SQLError::Routine {
         sqlstate: "42P17".into(),
@@ -153,10 +95,6 @@ mod tests {
             "jsonb_set",
         ] {
             assert!(validate_builtin_name(name).is_ok());
-            assert!(!fixed_builtin_is_non_immutable(name));
-        }
-        for name in ["random", "uuidv7", "to_regclass", "current_setting"] {
-            assert!(fixed_builtin_is_non_immutable(name));
         }
     }
 }

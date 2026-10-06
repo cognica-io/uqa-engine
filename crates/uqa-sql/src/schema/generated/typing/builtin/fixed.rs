@@ -6,7 +6,9 @@
 
 //! Generated-column binding for fixed-signature `PostgreSQL` built-ins.
 
-use crate::ast::{ColumnDef, Expr, FunctionBinding, GeneratedFunctionDependency};
+use crate::ast::{
+    ColumnDef, ColumnType, Expr, FunctionBinding, FunctionVolatility, GeneratedFunctionDependency,
+};
 use crate::{schema::SchemaExpressionCatalog, SQLError};
 
 use super::super::{
@@ -73,9 +75,25 @@ pub(in super::super) fn bind_call(
             selected.binding.name
         ))
     })?;
-    for (actual, position) in call.argument_types.iter().zip(positions) {
+    for ((actual, declared), position) in call
+        .argument_types
+        .iter()
+        .zip(&declared_argument_types)
+        .zip(positions)
+    {
         validate_unknown_literal_cast(actual, &selected.binding.argument_types[position])?;
+        if let Some(source) = declared {
+            let target = ColumnType::from_sql_name(&selected.binding.argument_types[position])?;
+            if crate::type_resolution::cast_volatility(source, &target)
+                != FunctionVolatility::Immutable
+            {
+                return Err(non_immutable_function());
+            }
+        }
     }
     *binding = Some(selected.binding);
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests;

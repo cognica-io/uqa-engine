@@ -383,9 +383,11 @@ pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDisp
 }
 
 fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
-    crate::schema::generated::eligibility::fixed_builtin_is_non_immutable(
-        binding.name.rsplit('.').next().unwrap_or_default(),
-    )
+    crate::semantics::volatility::builtin_function_volatility(
+        &binding.name,
+        Some(binding),
+        binding.argument_types.len(),
+    ) != crate::ast::FunctionVolatility::Immutable
 }
 
 fn default_argument(name: &str, position: usize) -> Option<ScalarExpr> {

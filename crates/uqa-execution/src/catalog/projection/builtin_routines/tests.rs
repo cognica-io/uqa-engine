@@ -30,6 +30,17 @@ fn numeric_metadata_matches_postgresql() {
     );
 }
 
+#[test]
+fn temporal_metadata_matches_postgresql() {
+    assert_catalog_metadata(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/date_trunc_timezone_oracle.expected.json"
+        )),
+        7,
+    );
+}
+
 fn assert_catalog_metadata(transcript: &str, expected_count: usize) {
     let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
     let catalog = reference["cases"]

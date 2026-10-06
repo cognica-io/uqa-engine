@@ -18,6 +18,8 @@ use crate::{
     error::{Result, SQLError},
 };
 
+mod timezone;
+
 /// Catalog input needed after analysis selects a type for an unknown literal. Domain array input includes each element's constraints, so the caller must retain this value rather than read the text again at execution.
 pub trait CatalogInputFunctions {
     fn read_unknown_input(&self, text: &str, target: &ColumnType) -> Result<Value>;
@@ -366,7 +368,13 @@ fn cast_resolved_value(
             return Ok(control.finish(Value::Int(oid), control.empty_reservation())?);
         }
     }
-    cast_value_from_with_control(value, target_ty, source_ty, control)
+    let zoned = timezone::cast_local_timestamp(value, target_column_type, engine, control)?;
+    cast_value_from_with_control(
+        zoned.as_ref().unwrap_or(value),
+        target_ty,
+        source_ty,
+        control,
+    )
 }
 
 fn resolve_regobject_input(
@@ -439,7 +447,9 @@ fn requires_catalog_array_cast(ty: &ColumnType) -> bool {
         | ColumnType::Regprocedure
         | ColumnType::Regnamespace
         | ColumnType::Enum(_)
-        | ColumnType::Composite(_) => true,
+        | ColumnType::Composite(_)
+        | ColumnType::TimestampTz
+        | ColumnType::TimestampTzPrecision(_) => true,
         ColumnType::Array(element) => requires_catalog_array_cast(element),
         _ => false,
     }

@@ -243,6 +243,11 @@ fn eval_function_call_inner(
             return result;
         }
     }
+    if lower == "date_trunc" {
+        if let Some(result) = super::time::truncate_session_zone(&evaluated, ctx) {
+            return result;
+        }
+    }
     match eval_scalar_function(lower, &evaluated) {
         // Unknown built-in: fall through to user-defined functions,
         // mirroring PostgreSQL's search-path order.

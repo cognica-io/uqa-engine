@@ -240,7 +240,7 @@ fn c_strtol(bytes: &[u8]) -> (i64, usize, bool) {
 }
 
 /// C `strtod`: the value, the offset where the conversion stopped (0 when nothing was converted) and whether the value overflowed or underflowed (`ERANGE`). Reads decimal and hexadecimal numbers, `inf`, `infinity` and `nan`.
-fn c_strtod(bytes: &[u8]) -> (f64, usize, bool) {
+pub(super) fn c_strtod(bytes: &[u8]) -> (f64, usize, bool) {
     let mut index = skip_c_space(bytes, 0);
     let sign_start = index;
     let negative = match bytes.get(index) {

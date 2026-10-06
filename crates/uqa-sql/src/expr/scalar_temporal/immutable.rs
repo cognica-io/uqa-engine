@@ -10,7 +10,9 @@ use super::super::{
     age_between,
     conversion::{to_f64_with_control, to_i64_with_control, value_to_string_with_control},
     datetime_out_of_range, float_to_i64_rounded, make_timestamp,
-    time::{coerce_temporal_with_control, date_trunc_value, extract_from_value},
+    time::{
+        coerce_temporal_with_control, date_trunc_value, extract_from_value, truncate_explicit_zone,
+    },
     uuid::{extract_uuid_timestamp, extract_uuid_version},
     IntervalFields, Result, SQLError, TemporalValue, Value,
 };
@@ -91,11 +93,18 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                 inline(age_between(&a, &b)?)
             }
             "date_trunc" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch("date_trunc takes 2 args".into()));
+                if !matches!(args.len(), 2 | 3) {
+                    return Err(SQLError::TypeMismatch(
+                        "date_trunc takes 2 or 3 args".into(),
+                    ));
                 }
                 let unit = field_name(&args[0], control)?;
-                inline(date_trunc_value(&unit, &args[1], control)?)
+                if let Some(zone) = args.get(2) {
+                    let zone = value_to_string_with_control(zone, control)?;
+                    inline(truncate_explicit_zone(&unit, &args[1], &zone, control)?)
+                } else {
+                    inline(date_trunc_value(&unit, &args[1], control)?)
+                }
             }
             "make_timestamp" => {
                 if !(6..=7).contains(&args.len()) {

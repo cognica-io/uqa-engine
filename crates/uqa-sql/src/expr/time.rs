@@ -26,6 +26,7 @@ mod date_trunc;
 mod interval;
 mod number_format;
 
+pub(super) use date_trunc::zone::{truncate_explicit_zone, truncate_session_zone};
 pub use interval::IntervalFields;
 
 const MICROS_PER_SECOND: i64 = 1_000_000;
