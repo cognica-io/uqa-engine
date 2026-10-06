@@ -265,6 +265,10 @@ fn prepare_foreign_table_sequence_references(
     )
     .map_err(|error| SQLError::Internal(error.to_string()))?;
     let result = if stored {
+        crate::schema::dependencies::regclass::bind_legacy_sequence_regclass_constants(
+            references, sequences, expression,
+        )
+        .map_err(SQLError::Internal)?;
         crate::schema::dependencies::rewrites::rewrite_sequence_function_references(
             expression,
             &mut |reference| {

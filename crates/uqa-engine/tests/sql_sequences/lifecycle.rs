@@ -444,7 +444,7 @@ fn sequence_drop_rejects_a_bound_view_dependency() {
 }
 
 #[test]
-fn legacy_unqualified_default_sequence_targets_are_unique_or_fail_closed() {
+fn legacy_default_sequence_identity_is_frozen_on_initial_open() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-default-sequence.db");
     {
@@ -469,8 +469,12 @@ fn legacy_unqualified_default_sequence_targets_are_unique_or_fail_closed() {
                 [],
                 |row| row.get(0),
             )?;
-            assert!(columns.contains("app.ids"), "{columns}");
-            let legacy = columns.replace("app.ids", "ids");
+            let mut columns: Vec<uqa_sql::ast::ColumnDef> = serde_json::from_str(&columns).unwrap();
+            let Expr::Func { args, .. } = columns[1].default.as_mut().unwrap() else {
+                panic!("stored sequence default");
+            };
+            args[0] = Expr::Literal(Value::Str("ids".into()));
+            let legacy = serde_json::to_string(&columns).unwrap();
             connection.execute(
                 "UPDATE _tables SET columns = ?1 \
                  WHERE schema_name = 'app' AND relation_name = 'items'",
@@ -490,20 +494,17 @@ fn legacy_unqualified_default_sequence_targets_are_unique_or_fail_closed() {
         .sql("INSERT INTO app.items (id) VALUES (1)", &[])
         .unwrap();
     reopened.sql("CREATE SEQUENCE public.ids", &[]).unwrap();
-    let ambiguous = reopened
-        .column_default_expr("app.items", "generated_id")
-        .unwrap_err();
-    assert!(
-        ambiguous.to_string().contains("ambiguous persisted"),
-        "{ambiguous}"
+    assert_eq!(
+        default_sequence_reference(&reopened, "app.items", "generated_id"),
+        "app.ids"
     );
-    let insert_error = reopened
-        .sql("INSERT INTO app.items (id) VALUES (2)", &[])
-        .unwrap_err();
-    assert!(
-        insert_error.to_string().contains("ambiguous persisted"),
-        "{insert_error}"
-    );
+    let inserted = reopened
+        .sql(
+            "INSERT INTO app.items (id) VALUES (2) RETURNING generated_id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(inserted.rows[0]["generated_id"], Value::Int(11));
     drop(reopened);
 
     let catalog = crate::native_storage::catalog(connection).unwrap();
@@ -513,15 +514,21 @@ fn legacy_unqualified_default_sequence_targets_are_unique_or_fail_closed() {
         .into_iter()
         .find(|schema| schema.relation.qualified_name() == "app.items")
         .unwrap();
-    let dangling = schema.columns_json.replace("\"ids\"", "\"missing\"");
-    assert_ne!(dangling, schema.columns_json);
-    schema.columns_json = dangling;
+    let mut columns: Vec<uqa_sql::ast::ColumnDef> =
+        serde_json::from_str(&schema.columns_json).unwrap();
+    let Expr::Func { args, .. } = columns[1].default.as_mut().unwrap() else {
+        panic!("stored sequence default");
+    };
+    assert!(
+        matches!(&args[0], Expr::TypedLiteral { value: Value::Int(_), ty } if ty == "regclass")
+    );
+    args[0] = Expr::Literal(Value::Str("missing".into()));
+    schema.columns_json = serde_json::to_string(&columns).unwrap();
     catalog.save_table(&schema).unwrap();
-    let dangling = Engine::open(&database).unwrap();
-    let error = dangling
-        .column_default_expr("app.items", "generated_id")
-        .unwrap_err();
-    assert!(error.to_string().contains("dangling persisted"), "{error}");
+    let Err(error) = Engine::open(&database) else {
+        panic!("a dangling legacy relation must fail during initial restoration");
+    };
+    assert!(error.to_string().contains("missing"), "{error}");
 }
 
 #[test]

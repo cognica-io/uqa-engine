@@ -44,14 +44,16 @@ pub fn rewrite_sequence_function_references(
     visit: &mut impl FnMut(&mut String) -> Result<(), String>,
 ) -> Result<(), String> {
     walk_schema_expr_mut(expression, &mut |node| {
-        let crate::ast::Expr::Func { name, args, .. } = node else {
+        let crate::ast::Expr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } = node
+        else {
             return Ok(());
         };
-        let lower = name.to_ascii_lowercase();
-        let local = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-        if !matches!(local, "nextval" | "currval" | "setval")
-            || (lower.contains('.') && !lower.starts_with("pg_catalog."))
-        {
+        if !is_sequence_function(name, binding.as_ref()) {
             return Ok(());
         }
         let Some(reference) = args.first_mut().and_then(regclass_literal_mut) else {
@@ -60,6 +62,27 @@ pub fn rewrite_sequence_function_references(
         };
         visit(reference)
     })
+}
+
+pub(super) fn is_sequence_function(
+    name: &str,
+    binding: Option<&crate::ast::FunctionBinding>,
+) -> bool {
+    let name = if let Some(binding) = binding {
+        if !binding.builtin
+            || binding.object_id.is_some()
+            || binding.dispatch.is_some()
+            || binding.resolution_error.is_some()
+        {
+            return false;
+        }
+        &binding.name
+    } else {
+        name
+    };
+    let lower = name.to_ascii_lowercase();
+    let local = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    matches!(local, "nextval" | "currval" | "setval")
 }
 
 fn regclass_literal_mut(expression: &mut crate::ast::Expr) -> Option<&mut String> {

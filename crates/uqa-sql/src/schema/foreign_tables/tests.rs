@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::ast::Statement;
+use crate::ast::{FunctionBinding, Statement};
 use std::cell::RefCell;
 use uqa_core::Value;
 
@@ -116,13 +116,29 @@ fn sequence_expression(argument: Expr) -> Expr {
 fn loaded_sequence_binding_does_not_consult_the_session_search_path() {
     let references = References::default();
     let mut expression = sequence_expression(Expr::Literal(Value::Str("seq".into())));
+    let Expr::Func { binding, .. } = &mut expression else {
+        unreachable!()
+    };
+    *binding = Some(FunctionBinding {
+        object_id: None,
+        name: "pg_catalog.nextval".into(),
+        argument_types: vec!["text".into()],
+        builtin: true,
+        dispatch: None,
+        invocation: None,
+        resolution_error: None,
+    });
     prepare_foreign_table_sequence_references(&references, &references, &mut expression, true)
         .unwrap();
-    assert_eq!(*references.calls.borrow(), ["stored-sequence:seq"]);
-    let Expr::Func { args, .. } = expression else {
+    assert_eq!(
+        *references.calls.borrow(),
+        ["stored-sequence:seq", "bound-oid:stored.seq"]
+    );
+    let Expr::Func { args, binding, .. } = expression else {
         panic!("expected function")
     };
-    assert!(matches!(&args[0],Expr::Literal(Value::Str(name)) if name=="stored.seq"));
+    assert!(matches!(&args[0],Expr::TypedLiteral {value: Value::Int(41), ty} if ty=="regclass"));
+    assert_eq!(binding.unwrap().argument_types, ["regclass"]);
 }
 
 #[test]
