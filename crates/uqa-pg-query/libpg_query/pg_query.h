@@ -16,6 +16,20 @@ typedef struct {
 	char* context; // additional context (optional, can be NULL)
 } PgQueryError;
 
+// Diagnostic strings are borrowed only for the synchronous callback. Callbacks
+// must not reenter libpg_query. The callback and its context are never retained.
+typedef struct {
+    int severity;
+    char sqlstate[6];
+    const char* message;
+    const char* detail;
+    const char* hint;
+    const char* context;
+    int cursorpos;
+} PgQueryDiagnostic;
+typedef void (*PgQueryDiagnosticCallback)(void* context,
+    const PgQueryDiagnostic* diagnostic);
+
 typedef struct {
 	int length;
 	bool *items;
@@ -180,14 +194,22 @@ extern "C" {
 PgQueryNormalizeResult pg_query_normalize(const char* input);
 PgQueryNormalizeResult pg_query_normalize_utility(const char* input);
 PgQueryScanResult pg_query_scan(const char* input);
+PgQueryScanResult pg_query_scan_opts(const char* input, int parser_options);
 PgQueryParseResult pg_query_parse(const char* input);
 PgQueryParseResult pg_query_parse_opts(const char* input, int parser_options);
 PgQueryProtobufParseResult pg_query_parse_protobuf(const char* input);
 PgQueryProtobufParseResult pg_query_parse_protobuf_opts(const char* input, int parser_options);
+PgQueryProtobufParseResult pg_query_parse_protobuf_with_diagnostics(
+    const char* input, int parser_options,
+    PgQueryDiagnosticCallback callback, void* context);
 PgQueryPlpgsqlParseResult pg_query_parse_plpgsql(const char* input);
 // A supplied catalog adds each PLpgSQL_type's resolved typoid to the JSON output.
 PgQueryPlpgsqlParseResult pg_query_parse_plpgsql_with_catalog(
     const char* input, const PgQueryPlpgsqlCatalog* catalog);
+PgQueryPlpgsqlParseResult pg_query_parse_plpgsql_with_options(
+    const char* input, const PgQueryPlpgsqlCatalog* catalog, int parser_options,
+    PgQueryDiagnosticCallback callback, void* context);
+
 
 PgQueryFingerprintResult pg_query_fingerprint(const char* input);
 PgQueryFingerprintResult pg_query_fingerprint_opts(const char* input, int parser_options);

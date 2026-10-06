@@ -1,5 +1,7 @@
 #include "pg_query.h"
 #include "pg_query_internal.h"
+#include "pg_query_diagnostics.h"
+#include "pg_query_parser_options.h"
 #include "pg_query_outfuncs.h"
 
 #include "parser/parser.h"
@@ -13,6 +15,9 @@ PgQueryInternalParsetreeAndError pg_query_raw_parse(const char* input, int parse
 {
 	PgQueryInternalParsetreeAndError result = {0};
 	MemoryContext parse_context = CurrentMemoryContext;
+	PgQueryParserOptionsScope previous_options = {
+		backslash_quote, standard_conforming_strings, escape_string_warning
+	};
 
 	char stderr_buffer[STDERR_BUFFER_LEN + 1] = {0};
 #ifndef DEBUG
@@ -62,19 +67,10 @@ PgQueryInternalParsetreeAndError pg_query_raw_parse(const char* input, int parse
 				break;
 		}
 
-		if ((parser_options & PG_QUERY_DISABLE_BACKSLASH_QUOTE) == PG_QUERY_DISABLE_BACKSLASH_QUOTE) {
-			backslash_quote = BACKSLASH_QUOTE_OFF;
-		} else {
-			backslash_quote = BACKSLASH_QUOTE_SAFE_ENCODING;
-		}
-		standard_conforming_strings = !((parser_options & PG_QUERY_DISABLE_STANDARD_CONFORMING_STRINGS) == PG_QUERY_DISABLE_STANDARD_CONFORMING_STRINGS);
-		escape_string_warning = !((parser_options & PG_QUERY_DISABLE_ESCAPE_STRING_WARNING) == PG_QUERY_DISABLE_ESCAPE_STRING_WARNING);
+		(void) pg_query_begin_parser_options(parser_options);
 
 		result.tree = raw_parser(input, rawParseMode);
 
-		backslash_quote = BACKSLASH_QUOTE_SAFE_ENCODING;
-		standard_conforming_strings = true;
-		escape_string_warning = true;
 
 #ifndef DEBUG
 		// Save stderr for result
@@ -90,6 +86,7 @@ PgQueryInternalParsetreeAndError pg_query_raw_parse(const char* input, int parse
 
 		MemoryContextSwitchTo(parse_context);
 		error_data = CopyErrorData();
+		pg_query_capture_diagnostic(error_data);
 
 		// Note: This is intentionally malloc so exiting the memory context doesn't free this
 		error = malloc(sizeof(PgQueryError));
@@ -104,6 +101,8 @@ PgQueryInternalParsetreeAndError pg_query_raw_parse(const char* input, int parse
 		FlushErrorState();
 	}
 	PG_END_TRY();
+	/* Restore on errors too; nested PL/pgSQL compilation keeps its own options. */
+	pg_query_end_parser_options(previous_options);
 
 #ifndef DEBUG
 	// Restore stderr, close pipe
@@ -187,4 +186,17 @@ void pg_query_free_protobuf_parse_result(PgQueryProtobufParseResult result)
 
 	free(result.parse_tree.data);
 	free(result.stderr_buffer);
+}
+
+PgQueryProtobufParseResult
+pg_query_parse_protobuf_with_diagnostics(const char *input, int parser_options,
+    PgQueryDiagnosticCallback callback, void *context)
+{
+    PgQueryDiagnosticScope scope;
+    PgQueryProtobufParseResult result;
+
+    pg_query_begin_diagnostics(&scope, callback, context);
+    result = pg_query_parse_protobuf_opts(input, parser_options);
+    pg_query_end_diagnostics(&scope);
+    return result;
 }
