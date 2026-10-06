@@ -176,3 +176,53 @@ fn fixed_generated_calls_use_selected_overload_volatility() {
         );
     }
 }
+
+#[test]
+fn extraction_overloads_retain_source_type_result_type_and_volatility() {
+    for name in ["extract", "date_part"] {
+        for source in [
+            ColumnType::Date,
+            ColumnType::Time,
+            ColumnType::TimeTz,
+            ColumnType::Timestamp,
+            ColumnType::TimestampTz,
+            ColumnType::Interval,
+        ] {
+            let types = [Some(ColumnType::Text), Some(source.clone())];
+            let call = resolve_fixed_builtin_call(name, None, &[None, None], &types, false, None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(call.selected.binding.argument_types[0], "text");
+            assert_eq!(
+                ColumnType::from_sql_name(&call.selected.binding.argument_types[1]).unwrap(),
+                source
+            );
+            assert_eq!(
+                call.builtin_non_immutable,
+                source == ColumnType::TimestampTz
+            );
+            assert_eq!(
+                fixed_builtin_return_type(&call.selected.binding),
+                Some(if name == "extract" {
+                    ColumnType::Numeric {
+                        precision: None,
+                        scale: None,
+                    }
+                } else {
+                    ColumnType::DoublePrecision
+                })
+            );
+        }
+        let error = resolve_fixed_builtin_call(
+            name,
+            None,
+            &[None, None],
+            &[Some(ColumnType::Text), Some(ColumnType::Integer)],
+            false,
+            None,
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.sqlstate(), Some("42883"));
+    }
+}

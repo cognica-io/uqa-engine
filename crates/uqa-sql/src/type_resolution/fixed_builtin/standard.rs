@@ -47,6 +47,22 @@ declarations! { pub(super) fn lookup(name);
             Signature::new(&[T::Text, T::Text], T::Text),
             Signature::new(&[T::Text, T::Text, T::Text], T::Text),
         ],
+        "extract" => &[
+            Signature::new(&[T::Text, T::Date], numeric_type()),
+            Signature::new(&[T::Text, T::Time], numeric_type()),
+            Signature::new(&[T::Text, T::TimeTz], numeric_type()),
+            Signature::new(&[T::Text, T::Timestamp], numeric_type()),
+            Signature::new(&[T::Text, T::TimestampTz], numeric_type()),
+            Signature::new(&[T::Text, T::Interval], numeric_type()),
+        ],
+        "date_part" => &[
+            Signature::new(&[T::Text, T::Date], T::DoublePrecision),
+            Signature::new(&[T::Text, T::Time], T::DoublePrecision),
+            Signature::new(&[T::Text, T::TimeTz], T::DoublePrecision),
+            Signature::new(&[T::Text, T::Timestamp], T::DoublePrecision),
+            Signature::new(&[T::Text, T::TimestampTz], T::DoublePrecision),
+            Signature::new(&[T::Text, T::Interval], T::DoublePrecision),
+        ],
         "date_trunc" => &[
             Signature::new(&[T::Text, T::Timestamp], T::Timestamp),
             Signature::new(&[T::Text, T::TimestampTz], T::TimestampTz),

@@ -8,28 +8,12 @@
 
 use super::{
     coerce_temporal_with_control, datetime_out_of_range, micros_from_naive, temporal_naive,
-    Datelike, IntervalFields, NaiveDate, NaiveDateTime, ProductionControl, Result, SQLError,
-    TemporalValue, Timelike, Value, MICROS_PER_HOUR, MICROS_PER_MINUTE, MICROS_PER_SECOND,
+    units::{Unit, UnitName},
+    Datelike, IntervalFields, NaiveDate, NaiveDateTime, ProductionControl, Result, TemporalValue,
+    Timelike, Value, MICROS_PER_HOUR, MICROS_PER_MINUTE, MICROS_PER_SECOND,
 };
 
 pub(super) mod zone;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Unit {
-    Millennium,
-    Century,
-    Decade,
-    Year,
-    Quarter,
-    Month,
-    Week,
-    Day,
-    Hour,
-    Minute,
-    Second,
-    Milliseconds,
-    Microseconds,
-}
 
 pub(super) fn truncate(
     units: &str,
@@ -62,59 +46,18 @@ pub(super) fn truncate(
 }
 
 fn decode_unit(raw: &str, type_name: &str) -> Result<Unit> {
-    // `downcase_truncate_identifier` clips on a UTF-8 boundary; `DecodeUnits` compares at most ten bytes without trimming whitespace.
-    let mut length = raw.len().min(63);
-    while !raw.is_char_boundary(length) {
-        length -= 1;
+    let name = UnitName::new(raw);
+    let unit = name.units().ok_or_else(|| name.unrecognized(type_name))?;
+    if matches!(
+        unit,
+        Unit::Timezone | Unit::TimezoneHour | Unit::TimezoneMinute
+    ) {
+        return Err(name.unsupported(type_name, None));
     }
-    let mut normalized = [0_u8; 63];
-    for (output, input) in normalized.iter_mut().zip(&raw.as_bytes()[..length]) {
-        *output = input.to_ascii_lowercase();
-    }
-    let name = std::str::from_utf8(&normalized[..length])
-        .expect("ASCII folding and character-boundary truncation preserve UTF-8");
-    let token = &normalized[..length.min(10)];
-    let unit = match token {
-        b"mil" | b"mils" | b"millennia" | b"millennium" => Unit::Millennium,
-        b"c" | b"cent" | b"century" | b"centuries" => Unit::Century,
-        b"dec" | b"decs" | b"decade" | b"decades" => Unit::Decade,
-        b"y" | b"yr" | b"yrs" | b"year" | b"years" => Unit::Year,
-        b"qtr" | b"quarter" => Unit::Quarter,
-        b"mon" | b"mons" | b"month" | b"months" => Unit::Month,
-        b"w" | b"week" | b"weeks" => Unit::Week,
-        b"d" | b"day" | b"days" => Unit::Day,
-        b"h" | b"hr" | b"hrs" | b"hour" | b"hours" => Unit::Hour,
-        b"m" | b"min" | b"mins" | b"minute" | b"minutes" => Unit::Minute,
-        b"s" | b"sec" | b"secs" | b"second" | b"seconds" => Unit::Second,
-        b"ms" | b"msec" | b"msecs" | b"msecond" | b"mseconds" | b"millisecon" => Unit::Milliseconds,
-        b"us" | b"usec" | b"usecs" | b"usecond" | b"useconds" | b"microsecon" => Unit::Microseconds,
-        b"timezone" | b"timezone_h" | b"timezone_m" => {
-            return Err(unsupported_unit(name, type_name, None));
-        }
-        _ => {
-            return Err(SQLError::Routine {
-                sqlstate: "22023".into(),
-                message: format!("unit \"{name}\" not recognized for type {type_name}"),
-            });
-        }
-    };
     if unit == Unit::Week && type_name == "interval" {
-        return Err(unsupported_unit(
-            name,
-            type_name,
-            Some("Months usually have fractional weeks."),
-        ));
+        return Err(name.unsupported(type_name, Some("Months usually have fractional weeks.")));
     }
     Ok(unit)
-}
-
-fn unsupported_unit(name: &str, type_name: &str, detail: Option<&str>) -> SQLError {
-    SQLError::Diagnostic {
-        sqlstate: "0A000".into(),
-        message: format!("unit \"{name}\" not supported for type {type_name}"),
-        detail: detail.map(str::to_string),
-        hint: None,
-    }
 }
 
 fn truncate_interval(unit: Unit, mut interval: IntervalFields) -> IntervalFields {
@@ -176,6 +119,7 @@ fn truncate_timestamp(unit: Unit, value: NaiveDateTime) -> Result<NaiveDateTime>
             value.and_utc().timestamp_subsec_micros() / 1_000 * 1_000,
         ),
         Unit::Microseconds => Some(value),
+        _ => unreachable!("timestamp units were validated before truncation"),
     };
     result.ok_or_else(|| datetime_out_of_range("timestamp"))
 }
