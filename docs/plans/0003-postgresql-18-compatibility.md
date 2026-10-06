@@ -1289,6 +1289,17 @@ Execution owns creation namespace scheduling and materialized-view publication. 
 - [x] Preserve all 75 inherited records, with 33 original tasks open; capture creation, catalog, refresh, rollback, rename, dependency and deletion behavior independently.
 - [x] Correct temporary materialized-view namespace, persistence and publication in the owning interfaces.
 - [x] Verify all four providers, session isolation, refresh, rollback and reopen, with owner regression coverage. All 34 PostgreSQL messages and three fresh-connection observations pass; six Execution view-creation tests and 25 affected Engine integrations, including the manual SQL harness and prior creation-order oracle, pass. Strict Clippy, rustfmt, dependency/ownership, harness, source-size, legal and manifest checks pass; the shared target cache is 87.33 GB against its 100 GB limit.
-- [ ] Synchronize the manual, HISTORY and manifest, review, merge, close #512 and clean the branch.
+- [x] Synchronize the manual, HISTORY and manifest, review, merge, close #512 and clean the branch. PR #513 merged as `b20a74321`; #512 is closed and both completed branches are removed.
 
 This restores an existing SQL relation lifecycle and introduces no algebraic carrier or operator. Temporary and permanent views must retain identical row and query semantics while respecting their distinct catalog lifetime.
+
+## Temporary foreign tables
+
+Issue [#514](https://github.com/cognica-io/uqa-engine/issues/514) completes the foreign-table half of the original temporary relation task after PR #513. The 38-message PostgreSQL 18.4 reference and two fresh-connection observations cover creation, serial sequence persistence, dependent views, grants, rename/savepoint rollback, temporary schema-move rejection, CASCADE, DISCARD TEMP, refresh and reopen. The baseline differs on 35 messages, including consequences of the initial creation failure.
+
+Execution owns temporary foreign definition lifetime, creation/publication scheduling and preservation during durable catalog refresh. Reuse SQL namespace rules and storage interfaces, retain session metadata without extending persistent formats, and keep Engine limited to the existing registry/transaction adapters. The relevant manifests, enabled features and dependency policy require no new dependency or feature. This corrects existing foreign relation semantics without adding an algebraic carrier or operator.
+
+- [x] Preserve all 75 inherited records, with 33 original tasks open; independently reproduce and identify every lifetime boundary.
+- [ ] Correct temporary foreign creation, serial persistence, catalog projection, publication, restoration and DISCARD cleanup.
+- [ ] Verify all providers, independent sessions and persistent reopen with owner regressions.
+- [ ] Synchronize documentation, review and merge, close #514 and clean the branch; mark the original combined task complete only after verification.
