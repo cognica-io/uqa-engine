@@ -48,7 +48,9 @@ pub fn bind_table_alteration(
     mut statement: AlterTableStmt,
 ) -> Result<BoundTableAlteration, SQLError> {
     let RelationAlterTarget {
-        canonical, kind, ..
+        canonical,
+        relation,
+        kind,
     } = target;
     let bound = match kind {
         "index"
@@ -80,7 +82,7 @@ pub fn bind_table_alteration(
             },
         },
         "view" | "materialized view" => {
-            match alter_view_from_table_syntax(&canonical, kind, &statement)? {
+            match alter_view_from_table_syntax(&canonical, &relation.name, kind, &statement)? {
                 Some(change) => BoundTableAlteration::View(change),
                 None => BoundTableAlteration::ViewEvents {
                     name: canonical,

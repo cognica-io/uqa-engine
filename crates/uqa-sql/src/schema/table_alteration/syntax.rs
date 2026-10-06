@@ -10,6 +10,8 @@ use crate::{
     SQLError,
 };
 
+mod views;
+
 pub fn table_alter_lock_mode(statement: &AlterTableStmt) -> TableLockMode {
     let mut mode = TableLockMode::ShareUpdateExclusive;
     for action in &statement.actions {
@@ -91,9 +93,11 @@ pub fn alter_sequence_from_table_syntax(
 /// Return a native view owner or name change, or None for a valid sequence of view event renames.
 pub fn alter_view_from_table_syntax(
     canonical: &str,
+    local_name: &str,
     kind: &str,
     stmt: &AlterTableStmt,
 ) -> Result<Option<crate::ast::AlterViewStmt>, SQLError> {
+    views::validate_actions(local_name, kind, &stmt.actions)?;
     let action = match stmt.actions.as_slice() {
         [AlterTableAction::RenameTable { to }] => {
             Some(crate::ast::AlterViewAction::RenameTo(to.clone()))

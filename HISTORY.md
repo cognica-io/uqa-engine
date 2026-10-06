@@ -31,6 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Match PostgreSQL's action-specific ALTER TABLE errors on regular and materialized views, including the local relation name and DETAIL. Resolve the target and ownership before validating declarations, preserve written action order, and skip invalid type modifiers when IF EXISTS or IF NOT EXISTS skips the declaration. Keep missing-column and USING errors ahead of target type modifiers and retain ordinary-table key validation.
 - Preserve named WINDOW declarations and selected OVER references in stored view definitions, including quoted names, inheritance, equivalent inline definitions and unused declarations. Analyze each definition's literal inputs once, retain its dependencies, and preserve prepared values and legacy expanded definitions across reopen. Correct window passes over projected rows so nested views and multiple sorts retain the actual physical row layout in memory and spill.
 - Analyze CREATE VIEW literal inputs before output aliases and target checks, retaining definition-time conversions across execution and reopen while leaving runtime expressions deferred. Failed replacement preserves the previous view.
 
