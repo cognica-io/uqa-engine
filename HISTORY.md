@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Validate CREATE TABLE foreign keys in written order, preserving repeated column REFERENCES, constraint naming and catalog order. Match PostgreSQL key diagnostics and defer generated sequence ownership until after table constraints; retain the correct owner for explicitly named cross-schema identity sequences and require an owned sequence for identity DEFAULT values.
+
 - Preserve stored role-constant dependency checks after input conversion and partition-key optimization, and match PostgreSQL routine declaration error ordering and CHECK diagnostics.
 
 - Resolve named array-transform calls alongside user overloads during preparation and stored binding, preserving argument positions and declared Boolean option types. Reconstruct stored named calls with PostgreSQL argument notation.
