@@ -293,7 +293,7 @@ fn transfer_children(
                 return Ok(false);
             }
             let mut changed =
-                transfer_call_arguments(args, bound_args, bound_binding.as_ref(), folding)?;
+                transfer_call_arguments(name, args, bound_args, bound_binding.as_ref(), folding)?;
             for (order, bound) in order_by.iter_mut().zip(bound_order) {
                 changed |= transfer(&mut order.expr, &bound.expr, folding)?;
             }
@@ -409,17 +409,25 @@ fn transfer_children(
     })
 }
 
-/// Fixed built-ins may reorder named arguments and insert defaults in the bound
+/// Built-ins may reorder named arguments and insert defaults in the bound
 /// copy. Map supplied values back through the selected signature, retaining the
 /// original argument markers and written order in stored syntax.
 fn transfer_call_arguments(
+    name: &str,
     stored: &mut [ScalarExpr],
     bound: &[ScalarExpr],
     binding: Option<&crate::ast::FunctionBinding>,
     folding: &mut dyn Folding,
 ) -> Result<bool, SQLError> {
     let selected = binding.filter(|binding| binding.builtin);
-    let positions = if let Some(binding) = selected {
+    let positions = if super::array_transform::is_function(name)
+        && binding.is_none_or(|binding| {
+            binding.dispatch == Some(crate::ast::FunctionDispatch::ArraySortJson)
+        }) {
+        let arguments = crate::scalar_call_arguments(stored)?;
+        let names = arguments.iter().map(|arg| arg.name).collect::<Vec<_>>();
+        crate::expr::array_transform_argument_positions(name, &names)?
+    } else if let Some(binding) = selected {
         let arguments = crate::scalar_call_arguments(stored)?;
         let names = arguments
             .iter()

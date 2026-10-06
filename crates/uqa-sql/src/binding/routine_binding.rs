@@ -745,6 +745,15 @@ impl SchemaScope {
                 Some(&resolver),
             )?
             .map(|resolved| resolved.selected)
+        } else if let Some(array) = crate::type_resolution::resolve_array_transform_call(
+            name,
+            binding.as_ref(),
+            args,
+            &argument_types,
+            explicit_variadic,
+            &resolver,
+        )? {
+            array.overload
         } else {
             resolver.resolve_function_overload(
                 name,

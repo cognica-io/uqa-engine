@@ -260,3 +260,23 @@ fn stored_domain_inputs_are_read_once_without_invoking_checks_during_introspecti
     }
     assert_eq!(catalog.0.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn stored_array_options_keep_written_names_and_argument_positions() {
+    for sql in [
+        "array_sort(nulls_first => false, \"array\" => ARRAY[2,1], descending => true)",
+        "array_sort(descending => $2, \"array\" => $1)",
+    ] {
+        let params = [
+            SQLParam::typed_scalar(
+                Value::Null,
+                ColumnType::Array(Box::new(ColumnType::Integer)),
+            ),
+            SQLParam::typed_scalar(Value::Null, ColumnType::Boolean),
+        ];
+        let original = expression(sql);
+        let mut stored = original.clone();
+        assert!(!store_operand_coercions(&mut stored, &schema(), &params, &Catalog).unwrap());
+        assert_eq!(stored, original, "{sql}");
+    }
+}

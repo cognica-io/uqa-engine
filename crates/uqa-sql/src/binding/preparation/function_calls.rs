@@ -70,6 +70,7 @@ impl Preparation<'_> {
         &mut self,
         name: &str,
         binding: Option<&FunctionBinding>,
+        args: &[ScalarExpr],
         arguments: &ObservedFunctionArguments,
     ) -> Result<SelectedFunctionArguments, SQLError> {
         if binding.is_none() && self.routines.has_untyped_function(name) {
@@ -80,6 +81,7 @@ impl Preparation<'_> {
             });
         }
         let types = arguments.types();
+        let mut kind = None;
         let (overload, positions) = if matches!(
             binding.and_then(|binding| binding.dispatch),
             Some(crate::ast::FunctionDispatch::NumericOperator(_))
@@ -96,6 +98,16 @@ impl Preparation<'_> {
             Some(self.routines),
         )? {
             (Some(fixed.selected), fixed.builtin_argument_positions)
+        } else if let Some(array) = crate::type_resolution::resolve_array_transform_call(
+            name,
+            binding,
+            args,
+            &types,
+            arguments.variadic,
+            self.routines,
+        )? {
+            kind = Some(super::super::ordered_calls::Kind::Ordinary);
+            (array.overload, array.builtin_argument_positions)
         } else {
             (
                 self.routines.resolve_function_overload(
@@ -114,7 +126,7 @@ impl Preparation<'_> {
         Ok(SelectedFunctionArguments {
             overload,
             positions,
-            kind: None,
+            kind,
         })
     }
 
@@ -122,6 +134,8 @@ impl Preparation<'_> {
         &mut self,
         name: &str,
         binding: Option<&FunctionBinding>,
+        args: &[ScalarExpr],
+        ordered: &[crate::ScalarOrder],
         arguments: &ObservedFunctionArguments,
     ) -> Result<SelectedFunctionArguments, SQLError> {
         if let Some((selected, kind)) = super::super::ordered_calls::resolve(
@@ -139,7 +153,17 @@ impl Preparation<'_> {
                 kind: Some(kind),
             })
         } else {
-            self.select_function_arguments(name, binding, arguments)
+            let args = if ordered.is_empty() {
+                std::borrow::Cow::Borrowed(args)
+            } else {
+                std::borrow::Cow::Owned(
+                    args.iter()
+                        .chain(ordered.iter().map(|order| &order.expr))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            };
+            self.select_function_arguments(name, binding, &args, arguments)
         }
     }
 
@@ -206,7 +230,16 @@ impl Preparation<'_> {
             .map(Some)
             .collect()
         } else {
-            crate::type_resolution::builtin_function_argument_targets(name, &types)
+            let declared = if let Some(positions) = &selection.positions {
+                let mut declared = vec![None; types.len()];
+                for (ty, position) in types.into_iter().zip(positions) {
+                    declared[*position] = ty;
+                }
+                declared
+            } else {
+                types
+            };
+            crate::type_resolution::builtin_function_argument_targets(name, &declared)
         };
         for (index, value) in arguments.values.iter_mut().enumerate() {
             let position = selection

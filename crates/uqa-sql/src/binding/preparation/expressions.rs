@@ -271,10 +271,11 @@ impl Preparation<'_> {
         else {
             unreachable!("function expression");
         };
+        let binding = binding.as_ref();
         let within_group = super::super::ordered_calls::uses_ordered_arguments(
             *order_syntax,
             name,
-            binding.as_ref(),
+            binding,
             order_by.len(),
         );
         let ordered = if within_group {
@@ -293,9 +294,9 @@ impl Preparation<'_> {
             self.require_boolean(filter, input, subqueries, "FILTER")?;
         }
         let selected = if within_group || super::super::ordered_calls::is_ordered_set(name) {
-            self.select_ordered_function_arguments(name, binding.as_ref(), &arguments)?
+            self.select_ordered_function_arguments(name, binding, args, ordered, &arguments)?
         } else {
-            self.select_function_arguments(name, binding.as_ref(), &arguments)?
+            self.select_function_arguments(name, binding, args, &arguments)?
         };
         if let Some(kind) = selected.kind.or_else(|| {
             selected
@@ -335,7 +336,7 @@ impl Preparation<'_> {
                 filter.is_some(),
             )?;
         }
-        self.coerce_function_arguments(name, binding.as_ref(), &mut arguments, &selected)?;
+        self.coerce_function_arguments(name, binding, &mut arguments, &selected)?;
         let selected = selected.overload;
         let ty = match selected
             .as_ref()
@@ -352,7 +353,7 @@ impl Preparation<'_> {
             selected
                 .as_ref()
                 .map(|selected| &selected.binding)
-                .or(binding.as_ref()),
+                .or(binding),
             input,
         )?;
         Ok(ty)
@@ -407,7 +408,7 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<Option<crate::type_resolution::ResolvedFunctionOverload>, SQLError> {
         let mut arguments = self.observe_function_arguments(name, args, &[], input, subqueries)?;
-        let selected = self.select_function_arguments(name, binding, &arguments)?;
+        let selected = self.select_function_arguments(name, binding, args, &arguments)?;
         self.coerce_function_arguments(name, binding, &mut arguments, &selected)?;
         Ok(selected.overload)
     }

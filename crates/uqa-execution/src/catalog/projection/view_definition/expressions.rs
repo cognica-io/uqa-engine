@@ -15,6 +15,9 @@ use uqa_sql::plan::QueryPlan;
 
 use super::{quote_ident, render_column, Deparser, SQLError, Scope};
 
+#[cfg(test)]
+mod tests;
+
 impl Deparser<'_> {
     pub fn expression(
         &self,
@@ -408,6 +411,14 @@ impl Deparser<'_> {
             .iter()
             .enumerate()
             .map(|(index, argument)| {
+                let decoded = uqa_sql::scalar_call_argument(argument)?;
+                if let Some(name) = decoded.name {
+                    return Ok(format!(
+                        "{} => {}",
+                        quote_ident(name),
+                        self.expression(decoded.value, scope, subqueries)?
+                    ));
+                }
                 if matches!(argument, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
                     if let Some(ty) = binding.and_then(|binding| binding.argument_types.get(index))
                     {
