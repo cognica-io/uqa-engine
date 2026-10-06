@@ -280,3 +280,24 @@ fn stored_array_options_keep_written_names_and_argument_positions() {
         assert_eq!(stored, original, "{sql}");
     }
 }
+
+#[test]
+fn stored_array_inspection_maps_arguments_without_repeating_type_inference() {
+    let schema = RowSchema::with_types(
+        vec!["a".into()],
+        vec![Some(ColumnType::Array(Box::new(ColumnType::Integer)))],
+    );
+    for sql in [
+        "array_dims(a)",
+        "array_ndims(a)",
+        "cardinality(a)",
+        "array_lower(a,1)",
+        "array_upper(a,1)",
+        "array_length(a,1)",
+    ] {
+        let original = expression(sql);
+        let mut stored = original.clone();
+        assert!(!store_operand_coercions(&mut stored, &schema, &[], &Catalog).unwrap());
+        assert_eq!(stored, original, "{sql}");
+    }
+}

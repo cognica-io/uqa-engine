@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Numeric, text, and temporal fixed signatures used by ordinary SQL.
+//! Numeric, text, temporal, and array inspection signatures used by ordinary SQL.
 
 use super::registry::{
     declarations, numeric_type, Signature, NUMERIC_BINARY_ARGUMENTS, NUMERIC_SCALE_ARGUMENTS,
@@ -13,6 +13,11 @@ use super::registry::{
 use crate::ast::ColumnType as T;
 
 declarations! { pub(super) fn lookup(name);
+        "array_dims" => &[Signature::new(&[T::AnyArray], T::Text)],
+        "array_ndims" | "cardinality" => &[Signature::new(&[T::AnyArray], T::Integer)],
+        "array_lower" | "array_upper" | "array_length" => &[
+            Signature::new(&[T::AnyArray, T::Integer], T::Integer),
+        ],
         "lower" | "upper" => &[Signature::new(&[T::Text], T::Text)],
         "replace" => &[Signature::new(&[T::Text, T::Text, T::Text], T::Text)],
         "mod" => &[

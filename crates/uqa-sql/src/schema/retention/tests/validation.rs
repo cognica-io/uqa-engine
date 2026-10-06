@@ -96,6 +96,38 @@ fn virtual_generated_calls_preserve_postgresql_error_fields() {
 }
 
 #[test]
+fn stored_generated_calls_require_declared_host_return_types_before_planning() {
+    for expression in [
+        "generated_twice(v)",
+        "coalesce(generated_twice(v), 0)",
+        "generated_twice(v)::integer",
+        "CASE WHEN false THEN generated_twice(v) ELSE 0 END",
+    ] {
+        let mut source = columns(&format!(
+            "CREATE TABLE t(v integer, g integer GENERATED ALWAYS AS ({expression}) STORED)"
+        ));
+        let binding = crate::binding::fixture::empty_binding_context();
+        let error = crate::schema::generated::prepare_generated_columns(
+            &crate::schema::SchemaBindingContext {
+                catalog: &Catalog,
+                binding: &binding,
+            },
+            "t",
+            &mut source,
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42804"));
+        assert!(
+            error
+                .to_string()
+                .contains("registered function `generated_twice` has no declared SQL return type"),
+            "{expression}: {error}"
+        );
+    }
+}
+
+#[test]
 fn generated_column_owner_rejects_the_query_shapes_excluded_from_retention() {
     for sql in [
         "SELECT (SELECT 1)",

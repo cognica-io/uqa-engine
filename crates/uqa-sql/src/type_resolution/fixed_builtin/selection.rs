@@ -125,6 +125,11 @@ pub(super) fn select_with_control(
         let matched =
             match_signature_with_control(declaration, argument_names, argument_types, control)?
                 .ok_or_else(|| bound_function_resolution_error(binding))?;
+        super::validate_polymorphic_arguments(
+            declaration.argument_types,
+            argument_types,
+            &matched.argument_positions,
+        )?;
         return Ok(SelectedSignature {
             name: registered_name,
             declaration,
@@ -159,10 +164,15 @@ pub(super) fn select_with_control(
             "is not unique",
         ));
     }
-    candidates
-        .values
-        .pop()
-        .ok_or_else(|| SQLError::Internal("resolved fixed built-in candidate disappeared".into()))
+    let selected = candidates.values.pop().ok_or_else(|| {
+        SQLError::Internal("resolved fixed built-in candidate disappeared".into())
+    })?;
+    super::validate_polymorphic_arguments(
+        selected.declaration.argument_types,
+        argument_types,
+        &selected.matched.argument_positions,
+    )?;
+    Ok(selected)
 }
 
 #[cfg(test)]

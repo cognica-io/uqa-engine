@@ -127,6 +127,26 @@ fn generated_column_does_not_rebind_registered_callback_as_fixed_builtin() {
             .contains("registered function `md5` has no declared SQL return type"),
         "{error}"
     );
+    eng.sql(
+        "CREATE TABLE generated_builtin_md5 (
+             source TEXT,
+             value TEXT GENERATED ALWAYS AS (pg_catalog.md5(source)) STORED
+         )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO generated_builtin_md5(source) VALUES ('abc')",
+        &[],
+    )
+    .unwrap();
+    let result = eng
+        .sql("SELECT value FROM generated_builtin_md5", &[])
+        .unwrap();
+    assert_eq!(
+        result.rows[0]["value"],
+        Value::Str("900150983cd24fb0d6963f7d28e17f72".into())
+    );
 }
 
 struct RepeatRows;

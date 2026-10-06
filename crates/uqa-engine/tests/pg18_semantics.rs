@@ -167,3 +167,6 @@ mod function_definition;
 
 #[path = "pg18_semantics/datestyle.rs"]
 mod datestyle;
+
+#[path = "pg18_semantics/array_inspection_identities.rs"]
+mod array_inspection_identities;

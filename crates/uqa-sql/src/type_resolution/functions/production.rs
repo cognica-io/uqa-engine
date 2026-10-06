@@ -723,7 +723,6 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "quote_nullable"
         | "regexp_substr"
         | "array_to_string"
-        | "array_dims"
         | "json_typeof"
         | "jsonb_typeof"
         | "jsonb_pretty"
@@ -860,8 +859,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         // An `unknown` operand selects the other operand's `||` as `oper_select_candidate` does, so it is typed by its parser identity rather than by its string value.
         "concat_op" => concat_type(effective(0), effective(1), control),
         "ntile" | "position" | "strpos" | "ascii" | "width_bucket" | "regexp_count"
-        | "regexp_instr" | "num_nulls" | "num_nonnulls" | "array_length" | "array_upper"
-        | "array_lower" | "array_ndims" | "cardinality" | "array_position"
+        | "regexp_instr" | "num_nulls" | "num_nonnulls" | "array_position"
         | "json_array_length" | "jsonb_array_length" => inline(ColumnType::Integer, control),
         "abs" => copy(first().map(base_type), control),
         "round" | "trunc" | "ceil" | "ceiling" | "floor" | "sign" => {

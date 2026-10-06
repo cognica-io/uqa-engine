@@ -14,7 +14,6 @@ pub(super) fn validate_array_call(
     types: &[Option<&ColumnType>],
 ) -> Result<(), SQLError> {
     let arity = match name {
-        "cardinality" => 1,
         "array_cat" | "array_append" | "array_prepend" | "array_remove" => 2,
         "array_replace" => 3,
         _ => return Ok(()),
@@ -23,11 +22,7 @@ pub(super) fn validate_array_call(
         crate::scalar_call_argument(argument)
             .is_ok_and(|argument| argument.name.is_some() || argument.explicit_variadic)
     });
-    if arguments.len() != arity
-        || has_argument_markers
-        || (name == "cardinality"
-            && types[0].is_some_and(|ty| crate::type_resolution::array_element_type(ty).is_none()))
-    {
+    if arguments.len() != arity || has_argument_markers {
         let names = arguments
             .iter()
             .map(|argument| {
@@ -42,12 +37,6 @@ pub(super) fn validate_array_call(
             &types.iter().map(|ty| ty.cloned()).collect::<Vec<_>>(),
             "does not exist",
         ));
-    }
-    if name == "cardinality" && types[0].is_none() {
-        return Err(SQLError::Routine {
-            sqlstate: "42804".into(),
-            message: "could not determine polymorphic type because input has type unknown".into(),
-        });
     }
     Ok(())
 }

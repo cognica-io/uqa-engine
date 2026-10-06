@@ -212,12 +212,14 @@ The extraction functions are strict and immutable. Version 1 timestamps use the 
 
 | Functions | Purpose |
 | --- | --- |
-| `array_length`, `array_lower`, `array_upper`, `cardinality` | Dimensions and bounds |
+| `array_dims`, `array_ndims`, `array_length`, `array_lower`, `array_upper`, `cardinality` | Dimensions, bounds and element count |
 | `array_cat`, `array_append`, `array_prepend` | Construction |
 | `array_remove`, `array_replace`, `array_trim`, `array_sample`, `array_sort`, `array_reverse` | Transformation |
 | `array_position`, `array_positions`, `array_overlap` | Search and overlap |
 | `array_to_string`, `array_fill` | Conversion and construction |
 | `unnest` | Expand values as a table function |
+
+The six dimension, bound and element-count routines expose PostgreSQL builtin identities in `pg_proc`, including their `anyarray` argument signatures, immutable/strict behavior and parallel safety. Their names and signatures resolve through `regproc` and `regprocedure`, and their EXECUTE privileges apply to direct calls and stored expressions. Array arguments retain their concrete types; an untyped NULL or string cannot determine the polymorphic array type. Dimension arguments use the declared `integer` signature, including implicit `smallint` widening and rejection of `bigint`. Calls participate in ordinary overload resolution, while `pg_catalog` qualification selects the builtin.
 
 `array_reverse(anyarray)` reverses the first dimension, and `array_sort(anyarray [, descending boolean [, nulls_first boolean]])` orders first-dimension elements while preserving dimensions and lower bounds. The result retains its concrete base-array type, including PostgreSQL's flattening of an array domain to that base type. The two- and three-argument sort overloads accept PostgreSQL's `"array"`, `descending`, and `nulls_first` named notation in declaration-independent order; unknown string literals and bare parameters in Boolean slots receive Boolean context, explicit non-Boolean arguments are rejected, NULL arguments are strict, and an unknown array argument cannot determine the polymorphic type. Unqualified calls participate in normal overload resolution: an exact concrete user-function overload can outrank the polymorphic built-in, an implicit-only user candidate conflicts with a viable built-in, and `pg_catalog` qualification selects the built-in directly. A user overload with incompatible argument names does not hide a matching builtin call. Preparation and stored expressions use the same selection, and stored definitions preserve the written named notation. Explicitly declared non-Boolean option parameters fail during preparation; untyped host scalar parameters still receive Boolean context. Sorting uses PostgreSQL element, nested-array, and record ordering for the implemented types, including the same `json` comparison-function errors, while reversing does not require an element comparator.
 
