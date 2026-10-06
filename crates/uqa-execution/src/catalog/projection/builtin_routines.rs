@@ -6,6 +6,11 @@
 
 //! `PostgreSQL` 18 built-in routine metadata exposed through the virtual catalogs.
 
+mod identities;
+pub use identities::{
+    builtin_routine_identities, builtin_routine_identity, BuiltinRoutineIdentity,
+};
+
 use uqa_sql::catalog::languages::{INTERNAL_LANGUAGE, SQL_LANGUAGE};
 
 #[derive(Debug, Clone, Copy)]
@@ -92,6 +97,12 @@ impl BuiltinRoutineCatalogEntry {
         match self.oid {
             1066 | 1067 => 3994,
             1068 | 1069 => 3995,
+            3100 => 6233,
+            3101 => 6234,
+            3102 => 6235,
+            3103 => 6306,
+            3104 => 6307,
+            3105 => 6308,
             _ => 0,
         }
     }
@@ -158,6 +169,7 @@ const BIT_LENGTH_SQL_BODY_SUFFIX: &str = concat!(
 
 const FALSE_NODE: &str = "({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]})";
 
+mod aggregate_windows;
 mod arrays;
 mod clock_and_case;
 mod definitions;
@@ -194,6 +206,7 @@ const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalo
 
 pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     scalar::ROUTINES,
+    aggregate_windows::ROUTINES,
     clock_and_case::ROUTINES,
     numeric::ROUTINES,
     temporal::ROUTINES,

@@ -206,7 +206,7 @@ fn routine_format_one_conversion_preserves_revoked_owner_execute() {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(stored["routine_catalog_format"], 2);
+        assert_eq!(stored["routine_catalog_format"], 3);
         assert!(
             stored["definitions"]["public.stored_routine"][0]["execute_acl"]
                 .as_array()

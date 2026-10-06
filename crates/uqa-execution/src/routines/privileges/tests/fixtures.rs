@@ -29,6 +29,7 @@ use uqa_sql::{
 
 pub(super) struct Fixture {
     pub registry: RefCell<RoutineRegistry>,
+    pub builtins: RefCell<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub persisted: RefCell<Vec<String>>,
     pub on_writer: RefCell<Option<RoutineRegistry>>,
     pub fail_persist: Cell<bool>,
@@ -51,6 +52,7 @@ impl Fixture {
             .remove(&uqa_sql::ast::RoleAttribute::Superuser);
         Self {
             registry: RefCell::new(BTreeMap::new()),
+            builtins: RefCell::new(BTreeMap::new()),
             persisted: RefCell::new(Vec::new()),
             on_writer: RefCell::new(None),
             fail_persist: Cell::new(false),
@@ -68,6 +70,9 @@ impl Fixture {
     }
     pub fn context(&self) -> RoutinePrivilegeContext<'_> {
         RoutinePrivilegeContext {
+            snapshot: crate::catalog::test_support::empty_catalog(),
+            builtin_security: self,
+            storage: None,
             catalog: RoutineMutationContext {
                 writer: self,
                 names: self,
@@ -203,7 +208,7 @@ impl RoutinePrivilegeNotices for Fixture {
 }
 impl RoutineNameCatalog for Fixture {
     fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
-        ["app", "empty", "public"]
+        ["app", "empty", "public", "pg_catalog"]
             .contains(&name)
             .then(|| BoundSchemaSecurity::bootstrap(name))
     }
@@ -279,5 +284,24 @@ impl SharedObjectLockSession for Fixture {
     }
     fn next_catalog_oid(&self) -> Result<u32, SQLError> {
         self.locks.catalog_oids().next_oid(None, || Ok(None))
+    }
+}
+
+impl uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurityCatalog for Fixture {
+    fn builtin_routine_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurityRead<'_> {
+        Box::new(self.builtins.borrow())
+    }
+}
+impl crate::catalog::security::builtin_routines::BuiltinRoutineSecurityState for Fixture {
+    fn builtin_routine_securities_write(
+        &self,
+    ) -> Box<
+        dyn std::ops::DerefMut<
+                Target = uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
+            > + '_,
+    > {
+        Box::new(self.builtins.borrow_mut())
     }
 }

@@ -17,7 +17,7 @@ use crate::{
 use std::collections::BTreeSet;
 use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
-    ast::{GrantRoutineStmt, RoutineRevokeBehavior},
+    ast::GrantRoutineStmt,
     catalog::roles::RoleReferenceNames,
     routines::lifecycle::RoutineRegistry,
     routines::{declaration::RoutineTypeCatalog, security as analysis},
@@ -29,6 +29,10 @@ pub trait RoutinePrivilegeNotices {
 }
 pub struct RoutinePrivilegeContext<'a> {
     pub catalog: RoutineMutationContext<'a>,
+    pub snapshot: crate::catalog::CatalogReadView,
+    pub builtin_security:
+        &'a dyn crate::catalog::security::builtin_routines::BuiltinRoutineSecurityState,
+    pub storage: Option<&'a dyn uqa_storage::CatalogFacade>,
     pub locks: &'a dyn SharedObjectLockSession,
     pub schemas: &'a dyn uqa_sql::catalog::security::ownership::RelationOwnerSchemas,
     pub types: &'a dyn RoutineTypeCatalog,
@@ -36,6 +40,8 @@ pub struct RoutinePrivilegeContext<'a> {
     pub notices: &'a dyn RoutinePrivilegeNotices,
 }
 
+mod builtins;
+mod candidates;
 mod ownership;
 mod targets;
 #[cfg(test)]
@@ -55,6 +61,8 @@ pub fn grant_sql_routine(
             RoutinePrivilegeCandidate {
                 mut registry,
                 next,
+                mut builtin_security,
+                builtin_updates,
                 notices,
             },
         ..
@@ -69,23 +77,54 @@ pub fn grant_sql_routine(
     if targets.is_empty() {
         return Ok(());
     }
-    context
-        .catalog
-        .publication
-        .persist_routine_definitions(&next)?;
+    if targets
+        .iter()
+        .any(|target| matches!(target, targets::RoutineGrantTarget::User(_)))
+    {
+        context
+            .catalog
+            .publication
+            .persist_routine_definitions(&next)?;
+    }
+    for update in &builtin_updates {
+        update.persist(context.storage).map_err(|error| {
+            SQLError::Internal(format!("persist builtin routine privilege: {error}"))
+        })?;
+    }
+    for update in builtin_updates {
+        builtin_security.insert(update.oid, update.entry);
+    }
     super::catalog::publication::record_changes(context.catalog.changes, &registry, &next);
     **registry = next;
+    drop(builtin_security);
     drop(registry);
     drop(memberships);
     drop(roles);
     for notice in notices {
         context.notices.routine_privilege_notice(notice);
     }
-    context.catalog.changes.catalog_registry_changed();
+    let change = if targets
+        .iter()
+        .all(|target| matches!(target, targets::RoutineGrantTarget::Builtin(_)))
+    {
+        crate::statement::prepared::invalidation::CatalogRegistryChange::BuiltinRoutinePrivileges
+    } else {
+        crate::statement::prepared::invalidation::CatalogRegistryChange::Definitions
+    };
+    context
+        .catalog
+        .changes
+        .catalog_registry_changed_kind(change);
     Ok(())
 }
 
 struct RoutinePrivilegeCandidate<'a> {
+    builtin_security: Box<
+        dyn std::ops::DerefMut<
+                Target = uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
+            > + 'a,
+    >,
+    builtin_updates: Vec<crate::catalog::security::builtin_routines::BuiltinRoutinePrivilegeUpdate>,
     registry: RoutineRegistryWrite<'a>,
     next: RoutineRegistry,
     notices: Vec<uqa_sql::SQLNotice>,
@@ -122,49 +161,39 @@ fn prepare_privileges<'a>(
     let memberships = context.catalog.roles.role_memberships();
     let registry = context.catalog.registry.routines_write();
     let mut next = registry.clone();
+    let builtin_security = context.builtin_security.builtin_routine_securities_write();
+    let mut builtin_next = builtin_security.clone();
+    let mut builtin_updates = Vec::new();
     let mut notices = Vec::new();
     let mut dependencies = BTreeSet::new();
-    for (name, position) in targets::current(targets, &next)? {
-        let existing = next[&name][position].clone();
-        let grantor = analysis::select_routine_acl_grantor(
-            &existing.def,
-            &current_user,
-            &roles,
-            &memberships,
-        )?;
-        analysis::grants::validate_target_options(stmt, &grantees)?;
-        let mut def = existing.def.clone();
-        if let Some(grantor) = grantor {
-            if stmt.is_grant {
-                for grantee in &bound_grantees {
-                    analysis::grant_routine_acl(&mut def, *grantee, grantor, stmt.grant_option)?;
-                }
-            } else {
-                for grantee in &bound_grantees {
-                    analysis::revoke_routine_acl(
-                        &mut def,
-                        *grantee,
-                        grantor,
-                        stmt.grant_option_only,
-                        stmt.revoke_behavior == RoutineRevokeBehavior::Cascade,
-                    )?;
-                }
+    let mut candidate = candidates::GrantCandidateContext {
+        statement: stmt,
+        current_user: &current_user,
+        roles: &roles,
+        memberships: &memberships,
+        grantees: &grantees,
+        bound_grantees: &bound_grantees,
+        notices: &mut notices,
+        dependencies: &mut dependencies,
+    };
+    for target in targets::current(targets, &next)? {
+        match target {
+            targets::CurrentRoutineGrantTarget::Builtin(target) => {
+                builtin_updates.push(builtins::prepare(
+                    &mut candidate,
+                    target,
+                    &mut builtin_next,
+                )?);
             }
-        } else {
-            notices.push(analysis::routine_acl_warning(
-                stmt.is_grant,
-                &existing.def.name,
-            ));
+            targets::CurrentRoutineGrantTarget::User(name, position) => {
+                candidate.user(&name, position, &mut next)?;
+            }
         }
-        // The command stores the ACL even when it grants or revokes nothing.
-        analysis::make_routine_acl_explicit(&mut def)?;
-        analysis::binding::added_routine_acl_roles(&existing.def, &def, &roles, &mut dependencies)?;
-        // `ExecGrant_common` stores a new catalog tuple even when its ACL is unchanged.
-        next.get_mut(&name).expect("resolved routine key")[position] =
-            super::catalog::revision::replacement(def, existing.body.clone())?;
     }
     Ok(RoleDependencyCandidate {
         value: RoutinePrivilegeCandidate {
+            builtin_security,
+            builtin_updates,
             registry,
             next,
             notices,

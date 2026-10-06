@@ -171,7 +171,13 @@ fn build_pg_proc_rows(
                     routine.sql_body().map_or(Value::Null, str_value),
                 ),
                 ("proconfig", Value::Null),
-                ("proacl", Value::Null),
+                (
+                    "proacl",
+                    builtin_acl_value(
+                        catalog,
+                        u32::try_from(routine.oid).expect("builtin routine OID"),
+                    )?,
+                ),
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
@@ -209,7 +215,13 @@ fn build_pg_proc_rows(
             ("probin", Value::Null),
             ("prosqlbody", Value::Null),
             ("proconfig", Value::Null),
-            ("proacl", Value::Null),
+            (
+                "proacl",
+                builtin_acl_value(
+                    catalog,
+                    u32::try_from(stable_oid("proc", name)).expect("registered routine OID"),
+                )?,
+            ),
         ]));
     }
     for function in catalog.all_sql_functions() {
@@ -446,4 +458,20 @@ pub(crate) fn routine_result_type_oid(
             }
         }
     }
+}
+
+fn builtin_acl_value(catalog: &CatalogReadView, oid: u32) -> Result<Value, SQLError> {
+    let definitions = &catalog.snapshot().definitions;
+    let Some(entry) = definitions.builtin_routine_security.get(&oid) else {
+        return Ok(Value::Null);
+    };
+    catalog_array(
+        object_acl_items(
+            &definitions.roles,
+            &entry.execute_acl,
+            'X',
+            "builtin routine",
+        )?,
+        "pg_proc.proacl",
+    )
 }

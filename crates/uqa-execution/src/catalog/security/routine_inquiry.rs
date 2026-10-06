@@ -49,7 +49,10 @@ impl RoutinePrivilegeCatalog for RoutineCatalog<'_, '_> {
             .ok_or_else(|| SQLError::Internal("routine catalog has no bootstrap owner".into()))?;
         Ok(Some(RoutinePrivileges {
             owner: owner.identity(),
-            execute_acl: None,
+            execute_acl: u32::try_from(oid)
+                .ok()
+                .and_then(|oid| definitions.builtin_routine_security.get(&oid))
+                .map(|entry| entry.execute_acl.as_slice()),
         }))
     }
 }

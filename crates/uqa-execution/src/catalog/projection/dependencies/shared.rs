@@ -197,6 +197,16 @@ impl DependencyBuilder<'_> {
                     .map(|entry| (entry.role, entry.grantor)),
             );
         }
+        for (oid, security) in snapshot.definitions.builtin_routine_security.iter() {
+            self.record_owned(
+                (database, ObjectAddress::whole(PROCEDURE_CLASS, *oid)),
+                RoleIdentity::BOOTSTRAP,
+                security
+                    .execute_acl
+                    .iter()
+                    .map(|entry| (entry.role, entry.grantor)),
+            );
+        }
         for server in snapshot.definitions.foreign_servers.values() {
             self.record_role(
                 database,

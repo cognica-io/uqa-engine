@@ -222,3 +222,13 @@ impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
         Box::new(self.snapshot.definitions.system_relation_security.as_ref())
     }
 }
+
+impl uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurityCatalog
+    for CatalogReadView
+{
+    fn builtin_routine_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurityRead<'_> {
+        Box::new(self.snapshot.definitions.builtin_routine_security.as_ref())
+    }
+}

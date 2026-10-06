@@ -144,5 +144,7 @@ pub fn validate_target_options(
     Ok(())
 }
 
+pub mod targets;
+
 #[cfg(test)]
 mod tests;

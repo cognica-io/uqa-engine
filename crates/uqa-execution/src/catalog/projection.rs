@@ -109,6 +109,10 @@ pub fn build_info_schema_rows(
 mod ag_catalog;
 pub(crate) use ag_catalog::named_label_relation_oid;
 mod builtin_routines;
+pub use builtin_routines::{
+    builtin_routine_identities, builtin_routine_identity, BuiltinRoutineIdentity,
+};
+pub use regtypes::catalog_routine_type_oid;
 mod cursors;
 mod dependencies;
 pub use dependencies::{

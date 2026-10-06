@@ -14,7 +14,24 @@ pub fn invalidate_execution_plans<'a>(
     entries: impl IntoIterator<Item = &'a mut PreparedStatementPlan>,
 ) {
     for entry in entries {
-        entry.plan = None;
+        if !entry.has_tracked_executable_dependencies() {
+            entry.plan = None;
+        }
+    }
+}
+
+/// Registry publication distinguishes executable definitions from builtin ACL tuples. Surviving calls check their ACL at execution initialization; already-folded calls have no remaining execution permission dependency.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CatalogRegistryChange {
+    Definitions,
+    BuiltinRoutinePrivileges,
+}
+
+impl CatalogRegistryChange {
+    pub fn invalidate<'a>(self, entries: impl IntoIterator<Item = &'a mut PreparedStatementPlan>) {
+        if self == Self::Definitions {
+            invalidate_execution_plans(entries);
+        }
     }
 }
 

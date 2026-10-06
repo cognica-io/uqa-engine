@@ -12,15 +12,16 @@ use std::sync::Arc;
 use uqa_sql::{
     ast::GrantRoutineStmt,
     catalog::roles::resolve_role_specification,
-    routines::{
-        lifecycle::{binding::resolve_sql_routine_alter_target, RoutineRegistry},
-        security::grants,
-        SQLUserFunction,
-    },
+    routines::{lifecycle::RoutineRegistry, security::grants, SQLUserFunction},
     SQLError,
 };
 
-pub(super) type RoutineGrantTargets = Vec<Arc<SQLUserFunction>>;
+#[derive(Clone)]
+pub(super) enum RoutineGrantTarget {
+    User(Arc<SQLUserFunction>),
+    Builtin(crate::catalog::projection::BuiltinRoutineIdentity),
+}
+pub(super) type RoutineGrantTargets = Vec<RoutineGrantTarget>;
 
 pub(super) fn bind(
     context: &RoutinePrivilegeContext<'_>,
@@ -32,63 +33,100 @@ pub(super) fn bind(
             resolve_role_specification(context.role_names, grantor).catalog_name(&roles)?;
         grants::validate_grantor(Some(&requested), &context.role_names.current_role(), &roles)?;
     }
+    if stmt.schemas.is_some() && !stmt.items.is_empty() {
+        return Err(SQLError::Internal(
+            "routine privilege declaration mixes explicit and schema targets".into(),
+        ));
+    }
     let snapshot = context.catalog.registry.routine_snapshot();
-    let selected = if let Some(schemas) = &stmt.schemas {
-        if !stmt.items.is_empty() {
-            return Err(SQLError::Internal(
-                "routine privilege declaration mixes explicit and schema targets".into(),
-            ));
+    let mut targets = Vec::new();
+    let mut identities = Vec::new();
+    for (name, overloads) in &snapshot {
+        for routine in overloads {
+            let oid = u32::try_from(user_routine_catalog_oid(routine)?)
+                .map_err(|error| SQLError::Internal(error.to_string()))?;
+            let relation = uqa_core::RelationIdentity::from_legacy_name(name)
+                .map_err(|error| SQLError::Internal(error.to_string()))?;
+            let argument_types = uqa_sql::routines::routine_signature_types(&routine.def)
+                .iter()
+                .map(|ty| {
+                    crate::catalog::projection::catalog_routine_type_oid(&context.snapshot, ty)
+                })
+                .collect();
+            identities.push(grants::targets::RoutinePrivilegeIdentity {
+                oid,
+                relation,
+                argument_types,
+                kind: if routine.def.is_procedure { 'p' } else { 'f' },
+            });
+            targets.push(RoutineGrantTarget::User(Arc::clone(routine)));
         }
-        grants::routines_in_schemas(
-            context.catalog.names,
-            &snapshot,
-            schemas,
-            stmt.kind,
-            user_routine_catalog_oid,
-        )?
+    }
+    for routine in crate::catalog::projection::builtin_routine_identities() {
+        identities.push(grants::targets::RoutinePrivilegeIdentity {
+            oid: routine.oid,
+            relation: uqa_core::RelationIdentity::new("pg_catalog", routine.name),
+            argument_types: routine.argument_types.to_vec(),
+            kind: routine.kind,
+        });
+        targets.push(RoutineGrantTarget::Builtin(routine));
+    }
+    let selected = if let Some(schemas) = &stmt.schemas {
+        grants::targets::in_schemas(context.catalog.names, &identities, schemas, stmt.kind)?
     } else {
         stmt.items
             .iter()
             .map(|item| {
-                let requested_types =
-                    uqa_sql::routines::declaration::resolve_routine_identity_types(
-                        context.types,
-                        item.arg_types.as_deref(),
-                        &[],
-                        "GRANT routine",
-                    )?;
-                resolve_sql_routine_alter_target(
+                let types = uqa_sql::routines::declaration::resolve_routine_identity_types(
+                    context.types,
+                    item.arg_types.as_deref(),
+                    &[],
+                    "GRANT routine",
+                )?;
+                let oids = types.as_ref().map(|types| {
+                    types
+                        .iter()
+                        .map(|ty| {
+                            crate::catalog::projection::catalog_routine_type_oid(
+                                &context.snapshot,
+                                ty,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                });
+                grants::targets::named(
                     context.catalog.names,
-                    &snapshot,
+                    &identities,
                     &item.name,
-                    requested_types.as_deref(),
+                    oids.as_deref(),
+                    types.as_deref(),
                     stmt.kind,
                 )
             })
             .collect::<Result<Vec<_>, SQLError>>()?
     };
-    selected
+    Ok(selected
         .into_iter()
-        .map(|(name, position)| {
-            let routine = &snapshot[&name][position];
-            if routine.def.object_id.is_none() {
-                return Err(SQLError::Internal(format!(
-                    "routine `{name}` has no catalog object identity"
-                )));
-            }
-            Ok(Arc::clone(routine))
-        })
-        .collect()
+        .map(|index| targets[index].clone())
+        .collect())
+}
+
+pub(super) enum CurrentRoutineGrantTarget {
+    User(String, usize),
+    Builtin(crate::catalog::projection::BuiltinRoutineIdentity),
 }
 
 /// Resolve the captured identities in one registry pass, preserving the command's repeated targets and written order.
 pub(super) fn current(
-    targets: &[Arc<SQLUserFunction>],
+    targets: &[RoutineGrantTarget],
     registry: &RoutineRegistry,
-) -> Result<Vec<(String, usize)>, SQLError> {
+) -> Result<Vec<CurrentRoutineGrantTarget>, SQLError> {
     let requested: std::collections::BTreeSet<_> = targets
         .iter()
-        .filter_map(|target| target.def.object_id)
+        .filter_map(|target| match target {
+            RoutineGrantTarget::User(target) => target.def.object_id,
+            RoutineGrantTarget::Builtin(_) => None,
+        })
         .collect();
     let mut positions = std::collections::BTreeMap::new();
     for (name, overloads) in registry {
@@ -103,11 +141,17 @@ pub(super) fn current(
     targets
         .iter()
         .map(|target| {
+            let target = match target {
+                RoutineGrantTarget::Builtin(target) => {
+                    return Ok(CurrentRoutineGrantTarget::Builtin(*target))
+                }
+                RoutineGrantTarget::User(target) => target,
+            };
             target
                 .def
                 .object_id
                 .and_then(|identity| positions.get(&identity))
-                .cloned()
+                .map(|(name, position)| CurrentRoutineGrantTarget::User(name.clone(), *position))
                 .ok_or_else(|| match user_routine_catalog_oid(target) {
                     Ok(oid) => SQLError::Routine {
                         sqlstate: "XX000".into(),

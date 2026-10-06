@@ -172,3 +172,52 @@ fn writer_wait_follows_original_routine_identity_without_rebinding_names_or_new_
         }
     }
 }
+
+#[test]
+fn schema_function_grants_include_builtin_aggregates_and_preserve_procedure_filtering() {
+    let fixture = Fixture::new();
+    fixture
+        .grant("REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA pg_catalog FROM PUBLIC")
+        .unwrap();
+    let all = crate::catalog::projection::builtin_routine_identities().collect::<Vec<_>>();
+    let state = fixture.builtins.borrow();
+    assert_eq!(state.len(), all.len());
+    for routine in all {
+        assert!(!state[&routine.oid]
+            .execute_acl
+            .iter()
+            .any(|entry| entry.role.is_none()));
+    }
+    assert!(state.contains_key(&2108));
+    let retained = state.clone();
+    drop(state);
+    fixture
+        .grant("GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA pg_catalog TO PUBLIC")
+        .unwrap();
+    assert_eq!(*fixture.builtins.borrow(), retained);
+    fixture
+        .grant("GRANT EXECUTE ON FUNCTION pg_catalog.lower(text) TO PUBLIC")
+        .unwrap();
+    assert!(fixture.builtins.borrow()[&870]
+        .execute_acl
+        .iter()
+        .any(|entry| entry.role.is_none()));
+    assert_eq!(fixture.builtins.borrow()[&2108], retained[&2108]);
+}
+
+#[test]
+fn builtin_and_user_target_errors_leave_all_acl_candidates_unpublished() {
+    let fixture = Fixture::new();
+    fixture.add("app.allowed", 21_000, false);
+    fixture
+        .grant("REVOKE EXECUTE ON FUNCTION app.allowed(),pg_catalog.lower(text) FROM PUBLIC")
+        .unwrap();
+    let before = fixture.builtins.borrow().clone();
+    *fixture.current.borrow_mut() = "reader".into();
+    let error = fixture
+        .grant("GRANT EXECUTE ON FUNCTION pg_catalog.lower(text),app.allowed() TO PUBLIC")
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    assert_eq!(*fixture.builtins.borrow(), before);
+    assert!(!fixture.allowed("app.allowed"));
+}
