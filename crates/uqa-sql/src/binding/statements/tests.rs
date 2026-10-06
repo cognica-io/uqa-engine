@@ -85,6 +85,32 @@ fn analyze(scopes: &Scopes, sql: &str) -> Result<(), SQLError> {
 }
 
 #[test]
+fn ordinary_plan_reuse_retains_only_immutable_input_conversions() {
+    for (sql, reusable) in [
+        ("SELECT '42'::integer", true),
+        ("SELECT 'plain text'", true),
+        ("SELECT 'now'::timestamp", false),
+        ("SELECT 'today'::date", false),
+        ("SELECT '{now}'::timestamp[]", false),
+        ("SELECT ('now'::text)::timestamp", true),
+    ] {
+        let scopes = Scopes::default();
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let (_, actual) = analyze_executable_plan_for_cache(
+            &StatementAnalysisContext {
+                scopes: &scopes,
+                routines: &NoRoutines,
+                aliases: &NoRoutines,
+            },
+            &mut plan,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(actual, reusable, "{sql}");
+    }
+}
+
+#[test]
 fn query_schema_errors_do_not_evaluate_constants() {
     let scopes = Scopes::default();
     let error = analyze(&scopes, "SELECT missing, 1 / 0").unwrap_err();

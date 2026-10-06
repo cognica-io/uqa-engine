@@ -15,7 +15,9 @@ pub(super) fn compile_logical_plans(
     if let Some(cached) = engine.cached_sql_statement(sql) {
         return Ok(vec![cached.logical_plan.as_ref().clone()]);
     }
-    let statements = compile(sql)?;
+    let (statements, parser) =
+        uqa_sql::parser::with_settings(engine.parser_settings(), || compile(sql));
+    let statements = statements?;
     let plans = statements
         .iter()
         .cloned()
@@ -26,6 +28,7 @@ pub(super) fn compile_logical_plans(
             sql.to_string(),
             Arc::new(statements[0].clone()),
             Arc::new(plans[0].clone()),
+            parser,
         );
     }
     Ok(plans)

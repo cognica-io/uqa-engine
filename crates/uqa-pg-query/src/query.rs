@@ -275,8 +275,14 @@ pub fn split_with_parser(query: &str) -> Result<Vec<&str>> {
 ///     ]);
 /// ```
 pub fn scan(sql: &str) -> Result<protobuf::ScanResult> {
+    scan_with_options(sql, crate::ParseOptions::default())
+}
+
+/// Scan with explicit string-literal settings, preserving token source offsets.
+/// No parse mode is used; `options.mode` is ignored.
+pub fn scan_with_options(sql: &str, options: crate::ParseOptions) -> Result<protobuf::ScanResult> {
     let input = CString::new(sql)?;
-    let result = unsafe { pg_query_scan(input.as_ptr()) };
+    let result = unsafe { pg_query_scan_opts(input.as_ptr(), options.bits()) };
     let scan_result = if !result.error.is_null() {
         let message = unsafe { CStr::from_ptr((*result.error).message) }
             .to_string_lossy()

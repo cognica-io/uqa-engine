@@ -35,6 +35,10 @@ use crate::{
 
 pub trait RoutineParserCatalog {
     fn plpgsql_catalog(&self) -> Result<PlpgsqlCatalog, SQLError>;
+    fn parser_settings(&self) -> crate::parser::ParserSettings {
+        crate::parser::ParserSettings::default()
+    }
+    fn parser_notice(&self, _notice: crate::SQLNotice) {}
 }
 pub trait RoutineCompilationCatalog: crate::schema::dependencies::oid_alias::OidAliasInput {
     fn has_registered_aggregate_function(&self, name: &str) -> bool;
@@ -122,6 +126,28 @@ fn reject_trigger_function_arguments(def: &CreateFunction) -> Result<(), SQLErro
 }
 
 fn compile_function_body_inner(
+    context: &RoutineCompilationContext<'_>,
+    def: &CreateFunction,
+    persisted_definition: bool,
+) -> Result<CompiledFunctionBody, SQLError> {
+    with_parser_context(context.parsers, || {
+        compile_body(context, def, persisted_definition)
+    })
+}
+
+/// Read live lexical settings only after the routine's own configuration has been applied, and deliver parser notices even if compilation fails.
+pub fn with_parser_context<T>(
+    parsers: &dyn RoutineParserCatalog,
+    compile: impl FnOnce() -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
+    let (result, metadata) = crate::parser::with_settings(parsers.parser_settings(), compile);
+    for notice in metadata.notices.iter() {
+        parsers.parser_notice(notice.clone());
+    }
+    result
+}
+
+fn compile_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
     persisted_definition: bool,

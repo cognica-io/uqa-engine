@@ -18,7 +18,7 @@ pub fn resolve_deferred_create_foreign_table(
     deferred: &DeferredCreateForeignTable,
     types: &dyn FunctionTypeResolver,
 ) -> Result<CreateForeignTable> {
-    let parsed = pg_query::parse(&deferred.definition_sql)?;
+    let parsed = crate::parser::parse(&deferred.definition_sql)?;
     let [raw] = parsed.protobuf.stmts.as_slice() else {
         return Err(SQLError::Internal(
             "deferred CREATE FOREIGN TABLE did not contain exactly one statement".into(),

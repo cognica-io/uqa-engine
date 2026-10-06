@@ -41,18 +41,17 @@ impl StatementCache for Engine {
             statement: cached.statement,
             logical_plan: cached.logical_plan,
             optimized_plan: cached.optimized_plan,
+            parser: cached.parser,
         })
-    }
-    fn cached_optimized_sql_plan(&self, sql: &str) -> Option<Arc<UnifiedPlan>> {
-        Engine::cached_optimized_sql_plan(self, sql)
     }
     fn cache_sql_statement(
         &self,
         sql: String,
         statement: Arc<Statement>,
         logical_plan: Arc<UnifiedPlan>,
+        parser: uqa_sql::parser::ParserMetadata,
     ) {
-        Engine::cache_sql_statement(self, sql, statement, logical_plan);
+        Engine::cache_sql_statement(self, sql, statement, logical_plan, parser);
     }
     fn cache_optimized_sql_plan(&self, sql: &str, optimized_plan: Arc<UnifiedPlan>) {
         Engine::cache_optimized_sql_plan(self, sql, optimized_plan);

@@ -71,7 +71,7 @@ pub(crate) fn compile_retained_type_declaration(name: &str) -> Result<ColumnType
             "invalid type declaration `{name}`"
         )));
     }
-    let parsed = pg_query::parse(&format!("SELECT NULL::{name}"))?;
+    let parsed = crate::parser::parse(&format!("SELECT NULL::{name}"))?;
     let ty = parsed
         .protobuf
         .stmts

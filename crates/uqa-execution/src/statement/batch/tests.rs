@@ -170,12 +170,16 @@ impl StatementCache for Inputs {
                 statement: Arc::clone(statement),
                 logical_plan: Arc::clone(logical_plan),
                 optimized_plan: None,
+                parser: uqa_sql::parser::ParserMetadata::default(),
             })
     }
-    fn cached_optimized_sql_plan(&self, _: &str) -> Option<Arc<UnifiedPlan>> {
-        panic!("persistent statements cannot use the memory-only cache shortcut")
-    }
-    fn cache_sql_statement(&self, _: String, _: Arc<Statement>, _: Arc<UnifiedPlan>) {
+    fn cache_sql_statement(
+        &self,
+        _: String,
+        _: Arc<Statement>,
+        _: Arc<UnifiedPlan>,
+        _: uqa_sql::parser::ParserMetadata,
+    ) {
         self.record(format!("cache.write.{}", self.snapshot.get()));
     }
     fn cache_optimized_sql_plan(&self, _: &str, _: Arc<UnifiedPlan>) {

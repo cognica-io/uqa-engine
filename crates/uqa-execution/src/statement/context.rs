@@ -72,6 +72,10 @@ pub trait StatementExecutionInputs<S: Clone + 'static> {
     }
     /// The session's `statement_timeout`, which a statement starts with; `None` lets a statement run without a limit. Reading it captures none of the statement's execution inputs.
     fn statement_timeout(&self) -> Option<std::time::Duration>;
+    /// Capture scanner settings at the SQL message boundary, before its first SET can execute.
+    fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
+        uqa_sql::parser::ParserSettings::default()
+    }
     /// Read the live host policy without capturing the statement's catalog/execution inputs.
     fn notification_subscriptions_required(&self) -> bool {
         false

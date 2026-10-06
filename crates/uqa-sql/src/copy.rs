@@ -90,7 +90,7 @@ pub type CopyInputField = Option<String>;
 
 /// Parse exactly one `PostgreSQL` COPY statement.
 pub fn compile_copy(sql: &str) -> Result<CopyStatement, SQLError> {
-    let parsed = pg_query::parse(sql)?;
+    let parsed = crate::parser::parse(sql)?;
     if parsed.protobuf.stmts.len() != 1 {
         return Err(SQLError::Routine {
             sqlstate: "42601".into(),

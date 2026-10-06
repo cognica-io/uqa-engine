@@ -108,6 +108,10 @@ impl context::PhysicalExplainPlanning for Engine {
     }
 }
 impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
+    fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
+        Engine::parser_settings(self)
+    }
+
     fn transaction_timestamp_micros(&self) -> Option<i64> {
         Some(Engine::transaction_timestamp_micros(self))
     }
