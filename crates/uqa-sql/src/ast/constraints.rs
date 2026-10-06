@@ -193,6 +193,9 @@ pub struct CreateTable {
     pub checks: Vec<TableCheck>,
     /// Table-level `FOREIGN KEY (col, ...) REFERENCES parent(col, ...)`.
     pub foreign_keys: Vec<ForeignKey>,
+    /// Foreign keys in the statement's written order, before inheritance adds any constraints. Only the statement carries this order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub foreign_key_order: Vec<DeclaredForeignKey>,
     /// Every declared `PRIMARY KEY` / `UNIQUE` constraint, including
     /// column-level declarations. Keeping the typed key (rather than only
     /// setting per-column flags) preserves composite-key and `NULLS NOT
@@ -235,6 +238,13 @@ pub enum DeclaredElement {
     PrimaryKey { columns: Vec<String> },
     /// A table PRIMARY KEY or UNIQUE constraint that is DEFERRABLE or INITIALLY DEFERRED.
     DeferrableKey,
+}
+
+/// A foreign key written as a column clause or a table constraint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeclaredForeignKey {
+    Column(String),
+    Table(usize),
 }
 
 /// A NOT NULL constraint a CREATE TABLE statement declares or implies, which `AddRelationNotNullConstraints` resolves against the relation's columns once they exist.

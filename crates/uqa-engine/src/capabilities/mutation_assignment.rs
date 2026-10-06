@@ -39,6 +39,25 @@ impl AssignmentColumnCatalog for Engine {
         Engine::try_column_insert_default_expr(self, table, column)
             .map_err(|error| Box::new(error) as uqa_sql::assignment::columns::ColumnCatalogError)
     }
+    fn try_identity_column_sequence(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<Option<String>, uqa_sql::SQLError> {
+        let stored = self
+            .try_table(table)
+            .map_err(|error| {
+                uqa_sql::catalog::errors::storage_error("read identity column", &error)
+            })?
+            .ok_or_else(|| uqa_sql::SQLError::UnknownTable(table.to_string()))?;
+        let columns = stored.columns.read();
+        let Some(definition) = columns.iter().find(|definition| definition.name == column) else {
+            return Ok(None);
+        };
+        uqa_sql::schema::sequences::implicit_ownership::identity_column_sequence(
+            self, table, definition,
+        )
+    }
     fn try_column_shape(
         &self,
         table: &str,

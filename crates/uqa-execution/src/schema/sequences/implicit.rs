@@ -64,15 +64,7 @@ pub fn materialize_implicit_sequences(
     }
     for (index, name, persistence, declaration, identity) in sequences {
         let column = &mut columns[index];
-        create_column_sequence(
-            context,
-            &relation,
-            column,
-            &name,
-            persistence,
-            &declaration,
-            identity,
-        )?;
+        create_column_sequence(context, column, &name, persistence, &declaration, identity)?;
         apply_implicit_sequence_metadata(table_name, column, name).map_err(SQLError::Internal)?;
     }
     Ok(())
@@ -130,7 +122,6 @@ fn sequence_persistence(
 /// Create one column's sequence as the `CREATE SEQUENCE` `PostgreSQL` issues for it does: read its options, create it, and read the `OWNED BY` the declaration writes.
 fn create_column_sequence(
     context: &ImplicitSequenceContext<'_>,
-    relation: &RelationIdentity,
     column: &ColumnDef,
     name: &str,
     persistence: RelationPersistence,
@@ -149,25 +140,6 @@ fn create_column_sequence(
     // The column itself owns the sequence. An `OWNED BY` the declaration writes is read and checked as `CREATE SEQUENCE` reads it, and then replaced.
     if let Some(names) = declaration.sequence.owned_by.as_deref() {
         bind_sequence_owner(context.owners, name, &sequence_ownership(names)?)?;
-    }
-    // `PostgreSQL` links the sequence to its column by naming the table in the sequence's schema.
-    if let Some(schema) = declaration
-        .name
-        .as_ref()
-        .and_then(|name| name.schema.as_ref())
-        .filter(|schema| **schema != relation.schema)
-    {
-        let linked = format!("{schema}.{}", relation.name);
-        if !context
-            .namespace
-            .relation_exists(&linked)
-            .map_err(|error| SQLError::Internal(format!("resolve relation `{linked}`: {error}")))?
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: format!("relation \"{linked}\" does not exist"),
-            });
-        }
     }
     Ok(())
 }

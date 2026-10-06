@@ -43,6 +43,7 @@ pub(in crate::compiler) fn compile_create_table(
     let mut element_order = Vec::new();
     let mut untyped_columns = Vec::new();
     let mut foreign_keys: Vec<ForeignKey> = Vec::new();
+    let mut foreign_key_order = Vec::new();
     let mut key_constraints: Vec<TableKeyConstraint> = Vec::new();
     for elt in &stmt.table_elts {
         let inner = elt
@@ -58,7 +59,7 @@ pub(in crate::compiler) fn compile_create_table(
                     untyped_columns.push(col.colname.clone());
                 }
                 key_constraints.extend(compile_column_key_constraints(col)?);
-                let (column, column_checks) = compile_column_def(col)?;
+                let (column, column_checks, column_references) = compile_column_def(col)?;
                 if column_checks.is_empty() {
                     if column.check.is_some() {
                         check_order.push(DeclaredCheck::Column(column.name.clone()));
@@ -68,6 +69,15 @@ pub(in crate::compiler) fn compile_create_table(
                         check_order.push(DeclaredCheck::Table(checks.len()));
                         checks.push(check);
                     }
+                }
+                for reference in column_references {
+                    foreign_key_order
+                        .push(crate::ast::DeclaredForeignKey::Table(foreign_keys.len()));
+                    foreign_keys.push(reference);
+                }
+                if column.references.is_some() {
+                    foreign_key_order
+                        .push(crate::ast::DeclaredForeignKey::Column(column.name.clone()));
                 }
                 columns.push(column);
             }
@@ -131,6 +141,8 @@ pub(in crate::compiler) fn compile_create_table(
                         &on_delete_set_columns,
                         &cstr.fk_del_action,
                     )?;
+                    foreign_key_order
+                        .push(crate::ast::DeclaredForeignKey::Table(foreign_keys.len()));
                     foreign_keys.push(ForeignKey {
                         referenced_key: None,
                         referenced_index: None,
@@ -239,6 +251,7 @@ pub(in crate::compiler) fn compile_create_table(
         if_not_exists: stmt.if_not_exists,
         checks,
         foreign_keys,
+        foreign_key_order,
         key_constraints,
         persistence,
         on_commit,
@@ -285,7 +298,7 @@ pub(in crate::compiler) fn compile_column_key_constraints(
 
 pub(in crate::compiler) fn compile_column_def(
     col: &pg_query::protobuf::ColumnDef,
-) -> Result<(ColumnDef, Vec<TableCheck>)> {
+) -> Result<(ColumnDef, Vec<TableCheck>, Vec<crate::ast::ForeignKey>)> {
     // A column option of `PARTITION OF` has no type; it takes the parent column's when the columns merge.
     let ty = if col.type_name.is_some() {
         compile_type_name(col)?
@@ -302,7 +315,7 @@ pub(in crate::compiler) fn compile_column_def(
 pub(in crate::compiler) fn compile_column_def_with_type(
     col: &pg_query::protobuf::ColumnDef,
     ty: ColumnType,
-) -> Result<(ColumnDef, Vec<TableCheck>)> {
+) -> Result<(ColumnDef, Vec<TableCheck>, Vec<crate::ast::ForeignKey>)> {
     let name = col.colname.clone();
     let raw_type = raw_type_name(col)?;
     let mut auto_increment = matches!(
@@ -326,6 +339,7 @@ pub(in crate::compiler) fn compile_column_def_with_type(
     let mut check_no_inherit = false;
     let mut checks = Vec::new();
     let mut references: Option<crate::ast::ForeignKeyRef> = None;
+    let mut column_references = Vec::new();
     #[derive(Clone, Copy)]
     enum EnforceableConstraint {
         Check,
@@ -440,6 +454,9 @@ pub(in crate::compiler) fn compile_column_def_with_type(
                         return Err(SQLError::TypeMismatch(
                             "column REFERENCES must name at most one referenced column".into(),
                         ));
+                    }
+                    if let Some(previous) = references.take() {
+                        column_references.push(previous);
                     }
                     references = Some(crate::ast::ForeignKeyRef {
                         referenced_key: None,
@@ -568,7 +585,16 @@ pub(in crate::compiler) fn compile_column_def_with_type(
                 .ok_or_else(|| SQLError::Internal("final column CHECK disappeared".into()))?,
         );
     }
-    Ok((column, checks))
+    let foreign_keys = if column_references.is_empty() {
+        Vec::new()
+    } else {
+        column_references.extend(column.references.take());
+        column_references
+            .iter()
+            .map(|reference| crate::schema::foreign_keys::column_foreign_key(&column, reference))
+            .collect()
+    };
+    Ok((column, checks, foreign_keys))
 }
 
 // -------------------------------------------------------------------------

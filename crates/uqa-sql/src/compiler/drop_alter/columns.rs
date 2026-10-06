@@ -26,10 +26,12 @@ pub(super) fn add_column(command: &AlterTableCmd) -> Result<AlterTableAction, SQ
         .as_ref()
         .ok_or_else(|| SQLError::Internal(format!("column `{}` has no type", column.colname)))?;
     let ty = crate::compiler::types::preserve_alter_type_declaration(ty, &column.colname)?;
-    let (definition, checks) = crate::compiler::tree::compile_column_def_with_type(column, ty)?;
+    let (definition, checks, foreign_keys) =
+        crate::compiler::tree::compile_column_def_with_type(column, ty)?;
     Ok(AlterTableAction::AddColumn {
         column: definition,
         checks,
+        foreign_keys,
         key_constraints: crate::compiler::tree::compile_column_key_constraints(column)?,
         if_not_exists: command.missing_ok,
         declaration,

@@ -41,6 +41,18 @@ pub trait AssignmentColumnCatalog {
         table: &str,
         column: &str,
     ) -> Result<Option<Expr>, ColumnCatalogError>;
+    /// The sequence an identity DEFAULT draws from. An identity declaration with no sequence owned by it reports `PostgreSQL`'s error.
+    fn try_identity_column_sequence(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<Option<String>, SQLError> {
+        Ok(self
+            .try_column_shape(table, column)
+            .map_err(|error| SQLError::Internal(format!("read identity column: {error}")))?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?
+            .and_then(|shape| shape.identity_sequence))
+    }
     /// The type and generated kind of one column: `None` for an unknown table, and an inner `None` for a column the table does not declare. Every written value asks for it, so a catalog answers from the column alone. The default describes the whole table, which copies every column and resolves every default expression.
     fn try_column_shape(
         &self,
@@ -146,11 +158,7 @@ pub fn identity_column_sequence(
     table: &str,
     column: &str,
 ) -> Result<Option<String>, SQLError> {
-    Ok(catalog
-        .try_column_shape(table, column)
-        .map_err(|error| SQLError::Internal(format!("read identity column: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?
-        .and_then(|shape| shape.identity_sequence))
+    catalog.try_identity_column_sequence(table, column)
 }
 
 pub fn generated_column_kind(

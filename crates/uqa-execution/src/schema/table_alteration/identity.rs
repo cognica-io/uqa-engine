@@ -216,8 +216,7 @@ fn set_identity_provenance<S: Clone + 'static>(
         crate::schema::sequences::ownership::attach_table_owners(
             &context.addition.ownership,
             table,
-        )
-        .map_err(|error| ddl_storage_error("ALTER COLUMN identity ownership", error))?;
+        )?;
     }
     if partitioned {
         for partition in partitions(context, table)? {

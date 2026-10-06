@@ -152,6 +152,16 @@ pub fn run_alter_table<S: Clone + 'static>(
             action,
         )?;
         for mut action in column_checks {
+            if matches!(action, AlterTableAction::AddForeignKeyConstraint { .. }) {
+                locking::prepare_table_alter_action(
+                    &context.binding,
+                    context,
+                    &table,
+                    recurse,
+                    &mut action,
+                    mode,
+                )?;
+            }
             materialize_recursive_action_names(context, &table, recurse, &mut action)?;
             run_recursive_alter_action(
                 context,
@@ -216,17 +226,31 @@ fn prepare_alter_action<S: Clone + 'static>(
     }
     materialize_recursive_action_names(context, table, recurse, action)?;
     // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
-    let mut column_checks = if let AlterTableAction::AddColumn { column, checks, .. } = action {
+    let mut column_checks = if let AlterTableAction::AddColumn {
+        column,
+        checks,
+        foreign_keys,
+        ..
+    } = action
+    {
         uqa_sql::schema::constraint_changes::take_column_check(column)
             .into_iter()
             .chain(std::mem::take(checks))
             .map(|constraint| AlterTableAction::AddCheckConstraint { constraint })
+            .chain(
+                std::mem::take(foreign_keys)
+                    .into_iter()
+                    .map(|constraint| AlterTableAction::AddForeignKeyConstraint { constraint }),
+            )
             .collect()
     } else {
         Vec::new()
     };
     locking::prepare_table_alter_action(&context.binding, context, table, recurse, action, mode)?;
     for check in &mut column_checks {
+        if matches!(check, AlterTableAction::AddForeignKeyConstraint { .. }) {
+            continue;
+        }
         locking::prepare_table_alter_action(
             &context.binding,
             context,

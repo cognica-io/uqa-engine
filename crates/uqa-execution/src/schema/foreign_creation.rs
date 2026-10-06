@@ -251,13 +251,7 @@ impl ForeignCreationContext<'_> {
         table_security.insert(relation, security);
         drop(table_security);
         drop(tables);
-        ownership::attach_column_owners(&self.ownership, name, object_id, &owner_columns).map_err(
-            |error| {
-                uqa_sql::SQLError::Internal(format!(
-                    "attach foreign table `{name}` sequence ownership: {error}"
-                ))
-            },
-        )?;
+        ownership::attach_column_owners(&self.ownership, name, object_id, &owner_columns)?;
         self.changes.catalog_registry_changed();
         self.changes
             .prepared_catalog_changed(PreparedCatalogChange::Relation(catalog_oids.relation));

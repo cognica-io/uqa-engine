@@ -229,20 +229,13 @@ fn create_after_preflight(
             .create_vector_field(&table.name, field, dimensions)
             .map_err(|error| storage_error("CREATE TABLE vector field", error))?;
     }
-    let mut registered_columns = table.columns.clone();
-    declaration::bind_created_table_foreign_keys(
-        &context.analysis.foreign_keys,
+    uqa_sql::schema::table_creation::foreign_keys::define_foreign_keys(
+        &context.analysis,
         &mut table,
-        &mut registered_columns,
-    )?;
-    // `ATAddForeignKeyConstraint` creates a foreign key's row once its referenced key is found.
-    declaration::define_foreign_key_identities(
-        &mut registered_columns,
-        &mut table.foreign_keys,
         inherited.foreign_keys,
         &mut allocator,
     )?;
-    publish_catalog_state(context, &table, registered_columns)?;
+    publish_catalog_state(context, &table, table.columns.clone())?;
     Ok(SQLResult::empty())
 }
 
@@ -275,8 +268,7 @@ fn publish_catalog_state(
             )
         }))
         .map_err(|error| storage_error("CREATE TABLE constraints", error))?;
-    ownership::attach_table_owners(&context.ownership, &table.name)
-        .map_err(|error| storage_error("CREATE TABLE sequence ownership", error))?;
+    ownership::attach_table_owners(&context.ownership, &table.name)?;
     context
         .publication
         .install_hierarchy(&table.name, table.hierarchy.clone())
@@ -292,7 +284,7 @@ fn publish_catalog_state(
         .map_err(|error| storage_error("CREATE TABLE btree indexes", error))
 }
 
-/// The inherited expressions, the defaults and generation expressions in column order, the partition bound and key, the keys a partition clones, the CHECK constraints in written order, the NOT NULL constraints as `AddRelationNotNullConstraints` creates them, and then the declared keys and the foreign keys' references, in the order `DefineRelation` and the commands it queues define them; each defined object takes its OIDs from `allocate` as it is defined. `relation_oid` is the relation's OID, which a constraint name violation reports.
+/// The inherited expressions, the defaults and generation expressions in column order, the partition bound and key, the keys a partition clones, the CHECK constraints in written order, the NOT NULL constraints as `AddRelationNotNullConstraints` creates them, and then the declared keys, in the order `DefineRelation` and the commands it queues define them; each defined object takes its OIDs from `allocate` as it is defined. `relation_oid` is the relation's OID, which a constraint name violation reports.
 fn define_expressions_and_constraints(
     context: &CreateTableContext<'_>,
     table: &mut CreateTable,
@@ -326,13 +318,7 @@ fn define_expressions_and_constraints(
         relation_oid,
         allocate,
     )?;
-    declaration::define_create_table_constraints(
-        &context.analysis,
-        table,
-        indexes,
-        inherited,
-        allocate,
-    )
+    declaration::define_create_table_constraints(table, indexes, inherited, allocate)
 }
 
 /// `DefineRelation` binds a new partition's bound and the table's partition key once the relation exists, and `check_default_partition_contents` rejects a bound that accepts a row the parent's default partition holds.

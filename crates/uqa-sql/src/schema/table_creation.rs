@@ -130,6 +130,7 @@ pub fn create_table_as_columns(
 pub mod checks;
 pub mod column_declarations;
 pub mod declaration;
+pub mod foreign_keys;
 pub mod keys;
 pub mod not_nulls;
 

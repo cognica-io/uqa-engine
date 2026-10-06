@@ -117,10 +117,7 @@ pub fn add_column<S: Clone + 'static>(
         }))
         .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
     if owns_sequence {
-        crate::schema::sequences::ownership::attach_table_owners(&context.ownership, table)
-            .map_err(|error| {
-                ddl_storage_error("ALTER TABLE ADD COLUMN sequence ownership", error)
-            })?;
+        crate::schema::sequences::ownership::attach_table_owners(&context.ownership, table)?;
     }
     // Constraint name reservations can refresh the catalog. Physical field metadata must already have a declared column whenever that happens.
     match column_type {
