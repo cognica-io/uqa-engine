@@ -538,3 +538,58 @@ fn timestamp_input_checks_the_julian_boundary_after_the_zone_offset() {
     assert!(TemporalValue::timestamp_micros_in_range(MINIMUM));
     assert!(TemporalValue::timestamp_micros_in_range(i64::MAX));
 }
+
+#[test]
+fn numeric_date_order_and_short_era_years_match_postgresql() {
+    for (order, expected, era) in [
+        (
+            TemporalDateOrder::MonthDayYear,
+            "2003-01-02",
+            "0003-01-02 BC",
+        ),
+        (
+            TemporalDateOrder::DayMonthYear,
+            "2003-02-01",
+            "0003-02-01 BC",
+        ),
+        (
+            TemporalDateOrder::YearMonthDay,
+            "2001-02-03",
+            "0001-02-03 BC",
+        ),
+    ] {
+        for separator in ['/', '-', '.'] {
+            let source = format!("01{separator}02{separator}03");
+            assert_eq!(
+                TemporalValue::date_input_in_order(&source, NOW, order)
+                    .unwrap()
+                    .to_sql_string(),
+                expected
+            );
+            assert_eq!(
+                TemporalValue::date_input_in_order(&format!("{source} BC"), NOW, order)
+                    .unwrap()
+                    .to_sql_string(),
+                era
+            );
+        }
+        for source in ["2020-02-03", "20200203", "200203"] {
+            assert_eq!(
+                TemporalValue::date_input_in_order(source, NOW, order)
+                    .unwrap()
+                    .to_sql_string(),
+                "2020-02-03"
+            );
+        }
+    }
+    assert_eq!(
+        TemporalValue::date_input_in_order("00/02/03 BC", NOW, TemporalDateOrder::YearMonthDay),
+        Err(TemporalInputError::FieldOverflow { date_style: false })
+    );
+    assert_eq!(
+        TemporalValue::date_input_in_order("00/02/03", NOW, TemporalDateOrder::YearMonthDay)
+            .unwrap()
+            .to_sql_string(),
+        "2000-02-03"
+    );
+}

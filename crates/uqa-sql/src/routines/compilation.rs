@@ -107,7 +107,7 @@ pub fn defer_function_body(
 }
 
 /// The checks `CREATE FUNCTION` makes whatever `check_function_bodies` says: the language and the body form it accepts, the declared types, and the role constants of parameter defaults, which are returned for the body's own checks.
-fn validate_routine_signature(
+pub(super) fn validate_routine_signature(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
 ) -> Result<StoredRegroleConstants, SQLError> {

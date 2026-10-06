@@ -38,6 +38,7 @@ struct Inputs {
     reject_snapshot: bool,
     requires_subscriptions: bool,
     transaction_clock: Cell<Option<i64>>,
+    date_order: Cell<Option<uqa_core::TemporalDateOrder>>,
     planning_clocks: RefCell<Vec<Option<i64>>>,
 }
 
@@ -69,6 +70,10 @@ impl Inputs {
 impl StatementExecutionInputs<()> for Inputs {
     fn transaction_timestamp_micros(&self) -> Option<i64> {
         self.transaction_clock.get()
+    }
+
+    fn temporal_date_order(&self) -> Option<uqa_core::TemporalDateOrder> {
+        self.date_order.get()
     }
 
     fn notification_subscriptions_required(&self) -> bool {
@@ -370,7 +375,12 @@ fn statements_refresh_transaction_clocks_and_restore_nested_and_failed_scopes() 
     use uqa_sql::expr::{transaction_clock_micros, TransactionClockScope};
 
     let _caller_clock = TransactionClockScope::enter(1);
+    let _caller_order =
+        uqa_sql::expr::DateOrderScope::enter(uqa_core::TemporalDateOrder::MonthDayYear);
     let inputs = Inputs::default();
+    inputs
+        .date_order
+        .set(Some(uqa_core::TemporalDateOrder::DayMonthYear));
     inputs.transaction_clock.set(Some(10));
     let error = execute_simple_query(
         &inputs.context(),
@@ -380,8 +390,19 @@ fn statements_refresh_transaction_clocks_and_restore_nested_and_failed_scopes() 
         &mut |result| {
             assert_eq!(result.command_tag.as_deref(), Some("COMMIT"));
             assert_eq!(transaction_clock_micros(), Some(10));
+            assert_eq!(
+                uqa_sql::expr::temporal_date_order(),
+                uqa_core::TemporalDateOrder::DayMonthYear
+            );
             inputs.transaction_clock.set(Some(20));
+            inputs
+                .date_order
+                .set(Some(uqa_core::TemporalDateOrder::YearMonthDay));
             execute_nested(&inputs.context(), "ROLLBACK", &[])?;
+            assert_eq!(
+                uqa_sql::expr::temporal_date_order(),
+                uqa_core::TemporalDateOrder::DayMonthYear
+            );
             assert_eq!(transaction_clock_micros(), Some(10));
             Ok(())
         },
@@ -391,6 +412,10 @@ fn statements_refresh_transaction_clocks_and_restore_nested_and_failed_scopes() 
     assert_eq!(&*inputs.planning_clocks.borrow(), &[Some(20)]);
     assert_eq!(inputs.depth.get(), 0);
     assert_eq!(transaction_clock_micros(), Some(1));
+    assert_eq!(
+        uqa_sql::expr::temporal_date_order(),
+        uqa_core::TemporalDateOrder::MonthDayYear
+    );
 }
 
 #[test]

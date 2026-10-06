@@ -116,6 +116,12 @@ impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
         Some(Engine::transaction_timestamp_micros(self))
     }
 
+    fn temporal_date_order(&self) -> Option<uqa_core::TemporalDateOrder> {
+        Some(uqa_sql::semantics::parameters::datestyle::date_order(
+            &self.session.setting("DateStyle"),
+        ))
+    }
+
     fn diagnostic_search_path(&self) -> Option<Vec<String>> {
         Some(self.session.state.read().search_path.clone())
     }

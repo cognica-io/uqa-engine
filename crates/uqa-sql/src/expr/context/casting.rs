@@ -18,6 +18,7 @@ use crate::{
     error::{Result, SQLError},
 };
 
+mod datestyle;
 mod timezone;
 
 /// Catalog input needed after analysis selects a type for an unknown literal. Domain array input includes each element's constraints, so the caller must retain this value rather than read the text again at execution.
@@ -203,6 +204,13 @@ pub fn cast_value_with_type_resolution_with_control(
             .map_err(SQLError::Internal)?,
         _ => None,
     };
+    let parsed_target = if resolved_target.is_some() {
+        None
+    } else {
+        optional_type_name(target_ty, control)?
+    };
+    let target_column_type = resolved_target.as_deref().or(parsed_target.as_deref());
+    let _date_order = datestyle::input_scope(value, target_column_type, engine, control)?;
     if let (Some(engine), Some(target)) = (engine, resolved_target.as_deref()) {
         if let Some(value) = engine.cast_domain(value, source_ty, target)? {
             return Ok(control.retain_external_value(value)?);
@@ -265,21 +273,12 @@ pub fn cast_value_with_type_resolution_with_control(
             .transpose()?,
         _ => None,
     };
-    let source_ty = resolved_source
-        .as_ref()
-        .map(|name| name.as_str())
-        .or(source_ty);
+    let source_ty = resolved_source.as_deref().map(String::as_str).or(source_ty);
     let target_name = resolved_target
         .as_ref()
         .map(|ty| coercion_type_name_with_control(ty, control))
         .transpose()?;
     let target_ty = target_name.as_ref().map_or(target_ty, |name| name.as_str());
-    let parsed_target = if resolved_target.is_some() {
-        None
-    } else {
-        optional_type_name(target_ty, control)?
-    };
-    let target_column_type = resolved_target.as_deref().or(parsed_target.as_deref());
     cast_resolved_value(
         value,
         source_ty,

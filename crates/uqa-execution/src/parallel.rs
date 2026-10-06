@@ -59,10 +59,10 @@ where
         });
     #[cfg(not(target_os = "emscripten"))]
     {
-        let clock = uqa_sql::expr::transaction_clock_micros();
+        let input = uqa_sql::expr::TemporalInputContext::current();
         chunks
             .into_par_iter()
-            .map(|chunk| under_transaction_clock(clock, || worker(chunk)))
+            .map(|chunk| under_temporal_input(input, || worker(chunk)))
             .reduce(Vec::new, |mut a, b| {
                 a.extend(b);
                 a
@@ -191,10 +191,10 @@ impl ParallelExecutor {
         }
         #[cfg(not(target_os = "emscripten"))]
         {
-            let clock = uqa_sql::expr::transaction_clock_micros();
+            let input = uqa_sql::expr::TemporalInputContext::current();
             workers
                 .par_iter()
-                .map(|w| under_transaction_clock(clock, w))
+                .map(|w| under_temporal_input(input, w))
                 .collect()
         }
         #[cfg(target_os = "emscripten")]
@@ -204,15 +204,45 @@ impl ParallelExecutor {
     }
 }
 
-/// Run `work` on a pool thread under the transaction clock of the thread that dispatched it, so the date and time input functions and `now()` read the statement's transaction start on every branch.
+/// Run a worker under the dispatching thread's transaction clock and date order.
 #[cfg(not(target_os = "emscripten"))]
-fn under_transaction_clock<R>(clock: Option<i64>, work: impl FnOnce() -> R) -> R {
-    let _scope = clock.map(uqa_sql::expr::TransactionClockScope::enter);
+fn under_temporal_input<R>(
+    input: uqa_sql::expr::TemporalInputContext,
+    work: impl FnOnce() -> R,
+) -> R {
+    let _scope = input.enter();
     work()
 }
 
 impl Default for ParallelExecutor {
     fn default() -> Self {
         Self::new(DEFAULT_PARALLEL_WORKERS)
+    }
+}
+
+#[cfg(test)]
+mod temporal_tests {
+    #[test]
+    fn date_order_and_transaction_clock_reach_each_worker() {
+        let _input = uqa_sql::expr::TemporalInputContext {
+            transaction_clock_micros: Some(123),
+            date_order: uqa_core::TemporalDateOrder::DayMonthYear,
+        }
+        .enter();
+        let check = || {
+            assert_eq!(uqa_sql::expr::transaction_clock_micros(), Some(123));
+            let uqa_core::Value::Temporal(date) =
+                uqa_sql::expr::cast_value(&uqa_core::Value::Str("02/03/2020".into()), "date")
+                    .unwrap()
+            else {
+                panic!("date")
+            };
+            assert_eq!(date.to_sql_string(), "2020-03-02");
+        };
+        super::run_parallel(vec![1, 2, 3, 4], 4, |chunk| {
+            check();
+            chunk
+        });
+        super::ParallelExecutor::new(4).execute_branches(&[check; 4]);
     }
 }

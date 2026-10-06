@@ -30,6 +30,7 @@ pub struct PreparedRegistrationContext<'a> {
     pub registry: &'a dyn PreparedDefinitionRegistry,
     /// The session's active transaction clock, including direct host registration.
     pub transaction_timestamp_micros: Option<i64>,
+    pub date_order: Option<uqa_core::TemporalDateOrder>,
     pub clock: fn() -> i64,
 }
 
@@ -49,9 +50,13 @@ pub fn register_plan(
     declared: &[ColumnType],
     source_sql: Option<&str>,
 ) -> Result<(), SQLError> {
-    let _transaction_clock = context
-        .transaction_timestamp_micros
-        .map(uqa_sql::expr::TransactionClockScope::enter);
+    let _temporal_input = uqa_sql::expr::TemporalInputContext {
+        transaction_clock_micros: context.transaction_timestamp_micros,
+        date_order: context
+            .date_order
+            .unwrap_or_else(uqa_sql::expr::temporal_date_order),
+    }
+    .enter();
     let source_plan = Arc::new(logical_plan.clone());
     let definition = uqa_sql::prepared::definition::analyze_definition(
         &context.analysis,

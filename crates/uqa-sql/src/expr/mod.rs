@@ -65,6 +65,7 @@ mod scalar_range;
 mod scalar_temporal;
 mod session_settings;
 mod session_sleep;
+mod temporal_input;
 pub mod variadic_any;
 
 #[cfg(test)]
@@ -105,6 +106,9 @@ pub use in_range::in_range;
 use scalar_dispatch::eval_scalar_function;
 use scalar_helpers::{point_xy, typeof_value};
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
+pub use temporal_input::{
+    temporal_date_order, DateOrderScope, TemporalInputContext, TemporalInputScope,
+};
 
 mod builtin;
 mod call_arguments;

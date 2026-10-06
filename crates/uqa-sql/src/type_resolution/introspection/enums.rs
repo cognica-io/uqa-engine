@@ -35,7 +35,7 @@ impl Binder<'_, '_> {
                 parameter_index: None,
             })),
             Ok(None) => Ok(None),
-            Err(error) if self.strict_literals => Err(error),
+            Err(error) if self.literal_binding == super::LiteralBinding::Validate => Err(error),
             Err(_) => Ok(None),
         }
     }
@@ -58,7 +58,7 @@ impl Binder<'_, '_> {
     }
 
     /// The catalog type a cast names, when it is not a built-in type.
-    fn user_cast_target(&mut self, ty: &str) -> Result<Option<ColumnType>, SQLError> {
+    pub(super) fn user_cast_target(&mut self, ty: &str) -> Result<Option<ColumnType>, SQLError> {
         let Some(resolver) = self.resolver else {
             return Ok(None);
         };

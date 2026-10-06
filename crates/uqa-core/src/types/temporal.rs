@@ -17,7 +17,7 @@ mod keys;
 mod production;
 mod timezone;
 
-pub use input::TemporalInputError;
+pub use input::{TemporalDateOrder, TemporalInputError};
 pub use timezone::TemporalTimeZone;
 
 pub(super) const MICROS_PER_SECOND: i64 = 1_000_000;

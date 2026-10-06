@@ -52,16 +52,23 @@ impl TemporalCastTarget {
         now_micros: i64,
         control: &ProductionControl<'_>,
     ) -> Result<std::result::Result<TemporalValue, TemporalInputError>> {
+        let order = crate::expr::temporal_date_order();
         Ok(match self {
-            Self::Date => TemporalValue::date_input_with_control(text, now_micros, control)?,
-            Self::Time => TemporalValue::time_input_with_control(text, now_micros, control)?,
-            Self::TimeTz => TemporalValue::time_tz_input_with_control(text, now_micros, control)?,
-            Self::Timestamp => {
-                TemporalValue::timestamp_input_with_control(text, now_micros, control)?
+            Self::Date => {
+                TemporalValue::date_input_in_order_with_control(text, now_micros, order, control)?
             }
-            Self::TimestampTz => {
-                TemporalValue::timestamp_tz_input_with_control(text, now_micros, control)?
+            Self::Time => {
+                TemporalValue::time_input_in_order_with_control(text, now_micros, order, control)?
             }
+            Self::TimeTz => TemporalValue::time_tz_input_in_order_with_control(
+                text, now_micros, order, control,
+            )?,
+            Self::Timestamp => TemporalValue::timestamp_input_in_order_with_control(
+                text, now_micros, order, control,
+            )?,
+            Self::TimestampTz => TemporalValue::timestamp_tz_input_in_order_with_control(
+                text, now_micros, order, control,
+            )?,
             Self::Interval => TemporalValue::interval_input_with_control(text, control)?,
         })
     }

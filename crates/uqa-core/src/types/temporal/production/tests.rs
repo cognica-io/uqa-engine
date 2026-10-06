@@ -236,3 +236,32 @@ fn years_print_without_a_sign_and_with_the_bc_era() {
         "0002-06-15 10:00:00+00 BC"
     );
 }
+
+#[test]
+fn controlled_date_order_preserves_cancellation_and_releases_scratch() {
+    let budget = MemoryBudget::new(4096);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let value = TemporalValue::date_input_in_order_with_control(
+        "01/02/03",
+        0,
+        TemporalDateOrder::DayMonthYear,
+        &control,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(value.to_sql_string(), "2003-02-01");
+    assert_eq!(budget.used(), 0);
+    invoking.cancel();
+    assert!(matches!(
+        TemporalValue::date_input_in_order_with_control(
+            "01/02/03",
+            0,
+            TemporalDateOrder::YearMonthDay,
+            &control
+        ),
+        Err(ValueRetentionError::Cancelled(_))
+    ));
+    assert_eq!(budget.used(), 0);
+}

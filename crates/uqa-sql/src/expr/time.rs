@@ -354,11 +354,13 @@ pub(super) fn coerce_temporal_with_control(
         Value::Str(s) => {
             let now_micros = crate::expr::transaction_timestamp_or_clock();
             for parse in [
-                TemporalValue::timestamp_input_with_control,
-                TemporalValue::date_input_with_control,
-                TemporalValue::time_input_with_control,
+                TemporalValue::timestamp_input_in_order_with_control,
+                TemporalValue::date_input_in_order_with_control,
+                TemporalValue::time_input_in_order_with_control,
             ] {
-                if let Ok(value) = parse(s, now_micros, control)? {
+                if let Ok(value) =
+                    parse(s, now_micros, crate::expr::temporal_date_order(), control)?
+                {
                     return Ok(value);
                 }
             }

@@ -214,7 +214,10 @@ fn unopened_worker(directional: bool) -> Vec<SessionPortalWorkerResponse> {
     };
     run(
         &UnopenedQuery,
-        Some(313),
+        uqa_sql::expr::TemporalInputContext {
+            transaction_clock_micros: Some(313),
+            date_order: uqa_core::TemporalDateOrder::DayMonthYear,
+        },
         &query,
         &[],
         directional,

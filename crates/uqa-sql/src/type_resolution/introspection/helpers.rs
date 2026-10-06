@@ -5,8 +5,8 @@
 //
 
 use super::{
-    Binder, BindingCall, ColumnType, FunctionBinding, FunctionTypeResolver, Produced, SQLError,
-    SQLParam, ScalarExpr, ScalarTypeSchema, Value,
+    Binder, BindingCall, ColumnType, FunctionBinding, FunctionTypeResolver, LiteralBinding,
+    Produced, SQLError, SQLParam, ScalarExpr, ScalarTypeSchema, Value,
 };
 use crate::type_resolution::{
     common::{base_type, local_routine_name},
@@ -215,35 +215,86 @@ impl Binder<'_, '_> {
         self.install_cast(expression, ty)
     }
 
+    /// An explicit cast of an unknown literal reads its base input now. Keep the written cast outside the constant so its modifier still applies at the original boundary.
+    pub(super) fn read_explicit_literal_input(
+        &mut self,
+        expression: &mut ScalarExpr,
+        ty: &str,
+    ) -> Result<(), SQLError> {
+        if !matches!(expression, ScalarExpr::Literal(Value::Str(_))) {
+            return Ok(());
+        }
+        let target = match ColumnType::from_sql_name_with_control(ty, &self.control) {
+            Ok(target) => target,
+            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+            Err(_) => {
+                let Some(target) = self.user_cast_target(ty)? else {
+                    return Ok(());
+                };
+                target.clone_with_control(&self.control)?
+            }
+        };
+        let input =
+            crate::type_resolution::literal_input_type_with_control(&target, &self.control)?;
+        if let Some(constant) = self.read_unknown_literal(expression, &input)? {
+            *expression = constant;
+        }
+        Ok(())
+    }
+
     /// `coerce_to_common_type` reads an `unknown` string constant with the selected type's input function, which reports what the type rejects, and stores the typed constant. A type whose input function consults the catalog keeps the cast form that the binding of a stored expression resolves.
     fn read_unknown_literal(
         &mut self,
         expression: &ScalarExpr,
         target: &ColumnType,
     ) -> Result<Option<ScalarExpr>, SQLError> {
-        let ScalarExpr::Literal(value @ Value::Str(_)) = expression else {
+        let ScalarExpr::Literal(value @ Value::Str(text)) = expression else {
             return Ok(None);
         };
         if crate::type_resolution::catalog_input_type(target) {
             return Ok(None);
         }
         // Binding reports no semantic errors: a literal the type rejects keeps its cast, which analysis and evaluation report.
-        let value = match crate::assignment::conversion::convert_value_to_column_type(
-            value.clone(),
-            target,
-        ) {
+        let converted = if self.literal_binding == LiteralBinding::Stored
+            && crate::expr::requires_domain_array_input(target)
+        {
+            let Some(catalog) = self
+                .resolver
+                .and_then(FunctionTypeResolver::catalog_input_functions)
+            else {
+                return Ok(None);
+            };
+            Ok(self
+                .control
+                .retain_external_value(catalog.read_unknown_input(text, target)?)?)
+        } else {
+            crate::assignment::conversion::convert_value_to_column_type_with_control(
+                self.control.copy_value(value)?,
+                target,
+                &self.control,
+            )
+        };
+        let value = match converted {
             Ok(value) => value,
-            Err(error) if self.strict_literals => return Err(error),
+            Err(error)
+                if self.literal_binding == LiteralBinding::Validate
+                    || matches!(error.sqlstate(), Some("53200" | "57014")) =>
+            {
+                return Err(error);
+            }
             Err(_) => return Ok(None),
         };
         let memory = self.control.reserve(size_of::<ScalarExpr>())?;
         *self.memory = self.control.combine(self.memory.take(), memory);
         let ty = self.control.copy_text(&target.catalog_name())?;
         let ty = self.retain(ty);
+        let bound_type = target.clone_with_control(&self.control)?;
+        let bound_type = self.retain(bound_type);
+        let value = self.retain(value);
         Ok(Some(ScalarExpr::TypedLiteral {
             value,
             ty,
-            bound_type: Some(target.clone()),
+            bound_type: Some(bound_type),
             parameter_index: None,
         }))
     }

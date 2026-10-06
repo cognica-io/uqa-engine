@@ -70,6 +70,10 @@ pub trait StatementExecutionInputs<S: Clone + 'static> {
     fn transaction_timestamp_micros(&self) -> Option<i64> {
         None
     }
+    /// The live session order for ambiguous date inputs. None preserves a caller's input context.
+    fn temporal_date_order(&self) -> Option<uqa_core::TemporalDateOrder> {
+        None
+    }
     /// The session's `statement_timeout`, which a statement starts with; `None` lets a statement run without a limit. Reading it captures none of the statement's execution inputs.
     fn statement_timeout(&self) -> Option<std::time::Duration>;
     /// Capture scanner settings at the SQL message boundary, before its first SET can execute.
@@ -87,12 +91,16 @@ pub trait StatementExecutionInputs<S: Clone + 'static> {
     }
 }
 
-pub(super) fn transaction_clock_scope<S: Clone + 'static>(
+pub(super) fn temporal_input_scope<S: Clone + 'static>(
     statements: &dyn StatementExecutionInputs<S>,
-) -> Option<uqa_sql::expr::TransactionClockScope> {
-    statements
-        .transaction_timestamp_micros()
-        .map(uqa_sql::expr::TransactionClockScope::enter)
+) -> uqa_sql::expr::TemporalInputScope {
+    uqa_sql::expr::TemporalInputContext {
+        transaction_clock_micros: statements.transaction_timestamp_micros(),
+        date_order: statements
+            .temporal_date_order()
+            .unwrap_or_else(uqa_sql::expr::temporal_date_order),
+    }
+    .enter()
 }
 
 pub trait StatementMutationInputs<S: Clone + 'static> {

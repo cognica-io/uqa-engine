@@ -8,8 +8,8 @@
 
 use super::{
     epoch_date, parse_interval_literal, wall_clock_micros, DateTime, Duration, ProductionControl,
-    ProductionString, TemporalInputError, TemporalValue, ValueRetentionError, MICROS_PER_DAY,
-    MICROS_PER_SECOND,
+    ProductionString, TemporalDateOrder, TemporalInputError, TemporalValue, ValueRetentionError,
+    MICROS_PER_DAY, MICROS_PER_SECOND,
 };
 use crate::memory::Produced;
 use chrono::{Datelike, NaiveDate, NaiveTime};
@@ -30,15 +30,37 @@ impl TemporalValue {
         now_micros: i64,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
+        self.parse_same_kind_in_order_with_control(
+            input,
+            now_micros,
+            TemporalDateOrder::default(),
+            control,
+        )
+    }
+
+    /// Parse this family using the caller's date order and transaction clock.
+    pub fn parse_same_kind_in_order_with_control(
+        &self,
+        input: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Self>, ValueRetentionError> {
         Ok(match self {
-            Self::Date { .. } => Self::date_input_with_control(input, now_micros, control)?,
-            Self::Time { .. } => Self::time_input_with_control(input, now_micros, control)?,
-            Self::TimeTz { .. } => Self::time_tz_input_with_control(input, now_micros, control)?,
+            Self::Date { .. } => {
+                Self::date_input_in_order_with_control(input, now_micros, order, control)?
+            }
+            Self::Time { .. } => {
+                Self::time_input_in_order_with_control(input, now_micros, order, control)?
+            }
+            Self::TimeTz { .. } => {
+                Self::time_tz_input_in_order_with_control(input, now_micros, order, control)?
+            }
             Self::Timestamp { .. } => {
-                Self::timestamp_input_with_control(input, now_micros, control)?
+                Self::timestamp_input_in_order_with_control(input, now_micros, order, control)?
             }
             Self::TimestampTz { .. } => {
-                Self::timestamp_tz_input_with_control(input, now_micros, control)?
+                Self::timestamp_tz_input_in_order_with_control(input, now_micros, order, control)?
             }
             Self::Interval { .. } => Self::interval_input_with_control(input, control)?,
         }
@@ -93,8 +115,23 @@ impl TemporalValue {
         now_micros: i64,
         control: &ProductionControl<'_>,
     ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        Self::date_input_in_order_with_control(
+            text,
+            now_micros,
+            TemporalDateOrder::default(),
+            control,
+        )
+    }
+
+    /// Read this temporal family with explicit date order under production limits.
+    pub fn date_input_in_order_with_control(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
         check_input(text, control)?;
-        let value = Self::date_input(text, now_micros);
+        let value = Self::date_input_in_order(text, now_micros, order);
         control.check()?;
         Ok(value)
     }
@@ -105,8 +142,23 @@ impl TemporalValue {
         now_micros: i64,
         control: &ProductionControl<'_>,
     ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        Self::time_input_in_order_with_control(
+            text,
+            now_micros,
+            TemporalDateOrder::default(),
+            control,
+        )
+    }
+
+    /// Read this temporal family with explicit date order under production limits.
+    pub fn time_input_in_order_with_control(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
         check_input(text, control)?;
-        let value = Self::time_input(text, now_micros);
+        let value = Self::time_input_in_order(text, now_micros, order);
         control.check()?;
         Ok(value)
     }
@@ -117,8 +169,23 @@ impl TemporalValue {
         now_micros: i64,
         control: &ProductionControl<'_>,
     ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        Self::time_tz_input_in_order_with_control(
+            text,
+            now_micros,
+            TemporalDateOrder::default(),
+            control,
+        )
+    }
+
+    /// Read this temporal family with explicit date order under production limits.
+    pub fn time_tz_input_in_order_with_control(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
         check_input(text, control)?;
-        let value = Self::time_tz_input(text, now_micros);
+        let value = Self::time_tz_input_in_order(text, now_micros, order);
         control.check()?;
         Ok(value)
     }
@@ -129,8 +196,23 @@ impl TemporalValue {
         now_micros: i64,
         control: &ProductionControl<'_>,
     ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        Self::timestamp_input_in_order_with_control(
+            text,
+            now_micros,
+            TemporalDateOrder::default(),
+            control,
+        )
+    }
+
+    /// Read this temporal family with explicit date order under production limits.
+    pub fn timestamp_input_in_order_with_control(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
         check_input(text, control)?;
-        let value = Self::timestamp_input(text, now_micros);
+        let value = Self::timestamp_input_in_order(text, now_micros, order);
         control.check()?;
         Ok(value)
     }
@@ -141,8 +223,23 @@ impl TemporalValue {
         now_micros: i64,
         control: &ProductionControl<'_>,
     ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        Self::timestamp_tz_input_in_order_with_control(
+            text,
+            now_micros,
+            TemporalDateOrder::default(),
+            control,
+        )
+    }
+
+    /// Read this temporal family with explicit date order under production limits.
+    pub fn timestamp_tz_input_in_order_with_control(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
         check_input(text, control)?;
-        let value = Self::timestamp_tz_input(text, now_micros);
+        let value = Self::timestamp_tz_input_in_order(text, now_micros, order);
         control.check()?;
         Ok(value)
     }

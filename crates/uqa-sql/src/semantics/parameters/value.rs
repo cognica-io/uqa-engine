@@ -15,6 +15,24 @@ const MAX_IDENTIFIER_BYTES: usize = 63;
 
 /// Read `raw` as a value of `definition` and return the setting it stands for, or the error `SET` reports for it.
 pub fn parse_setting(definition: &ParameterDefinition, raw: &str) -> Result<String, SQLError> {
+    parse_setting_with_context(
+        definition,
+        raw,
+        &definition.boot_setting(),
+        &definition.boot_setting(),
+    )
+}
+
+/// Read a setting with the session's current and reset values for partial assignments.
+pub fn parse_setting_with_context(
+    definition: &ParameterDefinition,
+    raw: &str,
+    current: &str,
+    reset: &str,
+) -> Result<String, SQLError> {
+    if definition.name == "DateStyle" {
+        return super::datestyle::parse_setting(definition, raw, current, reset);
+    }
     if definition.name == "TimeZone" {
         return super::timezone::parse_setting(definition, raw);
     }

@@ -183,11 +183,33 @@ impl Deparser<'_> {
     ) -> Result<Option<String>, SQLError> {
         // A constant already of the cast's type prints once.
         if let ScalarExpr::TypedLiteral {
-            ty: constant_type, ..
+            value,
+            ty: constant_type,
+            ..
         } = expr
         {
             if self.same_type(constant_type, ty) {
                 return self.expression(expr, scope, subqueries).map(Some);
+            }
+            if let (Some(source), Some(target)) =
+                (self.resolved_type(constant_type), self.resolved_type(ty))
+            {
+                if source.without_type_modifiers() == target.without_type_modifiers() {
+                    // A modifier on an already-read input constant prints one cast of that value, without rereading its original text under the current session settings.
+                    let bare_numeric = match (value, &target) {
+                        (Value::Decimal(number), ColumnType::Numeric { .. }) => {
+                            let text = number.to_sql_string();
+                            !text.starts_with('-') && text.contains('.')
+                        }
+                        _ => false,
+                    };
+                    let value = self.typed_literal(value, ty)?;
+                    return Ok(Some(if bare_numeric {
+                        format!("{value}::{}", self.type_display(ty))
+                    } else {
+                        value
+                    }));
+                }
             }
         }
         let Some(target) = self.resolved_type(ty) else {
@@ -258,6 +280,7 @@ fn is_oid_alias(ty: &ColumnType) -> bool {
 mod tests {
     use super::*;
     use crate::catalog::{RelationLookupMode, RelationNameResolution};
+    use uqa_sql::ast::Expr;
 
     #[test]
     fn implicit_array_coercion_wraps_the_constructor_while_explicit_cast_converts_elements() {
@@ -296,6 +319,52 @@ mod tests {
                     .unwrap(),
                 expected
             );
+        }
+    }
+    #[test]
+    fn read_input_constants_print_one_written_modifier_without_reinterpretation() {
+        let catalog = crate::catalog::test_support::empty_catalog();
+        let resolution = RelationNameResolution {
+            search_path: vec!["public".into()],
+            temporary_schema: "pg_temp_1".into(),
+            temporary_namespace_allocated: false,
+            current_user: "uqa".into(),
+            lookup_mode: RelationLookupMode::Dynamic,
+        };
+        // Independently captured with pg_get_viewdef on PostgreSQL 18.4.
+        for (input, source, target, expected) in [
+            (
+                "10:20:30.123456",
+                "time",
+                "time(3)",
+                "'10:20:30.123456'::time(3) without time zone",
+            ),
+            ("x", "varchar", "varchar(3)", "'x'::character varying(3)"),
+            ("ab", "bpchar", "char(3)", "'ab'::character(3)"),
+            ("1.234", "numeric", "numeric(3,1)", "1.234::numeric(3,1)"),
+        ] {
+            let value =
+                uqa_sql::expr::cast_value(&uqa_core::Value::Str(input.into()), source).unwrap();
+            let expression = Expr::Cast {
+                implicit: false,
+                expr: Box::new(Expr::TypedLiteral {
+                    value,
+                    ty: source.into(),
+                }),
+                ty: target.into(),
+            };
+            for pretty in [false, true] {
+                assert_eq!(
+                    super::super::stored_expression_definition(
+                        &catalog,
+                        &resolution,
+                        &expression,
+                        pretty
+                    )
+                    .unwrap(),
+                    expected
+                );
+            }
         }
     }
 }

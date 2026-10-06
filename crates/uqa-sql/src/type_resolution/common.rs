@@ -69,6 +69,31 @@ pub(super) fn base_type(mut ty: &ColumnType) -> &ColumnType {
     ty.without_temporal_modifiers()
 }
 
+/// `coerce_type` reads a scalar domain through its base input, but array input keeps each element's domain checks. Input functions receive interval modifiers; other modifiers remain on the outer coercion.
+pub(crate) fn literal_input_type_with_control(
+    mut ty: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    fn input_type(
+        ty: &ColumnType,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<ColumnType>, SQLError> {
+        Ok(match ty {
+            ColumnType::IntervalWithFields { .. } | ColumnType::Domain { .. } => {
+                ty.clone_with_control(control)?
+            }
+            ColumnType::Array(element) => {
+                ColumnType::array_with_control(input_type(element, control)?, control)?
+            }
+            _ => ty.without_type_modifiers_with_control(control)?,
+        })
+    }
+    while let ColumnType::Domain { base, .. } = ty {
+        ty = base;
+    }
+    input_type(ty, control)
+}
+
 pub(crate) fn array_element_type(ty: &ColumnType) -> Option<&ColumnType> {
     match base_type(ty) {
         ColumnType::Array(element) => {

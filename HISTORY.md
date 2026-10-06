@@ -34,6 +34,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Honor the session DateStyle order for numeric date inputs, including arrays, domains and ranges; normalize partial settings and aliases with PostgreSQL diagnostics, preserve prepared and stored input values, and carry the active order through transactions, cursors and parallel execution. Short BC years retain their written era. Stored domain-array inputs execute their checks once, and interval input retains its declared fields.
 - Resolve scalar element types for multidimensional ANY/ALL and polymorphic array functions, accept catalog vectors as anyarray inputs, and retain array-domain conversions in stored comparisons.
 - Preserve PostgreSQL IN-list analysis and selected OID-alias conversions in stored definitions. Keep array versus individual comparisons, volatile evaluation counts, independent scalar-subquery initialization, current versus enclosing row scopes and existing index/key access. Correct result-type derivation for correlated scalar subqueries in stored views, including qualified columns after rename and reopen.
 - Select and retain the common element type and array concatenation overload of `||`, including scalar append/prepend and typed NULL elements. Preserve selected conversions in stored definitions, PostgreSQL operator/input/dimension diagnostics, lower bounds and domain-array reconstruction.

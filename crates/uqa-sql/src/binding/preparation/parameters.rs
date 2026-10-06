@@ -266,10 +266,10 @@ impl<'a> ParameterTypes<'a> {
         if expression.ty.is_some() || !expression.coercible_unknown {
             return Ok(());
         }
-        let target = target.without_type_modifiers();
         if let Some((origin, text)) = &expression.literal {
-            self.read_literal(*origin, text, &target)?;
+            self.read_literal(*origin, text, target)?;
         }
+        let target = target.without_type_modifiers();
         if let Some(occurrence) = expression.occurrence {
             let (index, observed) = &mut self.occurrences[occurrence];
             if self.types[*index].as_ref().is_some_and(|ty| *ty != target) {
@@ -291,13 +291,12 @@ impl<'a> ParameterTypes<'a> {
         text: &str,
         target: &ColumnType,
     ) -> Result<(), SQLError> {
-        // Scalar domains read their base input and keep an outer runtime check;
-        // an array input invokes the domain input function for every element.
-        let mut input_type = target;
-        while let ColumnType::Domain { base, .. } = input_type {
-            input_type = base;
-        }
-        let input_type = input_type.without_type_modifiers();
+        let input_type = crate::type_resolution::literal_input_type_with_control(
+            target,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .into_uncontrolled()
+        .expect("ordinary literal input has no reservation");
         if self.input_constants.as_ref().is_some_and(|constants| {
             matches!(constants.0.get(&origin), Some(ScalarExpr::TypedLiteral { bound_type: Some(ty), .. }) if *ty == input_type)
         }) {
