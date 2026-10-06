@@ -188,16 +188,20 @@ pub enum FrameMode {
     Groups,
 }
 
-/// The written location of a function's ordering expressions. Older stored expressions did not retain this distinction and require binding to recover it.
+/// The written function-call form, retained independently of overload binding. The durable `order_syntax` field keeps its original name for stored-expression compatibility.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FunctionOrderSyntax {
+pub enum FunctionCallSyntax {
     #[default]
     Legacy,
     Ordinary,
     WithinGroup,
+    Extract,
 }
 
-impl FunctionOrderSyntax {
+/// The original public name, preserved for callers and stored ordering metadata.
+pub type FunctionOrderSyntax = FunctionCallSyntax;
+
+impl FunctionCallSyntax {
     #[must_use]
     pub const fn is_legacy(&self) -> bool {
         matches!(self, Self::Legacy)

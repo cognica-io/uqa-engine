@@ -290,6 +290,15 @@ SELECT date_trunc('hour', interval '1 day 02:34:56') AS whole_hours,
        date_trunc('week', timestamp '2024-05-19 15:23:45') AS week_start;
 ```
 
+`date_trunc(unit text, source timestamptz [, timezone text])` returns a timestamptz at the requested local calendar boundary. The two-argument overload uses the invoking session's `TimeZone` and is stable; the explicit-zone overload is immutable and can be used in a stored generated column. The timezone argument accepts case-insensitive IANA names, PostgreSQL's default abbreviations and POSIX timezone rules. Named-zone transitions use bundled IANA 2026b data, including historical offsets, so the result does not depend on the host's installed timezone database. Day and coarser truncation resolves the resulting local date's offset; a DST gap uses the offset before the transition and a fold uses the offset after it. Hour and finer truncation retains the source instant's offset. Any NULL argument returns NULL. An unknown timezone reports `22023` before unit validation, and a final UTC result outside the timestamp range reports `22008`.
+
+```sql execute
+SET TIME ZONE 'Asia/Seoul';
+SELECT extract(epoch FROM date_trunc('day', timestamptz '2024-01-02 03:04:05+00')) AS session_day,
+       extract(epoch FROM date_trunc('day', timestamptz '2024-01-02 03:04:05+00', 'America/New_York')) AS explicit_day;
+SET TIME ZONE 'UTC';
+```
+
 An interval keeps months, days, and time separately. Multiplying or dividing one by a number scales each field on its own and cascades a fractional month into days at 30 days a month and a fractional day into time at 24 hours a day, never upward, so `interval '1 month' * 0.5` is `15 days`; division divides each field rather than multiplying by the reciprocal, and dividing by zero reports SQLSTATE `22012`. `justify_hours` moves whole 24-hour periods of the time into days, `justify_days` moves whole 30-day periods into months, and `justify_interval` does both so that every field takes one sign; each carry truncates toward zero, so `justify_hours(interval '-25 hours')` is `-1 days -01:00:00`. Adding an interval to or subtracting it from a `time` or `time with time zone` value uses only its time field and wraps within the day. A date, time, timestamp, or interval result outside its type's range reports SQLSTATE `22008`.
 
 ```sql execute

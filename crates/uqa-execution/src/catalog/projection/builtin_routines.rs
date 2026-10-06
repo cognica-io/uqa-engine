@@ -158,6 +158,7 @@ mod records;
 mod scalar;
 mod sequences;
 mod sleep_bodies;
+mod temporal;
 
 const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalogEntry {
     BuiltinRoutineCatalogEntry {
@@ -181,6 +182,7 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     scalar::ROUTINES,
     clock_and_case::ROUTINES,
     numeric::ROUTINES,
+    temporal::ROUTINES,
     arrays::ROUTINES,
     enums::ROUTINES,
     definitions::ROUTINES,

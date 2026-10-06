@@ -12,6 +12,8 @@ use super::{
     TemporalValue, Timelike, Value, MICROS_PER_HOUR, MICROS_PER_MINUTE, MICROS_PER_SECOND,
 };
 
+pub(super) mod zone;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Unit {
     Millennium,
@@ -47,6 +49,9 @@ pub(super) fn truncate(
     }
     let result = truncate_timestamp(unit, temporal_naive(&temporal)?)?;
     let micros = micros_from_naive(result);
+    if !TemporalValue::timestamp_micros_in_range(micros) {
+        return Err(datetime_out_of_range("timestamp"));
+    }
     Ok(Value::Temporal(
         if matches!(temporal, TemporalValue::TimestampTz { .. }) {
             TemporalValue::TimestampTz { micros }
@@ -172,9 +177,7 @@ fn truncate_timestamp(unit: Unit, value: NaiveDateTime) -> Result<NaiveDateTime>
         ),
         Unit::Microseconds => Some(value),
     };
-    result
-        .filter(|value| TemporalValue::timestamp_micros_in_range(micros_from_naive(*value)))
-        .ok_or_else(|| datetime_out_of_range("timestamp"))
+    result.ok_or_else(|| datetime_out_of_range("timestamp"))
 }
 
 #[cfg(test)]

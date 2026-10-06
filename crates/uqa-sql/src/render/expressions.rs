@@ -75,6 +75,14 @@ pub(super) fn render_expr_in(
             filter,
             ..
         } => {
+            if *order_syntax == crate::ast::FunctionCallSyntax::Extract {
+                let (field, source) = super::function_syntax::extract_fields(args)?;
+                return Ok(format!(
+                    "EXTRACT({} FROM {})",
+                    super::string_literal(field),
+                    render_expr(source)?
+                ));
+            }
             if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
                 binding.as_ref().and_then(|binding| binding.dispatch)
             {
@@ -107,6 +115,7 @@ pub(super) fn render_expr_in(
                 arguments.push_str("ORDER BY ");
                 arguments.push_str(&order_by_sql(order_by)?);
             }
+            let name = super::function_syntax::ordinary_function_name(name);
             let mut rendered = format!("{name}({arguments})");
             if *order_syntax == crate::ast::FunctionOrderSyntax::WithinGroup {
                 write!(

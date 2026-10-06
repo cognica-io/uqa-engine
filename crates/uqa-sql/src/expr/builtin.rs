@@ -164,10 +164,11 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
             Some(true)
         }
         "array_sort" if matches!(argument_count, 1..=3) => Some(true),
-        "array_length" | "array_lower" | "array_upper" | "atan2" | "date_part" | "date_trunc"
-        | "decode" | "encode" | "extract" | "gcd" | "lcm" | "left" | "mod" | "power" | "pow"
-        | "repeat" | "right" | "starts_with" | "position" | "strpos" | "to_char" | "to_date"
-        | "to_number" | "trim_array" | "point" | "st_distance" | "st_within"
+        "date_trunc" if matches!(argument_count, 2 | 3) => Some(true),
+        "array_length" | "array_lower" | "array_upper" | "atan2" | "date_part" | "decode"
+        | "encode" | "extract" | "gcd" | "lcm" | "left" | "mod" | "power" | "pow" | "repeat"
+        | "right" | "starts_with" | "position" | "strpos" | "to_char" | "to_date" | "to_number"
+        | "trim_array" | "point" | "st_distance" | "st_within"
             if argument_count == 2 =>
         {
             Some(true)

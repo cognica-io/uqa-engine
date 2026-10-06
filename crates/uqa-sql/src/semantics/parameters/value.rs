@@ -15,6 +15,9 @@ const MAX_IDENTIFIER_BYTES: usize = 63;
 
 /// Read `raw` as a value of `definition` and return the setting it stands for, or the error `SET` reports for it.
 pub fn parse_setting(definition: &ParameterDefinition, raw: &str) -> Result<String, SQLError> {
+    if definition.name == "TimeZone" {
+        return super::timezone::parse_setting(definition, raw);
+    }
     match definition.kind {
         ParameterKind::Bool { .. } => parse_bool(raw)
             .map(|value| if value { "on" } else { "off" }.to_string())

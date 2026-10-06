@@ -11,7 +11,7 @@ mod constructs;
 mod operators;
 
 use super::{values, Field, Node};
-use crate::ast::{BinaryOp, Expr, FunctionBinding};
+use crate::ast::{BinaryOp, Expr, FunctionBinding, FunctionCallSyntax};
 use crate::catalog::type_metadata::{pg_type_collation_oid, pg_type_modifier, pg_type_oid};
 use crate::type_resolution::{
     binary_operator_catalog_entry, binary_operator_types, common_context_expression_type,
@@ -120,7 +120,7 @@ impl ExpressionContext<'_> {
                 ],
             )?,
             Expr::Func {
-                order_syntax: _,
+                order_syntax,
                 name,
                 binding,
                 args,
@@ -131,7 +131,7 @@ impl ExpressionContext<'_> {
                 if let Some(value) = self.construct(expression, name, binding.as_ref(), args)? {
                     value
                 } else {
-                    self.function(name, binding.as_ref(), args)?
+                    self.function(name, binding.as_ref(), args, *order_syntax)?
                 }
             }
             Expr::Cast { expr, ty } => {
@@ -284,6 +284,7 @@ impl ExpressionContext<'_> {
         name: &str,
         binding: Option<&FunctionBinding>,
         arguments: &[Expr],
+        syntax: FunctionCallSyntax,
     ) -> Result<TypedNode, SQLError> {
         let types = arguments
             .iter()
@@ -313,7 +314,14 @@ impl ExpressionContext<'_> {
                     ("funcresulttype", pg_type_oid(&routine.result_type).into()),
                     ("funcretset", false.into()),
                     ("funcvariadic", false.into()),
-                    ("funcformat", 0.into()),
+                    (
+                        "funcformat",
+                        if syntax == FunctionCallSyntax::Extract {
+                            3.into()
+                        } else {
+                            0.into()
+                        },
+                    ),
                     (
                         "funccollid",
                         pg_type_collation_oid(&routine.result_type).into(),

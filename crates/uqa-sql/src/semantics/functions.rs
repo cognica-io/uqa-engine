@@ -27,7 +27,11 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
     };
     let is_builtin = match schema {
         "ag_catalog" => is_age_catalog_function(local),
-        "pg_catalog" => crate::registry::is_registered(local) || is_pg_catalog_function(local),
+        "pg_catalog" => {
+            crate::registry::is_registered(local)
+                || crate::type_resolution::is_fixed_builtin(local)
+                || is_pg_catalog_function(local)
+        }
         _ => false,
     };
     if is_builtin {
@@ -397,11 +401,13 @@ mod tests {
     use super::builtin_function_dispatch_name;
 
     #[test]
-    fn sequence_introspection_dispatch_preserves_schema_identity() {
+    fn builtin_dispatch_preserves_schema_identity() {
         for name in [
             "pg_get_sequence_data",
             "pg_sequence_last_value",
             "pg_sequence_parameters",
+            "date_trunc",
+            "mod",
         ] {
             assert_eq!(builtin_function_dispatch_name(name), name);
             assert_eq!(

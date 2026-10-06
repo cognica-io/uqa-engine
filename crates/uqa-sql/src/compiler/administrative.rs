@@ -347,7 +347,22 @@ pub(super) fn compile_variable_set(
                         "SET type-cast argument must contain a string literal".into(),
                     ));
                 };
-                SetArgument::Text(value.sval.clone())
+                if stmt.name.eq_ignore_ascii_case("TimeZone") {
+                    let type_name = cast.type_name.as_ref().ok_or_else(|| {
+                        SQLError::Internal("SET interval argument has no type".into())
+                    })?;
+                    let ty = super::types::compile_pg_type_name(type_name, "TimeZone")?;
+                    let interval = crate::expr::cast_value(
+                        &uqa_core::Value::Str(value.sval.clone()),
+                        &ty.sql_name(),
+                    )?;
+                    SetArgument::Text(format!(
+                        "INTERVAL '{}'",
+                        crate::expr::value_to_string(&interval)?
+                    ))
+                } else {
+                    SetArgument::Text(value.sval.clone())
+                }
             }
             other => {
                 return Err(SQLError::Internal(format!(

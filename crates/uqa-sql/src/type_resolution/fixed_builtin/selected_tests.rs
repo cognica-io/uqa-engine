@@ -138,3 +138,41 @@ fn selected_descriptor_preserves_invalid_binding_and_variadic_diagnostics() {
         vec![ScalarExpr::Literal(Value::Int(1))],
     );
 }
+
+#[test]
+fn fixed_generated_calls_use_selected_overload_volatility() {
+    for (name, types, non_immutable) in [
+        (
+            "date_trunc",
+            vec![ColumnType::Text, ColumnType::TimestampTz],
+            true,
+        ),
+        (
+            "date_trunc",
+            vec![ColumnType::Text, ColumnType::TimestampTz, ColumnType::Text],
+            false,
+        ),
+        (
+            "date_trunc",
+            vec![ColumnType::Text, ColumnType::Timestamp],
+            false,
+        ),
+        (
+            "date_trunc",
+            vec![ColumnType::Text, ColumnType::Interval],
+            false,
+        ),
+        ("current_setting", vec![ColumnType::Text], true),
+        ("random", vec![], true),
+    ] {
+        let names = vec![None; types.len()];
+        let types = types.into_iter().map(Some).collect::<Vec<_>>();
+        let call = resolve_fixed_builtin_call(name, None, &names, &types, false, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            call.builtin_non_immutable, non_immutable,
+            "{name}: {types:?}"
+        );
+    }
+}

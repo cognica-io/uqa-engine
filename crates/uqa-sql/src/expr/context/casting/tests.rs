@@ -9,6 +9,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 mod domain_inputs;
 mod enum_arrays;
+mod timezone;
 
 #[test]
 fn standalone_catalog_casts_keep_oid_output_and_array_lower_bounds() {

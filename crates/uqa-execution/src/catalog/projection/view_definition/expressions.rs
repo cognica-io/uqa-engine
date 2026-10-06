@@ -483,6 +483,29 @@ impl Deparser<'_> {
         else {
             unreachable!()
         };
+        if *order_syntax == uqa_sql::ast::FunctionCallSyntax::Extract {
+            let [field, source] = args.as_slice() else {
+                return Err(SQLError::Internal("EXTRACT requires two operands".into()));
+            };
+            let mut field = field;
+            while let ScalarExpr::Cast { expr, .. } = field {
+                field = expr;
+            }
+            let (ScalarExpr::Literal(Value::Str(field))
+            | ScalarExpr::TypedLiteral {
+                value: Value::Str(field),
+                ..
+            }) = field
+            else {
+                return Err(SQLError::Internal(
+                    "EXTRACT field is not a text constant".into(),
+                ));
+            };
+            return Ok(format!(
+                "EXTRACT({field} FROM {})",
+                self.expression(source, scope, subqueries)?
+            ));
+        }
         let mut rendered = self.function(name, binding.as_ref(), args, scope, subqueries)?;
         if *distinct {
             let start = rendered

@@ -201,7 +201,11 @@ fn decode(text: &str) -> Input<Fields> {
         return Err(TemporalInputError::InvalidSyntax);
     }
     let mut fields = Fields::default();
-    for token in text.split_whitespace().flat_map(split_iso_separator) {
+    for token in text
+        .split_whitespace()
+        .flat_map(split_iso_separator)
+        .flat_map(split_date_zone)
+    {
         let token = token.trim_end_matches(',');
         if token.is_empty() {
             continue;
@@ -213,6 +217,10 @@ fn decode(text: &str) -> Input<Fields> {
             fields.date = Some(DatePart::Special(special));
             continue;
         }
+        if token.starts_with(['+', '-']) {
+            set_zone(&mut fields, decode_zone(token)?)?;
+            continue;
+        }
         if token.contains(':') {
             let (time, zone) = split_glued_zone(token);
             if fields.time.is_some() {
@@ -222,10 +230,6 @@ fn decode(text: &str) -> Input<Fields> {
             if let Some(zone) = zone {
                 set_zone(&mut fields, decode_zone(zone)?)?;
             }
-            continue;
-        }
-        if token.starts_with(['+', '-']) && token[1..].bytes().all(|byte| byte.is_ascii_digit()) {
-            set_zone(&mut fields, decode_zone(token)?)?;
             continue;
         }
         if token
@@ -263,12 +267,10 @@ fn decode(text: &str) -> Input<Fields> {
         }
         return Err(TemporalInputError::InvalidSyntax);
     }
-    if fields.era == Some(true) {
-        // `ValidateDate`: 1 BC is the year zero of the proleptic calendar, 2 BC the year before it.
-        match &mut fields.date {
-            Some(DatePart::Calendar(calendar)) => calendar.year = 1 - calendar.year,
-            _ => return Err(TemporalInputError::InvalidSyntax),
-        }
+    if let Some(DatePart::Calendar(calendar)) = &mut fields.date {
+        validate_date(calendar, fields.era == Some(true))?;
+    } else if fields.era == Some(true) {
+        return Err(TemporalInputError::InvalidSyntax);
     }
     if let Some(afternoon) = fields.meridian {
         let Some(micros) = fields.time else {
@@ -309,6 +311,27 @@ fn split_iso_separator(token: &str) -> impl Iterator<Item = &str> {
     .flatten()
 }
 
+/// `ParseDateTime` consumes a numeric date's matching delimiters before starting a zone field. A trailing minus stays in a hyphenated date, whereas a plus (or a minus after a slash/dot date) starts a separate offset even without whitespace.
+fn split_date_zone(token: &str) -> impl Iterator<Item = &str> {
+    let digits = token.bytes().take_while(u8::is_ascii_digit).count();
+    let end = match token.as_bytes().get(digits) {
+        Some(delimiter @ (b'-' | b'/' | b'.')) if digits > 0 => token
+            .bytes()
+            .take_while(|byte| byte.is_ascii_digit() || byte == delimiter)
+            .count(),
+        _ => digits,
+    };
+    let split = (end > 0 && end < token.len())
+        .then(|| token.split_at(end))
+        .filter(|(_, zone)| zone.starts_with(['+', '-']) || zone.eq_ignore_ascii_case("z"));
+    match split {
+        Some((date, zone)) => [Some(date), Some(zone)],
+        None => [Some(token), None],
+    }
+    .into_iter()
+    .flatten()
+}
+
 /// Split `10:00:00+02`, `10:00:00-05:30` or `10:00Z` into the time and its offset.
 fn split_glued_zone(token: &str) -> (&str, Option<&str>) {
     if let Some(time) = token.strip_suffix('Z').or_else(|| token.strip_suffix('z')) {
@@ -328,7 +351,7 @@ fn set_zone(fields: &mut Fields, zone: i64) -> Input<()> {
     Ok(())
 }
 
-/// Read `YYYY-MM-DD`, `YYYY/MM/DD`, `YYYY.MM.DD`, `YYYYMMDD` and `YYMMDD`, and a first field of fewer than three digits in the `MDY` order of the default `DateStyle`, then validate the fields as `ValidateDate` does: a month or day outside its own range is the overflow the `DateStyle` hint accompanies, and a day past the month's length is a plain overflow.
+/// Read `YYYY-MM-DD`, `YYYY/MM/DD`, `YYYY.MM.DD`, `YYYYMMDD` and `YYMMDD`, and a first field of fewer than three digits in the `MDY` order of the default `DateStyle`. Calendar validity follows the remaining field decoding, as in `ValidateDate`.
 fn decode_date(token: &str) -> Input<Calendar> {
     let parts: Vec<&str> = token.split(['-', '/', '.']).collect();
     let (year, month, day) = match parts.as_slice() {
@@ -360,20 +383,27 @@ fn decode_date(token: &str) -> Input<Calendar> {
         }
         _ => return Err(TemporalInputError::InvalidSyntax),
     };
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return Err(TemporalInputError::FieldOverflow { date_style: true });
-    }
-    // `ValidateDate`: there is no year zero in AD/BC notation.
-    if year <= 0 {
-        return Err(TemporalInputError::FieldOverflow { date_style: false });
-    }
     let (Ok(month), Ok(day)) = (u32::try_from(month), u32::try_from(day)) else {
         return Err(TemporalInputError::FieldOverflow { date_style: true });
     };
-    if day > days_in_month(year, month) {
+    Ok(Calendar { year, month, day })
+}
+
+/// `ValidateDate` runs after zone decoding and applies the era before checking leap days; 1 BC is the proleptic year zero, and the written year zero is never valid.
+fn validate_date(calendar: &mut Calendar, bc: bool) -> Input<()> {
+    if calendar.year <= 0 {
         return Err(TemporalInputError::FieldOverflow { date_style: false });
     }
-    Ok(Calendar { year, month, day })
+    if bc {
+        calendar.year = 1 - calendar.year;
+    }
+    if !(1..=12).contains(&calendar.month) || !(1..=31).contains(&calendar.day) {
+        return Err(TemporalInputError::FieldOverflow { date_style: true });
+    }
+    if calendar.day > days_in_month(calendar.year, calendar.month) {
+        return Err(TemporalInputError::FieldOverflow { date_style: false });
+    }
+    Ok(())
 }
 
 /// `DecodeDate` reads a two-digit year as 1970 through 2069.
@@ -464,25 +494,27 @@ fn decode_zone(token: &str) -> Input<i64> {
         _ => return Err(TemporalInputError::InvalidSyntax),
     };
     let body = &token[1..];
+    let zone_number = |text| {
+        number(text).map_err(|error| match error {
+            TemporalInputError::OutOfRange => TemporalInputError::ZoneDisplacement,
+            other => other,
+        })
+    };
     let (hours, minutes, seconds) = if body.contains(':') {
         let mut parts = body.split(':');
-        let hours = number(parts.next().unwrap_or_default())?;
-        let minutes = number(parts.next().unwrap_or("0"))?;
-        let seconds = number(parts.next().unwrap_or("0"))?;
+        let hours = zone_number(parts.next().unwrap_or_default())?;
+        let minutes = zone_number(parts.next().filter(|part| !part.is_empty()).unwrap_or("0"))?;
+        let seconds = zone_number(parts.next().filter(|part| !part.is_empty()).unwrap_or("0"))?;
         if parts.next().is_some() {
             return Err(TemporalInputError::InvalidSyntax);
         }
         (hours, minutes, seconds)
     } else {
-        match body.len() {
-            1 | 2 => (number(body)?, 0, 0),
-            4 => (number(&body[..2])?, number(&body[2..])?, 0),
-            6 => (
-                number(&body[..2])?,
-                number(&body[2..4])?,
-                number(&body[4..])?,
-            ),
-            _ => return Err(TemporalInputError::InvalidSyntax),
+        let number = zone_number(body)?;
+        if body.len() > 2 {
+            (number / 100, number % 100, 0)
+        } else {
+            (number, 0, 0)
         }
     };
     if !(0..=59).contains(&minutes) || !(0..=59).contains(&seconds) || hours > 15 {

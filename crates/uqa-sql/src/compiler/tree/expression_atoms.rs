@@ -190,17 +190,22 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
         Some(inner) => Some(Box::new(compile_expr(inner)?)),
         None => None,
     };
+    let order_syntax = if f.funcformat == pg_query::protobuf::CoercionForm::CoerceSqlSyntax as i32
+        && raw_name == "pg_catalog.extract"
+    {
+        crate::ast::FunctionCallSyntax::Extract
+    } else if f.agg_within_group {
+        FunctionOrderSyntax::WithinGroup
+    } else {
+        FunctionOrderSyntax::Ordinary
+    };
     Ok(Expr::Func {
         binding: None,
         name: raw_name,
         args,
         distinct: f.agg_distinct,
         order_by: agg_order,
-        order_syntax: if f.agg_within_group {
-            FunctionOrderSyntax::WithinGroup
-        } else {
-            FunctionOrderSyntax::Ordinary
-        },
+        order_syntax,
         filter: agg_filter,
     })
 }

@@ -119,6 +119,7 @@ fn function_order_syntax_round_trips_without_reclassifying_legacy_json() {
         FunctionOrderSyntax::Legacy,
         FunctionOrderSyntax::Ordinary,
         FunctionOrderSyntax::WithinGroup,
+        FunctionOrderSyntax::Extract,
     ] {
         let mut source = expression("SELECT f(a) WITHIN GROUP (ORDER BY b)");
         let Expr::Func { order_syntax, .. } = &mut source else {

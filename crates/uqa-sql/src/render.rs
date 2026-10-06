@@ -25,6 +25,7 @@ mod window;
 pub use window::frame_clause_sql;
 mod expressions;
 use expressions::{render_expr, render_expr_in};
+pub(crate) mod function_syntax;
 
 /// Render one executable statement represented by UQA's durable SQL AST.
 pub fn statement_sql(statement: &Statement) -> Result<String, SQLError> {

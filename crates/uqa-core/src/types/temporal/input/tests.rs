@@ -256,6 +256,114 @@ fn zones_apply_to_instants_and_report_their_own_errors() {
 }
 
 #[test]
+fn date_only_timestamps_read_separate_and_adjacent_numeric_zone_fields() {
+    let base = 19_723 * DAY;
+    // PostgreSQL 18.4 DecodeTimezone reads unseparated digits as HHMM, never HHMMSS.
+    for (text, seconds_east) in [
+        ("2024-01-01+00", 0),
+        ("2024-01-01Z", 0),
+        ("2024-01-01z", 0),
+        ("2024-01-01+5", 18_000),
+        ("2024-01-01+050", 3_000),
+        ("2024-01-01+000001", 60),
+        ("2024-01-01+0530", 19_800),
+        ("2024-01-01+05:30", 19_800),
+        ("2024-01-01+05:30:15", 19_815),
+        ("2024-01-01+05:", 18_000),
+        ("2024-01-01+05:30:", 19_800),
+        ("2024-01-01 +05:30", 19_800),
+        ("2024-01-01 -05:30:15", -19_815),
+        ("20240101+05:30", 19_800),
+        ("2024/01/01+05:30", 19_800),
+        ("2024.01.01-05:30", -19_800),
+        ("2024-01-01+15:59:59", 57_599),
+    ] {
+        assert_eq!(
+            TemporalValue::timestamp_tz_input(text, NOW),
+            Ok(TemporalValue::TimestampTz {
+                micros: base - seconds_east * 1_000_000
+            }),
+            "{text}"
+        );
+        assert_eq!(
+            TemporalValue::timestamp_input(text, NOW),
+            Ok(TemporalValue::Timestamp { micros: base }),
+            "{text}"
+        );
+        assert_eq!(
+            TemporalValue::date_input(text, NOW),
+            Ok(date(19_723)),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        TemporalValue::time_input("2024-01-01+05", NOW),
+        Err(TemporalInputError::InvalidSyntax)
+    );
+    assert_eq!(
+        TemporalValue::timestamp_tz_input("2024-01-01 12:00 +05:30", NOW),
+        Ok(TemporalValue::TimestampTz {
+            micros: base + 23_400_000_000
+        })
+    );
+}
+
+#[test]
+fn date_only_zone_tokens_keep_postgresql_syntax_and_displacement_diagnostics() {
+    for text in [
+        "2024-01-01-05",
+        "2024-01-01-05:30:15",
+        "0002-06-15-00:00:01 bc",
+        "2024-01-01-15:59:59",
+        "2024-01-01+05:30:1.5",
+        "2024-01-01+",
+        "2024-01-01+05+06",
+        "2024-01-01+05 UTC",
+        "2024-01-01-05:30 12:00",
+    ] {
+        assert_eq!(
+            TemporalValue::timestamp_tz_input(text, NOW),
+            Err(TemporalInputError::InvalidSyntax),
+            "{text}"
+        );
+    }
+    for text in [
+        "2024-01-01+053015",
+        "2024-01-01+16",
+        "2024-01-01+05:60",
+        "2024-01-01+05:30:60",
+        "2024-13-01+16",
+        "2024-02-30+16",
+    ] {
+        assert_eq!(
+            TemporalValue::timestamp_tz_input(text, NOW),
+            Err(TemporalInputError::ZoneDisplacement),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn date_only_zone_inputs_apply_the_era_and_then_check_the_final_instant() {
+    for (text, micros) in [
+        ("0001-01-01+05:30 BC", -62_167_239_000_000_000),
+        ("0002-06-15 -00:00:01 BC", -62_184_499_199_000_000),
+        ("0001-02-29+00 BC", -62_162_121_600_000_000),
+        ("4714-11-24+00 BC", -210_866_803_200_000_000),
+    ] {
+        assert_eq!(
+            TemporalValue::timestamp_tz_input(text, NOW),
+            Ok(TemporalValue::TimestampTz { micros }),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        TemporalValue::timestamp_tz_input("4714-11-24+00:00:01 BC", NOW),
+        Err(TemporalInputError::OutOfRange)
+    );
+}
+
+#[test]
 fn timestamps_ignore_offsets_and_validate_their_fields() {
     let base = 19_723 * DAY + 10 * 3_600_000_000;
     // A `timestamp` reads and ignores the offset; a `timetz` keeps it.

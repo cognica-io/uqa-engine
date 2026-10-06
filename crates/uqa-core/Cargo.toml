@@ -16,6 +16,8 @@ exclude.workspace = true
 
 [dependencies]
 chrono = { workspace = true }
+tz-rs = { workspace = true }
+tzdb_data = { workspace = true }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }
 serde = { workspace = true }
