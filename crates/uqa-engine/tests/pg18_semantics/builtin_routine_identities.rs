@@ -36,19 +36,26 @@ fn builtin_routine_identities_match_postgresql_and_survive_reopen(#[case] provid
     let transcript = include_str!(
         "../../../../tests/parity/pg18/builtin_routine_identities_oracle.expected.json"
     );
-    crate::pg18_oracle::verify(&engine, transcript);
-    if provider == 0 {
-        return;
+    let mut reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    let default_after_reopen = reference["cases"].as_array_mut().unwrap().pop().unwrap();
+    assert_eq!(default_after_reopen["id"], "reopen_default");
+    crate::pg18_oracle::verify(&engine, &reference.to_string());
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        open(provider, &path)
+    };
+    if provider != 0 {
+        reference["cases"].as_array_mut().unwrap().retain(|case| {
+            matches!(
+                case["id"].as_str().unwrap(),
+                "catalog" | "numeric_output" | "arrays" | "stored_definitions" | "retained_reopen"
+            )
+        });
+        assert_eq!(reference["cases"].as_array().unwrap().len(), 5);
+        crate::pg18_oracle::verify(&engine, &reference.to_string());
     }
-    drop(engine);
-    let engine = open(provider, &path);
-    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
-    restored["cases"].as_array_mut().unwrap().retain(|case| {
-        matches!(
-            case["id"].as_str().unwrap(),
-            "catalog" | "numeric_output" | "arrays" | "stored_definitions" | "retained_reopen"
-        )
-    });
-    assert_eq!(restored["cases"].as_array().unwrap().len(), 5);
-    crate::pg18_oracle::verify(&engine, &restored.to_string());
+    reference["cases"] = serde_json::json!([default_after_reopen]);
+    crate::pg18_oracle::verify(&engine, &reference.to_string());
 }

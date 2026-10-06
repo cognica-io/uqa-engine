@@ -337,6 +337,8 @@ The input is a PostgreSQL object name or type spelling. `to_regclass` resolves a
 
 Each function returns the catalog OID in its declared `reg*` alias; relation, routine, and type lookups use `search_path` when the input is unqualified, while roles are global and qualified role names return NULL. A missing object returns NULL; an ambiguous `to_regproc` name or a signature-less `to_regprocedure` name also returns NULL. An all-digit input uses PostgreSQL's OID input syntax, including its leading-zero octal form, without requiring the OID to identify an existing object, and `-` denotes OID 0. Text output follows the corresponding `reg*` carrier, including visible-name qualification, role identifier quoting, PostgreSQL built-in type aliases, and decimal output for an unresolved nonzero OID.
 
+The implemented clock routines `now()`, `transaction_timestamp()`, `statement_timestamp()`, `clock_timestamp()` and `timeofday()`, and the text `lower(text)`/`upper(text)` overloads expose their PostgreSQL identities through the same routine catalog. Their hard `regproc`/`regprocedure` inputs, soft lookup functions, numeric OID output and arrays use the ordinary visibility rules. The overloaded names `lower` and `upper` are ambiguous for hard `regproc` input (`42725`) and return NULL from `to_regproc`; `regprocedure` selects their exact text signature. Stored defaults and view definitions retain the selected OID through search-path changes and durable reopening.
+
 A cast of a `reg*` value, or of an array of them, to `text`, `name`, `varchar` or `char` spells the value with its output function, element by element for an array, and then applies the target's length, as PostgreSQL's I/O conversion cast does: `'pg_class'::regclass::varchar(4)` is `pg_c` and `0::regclass::name` is `-`.
 
 These lookups do not mutate state. They are strict, stable, parallel-safe, and not leakproof, so a NULL input returns NULL and the functions are rejected in generated-column expressions that require immutability. `pg_catalog.pg_proc` exposes PostgreSQL 18 OIDs 3494, 3479, 3495, 4086, 4093, and 3493 for the functions in the syntax order above, and `information_schema.routines` exposes their exact `reg*` return aliases.
@@ -348,6 +350,8 @@ PostgreSQL does not permit a non-NULL scalar `regrole` constant to be retained i
 ```sql execute
 SELECT to_regclass('pg_catalog.pg_type') AS relation_oid,
        to_regprocedure('casefold(text)') AS routine_oid,
+       to_regproc('now') AS transaction_clock_oid,
+       to_regprocedure('lower(text)') AS text_lower_oid,
        to_regrole(current_user) AS role_oid,
        to_regtype('integer[]') AS type_oid;
 ```
