@@ -57,6 +57,11 @@ fn controlled_binding_preserves_cast_common_type_and_selected_call_semantics() {
             Expr::Literal(Value::Str("2".into())),
             Expr::Column("small".into()),
         ]),
+        Expr::Cast {
+            implicit: false,
+            expr: Box::new(Expr::Literal(Value::Str("02/03/2020".into()))),
+            ty: "date".into(),
+        },
         Expr::Case {
             base: Some(Box::new(Expr::Column("small".into()))),
             when: vec![(

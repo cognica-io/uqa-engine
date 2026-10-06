@@ -215,6 +215,27 @@ impl Binder<'_, '_> {
         self.install_cast(expression, ty)
     }
 
+    /// An explicit cast of an unknown literal reads its base input now. Keep the written cast outside the constant so its modifier still applies at the original boundary.
+    pub(super) fn read_explicit_literal_input(
+        &mut self,
+        expression: &mut ScalarExpr,
+        ty: &str,
+    ) -> Result<(), SQLError> {
+        if !matches!(expression, ScalarExpr::Literal(Value::Str(_))) {
+            return Ok(());
+        }
+        let target = match ColumnType::from_sql_name_with_control(ty, &self.control) {
+            Ok(target) => target,
+            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+            Err(_) => return Ok(()),
+        };
+        let input = target.without_type_modifiers_with_control(&self.control)?;
+        if let Some(constant) = self.read_unknown_literal(expression, &input)? {
+            *expression = constant;
+        }
+        Ok(())
+    }
+
     /// `coerce_to_common_type` reads an `unknown` string constant with the selected type's input function, which reports what the type rejects, and stores the typed constant. A type whose input function consults the catalog keeps the cast form that the binding of a stored expression resolves.
     fn read_unknown_literal(
         &mut self,
@@ -228,22 +249,30 @@ impl Binder<'_, '_> {
             return Ok(None);
         }
         // Binding reports no semantic errors: a literal the type rejects keeps its cast, which analysis and evaluation report.
-        let value = match crate::assignment::conversion::convert_value_to_column_type(
-            value.clone(),
+        let value = match crate::assignment::conversion::convert_value_to_column_type_with_control(
+            self.control.copy_value(value)?,
             target,
+            &self.control,
         ) {
             Ok(value) => value,
-            Err(error) if self.strict_literals => return Err(error),
+            Err(error)
+                if self.strict_literals || matches!(error.sqlstate(), Some("53200" | "57014")) =>
+            {
+                return Err(error);
+            }
             Err(_) => return Ok(None),
         };
         let memory = self.control.reserve(size_of::<ScalarExpr>())?;
         *self.memory = self.control.combine(self.memory.take(), memory);
         let ty = self.control.copy_text(&target.catalog_name())?;
         let ty = self.retain(ty);
+        let bound_type = target.clone_with_control(&self.control)?;
+        let bound_type = self.retain(bound_type);
+        let value = self.retain(value);
         Ok(Some(ScalarExpr::TypedLiteral {
             value,
             ty,
-            bound_type: Some(target.clone()),
+            bound_type: Some(bound_type),
             parameter_index: None,
         }))
     }

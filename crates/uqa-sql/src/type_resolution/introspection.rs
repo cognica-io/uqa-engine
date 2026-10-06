@@ -383,6 +383,7 @@ impl Binder<'_, '_> {
                 if let Some(source) = source {
                     self.wrap_declared(&mut expr, &source)?;
                 }
+                self.read_explicit_literal_input(&mut expr, &ty)?;
                 ScalarExpr::Cast { implicit, expr, ty }
             }
             ScalarExpr::InSubquery {

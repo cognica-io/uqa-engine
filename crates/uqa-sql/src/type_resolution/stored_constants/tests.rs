@@ -127,3 +127,44 @@ fn array_domains_keep_only_required_base_conversions_and_bind_idempotently() {
         assert_eq!(stored, once);
     }
 }
+
+#[test]
+fn stored_explicit_temporal_inputs_keep_creation_values_and_written_modifiers() {
+    use crate::expr::DateOrderScope;
+    use uqa_core::TemporalDateOrder;
+
+    for (sql, expected) in [
+        ("DATE '02/03/2020'", "2020-03-02"),
+        (
+            "'02/03/2020 10:20:30.123456'::timestamp(3)",
+            "2020-03-02 10:20:30.123456",
+        ),
+    ] {
+        let mut stored = expression(sql);
+        let written_type = match &stored {
+            ScalarExpr::Cast { ty, .. } => ty.clone(),
+            _ => panic!("explicit cast"),
+        };
+        {
+            let _scope = DateOrderScope::enter(TemporalDateOrder::DayMonthYear);
+            assert!(store_operand_coercions(&mut stored, &schema(), &[], &Catalog).unwrap());
+        }
+        let ScalarExpr::Cast { expr, ty, implicit } = &stored else {
+            panic!("written cast remains")
+        };
+        assert!(!implicit);
+        assert_eq!(*ty, written_type);
+        let ScalarExpr::TypedLiteral {
+            value: Value::Temporal(value),
+            ..
+        } = expr.as_ref()
+        else {
+            panic!("input constant")
+        };
+        assert_eq!(value.to_sql_string(), expected);
+        let once = stored.clone();
+        let _scope = DateOrderScope::enter(TemporalDateOrder::YearMonthDay);
+        assert!(!store_operand_coercions(&mut stored, &schema(), &[], &Catalog).unwrap());
+        assert_eq!(stored, once);
+    }
+}
