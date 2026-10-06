@@ -52,6 +52,9 @@ pub fn resolve_fixed_builtin_call(
     explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ResolvedFixedBuiltinCall>, SQLError> {
+    if super::range::function_type(name, binding, argument_types).is_some() {
+        return Ok(None);
+    }
     let Some(builtins) = overloads(name) else {
         return Ok(None);
     };
@@ -250,6 +253,12 @@ pub(super) fn bind_call(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
+    if matches!(
+        binding.as_ref().and_then(|b| b.dispatch),
+        Some(FunctionDispatch::Range { .. })
+    ) {
+        return name;
+    }
     if resolver.is_none() {
         return binding::bind_local_call(name, binding, args, schema, params);
     }

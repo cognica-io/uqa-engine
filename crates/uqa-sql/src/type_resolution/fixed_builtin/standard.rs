@@ -13,6 +13,8 @@ use super::registry::{
 use crate::ast::ColumnType as T;
 
 declarations! { pub(super) fn lookup(name);
+        "lower" | "upper" => &[Signature::new(&[T::Text], T::Text)],
+        "replace" => &[Signature::new(&[T::Text, T::Text, T::Text], T::Text)],
         "mod" => &[
             Signature::new(&[T::SmallInteger, T::SmallInteger], T::SmallInteger),
             Signature::new(&[T::Integer, T::Integer], T::Integer),

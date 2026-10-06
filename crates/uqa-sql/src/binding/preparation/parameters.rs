@@ -68,9 +68,12 @@ pub(super) struct ParameterTypes<'a> {
     catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
 }
 
-/// Original leaf identities, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
+/// Original expression identities for input constants and selected fixed calls, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
 #[derive(Default)]
-pub(super) struct InputConstants(BTreeMap<NonNull<ScalarExpr>, ScalarExpr>);
+pub(super) struct InputConstants(
+    BTreeMap<NonNull<ScalarExpr>, ScalarExpr>,
+    BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionBinding>,
+);
 
 impl InputConstants {
     /// Ordinary messages must repeat session/catalog-dependent input functions.
@@ -91,13 +94,23 @@ impl InputConstants {
         })
     }
 
+    fn apply_node(&mut self, expression: &mut ScalarExpr) {
+        let identity = NonNull::from(&*expression);
+        if let Some(selected) = self.1.remove(&identity) {
+            if let ScalarExpr::Func { binding, .. } = expression {
+                *binding = Some(selected);
+            }
+        }
+        if let Some(constant) = self.0.remove(&identity) {
+            *expression = constant;
+        }
+    }
+
     pub(super) fn apply_expression(mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
         crate::plan::rewrite_scalar_expression(expression, &mut |node| {
-            if let Some(constant) = self.0.remove(&NonNull::from(&*node)) {
-                *node = constant;
-            }
+            self.apply_node(node);
         });
-        if self.0.is_empty() {
+        if self.0.is_empty() && self.1.is_empty() {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -109,11 +122,9 @@ impl InputConstants {
     pub(super) fn apply(mut self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
         // Replacing leaves preserves every other node's address; the plan is neither cloned nor moved between analysis and this walk.
         plan.rewrite_scalar_expressions(&mut |expression| {
-            if let Some(constant) = self.0.remove(&NonNull::from(&*expression)) {
-                *expression = constant;
-            }
+            self.apply_node(expression);
         });
-        if self.0.is_empty() {
+        if self.0.is_empty() && self.1.is_empty() {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -147,6 +158,22 @@ impl<'a> ParameterTypes<'a> {
             enum_labels,
             catalog_inputs,
             ..Self::new(types)
+        }
+    }
+
+    /// Keep the declaration selected by analysis on the original call, without
+    /// copying its arguments or repeating type inference before optimization.
+    pub(super) fn retain_fixed_builtin(
+        &mut self,
+        expression: &ScalarExpr,
+        selected: &crate::ast::FunctionBinding,
+    ) {
+        if crate::fixed_builtin_return_type(selected).is_some() {
+            if let Some(constants) = &mut self.input_constants {
+                constants
+                    .1
+                    .insert(NonNull::from(expression), selected.clone());
+            }
         }
     }
 
