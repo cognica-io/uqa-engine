@@ -144,5 +144,8 @@ mod stored_column_alias_drop;
 #[path = "pg18_semantics/builtin_routine_identities.rs"]
 mod builtin_routine_identities;
 
+#[path = "pg18_semantics/date_trunc_interval.rs"]
+mod date_trunc_interval;
+
 #[path = "pg18_semantics/numeric_routine_identities.rs"]
 mod numeric_routine_identities;
