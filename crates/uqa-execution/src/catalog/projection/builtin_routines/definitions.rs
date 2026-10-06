@@ -160,7 +160,7 @@ pub const ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
         source: "pg_get_function_result",
     },
     BuiltinRoutineCatalogEntry {
-        oid: 9704,
+        oid: 6197,
         name: "pg_get_function_sqlbody",
         kind: "f",
         strict: true,

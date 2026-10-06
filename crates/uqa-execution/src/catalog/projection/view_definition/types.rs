@@ -75,7 +75,7 @@ impl Deparser<'_> {
     }
 
     /// The output of the non-relation alias types, built from the catalog view and the session's name resolution when first needed.
-    fn alias_output(
+    pub(super) fn alias_output(
         &self,
     ) -> Result<&crate::catalog::projection::regtypes::AliasConstantOutput, SQLError> {
         if let Some(output) = self.aliases.get() {

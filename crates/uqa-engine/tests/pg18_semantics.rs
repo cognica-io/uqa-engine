@@ -155,3 +155,6 @@ mod date_trunc_timezone;
 
 #[path = "pg18_semantics/finite_extraction.rs"]
 mod finite_extraction;
+
+#[path = "pg18_semantics/builtin_sqlbody.rs"]
+mod builtin_sqlbody;

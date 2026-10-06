@@ -17,6 +17,8 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 
 use super::builtin_routines::{BuiltinRoutineCatalogEntry, PG18_BUILTIN_ROUTINE_GROUPS};
 
+mod builtin_body;
+
 enum Routine {
     User(std::sync::Arc<SQLUserFunction>),
     Builtin(&'static BuiltinRoutineCatalogEntry),
@@ -271,8 +273,10 @@ pub fn pg_get_function_sqlbody_value(
     let Some(oid) = routine_oid_argument("pg_get_function_sqlbody", arguments)? else {
         return Ok(Value::Null);
     };
-    let Some(Routine::User(function)) = find_routine(context, oid)? else {
-        return Ok(Value::Null);
+    let function = match find_routine(context, oid)? {
+        Some(Routine::User(function)) => function,
+        Some(Routine::Builtin(routine)) => return builtin_body::definition(context, routine),
+        None => return Ok(Value::Null),
     };
     let FunctionBody::Statements(statements) = &function.def.body else {
         return Ok(Value::Null);

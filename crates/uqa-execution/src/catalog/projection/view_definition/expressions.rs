@@ -413,10 +413,33 @@ impl Deparser<'_> {
         {
             return Ok(local.to_ascii_uppercase());
         }
+        if let Some(binding) = binding.filter(|binding| binding.builtin) {
+            if schema
+                .as_deref()
+                .is_none_or(|schema| schema == "pg_catalog")
+            {
+                let argument_types = binding
+                    .argument_types
+                    .iter()
+                    .map(|ty| super::super::regtypes::catalog_routine_type_oid(self.catalog, ty))
+                    .collect::<Vec<_>>();
+                if let Some(parts) =
+                    self.alias_output()?
+                        .routine_name_parts("pg_catalog", &local, &argument_types)
+                {
+                    return Ok(parts
+                        .iter()
+                        .map(|part| quote_ident(part))
+                        .collect::<Vec<_>>()
+                        .join("."));
+                }
+                return Ok(quote_ident(&local));
+            }
+        }
         let Some(schema) = schema else {
             return Ok(quote_ident(&local));
         };
-        if schema == "pg_catalog" && binding.is_none_or(|binding| binding.builtin) {
+        if schema == "pg_catalog" && binding.is_none() {
             return Ok(quote_ident(&local));
         }
         if let Some(binding) = binding {

@@ -9,13 +9,24 @@
 use super::{invalid, values, Field, Node};
 use crate::SQLError;
 
+mod bodies;
 mod control;
 mod operators;
+
+pub use bodies::return_body;
+
+#[cfg(test)]
+mod tests;
 
 pub trait ExpressionNames {
     fn column(&self, attribute: i64) -> Result<String, SQLError>;
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError>;
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError>;
+
+    /// SQL spelling of an external parameter after the renderer validates its positive number.
+    fn parameter(&self, number: i64) -> Result<String, SQLError> {
+        Ok(format!("${number}"))
+    }
 }
 
 pub fn expression(
@@ -61,6 +72,7 @@ impl Renderer<'_> {
                     .column(node.integer("varattno")?)
                     .map(|name| crate::expr::quote_ident(&name))
             }
+            "PARAM" => self.parameter(node),
             "CONST" => self.constant(node),
             "OPEXPR" | "DISTINCTEXPR" => self.operator(node, outer),
             "FUNCEXPR" => self.function(node),
@@ -135,9 +147,17 @@ impl Renderer<'_> {
         }
     }
 
+    fn parameter(&self, node: &Node) -> Result<String, SQLError> {
+        let number = node.integer("paramid")?;
+        if node.integer("paramkind")? != 0 || number <= 0 {
+            return Err(invalid("invalid external parameter in stored expression"));
+        }
+        self.names.parameter(number)
+    }
+
     fn cast(&self, argument: &Field, oid: i64, modifier: i64) -> Result<String, SQLError> {
         let text = self.field(argument, false)?;
-        let atomic = matches!(argument, Field::Node(node) if matches!(node.kind.as_str(), "VAR" | "COERCETODOMAINVALUE" | "CONST" | "FUNCEXPR"));
+        let atomic = matches!(argument, Field::Node(node) if matches!(node.kind.as_str(), "VAR" | "PARAM" | "COERCETODOMAINVALUE" | "CONST" | "FUNCEXPR"));
         Ok(format!(
             "{}::{}",
             parentheses(text, !self.pretty || !atomic),
