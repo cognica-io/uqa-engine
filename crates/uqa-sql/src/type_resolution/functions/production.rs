@@ -191,21 +191,27 @@ fn fixed_type(
 }
 
 fn array_type(
-    name: &str,
-    binding: Option<&FunctionBinding>,
-    args: &[ScalarExpr],
+    call: FunctionTypeCall<'_>,
     types: &[Option<ColumnType>],
     explicit: bool,
+    params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let FunctionTypeCall {
+        name,
+        binding,
+        args,
+    } = call;
+    let types =
+        array_transform::argument_types_with_parameters(name, args, types, params, control)?;
     if resolver.is_some() {
         return optional_inline(
-            array_transform::resolve_type(name, binding, args, types, explicit, resolver)?,
+            array_transform::resolve_type(name, binding, args, &types, explicit, resolver)?,
             control,
         );
     }
-    array_transform::resolve_type_with_control(name, binding, args, types, explicit, control)
+    array_transform::resolve_type_with_control(name, binding, args, &types, explicit, control)
 }
 
 fn extension_type(
@@ -735,11 +741,14 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "json_extract_path_text"
         | "jsonb_extract_path_text" => inline(ColumnType::Text, control),
         "array_sort" | "array_reverse" => array_type(
-            original_name,
-            binding,
-            args,
+            FunctionTypeCall {
+                name: original_name,
+                binding,
+                args,
+            },
             &argument_types,
             explicit_variadic,
+            params,
             resolver,
             control,
         ),

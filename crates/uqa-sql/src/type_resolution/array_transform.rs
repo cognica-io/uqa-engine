@@ -47,6 +47,45 @@ enum SelectedOverload {
     User(ResolvedFunctionOverload),
 }
 
+pub(crate) struct ResolvedArrayTransformCall {
+    pub(crate) overload: Option<ResolvedFunctionOverload>,
+    pub(crate) builtin_argument_positions: Option<Vec<usize>>,
+}
+
+/// Select the same candidate during preparation and expression binding, before
+/// unknown arguments run their selected input conversions.
+pub(crate) fn resolve_array_transform_call(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<ResolvedArrayTransformCall>, SQLError> {
+    if !is_function(name) {
+        return Ok(None);
+    }
+    let (overload, positions) = match select_overload(
+        name,
+        binding,
+        args,
+        argument_types,
+        explicit_variadic,
+        Some(resolver),
+    )? {
+        SelectedOverload::User(overload) => (Some(overload), None),
+        SelectedOverload::Builtin(_) => {
+            let names = args.iter().map(named_argument_name).collect::<Vec<_>>();
+            let positions = crate::expr::array_transform_argument_positions(name, &names)?;
+            (None, positions)
+        }
+    };
+    Ok(Some(ResolvedArrayTransformCall {
+        overload,
+        builtin_argument_positions: positions,
+    }))
+}
+
 fn select_overload(
     name: &str,
     binding: Option<&FunctionBinding>,
@@ -177,9 +216,7 @@ fn resolve_builtin_type_with_control(
         .enumerate()
     {
         let argument = named_argument_value(argument);
-        let ty = if matches!(argument, ScalarExpr::Literal(Value::Str(_) | Value::Null))
-            || *position > 0 && matches!(argument, ScalarExpr::Param(_))
-        {
+        let ty = if matches!(argument, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
             None
         } else {
             argument_type.as_ref()
@@ -229,6 +266,39 @@ fn argument_names_with_control<'a>(
     Ok(names.finish()?)
 }
 
+/// Runtime scalar values without a declared SQL type still take Boolean context
+/// in option slots. Explicit PREPARE or routine parameter types stay authoritative.
+pub(super) fn argument_types_with_parameters(
+    name: &str,
+    args: &[ScalarExpr],
+    types: &[Option<ColumnType>],
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Option<ColumnType>>>, SQLError> {
+    let names = argument_names_with_control(args, control)?;
+    let positions =
+        crate::expr::array_transform_argument_positions_with_control(name, &names, control)?;
+    let mut effective = ProductionVec::new(*control);
+    effective.reserve(types.len())?;
+    for (index, (argument, ty)) in args.iter().zip(types).enumerate() {
+        let untyped_option = positions
+            .as_ref()
+            .is_some_and(|positions| positions[index] > 0)
+            && matches!(named_argument_value(argument), ScalarExpr::Param(index)
+                if index.checked_sub(1).and_then(|index| params.get(index))
+                    .is_some_and(|parameter| parameter.declared_scalar_type().is_none()));
+        let ty = if untyped_option { None } else { ty.as_ref() };
+        effective.push_produced(match ty {
+            Some(ty) => {
+                let (ty, memory) = ty.clone_with_control(control)?.into_parts();
+                control.finish(Some(ty), memory)?
+            }
+            None => control.finish(None, control.empty_reservation())?,
+        })?;
+    }
+    Ok(effective.finish()?)
+}
+
 fn resolve_user_overload(
     name: &str,
     binding: Option<&FunctionBinding>,
@@ -275,7 +345,7 @@ fn user_argument_types(
         .collect()
 }
 
-pub(super) fn is_function(name: &str) -> bool {
+pub(crate) fn is_function(name: &str) -> bool {
     let local = local_name(name);
     local.eq_ignore_ascii_case("array_sort") || local.eq_ignore_ascii_case("array_reverse")
 }

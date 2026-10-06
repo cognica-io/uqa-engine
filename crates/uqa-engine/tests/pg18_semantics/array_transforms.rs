@@ -7,6 +7,9 @@
 //! `PostgreSQL` 18 `array_sort` and `array_reverse` parity.
 
 use super::*;
+
+#[path = "array_transforms/named_overloads.rs"]
+mod named_overloads;
 use uqa_engine::SQLParam;
 
 fn assert_query_error(

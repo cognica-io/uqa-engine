@@ -14,6 +14,7 @@ use crate::{RowSchema, ScalarExpr};
 use uqa_core::Value;
 
 mod array_transform;
+pub(crate) use array_transform::resolve_array_transform_call;
 mod call;
 mod cast_compatibility;
 mod checksum;
