@@ -15,13 +15,13 @@ use super::relations::{
 };
 use super::routines::{compile_drop_function, compile_object_with_args, CompiledRoutineTarget};
 use super::types::{
-    compile_foreign_key_action, compile_foreign_key_match, validate_foreign_key_set_columns,
+    compile_foreign_key_action, compile_foreign_key_match, preserve_alter_type_declaration,
+    validate_foreign_key_set_columns,
 };
 use super::{
-    compile_column_def, compile_expr, compile_pg_type_name, extract_string, range_var_name,
-    render_relation_component, AlterTableAction, AlterTableStmt, AlterViewAction, AlterViewKind,
-    AlterViewStmt, DropKind, DropStmt, Node, NodeEnum, Result, SQLError, Statement,
-    TableKeyConstraint, TableKeyConstraintKind,
+    compile_expr, extract_string, range_var_name, render_relation_component, AlterTableAction,
+    AlterTableStmt, AlterViewAction, AlterViewKind, AlterViewStmt, DropKind, DropStmt, Node,
+    NodeEnum, Result, SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
 };
 use crate::ast::{
     AlterRoutineKind, AlterSequence, EventEnableMode, ForeignKey, RelationPersistence,
@@ -531,15 +531,6 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                                     .into(),
                             ));
                         }
-                        if let Some(column) =
-                            columns.iter().enumerate().find_map(|(position, column)| {
-                                columns[..position].contains(column).then_some(column)
-                            })
-                        {
-                            return Err(crate::schema::keys::definition::repeated_key_column(
-                                kind, column,
-                            ));
-                        }
                         AlterTableAction::AddKeyConstraint {
                             constraint: TableKeyConstraint {
                                 catalog_identity: None,
@@ -726,7 +717,12 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     .ok_or_else(|| SQLError::Internal("ALTER COLUMN TYPE without type".into()))?;
                 let (ty, using) = match def_inner {
                     NodeEnum::ColumnDef(column) => (
-                        compile_column_def(column)?.0.ty,
+                        preserve_alter_type_declaration(
+                            column.type_name.as_ref().ok_or_else(|| {
+                                SQLError::Internal("ALTER COLUMN TYPE without type".into())
+                            })?,
+                            &cmd.name,
+                        )?,
                         column
                             .raw_default
                             .as_deref()
@@ -734,7 +730,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                             .transpose()?,
                     ),
                     NodeEnum::TypeName(type_name) => {
-                        (compile_pg_type_name(type_name, &cmd.name)?, None)
+                        (preserve_alter_type_declaration(type_name, &cmd.name)?, None)
                     }
                     other => {
                         return Err(SQLError::Internal(format!(

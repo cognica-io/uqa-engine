@@ -18,11 +18,19 @@ pub struct AddedKeyRelation<'a> {
     pub partition: Option<&'a crate::ast::PartitionSpec>,
 }
 
-/// Validate a key that ALTER TABLE adds, before its index is named: the `WITHOUT OVERLAPS` period as `transformIndexConstraint` checks it, a primary key's columns as the NOT NULL constraints that `ATPrepAddPrimaryKey` adds before the index, and then the checks of `DefineIndex`, which resolves the key's columns. A column repeated in the key was rejected while the statement was compiled.
+/// Validate a key that ALTER TABLE adds, before its index is named: its declaration as `transformIndexConstraint` checks it, a primary key's columns as the NOT NULL constraints that `ATPrepAddPrimaryKey` adds before the index, and then the checks of `DefineIndex`, which resolves the key's columns.
 pub fn validate_added_key(
     relation: &AddedKeyRelation<'_>,
     key: &TableKeyConstraint,
 ) -> Result<(), SQLError> {
+    if let Some(column) = key
+        .columns
+        .iter()
+        .enumerate()
+        .find_map(|(position, column)| key.columns[..position].contains(column).then_some(column))
+    {
+        return Err(definition::repeated_key_column(key.kind, column));
+    }
     let column = |name: &str| relation.columns.iter().find(|column| column.name == name);
     let system = definition::is_system_column;
     if key.without_overlaps {
@@ -108,3 +116,6 @@ pub fn apply_primary_key_columns(
 }
 
 pub mod definition;
+
+#[cfg(test)]
+mod tests;

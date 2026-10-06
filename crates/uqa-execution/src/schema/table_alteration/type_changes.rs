@@ -96,7 +96,7 @@ fn prepare_relation<S: Clone + 'static>(
                         .is_some_and(uqa_sql::ast::AutoIncrement::is_identity)
             })
         {
-            *ty = uqa_sql::type_resolution::resolve_declared_column_type(
+            *ty = uqa_sql::type_resolution::resolve_alter_column_type(
                 context.hierarchy.publication.types,
                 ty,
             )?;
@@ -111,7 +111,7 @@ fn prepare_relation<S: Clone + 'static>(
             inherited,
             hierarchy.partition_spec.as_ref(),
         )?;
-        *ty = uqa_sql::type_resolution::resolve_declared_column_type(
+        *ty = uqa_sql::type_resolution::resolve_alter_column_type(
             context.hierarchy.publication.types,
             ty,
         )?;
