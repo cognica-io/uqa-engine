@@ -212,6 +212,33 @@ pub fn query_depends_on_outer_row(
     query_has_external_reference(context, plan, &mut Vec::new())
 }
 
+/// Whether a subquery refers to the caller's own row. Seed enclosing identities so references beyond that row are not mistaken for level-zero variables.
+pub(crate) fn query_depends_on_current_row(
+    context: CorrelationContext<'_>,
+    plan: &QueryPlan,
+    input: &crate::RowSchema,
+) -> Result<bool, SQLError> {
+    let mut enclosing = QueryScope {
+        columns: RelationColumns::empty_known(),
+        ..QueryScope::default()
+    };
+    for (identity, _) in input.typed_physical_alias_identities() {
+        if !input.resolves_local_column(identity.qualifier(), identity.column()) {
+            if let Some(qualifier) = identity.qualifier() {
+                enclosing.qualifiers.insert(qualifier.to_owned());
+            } else {
+                enclosing.columns.names.insert(identity.column().to_owned());
+            }
+        }
+    }
+    for (column, slot) in input.internal_identities() {
+        if !input.slot_is_local(slot) {
+            enclosing.internal_relations.insert(column.relation());
+        }
+    }
+    query_has_external_reference(context, plan, &mut vec![enclosing])
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "preserves scope and subquery identity"

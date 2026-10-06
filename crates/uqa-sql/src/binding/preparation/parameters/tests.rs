@@ -9,6 +9,35 @@ use crate::expr::enums::{EnumLabelCatalog, EnumTypeLabel, EnumTypeLabels};
 use std::sync::Arc;
 use uqa_core::EnumLabelKey;
 
+#[test]
+fn copied_membership_constants_keep_input_cache_volatility() {
+    for (text, target, reusable) in [
+        ("1", ColumnType::Integer, true),
+        ("2020-02-03", ColumnType::Date, false),
+    ] {
+        let expression = ScalarExpr::Literal(Value::Str(text.into()));
+        let mut parameters = ParameterTypes::with_input_constants(&[], None, None, None);
+        parameters
+            .coerce_unknown(
+                &mut ExpressionType::unknown_literal(&expression, text.into()),
+                &target,
+            )
+            .unwrap();
+        let constant = parameters.take_literal(&expression).unwrap();
+        parameters.retain_membership(
+            &expression,
+            super::super::membership::MembershipAnalysis {
+                shape: crate::type_resolution::membership::MembershipShape::default(),
+                array_coercions: Vec::new(),
+                left_constants: vec![Some(constant)],
+            },
+        );
+        let constants = parameters.take_input_constants();
+        assert!(constants.0.is_empty());
+        assert_eq!(constants.reusable_across_messages(), reusable, "{target:?}");
+    }
+}
+
 struct Labels(&'static str);
 
 impl EnumLabelCatalog for Labels {

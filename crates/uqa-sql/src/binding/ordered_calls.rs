@@ -260,11 +260,9 @@ impl super::SchemaScope {
         schema: &crate::RowSchema,
         subqueries: &[crate::plan::QueryPlan],
         params: &[crate::SQLParam],
-        outer: Option<&crate::RowSchema>,
     ) -> Result<(), SQLError> {
-        let resolver = self.query_function_type_resolver(
-            routines, expression, schema, subqueries, params, outer,
-        )?;
+        let resolver =
+            self.query_function_type_resolver(routines, expression, schema, subqueries, params)?;
         let crate::ScalarExpr::Func {
             name,
             binding,

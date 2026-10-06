@@ -171,6 +171,9 @@ pub fn lower_where_bound(
     expression: &ScalarExpr,
     constants: &RetrievalConstants<'_>,
 ) -> Result<Option<RetrievalExpr>, SQLError> {
+    if crate::semantics::membership_operands(expression).is_some() {
+        return Ok(lower_where(expression, constants));
+    }
     match expression {
         ScalarExpr::And(parts) => {
             let mut children = Vec::with_capacity(parts.len());

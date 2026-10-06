@@ -38,7 +38,6 @@ pub fn bind_expression_plan_type(
         &RowSchema::default(),
         &plan.subqueries,
         params,
-        None,
     )
 }
 
@@ -55,7 +54,6 @@ pub fn analyze_expression_plan_type(
         &RowSchema::default(),
         &plan.subqueries,
         params,
-        None,
     )
 }
 
@@ -95,8 +93,7 @@ pub fn values_types_in_scope(
     params: &[SQLParam],
     ctes: &BindingContext,
 ) -> Result<Vec<Option<ColumnType>>, SQLError> {
-    SchemaScope::from_context(ctes)?
-        .bind_values_types(routines, rows, subqueries, schema, params, schema)
+    SchemaScope::from_context(ctes)?.bind_values_types(routines, rows, subqueries, schema, params)
 }
 
 /// The common type of two columns of the construct `context`, as `select_common_type` chooses it over typed and `unknown` (`None`) inputs; two unknown inputs stay unknown for the caller to resolve.

@@ -150,6 +150,46 @@ fn selects_operator_tree_access_and_pushes_relational_limit() {
 }
 
 #[test]
+fn analyzed_membership_retains_posting_access() {
+    for predicate in ["id IN (1, 2)", "id NOT IN (1, 2)", "id IN (1, NULL)"] {
+        let mut plan = UnifiedPlan::lower(
+            compile(&format!("SELECT id FROM docs WHERE {predicate}"))
+                .unwrap()
+                .remove(0),
+        );
+        let UnifiedPlan::Query(query) = &mut plan else {
+            unreachable!()
+        };
+        let RelationalPlan::QueryBlock(block) = &mut query.root else {
+            unreachable!()
+        };
+        block.r#where = Some(uqa_sql::bind_type_introspection(
+            block.r#where.take().unwrap(),
+            &uqa_sql::RowSchema::with_types(
+                vec!["id".into()],
+                vec![Some(uqa_sql::ColumnType::Integer)],
+            ),
+            &[],
+        ));
+        assert!(matches!(block.r#where, Some(ScalarExpr::Func { .. })));
+        let plan = optimize(
+            plan,
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                query_block(&plan).access,
+                AccessPathPlan::OperatorTree {
+                    score_limit_pushdown: false
+                }
+            ),
+            "{predicate}"
+        );
+    }
+}
+
+#[test]
 fn parameter_expression_operands_select_access_without_plan_time_evaluation() {
     for predicate in [
         "id = $1 + 1",

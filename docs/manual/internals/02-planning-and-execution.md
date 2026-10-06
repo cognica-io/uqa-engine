@@ -44,6 +44,8 @@ sequenceDiagram
     Engine-->>App: SQLResult, cursor, or columnar batches
 ```
 
+SQL input preparation retains IN-list grouping before scalar optimization. Its shared membership rewrite keeps selected array comparisons ahead of individual row comparisons, and every copied left-side scalar subquery receives a separate slot in its existing query arena. SQL owns admitted scalar copies, lexical row classification, selected coercions and retained AST correspondence. Planner posting access and cardinality, SQL retrieval lowering and Execution key candidates borrow the same membership operands without discarding whole-array conversions. Result-schema derivation uses the same complete lexical row scope as reference validation, including correlated columns inside stored views.
+
 ## SQL frontend
 
 `uqa-sql` translates `libpg_query` protobuf nodes into owned UQA Engine statements and expressions. It owns syntax validation and rejects unsupported clauses before the engine can lose their meaning. It does not depend on concrete storage, scoring, or graph implementations.

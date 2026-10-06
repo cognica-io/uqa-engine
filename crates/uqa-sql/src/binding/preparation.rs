@@ -11,6 +11,7 @@ mod ctes;
 mod expression_contexts;
 mod expressions;
 mod function_calls;
+mod membership;
 mod parameters;
 mod queries;
 mod routines;
@@ -284,7 +285,7 @@ fn analyze_expression_inputs<'a>(
     analysis
         .parameters
         .take_input_constants()
-        .apply_expression(&mut expression.scalar)?;
+        .apply_expression_with_subqueries(&mut expression.scalar, &mut expression.subqueries)?;
     Ok(ty)
 }
 
@@ -366,7 +367,6 @@ impl Preparation<'_> {
             input,
             subqueries,
             &self.parameters.values(),
-            Some(input),
         )
     }
 

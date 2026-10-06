@@ -19,6 +19,7 @@ mod comparison;
 mod concat;
 mod enums;
 mod helpers;
+mod membership;
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types.
 pub fn bind_type_introspection(
@@ -280,12 +281,7 @@ impl Binder<'_, '_> {
             } => {
                 self.in_place(&mut expr)?;
                 self.items(&mut list)?;
-                self.coerce_in_list(&mut expr, &mut list)?;
-                ScalarExpr::InList {
-                    expr,
-                    list,
-                    negated,
-                }
+                self.coerce_in_list(expr, list, negated)?
             }
             ScalarExpr::WindowCall {
                 name,
@@ -371,7 +367,7 @@ impl Binder<'_, '_> {
                 implicit,
             } => {
                 self.fold_enum_array_constructor(&mut expr, &ty)?;
-                let source = if self.cast_requires_source(&ty)? {
+                let source = if !implicit && self.cast_requires_source(&ty)? {
                     let source = self.semantic(self.infer(&expr))?.flatten();
                     source
                         .map(|source| self.declared_source(&ty, source))

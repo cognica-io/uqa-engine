@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Stored expressions keep the enum constants that parse analysis coerces from `unknown` literals by label identity, as `PostgreSQL` stores `Const` nodes: `ALTER TYPE ... RENAME VALUE` changes their label and never their meaning, and reloading the catalog never converts label text again. Binding decides every coercion; this module carries the constants it produced back into the stored tree. Binding changes a stored tree only by adding casts, binding calls and converting literals, so the two trees correspond node for node once the added casts are skipped.
+//! Stored expressions keep the enum constants that parse analysis coerces from `unknown` literals by label identity, as `PostgreSQL` stores `Const` nodes: `ALTER TYPE ... RENAME VALUE` changes their label and never their meaning, and reloading the catalog never converts label text again. Binding decides every coercion; this module carries the constants it produced back into the stored tree. Selected membership structure is retained before pairing nodes and transferring casts, calls and constants.
 
 use super::{is_unknown_literal, FunctionTypeResolver};
 use crate::ast::ColumnType;
@@ -222,6 +222,28 @@ fn transfer(
     bound: &ScalarExpr,
     folding: &mut dyn Folding,
 ) -> Result<bool, SQLError> {
+    let reshaped = if let Some(shape) = super::membership::stored_shape(stored, bound) {
+        let ScalarExpr::InList {
+            expr,
+            list,
+            negated,
+        } = std::mem::replace(stored, ScalarExpr::Literal(Value::Null))
+        else {
+            unreachable!()
+        };
+        *stored = super::membership::rewrite(
+            expr,
+            list,
+            negated,
+            &shape,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .into_uncontrolled()
+        .expect("ordinary stored syntax");
+        true
+    } else {
+        false
+    };
     let (bound, added) = split_added_casts(stored, bound);
     let mut changed = if is_unknown_literal(stored) {
         folding.literal(stored, bound)?
@@ -230,7 +252,7 @@ fn transfer(
     };
     changed |= folding.added_casts(stored, &added);
     changed |= folding.array_domain_input(stored)?;
-    Ok(changed)
+    Ok(changed || reshaped)
 }
 
 #[expect(

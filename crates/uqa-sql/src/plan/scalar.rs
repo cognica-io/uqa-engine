@@ -19,6 +19,7 @@ use uqa_core::{
 };
 
 mod binding;
+mod copy;
 mod resources;
 mod source;
 mod window;

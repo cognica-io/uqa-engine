@@ -57,6 +57,23 @@ fn candidates(
     params: &[SQLParam],
     columns: IdentityColumns<'_>,
 ) -> Option<BTreeSet<DocId>> {
+    if let Some(membership) = uqa_sql::semantics::membership_operands(filter) {
+        if membership.negated {
+            return None;
+        }
+        let column = identity_column(membership.value, columns)?;
+        let mut identities = BTreeSet::new();
+        for item in membership.items.iter() {
+            let value = match item {
+                uqa_sql::semantics::MembershipItem::Expression(expression) => {
+                    constant(expression, params)?
+                }
+                uqa_sql::semantics::MembershipItem::Constant(value) => value.clone(),
+            };
+            identities.extend(column.identities(&value)?);
+        }
+        return Some(identities);
+    }
     match filter {
         ScalarExpr::And(parts) => parts
             .iter()
@@ -76,18 +93,6 @@ fn candidates(
             column
                 .identities(&value)
                 .map(|identities| identities.into_iter().collect())
-        }
-        ScalarExpr::InList {
-            expr,
-            list,
-            negated: false,
-        } => {
-            let column = identity_column(expr, columns)?;
-            let mut identities = BTreeSet::new();
-            for item in list {
-                identities.extend(column.identities(&constant(item, params)?)?);
-            }
-            Some(identities)
         }
         _ => None,
     }

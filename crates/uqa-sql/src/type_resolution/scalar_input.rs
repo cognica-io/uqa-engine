@@ -13,7 +13,7 @@ use crate::{
     SQLError, SQLParam, ScalarExpr,
 };
 use uqa_core::{
-    memory::{Produced, ProductionControl},
+    memory::{Produced, ProductionControl, ProductionString},
     Value,
 };
 
@@ -134,6 +134,17 @@ fn operand_type_name(
         ScalarExpr::UnaryMinus(inner) => {
             return scalar_operand_type_name_with_control(inner, schema, params, control);
         }
+        ScalarExpr::Array(items) => {
+            match array_source_name(items, schema, params, control)? {
+                ArraySource::Known(name) => return Ok(Some(name)),
+                ArraySource::Unknown => return Ok(None),
+                ArraySource::Infer => {}
+            }
+            return inferred_type(expression, schema, params, control)?
+                .as_deref()
+                .map(type_name)
+                .transpose();
+        }
         ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
         ScalarExpr::Literal(Value::Int(_)) => Some("bigint"),
         ScalarExpr::Literal(Value::Bytes(_)) => Some("bytea"),
@@ -147,6 +158,50 @@ fn operand_type_name(
     };
     name.map(|name| control.copy_text(name).map_err(Into::into))
         .transpose()
+}
+
+/// Binding has already coerced a constructor's items to their common type. Their retained call signatures keep that type even when catalog-free inference cannot resolve a routine or domain. Reading this metadata performs no cast and cannot repeat a domain check.
+fn array_source_name(
+    items: &[ScalarExpr],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<ArraySource, SQLError> {
+    let mut selected: Option<Produced<String>> = None;
+    let mut unresolved = false;
+    for item in items {
+        control.check()?;
+        let Some(name) = operand_type_name(item, schema, params, control, true)? else {
+            unresolved |= !super::is_unknown_literal(item);
+            continue;
+        };
+        if selected
+            .as_deref()
+            .is_some_and(|selected| !selected.eq_ignore_ascii_case(&name))
+        {
+            return Ok(ArraySource::Infer);
+        }
+        if selected.is_none() {
+            selected = Some(name);
+        }
+    }
+    let Some(selected) = selected else {
+        return Ok(if unresolved {
+            ArraySource::Unknown
+        } else {
+            ArraySource::Infer
+        });
+    };
+    let mut name = ProductionString::new(*control);
+    name.push_str(&selected)?;
+    name.push_str("[]")?;
+    Ok(ArraySource::Known(name.finish()?))
+}
+
+enum ArraySource {
+    Known(Produced<String>),
+    Unknown,
+    Infer,
 }
 
 pub fn scalar_integer_operation_width(

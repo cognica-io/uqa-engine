@@ -101,41 +101,6 @@ impl Binder<'_, '_> {
         Ok(())
     }
 
-    /// `a IN (b, c, ...)` compares every item with `a` using the common type of all of them. Without a common type each item keeps the type selected by its own equality operator.
-    pub(super) fn coerce_in_list(
-        &mut self,
-        value: &mut ScalarExpr,
-        list: &mut [ScalarExpr],
-    ) -> Result<(), SQLError> {
-        for expression in std::iter::once(&*value).chain(list.iter()) {
-            if !unknown_input(expression)
-                && self
-                    .semantic(self.common_context(expression))?
-                    .flatten()
-                    .is_none()
-            {
-                return Ok(());
-            }
-        }
-        let common = self.common_type(std::iter::once(&*value).chain(list.iter()))?;
-        if let Some(common) = common {
-            self.operand_cast(value, &common)?;
-            for item in list {
-                self.operand_cast(item, &common)?;
-            }
-            return Ok(());
-        }
-        for item in list {
-            if let Some(types) = self
-                .semantic(self.binary_operand_types(BinaryOp::Equal, value, item))?
-                .flatten()
-            {
-                self.operand_cast(item, &types[1])?;
-            }
-        }
-        Ok(())
-    }
-
     /// Comparison syntax represented as a call: `IS DISTINCT FROM`, `BETWEEN SYMMETRIC`, `op ANY/ALL (array)` and `NULLIF`.
     pub(super) fn coerce_comparison_call(
         &mut self,
@@ -191,12 +156,16 @@ impl Binder<'_, '_> {
         let array_type = self.semantic(self.common_context(array))?.flatten();
         let element_type = match array_type.as_deref().map(base_type) {
             None => None,
-            Some(ColumnType::Array(element)) => Some(element.clone_with_control(&self.control)?),
+            Some(ty) if crate::type_resolution::array_element_type(ty).is_some() => {
+                crate::type_resolution::array_element_type(ty)
+                    .map(|element| element.clone_with_control(&self.control))
+                    .transpose()?
+            }
             Some(_) => return Ok(()),
         };
         let element = element_type
             .as_deref()
-            .map(|element| base_type(element).clone_with_control(&self.control))
+            .map(|element| element.clone_with_control(&self.control))
             .transpose()?;
         let Some(types) = self
             .semantic(self.operator_types(op, value, value_type, array, element_type))?
@@ -205,11 +174,10 @@ impl Binder<'_, '_> {
             return Ok(());
         };
         self.operand_cast(value, &types[0])?;
-        // An untyped array literal takes the array type of the selected operand; a typed array whose elements the operator does not declare, such as `regclass[]` against the `oid` operators, is relabeled to it. An `ARRAY[...]` constructor keeps its element type: a written cast of a constructor is pushed into its elements when it is analyzed, so a cast around the constructor would print as the written form.
-        let relabel = !matches!(array, ScalarExpr::Array(_))
-            && element
-                .as_deref()
-                .is_some_and(|element| *element != types[1]);
+        // Both a literal array and an ARRAY constructor retain the conversion to the selected operator's element type. The implicit cast marker keeps a whole-array conversion distinct from a written constructor cast.
+        let relabel = element
+            .as_deref()
+            .is_some_and(|element| *element != types[1]);
         if array_type.is_none() || relabel {
             let array_target = ColumnType::array_with_control(
                 types[1].clone_with_control(&self.control)?,

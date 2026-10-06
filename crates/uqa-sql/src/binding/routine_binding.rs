@@ -126,7 +126,6 @@ impl SchemaScope {
                     &schema,
                     &[],
                     params,
-                    outer,
                 )?;
                 self.bind_scalar_routines_for_storage(
                     routines,
@@ -134,7 +133,6 @@ impl SchemaScope {
                     &schema,
                     &[],
                     params,
-                    outer,
                 )?;
             }
             let provisional = if self_recursive {
@@ -298,7 +296,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?;
                 }
                 let labels = super::routine_parameters::column_labels(&block.projections);
@@ -309,7 +306,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?;
                 }
                 super::routine_parameters::keep_column_labels(&mut block.projections, labels);
@@ -349,7 +345,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?;
                 }
                 for set in &mut block.grouping_sets {
@@ -360,7 +355,6 @@ impl SchemaScope {
                             &expression_schema,
                             &block.subqueries,
                             params,
-                            outer,
                         )?;
                     }
                 }
@@ -371,7 +365,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?;
                 }
                 // A bare name in ORDER BY or DISTINCT ON names an output column before any input column or parameter, as `findTargetlistEntrySQL92` resolves it.
@@ -392,7 +385,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?;
                 }
                 if let Some(limit) = block.limit.as_mut() {
@@ -402,7 +394,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?;
                 }
                 if let Some(offset) = block.offset.as_mut() {
@@ -412,7 +403,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?;
                 }
                 for expression in &mut block.distinct_on {
@@ -427,7 +417,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?;
                 }
                 for expression in block
@@ -441,7 +430,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?;
                 }
             }
@@ -466,17 +454,16 @@ impl SchemaScope {
                         output,
                         subqueries,
                         params,
-                        outer,
                     )?;
                 }
                 if let Some(limit) = limit {
                     self.bind_scalar_routines_for_storage(
-                        routines, limit, output, subqueries, params, outer,
+                        routines, limit, output, subqueries, params,
                     )?;
                 }
                 if let Some(offset) = offset {
                     self.bind_scalar_routines_for_storage(
-                        routines, offset, output, subqueries, params, outer,
+                        routines, offset, output, subqueries, params,
                     )?;
                 }
             }
@@ -484,7 +471,7 @@ impl SchemaScope {
                 let input = outer.cloned().unwrap_or_default();
                 for expression in rows.iter_mut().flatten() {
                     self.bind_scalar_routines_for_storage(
-                        routines, expression, &input, subqueries, params, outer,
+                        routines, expression, &input, subqueries, params,
                     )?;
                 }
             }
@@ -533,9 +520,7 @@ impl SchemaScope {
                         self.bind_source(engine, right, subqueries, params, right_outer)?;
                     let input = RowSchema::join(&left_schema, &right_schema, std::iter::empty());
                     let input = overlay_outer_schema(&input, outer);
-                    self.bind_scalar_routines_for_storage(
-                        engine, on, &input, subqueries, params, outer,
-                    )?;
+                    self.bind_scalar_routines_for_storage(engine, on, &input, subqueries, params)?;
                 }
                 Ok(())
             }
@@ -546,7 +531,7 @@ impl SchemaScope {
                 let input = outer.cloned().unwrap_or_default();
                 for expression in rows.iter_mut().flatten() {
                     self.bind_scalar_routines_for_storage(
-                        engine, expression, &input, subqueries, params, outer,
+                        engine, expression, &input, subqueries, params,
                     )?;
                 }
                 Ok(())
@@ -572,7 +557,7 @@ impl SchemaScope {
                             _ => &constant,
                         };
                         self.bind_scalar_routines_for_storage(
-                            engine, expression, input, subqueries, params, outer,
+                            engine, expression, input, subqueries, params,
                         )?;
                     }
                     return Ok(());
@@ -580,7 +565,7 @@ impl SchemaScope {
                 let input = outer.cloned().unwrap_or_default();
                 for expression in args {
                     self.bind_scalar_routines_for_storage(
-                        engine, expression, &input, subqueries, params, outer,
+                        engine, expression, &input, subqueries, params,
                     )?;
                 }
                 Ok(())
@@ -602,7 +587,7 @@ impl SchemaScope {
                                 _ => &constant,
                             };
                             self.bind_scalar_routines_for_storage(
-                                engine, expression, input, subqueries, params, outer,
+                                engine, expression, input, subqueries, params,
                             )?;
                         }
                         continue;
@@ -610,7 +595,7 @@ impl SchemaScope {
                     let input = outer.cloned().unwrap_or_default();
                     for expression in &mut function.args {
                         self.bind_scalar_routines_for_storage(
-                            engine, expression, &input, subqueries, params, outer,
+                            engine, expression, &input, subqueries, params,
                         )?;
                     }
                 }
@@ -627,7 +612,6 @@ impl SchemaScope {
         schema: &RowSchema,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
-        outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         let schema = self.with_stored_outer_internal_aliases(schema);
         let schema = &schema;
@@ -647,7 +631,7 @@ impl SchemaScope {
                     || super::ordered_calls::is_ordered_set(name))
             {
                 if let Err(error) = self.bind_ordered_function_for_storage(
-                    engine, expression, schema, subqueries, params, outer,
+                    engine, expression, schema, subqueries, params,
                 ) {
                     failure = Some(error);
                 }
@@ -666,7 +650,7 @@ impl SchemaScope {
                 if let crate::ast::FunctionDispatch::NumericOperator(operator) = dispatch {
                     let selected = (|| {
                         let resolver = self.query_function_type_resolver_for_subqueries(
-                            engine, args, schema, subqueries, params, outer,
+                            engine, args, schema, subqueries, params,
                         )?;
                         let (_, types, _) = crate::function_call_argument_signature(
                             args,
@@ -693,13 +677,13 @@ impl SchemaScope {
                 return;
             }
             if let Err(error) = self.bind_scalar_function_for_storage(
-                engine, name, binding, args, schema, subqueries, params, outer,
+                engine, name, binding, args, schema, subqueries, params,
             ) {
                 failure = Some(error);
             }
         });
         failure.map_or(Ok(()), Err)?;
-        self.bind_stored_scalar_types(engine, expression, schema, subqueries, params, outer)
+        self.bind_stored_scalar_types(engine, expression, schema, subqueries, params)
     }
 
     /// Name user-defined types by OID identity and keep the enum constants that binding coerces from `unknown` literals by label identity, as `PostgreSQL` stores type and label OIDs in analyzed expressions.
@@ -710,7 +694,6 @@ impl SchemaScope {
         schema: &RowSchema,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
-        outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         super::stored_types::bind_scalar_type_identities(expression, &mut |name| {
             engine.resolve_type_name(name)
@@ -721,7 +704,6 @@ impl SchemaScope {
             schema,
             subqueries,
             params,
-            outer,
         )?;
         // The coercions binding adds to an operator's operands, the constants it reads from `unknown` literals and the relabels of `oid` alias operands, are stored, as `PostgreSQL` stores them in an analyzed expression.
         crate::type_resolution::store_operand_coercions(expression, schema, params, &resolver)?;
@@ -745,10 +727,9 @@ impl SchemaScope {
         schema: &RowSchema,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
-        outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         let resolver = self.query_function_type_resolver_for_subqueries(
-            engine, args, schema, subqueries, params, outer,
+            engine, args, schema, subqueries, params,
         )?;
         let (argument_names, argument_types, explicit_variadic) =
             crate::function_call_argument_signature(args, schema, params, Some(&resolver))?;
@@ -821,7 +802,6 @@ pub fn bind_expression_plan_routines_for_storage(
         schema,
         &plan.subqueries,
         params,
-        None,
     )?;
-    scope.bind_expression_type(engine, &plan.scalar, schema, &plan.subqueries, params, None)
+    scope.bind_expression_type(engine, &plan.scalar, schema, &plan.subqueries, params)
 }

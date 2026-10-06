@@ -63,7 +63,6 @@ impl SchemaScope {
         schema: &RowSchema,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
-        outer: Option<&RowSchema>,
     ) -> Result<QueryFunctionTypeResolver<'a>, SQLError> {
         self.query_function_type_resolver_for_subqueries(
             routines,
@@ -71,7 +70,6 @@ impl SchemaScope {
             schema,
             subqueries,
             params,
-            outer,
         )
     }
 
@@ -82,7 +80,6 @@ impl SchemaScope {
         schema: &RowSchema,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
-        outer: Option<&RowSchema>,
     ) -> Result<QueryFunctionTypeResolver<'a>, SQLError> {
         let mut referenced = std::collections::BTreeSet::new();
         for expression in expressions {
@@ -95,7 +92,8 @@ impl SchemaScope {
                 defer_routine_namespace_errors: false,
             });
         }
-        let subquery_outer = self.validate_references.then_some(schema).or(outer);
+        // Result typing and validation share the complete lexical row scope.
+        let subquery_outer = Some(schema);
         let mut scalar_subquery_types = vec![None; subqueries.len()];
         for index in referenced {
             let plan = subqueries.get(index).ok_or_else(|| {

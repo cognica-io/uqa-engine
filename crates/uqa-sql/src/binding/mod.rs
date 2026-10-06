@@ -291,8 +291,7 @@ impl SchemaScope {
                         .map(|index| format!("column{index}"))
                         .collect()
                 });
-                let types =
-                    self.bind_values_types(routines, rows, subqueries, outer, params, outer)?;
+                let types = self.bind_values_types(routines, rows, subqueries, outer, params)?;
                 Ok(RowSchema::with_types(columns, types))
             }
         }
@@ -349,7 +348,6 @@ impl SchemaScope {
                         &expression_schema,
                         &block.subqueries,
                         params,
-                        outer,
                     )?
                 },
             );
@@ -396,21 +394,20 @@ impl SchemaScope {
         schema: &RowSchema,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
-        outer: Option<&RowSchema>,
     ) -> Result<Option<ColumnType>, SQLError> {
         if let ScalarExpr::ScalarSubquery(index) = expression {
             let plan = subqueries.get(*index).ok_or_else(|| {
                 SQLError::Internal(format!("scalar subquery slot {index} is out of bounds"))
             })?;
-            let subquery_outer = self.validate_references.then_some(schema).or(outer);
+            // Result typing and validation share the complete lexical row scope.
+            let subquery_outer = Some(schema);
             let output = self.bind_query(routines, plan, params, subquery_outer)?;
             return Ok(output.column_type(0).cloned());
         }
         let schema = self.with_stored_outer_internal_aliases(schema);
         let schema = &schema;
-        let resolver = self.query_function_type_resolver(
-            routines, expression, schema, subqueries, params, outer,
-        )?;
+        let resolver =
+            self.query_function_type_resolver(routines, expression, schema, subqueries, params)?;
         if self.validate_references {
             Self::validate_expression_references_with_resolver(
                 routines, expression, schema, None, params, &resolver,
@@ -610,7 +607,6 @@ impl SchemaScope {
                     subqueries,
                     Some(&binding_schema),
                     params,
-                    Some(&binding_schema),
                 )?;
                 Ok(match alias.as_deref() {
                     Some(qualifier) => RowSchema::with_qualified_types(qualifier, columns, types),
@@ -642,12 +638,7 @@ impl SchemaScope {
                     .transpose()?;
                 let input = outer.cloned().unwrap_or_default();
                 let type_resolver = self.query_function_type_resolver_for_subqueries(
-                    routines,
-                    args,
-                    &input,
-                    subqueries,
-                    params,
-                    Some(&input),
+                    routines, args, &input, subqueries, params,
                 )?;
                 let user_function = if let Some((left, right)) = operator_inputs.as_ref() {
                     if self.validate_references {

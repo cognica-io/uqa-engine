@@ -24,7 +24,6 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         schema: Option<&RowSchema>,
         params: &[SQLParam],
-        outer: Option<&RowSchema>,
     ) -> Result<Vec<Option<ColumnType>>, SQLError> {
         let width = rows.first().map_or(0, Vec::len);
         let empty = RowSchema::default();
@@ -41,9 +40,7 @@ impl SchemaScope {
                     if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
                         None
                     } else {
-                        self.bind_expression_type(
-                            routines, expression, schema, subqueries, params, outer,
-                        )?
+                        self.bind_expression_type(routines, expression, schema, subqueries, params)?
                     };
                 types[position] = merge_types(
                     crate::type_resolution::CommonTypeContext::Values,
@@ -80,7 +77,7 @@ impl SchemaScope {
             let input = RowSchema::join(left, right, std::iter::empty::<String>());
             let input = overlay_outer_schema(&input, outer);
             if self.validate_references {
-                self.bind_expression_type(routines, on, &input, subqueries, params, outer)?;
+                self.bind_expression_type(routines, on, &input, subqueries, params)?;
                 self.validate_condition(routines, on, "JOIN/ON", &input, subqueries, params)?;
             } else {
                 crate::scalar_type_with_resolver(on, &input, params, routines)?;

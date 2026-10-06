@@ -21,6 +21,35 @@ fn expression(source: &str) -> ScalarExpr {
 }
 
 #[test]
+fn quantified_arrays_compare_scalar_elements_across_ranks_and_catalog_vectors() {
+    let schema = RowSchema::default();
+    for sql in [
+        "1 = ANY(ARRAY[[1,2],[3,4]])",
+        "5 <> ALL(ARRAY[[1,2],[3,4]])",
+        "1 = ANY('1 2'::int2vector)",
+        "3 <> ALL('1 2'::oidvector)",
+    ] {
+        let source = expression(sql);
+        assert_eq!(
+            crate::scalar_type(&source, &schema, &[]).unwrap(),
+            Some(ColumnType::Boolean),
+            "{sql}"
+        );
+        let bound = crate::bind_type_introspection(source, &schema, &[]);
+        assert_eq!(
+            crate::scalar_type(&bound, &schema, &[]).unwrap(),
+            Some(ColumnType::Boolean),
+            "{sql}"
+        );
+    }
+    let vector_array = ColumnType::Array(Box::new(ColumnType::Int2Vector));
+    assert_eq!(
+        crate::type_resolution::array_element_type(&vector_array),
+        Some(&ColumnType::Int2Vector)
+    );
+}
+
+#[test]
 fn numeric_comparison_binding_retains_selected_casts_without_masking_exact_columns() {
     let schema = RowSchema::with_types(
         vec!["n".into(), "f".into()],
