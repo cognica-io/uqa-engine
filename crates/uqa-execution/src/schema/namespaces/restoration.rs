@@ -13,6 +13,8 @@ use uqa_sql::catalog::{
 };
 use uqa_storage::{CatalogFacade, SchemaRow, StorageBackendError, StorageBackendResult};
 
+const BUILTIN_INITIALIZED: &str = "sql_builtin_schema_catalog_initialized";
+
 pub fn restore(
     catalog: &dyn CatalogFacade,
     roles: &BTreeMap<String, RoleDefinition>,
@@ -67,8 +69,37 @@ pub fn restore(
             )));
         }
     }
+    // Initialize once so a later deliberate drop or rename is not undone on reopen.
+    let initialize_builtins = catalog.get_metadata(BUILTIN_INITIALIZED)?.is_none();
+    if initialize_builtins {
+        if !allow_migration {
+            return Err(StorageBackendError::Other(
+                "built-in schemas require initial catalog migration".into(),
+            ));
+        }
+        for name in BoundSchemaSecurity::BUILTIN_NAMES {
+            if restored.contains_key(name) {
+                continue;
+            }
+            let security = BoundSchemaSecurity::builtin(name).expect("built-in schema");
+            security
+                .validate(roles)
+                .map_err(StorageBackendError::Other)?;
+            let tuple = security.tuple.expect("built-in schema identity");
+            if !oids.insert(tuple.oid) || !identities.insert(tuple.object_id) {
+                return Err(StorageBackendError::Other(format!(
+                    "duplicate schema catalog identity for `{name}`"
+                )));
+            }
+            migrations.push(security.row(name).into());
+            restored.insert(name.into(), security);
+        }
+    }
     for row in &migrations {
         catalog.save_schema_row(row)?;
+    }
+    if initialize_builtins {
+        catalog.set_metadata(BUILTIN_INITIALIZED, "true")?;
     }
     Ok(restored)
 }

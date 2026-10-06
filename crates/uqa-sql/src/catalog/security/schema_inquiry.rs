@@ -96,15 +96,7 @@ impl SchemaPrivilegeInquiry<'_> {
                 return Some(security);
             }
         }
-        let mut security = match schema {
-            "pg_catalog" | "information_schema" => {
-                Some(BoundSchemaSecurity::with_public_privileges(false))
-            }
-            "ag_catalog" => Some(BoundSchemaSecurity::bootstrap("ag_catalog")),
-            _ => None,
-        }?;
-        security.tuple = BoundSchemaSecurity::bootstrap(schema).tuple;
-        Some(security)
+        BoundSchemaSecurity::builtin(schema)
     }
 
     /// The session's temporary namespace once its first temporary object created it.

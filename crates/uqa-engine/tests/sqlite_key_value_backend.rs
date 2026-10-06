@@ -382,7 +382,13 @@ fn empty_schema_survives_key_value_engine_reopen() {
     let reopened = open_key_value_engine(&path);
     assert_eq!(
         reopened.list_schemas().unwrap(),
-        vec!["empty_app".to_string(), "public".to_string()]
+        [
+            "ag_catalog",
+            "empty_app",
+            "information_schema",
+            "pg_catalog",
+            "public"
+        ]
     );
 }
 

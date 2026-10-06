@@ -112,3 +112,94 @@ fn duplicate_namespace_oid_or_incarnation_rejects_the_whole_migration_before_wri
         assert_eq!(catalog.load_schema_rows().unwrap(), before);
     }
 }
+
+#[test]
+fn builtin_initialization_requires_initial_restore_and_preserves_existing_authority() {
+    let (catalog, mut roles) = fixture();
+    let mut owner = RoleDefinition::bootstrap();
+    owner.name = "namespace_owner".into();
+    owner.oid = 20_000;
+    owner.object_id = [7; 16];
+    roles.insert(owner.name.clone(), owner.clone());
+    let mut customized = BoundSchemaSecurity::builtin("information_schema").unwrap();
+    customized.role_owner = owner.identity();
+    customized.acl = None;
+    customized.tuple.as_mut().unwrap().revision = [8; 16];
+    catalog
+        .save_schema_row(&customized.row("information_schema").into())
+        .unwrap();
+    let before = catalog.load_schema_rows().unwrap();
+    assert!(restore(&catalog, &roles, false)
+        .unwrap_err()
+        .to_string()
+        .contains("initial catalog migration"));
+    assert_eq!(catalog.load_schema_rows().unwrap(), before);
+    assert_eq!(catalog.get_metadata(BUILTIN_INITIALIZED).unwrap(), None);
+
+    let restored = restore(&catalog, &roles, true).unwrap();
+    assert_eq!(restored["information_schema"], customized);
+    for name in ["pg_catalog", "ag_catalog"] {
+        assert_eq!(
+            restored.get(name),
+            BoundSchemaSecurity::builtin(name).as_ref()
+        );
+    }
+    let encoded = catalog.load_schema_rows().unwrap();
+    assert_eq!(
+        catalog
+            .get_metadata(BUILTIN_INITIALIZED)
+            .unwrap()
+            .as_deref(),
+        Some("true")
+    );
+    assert_eq!(restore(&catalog, &roles, false).unwrap(), restored);
+    assert_eq!(restore(&catalog, &roles, true).unwrap(), restored);
+    assert_eq!(catalog.load_schema_rows().unwrap(), encoded);
+}
+
+#[test]
+fn initialized_catalog_never_recreates_removed_builtin_names() {
+    let (catalog, roles) = fixture();
+    restore(&catalog, &roles, true).unwrap();
+    catalog.drop_schema("information_schema").unwrap();
+    let mut renamed = BoundSchemaSecurity::builtin("ag_catalog").unwrap();
+    renamed.tuple.as_mut().unwrap().revision = [9; 16];
+    catalog.drop_schema("ag_catalog").unwrap();
+    catalog
+        .save_schema_row(&renamed.row("renamed_catalog").into())
+        .unwrap();
+    let before = catalog.load_schema_rows().unwrap();
+    for allow_migration in [false, true] {
+        let restored = restore(&catalog, &roles, allow_migration).unwrap();
+        assert!(!restored.contains_key("information_schema"));
+        assert!(!restored.contains_key("ag_catalog"));
+        assert_eq!(restored["renamed_catalog"], renamed);
+        assert_eq!(catalog.load_schema_rows().unwrap(), before);
+    }
+}
+
+#[test]
+fn builtin_identity_conflicts_reject_all_initialization_before_writes() {
+    for same_oid in [true, false] {
+        let (catalog, roles) = fixture();
+        catalog
+            .save_schema_row(&SchemaRow::legacy("legacy"))
+            .unwrap();
+        let mut conflicting = BoundSchemaSecurity::builtin("information_schema").unwrap();
+        if same_oid {
+            conflicting.tuple.as_mut().unwrap().object_id = [8; 16];
+        } else {
+            conflicting.tuple.as_mut().unwrap().oid = 40_000;
+        }
+        catalog
+            .save_schema_row(&conflicting.row("conflicting").into())
+            .unwrap();
+        let before = catalog.load_schema_rows().unwrap();
+        assert!(restore(&catalog, &roles, true)
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate schema catalog identity"));
+        assert_eq!(catalog.load_schema_rows().unwrap(), before);
+        assert_eq!(catalog.get_metadata(BUILTIN_INITIALIZED).unwrap(), None);
+    }
+}
