@@ -13,12 +13,42 @@ use uqa_sql::routines::SQLUserFunction;
 use uqa_sql::SQLError;
 
 use crate::catalog::context::CatalogContext;
+use crate::catalog::{CatalogReadView, RelationNameResolution};
 
 use super::builtin_routines::{BuiltinRoutineCatalogEntry, PG18_BUILTIN_ROUTINE_GROUPS};
 
 enum Routine {
     User(std::sync::Arc<SQLUserFunction>),
     Builtin(&'static BuiltinRoutineCatalogEntry),
+}
+
+/// Preserve the stored default's pseudo-type or unknown input type while
+/// reconstructing its expression, without turning it into a concrete carrier.
+pub(super) fn routine_parameter_default_text(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    parameter: &uqa_sql::ast::FunctionParam,
+) -> Result<Option<String>, SQLError> {
+    use uqa_sql::ast::{Expr, RoutineDefaultType};
+    let Some(default) = &parameter.default else {
+        return Ok(None);
+    };
+    let typed;
+    let expression = if matches!(default, Expr::Literal(Value::Str(_) | Value::Null)) {
+        let ty = match &parameter.default_type {
+            Some(RoutineDefaultType::Concrete(ty)) => ty.catalog_name(),
+            Some(RoutineDefaultType::Polymorphic(name)) => name.clone(),
+            None => "unknown".into(),
+        };
+        typed = Expr::Cast {
+            expr: Box::new(default.clone()),
+            ty,
+        };
+        &typed
+    } else {
+        default
+    };
+    super::view_definition::stored_expression_text(catalog, resolution, expression).map(Some)
 }
 
 fn routine_oid_argument(name: &str, arguments: &[Value]) -> Result<Option<i64>, SQLError> {
@@ -101,13 +131,10 @@ fn user_arguments(
         }
         argument.push_str(&declared_type_display(context, &parameter.type_name)?);
         if defaults && input {
-            if let Some(default) = &parameter.default {
+            if let Some(default) = routine_parameter_default_text(&catalog, &resolution, parameter)?
+            {
                 argument.push_str(" DEFAULT ");
-                argument.push_str(&super::view_definition::stored_expression_text(
-                    &catalog,
-                    &resolution,
-                    default,
-                )?);
+                argument.push_str(&default);
             }
         }
         printed.push(argument);

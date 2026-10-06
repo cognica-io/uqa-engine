@@ -18,6 +18,8 @@ pub trait RoutineNameCatalog {
     fn schema_has_usage(&self, schema: &str, role: &RoleReference) -> bool;
     /// `format_type_be` of a routine argument type: a user-defined type, recorded by identity, is spelled by its current name.
     fn routine_type_display(&self, type_name: &str) -> String;
+    /// `format_procedure` of an existing routine, including search-path qualification and its current input type names. Call before retaining the routine registry's write guard.
+    fn routine_identity_display(&self, oid: u32) -> Result<String, SQLError>;
 }
 
 pub fn routine_lookup_keys(

@@ -150,6 +150,50 @@ fn new_routine_oid(
         .map_err(|_| SQLError::Internal(format!("invalid routine OID {oid}")))
 }
 
+/// Capture the existing routine's display before holding its registry for publication: catalog output reads that registry. The selected incarnation is checked again after acquiring the write guard.
+fn replacement_display(
+    context: &RoutineRegistrationContext<'_>,
+    name: &str,
+    signature: &[String],
+) -> Result<Option<([u8; 16], u32, String)>, SQLError> {
+    let snapshot = context.catalog.registry.routine_snapshot();
+    let Some(function) = snapshot.get(name).and_then(|overloads| {
+        overloads
+            .iter()
+            .find(|function| routine_signature_types(&function.def) == signature)
+    }) else {
+        return Ok(None);
+    };
+    let object_id = function.def.object_id.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "existing routine `{name}` has no catalog object identity"
+        ))
+    })?;
+    let oid = function.def.catalog_oid.ok_or_else(|| {
+        SQLError::Internal(format!("existing routine `{name}` has no catalog OID"))
+    })?;
+    Ok(Some((
+        object_id,
+        oid,
+        context.catalog.names.routine_identity_display(oid)?,
+    )))
+}
+
+fn checked_replacement_display<'a>(
+    display: Option<&'a ([u8; 16], u32, String)>,
+    existing: &CreateFunction,
+) -> Result<&'a str, SQLError> {
+    display
+        .filter(|(object_id, oid, _)| {
+            existing.object_id == Some(*object_id) && existing.catalog_oid == Some(*oid)
+        })
+        .map(|(_, _, label)| label.as_str())
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "40001".into(),
+            message: format!("routine `{}` changed during replacement", existing.name),
+        })
+}
+
 /// Check the statement as `CreateFunction` does, stage by stage: CREATE on the routine's schema; then, as `compute_function_attributes` interprets them, the attribute clauses in written order, the SET values, COST, ROWS, the SUPPORT function and PARALLEL; the language; LEAKPROOF; the transforms; the argument types with their defaults and the result type; the body; and whether ROWS applies. The locked registration checks the superuser-only attributes again.
 fn validate_routine_creation(
     context: &RoutineRegistrationContext<'_>,
@@ -173,7 +217,7 @@ fn validate_routine_creation(
     analysis::validate_routine_security_attributes(def, current_user_is_superuser)?;
     let types = context.definition.compilation.analysis.types;
     attributes::validate_transforms(types, def, &clauses)?;
-    resolve_routine_type_references(types, def)?;
+    resolve_routine_type_references(&context.definition.compilation.analysis, def)?;
     attributes::validate_body_form(def, &clauses)?;
     attributes::validate_rows_applicability(def.rows, def.returns_set())?;
     attributes::reject_window_function(def, &clauses)?;
@@ -231,6 +275,7 @@ pub fn register_sql_function(
                 .is_some_and(|role| role.has(RoleAttribute::Superuser));
             let memberships = context.catalog.roles.role_memberships();
             analysis::validate_routine_security_attributes(&def, current_user_is_superuser)?;
+            let replacement = replacement_display(context, &name, &signature)?;
             let registry = context.catalog.registry.routines_write();
             let mut next = registry.clone();
             let mut def = def.clone();
@@ -247,6 +292,7 @@ pub fn register_sql_function(
                     &current_user,
                     &roles,
                     &memberships,
+                    checked_replacement_display(replacement.as_ref(), existing)?,
                 )?;
                 let published = super::catalog::revision::replacement(def, bound.body.clone())?;
                 overloads[pos] = Arc::clone(&published);

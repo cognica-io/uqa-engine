@@ -38,7 +38,7 @@ pub fn builtin_returns_set(name: &str) -> bool {
 }
 
 pub fn function_may_return_set(
-    engine: &dyn SetFunctionCatalog,
+    engine: &dyn crate::routines::RoutineResolution,
     resolver: &dyn FunctionTypeResolver,
     name: &str,
     binding: Option<&FunctionBinding>,
@@ -191,7 +191,7 @@ pub fn projections_may_return_set(
     reason = "preserves SELECT schema and row identity"
 )]
 pub fn expression_may_return_set(
-    engine: &dyn SetFunctionCatalog,
+    engine: &dyn crate::routines::RoutineResolution,
     resolver: &dyn FunctionTypeResolver,
     expression: &ScalarExpr,
     schema: &RowSchema,
@@ -331,7 +331,7 @@ pub fn expression_may_return_set(
 }
 
 fn expressions_may_return_set<'a>(
-    engine: &dyn SetFunctionCatalog,
+    engine: &dyn crate::routines::RoutineResolution,
     resolver: &dyn FunctionTypeResolver,
     expressions: impl IntoIterator<Item = &'a ScalarExpr>,
     schema: &RowSchema,
@@ -346,7 +346,7 @@ fn expressions_may_return_set<'a>(
 }
 
 fn frame_bound_may_return_set(
-    engine: &dyn SetFunctionCatalog,
+    engine: &dyn crate::routines::RoutineResolution,
     resolver: &dyn FunctionTypeResolver,
     bound: &ScalarFrameBound,
     schema: &RowSchema,

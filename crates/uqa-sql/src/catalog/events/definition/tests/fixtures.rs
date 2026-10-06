@@ -410,3 +410,9 @@ impl CatalogRoutineScopes for Catalog {
         panic!("declaration rejection must precede catalog routine binding")
     }
 }
+
+impl crate::schema::dependencies::oid_alias::OidAliasInput for Catalog {
+    fn resolve_oid_alias_input(&self, _: &ColumnType, _: &str) -> Result<Option<i64>, SQLError> {
+        panic!("unexpected routine-default OID input")
+    }
+}

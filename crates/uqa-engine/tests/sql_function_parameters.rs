@@ -6,6 +6,9 @@
 
 //! Names in SQL function bodies, resolved as `PostgreSQL` 18's parser resolves them with the hooks of `sql_fn_parser_setup`: a column of any query level, an output column named by ORDER BY, GROUP BY or DISTINCT ON, and a relation used as a whole-row value each take a name before a parameter does; the routine's name qualifies a parameter; and each clause of a data-modifying statement sees only the relations of its own namespace.
 
+#[path = "sql_function_parameters/defaults.rs"]
+mod defaults;
+
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::{SQLError, SQLResult};

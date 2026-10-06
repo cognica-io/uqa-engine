@@ -758,10 +758,8 @@ fn create_view_preserves_positional_column_names() {
 }
 
 #[test]
-fn direct_unknown_literal_casts_are_validated_during_analysis() {
-    let error = compile("SELECT 'bad'::integer").unwrap_err();
-    assert_eq!(error.sqlstate(), Some("22P02"));
-
+fn literal_casts_retain_syntax_until_ordered_semantic_analysis() {
+    compile("SELECT 'bad'::integer").unwrap();
     compile("SELECT ('bad'::text)::integer").unwrap();
     compile("SELECT 999999999999::integer").unwrap();
 }

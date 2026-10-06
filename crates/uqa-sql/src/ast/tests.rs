@@ -333,6 +333,7 @@ fn routine_identity_and_call_parameters_are_distinct() {
         written_type: None,
         mode,
         default: None,
+        default_type: None,
     };
     let function = CreateFunction {
         object_id: None,

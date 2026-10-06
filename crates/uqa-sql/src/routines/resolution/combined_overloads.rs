@@ -342,6 +342,14 @@ fn resolve_selected_candidate(
             &matched.function.def,
         )?;
     }
+    if let FunctionTarget::User(matched) = &selected.target {
+        super::check_selected_default_types(
+            request.resolver.catalog,
+            RoutineCallKind::Function,
+            request.name,
+            matched,
+        )?;
+    }
     let known_arguments = request.argument_types.iter().flatten().count();
     match selected.target {
         FunctionTarget::User(matched) => Ok(ResolvedFunctionOverload {

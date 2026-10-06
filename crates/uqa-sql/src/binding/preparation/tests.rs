@@ -8,6 +8,7 @@ use super::*;
 use crate::{ast::FunctionBinding, FunctionTypeResolver, RelationIdentity};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod defaults;
 mod dependencies;
 
 struct NoRoutines;
