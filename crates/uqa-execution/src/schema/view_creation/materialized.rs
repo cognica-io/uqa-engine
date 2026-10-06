@@ -18,6 +18,7 @@ use crate::row_locks::{
 };
 use uqa_core::RelationIdentity;
 use uqa_sql::{
+    ast::RelationPersistence,
     schema::table_creation::{
         create_table_as_columns, existing_create_as_target, validate_create_table_as_columns,
     },
@@ -64,7 +65,14 @@ fn skip_existing_materialized_view(
     name: &str,
     if_not_exists: bool,
 ) -> Result<bool, SQLError> {
-    let resolved = context.namespace.resolve_persistent_name(name)?;
+    let resolved = if context
+        .namespace
+        .targets_temporary_namespace(name, RelationPersistence::Permanent)?
+    {
+        context.namespace.temporary_name(name)?
+    } else {
+        context.namespace.resolve_persistent_name(name)?
+    };
     if context
         .names
         .relation_kind_at(&resolved)
@@ -113,7 +121,9 @@ pub fn register_materialized_view_plan(
         }
         let columns = create_table_as_columns(&query_schema, column_names)?;
         // Re-resolve the original name and authority after namespace waits; skipped targets never retain a namespace dependency.
-        let name = context.namespace.persistent_relation_name(name)?;
+        let (name, persistence) = context
+            .namespace
+            .relation_target(name, RelationPersistence::Permanent)?;
         validate_create_table_as_columns(context.routines, &columns)?;
         let output_columns = columns
             .into_iter()
@@ -148,7 +158,7 @@ pub fn register_materialized_view_plan(
                 })?,
                 query: plan,
                 output_columns: Some(output_columns),
-                persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                persistence,
                 options: options.to_vec(),
                 kind: StoredViewKind::Materialized,
                 materialized_rows,

@@ -46,7 +46,7 @@ pub(super) fn publish_materialized_view(
     let change = crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
         view.relation_oids().relation,
     );
-    if publication.has_catalog() {
+    if view.persistence != RelationPersistence::Temporary && publication.has_catalog() {
         publication
             .save_view(&catalog_view_row(&relation, &view).map_err(|error| {
                 SQLError::Internal(format!("serialize materialized view `{name}`: {error}"))
