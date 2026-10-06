@@ -56,7 +56,10 @@
     "partition_bounds": "tests/parity/pg18/partition_bounds_oracle.expected.json",
     "failing_row_details": "tests/parity/pg18/failing_row_detail_oracle.expected.json",
     "domain_constraints": "tests/parity/pg18/alter_domain_constraints_oracle.expected.json",
-    "domain_constraint_snapshots": "tests/parity/pg18/domain_constraint_snapshots.expected.json"
+    "domain_constraint_snapshots": "tests/parity/pg18/domain_constraint_snapshots.expected.json",
+    "membership_comparisons": "tests/parity/pg18/membership_comparisons_oracle.expected.json",
+    "correlated_view_scope": "tests/parity/pg18/correlated_view_scope_oracle.expected.json",
+    "array_element_input": "tests/parity/pg18/array_element_input_oracle.expected.json"
   },
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
@@ -147,7 +150,10 @@
       "expressions.stored-common-type-coercions",
       "expressions.stored-operator-coercions",
       "types.multidimensional-array-input",
-      "expressions.array-concatenation-coercions"
+      "expressions.array-concatenation-coercions",
+      "expressions.stored-membership-coercions",
+      "queries.correlated-stored-view-scope",
+      "types.array-element-selection"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -1360,6 +1366,30 @@
       "postgresql_reference": "PostgreSQL 18.4 independently captured in tests/parity/pg18/array_concatenation_oracle.expected.json (35 Simple Query messages); array operator analysis, selected input conversions and stored definition output",
       "uqa_test": "cargo test -p uqa-sql --lib type_resolution::functions::concat; cargo test -p uqa-engine --test integration array_concatenation_matches_postgresql",
       "supported_version": "Array/array and array/scalar concatenation retain common element types and selected NULL roles. Numeric promotion, domains, legacy vectors, dimensions and lower bounds, unknown input and exact operator/input/dimension diagnostics match PostgreSQL. Stored views, generated columns and SQL-standard bodies preserve coercions, array-domain base conversions and operator labels through rename and reopen; volatile element-domain checks run exactly once per element. All 35 messages pass on memory, native SQLite, SQLite Key/Value and redb, with two replay messages per persistent provider. Controlled SQL owner checks cover cancellation, allocation failure, cleanup, serialization and rebinding.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "expressions.stored-membership-coercions",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured in tests/parity/pg18/membership_comparisons_oracle.expected.json (47 Simple Query messages); PostgreSQL parser type and operator selection, lexical scope resolution and ruleutils stored expression output",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::sql_views::common_coercions::membership_comparisons; cargo test -p uqa-sql --lib type_resolution",
+      "supported_version": "Selected IN and ANY/ALL operator inputs, current-row versus outer-row partitioning, independent left-input conversions and subquery initialization, exact volatile effects and diagnostics survive stored views, routines, generated expressions, expression indexes, grouping, rename and reopening. All 47 PostgreSQL messages pass on four providers, with six replay messages on each persistent provider. Existing posting, indexed access, key candidates and cardinality keep their original NULL and empty-array safety.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "queries.correlated-stored-view-scope",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured in tests/parity/pg18/correlated_view_scope_oracle.expected.json (7 Simple Query messages); PostgreSQL parser type and operator selection, lexical scope resolution and ruleutils stored expression output",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::sql_views::common_coercions::correlated_view_columns; cargo test -p uqa-sql --lib type_resolution",
+      "supported_version": "Stored-view result type derivation uses the same lexical relation scopes as query validation. Qualified and unqualified correlated columns retain their references through view creation, column rename and durable reopening. Seven independently captured PostgreSQL messages pass all four providers, with one replay message on each persistent provider.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "types.array-element-selection",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured in tests/parity/pg18/array_element_input_oracle.expected.json (13 Simple Query messages); PostgreSQL parser type and operator selection, lexical scope resolution and ruleutils stored expression output",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::sql_views::common_coercions::array_element_inputs; cargo test -p uqa-sql --lib type_resolution",
+      "supported_version": "Quantified comparisons and polymorphic unnest select scalar elements across multidimensional arrays and int2vector/oidvector inputs while retaining outer catalog-vector values and domain-to-base array conversions. All thirteen PostgreSQL messages pass four providers; definitions and values survive rename and persistent reopen. Existing legacy-vector and prepared-query regressions also pass.",
       "status": "verified",
       "open_issue": null
     }
