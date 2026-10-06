@@ -181,3 +181,125 @@ fn concrete_defaults_compare_the_assignment_type_and_preserve_publication_identi
     assert_eq!(replacement.owner, existing.owner);
     assert_eq!(replacement.execute_acl, existing.execute_acl);
 }
+
+// Independently observed in routine_return_replacement_oracle.expected.json.
+#[test]
+fn replacement_compares_catalog_result_identity_instead_of_returns_spelling() {
+    for (old, new) in [
+        (
+            "f(a integer, OUT x integer, OUT y text)",
+            "f(a integer, OUT x integer, OUT y text) RETURNS record",
+        ),
+        (
+            "f(a integer, OUT x integer)",
+            "f(a integer) RETURNS integer",
+        ),
+        (
+            "f(a integer, OUT x integer)",
+            "f(a integer, OUT changed integer) RETURNS integer",
+        ),
+        (
+            "f(a integer) RETURNS TABLE(x integer)",
+            "f(a integer) RETURNS SETOF integer",
+        ),
+        (
+            "f(a integer) RETURNS TABLE(x integer,y text)",
+            "f(a integer,OUT x integer,OUT y text) RETURNS SETOF record",
+        ),
+        (
+            "f(a integer,OUT integer,OUT text)",
+            "f(a integer,OUT column1 integer,OUT column2 text)",
+        ),
+    ] {
+        for (old, new) in [(old, new), (new, old)] {
+            let existing = definition(
+                &format!("CREATE FUNCTION {old} LANGUAGE SQL AS 'SELECT 1'"),
+                &[],
+            );
+            let mut replacement = definition(
+                &format!("CREATE FUNCTION {new} LANGUAGE SQL AS 'SELECT 1'"),
+                &[],
+            );
+            replace(&existing, &mut replacement, "f(integer)")
+                .unwrap_or_else(|error| panic!("{old} -> {new}: {error}"));
+            assert_eq!(replacement.object_id, existing.object_id);
+            assert_eq!(replacement.catalog_oid, existing.catalog_oid);
+            assert_eq!(replacement.owner, existing.owner);
+            assert_eq!(replacement.execute_acl, existing.execute_acl);
+        }
+    }
+}
+
+#[test]
+fn changed_catalog_result_identity_precedes_record_descriptor_changes() {
+    let existing = definition(
+        "CREATE FUNCTION f(a integer, OUT x integer, OUT y text) LANGUAGE SQL AS 'SELECT 1'",
+        &[],
+    );
+    for (declaration, detail) in [
+        (
+            "f(a integer,OUT changed integer,OUT y text) RETURNS record",
+            Some("Row type defined by OUT parameters is different."),
+        ),
+        (
+            "f(a integer,OUT x bigint,OUT y text) RETURNS record",
+            Some("Row type defined by OUT parameters is different."),
+        ),
+        (
+            "f(a integer) RETURNS record",
+            Some("Row type defined by OUT parameters is different."),
+        ),
+        (
+            "f(a integer,OUT changed integer,OUT y text) RETURNS SETOF record",
+            None,
+        ),
+    ] {
+        let mut replacement = definition(
+            &format!("CREATE FUNCTION {declaration} LANGUAGE SQL AS 'SELECT 1'"),
+            &[],
+        );
+        let error = replace(&existing, &mut replacement, "f(integer)").unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42P13"));
+        assert_eq!(
+            error.to_string(),
+            "cannot change return type of existing function"
+        );
+        assert_eq!(error.detail(), detail);
+        assert_eq!(error.hint(), Some("Use DROP FUNCTION f(integer) first."));
+    }
+}
+
+#[test]
+fn procedure_replacement_compares_even_a_single_output_column() {
+    let existing = definition(
+        "CREATE PROCEDURE p(IN a integer, OUT x integer) LANGUAGE SQL AS 'SELECT 1'",
+        &[],
+    );
+    for (declaration, message, detail) in [
+        (
+            "p(IN a integer,OUT changed integer)",
+            "cannot change return type of existing function",
+            Some("Row type defined by OUT parameters is different."),
+        ),
+        (
+            "p(IN a integer,OUT x bigint)",
+            "cannot change return type of existing function",
+            Some("Row type defined by OUT parameters is different."),
+        ),
+        (
+            "p(IN a integer)",
+            "cannot change whether a procedure has output parameters",
+            None,
+        ),
+    ] {
+        let mut replacement = definition(
+            &format!("CREATE PROCEDURE {declaration} LANGUAGE SQL AS 'SELECT 1'"),
+            &[],
+        );
+        let error = replace(&existing, &mut replacement, "p(integer)").unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42P13"));
+        assert_eq!(error.to_string(), message);
+        assert_eq!(error.detail(), detail);
+        assert_eq!(error.hint(), Some("Use DROP PROCEDURE p(integer) first."));
+    }
+}

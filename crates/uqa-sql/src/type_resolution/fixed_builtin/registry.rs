@@ -240,7 +240,8 @@ declarations! { fn lookup_local(local);
         "pg_get_function_arguments"
         | "pg_get_function_identity_arguments"
         | "pg_get_function_result"
-        | "pg_get_function_sqlbody" => &[Signature::new(&[ColumnType::Oid], ColumnType::Text)],
+        | "pg_get_functiondef"
+            | "pg_get_function_sqlbody" => &[Signature::new(&[ColumnType::Oid], ColumnType::Text)],
         "pg_get_indexdef" => &[
             Signature::new(&[ColumnType::Oid], ColumnType::Text),
             Signature::new(&[ColumnType::Oid, ColumnType::Integer, ColumnType::Boolean],

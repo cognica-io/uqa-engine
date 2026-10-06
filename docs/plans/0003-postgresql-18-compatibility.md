@@ -265,6 +265,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `functions.temporal-extraction` | `M1` | `partial` |
 | `expressions.interval-arithmetic` | `M1` | `verified` |
 | `routines.sql-standard-body-deparse` | `M1` | `verified` |
+| `routines.definition-output` | `M3` | `verified` |
 | `routines.attribute-checks` | `M3` | `partial` |
 | `types.common-type-selection` | `M4` | `partial` |
 | `ddl.default-cooking` | `M3` | `partial` |
@@ -952,7 +953,7 @@ Verification: all 256 independent PostgreSQL 18.4 messages pass on memory, nativ
 - [x] Reuse SQL's typed node renderer for scalar RETURN bodies and external parameters, with query-shape validation and owner tests.
 - [x] Reuse Execution's exact-signature routine visibility for built-in and stored SQL reconstruction; preserve invoking search-path semantics.
 - [x] Verify the four providers, durable reopening and affected owner/catalog/manual regressions.
-- [x] Synchronize the manual, HISTORY, manifest and all inherited checklist records; review, merge and remove the completed branch (PR #455).
+- [x] Synchronize the manual, HISTORY, manifest and all inherited checklist records; review, merge and remove the completed branch. PR #455 merged as `593e336a9`, closing #453/#454/#456. Its branches are removed and primary main is updated.
 
 SQL owns typed node parsing and rendering; Execution owns catalog identity and invoking name visibility. The existing Engine catalog/session adapters are sufficient. Owning manifests and dependency direction were checked, and no dependency or feature addition is needed. For a stored routine identity, emitting the unqualified name is valid only when the current search path selects that same argument-type signature; otherwise its schema must be printed. Thus reconstructed calls preserve the original binding under reuse. RETURN reconstruction traverses the existing typed expression instead of inventing a second source string, and rejects query shapes whose clauses it cannot preserve. These are read-only observations: they do not alter scalar carriers, query operators, stored values, routine execution or transaction effects. The broader pg_get_functiondef and original 41 open work items remain preserved.
 
@@ -1001,7 +1002,7 @@ The independent PostgreSQL 18.4 reference in `tests/parity/pg18/user_routine_sch
 
 Preservation argument: schema expansion produces an ordered sequence of existing routine identities and applies the same ACL transition used by explicit targets. Candidate construction does not publish any prefix; an error leaves the original catalog, while success publishes the complete candidate in the existing transaction. Thus each following relational or ranked operator observes exactly one catalog state and unchanged carriers, operators and value/score semantics. Repeated targets preserve PostgreSQL warning and grant ordering rather than changing result algebra.
 
-The builtin routine ACL foundation and execution checks are verified in PR #468 with the unit below. The original 75 inherited records, including 40 open work items, are unchanged; #461 closes when this PR merges.
+The builtin routine ACL foundation and execution checks merged in PR #468 as `5915147da`; #461 is closed and the completed branch is removed. This unit left the original 75 inherited records and 40 open work items unchanged.
 
 ### Builtin identity, authority and executable preservation
 
@@ -1014,3 +1015,22 @@ Let $E$ be an already analyzed executable, $L(E)$ its surviving call sites and $
 For a simple derived projection, let $D$ be the columns demanded by the enclosing query and $P$ the original projection. Replacing only outputs outside $D$ with typed NULL gives $P'$ such that $\pi_D(P(R)) = \pi_D(P'(R))$, with identical row multiplicity and demanded values. The rewrite excludes DISTINCT, grouping, ordering, windows, set-returning or volatile calls and catalog-dependent casts, so it changes no row/cardinality or effect boundary. Output names and types remain identical. Authorization references of removed expressions are retained separately, giving $Auth(P)=Auth(P')$ even when a discarded expression referenced a column the role cannot read. This is value-relation projection preservation; it asserts no additional laws about decorated postings or ranked carriers.
 
 Mutation initialization reuses SQL-owned expression ownership and column provenance. Execution captures the invoking role and current builtin ACLs once, authorizes target/source relations, then visits surviving calls before statement triggers or data-modifying CTEs. Only referenced VIRTUAL generation expressions are initialized; STORED generation retains row-time evaluation. EXPLAIN borrows the same read services without entering a mutation command. No write, trigger or argument evaluation is added by this check.
+
+## Routine definition reconstruction
+
+PR #459 implements #457 `pg_get_functiondef` and fixes #458 shared builtin argument/result output. SQL owns source quoting, saved configuration, float4 formatting and effective result identity; Execution observes the existing routine catalog and name visibility. No dependency, Cargo feature, AST or persisted format is added, and Engine gains no algorithm.
+
+- [x] Inspect ownership/features/dependencies and capture independent PostgreSQL 18.4 references.
+- [x] Implement source/configuration/estimate rendering, complete declaration output, typed builtin defaults and shared OUT/VARIADIC/SETOF helpers.
+- [x] Verify 44 definition messages, including 293 builtin declarations, on all four providers; verify eleven observations after durable reopen and reapply all seventeen user declarations without changing their output or sequence state.
+- [x] Fix #469 effective return identity and #470 host callback precedence; verify the 33-message replacement reference on all four providers and the existing callback regression.
+- [x] Verify 1,372 SQL owner tests, twelve affected Execution tests and 171 affected Engine integration tests, including the manual SQL harness; complete strict Clippy and repository policy checks.
+- [ ] Complete final review, merge, close #457/#458/#469/#470 and remove the completed branch.
+
+The first acceptance run exposed the ordinary scanner and schema-privilege prerequisites. Their corrections merged in #462 and #468; the separate SQL/PL first-use task remains in #465. Round-trip validation then reproduced #469: raw `RETURNS` AST spelling incorrectly rejected equivalent inferred OUT, explicit record, TABLE and SETOF declarations. Replacement now compares the effective catalog type, set cardinality and record output descriptor; single-output procedures retain a record descriptor, and unnamed record columns use PostgreSQL's generated names. Rejection SQLSTATE, DETAIL and DROP hint match the independent reference. The same SQL-owned type helper drives pg_proc and declaration output. #470 preserves host callbacks during fixed-call selection and argument coercion, while explicit and retained builtin identities still bypass callback lookup. The original `pg_get_functiondef` task is complete; all 75 inherited records remain, with 39 original work items open.
+
+For catalog $C$ and stored routine identity $o$, define the inquiry as $D_C(o)=(d,C)$: it returns declaration text $d$ and the identical catalog, session and transaction state. No routine body, argument expression or sequence operation is evaluated. Therefore composition with an existing relational or ranked operator retains its original state input and carrier operations. The renderer reads the stored signature and attributes, using current selected-object names for already bound SQL expressions. For source bytes $s$, the dollar delimiter is chosen so its prefix occurs nowhere in $s$; parsing the emitted source clause therefore recovers exactly $s$, including quotes, backslashes and trailing newlines. Saved configuration retains entry and list-element order, with escaping selected by the current scanner setting. Float4 estimates use PostgreSQL's six-significant-digit rendering. The existing SQL renderer supplies the supported SQL-standard expression/body reconstruction; no new algebraic law is assumed for payloads or ranked carriers.
+
+Let $T(R)$ be the effective result type of a validated routine declaration, $S(R)$ its set-returning flag and $O(R)$ its record output descriptor when one exists. Replacement accepts equivalent result declarations exactly when $T(R)=T(R')$, $S(R)=S(R')$ and the applicable $O(R)=O(R')$. Thus writing an inferred result explicitly, or changing TABLE spelling to equivalent OUT plus SETOF, does not change the function's codomain or cardinality. Existing replacement publication preserves the routine identity, owner and ACL; a rejected change publishes nothing. Catalog projection and reconstruction use the same $T$, so their declarations cannot disagree merely because `RETURNS` was omitted. The remaining full builtin catalog inventory and other inherited routine features stay open.
+
+Pure rendering owner tests use 43 independent PostgreSQL observations for dollar-prefix collisions, float4 estimates and saved configuration lists. Malformed catalog values are confined to a disposable PostgreSQL database. The provider references retain expected rows, types, diagnostics and compact capture provenance; no machine timing report is committed.

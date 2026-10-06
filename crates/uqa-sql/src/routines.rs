@@ -13,6 +13,7 @@ pub mod compilation;
 pub mod configuration;
 pub mod declaration;
 mod defaults;
+pub mod definition_output;
 pub mod dependencies;
 pub mod lifecycle;
 pub mod merge_columns;

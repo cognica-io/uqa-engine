@@ -131,7 +131,7 @@ pub(crate) use regtypes::routine_oid_exists;
 pub use regtypes::{format_type_name, format_type_value};
 pub use routine_definitions::{
     pg_get_function_arguments_value, pg_get_function_identity_arguments_value,
-    pg_get_function_result_value, pg_get_function_sqlbody_value,
+    pg_get_function_result_value, pg_get_function_sqlbody_value, pg_get_functiondef_value,
 };
 mod view_definition;
 pub use view_definition::pg_get_viewdef_value;

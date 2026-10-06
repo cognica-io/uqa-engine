@@ -103,6 +103,7 @@ impl BuiltinRoutineCatalogEntry {
             3103 => 6306,
             3104 => 6307,
             3105 => 6308,
+            6179 => 6380,
             _ => 0,
         }
     }
@@ -184,6 +185,7 @@ mod scalar;
 mod sequences;
 mod series;
 mod sleep_bodies;
+mod support;
 mod temporal;
 
 const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalogEntry {
@@ -205,6 +207,7 @@ const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalo
 }
 
 pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
+    support::ROUTINES,
     scalar::ROUTINES,
     aggregate_windows::ROUTINES,
     clock_and_case::ROUTINES,

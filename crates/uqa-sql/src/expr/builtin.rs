@@ -69,6 +69,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "pg_get_function_arguments"
         | "pg_get_function_identity_arguments"
         | "pg_get_function_result"
+        | "pg_get_functiondef"
         | "pg_get_function_sqlbody"
             if argument_count == 1 =>
         {
