@@ -71,7 +71,7 @@ impl FieldNameLiteral for crate::ast::Expr {
     }
 }
 
-pub(crate) fn function_projection_label(
+pub fn function_projection_label(
     name: &str,
     binding: Option<&crate::ast::FunctionBinding>,
 ) -> String {
@@ -80,6 +80,9 @@ pub(crate) fn function_projection_label(
         binding.and_then(|binding| binding.dispatch),
         Some(
             crate::ast::FunctionDispatch::NumericOperator(_)
+                | crate::ast::FunctionDispatch::ArrayConcat
+                | crate::ast::FunctionDispatch::ArrayAppend
+                | crate::ast::FunctionDispatch::ArrayPrepend
                 | crate::ast::FunctionDispatch::IsDistinct
                 | crate::ast::FunctionDispatch::AnyOperator
                 | crate::ast::FunctionDispatch::AllOperator

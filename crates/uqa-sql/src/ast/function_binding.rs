@@ -82,6 +82,10 @@ pub enum FunctionDispatch {
     RandomInt8Range,
     RandomNumericRange,
     ArraySortJson,
+    /// The selected array `||` overload, retained even when its arguments evaluate to NULL.
+    ArrayConcat,
+    ArrayAppend,
+    ArrayPrepend,
     JsonExtract {
         as_text: bool,
         path: bool,
@@ -138,6 +142,9 @@ impl FunctionDispatch {
                 "pg_catalog.random"
             }
             Self::ArraySortJson => "pg_catalog.array_sort",
+            Self::ArrayConcat => "pg_catalog.array_cat",
+            Self::ArrayAppend => "pg_catalog.array_append",
+            Self::ArrayPrepend => "pg_catalog.array_prepend",
             Self::JsonExtract { as_text: false, .. } => "JSON extraction operator",
             Self::JsonExtract { as_text: true, .. } => "JSON text extraction operator",
             Self::Range { operation, .. } => operation.label(),

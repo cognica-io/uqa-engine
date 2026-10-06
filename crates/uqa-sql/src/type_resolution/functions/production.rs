@@ -6,9 +6,7 @@
 
 //! Built-in result inference retains type buffers and selected payloads under its caller's control.
 
-use super::super::common::{
-    base_type, common_numeric_type, common_type_with_control, numeric_type,
-};
+use super::super::common::{base_type, common_numeric_type, numeric_type};
 use super::super::{
     array_transform,
     call::{infer_with_control, InferType},
@@ -288,16 +286,10 @@ fn concat_type(
     right: Option<&ColumnType>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    if let Some((_, array)) = super::array_concat_types(left, right, control)? {
+        return Ok(Some(array));
+    }
     match (left, right) {
-        (Some(ColumnType::Array(left)), Some(ColumnType::Array(right))) => {
-            Ok(Some(ColumnType::array_with_control(
-                common_type_with_control(left, right, control)?,
-                control,
-            )?))
-        }
-        (Some(array @ ColumnType::Array(_)), _) | (_, Some(array @ ColumnType::Array(_))) => {
-            copy(Some(array), control)
-        }
         // `jsonb || jsonb` and `bytea || bytea` match a typed operand exactly where `anynonarray || text` does not, so an `unknown` operand is read as the typed operand's type.
         (Some(ColumnType::JsonB), Some(ColumnType::JsonB) | None)
         | (None, Some(ColumnType::JsonB)) => inline(ColumnType::JsonB, control),
@@ -537,6 +529,11 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
     if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
         match dispatch {
             FunctionDispatch::NumericOperator(_) => unreachable!("numeric operator handled above"),
+            FunctionDispatch::ArrayConcat
+            | FunctionDispatch::ArrayAppend
+            | FunctionDispatch::ArrayPrepend => {
+                return concat_type(effective(0), effective(1), control);
+            }
             FunctionDispatch::JsonExtract { as_text, .. } => {
                 let input = first();
                 let input = input.map(base_type);
