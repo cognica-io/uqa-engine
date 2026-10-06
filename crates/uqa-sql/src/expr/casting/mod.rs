@@ -43,7 +43,7 @@ pub fn cast_value_from_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     control.check()?;
-    if ty.trim().strip_suffix("[]").is_some_and(|element| {
+    if array_scalar_type_name(ty).is_some_and(|element| {
         element.trim().eq_ignore_ascii_case("void")
             || element.trim().eq_ignore_ascii_case("pg_catalog.void")
     }) {
@@ -75,17 +75,14 @@ pub fn cast_value_from_with_control(
     {
         return Err(undefined_cast("void", postgres_type_display_name(target)));
     }
-    if let Some(element_type) = ty.strip_suffix("[]") {
-        let source_element_type = source_ty
-            .and_then(|source| source.trim().strip_suffix("[]"))
-            .map(str::trim)
-            .or(match v {
-                Value::LegacyVector(vector) => Some(match vector.kind() {
-                    uqa_core::LegacyVectorKind::SmallInteger => "smallint",
-                    uqa_core::LegacyVectorKind::Oid => "oid",
-                }),
-                _ => None,
-            });
+    if let Some(element_type) = array_scalar_type_name(ty) {
+        let source_element_type = source_ty.and_then(array_scalar_type_name).or(match v {
+            Value::LegacyVector(vector) => Some(match vector.kind() {
+                uqa_core::LegacyVectorKind::SmallInteger => "smallint",
+                uqa_core::LegacyVectorKind::Oid => "oid",
+            }),
+            _ => None,
+        });
         let parsed;
         let array = match v {
             Value::Array(array) => array,
@@ -329,6 +326,15 @@ pub fn cast_value_from_with_control(
         other => Err(SQLError::Unsupported(format!("CAST AS {other}"))),
     }?;
     Ok(control.finish(value, control.empty_reservation())?)
+}
+
+/// Repeated array brackets declare dimensions; every scalar leaf uses the same element input type.
+fn array_scalar_type_name(ty: &str) -> Option<&str> {
+    let mut element = ty.trim().strip_suffix("[]")?.trim_end();
+    while let Some(inner) = element.strip_suffix("[]") {
+        element = inner.trim_end();
+    }
+    Some(element)
 }
 
 fn text_value(
