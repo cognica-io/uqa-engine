@@ -26,6 +26,7 @@ pub(crate) mod enums;
 mod equality;
 pub(crate) mod field_selection;
 mod fixed_builtin;
+pub(crate) use fixed_builtin::overloads as fixed_builtin_overloads;
 mod functions;
 mod gamma;
 mod inference;

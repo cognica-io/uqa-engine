@@ -89,7 +89,7 @@ fn build_pg_proc_rows(
                 ("procost", Value::Float(1.0)),
                 ("prorows", Value::Float(routine.estimated_rows())),
                 ("provariadic", int_value(routine.variadic_type())),
-                ("prosupport", int_value(0)),
+                ("prosupport", int_value(routine.support_oid())),
                 ("prokind", str_value(routine.kind)),
                 ("prosecdef", bool_value(false)),
                 ("proleakproof", bool_value(routine.leakproof)),

@@ -9,6 +9,54 @@ use std::collections::BTreeSet;
 use super::PG18_BUILTIN_ROUTINE_GROUPS;
 
 #[test]
+fn integer_series_metadata_matches_postgresql() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/series_binding_oracle.expected.json"
+    )))
+    .unwrap();
+    let catalog = &reference["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "catalog")
+        .unwrap()["results"][0];
+    let expected = catalog["rows"].as_array().unwrap();
+    assert_eq!(expected.len(), 6);
+    for row in expected {
+        let oid = row[0].as_str().unwrap().parse::<i64>().unwrap();
+        let routine = PG18_BUILTIN_ROUTINE_GROUPS
+            .iter()
+            .flat_map(|group| group.iter())
+            .find(|routine| routine.oid == oid)
+            .unwrap();
+        let actual = vec![
+            routine.oid.to_string(),
+            routine.name.into(),
+            routine.source.into(),
+            routine.kind.into(),
+            boolean_text(routine.strict).into(),
+            routine.volatility.into(),
+            routine.parallel.into(),
+            boolean_text(routine.leakproof).into(),
+            boolean_text(routine.returns_set()).into(),
+            routine.estimated_rows().to_string(),
+            routine.argument_types.len().to_string(),
+            routine.default_arguments.to_string(),
+            routine.support_oid().to_string(),
+            routine
+                .argument_types
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(" "),
+            routine.return_type.to_string(),
+        ];
+        assert_eq!(serde_json::to_value(actual).unwrap(), *row, "OID {oid}");
+    }
+}
+
+#[test]
 fn clock_and_case_metadata_matches_postgresql() {
     assert_catalog_metadata(
         include_str!(concat!(
