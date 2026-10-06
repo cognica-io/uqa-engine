@@ -37,6 +37,23 @@ pub trait RoutineTypeCatalog {
     }
 }
 
+/// Catalog result identity of a validated declaration, independent of whether `RETURNS` was written. Procedures expose `record` for any output parameters; functions use the declared or inferred scalar/record type.
+#[must_use]
+pub fn result_type_name(def: &CreateFunction) -> &str {
+    let outputs = def.output_params();
+    if def.is_procedure {
+        return if outputs.is_empty() { "void" } else { "record" };
+    }
+    match &def.returns {
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => type_name,
+        FunctionReturns::Table | FunctionReturns::None => match outputs.as_slice() {
+            [output] => &output.type_name,
+            [] => "void",
+            _ => "record",
+        },
+    }
+}
+
 /// Resolve the declared argument and result types, as `interpret_function_parameter_list` and `compute_return_type` do. Each argument in order requires `USAGE` on its type, a missing one named as written and unquoted; then no input may follow a VARIADIC argument, nor an output in a procedure, a VARIADIC argument must be an array, a name may not repeat within one direction, only inputs may have defaults, and after one every input needs one, as every procedure output does not. The result type follows, a missing one quoted.
 pub fn resolve_routine_type_references(
     context: &super::compilation::RoutineCompilationContext<'_>,

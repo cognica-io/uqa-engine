@@ -438,26 +438,10 @@ pub(crate) fn routine_result_type_oid(
     catalog: &CatalogReadView,
     def: &uqa_sql::ast::CreateFunction,
 ) -> i64 {
-    if def.is_procedure {
-        return if def.output_params().is_empty() {
-            2278
-        } else {
-            2249
-        };
-    }
-    match &def.returns {
-        uqa_sql::ast::FunctionReturns::Scalar { type_name }
-        | uqa_sql::ast::FunctionReturns::SetOf { type_name } => {
-            catalog_routine_type_oid(catalog, type_name)
-        }
-        uqa_sql::ast::FunctionReturns::Table | uqa_sql::ast::FunctionReturns::None => {
-            match def.output_params().as_slice() {
-                [output] => catalog_routine_type_oid(catalog, &output.type_name),
-                [] => 2278,
-                _ => 2249,
-            }
-        }
-    }
+    catalog_routine_type_oid(
+        catalog,
+        uqa_sql::routines::declaration::result_type_name(def),
+    )
 }
 
 fn builtin_acl_value(catalog: &CatalogReadView, oid: u32) -> Result<Value, SQLError> {

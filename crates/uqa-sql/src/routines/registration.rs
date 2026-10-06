@@ -100,12 +100,7 @@ pub fn prepare_routine_replacement(
             message: "cannot change routine kind".into(),
         });
     }
-    if !same_return_shape(existing, def) {
-        return Err(SQLError::Routine {
-            sqlstate: "42P13".into(),
-            message: "cannot change return type of existing function".into(),
-        });
-    }
+    validate_replacement_result(existing, def, signature)?;
     validate_replacement_defaults(existing, def, signature)?;
     // CREATE OR REPLACE changes the definition but not object ownership or privileges.
     def.object_id = Some(existing.object_id.ok_or_else(|| {
@@ -220,29 +215,63 @@ pub fn alter_routine_attributes(
     Ok(def)
 }
 
-fn same_return_shape(a: &CreateFunction, b: &CreateFunction) -> bool {
-    use crate::ast::FunctionReturns;
-    let same_outputs = {
-        let a_outs = a.output_params();
-        let b_outs = b.output_params();
-        a_outs.len() == b_outs.len()
-            && a_outs.iter().zip(&b_outs).all(|(x, y)| {
-                x.name == y.name
-                    && canonical_routine_type_name(&x.type_name)
-                        == canonical_routine_type_name(&y.type_name)
-                    && x.mode == y.mode
-            })
-    };
-    let same_kind = match (&a.returns, &b.returns) {
-        (FunctionReturns::None, FunctionReturns::None)
-        | (FunctionReturns::Table, FunctionReturns::Table) => true,
-        (FunctionReturns::Scalar { type_name: x }, FunctionReturns::Scalar { type_name: y })
-        | (FunctionReturns::SetOf { type_name: x }, FunctionReturns::SetOf { type_name: y }) => {
-            canonical_routine_type_name(x) == canonical_routine_type_name(y)
+fn validate_replacement_result(
+    existing: &CreateFunction,
+    replacement: &CreateFunction,
+    signature: &str,
+) -> Result<(), SQLError> {
+    let existing_type = canonical_routine_type_name(super::declaration::result_type_name(existing));
+    let replacement_type =
+        canonical_routine_type_name(super::declaration::result_type_name(replacement));
+    let same_type =
+        existing_type == replacement_type && existing.returns_set() == replacement.returns_set();
+    let same_record = existing_type != "record"
+        || record_output_shape(existing) == record_output_shape(replacement);
+    if same_type && same_record {
+        return Ok(());
+    }
+    Err(SQLError::Diagnostic {
+        sqlstate: "42P13".into(),
+        message: if existing.is_procedure && !same_type {
+            "cannot change whether a procedure has output parameters"
+        } else {
+            "cannot change return type of existing function"
         }
-        _ => false,
-    };
-    same_kind && same_outputs
+        .into(),
+        detail: same_type.then(|| "Row type defined by OUT parameters is different.".into()),
+        hint: Some(format!(
+            "Use DROP {} {signature} first.",
+            if existing.is_procedure {
+                "PROCEDURE"
+            } else {
+                "FUNCTION"
+            }
+        )),
+    })
+}
+
+// PostgreSQL compares the output tuple descriptor for record results, not the
+// spelling or parameter mode. A function with fewer than two output parameters
+// has no such descriptor; procedures keep even their single output column.
+fn record_output_shape(definition: &CreateFunction) -> Vec<(String, String)> {
+    let outputs = definition.output_params();
+    if !definition.is_procedure && outputs.len() < 2 {
+        return Vec::new();
+    }
+    outputs
+        .iter()
+        .enumerate()
+        .map(|(index, parameter)| {
+            (
+                if parameter.name.is_empty() {
+                    format!("column{}", index + 1)
+                } else {
+                    parameter.name.clone()
+                },
+                canonical_routine_type_name(&parameter.type_name),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
