@@ -1224,8 +1224,22 @@ SQL owns both preparation-time selection and the existing array-transform candid
 - [x] Preserve the reproduced failure, independent PostgreSQL reference and all 75 inherited records, including 34 open original tasks.
 - [x] Reuse SQL's array-transform selection during preparation and preserve argument-position coercion.
 - [x] Verify owning-crate selection regressions and PostgreSQL values, errors, stored calls and durable reopening with the existing provider harness.
-- [ ] Synchronize the manual, HISTORY, manifest and inherited tasks; review, merge, close #499 and clean its branch before #501.
+- [x] Synchronize the manual, HISTORY, manifest and inherited tasks; review, merge, close #499/#504/#505 and clean its branch before #501. PR #503 merged as `bc080a102`; all three issues are closed, completed branches are removed, and main is updated with the unrelated README edit preserved.
 
 This corrects selection for an existing function family without introducing an algebraic operator. The chosen invocation must have the same argument positions, input types and result type as the existing array-transform binder; applying those conversions preserves the binder's value, NULL, error and effect semantics. User overloads continue to retain their selected identities, and no Engine algorithm is added.
 
 All 29 independently captured PostgreSQL messages match memory, native SQLite, SQLite Key/Value and redb; four stored definition/value observations pass after reopening each persistent provider. All 1,428 SQL owner tests, four Execution definition-projection tests and 57 affected Engine integrations pass, including the original overload regression, untyped host parameters, exact declared-type errors, stored bodies, common coercions, generated columns and routine parameter defaults. The final source-only cleanup reuses the same borrowed function binding without changing selection; strict Clippy passes on the resulting tree. Rustfmt, dependency/ownership/harness/source-size checks, canonical crate README copies and the compatibility manifest pass. No timing measurement or manual CI action was used.
+
+
+## Stored role constants and routine validation order
+
+Issue [#501](https://github.com/cognica-io/uqa-engine/issues/501) is the next bounded correction after merged PR #503. Its three original regrole integration failures reproduce, with five related tests passing. The independent 34-message PostgreSQL 18.4 Docker reference exposes twelve mismatches: converted CHECK/view constants and optimized partition keys escape the dependency restriction, routine parameter defaults report the restriction before declaration/body errors, and CHECK's Boolean type message has an extra prefix.
+
+The inspected SQL manifest, feature configuration, dependency policy and manual boundaries keep stored constant classification, routine declaration analysis and partition/check validation in SQL. Existing `StoredRegroleConstants`, parameter default analysis and partition-key analysis provide the relevant interfaces; no new dependency, feature or Engine algorithm is needed. Existing source-body, runtime text casts, numeric casts, NULL and regrole-array exceptions must remain intact.
+
+- [x] Reproduce the three original failures and retain the independent 34-message reference with all 75 inherited records and 34 original open work items.
+- [ ] Preserve converted role-constant identity and pre-optimization partition dependencies; delay default dependency rejection until its PostgreSQL validation point.
+- [ ] Match exact declaration/CHECK diagnostics and pass owner tests, original regressions and provider/reopen acceptance without changing valid exceptions.
+- [ ] Synchronize manual, HISTORY, manifest, plan and inherited tasks; review, merge, close #501 and remove the completed branch.
+
+This corrects existing validation, without introducing an algebraic carrier or operator. Valid statements retain their existing values, state effects and transaction boundaries; a stored scalar regrole constant must remain discoverable after input conversion or optimization, while a runtime cast, numeric relabel, NULL or array constant retains its existing distinct meaning. Declaration/input errors must precede dependency rejection exactly where PostgreSQL reports them.
