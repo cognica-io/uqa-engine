@@ -140,3 +140,6 @@ mod stored_column_drop;
 
 #[path = "pg18_semantics/stored_column_alias_drop.rs"]
 mod stored_column_alias_drop;
+
+#[path = "pg18_semantics/builtin_routine_identities.rs"]
+mod builtin_routine_identities;
