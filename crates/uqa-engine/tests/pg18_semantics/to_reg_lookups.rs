@@ -8,6 +8,9 @@
 
 use super::*;
 
+#[path = "to_reg_lookups/stored_dependencies.rs"]
+mod stored_dependencies;
+
 fn create_lookup_objects(eng: &Engine) {
     for sql in [
         "CREATE SCHEMA reg_lookup",

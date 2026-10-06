@@ -100,10 +100,13 @@ pub fn validate_check_expression(
         &[],
         Some(context.catalog),
     )? {
-        Some(ty) if !is_boolean_type(&ty) => Err(SQLError::TypeMismatch(format!(
-            "argument of CHECK must be type boolean, not type {}",
-            ty.sql_name()
-        ))),
+        Some(ty) if !is_boolean_type(&ty) => Err(SQLError::Routine {
+            sqlstate: "42804".into(),
+            message: format!(
+                "argument of CHECK must be type boolean, not type {}",
+                ty.sql_name()
+            ),
+        }),
         None => {
             if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = expression {
                 *value = crate::expr::cast_value(value, "boolean")?;

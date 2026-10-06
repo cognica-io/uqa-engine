@@ -77,3 +77,20 @@ fn quoted_drop_server_body_keeps_execution_time_compilation() {
     assert_eq!(drop.kind, crate::ast::DropKind::ForeignServer);
     assert!(drop.if_exists);
 }
+
+#[test]
+fn polymorphic_result_errors_keep_postgresql_message_and_detail_separate() {
+    for (result, inputs) in [
+        ("anyelement", "anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange"),
+        ("anycompatible", "anycompatible, anycompatiblearray, anycompatiblenonarray, anycompatiblerange, or anycompatiblemultirange"),
+    ] {
+        let Statement::CreateFunction(definition) = crate::compile(&format!(
+            "CREATE FUNCTION result_type(a integer) RETURNS {result} LANGUAGE SQL AS 'SELECT 1'"
+        )).unwrap().remove(0) else { unreachable!() };
+        let error = validate_routine_declaration(&definition).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42P13"));
+        assert_eq!(error.to_string(), "cannot determine result data type");
+        assert!(matches!(error, SQLError::Diagnostic { detail: Some(detail), hint: None, .. }
+            if detail == format!("A result of type {result} requires at least one input of type {inputs}.")));
+    }
+}

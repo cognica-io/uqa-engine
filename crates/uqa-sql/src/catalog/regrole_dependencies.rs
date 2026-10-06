@@ -14,6 +14,9 @@ use uqa_core::Value;
 
 use crate::expr::EngineHook;
 
+#[cfg(test)]
+mod tests;
+
 pub trait StoredRegroleResolver {
     fn resolve_stored_regrole(&self, name: &str) -> Result<Option<i64>, SQLError>;
 }
@@ -58,6 +61,7 @@ fn scalar_regrole_literal(expression: &ScalarExpr) -> Option<&str> {
 #[derive(Default)]
 pub struct StoredRegroleConstants {
     inputs: Vec<String>,
+    has_bound_constant: bool,
 }
 
 impl StoredRegroleConstants {
@@ -72,27 +76,37 @@ impl StoredRegroleConstants {
             }
         }
         let scalar = crate::plan::ExpressionPlan::lower(expression.clone()).scalar;
-        scalar.visit(&mut |node| {
-            if let Some(input) = scalar_regrole_literal(node) {
-                self.inputs.push(input.to_string());
-            }
-        });
+        self.collect_scalar_expression(&scalar);
+    }
+
+    /// Keep dependency identity before a caller replaces an expression by its optimized form.
+    pub fn collect_scalar_expression(&mut self, expression: &ScalarExpr) {
+        expression.visit(&mut |node| self.collect_scalar(node));
+    }
+
+    fn collect_scalar(&mut self, expression: &ScalarExpr) {
+        if let Some(input) = scalar_regrole_literal(expression) {
+            self.inputs.push(input.to_string());
+        }
+        if let ScalarExpr::TypedLiteral {
+            value,
+            ty,
+            bound_type,
+            ..
+        } = expression
+        {
+            self.has_bound_constant |= !matches!(value, Value::Null)
+                && (bound_type.as_ref().is_some_and(scalar_regrole_type)
+                    || scalar_regrole_type_name(ty));
+        }
     }
 
     pub fn collect_query_plan(&mut self, plan: &mut QueryPlan) {
-        plan.rewrite_scalar_expressions(&mut |expression| {
-            if let Some(input) = scalar_regrole_literal(expression) {
-                self.inputs.push(input.to_string());
-            }
-        });
+        plan.rewrite_scalar_expressions(&mut |expression| self.collect_scalar(expression));
     }
 
     pub fn collect_plan(&mut self, plan: &mut UnifiedPlan) {
-        plan.rewrite_scalar_expressions(&mut |expression| {
-            if let Some(input) = scalar_regrole_literal(expression) {
-                self.inputs.push(input.to_string());
-            }
-        });
+        plan.rewrite_scalar_expressions(&mut |expression| self.collect_scalar(expression));
     }
 
     pub fn validate_inputs(&self, context: &dyn EngineHook) -> Result<(), SQLError> {
@@ -118,7 +132,7 @@ impl StoredRegroleConstants {
         context: &C,
     ) -> Result<(), SQLError> {
         self.validate_inputs_with(context)?;
-        if self.inputs.is_empty() {
+        if self.inputs.is_empty() && !self.has_bound_constant {
             Ok(())
         } else {
             Err(regrole_constant_error())

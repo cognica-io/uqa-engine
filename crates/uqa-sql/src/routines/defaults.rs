@@ -86,11 +86,11 @@ pub(super) fn analyze_parameter_default(
         }
     }
     crate::schema::dependencies::oid_alias::read_oid_alias_constants(context.catalog, expression)?;
-    crate::catalog::regrole_dependencies::reject_stored_regrole_constants_with(
-        context.regroles,
-        expression,
-        target.as_ref(),
-    )?;
+    // Input errors belong to parameter analysis; dependency rejection follows
+    // declaration and SQL-standard body validation in routine compilation.
+    let mut regroles = crate::catalog::regrole_dependencies::StoredRegroleConstants::default();
+    regroles.collect_expression(expression, target.as_ref());
+    regroles.validate_inputs_with(context.regroles)?;
     Ok(default_expression_type(
         type_name,
         expression,
