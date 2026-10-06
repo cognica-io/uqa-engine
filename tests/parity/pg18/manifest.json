@@ -140,6 +140,7 @@
       "expressions.boolean-conditions",
       "expressions.interval-arithmetic",
       "functions.date-trunc",
+      "functions.temporal-extraction",
       "routines.sql-standard-body-deparse",
       "aggregates.within-group-call-analysis"
     ],
@@ -1139,6 +1140,14 @@
       "supported_version": "Unreleased: finite interval and timestamp date_trunc behavior across canonical units, aliases, signed/mixed symbolic interval fields, BC and negative-epoch calendar values, NULL inputs, interval boundaries, minimum-Julian timestamp inputs and results with UTC-offset-before-range-check ordering, exact 22008/22023/0A000 diagnostics and stored default/generated/view/prepared expression lifetimes; the independent reference is replayed on all four storage providers with durable reopen; finite timestamptz truncation uses explicit or session zones with bundled IANA 2026b historical data, PostgreSQL gap/fold resolution, default abbreviations and POSIX specifications, strict NULL/error ordering, validated numeric/interval TimeZone settings and selected-overload volatility; typed date/timestamp arguments use session-aware casts, retained EXTRACT syntax distinguishes keyword from explicit function calls, and 172 independent messages pass all four providers with fifteen durable-reopen observations",
       "status": "partial",
       "open_issue": "Global infinite temporal carriers and full date/timestamp ranges remain in the inherited compatibility tasks."
+    },
+    {
+      "id": "functions.temporal-extraction",
+      "postgresql_reference": "PostgreSQL 18.4 independent command tags, values, result OIDs, diagnostics and routine metadata in tests/parity/pg18/finite_extraction_oracle.expected.json; timestamp_part_common, timestamptz_part_common and interval_part_common in src/backend/utils/adt/timestamp.c; extract_date, time_part_common and timetz_part_common in src/backend/utils/adt/date.c",
+      "uqa_test": "cargo test -p uqa-sql --lib expr::time::extract; cargo test -p uqa-sql --lib expr::call_dispatch::temporal; cargo test -p uqa-sql --lib extraction_overloads; cargo test -p uqa-execution --lib extraction_metadata; cargo test -p uqa-engine --test integration finite_extraction",
+      "supported_version": "Unreleased: finite EXTRACT/date_part source-specific units, exact numeric coefficients/scales, separate float evaluation, signed interval epoch, BC calendar fields, session-zone timestamptz fields, timetz offsets, date wrapper semantics, strict NULLs, overload identity/volatility, twelve pg_proc rows, shared language identities and owner-visible SQL wrapper metadata. All 256 independent PostgreSQL messages pass on four providers, including stored/generated/prepared expressions, with thirty additional durable-reopen observations.",
+      "status": "partial",
+      "open_issue": "Infinite temporal carriers and the remaining full date/timestamp ranges are preserved inherited compatibility tasks."
     },
     {
       "id": "expressions.interval-arithmetic",

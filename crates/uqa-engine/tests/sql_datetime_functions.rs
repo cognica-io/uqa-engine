@@ -7,7 +7,7 @@
 //! SQL date and time function coverage.
 //!
 //! SQL results retain typed temporal and numeric carriers; assertions check
-//! their values and PostgreSQL text output.
+//! their values and `PostgreSQL` text output.
 
 use uqa_core::{DecimalValue, Value};
 use uqa_engine::{Engine, SQLResult};
