@@ -96,7 +96,8 @@ pub(crate) fn read_executable_inputs(
             analysis.query(query, None)?;
         }
         UnifiedPlan::Command(command) => match command.as_ref() {
-            crate::plan::CommandPlan::CreateTableAs { query, .. }
+            crate::plan::CommandPlan::CreateView { query, .. }
+            | crate::plan::CommandPlan::CreateTableAs { query, .. }
             | crate::plan::CommandPlan::CreateMaterializedView { query, .. }
             | crate::plan::CommandPlan::DeclareCursor { query, .. } => {
                 analysis.query(query, None)?;

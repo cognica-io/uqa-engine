@@ -31,6 +31,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Analyze CREATE VIEW literal inputs before output aliases and target checks, retaining definition-time conversions across execution and reopen while leaving runtime expressions deferred. Failed replacement preserves the previous view.
+
 - Resolve ordinary WITHIN GROUP calls with both direct and ordering arguments, preserving PostgreSQL overload selection, modifier diagnostics, FILTER order and implicit-input effects. Retain ordered-set syntax and function identity in stored definitions, restore legacy expressions and accept typed prepared percentile fractions.
 - Read unknown domain-array literals through catalog-aware input functions and retain their converted values before optimization. Preserve element constraints, array bounds, prepared input lifetime and single evaluation of input-function effects through DEFAULT, CHECK and USING. Retain default source types during assignment and preserve scalar-domain runtime checks, including NULL.
 - Store sequence-function column defaults as regclass OID constants and retain selected argument coercions. Preserve sequence identity through rename and reopen, explicit text late binding, user-defined overloads and PostgreSQL's definition-time versus execution-time errors for ordinary and foreign tables.

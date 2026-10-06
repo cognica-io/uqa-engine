@@ -109,7 +109,8 @@ pub fn analyze_plan_result(
                 analyze_plan_result(routines, aliases, body, params, scope)?;
                 Ok(AnalyzedResult::Command)
             }
-            CommandPlan::CreateTableAs { query, .. }
+            CommandPlan::CreateView { query, .. }
+            | CommandPlan::CreateTableAs { query, .. }
             | CommandPlan::CreateMaterializedView { query, .. }
             | CommandPlan::DeclareCursor { query, .. } => {
                 super::analyze_query_plan_schema(routines, query, params, &binding, None)?;
