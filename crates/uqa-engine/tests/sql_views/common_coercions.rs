@@ -30,11 +30,39 @@ fn open(provider: usize, path: &std::path::Path) -> Engine {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn common_coercions_match_postgresql_and_survive_reopen(#[case] provider: usize) {
+    verify_coercions(
+        provider,
+        include_str!("../../../../tests/parity/pg18/common_coercions_oracle.expected.json"),
+        &[
+            "reopen_definitions",
+            "reopen_values",
+            "reopen_stored_syntax",
+            "reopen_arbiter_inference",
+        ],
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn operator_coercions_match_postgresql_and_survive_reopen(#[case] provider: usize) {
+    verify_coercions(
+        provider,
+        include_str!("../../../../tests/parity/pg18/operator_coercions_oracle.expected.json"),
+        &[
+            "reopen_definitions",
+            "reopen_values",
+            "reopen_stored_syntax",
+        ],
+    );
+}
+
+fn verify_coercions(provider: usize, transcript: &str, replay_ids: &[&str]) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("common-coercions.db");
     let engine = open(provider, &path);
-    let transcript =
-        include_str!("../../../../tests/parity/pg18/common_coercions_oracle.expected.json");
     crate::pg18_oracle::verify(&engine, transcript);
     if provider == 0 {
         return;
@@ -42,15 +70,13 @@ fn common_coercions_match_postgresql_and_survive_reopen(#[case] provider: usize)
     drop(engine);
     let engine = open(provider, &path);
     let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
-    restored["cases"].as_array_mut().unwrap().retain(|case| {
-        matches!(
-            case["id"].as_str().unwrap(),
-            "reopen_definitions"
-                | "reopen_values"
-                | "reopen_stored_syntax"
-                | "reopen_arbiter_inference"
-        )
-    });
-    assert_eq!(restored["cases"].as_array().unwrap().len(), 4);
+    restored["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| replay_ids.contains(&case["id"].as_str().unwrap()));
+    assert_eq!(
+        restored["cases"].as_array().unwrap().len(),
+        replay_ids.len()
+    );
     crate::pg18_oracle::verify(&engine, &restored.to_string());
 }

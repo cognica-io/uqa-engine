@@ -68,6 +68,18 @@ impl AggregateOutputPlan {
             .collect::<Result<Vec<_>, _>>()?;
 
         let slot_relation = uqa_sql::ast::InternalRelationId::allocate();
+        let bound_groups = statement
+            .group_by
+            .iter()
+            .map(|group| {
+                crate::bind_type_introspection_with_resolver(
+                    group.clone(),
+                    input_schema,
+                    params,
+                    context,
+                )
+            })
+            .collect::<Vec<_>>();
         let mut aggregate_cursor = 0;
         let projections = statement
             .projections
@@ -90,7 +102,7 @@ impl AggregateOutputPlan {
                 )?;
                 let expression = compile_group_slots(
                     &expression,
-                    &statement.group_by,
+                    &bound_groups,
                     slot_relation,
                     finalizers.len(),
                 )?;
@@ -154,7 +166,7 @@ impl AggregateOutputPlan {
                 )?;
                 let expression = compile_group_slots(
                     &expression,
-                    &statement.group_by,
+                    &bound_groups,
                     slot_relation,
                     finalizers.len(),
                 )?;
