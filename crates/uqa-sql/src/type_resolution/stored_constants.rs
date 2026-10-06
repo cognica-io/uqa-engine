@@ -179,10 +179,6 @@ impl Folding for OperatorCoercions<'_> {
         }
         changed
     }
-
-    fn argument_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool {
-        store_casts(stored, casts)
-    }
 }
 
 fn store_casts(stored: &mut ScalarExpr, casts: &[&str]) -> bool {
