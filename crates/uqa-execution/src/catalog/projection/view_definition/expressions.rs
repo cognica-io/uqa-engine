@@ -45,18 +45,7 @@ impl Deparser<'_> {
             ScalarExpr::Param(index) => Ok(self.parameter(*index, scope)),
             ScalarExpr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, scope, subqueries),
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-                let operator = if matches!(expression, ScalarExpr::And(_)) {
-                    " AND "
-                } else {
-                    " OR "
-                };
-                let expressions = items
-                    .iter()
-                    .map(|item| {
-                        self.operand(item, precedence(expression), false, scope, subqueries)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(self.parenthesize(expressions.join(operator)))
+                self.boolean_expression(expression, items, scope, subqueries)
             }
             ScalarExpr::Not(inner) => self.negation(inner, scope, subqueries),
             ScalarExpr::UnaryMinus(inner) => self.unary_minus(inner, scope, subqueries),
@@ -83,7 +72,9 @@ impl Deparser<'_> {
                 "ROW({})",
                 self.expressions(items, scope, subqueries)?
             )),
-            ScalarExpr::Cast { expr, ty } => self.cast(expr, ty, scope, subqueries),
+            ScalarExpr::Cast { expr, ty, implicit } => {
+                self.cast_with_origin(expr, ty, *implicit, scope, subqueries)
+            }
             ScalarExpr::Func { .. } => self.aggregate(expression, scope, subqueries),
             ScalarExpr::WindowCall {
                 name,
@@ -122,6 +113,25 @@ impl Deparser<'_> {
                 self.subquery(*subquery, scope, subqueries)?
             )),
         }
+    }
+
+    fn boolean_expression(
+        &self,
+        expression: &ScalarExpr,
+        items: &[ScalarExpr],
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let operator = if matches!(expression, ScalarExpr::And(_)) {
+            " AND "
+        } else {
+            " OR "
+        };
+        let expressions = items
+            .iter()
+            .map(|item| self.operand(item, precedence(expression), false, scope, subqueries))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(self.parenthesize(expressions.join(operator)))
     }
 
     fn unary_minus(
@@ -243,7 +253,18 @@ impl Deparser<'_> {
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
-        if let Some(rendered) = self.coercion(expr, ty, scope, subqueries)? {
+        self.cast_with_origin(expr, ty, false, scope, subqueries)
+    }
+
+    fn cast_with_origin(
+        &self,
+        expr: &ScalarExpr,
+        ty: &str,
+        implicit: bool,
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        if let Some(rendered) = self.coercion(expr, ty, implicit, scope, subqueries)? {
             return Ok(rendered);
         }
         let display = self.type_display(ty);

@@ -128,6 +128,7 @@ fn cast_uses_the_input_schema_declared_source_type() {
     let row = PhysicalRow::from_values(vec![Value::Int(0)]);
     let view = schema.view(&row);
     let expression = ScalarExpr::Cast {
+        implicit: false,
         expr: Box::new(ScalarExpr::Column("support".into())),
         ty: "text".into(),
     };
@@ -144,6 +145,7 @@ fn cast_uses_the_input_schema_declared_source_type() {
 #[test]
 fn cast_preserves_unknown_type_for_string_literals() {
     let expression = ScalarExpr::Cast {
+        implicit: false,
         expr: Box::new(ScalarExpr::Literal(Value::Str("[1,5)".into()))),
         ty: "int4range".into(),
     };

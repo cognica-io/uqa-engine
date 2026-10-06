@@ -171,7 +171,7 @@ pub fn read_oid_alias_constants<C: OidAliasInput + ?Sized>(
 ) -> Result<(), SQLError> {
     let mut failure = None;
     let outcome = walk_schema_expr_mut(expression, &mut |node| {
-        let Expr::Cast { expr, ty } = node else {
+        let Expr::Cast { expr, ty, .. } = node else {
             return Ok(());
         };
         let Some((alias, array)) = alias_type(ty) else {
@@ -262,7 +262,7 @@ fn read_scalar_constant<C: OidAliasInput + ?Sized>(
         }
         return;
     }
-    let ScalarExpr::Cast { expr, ty } = expression else {
+    let ScalarExpr::Cast { expr, ty, .. } = expression else {
         return;
     };
     let Some((alias, array)) = alias_type(ty) else {
@@ -333,7 +333,7 @@ pub fn check_statement_oid_alias_constants<C: OidAliasInput + ?Sized>(
                 }
                 return;
             }
-            let ScalarExpr::Cast { expr, ty } = expression else {
+            let ScalarExpr::Cast { expr, ty, .. } = expression else {
                 return;
             };
             let Some((alias, array)) = alias_type(ty) else {

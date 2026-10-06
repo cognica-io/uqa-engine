@@ -220,7 +220,7 @@ pub(super) fn render_expr_in(
             rendered.push_str(" END");
             rendered
         }
-        Expr::Cast { expr, ty } => format!("CAST({} AS {ty})", render_expr(expr)?),
+        Expr::Cast { expr, ty, .. } => format!("CAST({} AS {ty})", render_expr(expr)?),
         Expr::ScalarSubquery(body) => format!("({})", select_sql(body)?),
         Expr::Exists { body, negated } => format!(
             "{}EXISTS ({})",

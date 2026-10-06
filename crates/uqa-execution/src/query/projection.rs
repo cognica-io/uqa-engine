@@ -64,6 +64,7 @@ pub fn physical_projections(projections: &[ProjectionPlan]) -> Vec<PhysicalProje
                 ProjectionTarget::Column(labels[index].clone()),
                 match &projection.expr {
                     ScalarExpr::Literal(uqa_core::Value::Null) => ScalarExpr::Cast {
+                        implicit: true,
                         expr: Box::new(projection.expr.clone()),
                         ty: "text".into(),
                     },

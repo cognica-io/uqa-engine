@@ -225,6 +225,6 @@ fn stored_function_coercions_keep_named_argument_positions() {
     assert_eq!(arguments[0].name, Some("max"));
     assert_eq!(arguments[1].name, Some("min"));
     assert!(
-        matches!(arguments[1].value, ScalarExpr::Cast { expr, ty } if ty == "bigint" && matches!(expr.as_ref(), ScalarExpr::Literal(uqa_core::Value::Int(1))))
+        matches!(arguments[1].value, ScalarExpr::Cast { expr, ty, .. } if ty == "bigint" && matches!(expr.as_ref(), ScalarExpr::Literal(uqa_core::Value::Int(1))))
     );
 }

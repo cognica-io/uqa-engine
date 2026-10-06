@@ -59,7 +59,7 @@ fn is_constant(expression: &ScalarExpr) -> bool {
         | ScalarExpr::Row(items)
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items.iter().all(is_constant),
-        ScalarExpr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty, .. } => {
             is_constant(expr)
                 && ColumnType::from_sql_name(ty).is_ok_and(|target| {
                     immutable_cast_type(&target)
@@ -141,7 +141,7 @@ pub(super) fn fold_authorized_literal(
         // Argument markers carry syntax for their enclosing call; only that call evaluates them as arguments.
         return Ok(expression);
     }
-    if let ScalarExpr::Cast { expr, ty } = &expression {
+    if let ScalarExpr::Cast { expr, ty, .. } = &expression {
         if literal_value(expr).is_some_and(|value| matches!(value, Value::Null)) {
             if let Ok(target) = ColumnType::from_sql_name(ty) {
                 if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {

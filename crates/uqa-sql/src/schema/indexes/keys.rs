@@ -41,7 +41,7 @@ fn expression_name(expression: &Expr) -> Option<(String, bool)> {
                 .unwrap_or_else(|| name.clone()),
             true,
         )),
-        Expr::Cast { expr, ty } => {
+        Expr::Cast { expr, ty, .. } => {
             let inner = expression_name(expr);
             if inner.as_ref().is_some_and(|(_, strong)| *strong) {
                 inner
@@ -108,6 +108,7 @@ fn bind_index_keys(
                 return Ok(Some(ty));
             }
             **expression = Expr::Cast {
+                implicit: true,
                 expr: expression.clone(),
                 ty: "text".into(),
             };

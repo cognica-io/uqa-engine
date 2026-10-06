@@ -330,6 +330,7 @@ pub(in crate::compiler) fn compile_sql_value_function(
     });
     Ok(match target {
         Some(target) => Expr::Cast {
+            implicit: false,
             expr: Box::new(call),
             ty: target.sql_name(),
         },

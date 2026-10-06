@@ -182,7 +182,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 None => Ok(Value::Null),
             }
         }
-        Expr::Cast { expr, ty } => {
+        Expr::Cast { expr, ty, .. } => {
             let source_ty = explicit_expr_type(expr);
             let v = eval(expr, ctx)?;
             cast_value_with_type_resolution(&v, source_ty, ty, ctx.engine)

@@ -36,6 +36,7 @@ pub fn read_unknown_stored_literal(
         // The input function of an OID alias type resolves the name in the catalog, which the binding of the stored expression does; the literal takes the cast that binding resolves.
         let literal = std::mem::replace(expression, Expr::Literal(Value::Null));
         *expression = Expr::Cast {
+            implicit: true,
             expr: Box::new(literal),
             ty: base.catalog_name(),
         };

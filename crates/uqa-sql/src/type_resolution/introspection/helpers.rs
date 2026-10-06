@@ -131,10 +131,12 @@ impl Binder<'_, '_> {
     ) -> Result<Option<Produced<ColumnType>>, SQLError> {
         let mut common = None;
         let mut saw_expression = false;
+        let mut saw_unknown = false;
         for expression in expressions {
             saw_expression = true;
             // `select_common_type` passes over `unknown` literals, which the selected type then reads.
             if crate::type_resolution::is_unknown_literal(expression) {
+                saw_unknown = true;
                 continue;
             }
             let Some(ty) = self.semantic(self.common_context(expression))? else {
@@ -149,6 +151,11 @@ impl Binder<'_, '_> {
                 return Ok(None);
             };
             common = merged;
+        }
+        if saw_unknown {
+            if let Some(selected) = common.as_ref() {
+                common = Some(base_type(selected).clone_with_control(&self.control)?);
+            }
         }
         if saw_expression && common.is_none() {
             common = Some(ColumnType::Text.clone_with_control(&self.control)?);
@@ -187,10 +194,10 @@ impl Binder<'_, '_> {
         expression: &mut ScalarExpr,
         target: &ColumnType,
     ) -> Result<(), SQLError> {
-        let target = base_type(target).without_type_modifiers_with_control(&self.control)?;
+        let target = target.without_type_modifiers_with_control(&self.control)?;
         let source = self.semantic(self.common_context(expression))?.flatten();
         if let Some(source) = source {
-            let source = base_type(&source).without_type_modifiers_with_control(&self.control)?;
+            let source = source.without_type_modifiers_with_control(&self.control)?;
             if *source == *target {
                 return Ok(());
             }
@@ -263,6 +270,7 @@ impl Binder<'_, '_> {
         let ty = self.retain(ty);
         let inner = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
         *expression = ScalarExpr::Cast {
+            implicit: true,
             expr: Box::new(inner),
             ty,
         };
@@ -278,6 +286,7 @@ impl Binder<'_, '_> {
         *self.memory = self.control.combine(self.memory.take(), memory);
         let ty = self.retain(ty);
         Ok(ScalarExpr::Cast {
+            implicit: true,
             expr: Box::new(expression),
             ty,
         })

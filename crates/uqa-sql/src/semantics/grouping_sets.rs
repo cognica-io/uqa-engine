@@ -283,7 +283,7 @@ fn normalize_expression(
                 })
                 .transpose()?,
         },
-        ScalarExpr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty, .. } => {
             let source_type = expression_type(engine, &expr, schema, params)?;
             let target_type = crate::type_resolution::resolve_declared_column_type(
                 engine,
@@ -294,6 +294,7 @@ fn normalize_expression(
                 expression
             } else if input_requires_catalog(&target_type) {
                 ScalarExpr::Cast {
+                    implicit: false,
                     expr: Box::new(expression),
                     ty: target_type.sql_name(),
                 }
@@ -322,6 +323,7 @@ fn normalize_expression(
                     input
                 } else {
                     ScalarExpr::Cast {
+                        implicit: false,
                         expr: Box::new(input),
                         ty: target_type.sql_name(),
                     }
@@ -335,6 +337,7 @@ fn normalize_expression(
                 }
             } else {
                 ScalarExpr::Cast {
+                    implicit: false,
                     expr: Box::new(expression),
                     ty: target_type.sql_name(),
                 }
@@ -429,6 +432,7 @@ fn normalize_unknown_literal(
             return normalize_expression(
                 engine,
                 ScalarExpr::Cast {
+                    implicit: true,
                     expr: Box::new(expression),
                     ty: target.sql_name(),
                 },

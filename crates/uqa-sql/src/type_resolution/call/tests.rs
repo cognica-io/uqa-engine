@@ -73,7 +73,7 @@ fn auxiliary_bindings_retain_dispatch_names_cast_nodes_and_incoming_arguments() 
     let output =
         containment::bind_unknown_arguments_with_control(source, &mut infer, &control).unwrap();
     assert!(
-        matches!(&output.arguments[0], ScalarExpr::Cast {ty, expr} if ty == "integer[]" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(value)) if value == "{1}"))
+        matches!(&output.arguments[0], ScalarExpr::Cast {ty, expr, .. } if ty == "integer[]" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(value)) if value == "{1}"))
     );
     assert_eq!(budget.used(), output.reserved_bytes());
     drop(output);
@@ -266,10 +266,10 @@ fn named_array_binding_reorders_owned_expressions_and_casts_destination_slots() 
     let output = array_transform::bind_call_with_control(source, &mut infer, &control).unwrap();
     assert_eq!(output.arguments[0], ScalarExpr::Literal(Value::Int(9)));
     assert!(
-        matches!(&output.arguments[1], ScalarExpr::Cast {ty, expr} if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(value)) if value == "false"))
+        matches!(&output.arguments[1], ScalarExpr::Cast {ty, expr, .. } if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(value)) if value == "false"))
     );
     assert!(
-        matches!(&output.arguments[2], ScalarExpr::Cast {ty, expr} if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Null)))
+        matches!(&output.arguments[2], ScalarExpr::Cast {ty, expr, .. } if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Null)))
     );
     assert_eq!(
         output.binding.as_ref().unwrap().dispatch,

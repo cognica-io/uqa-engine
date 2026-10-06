@@ -35,7 +35,7 @@ pub fn sequence_function_reference_mut(expression: &mut ScalarExpr) -> Option<&m
 pub fn regclass_literal_mut(expression: &mut ScalarExpr) -> Option<&mut String> {
     match expression {
         ScalarExpr::Literal(Value::Str(reference)) => Some(reference),
-        ScalarExpr::Cast { expr, ty }
+        ScalarExpr::Cast { expr, ty, .. }
             if ty.eq_ignore_ascii_case("regclass")
                 || ty.eq_ignore_ascii_case("pg_catalog.regclass") =>
         {

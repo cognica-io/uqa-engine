@@ -67,6 +67,7 @@ fn typed_scalar_parameters_preserve_declared_width_domain_and_text_identity() {
 #[test]
 fn regclass_cast_preserves_postgresql_type_identity() {
     let expression = ScalarExpr::Cast {
+        implicit: false,
         expr: Box::new(ScalarExpr::Literal(Value::Str("items".into()))),
         ty: "pg_catalog.regclass".into(),
     };
@@ -75,6 +76,7 @@ fn regclass_cast_preserves_postgresql_type_identity() {
         Some(ColumnType::Regclass)
     );
     let routine = ScalarExpr::Cast {
+        implicit: false,
         expr: Box::new(ScalarExpr::Literal(Value::Str("md5(text)".into()))),
         ty: "pg_catalog.regprocedure".into(),
     };
@@ -271,12 +273,12 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
     assert_eq!(binding.argument_types, ["jsonb", "boolean"]);
     assert!(matches!(
         &args[0],
-        ScalarExpr::Cast { expr, ty }
+        ScalarExpr::Cast { expr, ty, .. }
             if ty == "jsonb" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(_)))
     ));
     assert!(matches!(
         &args[1],
-        ScalarExpr::Cast { expr, ty }
+        ScalarExpr::Cast { expr, ty, .. }
             if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Param(1))
     ));
 
@@ -302,6 +304,7 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
         name: "json_strip_nulls".into(),
         binding: None,
         args: vec![ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Literal(Value::Str("{}".into()))),
             ty: "text".into(),
         }],
@@ -503,10 +506,12 @@ fn foreign_key_type_resolution_uses_the_referenced_operator_family() {
 fn values_type_resolution_uses_declared_casts_instead_of_runtime_values() {
     let rows = vec![
         vec![ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Literal(Value::Int(1))),
             ty: "smallint".into(),
         }],
         vec![ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Literal(Value::Int(2))),
             ty: "bigint".into(),
         }],
@@ -532,6 +537,7 @@ fn type_introspection_binds_before_integer_width_is_erased() {
     assert_eq!(
         bind_type_introspection(expression, &schema, &[]),
         ScalarExpr::Cast {
+            implicit: true,
             expr: Box::new(ScalarExpr::Literal(Value::Str("smallint".into()))),
             ty: "regtype".into(),
         }
@@ -705,7 +711,7 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
     };
     assert!(matches!(
         &args[1],
-        ScalarExpr::Cast { expr, ty }
+        ScalarExpr::Cast { expr, ty, .. }
             if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Param(1))
     ));
 
@@ -770,6 +776,7 @@ fn qualified_type_introspection_binds_inside_an_expression() {
         bind_type_introspection(expression, &schema, &[]),
         ScalarExpr::IsNull {
             expr: Box::new(ScalarExpr::Cast {
+                implicit: true,
                 expr: Box::new(ScalarExpr::Literal(Value::Str("real".into()))),
                 ty: "regtype".into(),
             }),
@@ -812,17 +819,21 @@ fn type_binding_reuses_existing_expression_storage() {
 #[test]
 fn array_cast_binding_preserves_the_declared_source_element_type() {
     let source = ScalarExpr::Array(vec![ScalarExpr::Cast {
+        implicit: false,
         expr: Box::new(ScalarExpr::Literal(Value::Int(1))),
         ty: "smallint".into(),
     }]);
     let expression = ScalarExpr::Cast {
+        implicit: false,
         expr: Box::new(source.clone()),
         ty: "bytea[]".into(),
     };
     assert_eq!(
         bind_type_introspection(expression, &RowSchema::default(), &[]),
         ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Cast {
+                implicit: true,
                 expr: Box::new(source),
                 ty: "smallint[]".into(),
             }),
@@ -847,6 +858,7 @@ fn text_cast_binding_preserves_only_legacy_vector_identity() {
         ],
     );
     let text_cast = |column: &str| ScalarExpr::Cast {
+        implicit: false,
         expr: Box::new(ScalarExpr::Column(column.into())),
         ty: "text".into(),
     };
@@ -857,7 +869,9 @@ fn text_cast_binding_preserves_only_legacy_vector_identity() {
     assert_eq!(
         bind_type_introspection(text_cast("arguments"), &schema, &[]),
         ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Cast {
+                implicit: true,
                 expr: Box::new(ScalarExpr::Column("arguments".into())),
                 ty: "oidvector".into(),
             }),

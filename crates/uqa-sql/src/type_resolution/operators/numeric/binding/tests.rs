@@ -309,6 +309,7 @@ fn ordinary_numeric_binding_preserves_custom_resolver_error_deferral() {
         NumericOperator::Plus,
         &mut root.binding,
         &[ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Literal(Value::Int(1))),
             ty: "custom_numeric_domain".into(),
         }],

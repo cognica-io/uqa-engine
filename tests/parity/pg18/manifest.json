@@ -143,7 +143,8 @@
       "functions.date-trunc",
       "functions.temporal-extraction",
       "routines.sql-standard-body-deparse",
-      "aggregates.within-group-call-analysis"
+      "aggregates.within-group-call-analysis",
+      "expressions.stored-common-type-coercions"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -555,7 +556,7 @@
       "id": "routines.polymorphic-variadic-pseudotype-overloads",
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live stateful routine results, declared types, rows, errors, and SQLSTATEs plus function type-resolution, polymorphic type, variadic function, pseudo-type, CREATE FUNCTION, CREATE PROCEDURE, CALL, and table-function documentation; tests/parity/pg18/routine_parameter_defaults_oracle.expected.json",
       "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py; cargo test -p uqa-sql --lib compiler::tests::routines::; cargo test -p uqa-sql --lib type_resolution::routine_signature::tests::; cargo test -p uqa-engine --test integration functions::sql_routine_identity::polymorphic_variadic::; cargo test -p uqa-engine --test integration functions::sql_plpgsql::; cargo test -p uqa-engine --test integration functions::sql_table_functions::; cargo test -p uqa-engine --test integration functions::sql_function_parameters::defaults",
-      "supported_version": "PostgreSQL 18.4 simple and compatible polymorphic substitution for implemented scalar and array carriers; concrete and polymorphic VARIADIC expansion, explicit array pass-through, defaults, named notation, fixed-candidate ranking, and declared-array identity; SQL and PL/pgSQL scalar, TABLE, SETOF, CALL, nested-call, generated-column, stored-view, and reopen execution with concrete result types; pseudo-type declaration validation and exact 42804, 42883, 42725, and 42P13 boundaries; omitted defaults contribute stored expression types after supplied-argument overload selection, including unknown and pseudo-type NULL defaults and family-specific consistency diagnostics",
+      "supported_version": "PostgreSQL 18.4 simple and compatible polymorphic substitution for implemented scalar and array carriers; concrete and polymorphic VARIADIC expansion, explicit array pass-through, defaults, named notation, fixed-candidate ranking, and declared-array identity; SQL and PL/pgSQL scalar, TABLE, SETOF, CALL, nested-call, generated-column, stored-view, and reopen execution with concrete result types; pseudo-type declaration validation and exact 42804, 42883, 42725, and 42P13 boundaries; omitted defaults contribute stored expression types after supplied-argument overload selection, including unknown and pseudo-type NULL defaults and family-specific consistency diagnostics; SQL inlining infers the retained default expression type before parameter assignment, preserving numeric rounding, text conversion and runtime domain checks in the independent parameter-default reference across all four providers and persistent reopen",
       "status": "verified",
       "open_issue": null
     },
@@ -1259,9 +1260,9 @@
       "id": "ddl.alter-schema-rename",
       "postgresql_reference": "PostgreSQL 18.4 live command tags, rows, SQLSTATEs, messages, DETAIL and HINT in tests/parity/pg18/schema_rename_oracle.expected.json; RenameSchema in src/backend/commands/schemacmds.c; IsReservedName in src/backend/catalog/catalog.c; the namespace OID references of pg_class, pg_proc and pg_type",
       "uqa_test": "cargo test -p uqa-engine --test integration catalog::schema_rename",
-      "supported_version": "Unreleased: 49 PostgreSQL 18.4 statements on memory and SQLite engines cover ALTER SCHEMA ... RENAME TO: the namespace keeps its OID, owner and USAGE grants under the new name, regnamespace and regclass constants in defaults print the new name, the tables, views, sequences, functions, enum types and indexes the schema holds follow (pg_get_viewdef, pg_get_expr, the reg* output, pg_class, pg_proc, pg_type, pg_indexes and information_schema.schemata show the new schema), the old name no longer resolves (42P01 for its relations, a search_path entry naming it is skipped, current_schema falls back), public can be renamed and renamed back, and the diagnostics are RenameSchema's in its order: 3F000 for a missing schema, 42P06 for a name already taken including the schema's own, 42501 must be owner of schema for a non-owner, and 42939 unacceptable schema name with the DETAIL The prefix \"pg_\" is reserved for system schemas.",
+      "supported_version": "Unreleased: 49 PostgreSQL 18.4 statements on memory and SQLite engines cover ALTER SCHEMA ... RENAME TO: the namespace keeps its OID, owner and USAGE grants under the new name, regnamespace and regclass constants in defaults print the new name, the tables, views, sequences, functions, enum types and indexes the schema holds follow (pg_get_viewdef, pg_get_expr, the reg* output, pg_class, pg_proc, pg_type, pg_indexes and information_schema.schemata show the new schema), the old name no longer resolves (42P01 for its relations, a search_path entry naming it is skipped, current_schema falls back), public can be renamed and renamed back, and the diagnostics are RenameSchema's in its order: 3F000 for a missing schema, 42P06 for a name already taken including the schema's own, 42501 must be owner of schema for a non-owner, and 42939 unacceptable schema name with the DETAIL The prefix \"pg_\" is reserved for system schemas.; generated-expression post-planning immutability is verified separately under ddl.generated-columns",
       "status": "partial",
-      "open_issue": "The virtual pg_catalog, information_schema and ag_catalog namespaces, the session's temporary schema and a graph's namespace report 0A000 where PostgreSQL lets a superuser rename its system schemas; a generation expression calling a volatile SQL function is rejected (42P17) where PostgreSQL inlines the function before the immutability check."
+      "open_issue": "The virtual pg_catalog, information_schema and ag_catalog namespaces, the session's temporary schema and a graph's namespace report 0A000 where PostgreSQL lets a superuser rename its system schemas."
     },
     {
       "id": "types.datetime-input",
@@ -1324,6 +1325,14 @@
       "postgresql_reference": "PostgreSQL 18.4 ParseFuncOrColumn and transformFuncCall; tests/parity/pg18/within_group_calls_oracle.expected.json",
       "uqa_test": "cargo test -p uqa-sql --lib binding::preparation::tests::ordered_calls; cargo test -p uqa-engine --test integration queries::within_group_calls_oracle; cargo test -p uqa-execution --lib percentile_fraction",
       "supported_version": "Unreleased: ordinary WITHIN GROUP syntax, combined signature selection, scalar/aggregate/window modifier diagnostics, direct/ordered argument split HINTs, polymorphic unknowns, FILTER and implicit input ordering, stored binding identity and prepared percentile fractions. All 46 independent PostgreSQL 18.4 messages match memory, native SQLite, SQLite K/V and redb, with 18 persistent-reopen observations and native legacy-view migration across two reopenings.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "expressions.stored-common-type-coercions",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured definitions, values, types, diagnostics and notices in tests/parity/pg18/common_coercions_oracle.expected.json (37 Simple Query messages); select_common_type, coerce_to_common_type and ruleutils.c",
+      "uqa_test": "cargo test -p uqa-sql --lib type_resolution::introspection::tests; cargo test -p uqa-sql --lib catalog::stored_ast::sites::tests; cargo test -p uqa-sql --lib ir::tests; cargo test -p uqa-planner --lib scalar_optimization_retains_array_coercion_origin; cargo test -p uqa-execution --lib implicit_array_coercion; cargo test -p uqa-engine --test integration catalog::sql_views::common_coercions; cargo test -p uqa-sql --lib semantics::conflict::tests; cargo test -p uqa-sql --lib semantics::grouping_sets::tests",
+      "supported_version": "CASE result and COALESCE/GREATEST/LEAST argument conversions, mixed and identical domains, unknown inputs and implicit versus explicit array constructor casts survive AST/IR lowering, optimization, syntax reconstruction and durable storage. All 37 messages match memory, native SQLite, SQLite Key/Value and redb, with four additional replay messages per persistent provider. Routine and generated definitions, command DEFAULT positions, canonical set-operation inputs, inherited CHECK equality, equivalent versus distinct expression/partial-index inference, GROUP BY DISTINCT and duplicate grouping aliases, renames, values/types, lazy effects and input-error atomicity are covered.",
       "status": "verified",
       "open_issue": null
     }

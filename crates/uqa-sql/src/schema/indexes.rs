@@ -23,6 +23,7 @@ pub fn prepare_index_expression(
         return Ok(ty);
     }
     *expression = Expr::Cast {
+        implicit: true,
         expr: Box::new(expression.clone()),
         ty: "text".into(),
     };

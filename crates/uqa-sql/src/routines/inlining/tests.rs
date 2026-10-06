@@ -253,7 +253,7 @@ fn retained_identity_and_return_coercion_survive_inline_analysis() {
         .prepare(&binding, &[ScalarExpr::Param(3)], &[])
         .unwrap()
         .unwrap();
-    let ScalarExpr::Cast { expr, ty } = replacement.expression else {
+    let ScalarExpr::Cast { expr, ty, .. } = replacement.expression else {
         panic!("result assignment is required")
     };
     assert_eq!(
@@ -280,6 +280,7 @@ fn ordinary_cache_replanning_is_separate_from_the_execution_body_cache() {
         let mut plan = UnifiedPlan::lower(crate::compile("SELECT 1").unwrap().remove(0));
         plan.rewrite_scalar_expressions(&mut |expression| {
             *expression = ScalarExpr::Cast {
+                implicit: false,
                 expr: Box::new(call(catalog.binding(name, &[]), vec![])),
                 ty: "bigint".into(),
             };
@@ -403,5 +404,36 @@ fn expression_mutability_uses_its_own_column_types() {
             expected,
             "{ty}: {expression}"
         );
+    }
+}
+
+#[test]
+fn assigned_default_type_does_not_replace_the_default_expression_type() {
+    for (declaration, target) in [
+        (
+            "CREATE FUNCTION f(v integer DEFAULT 1.6) RETURNS integer LANGUAGE SQL AS 'SELECT v'",
+            ColumnType::Integer,
+        ),
+        (
+            "CREATE FUNCTION f(v text DEFAULT 12) RETURNS text LANGUAGE SQL AS 'SELECT v'",
+            ColumnType::Text,
+        ),
+    ] {
+        let mut catalog = Catalog::new(declaration);
+        Arc::make_mut(&mut catalog.functions[0]).def.params[0].default_type =
+            Some(crate::ast::RoutineDefaultType::Concrete(target.clone()));
+        let expanded = catalog
+            .context()
+            .prepare(&catalog.binding("f", &[]), &[], &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            crate::scalar_type(&expanded.expression, &crate::RowSchema::default(), &[]).unwrap(),
+            Some(target)
+        );
+        assert!(matches!(
+            expanded.expression,
+            ScalarExpr::Cast { implicit: true, .. }
+        ));
     }
 }

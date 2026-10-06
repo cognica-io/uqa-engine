@@ -794,7 +794,8 @@ pub fn rewrite_output_filter(
                 None => None,
             },
         },
-        ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
+        ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
+            implicit: *implicit,
             expr: Box::new(recur(expr, used)?),
             ty: ty.clone(),
         },

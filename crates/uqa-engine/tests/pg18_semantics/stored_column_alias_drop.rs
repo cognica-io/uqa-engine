@@ -283,6 +283,7 @@ fn stored_column_alias_drop_migrates_regclass_constants_before_sequence_rename()
             .unwrap();
         let mut columns: Vec<ColumnDef> = serde_json::from_str(&table.columns_json).unwrap();
         columns[0].generated.as_mut().unwrap().expression = Box::new(Expr::Cast {
+            implicit: false,
             expr: Box::new(Expr::Literal(Value::Str("alias_migration_sequence".into()))),
             ty: "regclass".into(),
         });

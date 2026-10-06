@@ -64,11 +64,11 @@ fn oid_alias_comparisons_relabel_their_operands_to_oid() {
         panic!("binary comparison: {scalar:?}")
     };
     assert!(
-        matches!(*lhs, ScalarExpr::Cast { ref ty, ref expr } if ty == "oid" && matches!(**expr, ScalarExpr::Column(_))),
+        matches!(*lhs, ScalarExpr::Cast { ref ty, ref expr, .. } if ty == "oid" && matches!(**expr, ScalarExpr::Column(_))),
         "{lhs:?}"
     );
     assert!(
-        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr } if ty == "oid" && matches!(**expr, ScalarExpr::Cast { .. })),
+        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr, .. } if ty == "oid" && matches!(**expr, ScalarExpr::Cast { .. })),
         "{rhs:?}"
     );
     // An `oid` operand needs no relabel; an integer literal is cast to `oid`; an `unknown` literal is read as `oid`.
@@ -89,7 +89,7 @@ fn oid_alias_comparisons_relabel_their_operands_to_oid() {
         panic!("binary comparison: {scalar:?}")
     };
     assert!(
-        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr } if ty == "oid" && matches!(**expr, ScalarExpr::Literal(_))),
+        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr, .. } if ty == "oid" && matches!(**expr, ScalarExpr::Literal(_))),
         "{rhs:?}"
     );
     let scalar = crate::bind_type_introspection(expression("e <> '16384'"), &schema, &[]);

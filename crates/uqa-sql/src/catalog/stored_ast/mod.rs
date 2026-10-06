@@ -200,6 +200,24 @@ where
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
         let visible = self.bind_ctes(&mut select.with, inherited)?;
+        if let Some(set) = select.set_op.as_mut().filter(|set| set.left.is_some()) {
+            self.bind_set_operation(set, &visible)?;
+            let left = set
+                .left
+                .as_deref()
+                .expect("explicit set-operation left input");
+            // These fields mirror the left input for AST compatibility; they are not another syntax occurrence.
+            select.projections.clone_from(&left.projections);
+            select.values.clone_from(&left.values);
+            select.from.clone_from(&left.from);
+            select.r#where.clone_from(&left.r#where);
+            select.group_by.clone_from(&left.group_by);
+            select.order_by.clone_from(&left.order_by);
+            select.limit.clone_from(&left.limit);
+            select.with_ties = left.with_ties;
+            select.offset.clone_from(&left.offset);
+            return Ok(());
+        }
         if let Some(source) = &mut select.from {
             self.bind_from(source, &visible)?;
         }
@@ -239,19 +257,28 @@ where
             }
         }
         if let Some(set) = &mut select.set_op {
-            if let Some(left) = &mut set.left {
-                self.bind_select(left, &visible)?;
-            }
-            self.bind_select(&mut set.right, &visible)?;
-            for order in &mut set.combined_order_by {
-                self.bind_expr(&mut order.expr, &visible)?;
-            }
-            if let Some(expression) = &mut set.combined_limit {
-                self.bind_expr(expression, &visible)?;
-            }
-            if let Some(expression) = &mut set.combined_offset {
-                self.bind_expr(expression, &visible)?;
-            }
+            self.bind_set_operation(set, &visible)?;
+        }
+        Ok(())
+    }
+
+    fn bind_set_operation(
+        &mut self,
+        set: &mut crate::ast::SetOp,
+        visible: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        if let Some(left) = &mut set.left {
+            self.bind_select(left, visible)?;
+        }
+        self.bind_select(&mut set.right, visible)?;
+        for order in &mut set.combined_order_by {
+            self.bind_expr(&mut order.expr, visible)?;
+        }
+        if let Some(expression) = &mut set.combined_limit {
+            self.bind_expr(expression, visible)?;
+        }
+        if let Some(expression) = &mut set.combined_offset {
+            self.bind_expr(expression, visible)?;
         }
         Ok(())
     }

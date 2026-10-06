@@ -159,6 +159,7 @@ fn current_sequence_binding_uses_visible_names_before_storing_the_reference() {
 fn bound_regclass_is_resolved_before_any_sequence_name_rewrite() {
     let references = References::default();
     let mut expression = sequence_expression(Expr::Cast {
+        implicit: false,
         expr: Box::new(Expr::Literal(Value::Str("seq".into()))),
         ty: "regclass".into(),
     });
@@ -183,6 +184,7 @@ fn reference_failures_preserve_diagnostics_and_stop_before_later_binding() {
         ..References::default()
     };
     let mut expression = sequence_expression(Expr::Cast {
+        implicit: false,
         expr: Box::new(Expr::Literal(Value::Str("seq".into()))),
         ty: "regclass".into(),
     });

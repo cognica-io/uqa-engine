@@ -45,6 +45,7 @@ pub(super) fn routine_parameter_default_text(
             None => "unknown".into(),
         };
         typed = Expr::Cast {
+            implicit: true,
             expr: Box::new(default.clone()),
             ty,
         };

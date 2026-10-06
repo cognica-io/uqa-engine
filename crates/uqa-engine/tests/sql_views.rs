@@ -24,6 +24,8 @@ mod automatic_updatability;
 mod catalog_function_dispatch;
 #[path = "sql_views/column_aliases.rs"]
 mod column_aliases;
+#[path = "sql_views/common_coercions.rs"]
+mod common_coercions;
 #[path = "sql_views/definitions.rs"]
 mod definitions;
 #[path = "sql_views/input_analysis_order.rs"]

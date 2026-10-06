@@ -105,6 +105,7 @@ fn bigint_operand_cast_preserves_postgresql_widening_and_null_aggregation() {
     let expression = ScalarExpr::Binary {
         op: BinaryOp::Multiply,
         lhs: Box::new(ScalarExpr::Cast {
+            implicit: false,
             expr: Box::new(ScalarExpr::Column("price".into())),
             ty: "bigint".into(),
         }),

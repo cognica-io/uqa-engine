@@ -281,7 +281,8 @@ fn bind_rule_expr_with_scope(
         },
         Expr::WindowCall { .. } => bind_rule_window_expression(expr, resolver, scope, context)?,
         Expr::Case { .. } => bind_rule_case_expression(expr, resolver, scope, context)?,
-        Expr::Cast { expr, ty } => Expr::Cast {
+        Expr::Cast { expr, ty, implicit } => Expr::Cast {
+            implicit: *implicit,
             expr: Box::new(bind_rule_expr_with_scope(expr, resolver, scope, context)?),
             ty: ty.clone(),
         },

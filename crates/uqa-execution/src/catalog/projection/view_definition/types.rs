@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Type names, typed constants and coercions in reconstructed SQL, as `ruleutils.c` prints `Const`, `CoerceToDomain` and array constructors: a user-defined type named by identity is spelled by its current name, an enum constant by its current label, a domain coercion over the value of its base type, and a cast of an `ARRAY[...]` constructor as a conversion of each element.
+//! Type names, typed constants and coercions in reconstructed SQL, as `ruleutils.c` prints `Const`, `CoerceToDomain` and array constructors: a user-defined type named by identity is spelled by its current name, an enum constant by its current label, a domain coercion over the value of its base type, an explicit cast of an `ARRAY[...]` constructor as a conversion of each element, and an implicit array coercion around the complete constructor.
 
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, UserTypeIdentity};
@@ -177,6 +177,7 @@ impl Deparser<'_> {
         &self,
         expr: &ScalarExpr,
         ty: &str,
+        implicit: bool,
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<Option<String>, SQLError> {
@@ -197,6 +198,9 @@ impl Deparser<'_> {
             base = inner;
         }
         if let (ScalarExpr::Array(items), ColumnType::Array(element)) = (expr, base) {
+            if implicit {
+                return Ok(None);
+            }
             let display = self.type_display(ty);
             if items.is_empty() {
                 return Ok(Some(format!("ARRAY[]::{display}")));
@@ -253,4 +257,50 @@ fn is_oid_alias(ty: &ColumnType) -> bool {
             | ColumnType::Regprocedure
             | ColumnType::Regnamespace
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::{RelationLookupMode, RelationNameResolution};
+
+    #[test]
+    fn implicit_array_coercion_wraps_the_constructor_while_explicit_cast_converts_elements() {
+        let catalog = crate::catalog::test_support::empty_catalog();
+        let resolution = RelationNameResolution {
+            search_path: vec!["public".into()],
+            temporary_schema: "pg_temp_1".into(),
+            temporary_namespace_allocated: false,
+            current_user: "owner".into(),
+            lookup_mode: RelationLookupMode::Dynamic,
+        };
+        let deparser = Deparser {
+            catalog: &catalog,
+            dynamic: resolution.clone(),
+            bound: resolution,
+            pretty: false,
+            wrap: 0,
+            standalone: false,
+            indent: true,
+            routine: None,
+            aliases: std::cell::OnceCell::new(),
+        };
+        // Exact constructor forms independently captured from PostgreSQL 18.4.
+        for (implicit, expected) in [
+            (false, "ARRAY[(value)::bigint]"),
+            (true, "(ARRAY[value])::bigint[]"),
+        ] {
+            let expression = ScalarExpr::Cast {
+                implicit,
+                expr: Box::new(ScalarExpr::Array(vec![ScalarExpr::Column("value".into())])),
+                ty: "bigint[]".into(),
+            };
+            assert_eq!(
+                deparser
+                    .expression(&expression, &Scope::default(), &[])
+                    .unwrap(),
+                expected
+            );
+        }
+    }
 }

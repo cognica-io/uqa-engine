@@ -230,7 +230,8 @@ fn rewrite_selected(
                 .map(|branch| rewrite_selected(branch, replace).map(Box::new))
                 .transpose()?,
         }),
-        ScalarExpr::Cast { expr, ty } => Ok(ScalarExpr::Cast {
+        ScalarExpr::Cast { expr, ty, implicit } => Ok(ScalarExpr::Cast {
+            implicit: *implicit,
             expr: Box::new(rewrite_selected(expr, replace)?),
             ty: ty.clone(),
         }),

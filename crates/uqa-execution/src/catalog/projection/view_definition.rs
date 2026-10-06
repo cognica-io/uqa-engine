@@ -294,7 +294,7 @@ fn expression_name(expression: &ScalarExpr) -> String {
         ScalarExpr::Func { name, .. } | ScalarExpr::WindowCall { name, .. } => {
             name.rsplit('.').next().unwrap_or(name).to_string()
         }
-        ScalarExpr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty, .. } => {
             let name = expression_name(expr);
             if name == "?column?" {
                 ty.clone()

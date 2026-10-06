@@ -168,6 +168,7 @@ fn bind_domain_check(
         )?;
     } else {
         *expression = Expr::Cast {
+            implicit: true,
             expr: Box::new(expression.clone()),
             ty: "boolean".into(),
         };

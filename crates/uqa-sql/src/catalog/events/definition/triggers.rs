@@ -514,6 +514,7 @@ impl EventAnalysisContext<'_> {
                 )));
             } else {
                 *condition = Expr::Cast {
+                    implicit: true,
                     expr: Box::new(condition.clone()),
                     ty: "boolean".into(),
                 };

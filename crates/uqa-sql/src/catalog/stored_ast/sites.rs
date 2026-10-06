@@ -35,8 +35,6 @@ enum Syntax<'a> {
 }
 
 fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError> {
-    // A stored expression's sites name every node, a statement's only its casts, literals and function ordering.
-    let aligned = matches!(syntax, Syntax::Expression(_));
     let mut routines = sites.routines.iter();
     let mut values = sites.values.iter().peekable();
     let mut routines_changed = false;
@@ -54,7 +52,7 @@ fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError
         Ok(())
     };
     let mut expression = |node: &mut Expr| -> Result<(), SQLError> {
-        values_changed |= apply_value_site(node, &mut values, aligned)?;
+        values_changed |= apply_value_site(node, &mut values)?;
         Ok(())
     };
     let mut visitor = StoredAstVisitor {
@@ -87,7 +85,6 @@ fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError
 fn apply_value_site<'a>(
     node: &mut Expr,
     sites: &mut std::iter::Peekable<impl Iterator<Item = &'a ValueSite>>,
-    aligned: bool,
 ) -> Result<bool, SQLError> {
     let mismatch = |what: &str| {
         SQLError::Internal(format!(
@@ -100,6 +97,7 @@ fn apply_value_site<'a>(
         sites.next();
         let inner = std::mem::replace(node, Expr::Literal(Value::Null));
         *node = Expr::Cast {
+            implicit: true,
             expr: Box::new(inner),
             ty,
         };
@@ -141,11 +139,10 @@ fn apply_value_site<'a>(
             *order_syntax = *bound;
             Ok(true)
         }
-        _ if aligned => match sites.next() {
+        _ => match sites.next() {
             Some(ValueSite::Node) => Ok(false),
             _ => Err(mismatch("expression")),
         },
-        _ => Ok(false),
     }
 }
 

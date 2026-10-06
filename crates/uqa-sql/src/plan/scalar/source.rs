@@ -127,6 +127,7 @@ pub(super) enum Node<'a> {
         else_branch: Option<Source<'a, Box<Expr>>>,
     },
     Cast {
+        implicit: bool,
         expr: Source<'a, Box<Expr>>,
         ty: Source<'a, String>,
     },
@@ -224,7 +225,8 @@ fn owned(expression: Expr) -> Node<'static> {
             when: Items::Owned(when.into_iter()),
             else_branch: else_branch.map(Source::Owned),
         },
-        Expr::Cast { expr, ty } => Node::Cast {
+        Expr::Cast { expr, ty, implicit } => Node::Cast {
+            implicit,
             expr: Source::Owned(expr),
             ty: Source::Owned(ty),
         },
@@ -318,7 +320,8 @@ fn borrowed(expression: &Expr) -> Node<'_> {
             when: Items::Borrowed(when.iter()),
             else_branch: else_branch.as_ref().map(Source::Borrowed),
         },
-        Expr::Cast { expr, ty } => Node::Cast {
+        Expr::Cast { expr, ty, implicit } => Node::Cast {
+            implicit: *implicit,
             expr: Source::Borrowed(expr),
             ty: Source::Borrowed(ty),
         },

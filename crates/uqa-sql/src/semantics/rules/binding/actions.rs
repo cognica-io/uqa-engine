@@ -228,6 +228,7 @@ fn resolved_variable_expr(variable: ResolvedVariable) -> Expr {
     } = variable;
     match declared_type {
         Some(ty) => Expr::Cast {
+            implicit: true,
             expr: Box::new(Expr::Literal(value)),
             ty,
         },

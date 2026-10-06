@@ -146,7 +146,7 @@ fn prepare_inference_expression(
         }
     });
     crate::plan::rewrite_scalar_expression(&mut plan.scalar, &mut |expression| {
-        if let Expr::Cast { expr, ty } = expression {
+        if let Expr::Cast { expr, ty, .. } = expression {
             if let Expr::Column(name) = expr.as_ref() {
                 if columns.iter().any(|column| {
                     column.name == *name
@@ -158,8 +158,18 @@ fn prepare_inference_expression(
             }
         }
     });
-    *expression = plan.scalar;
+    *expression = inference_identity(plan.scalar);
     Ok(())
+}
+
+fn inference_identity(mut expression: Expr) -> Expr {
+    // PostgreSQL expression equality ignores coercion display form, but retains the conversion itself and its destination type.
+    crate::plan::rewrite_scalar_expression(&mut expression, &mut |node| {
+        if let Expr::Cast { implicit, .. } = node {
+            *implicit = false;
+        }
+    });
+    expression
 }
 
 fn predicate_error(sqlstate: &str, message: &str) -> SQLError {
@@ -169,6 +179,7 @@ fn predicate_error(sqlstate: &str, message: &str) -> SQLError {
     }
 }
 
+/// Match the inference expressions analyzed by [`prepare_inference_predicate`] against the stored unique keys.
 pub fn conflict_key_indices(
     catalog: &dyn ConflictCatalog,
     table: &str,
@@ -201,9 +212,9 @@ pub fn conflict_key_indices(
                         .keys
                         .iter()
                         .filter_map(|key| match key {
-                            crate::ast::IndexKey::Expression(expr) => {
-                                Some(ExpressionPlan::lower((**expr).clone()).scalar)
-                            }
+                            crate::ast::IndexKey::Expression(expr) => Some(inference_identity(
+                                ExpressionPlan::lower((**expr).clone()).scalar,
+                            )),
                             crate::ast::IndexKey::Column(_) => None,
                         })
                         .collect::<Vec<_>>();
@@ -217,7 +228,10 @@ pub fn conflict_key_indices(
                 }
                 && key.predicate.as_deref().is_none_or(|required| {
                     conflict.predicate.as_deref().is_some_and(|given| {
-                        implies(given, &ExpressionPlan::lower(required.clone()).scalar)
+                        implies(
+                            given,
+                            &inference_identity(ExpressionPlan::lower(required.clone()).scalar),
+                        )
                     })
                 }))
             .then_some(index)
@@ -403,4 +417,33 @@ fn validate_conflict_columns(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inference_implication_ignores_cast_origin_but_preserves_cast_types() {
+        let predicate = |implicit, ty: &str, bound| {
+            inference_identity(Expr::Binary {
+                op: BinaryOp::Greater,
+                lhs: Box::new(Expr::Cast {
+                    implicit,
+                    expr: Box::new(Expr::Column("value".into())),
+                    ty: ty.into(),
+                }),
+                rhs: Box::new(Expr::Literal(Value::Int(bound))),
+            })
+        };
+        for implicit in [false, true] {
+            let required = predicate(implicit, "bigint", 0);
+            let equivalent = predicate(!implicit, "bigint", 0);
+            assert_eq!(required, equivalent);
+            assert!(implies(&equivalent, &required));
+            assert!(implies(&predicate(!implicit, "bigint", 1), &required));
+            assert!(!implies(&predicate(!implicit, "bigint", -1), &required));
+            assert!(!implies(&predicate(!implicit, "integer", 0), &required));
+        }
+    }
 }

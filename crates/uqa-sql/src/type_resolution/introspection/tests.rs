@@ -40,6 +40,7 @@ fn controlled_binding_preserves_cast_common_type_and_selected_call_semantics() {
     let expressions = [
         call("pg_typeof", vec![Expr::Column("small".into())]),
         Expr::Cast {
+            implicit: false,
             expr: Box::new(Expr::Column("real".into())),
             ty: "text".into(),
         },
@@ -114,7 +115,7 @@ fn controlled_binding_admits_new_ir_before_mutating_the_owned_root() {
                     panic!("row remains a row")
                 };
                 assert!(
-                    matches!(&items[0], ScalarExpr::Cast {ty, expr} if ty == "regtype" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(name)) if name == "smallint"))
+                    matches!(&items[0], ScalarExpr::Cast {ty, expr, .. } if ty == "regtype" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(name)) if name == "smallint"))
                 );
                 assert_eq!(
                     items[1],
@@ -187,4 +188,77 @@ fn controlled_binding_checks_root_allowance_before_noop_leaves() {
     assert!(result.is_err());
     assert_eq!(budget.used(), 0);
     assert_eq!(foreign.used(), 0);
+}
+
+#[test]
+fn array_common_type_preserves_coercion_origin_through_controlled_binding() {
+    let schema = RowSchema::with_types(
+        vec!["small".into(), "large".into()],
+        vec![Some(ColumnType::SmallInteger), Some(ColumnType::BigInteger)],
+    );
+    let array = |name: &str| Expr::Array(vec![Expr::Column(name.into())]);
+    for explicit in [false, true] {
+        let source = if explicit {
+            Expr::Cast {
+                implicit: false,
+                expr: Box::new(array("small")),
+                ty: "bigint[]".into(),
+            }
+        } else {
+            array("small")
+        };
+        let expression = call("coalesce", vec![source, array("large")]);
+        let budget = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        let output = bind_type_introspection_with_control(
+            input(&expression, &budget),
+            &schema,
+            &[],
+            &control,
+        )
+        .unwrap();
+        let ScalarExpr::Func { args, .. } = &*output else {
+            panic!("common expression")
+        };
+        assert!(matches!(&args[0], ScalarExpr::Cast { implicit, ty, expr }
+            if *implicit != explicit && ty == "bigint[]" && matches!(expr.as_ref(), ScalarExpr::Array(_))));
+        assert!(matches!(&args[1], ScalarExpr::Array(_)));
+        assert_eq!(budget.used(), output.reserved_bytes());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
+fn unknown_common_input_relabels_a_domain_but_identical_domains_survive() {
+    let domain = ColumnType::Domain {
+        schema: "public".into(),
+        name: "oid_domain".into(),
+        oid: 90_001,
+        array_oid: None,
+        base: Box::new(ColumnType::Oid),
+    };
+    let schema = RowSchema::with_types(vec!["domain_value".into()], vec![Some(domain)]);
+    for unknown in [false, true] {
+        let column = Expr::Column("domain_value".into());
+        let second = if unknown {
+            Expr::Literal(Value::Null)
+        } else {
+            column.clone()
+        };
+        let expression = ExpressionPlan::lower(call("coalesce", vec![column, second])).scalar;
+        let bound = bind_type_introspection(expression, &schema, &[]);
+        let ScalarExpr::Func { args, .. } = bound else {
+            panic!("common expression")
+        };
+        if unknown {
+            assert!(matches!(&args[0], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "oid"));
+            assert!(matches!(&args[1], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "oid"));
+        } else {
+            assert!(args
+                .iter()
+                .all(|argument| matches!(argument, ScalarExpr::Column(_))));
+        }
+    }
 }

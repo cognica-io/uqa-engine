@@ -72,6 +72,7 @@ fn operand_names_keep_bound_type_and_unknown_literal_precedence() {
         ),
         (
             ScalarExpr::Cast {
+                implicit: false,
                 expr: Box::new(ScalarExpr::Literal(Value::Int(1))),
                 ty: "pg_catalog.int8".into(),
             },

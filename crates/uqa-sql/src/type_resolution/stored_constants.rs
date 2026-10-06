@@ -41,7 +41,7 @@ pub fn fold_stored_enum_constants(
     transfer(expression, &bound, &mut EnumConstants { catalog })
 }
 
-/// Store the coercions binding adds to function arguments and the operands of an operator, as `PostgreSQL` stores the `RelabelType` nodes and coerced constants of an analyzed expression: an `unknown` literal becomes the constant the selected operand type's input function read (`1` in `a + '1'`, `'16384'::oid` against a `regclass` column), an operand of `oid` or one of its alias types gains its cast to `oid`, and an array operand its cast to `oid[]`. Selected function arguments retain their input casts, including runtime text-to-regclass conversion and integer-to-bigint conversion. Constants of the types whose input consults the catalog keep their cast, which the stored expression's binding resolves. Returns whether anything changed.
+/// Store the coercions binding adds to function arguments and the operands of an operator, as `PostgreSQL` stores the `RelabelType` nodes and coerced constants of an analyzed expression: an `unknown` literal becomes the constant the selected operand type's input function read (`1` in `a + '1'`, `'16384'::oid` against a `regclass` column), an operand of `oid` or one of its alias types gains its cast to `oid`, and an array operand its cast to `oid[]`. Selected function arguments and CASE result arms retain their input casts, including runtime text-to-regclass conversion, integer-to-bigint conversion, array coercions and domain-to-base relabels. Constants of the types whose input consults the catalog keep their cast, which the stored expression's binding resolves. Returns whether anything changed.
 pub fn store_operand_coercions(
     expression: &mut ScalarExpr,
     schema: &dyn ScalarTypeSchema,
@@ -63,7 +63,7 @@ trait Folding {
     fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError>;
     /// The casts binding added around a node, outermost first, which the stored node may take over.
     fn added_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool;
-    /// Casts at a selected function's argument boundary retain its declared input type.
+    /// Casts at a selected function argument or CASE result boundary retain its common type.
     fn argument_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool {
         self.added_casts(stored, casts)
     }
@@ -131,6 +131,7 @@ fn store_casts(stored: &mut ScalarExpr, casts: &[&str]) -> bool {
     for ty in casts.iter().rev() {
         let inner = std::mem::replace(stored, ScalarExpr::Literal(Value::Null));
         *stored = ScalarExpr::Cast {
+            implicit: true,
             expr: Box::new(inner),
             ty: (*ty).to_string(),
         };
@@ -144,7 +145,7 @@ fn split_added_casts<'a>(
     mut bound: &'a ScalarExpr,
 ) -> (&'a ScalarExpr, Vec<&'a str>) {
     let mut added = Vec::new();
-    while let ScalarExpr::Cast { expr, ty } = bound {
+    while let ScalarExpr::Cast { expr, ty, .. } = bound {
         if matches!(stored, ScalarExpr::Cast { ty: written, .. } if written == ty) {
             break;
         }
@@ -320,10 +321,10 @@ fn transfer_children(
                 when.iter_mut().zip(bound_when)
             {
                 changed |= transfer(condition, bound_condition, folding)?;
-                changed |= transfer(result, bound_result, folding)?;
+                changed |= transfer_argument(result, bound_result, folding)?;
             }
             if let (Some(branch), Some(bound)) = (else_branch, bound_else) {
-                changed |= transfer(branch, bound, folding)?;
+                changed |= transfer_argument(branch, bound, folding)?;
             }
             changed
         }
@@ -369,11 +370,18 @@ fn transfer_call_arguments(
         } else {
             (argument, index)
         };
-        let (bound, casts) = split_added_casts(argument, &bound[position]);
-        changed |= transfer(argument, bound, folding)?;
-        changed |= folding.argument_casts(argument, &casts);
+        changed |= transfer_argument(argument, &bound[position], folding)?;
     }
     Ok(changed)
+}
+
+fn transfer_argument(
+    stored: &mut ScalarExpr,
+    bound: &ScalarExpr,
+    folding: &mut dyn Folding,
+) -> Result<bool, SQLError> {
+    let (bound, casts) = split_added_casts(stored, bound);
+    Ok(transfer(stored, bound, folding)? | folding.argument_casts(stored, &casts))
 }
 
 fn call_argument_value_mut(expression: &mut ScalarExpr) -> &mut ScalarExpr {

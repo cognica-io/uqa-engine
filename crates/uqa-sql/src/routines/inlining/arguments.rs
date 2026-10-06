@@ -71,6 +71,7 @@ pub(super) fn prepare(
             ));
         };
         *slot = Some(ScalarExpr::Cast {
+            implicit: true,
             expr: Box::new(ScalarExpr::Array(values)),
             ty: invocation.parameter_types[position].clone(),
         });
@@ -92,14 +93,17 @@ pub(super) fn prepare(
             if !plan.subqueries.is_empty() {
                 return Ok(None);
             }
-            let source = match &parameter.default_type {
-                Some(crate::ast::RoutineDefaultType::Concrete(ty)) => Some(ty),
-                _ => None,
-            };
+            // default_type records the assigned declaration type, not proof that the retained expression already has that type.
+            let source = crate::type_resolution::scalar_type_with_resolver(
+                &plan.scalar,
+                &crate::RowSchema::default(),
+                &[],
+                context.routines,
+            )?;
             coerce(
                 context,
                 plan.scalar,
-                source,
+                source.as_ref(),
                 &invocation.parameter_types[position],
             )?
         };
@@ -135,6 +139,7 @@ fn coerce(
         Ok(expression)
     } else {
         Ok(ScalarExpr::Cast {
+            implicit: true,
             expr: Box::new(expression),
             ty: target.catalog_name(),
         })

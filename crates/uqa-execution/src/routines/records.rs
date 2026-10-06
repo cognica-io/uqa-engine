@@ -36,7 +36,7 @@ impl Interpreter<'_> {
                 .resolver()
                 .lookup(name)
                 .and_then(|index| self.record_types.get(&index).cloned())),
-            Expr::Cast { expr, ty } if ty == "record" => self.raw_record_expression_types(expr),
+            Expr::Cast { expr, ty, .. } if ty == "record" => self.raw_record_expression_types(expr),
             _ => Ok(None),
         }
     }

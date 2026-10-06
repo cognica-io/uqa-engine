@@ -105,7 +105,7 @@ fn inspect_node(
         } => {
             volatility = inspect_call(context, name, binding.as_ref(), args.len(), properties);
         }
-        ScalarExpr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty, .. } => {
             let target = context.types.resolve_catalog_column_type_name(ty)?;
             let source =
                 crate::scalar_type_with_resolver(expr, schema, parameters, context.routines)

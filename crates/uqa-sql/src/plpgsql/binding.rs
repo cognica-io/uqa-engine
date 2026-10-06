@@ -211,7 +211,8 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
                 None => None,
             },
         },
-        Expr::Cast { expr, ty } => Expr::Cast {
+        Expr::Cast { expr, ty, implicit } => Expr::Cast {
+            implicit: *implicit,
             expr: Box::new(bind_expr(expr, r)?),
             ty: ty.clone(),
         },

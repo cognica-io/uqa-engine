@@ -179,3 +179,69 @@ fn canonical_window_input_sites_preserve_each_stored_copy_without_raw_orphan_que
     let sites = query_syntax_sites(&restored, &restored).unwrap();
     assert!(!bind_stored_statement_sites(&mut syntax, &sites).unwrap());
 }
+
+#[test]
+fn statement_sites_preserve_common_coercions_across_storage_and_relowering() {
+    let mut syntax = crate::compile(
+        "WITH input AS (SELECT coalesce(ARRAY[s],ARRAY[b]) AS value) SELECT value, (SELECT coalesce(ARRAY[s],ARRAY[b])) FROM input",
+    ).unwrap().remove(0);
+    let Statement::Select(statement) = &syntax else {
+        panic!("SELECT expected")
+    };
+    let original = QueryPlan::lower(statement.as_ref().clone());
+    let schema = crate::RowSchema::with_types(
+        vec!["s".into(), "b".into()],
+        vec![
+            Some(crate::ColumnType::SmallInteger),
+            Some(crate::ColumnType::BigInteger),
+        ],
+    );
+    let mut bound = original.clone();
+    bound.rewrite_scalar_expressions(&mut |node| {
+        if matches!(node, ScalarExpr::Func { name, .. } if name == "coalesce") {
+            *node = crate::type_resolution::bind_type_introspection(node.clone(), &schema, &[]);
+        }
+    });
+    let sites = query_syntax_sites(&original, &bound).unwrap();
+    assert!(bind_stored_statement_sites(&mut syntax, &sites).unwrap());
+    let serialized = serde_json::to_string(&syntax).unwrap();
+    assert_eq!(serialized.matches(r#""implicit":true"#).count(), 2);
+    let mut restored: Statement = serde_json::from_str(&serialized).unwrap();
+    let Statement::Select(statement) = &restored else {
+        panic!("SELECT expected")
+    };
+    let lowered = QueryPlan::lower(statement.as_ref().clone());
+    assert_eq!(
+        serde_json::to_value(&lowered).unwrap(),
+        serde_json::to_value(&bound).unwrap()
+    );
+    let sites = query_syntax_sites(&lowered, &lowered).unwrap();
+    assert!(!bind_stored_statement_sites(&mut restored, &sites).unwrap());
+}
+
+#[test]
+fn stored_set_operations_bind_each_left_input_once() {
+    let mut syntax = crate::compile("SELECT f('left') UNION ALL SELECT f('right')")
+        .unwrap()
+        .remove(0);
+    let Statement::Select(statement) = &syntax else {
+        panic!("SELECT expected")
+    };
+    let original = QueryPlan::lower(statement.as_ref().clone());
+    let sites = query_syntax_sites(&original, &original).unwrap();
+    assert!(!bind_stored_statement_sites(&mut syntax, &sites).unwrap());
+    let mut calls = 0;
+    visit_stored_statement_expressions(&mut syntax, &mut |node| {
+        calls += usize::from(matches!(node, Expr::Func { .. }));
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(calls, 2);
+    let Statement::Select(statement) = syntax else {
+        panic!("SELECT expected")
+    };
+    assert_eq!(
+        serde_json::to_value(QueryPlan::lower(*statement)).unwrap(),
+        serde_json::to_value(original).unwrap()
+    );
+}
