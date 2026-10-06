@@ -171,6 +171,7 @@ pub fn set_expression<S: Clone + 'static>(
         &context.generated,
         table,
         kind == GeneratedColumnKind::Stored,
+        &[name.to_string()],
     )
 }
 /// Drop a stored generated column's expression, or return the notice that skips a column that is not generated under `IF EXISTS`.

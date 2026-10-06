@@ -178,7 +178,13 @@ impl uqa_execution::schema::columns::ColumnRewritePublication for Engine {
         values: std::collections::BTreeMap<String, uqa_core::Value>,
         vectors: uqa_execution::mutation::publication::DocumentVectors,
     ) -> Result<bool, SQLError> {
-        self.update_document_fields_with_vector_values(table, id, values, vectors)
+        uqa_execution::schema::columns::generated::update_rewritten_fields(
+            &self.generated_rewrite_context(),
+            table,
+            id,
+            values,
+            vectors,
+        )
     }
 }
 

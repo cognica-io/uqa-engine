@@ -215,6 +215,25 @@ impl TypeRewrites {
 }
 
 impl RelationRewrite {
+    fn generated_rewrite_columns<S: Clone + 'static>(
+        &self,
+        context: &TableAlterContext<'_, S>,
+    ) -> Vec<String> {
+        self.transforms
+            .iter()
+            .filter(|transform| transform.generated == Some(GeneratedColumnKind::Stored))
+            .map(|transform| transform.name.clone())
+            .chain(context.columns.deferred_rows.physical_columns(&self.table))
+            .chain(
+                context
+                    .addition
+                    .pending_rows
+                    .deferral
+                    .physical_columns(&self.table),
+            )
+            .collect()
+    }
+
     fn rewrite<S: Clone + 'static>(
         &mut self,
         context: &TableAlterContext<'_, S>,
@@ -244,6 +263,7 @@ impl RelationRewrite {
                 .pending_rows
                 .deferral
                 .needs_physical_rewrite(&self.table);
+        let generated_columns = self.generated_rewrite_columns(context);
         for position in 0..self.original.rows.len() {
             context.columns.rewrite.cancellation.check()?;
             let original = self.original.rows.get(position)?;
@@ -285,10 +305,11 @@ impl RelationRewrite {
                     document.insert(column.name.clone(), Value::Null);
                 }
             }
-            crate::mutation::assignment::refresh_stored_generated_columns(
+            crate::mutation::assignment::refresh_selected_stored_generated_columns(
                 context.columns.generated.assignment,
                 &self.table,
                 &mut document,
+                Some(&generated_columns),
             )?;
             crate::mutation::constraints::validate_rewritten_row(
                 context.columns.generated.keys.constraints,

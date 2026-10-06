@@ -15,15 +15,19 @@ use uqa_sql::{
     ResultRow, RowSchema, SQLError,
 };
 
-/// Recompute every stored generated column; each value takes its column type through catalog-aware assignment conversion.
+/// Recompute the selected stored generated columns (all when no selection is supplied); each value takes its column type through catalog-aware assignment conversion.
 pub fn refresh_stored_generated_columns(
     assignment: &dyn AssignmentContext,
     columns: &[ColumnDef],
+    selected: Option<&[String]>,
     document: &mut ResultRow,
     evaluate: &mut dyn FnMut(&Expr, &ResultRow, &RowSchema) -> Result<Value, SQLError>,
 ) -> Result<(), SQLError> {
     for column in columns {
-        if column.generated.is_some() {
+        if column.generated.as_ref().is_some_and(|generated| {
+            generated.kind == GeneratedColumnKind::Virtual
+                || selected.is_none_or(|selected| selected.contains(&column.name))
+        }) {
             document.remove(&column.name);
         }
     }
@@ -38,7 +42,9 @@ pub fn refresh_stored_generated_columns(
         let Some(generated) = column.generated.as_ref() else {
             continue;
         };
-        if generated.kind != GeneratedColumnKind::Stored {
+        if generated.kind != GeneratedColumnKind::Stored
+            || selected.is_some_and(|selected| !selected.contains(&column.name))
+        {
             continue;
         }
         let value = evaluate(&generated.expression, document, &schema)?;
@@ -49,3 +55,6 @@ pub fn refresh_stored_generated_columns(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
