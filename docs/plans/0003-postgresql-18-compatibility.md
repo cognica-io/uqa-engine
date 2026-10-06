@@ -140,7 +140,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | Milestone | Name | Status | Exit gate |
 | --- | --- | --- | --- |
 | `M0` | PG18 baseline | `in_progress` | PG18 parser pinned; all AST deltas audited; unsupported shapes fail explicitly; active names and fixtures use pg18; 22/22 TPC-H-derived results match PostgreSQL 18 |
-| `M1` | Discovered semantic fixes | `complete` | Bounded DML row-image, constraint-metadata, identified-function, and independently verified semantic slices pass their PostgreSQL 18.4 evidence |
+| `M1` | Discovered semantic fixes | `in_progress` | Bounded DML row-image, constraint-metadata, identified-function, and independently verified semantic slices pass their PostgreSQL 18.4 evidence |
 | `M2` | Protocol 3.2 | `complete` | Byte-exact codec tests and live PostgreSQL 18 libpq 3.0/3.2/latest negotiation and cancellation tests pass |
 | `M3` | PG18 DDL and types | `in_progress` | Generated columns, range/multirange, temporal constraints, catalogs, dump/restore, and reopen tests pass |
 | `M4` | Core regression parity | `in_progress` | PostgreSQL 18 core regression and isolation suites pass with every remaining failure recorded and reduced to zero |
@@ -260,6 +260,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `query.window-frames` | `M1` | `verified` |
 | `aggregates.null-and-enum-inputs` | `M1` | `verified` |
 | `expressions.boolean-conditions` | `M1` | `verified` |
+| `functions.date-trunc` | `M1` | `partial` |
 | `expressions.interval-arithmetic` | `M1` | `verified` |
 | `routines.sql-standard-body-deparse` | `M1` | `verified` |
 | `routines.attribute-checks` | `M3` | `partial` |
@@ -890,11 +891,11 @@ The wider inventory distinguishes declared signatures from runtime support. SQL-
 
 ## Finite date_trunc inputs and units
 
-Review of the next temporal catalog family reproduced two runtime defects: interval truncation enters a date/timestamp-only conversion, and timestamptz truncation rejects an explicit timezone while ignoring the session TimeZone. [Issue #441](https://github.com/cognica-io/uqa-engine/issues/441) is the current bounded correction for finite interval and timestamp unit semantics; [issue #442](https://github.com/cognica-io/uqa-engine/issues/442) is the immediate subsequent implementation unit for explicit/session timezone evaluation. Declared fixed signatures do not establish runtime support, so the seven temporal catalog identities are not counted as complete. All 75 inherited records and 41 open original work items remain.
+Review of the next temporal catalog family reproduced two runtime defects: interval truncation enters a date/timestamp-only conversion, and timestamptz truncation rejects an explicit timezone while ignoring the session TimeZone. [PR #443](https://github.com/cognica-io/uqa-engine/pull/443) addresses [issue #441](https://github.com/cognica-io/uqa-engine/issues/441) as the current bounded correction for finite interval and timestamp unit semantics; [issue #442](https://github.com/cognica-io/uqa-engine/issues/442) is the immediate subsequent implementation unit for explicit/session timezone evaluation. Declared fixed signatures do not establish runtime support, so the seven temporal catalog identities are not counted as complete. All 75 inherited records and 41 open original work items remain.
 
-- [x] Reproduce the runtime differences and capture the independent 164-message PostgreSQL 18.4 reference in `tests/parity/pg18/date_trunc_interval_oracle.expected.json`.
-- [ ] Implement finite interval/timestamp unit decoding and truncation in the owning SQL crate, retaining strict NULL handling, selected signatures and production control.
-- [ ] Verify aliases, signed fields, BC/calendar boundaries, exact diagnostics and retained default/generated/view/prepared expressions on all four providers, including durable reopening; synchronize manual, HISTORY, manifest and PR progress.
-- [ ] Merge the bounded fix for #441 and remove its branches, then implement and close #442 rather than stopping at its issue record.
+- [x] Reproduce the runtime differences and capture the independent 184-message PostgreSQL 18.4 reference in `tests/parity/pg18/date_trunc_interval_oracle.expected.json`.
+- [x] Implement finite interval/timestamp unit decoding and truncation in the owning SQL crate, retaining strict NULL handling, selected signatures and production control. Independent boundary review also reproduced [#444](https://github.com/cognica-io/uqa-engine/issues/444): Core timestamp input accepted instants before PostgreSQL's Julian minimum. Core now owns one finite-range predicate used by timestamp input after UTC-offset conversion and by SQL truncation results; eight SQL owner tests and one Core boundary test cover the correction.
+- [x] Verify aliases, signed fields, BC/calendar boundaries, exact diagnostics and retained default/generated/view/prepared expressions on all four providers. All 184 PostgreSQL messages match memory, native SQLite, SQLite K/V and redb, including fifteen observations after durable reopening. Eight SQL truncation tests, nine Core temporal-input tests, eight existing SQL regressions and 43 existing Engine regressions pass, including manual SQL compilation/execution. Independent Core and SQL review found no remaining blocker. Strict Clippy, Rustfmt, workspace dependency and Engine capability checks, integration-harness coverage, file headers, file-size limits and manifest validation pass. Manual, HISTORY, manifest, plan index and PR progress are synchronized.
+- [ ] Merge the bounded fix for #441 and #444 and remove its branches, then implement and close #442 rather than stopping at its issue record.
 
 The correction operates on the existing interval carrier `(months, days, micros)` without converting months to fixed-duration days. Calendar truncation removes lower fields and time truncation preserves the symbolic month/day fields; signed interval division truncates toward zero. Timestamp truncation follows its civil calendar fields and preserves the timestamp carrier. The implementation adds no algebraic operator or persistence format: ordinary expressions and stored compositions use the same selected scalar operation, retain production-control failures and publish statement effects through the existing transaction boundary. Independent reference results verify those observations; global infinity/full-range work remains in its original inherited tasks and timezone evaluation remains the explicitly scheduled #442 fix.

@@ -22,6 +22,7 @@ use crate::error::{Result, SQLError};
 use super::conversion::to_f64_with_control;
 use super::{datetime_out_of_range, float_to_i64_rounded, out_of_range};
 
+mod date_trunc;
 mod interval;
 mod number_format;
 
@@ -588,57 +589,7 @@ pub(super) fn date_trunc_value(
     value: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
-    let temporal = coerce_temporal_with_control(value, control)?;
-    let tz = matches!(temporal, TemporalValue::TimestampTz { .. });
-    let dt = temporal_naive(&temporal)?;
-    let date = dt.date();
-    let truncated = match unit {
-        "millennium" => with_date(NaiveDate::from_ymd_opt(
-            (date.year() - 1) / 1000 * 1000 + 1,
-            1,
-            1,
-        )),
-        "century" => with_date(NaiveDate::from_ymd_opt(
-            (date.year() - 1) / 100 * 100 + 1,
-            1,
-            1,
-        )),
-        "decade" => with_date(NaiveDate::from_ymd_opt(date.year() / 10 * 10, 1, 1)),
-        "year" => with_date(NaiveDate::from_ymd_opt(date.year(), 1, 1)),
-        "quarter" => {
-            let month = (date.month() - 1) / 3 * 3 + 1;
-            with_date(NaiveDate::from_ymd_opt(date.year(), month, 1))
-        }
-        "month" => with_date(NaiveDate::from_ymd_opt(date.year(), date.month(), 1)),
-        "week" => {
-            let offset = date.weekday().num_days_from_monday() as i64;
-            with_date(date.checked_sub_signed(chrono::Duration::days(offset)))
-        }
-        "day" => with_date(Some(date)),
-        "hour" => date.and_hms_opt(dt.hour(), 0, 0),
-        "minute" => date.and_hms_opt(dt.hour(), dt.minute(), 0),
-        "second" => date.and_hms_opt(dt.hour(), dt.minute(), dt.second()),
-        "milliseconds" => {
-            let millis = i64::from(dt.and_utc().timestamp_subsec_millis());
-            date.and_hms_opt(dt.hour(), dt.minute(), dt.second())
-                .map(|naive| naive + chrono::Duration::milliseconds(millis))
-        }
-        "microseconds" => Some(dt),
-        other => {
-            return Err(SQLError::Unsupported(format!("date_trunc unit `{other}`")));
-        }
-    }
-    .ok_or_else(|| SQLError::TypeMismatch(format!("date_trunc: bad {unit}")))?;
-    let micros = micros_from_naive(truncated);
-    Ok(Value::Temporal(if tz {
-        TemporalValue::TimestampTz { micros }
-    } else {
-        TemporalValue::Timestamp { micros }
-    }))
-}
-
-fn with_date(date: Option<NaiveDate>) -> Option<NaiveDateTime> {
-    date.and_then(|d| d.and_hms_opt(0, 0, 0))
+    date_trunc::truncate(unit, value, control)
 }
 
 pub(super) fn make_timestamp(

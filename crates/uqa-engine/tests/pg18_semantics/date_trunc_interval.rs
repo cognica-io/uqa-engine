@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Finite date_trunc units, interval fields and stored temporal expression lifetimes.
+//! Finite `date_trunc` units, interval fields and stored temporal expression lifetimes.
 
 use uqa_engine::Engine;
 
