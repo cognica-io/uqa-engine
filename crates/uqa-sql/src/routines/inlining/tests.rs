@@ -406,3 +406,34 @@ fn expression_mutability_uses_its_own_column_types() {
         );
     }
 }
+
+#[test]
+fn assigned_default_type_does_not_replace_the_default_expression_type() {
+    for (declaration, target) in [
+        (
+            "CREATE FUNCTION f(v integer DEFAULT 1.6) RETURNS integer LANGUAGE SQL AS 'SELECT v'",
+            ColumnType::Integer,
+        ),
+        (
+            "CREATE FUNCTION f(v text DEFAULT 12) RETURNS text LANGUAGE SQL AS 'SELECT v'",
+            ColumnType::Text,
+        ),
+    ] {
+        let mut catalog = Catalog::new(declaration);
+        Arc::make_mut(&mut catalog.functions[0]).def.params[0].default_type =
+            Some(crate::ast::RoutineDefaultType::Concrete(target.clone()));
+        let expanded = catalog
+            .context()
+            .prepare(&catalog.binding("f", &[]), &[], &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            crate::scalar_type(&expanded.expression, &crate::RowSchema::default(), &[]).unwrap(),
+            Some(target)
+        );
+        assert!(matches!(
+            expanded.expression,
+            ScalarExpr::Cast { implicit: true, .. }
+        ));
+    }
+}
