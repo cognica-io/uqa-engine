@@ -151,6 +151,7 @@ mod definitions;
 mod enums;
 mod namespaces;
 mod notifications;
+mod numeric;
 mod privileges;
 mod ranges;
 mod records;
@@ -179,6 +180,7 @@ const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalo
 pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     scalar::ROUTINES,
     clock_and_case::ROUTINES,
+    numeric::ROUTINES,
     arrays::ROUTINES,
     enums::ROUTINES,
     definitions::ROUTINES,

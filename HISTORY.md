@@ -31,7 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Restore PostgreSQL catalog identities for the five clock routines and the text lower/upper overloads, including regproc/regprocedure input and output, catalog metadata, stored references and search-path shadowing.
+- Restore PostgreSQL catalog identities for the five clock routines, text lower/upper overloads and eleven mod/power/pow/sqrt/cbrt overloads, including regproc/regprocedure input and output, catalog metadata, stored references and search-path shadowing.
 
 - Match PostgreSQL's action-specific ALTER TABLE errors on regular and materialized views, including the local relation name and DETAIL. Resolve the target and ownership before validating declarations, preserve written action order, and skip invalid type modifiers when IF EXISTS or IF NOT EXISTS skips the declaration. Keep missing-column and USING errors ahead of target type modifiers and retain ordinary-table key validation.
 - Preserve named WINDOW declarations and selected OVER references in stored view definitions, including quoted names, inheritance, equivalent inline definitions and unused declarations. Analyze each definition's literal inputs once, retain its dependencies, and preserve prepared values and legacy expanded definitions across reopen. Correct window passes over projected rows so nested views and multiple sorts retain the actual physical row layout in memory and spill.
