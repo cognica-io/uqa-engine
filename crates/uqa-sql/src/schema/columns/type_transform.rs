@@ -96,7 +96,12 @@ pub fn coerce_type_transform(
     if transform.source_type.is_none() {
         if let ScalarExpr::Literal(value @ uqa_core::Value::Str(_)) = &transform.plan.scalar {
             let mut expression = Expr::Literal(value.clone());
-            crate::schema::defaults::cook_unknown_literal(context, &mut expression, target, false)?;
+            crate::catalog::stored_ast::read_unknown_stored_literal(
+                crate::FunctionTypeResolver::enum_labels(context.catalog),
+                &mut expression,
+                target,
+                false,
+            )?;
             transform.plan = ExpressionPlan::lower(expression);
             transform.source_type = crate::binding::bind_expression_plan_routines_for_storage(
                 context.catalog,

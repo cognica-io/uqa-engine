@@ -118,7 +118,12 @@ pub fn cook_constant(
             return Ok(false);
         }
         Expr::Literal(Value::Str(_)) => {
-            cook_unknown_literal(context, expression, target, false)?;
+            crate::catalog::stored_ast::read_unknown_stored_literal(
+                crate::FunctionTypeResolver::enum_labels(context.catalog),
+                expression,
+                target,
+                false,
+            )?;
         }
         Expr::Cast { expr, ty } if matches!(expr.as_ref(), Expr::Literal(Value::Str(_))) => {
             // A cast of a literal is read by the cast's type and keeps the modifier the cast writes.
@@ -129,54 +134,18 @@ pub fn cook_constant(
                 // The cast is already the form the catalog binding of a stored expression resolves.
                 return Ok(true);
             }
-            cook_unknown_literal(context, expr, &cast_type, true)?;
+            crate::catalog::stored_ast::read_unknown_stored_literal(
+                crate::FunctionTypeResolver::enum_labels(context.catalog),
+                expr,
+                &cast_type,
+                true,
+            )?;
             let cooked = std::mem::replace(expr.as_mut(), Expr::Literal(Value::Null));
             *expression = cooked;
         }
         _ => {}
     }
     Ok(true)
-}
-
-/// Read an `unknown` literal with the input function of `target`, which reports what the type's input rejects, and store the typed constant. `coerce_type` passes the input function no type modifier, so a length or precision the column declares applies when a row is assigned, not here; the constant keeps the modifier only when `keep_modifier` says a cast wrote it.
-pub(super) fn cook_unknown_literal(
-    context: &SchemaBindingContext<'_, '_>,
-    expression: &mut Expr,
-    target: &ColumnType,
-    keep_modifier: bool,
-) -> Result<(), SQLError> {
-    if crate::catalog::stored_ast::fold_assigned_stored_literal(
-        expression,
-        target,
-        crate::FunctionTypeResolver::enum_labels(context.catalog),
-    )? {
-        return Ok(());
-    }
-    let Expr::Literal(value) = &*expression else {
-        return Ok(());
-    };
-    let mut base = target;
-    while let ColumnType::Domain { base: inner, .. } = base {
-        base = inner;
-    }
-    if crate::type_resolution::catalog_input_type(base) {
-        // The input function of an OID alias type resolves the name in the catalog, which the binding of the stored expression does; the literal takes the cast that binding resolves.
-        let literal = std::mem::replace(expression, Expr::Literal(Value::Null));
-        *expression = Expr::Cast {
-            expr: Box::new(literal),
-            ty: base.catalog_name(),
-        };
-        return Ok(());
-    }
-    let input_type = base.without_type_modifiers();
-    let value =
-        crate::assignment::conversion::convert_value_to_column_type(value.clone(), &input_type)?;
-    let ty = if keep_modifier { base } else { &input_type };
-    *expression = Expr::TypedLiteral {
-        value,
-        ty: ty.catalog_name(),
-    };
-    Ok(())
 }
 
 /// Bind a copy of stored schema expression syntax and carry its exact routine identities, user-defined type identities and enum constants back into the syntax. `typed_expression` is the syntax with its column references replaced by typed placeholders.
