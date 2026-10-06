@@ -18,6 +18,7 @@ use super::helpers::type_metadata::routine_variadic_element_oid;
 use super::regtypes::catalog_routine_type_oid;
 use crate::catalog::CatalogReadView;
 use uqa_core::Value;
+use uqa_sql::catalog::languages::language_oid;
 use uqa_sql::registry::registered_names;
 use uqa_sql::routines::{builtin_routine_support_oid, SQLUserFunction};
 use uqa_sql::{ResultRow, SQLError};
@@ -213,6 +214,12 @@ fn build_pg_proc_rows(
     }
     for function in catalog.all_sql_functions() {
         let def = &function.def;
+        let language = language_oid(&def.language).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "routine `{}` references unknown language `{}`",
+                def.name, def.language
+            ))
+        })?;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
         let source = match &def.body {
             uqa_sql::ast::FunctionBody::Source(source) => source.clone(),
@@ -325,7 +332,7 @@ fn build_pg_proc_rows(
                 "proowner",
                 int_value(uqa_sql::routines::security::bound_routine_owner(def)?.oid),
             ),
-            ("prolang", int_value(0)),
+            ("prolang", int_value(i64::from(language))),
             // `CreateFunction`'s defaults for SQL and PL/pgSQL routines without COST or ROWS.
             ("procost", Value::Float(def.cost.map_or(100.0, f64::from))),
             (

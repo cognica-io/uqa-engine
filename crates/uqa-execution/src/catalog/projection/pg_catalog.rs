@@ -11,6 +11,7 @@ mod composites;
 mod constraint_definitions;
 mod constraints;
 mod indexes;
+mod languages;
 mod relations;
 mod roles;
 mod row_types;
@@ -26,6 +27,8 @@ pub use indexes::{
     build_pg_index, build_pg_indexes, catalog_index_relations, index_access_method_oid,
     CatalogIndexRelation,
 };
+pub use languages::build_pg_language;
+pub(super) use languages::language_class_row;
 pub use relations::{
     build_pg_database, build_pg_matviews, build_pg_tables, build_pg_views, pg_class_catalog_row,
     pg_class_row, pg_class_row_with_lifecycle, relation_identity_for_oid, table_relation_oid_from,

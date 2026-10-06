@@ -6,6 +6,8 @@
 
 //! `PostgreSQL` 18 built-in routine metadata exposed through the virtual catalogs.
 
+use uqa_sql::catalog::languages::{INTERNAL_LANGUAGE, SQL_LANGUAGE};
+
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinRoutineCatalogEntry {
     pub oid: i64,
@@ -26,13 +28,14 @@ pub struct BuiltinRoutineCatalogEntry {
 impl BuiltinRoutineCatalogEntry {
     pub const fn language(self) -> i64 {
         match self.oid {
-            1810 | 1811 | 3935 | 3936 => 14,
-            _ => 12,
+            1384 | 1810 | 1811 | 3935 | 3936 => SQL_LANGUAGE as i64,
+            _ => INTERNAL_LANGUAGE as i64,
         }
     }
 
     pub fn sql_body(self) -> Option<String> {
         let (function_oid, parameter_type, collation_oid) = match self.oid {
+            1384 => return Some(temporal::DATE_PART_DATE_SQL_BODY.into()),
             1810 => (720, 17, 0),
             1811 => (1374, 25, 100),
             3935 => return Some(sleep_bodies::PG_SLEEP_FOR_SQL_BODY.into()),

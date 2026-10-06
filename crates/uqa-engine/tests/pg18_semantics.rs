@@ -152,3 +152,6 @@ mod numeric_routine_identities;
 
 #[path = "pg18_semantics/date_trunc_timezone.rs"]
 mod date_trunc_timezone;
+
+#[path = "pg18_semantics/finite_extraction.rs"]
+mod finite_extraction;

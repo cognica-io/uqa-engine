@@ -66,7 +66,7 @@ pub(super) fn relation_type_rows(catalog: &CatalogReadView) -> Vec<ResultRow> {
     rows
 }
 
-fn append_rows(
+pub(super) fn append_rows(
     rows: &mut Vec<ResultRow>,
     catalog: &CatalogReadView,
     identity: &RelationIdentity,

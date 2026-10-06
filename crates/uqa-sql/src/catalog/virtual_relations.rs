@@ -64,6 +64,7 @@ virtual_relations! {
     PgRange => ("pg_catalog", "pg_range", 3541),
     PgEnum => ("pg_catalog", "pg_enum", 3501),
     PgProc => ("pg_catalog", "pg_proc", 1255),
+    PgLanguage => ("pg_catalog", "pg_language", 2612),
     PgDatabase => ("pg_catalog", "pg_database", 1262),
     PgAuthid => ("pg_catalog", "pg_authid", 1260),
     PgAuthMembers => ("pg_catalog", "pg_auth_members", 1261),

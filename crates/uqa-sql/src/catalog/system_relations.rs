@@ -73,7 +73,6 @@ system_relations! {
     PgTablespace => ("pg_catalog", "pg_tablespace", 1213, "table"),
     PgCollation => ("pg_catalog", "pg_collation", 3456, "table"),
     PgSequence => ("pg_catalog", "pg_sequence", 2224, "table"),
-    PgLanguage => ("pg_catalog", "pg_language", 2612, "table"),
     InformationEnabledRoles => ("information_schema", "enabled_roles", 13410, "view"),
 }
 
@@ -138,7 +137,7 @@ impl SystemRelation {
         use SystemRelation::Projected as P;
         use VirtualRelation::{
             InformationColumnPrivileges, PgAttrdef, PgAttribute, PgClass, PgConstraint, PgIndex,
-            PgNamespace, PgProc, PgRewrite, PgTrigger, PgType,
+            PgLanguage, PgNamespace, PgProc, PgRewrite, PgTrigger, PgType,
         };
         match self {
             P(VirtualRelation::InformationSchemata) => {
@@ -186,7 +185,7 @@ impl SystemRelation {
             P(VirtualRelation::InformationRoutines) => &[
                 P(PgNamespace),
                 P(PgProc),
-                Self::PgLanguage,
+                P(PgLanguage),
                 P(PgType),
                 P(PgNamespace),
             ],

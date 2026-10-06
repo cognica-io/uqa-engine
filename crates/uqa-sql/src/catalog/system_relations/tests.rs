@@ -53,6 +53,46 @@ fn cursor_catalog_has_postgresql_identity_and_typed_declaration_columns() {
     );
 }
 
+#[test]
+fn language_catalog_preserves_identity_and_postgresql_attribute_types() {
+    use crate::catalog::type_metadata::pg_type_oid;
+
+    let relation = VirtualRelation::PgLanguage;
+    assert_eq!(relation.oid(), 2612);
+    assert_eq!(relation.kind(), "table");
+    assert!(relation.accepts_row_lock());
+    assert_eq!(
+        SystemRelation::from_qualified_name("pg_catalog.pg_language"),
+        Some(SystemRelation::Projected(relation))
+    );
+    let columns = relation.schema();
+    assert_eq!(
+        columns
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "oid",
+            "lanname",
+            "lanowner",
+            "lanispl",
+            "lanpltrusted",
+            "lanplcallfoid",
+            "laninline",
+            "lanvalidator",
+            "lanacl"
+        ]
+    );
+    assert_eq!(
+        columns
+            .iter()
+            .map(|(_, ty)| pg_type_oid(ty))
+            .collect::<Vec<_>>(),
+        [26, 19, 26, 16, 16, 26, 26, 26, 1034]
+    );
+    assert!(!SystemRelation::Projected(relation).tracks_serializable_reads());
+}
+
 // PostgreSQL 18.4 rewrite range tables, traversed in LockViewRecurse order.
 #[test]
 fn system_view_sources_preserve_postgresql_reference_order() {

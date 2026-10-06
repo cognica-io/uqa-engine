@@ -14,6 +14,7 @@ use uqa_sql::catalog::dependencies::{
     LANGUAGE_CLASS, NAMESPACE_CLASS, PROCEDURE_CLASS, RELATION_CLASS, REWRITE_CLASS, ROLE_CLASS,
     ROLE_MEMBERSHIP_CLASS, TRIGGER_CLASS, TYPE_CLASS,
 };
+use uqa_sql::catalog::languages::language_name;
 use uqa_sql::SQLError;
 
 /// Catalogs whose objects `getObjectDescription` can name and that hold no objects in this catalog.
@@ -185,15 +186,4 @@ fn reg_output(
     oid: u32,
 ) -> Result<Option<String>, SQLError> {
     super::super::resolve_regtype_output(context, ty, i64::from(oid)).map_err(SQLError::Internal)
-}
-
-/// The languages `initdb` installs.
-const fn language_name(oid: u32) -> Option<&'static str> {
-    match oid {
-        12 => Some("internal"),
-        13 => Some("c"),
-        14 => Some("sql"),
-        super::objects::PLPGSQL_LANGUAGE => Some("plpgsql"),
-        _ => None,
-    }
 }

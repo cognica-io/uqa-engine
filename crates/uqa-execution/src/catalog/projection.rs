@@ -55,7 +55,7 @@ pub fn build_info_schema_rows(
             build_info_column_privileges(context, catalog, resolution, true)?
         }
         VirtualRelation::InformationViews => build_info_views(context, catalog, resolution)?,
-        VirtualRelation::InformationRoutines => build_info_routines(catalog)?,
+        VirtualRelation::InformationRoutines => build_info_routines(catalog, resolution)?,
         VirtualRelation::InformationSequences => build_info_sequences(catalog, session)?,
         VirtualRelation::InformationTableConstraints => {
             build_info_table_constraints(catalog, resolution)?
@@ -83,6 +83,7 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgEnum => build_pg_enum(catalog),
         VirtualRelation::PgProc => build_pg_proc(catalog, resolution)?,
+        VirtualRelation::PgLanguage => build_pg_language(),
         VirtualRelation::PgDatabase => build_pg_database(catalog)?,
         VirtualRelation::PgAuthid => build_pg_authid(catalog),
         VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog)?,
@@ -330,8 +331,8 @@ pub fn snapshot_table_relation_oid(
 use pg_catalog::{
     build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_authid,
     build_pg_constraint, build_pg_database, build_pg_enum, build_pg_index, build_pg_indexes,
-    build_pg_matviews, build_pg_range, build_pg_roles, build_pg_sequences, build_pg_tables,
-    build_pg_type, build_pg_user, build_pg_views,
+    build_pg_language, build_pg_matviews, build_pg_range, build_pg_roles, build_pg_sequences,
+    build_pg_tables, build_pg_type, build_pg_user, build_pg_views,
 };
 use pg_namespace::build_pg_namespace;
 pub use pg_namespace::{pg_is_other_temp_schema_value, pg_my_temp_schema_value};
