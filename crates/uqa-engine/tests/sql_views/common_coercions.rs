@@ -85,6 +85,19 @@ fn correlated_view_columns_match_postgresql_and_survive_reopen(#[case] provider:
     );
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn array_element_inputs_match_postgresql_and_survive_reopen(#[case] provider: usize) {
+    verify_coercions(
+        provider,
+        include_str!("../../../../tests/parity/pg18/array_element_input_oracle.expected.json"),
+        &["reopen_stored"],
+    );
+}
+
 fn verify_coercions(provider: usize, transcript: &str, replay_ids: &[&str]) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("common-coercions.db");

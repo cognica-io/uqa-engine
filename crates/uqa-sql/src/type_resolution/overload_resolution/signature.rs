@@ -183,11 +183,17 @@ pub(in crate::type_resolution) fn match_signature_with_control<
                 "any" | "anyelement" | "anycompatible" => Some(true),
                 "anyarray" => Some(matches!(
                     base_type(actual_type),
-                    ColumnType::Array(_) | ColumnType::AnyArray
+                    ColumnType::Array(_)
+                        | ColumnType::AnyArray
+                        | ColumnType::Int2Vector
+                        | ColumnType::OidVector
                 )),
                 "anynonarray" => Some(!matches!(
                     base_type(actual_type),
-                    ColumnType::Array(_) | ColumnType::AnyArray
+                    ColumnType::Array(_)
+                        | ColumnType::AnyArray
+                        | ColumnType::Int2Vector
+                        | ColumnType::OidVector
                 )),
                 "anyenum" => Some(matches!(base_type(actual_type), ColumnType::Enum(_))),
                 _ => None,

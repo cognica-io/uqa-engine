@@ -71,7 +71,13 @@ pub(super) fn base_type(mut ty: &ColumnType) -> &ColumnType {
 
 pub(crate) fn array_element_type(ty: &ColumnType) -> Option<&ColumnType> {
     match base_type(ty) {
-        ColumnType::Array(element) => Some(element),
+        ColumnType::Array(element) => {
+            let mut element = element.as_ref();
+            while let ColumnType::Array(inner) = element {
+                element = inner;
+            }
+            Some(element)
+        }
         ColumnType::Int2Vector => Some(&ColumnType::SmallInteger),
         ColumnType::OidVector => Some(&ColumnType::Oid),
         _ => None,

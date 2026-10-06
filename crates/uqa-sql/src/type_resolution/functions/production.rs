@@ -609,9 +609,9 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                 // The operator compares with the array's element type; an `unknown` array literal stays unknown until the operator selects its type.
                 let element = match effective(1).map(base_type) {
                     None => None,
-                    Some(ColumnType::Array(element)) => Some(element.as_ref()),
-                    Some(ColumnType::Int2Vector) => Some(&ColumnType::SmallInteger),
-                    Some(ColumnType::OidVector) => Some(&ColumnType::Oid),
+                    Some(ty) if super::super::array_element_type(ty).is_some() => {
+                        super::super::array_element_type(ty)
+                    }
                     Some(_) => {
                         return Err(SQLError::Routine {
                             sqlstate: "42809".into(),
