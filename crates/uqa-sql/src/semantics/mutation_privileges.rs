@@ -223,3 +223,39 @@ pub fn inherit_command_privilege_subject(
     target_subject.get_or_insert(subject);
     Ok(())
 }
+
+/// Authorize a DELETE target and the columns read by its predicate and RETURNING.
+pub fn ensure_delete_target_privileges<'a>(
+    catalog: &dyn MutationPrivilegeCatalog,
+    statement: &'a crate::plan::DeletePlan,
+) -> Result<Vec<&'a ScalarExpr>, SQLError> {
+    let privilege_subject = statement
+        .target_privilege_subject
+        .clone()
+        .unwrap_or_else(|| catalog.current_role());
+    catalog.ensure_table_privilege_for(
+        &statement.table,
+        &privilege_subject,
+        TableAclPrivilege::Delete,
+    )?;
+    let privilege_expressions = statement
+        .predicate
+        .iter()
+        .chain(
+            statement
+                .returning
+                .iter()
+                .map(|projection| &projection.expr),
+        )
+        .collect::<Vec<_>>();
+    catalog.ensure_target_select(TargetSelectPrivilegeRequest {
+        table: &statement.table,
+        privilege_subject: statement.target_privilege_subject.as_ref(),
+        target_qualifier: &statement.target_qualifier,
+        returning_aliases: &statement.returning_aliases,
+        expressions: &privilege_expressions,
+        subqueries: &statement.subqueries,
+        required_columns: &[],
+    })?;
+    Ok(privilege_expressions)
+}

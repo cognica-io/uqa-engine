@@ -101,6 +101,13 @@ impl EngineExpressionEvaluator {
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn require_builtin_execute(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+    ) -> Result<(), SQLError> {
+        uqa_sql::expr::EngineHook::require_builtin_execute(self.engine, binding)
+    }
+
     fn transaction_timestamp_micros(&self) -> Option<i64> {
         Some(self.engine.transaction_timestamp_micros())
     }

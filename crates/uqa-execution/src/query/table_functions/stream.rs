@@ -28,6 +28,9 @@ pub fn build_table_function_row_stream_with_row(
     call: TableFunctionCall<'_>,
     row: Option<&crate::OwnedPhysicalRow>,
 ) -> Result<TableFunctionRows, SQLError> {
+    if let Some(binding) = call.binding {
+        context.eval_hook.require_builtin_execute(binding)?;
+    }
     let ordinality = call.ordinality;
     let mut output = build_table_function_value_row_stream_with_row(context, call, row)?;
     let cancellation = context.runtime.cancellation_token();

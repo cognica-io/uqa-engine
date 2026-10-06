@@ -12,6 +12,16 @@ use uqa_sql::SQLError;
 use super::Engine;
 
 impl uqa_sql::expr::EngineHook for Engine {
+    fn require_builtin_execute(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+    ) -> Result<(), SQLError> {
+        use uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution;
+        uqa_execution::catalog::security::builtin_routines::execution::BuiltinRoutinePermissions::capture(
+            &self.catalog_execution(),
+        ).require_execute(binding)
+    }
+
     fn transaction_timestamp_micros(&self) -> Option<i64> {
         Some(Engine::transaction_timestamp_micros(self))
     }

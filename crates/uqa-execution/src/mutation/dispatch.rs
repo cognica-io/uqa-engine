@@ -42,6 +42,7 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
             uqa_sql::ast::RuleEvent::Insert,
         )? {
             let _ = view_privileges::ensure_insert(rewrite.authorization, stmt)?;
+            super::routine_calls::insert(context, stmt, params, inherited_ctes)?;
             return super::views::commands::run_view_insert_inner(
                 context,
                 planning.prune_source_outputs,
@@ -95,6 +96,7 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
             uqa_sql::ast::RuleEvent::Update,
         )? {
             let _ = view_privileges::ensure_update(rewrite.authorization, stmt)?;
+            super::routine_calls::update(context, stmt, params, inherited_ctes)?;
             return super::views::commands::run_view_update_inner(
                 context,
                 prune,
@@ -142,6 +144,7 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
             uqa_sql::ast::RuleEvent::Delete,
         )? {
             let _ = view_privileges::ensure_delete(rewrite.authorization, stmt)?;
+            super::routine_calls::delete(context, stmt, params, inherited_ctes)?;
             return super::views::commands::run_view_delete_inner(
                 context,
                 prune,
@@ -197,6 +200,7 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
             }
             view_rewrite::MergeViewTargetPath::ViewTriggers => {
                 let _ = view_privileges::ensure_merge(rewrite.authorization, stmt)?;
+                super::routine_calls::merge(context, stmt, params, inherited_ctes)?;
                 super::merge::views::run_view_merge(context, prune, stmt, params, inherited_ctes)
             }
         };

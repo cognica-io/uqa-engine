@@ -266,6 +266,9 @@ pub fn eval_bound_builtin_function_call(
     if let Some(error) = &binding.resolution_error {
         return Err(error.sql_error());
     }
+    if let Some(hook) = ctx.engine {
+        hook.require_builtin_execute(binding)?;
+    }
     let Some(dispatch) = binding.dispatch else {
         let value = eval_builtin_function_call(&binding.name, call_args, ctx)?;
         // Fixed signatures retain widths that the shared integer and floating carriers cannot enforce on their own.

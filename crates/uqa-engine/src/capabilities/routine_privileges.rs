@@ -30,6 +30,9 @@ impl RoutinePrivilegeNotices for Engine {
 impl Engine {
     pub(crate) fn routine_privilege_context(&self) -> RoutinePrivilegeContext<'_> {
         RoutinePrivilegeContext {
+            snapshot: self.catalog_read_view(),
+            builtin_security: self,
+            storage: self.storage.catalog.as_deref(),
             locks: self,
             schemas: self,
             catalog: self.routine_mutation_context(),
@@ -37,5 +40,24 @@ impl Engine {
             role_names: self,
             notices: self,
         }
+    }
+}
+
+impl uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurityCatalog for Engine {
+    fn builtin_routine_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurityRead<'_> {
+        Box::new(self.durable.builtin_routine_security.read())
+    }
+}
+impl uqa_execution::catalog::security::builtin_routines::BuiltinRoutineSecurityState for Engine {
+    fn builtin_routine_securities_write(
+        &self,
+    ) -> Box<
+        dyn std::ops::DerefMut<
+                Target = uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
+            > + '_,
+    > {
+        Box::new(self.durable.builtin_routine_security.write())
     }
 }

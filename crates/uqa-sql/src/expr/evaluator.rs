@@ -117,6 +117,9 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 if let Some(error) = &binding.resolution_error {
                     return Err(error.sql_error());
                 }
+                if let Some(hook) = ctx.engine {
+                    hook.require_builtin_execute(binding)?;
+                }
                 if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
                     binding.dispatch
                 {

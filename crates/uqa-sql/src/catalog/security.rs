@@ -96,6 +96,7 @@ pub mod table_inquiry;
 
 pub mod view_ownership;
 
+pub mod builtin_routines;
 pub mod grants;
 pub mod object_acl;
 pub mod system_relations;

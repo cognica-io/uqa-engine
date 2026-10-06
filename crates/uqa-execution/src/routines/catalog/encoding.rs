@@ -34,7 +34,7 @@ pub(super) fn encode(definitions: Definitions) -> StorageBackendResult<String> {
         validate_object_identity(definition)?;
     }
     Ok(serde_json::to_string(&RoutineCatalog {
-        routine_catalog_format: 2,
+        routine_catalog_format: 3,
         definitions,
     })?)
 }
@@ -64,7 +64,7 @@ pub(crate) fn decode(
     let (format, mut definitions) = if value.get("routine_catalog_format").is_some() {
         let catalog: RoutineCatalog<BTreeMap<String, Vec<serde_json::Value>>> =
             serde_json::from_value(value)?;
-        if !matches!(catalog.routine_catalog_format, 1 | 2) {
+        if !matches!(catalog.routine_catalog_format, 1..=3) {
             return Err(StorageBackendError::Other(format!(
                 "unknown routine catalog format {}",
                 catalog.routine_catalog_format
@@ -74,13 +74,13 @@ pub(crate) fn decode(
     } else {
         (0, serde_json::from_value(value)?)
     };
-    if format != 2 && !allows_migration {
+    if format != 3 && !allows_migration {
         return Err(StorageBackendError::Other(
             "routine authority requires initial catalog migration".into(),
         ));
     }
     for definition in definitions.values_mut().flatten() {
-        if format == 2 {
+        if format >= 2 {
             if definition.get("owner").is_none() || definition.get("execute_acl").is_none() {
                 return Err(StorageBackendError::Other(
                     "current routine authority fields are missing".into(),
@@ -103,11 +103,11 @@ pub(crate) fn decode(
     for definition in definitions.values().flatten() {
         validate_routine_authority(definition, roles)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        if format == 2 {
+        if format >= 2 {
             validate_object_identity(definition)?;
         }
     }
-    Ok((definitions, format != 2))
+    Ok((definitions, format != 3))
 }
 
 fn bind_legacy_definition(

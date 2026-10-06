@@ -14,6 +14,7 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
     CatalogReadView::new(CatalogReadSnapshot {
         tables: BTreeMap::default(),
         definitions: CatalogDefinitionSnapshot {
+            builtin_routine_security: Arc::default(),
             foreign_servers: Arc::default(),
             sequence_persistence: Arc::default(),
             foreign_tables: Arc::default(),

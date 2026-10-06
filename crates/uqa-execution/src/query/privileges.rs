@@ -5,6 +5,8 @@
 //
 
 //! Capture authorization analysis inputs from the statement scope.
+pub mod routine_calls;
+
 use super::CteScope;
 use std::collections::BTreeSet;
 use uqa_sql::catalog::roles::RoleReference;
@@ -31,7 +33,7 @@ impl<S: Clone> PrivilegeCteCatalog for CteScope<S> {
         self.privilege_subject()
     }
 }
-fn with_scope<S: Clone, T>(
+pub(crate) fn with_scope<S: Clone, T>(
     ctes: &CteScope<S>,
     apply: impl FnOnce(&PrivilegeScope<'_>) -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {

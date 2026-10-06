@@ -11,6 +11,7 @@ use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::roles::{RoleIdentity, RoleReference};
 
 pub mod binding;
+pub mod grants;
 use crate::{
     ast::{
         AlterRoutineOwnerStmt, AlterRoutineStmt, CreateFunction, GrantRoutineStmt, RoutineAclEntry,
@@ -110,7 +111,7 @@ pub fn bound_routine_owner(definition: &CreateFunction) -> Result<RoleIdentity, 
 }
 
 pub fn validate_routine_acl_roles(
-    stmt: &GrantRoutineStmt,
+    _stmt: &GrantRoutineStmt,
     grantees: &[AclGrantee],
     requested_grantor: Option<&str>,
     current_user: &(impl RoleSubject + ?Sized),
@@ -127,27 +128,7 @@ pub fn validate_routine_acl_roles(
             });
         }
     }
-    if stmt.is_grant && stmt.grant_option && grantees.iter().any(AclGrantee::is_public) {
-        return Err(SQLError::Routine {
-            sqlstate: "0LP01".into(),
-            message: "grant options can only be granted to roles".into(),
-        });
-    }
-    if let Some(requested_grantor) = requested_grantor {
-        if !roles.contains_key(requested_grantor) {
-            return Err(SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("role \"{requested_grantor}\" does not exist"),
-            });
-        }
-        if current_user.role_name(roles) != Some(requested_grantor) {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "grantor must be current user".into(),
-            });
-        }
-    }
-    Ok(())
+    grants::validate_grantor(requested_grantor, current_user, roles)
 }
 
 pub fn select_routine_acl_grantor(
@@ -156,13 +137,32 @@ pub fn select_routine_acl_grantor(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Result<Option<RoleIdentity>, SQLError> {
-    Ok(object_acl::select_grantor(
-        bound_routine_owner(definition)?,
+    let owner = bound_routine_owner(definition)?;
+    let grantor = object_acl::select_grantor(
+        owner,
         definition.execute_acl.as_deref(),
         current_user,
         roles,
         memberships,
-    ))
+    );
+    if grantor.is_none()
+        && !routine_privilege_allowed(
+            &owner,
+            definition.execute_acl.as_deref(),
+            false,
+            false,
+            |role| crate::catalog::roles::role_inherits(roles, memberships, current_user, role),
+        )
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: format!(
+                "permission denied for function {}",
+                routine_local_name(&definition.name)?
+            ),
+        });
+    }
+    Ok(grantor)
 }
 
 pub fn grant_routine_acl(

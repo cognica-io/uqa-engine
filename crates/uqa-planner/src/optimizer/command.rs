@@ -50,9 +50,9 @@ pub(super) fn optimize_command(
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            for subquery in &mut plan.subqueries {
-                optimize_query(subquery, config, aggregates)?;
-            }
+            let expressions = plan.expressions();
+            let live = super::subqueries::live_slots(expressions)?;
+            super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Update(plan) => {
             for cte in &mut plan.ctes {
@@ -69,9 +69,12 @@ pub(super) fn optimize_command(
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            for subquery in &mut plan.subqueries {
-                optimize_query(subquery, config, aggregates)?;
+            let mut expressions = plan.expressions();
+            if let Some(source) = &plan.source {
+                source.push_expressions(&mut expressions);
             }
+            let live = super::subqueries::live_slots(expressions)?;
+            super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Delete(plan) => {
             for cte in &mut plan.ctes {
@@ -87,9 +90,12 @@ pub(super) fn optimize_command(
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            for subquery in &mut plan.subqueries {
-                optimize_query(subquery, config, aggregates)?;
+            let mut expressions = plan.expressions();
+            if let Some(source) = &plan.source {
+                source.push_expressions(&mut expressions);
             }
+            let live = super::subqueries::live_slots(expressions)?;
+            super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Merge(plan) => {
             for cte in &mut plan.ctes {
@@ -134,9 +140,10 @@ pub(super) fn optimize_command(
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            for subquery in &mut plan.subqueries {
-                optimize_query(subquery, config, aggregates)?;
-            }
+            let mut expressions = plan.expressions();
+            plan.source.push_expressions(&mut expressions);
+            let live = super::subqueries::live_slots(expressions)?;
+            super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::DeclareCursor { query, .. } => {
             optimize_query(query, config, aggregates)?;
@@ -226,8 +233,7 @@ fn optimize_expression_plan(
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
     optimize_scalar_slot(&mut expression.scalar, config)?;
-    for subquery in &mut expression.subqueries {
-        optimize_query(subquery, config, aggregates)?;
-    }
+    let live = super::subqueries::live_slots([&expression.scalar])?;
+    super::subqueries::optimize_live(&mut expression.subqueries, &live, config, aggregates)?;
     Ok(())
 }

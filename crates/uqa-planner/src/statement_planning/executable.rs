@@ -17,6 +17,13 @@ use uqa_sql::{
 pub trait StatementOptimizationContexts {
     fn statistics(&self) -> StatementStatisticsContext<'_>;
     fn rule_inputs(&self) -> RuleInputPlanningContext<'_>;
+    fn builtin_permissions(
+        &self,
+    ) -> Option<
+        std::sync::Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
+    > {
+        None
+    }
 }
 pub struct StatementPlanningContext<'a> {
     pub analysis: StatementAnalysisContext<'a>,
@@ -80,11 +87,12 @@ pub fn optimize_plan(
     context: &StatementPlanningContext<'_>,
     plan: UnifiedPlan,
 ) -> Result<UnifiedPlan, SQLError> {
-    super::optimize_plan(
+    super::optimize_plan_authorized(
         context.optimization.statistics(),
         &context.optimization.rule_inputs(),
         context.aggregates,
         context.constant_evaluator,
+        context.optimization.builtin_permissions(),
         plan,
     )
 }

@@ -15,7 +15,7 @@ pub(super) fn remove_routine_identity_fields(value: &mut serde_json::Value) -> u
 
 fn downgrade_bootstrap_authority(value: &mut serde_json::Value) {
     use uqa_core::{catalog_acl::AclGrantee, catalog_role::RoleIdentity};
-    assert_eq!(value["routine_catalog_format"], 2);
+    assert_eq!(value["routine_catalog_format"], 3);
     value["routine_catalog_format"] = 1.into();
     for overloads in value["definitions"].as_object_mut().unwrap().values_mut() {
         for definition in overloads.as_array_mut().unwrap() {

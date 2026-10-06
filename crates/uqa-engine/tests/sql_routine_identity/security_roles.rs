@@ -6,10 +6,14 @@
 
 use super::*;
 
+#[path = "security_roles/builtin_grants.rs"]
+mod builtin_grants;
 #[path = "security_roles/membership.rs"]
 mod membership;
 #[path = "security_roles/privilege_inquiry.rs"]
 mod privilege_inquiry;
+#[path = "security_roles/schema_grants.rs"]
+mod schema_grants;
 #[path = "security_roles/schema_usage.rs"]
 mod schema_usage;
 

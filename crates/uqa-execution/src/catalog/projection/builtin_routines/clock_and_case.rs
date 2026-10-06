@@ -37,6 +37,7 @@ pub const ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
     routine(274, "timeofday", "v", 25, &[], "timeofday"),
     routine(870, "lower", "i", 25, &[25], "lower"),
     routine(871, "upper", "i", 25, &[25], "upper"),
+    routine(2087, "replace", "i", 25, &[25, 25, 25], "replace_text"),
     routine(1299, "now", "s", 1184, &[], "now"),
     routine(2647, "transaction_timestamp", "s", 1184, &[], "now"),
     routine(

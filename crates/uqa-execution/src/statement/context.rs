@@ -97,6 +97,10 @@ pub(super) fn transaction_clock_scope<S: Clone + 'static>(
 
 pub trait StatementMutationInputs<S: Clone + 'static> {
     fn mutation_context(&self) -> crate::mutation::entry::MutationEntryContext<'_, S>;
+    /// Borrow read services for expression initialization without entering a writable command.
+    fn mutation_initialization_context(
+        &self,
+    ) -> crate::mutation::statement::context::MutationStatementContext<'_, S>;
 }
 
 #[derive(Clone)]

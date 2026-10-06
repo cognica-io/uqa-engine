@@ -45,6 +45,13 @@ pub trait NamespaceCatalogChanges {
     }
     fn catalog_registry_changed(&self);
 
+    fn catalog_registry_changed_kind(
+        &self,
+        _change: crate::statement::prepared::invalidation::CatalogRegistryChange,
+    ) {
+        self.catalog_registry_changed();
+    }
+
     fn namespace_catalog_changed(&self) {
         self.catalog_registry_changed();
         self.prepared_catalog_changed(

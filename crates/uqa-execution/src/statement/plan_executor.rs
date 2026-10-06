@@ -244,6 +244,26 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 body,
             )?;
         }
+        if let UnifiedPlan::Query(query) = body {
+            let ctes = self
+                .context
+                .queries
+                .statement_scope(self.privilege_subject.as_ref());
+            crate::query::privileges::routine_calls::query(
+                &self.context.queries.query_context().source,
+                query,
+                self.params,
+                &ctes,
+            )?;
+        }
+        if let UnifiedPlan::Command(command) = body {
+            crate::mutation::routine_calls::explain(
+                &self.context.mutations.mutation_initialization_context(),
+                self.context.mutations.mutation_context().targets,
+                command,
+                self.params,
+            )?;
+        }
         let physical = self
             .context
             .physical_explain

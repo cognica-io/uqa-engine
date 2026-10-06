@@ -32,6 +32,11 @@ pub use regtype::{
 /// accepted here: lowering assigns them physical query-plan slots executed by
 /// `uqa-execution::ScalarSubqueryRunner`.
 pub trait EngineHook {
+    /// Enforce EXECUTE on a selected built-in at an execution boundary. Catalog-free embedders have no mutable routine ACLs.
+    fn require_builtin_execute(&self, _binding: &crate::ast::FunctionBinding) -> Result<()> {
+        Ok(())
+    }
+
     /// Start of the current SQL transaction, in Unix microseconds.
     fn transaction_timestamp_micros(&self) -> Option<i64> {
         None

@@ -161,6 +161,9 @@ pub struct QueryBlockPlan {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<crate::ast::WindowDefinition<crate::ir::ScalarWindowSpec>>,
     pub projections: Vec<ProjectionPlan>,
+    /// Analyzed column reads retained when unused outputs are removed. These names authorize access but never evaluate the discarded values.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub privilege_columns: std::collections::BTreeSet<crate::ColumnIdentity>,
     pub from: Option<SourcePlan>,
     pub r#where: Option<ScalarExpr>,
     pub compute: ComputePlan,

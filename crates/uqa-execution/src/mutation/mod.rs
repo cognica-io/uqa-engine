@@ -61,3 +61,5 @@ pub mod delete;
 pub mod dispatch;
 
 pub mod entry;
+
+pub mod routine_calls;
