@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Support mutable EXECUTE privileges for builtin catalog routines, including schema-wide targets, aggregate/window identities, grant dependencies, transaction rollback and persistent reopening. Retain analyzed function identities through constant planning, preserve column authorization when pruning unused outputs, and check surviving calls before row production or argument side effects.
+
 - Implement PostgreSQL domain constraint addition, removal and validation, including NOT VALID checks, dependent stored values, catalog identities and transactional restoration across all storage providers.
 - Support PostgreSQL 18 configuration definitions, custom parameter placeholders, `set_config`, `SHOW ALL`, `client_min_messages` and startup values restored by `RESET`.
 - Implement `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `idle_session_timeout`, `transaction_timeout`, and the `pg_sleep` functions. Report the cancellation reason and preserve permanent session termination through `Engine::session_termination`.
