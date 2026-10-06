@@ -39,6 +39,10 @@ fn parser_settings_match_postgresql_and_survive_reopen(#[case] provider: usize) 
     ))
     .unwrap();
     crate::pg18_oracle::verify(&engine, &reference.to_string());
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/dynamic_parser_settings_oracle.expected.json"),
+    );
     if provider == 0 {
         return;
     }

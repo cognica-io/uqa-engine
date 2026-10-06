@@ -83,6 +83,9 @@ impl RoutineExpressions for Engine {
     }
 }
 impl RoutineStatements for Engine {
+    fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
+        Engine::parser_settings(self)
+    }
     fn execute_body_statement(
         &self,
         plan: UnifiedPlan,

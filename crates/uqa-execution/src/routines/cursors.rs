@@ -52,7 +52,7 @@ impl Interpreter<'_> {
             } => {
                 let (text, params) = self.eval_dynamic_sql(query, params)?;
                 (
-                    compile_cursor_statement(&text)?,
+                    self.compile_dynamic_cursor(&text)?,
                     params,
                     *scroll,
                     text.into(),
@@ -150,7 +150,7 @@ impl Interpreter<'_> {
         body: &[PLpgSQLStmt],
     ) -> Result<Flow, SQLError> {
         let (text, params) = self.eval_dynamic_sql(query, params)?;
-        let query = compile_cursor_statement(&text)?;
+        let query = self.compile_dynamic_cursor(&text)?;
         let plan = self.lower_cursor_plan(query)?;
         let portal_name = self.open_internal_for_portal(&params, &plan, &text)?;
         self.exec_pinned_for_portal(&portal_name, label, target, body, true)
@@ -198,6 +198,17 @@ impl Interpreter<'_> {
             .portals
             .open(params, &portal_name, Some(false), plan, source_sql)?;
         Ok(portal_name)
+    }
+
+    fn compile_dynamic_cursor(&self, text: &str) -> Result<Statement, SQLError> {
+        let (result, parser) =
+            uqa_sql::parser::with_settings(self.services.statements.parser_settings(), || {
+                compile_cursor_statement(text)
+            });
+        for notice in parser.notices.iter() {
+            self.services.runtime.push_notice(notice.clone());
+        }
+        result
     }
 
     fn exec_pinned_for_portal(

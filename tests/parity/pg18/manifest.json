@@ -256,9 +256,9 @@
     },
     {
       "id": "parser.session-scanner-diagnostics",
-      "postgresql_reference": "PostgreSQL 18.4 independently captured message values, command tags, original SQLSTATE/DETAIL/HINT and notices in tests/parity/pg18/parser_settings_oracle.expected.json; scoped scanner and ErrorData transport from the exact parser_chain revisions",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured message values, command tags, original SQLSTATE/DETAIL/HINT and notices in tests/parity/pg18/parser_settings_oracle.expected.json and dynamic_parser_settings_oracle.expected.json; scoped scanner and ErrorData transport from the exact parser_chain revisions",
       "uqa_test": "cargo test -p uqa-sql --lib parser::tests; cargo test -p uqa-engine --test integration parser_settings; cargo test -p uqa-engine --lib queries::scope",
-      "supported_version": "Unreleased: complete-message standard_conforming_strings, backslash_quote and escape_string_warning boundaries, statement/cursor cache notice replay through the current filter, SET LOCAL restoration, retained PREPARE inputs, routine-local lexical settings, and reanalysis of live ordinary input conversions. Forty-two independent messages pass all four storage providers, with nine additional observations after reopening the three durable providers.",
+      "supported_version": "Unreleased: complete-message standard_conforming_strings, backslash_quote and escape_string_warning boundaries, statement/cursor cache notice replay through the current filter, SET LOCAL restoration, retained PREPARE inputs, routine-local lexical settings and dynamic EXECUTE/cursor parsing, and reanalysis of live ordinary input conversions. Forty-two core and eleven dynamic SQL messages pass all four storage providers, with nine additional observations after reopening the three durable providers.",
       "status": "verified",
       "open_issue": null
     },
