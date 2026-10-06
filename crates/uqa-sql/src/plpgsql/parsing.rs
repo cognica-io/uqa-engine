@@ -41,7 +41,7 @@ pub fn parse_function_with_catalog(
         catalog_type_spelling(catalog, type_name)
     })?;
     Ok(with_compile_options(
-        lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(&text, catalog)?)?,
+        lower_plpgsql_json(&crate::parser::parse_plpgsql(&text, Some(catalog))?)?,
         body,
     ))
 }
@@ -77,9 +77,9 @@ pub fn parse_do_block_with_catalog(
 ) -> Result<PLpgSQLFunction> {
     let tag = fresh_dollar_tag(body);
     Ok(with_compile_options(
-        lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(
+        lower_plpgsql_json(&crate::parser::parse_plpgsql(
             &format!("DO {tag}{body}{tag} LANGUAGE plpgsql;"),
-            catalog,
+            Some(catalog),
         )?)?,
         body,
     ))
@@ -188,10 +188,14 @@ pub(super) fn fresh_dollar_tag(body: &str) -> String {
 }
 
 pub(super) fn parse_plpgsql_text(text: &str) -> Result<PLpgSQLFunction> {
-    lower_plpgsql_json(&pg_query::parse_plpgsql(text)?)
+    lower_plpgsql_json(&crate::parser::parse_plpgsql(text, None)?)
 }
 
 fn lower_plpgsql_json(json: &JSONValue) -> Result<PLpgSQLFunction> {
+    crate::parser::without_notices(|| lower_parsed_plpgsql(json))
+}
+
+fn lower_parsed_plpgsql(json: &JSONValue) -> Result<PLpgSQLFunction> {
     let functions = json
         .as_array()
         .ok_or_else(|| SQLError::Internal("PL/pgSQL parse returned no function list".into()))?;

@@ -24,7 +24,9 @@ pub fn compile_do_block(
         });
     }
     let catalog = parsers.plpgsql_catalog()?;
-    let mut parsed = crate::plpgsql::parse_do_block_with_catalog(body, &catalog)?;
+    let mut parsed = super::compilation::with_parser_context(parsers, || {
+        crate::plpgsql::parse_do_block_with_catalog(body, &catalog)
+    })?;
     crate::routines::declaration::resolve_plpgsql_datum_types(types, &mut parsed)?;
     let def = CreateFunction {
         object_id: None,

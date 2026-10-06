@@ -39,6 +39,7 @@ pub mod fts_query;
 pub mod ir;
 pub mod notice;
 pub mod params;
+pub mod parser;
 pub mod plan;
 pub mod plpgsql;
 pub mod registry;
