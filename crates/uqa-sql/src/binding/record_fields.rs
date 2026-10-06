@@ -80,14 +80,7 @@ impl SchemaScope {
                     ) {
                         Ok(None)
                     } else {
-                        self.bind_expression_type(
-                            routines,
-                            field,
-                            schema,
-                            subqueries,
-                            params,
-                            Some(schema),
-                        )
+                        self.bind_expression_type(routines, field, schema, subqueries, params)
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()
@@ -122,14 +115,8 @@ impl SchemaScope {
                 Ok(output.record_fields(0).cloned())
             }
             _ => {
-                let ty = self.bind_expression_type(
-                    routines,
-                    expression,
-                    schema,
-                    subqueries,
-                    params,
-                    Some(schema),
-                )?;
+                let ty =
+                    self.bind_expression_type(routines, expression, schema, subqueries, params)?;
                 let Some(ColumnType::Composite(reference)) = ty else {
                     return Ok(None);
                 };

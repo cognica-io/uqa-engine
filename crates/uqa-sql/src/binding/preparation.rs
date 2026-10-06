@@ -366,7 +366,6 @@ impl Preparation<'_> {
             input,
             subqueries,
             &self.parameters.values(),
-            Some(input),
         )
     }
 

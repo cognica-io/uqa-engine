@@ -36,17 +36,9 @@ impl SchemaScope {
             joined,
             &merge.subqueries,
             params,
-            None,
         )?;
         if let Some(predicate) = &merge.target_predicate {
-            self.bind_expression_type(
-                routines,
-                predicate,
-                joined,
-                &merge.subqueries,
-                params,
-                None,
-            )?;
+            self.bind_expression_type(routines, predicate, joined, &merge.subqueries, params)?;
         }
         for clause in &merge.when_clauses {
             let input = match clause {
@@ -92,14 +84,7 @@ impl SchemaScope {
                 | MergeWhenPlan::NothingNotMatchedBySource { condition } => (condition, Vec::new()),
             };
             for expression in condition.iter().chain(values) {
-                self.bind_expression_type(
-                    routines,
-                    expression,
-                    input,
-                    &merge.subqueries,
-                    params,
-                    None,
-                )?;
+                self.bind_expression_type(routines, expression, input, &merge.subqueries, params)?;
             }
         }
         Ok(())

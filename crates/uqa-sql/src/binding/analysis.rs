@@ -291,14 +291,8 @@ impl SchemaScope {
     ) -> Result<(), SQLError> {
         let schema = self.with_stored_outer_internal_aliases(schema);
         let schema = &schema;
-        let resolver = self.query_function_type_resolver(
-            engine,
-            expression,
-            schema,
-            subqueries,
-            params,
-            Some(schema),
-        )?;
+        let resolver =
+            self.query_function_type_resolver(engine, expression, schema, subqueries, params)?;
         Self::validate_expression_references_with_resolver(
             engine, expression, schema, fallback, params, &resolver,
         )
@@ -315,14 +309,8 @@ impl SchemaScope {
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
         let schema = self.with_stored_outer_internal_aliases(schema);
-        let resolver = self.query_function_type_resolver(
-            engine,
-            condition,
-            &schema,
-            subqueries,
-            params,
-            Some(&schema),
-        )?;
+        let resolver =
+            self.query_function_type_resolver(engine, condition, &schema, subqueries, params)?;
         references::require_boolean_condition(condition, construct, &schema, params, &resolver)
     }
 
@@ -350,14 +338,8 @@ impl SchemaScope {
             input,
             params,
         } = request;
-        let resolver = self.query_function_type_resolver_for_subqueries(
-            engine,
-            args,
-            input,
-            subqueries,
-            params,
-            Some(input),
-        )?;
+        let resolver = self
+            .query_function_type_resolver_for_subqueries(engine, args, input, subqueries, params)?;
         for argument in args {
             Self::validate_expression_references_with_resolver(
                 engine, argument, input, None, params, &resolver,

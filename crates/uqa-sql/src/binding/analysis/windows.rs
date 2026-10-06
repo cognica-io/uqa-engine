@@ -134,7 +134,6 @@ impl SchemaScope {
             scope.source,
             scope.subqueries,
             scope.params,
-            Some(scope.source),
         )?;
         let ty =
             crate::scalar_type_with_resolver(expression, scope.source, scope.params, &resolver)?;

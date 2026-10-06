@@ -35,6 +35,51 @@ impl FunctionTypeResolver for EmptyRoutineResolution {
 
 impl RoutineResolution for EmptyRoutineResolution {}
 
+#[test]
+fn result_schema_keeps_correlated_columns_without_reference_validation() {
+    let context = super::BindingContext {
+        catalog: super::fixture::catalog(BTreeMap::new()),
+        resolution: super::fixture::resolution(vec!["public".into()], "pg_temp_fixture".into()),
+        ctes: BTreeMap::new(),
+        deferred_ctes: BTreeMap::new(),
+        non_returning_ctes: std::collections::BTreeSet::new(),
+        scalar_subqueries: &[],
+    };
+    for expression in [
+        "(SELECT src.c)",
+        "(SELECT (SELECT src.c))",
+        "(SELECT src.c) + 1",
+        "CASE WHEN true THEN (SELECT src.c) ELSE 0 END",
+        "(SELECT src.c FROM (VALUES (2::integer)) AS src(c))",
+    ] {
+        let statement = crate::compile(&format!(
+            "SELECT {expression} FROM (VALUES (1::integer)) AS src(c)"
+        ))
+        .unwrap()
+        .remove(0);
+        let crate::plan::UnifiedPlan::Query(query) = crate::plan::UnifiedPlan::lower(statement)
+        else {
+            panic!("SELECT")
+        };
+        let schema =
+            super::bind_query_plan_schema(&EmptyRoutineResolution, &query, &[], &context, None)
+                .unwrap();
+        assert_eq!(
+            schema.column_type(0),
+            Some(&ColumnType::Integer),
+            "{expression}"
+        );
+        let analyzed =
+            super::analyze_query_plan_schema(&EmptyRoutineResolution, &query, &[], &context, None)
+                .unwrap();
+        assert_eq!(
+            schema.column_types(),
+            analyzed.column_types(),
+            "{expression}"
+        );
+    }
+}
+
 fn column(name: &str, ty: ColumnType) -> ColumnDef {
     ColumnDef {
         name: name.into(),

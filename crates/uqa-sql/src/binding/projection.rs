@@ -97,7 +97,6 @@ fn projection_output_schema(
             expression_schema,
             subqueries,
             params,
-            Some(expression_schema),
         )?);
         records.push(
             if types

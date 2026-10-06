@@ -218,12 +218,7 @@ impl SchemaScope {
                 }
                 let input = outer.cloned().unwrap_or_default();
                 let resolver = self.query_function_type_resolver_for_subqueries(
-                    routines,
-                    args,
-                    &input,
-                    subqueries,
-                    params,
-                    Some(&input),
+                    routines, args, &input, subqueries, params,
                 )?;
                 if let Some(selected) = crate::semantics::resolve_table_function_binding(
                     routines,

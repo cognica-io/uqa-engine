@@ -139,14 +139,7 @@ impl SchemaScope {
                             .collect(),
                     },
                 ];
-                self.bind_clause_scopes(
-                    routines,
-                    clauses,
-                    subqueries,
-                    &scopes.clauses,
-                    params,
-                    outer,
-                )
+                self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params)
             }
             CommandPlan::Delete(delete) => {
                 let DeletePlan {
@@ -168,14 +161,7 @@ impl SchemaScope {
                             .collect(),
                     },
                 ];
-                self.bind_clause_scopes(
-                    routines,
-                    clauses,
-                    subqueries,
-                    &scopes.clauses,
-                    params,
-                    outer,
-                )
+                self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params)
             }
             CommandPlan::Merge(merge) => {
                 self.bind_merge_clauses(routines, merge, scopes, params, outer)
@@ -257,14 +243,7 @@ impl SchemaScope {
                     .collect(),
             },
         ];
-        self.bind_clause_scopes(
-            routines,
-            clauses,
-            subqueries,
-            &scopes.clauses,
-            params,
-            outer,
-        )
+        self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params)
     }
 
     fn bind_merge_clauses(
@@ -324,14 +303,7 @@ impl SchemaScope {
                     .collect(),
             },
         ];
-        self.bind_clause_scopes(
-            routines,
-            clauses,
-            subqueries,
-            &scopes.clauses,
-            params,
-            outer,
-        )
+        self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params)
     }
 
     /// Bind each clause's subqueries within the clause's scope, and then the clause's expressions. A subquery that no clause expression names, such as one in a join condition of the statement's sources, is bound within `fallback`.
@@ -342,7 +314,6 @@ impl SchemaScope {
         subqueries: &mut [QueryPlan],
         fallback: &RowSchema,
         params: &[SQLParam],
-        outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         let mut owners = vec![None; subqueries.len()];
         for (position, clause) in clauses.iter().enumerate() {
@@ -369,7 +340,6 @@ impl SchemaScope {
                     &clause.schema,
                     &subqueries,
                     params,
-                    outer,
                 )?;
             }
         }

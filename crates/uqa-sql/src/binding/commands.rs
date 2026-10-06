@@ -74,7 +74,6 @@ pub fn analyze_prepared_command_schema(
                 },
                 command.scalar_subqueries(),
                 params,
-                None,
             )?;
         }
         if let CommandPlan::Merge(merge) = command {
@@ -245,7 +244,6 @@ impl SchemaScope {
                         &expression,
                         command.scalar_subqueries(),
                         params,
-                        Some(&expression),
                     )?);
                 }
             }
