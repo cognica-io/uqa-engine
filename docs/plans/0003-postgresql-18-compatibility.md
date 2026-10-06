@@ -263,7 +263,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `functions.date-trunc` | `M1` | `partial` |
 | `functions.temporal-extraction` | `M1` | `partial` |
 | `expressions.interval-arithmetic` | `M1` | `verified` |
-| `routines.sql-standard-body-deparse` | `M1` | `partial` |
+| `routines.sql-standard-body-deparse` | `M1` | `verified` |
 | `routines.attribute-checks` | `M3` | `partial` |
 | `types.common-type-selection` | `M4` | `partial` |
 | `ddl.default-cooking` | `M3` | `partial` |
@@ -941,16 +941,18 @@ The same real catalog join exposed missing `pg_language` rows, fixed in [#452](h
 
 Owner review independently verified PostgreSQL's signed-int32 negation at the interval minimum-month quarter boundary, and the SQL kernel retains that width. The old week extraction test expected an integer carrier and only checked a broad range; it now checks the independently captured numeric value 24. The final reference also executes retained expressions while same-signature user functions shadow the built-ins.
 
-Verification: all 256 independent PostgreSQL 18.4 messages pass on memory, native SQLite, SQLite Key/Value and redb, with thirty additional durable-reopen observations. All 1,327 SQL owner tests, nine Execution catalog/rendering tests, three Planner tests, ten Engine session/prepared owner tests and 129 affected Engine integration tests pass. The integration selection includes temporal operations, generated expressions, catalog dependencies and the manual compile/execute harness. The final shared build completed in 2m02s. Rustfmt, dependency, Engine capability, harness, source/header and manifest checks pass. Strict Clippy across the eight affected crates passes; automatic review is being finalized before merge. No performance measurement or manual CI action is included.
+Verification: all 256 independent PostgreSQL 18.4 messages pass on memory, native SQLite, SQLite Key/Value and redb, with thirty additional durable-reopen observations. All 1,327 SQL owner tests, nine Execution catalog/rendering tests, three Planner tests, ten Engine session/prepared owner tests and 129 affected Engine integration tests pass. The integration selection includes temporal operations, generated expressions, catalog dependencies and the manual compile/execute harness. The final shared build completed in 2m02s. Rustfmt, dependency, Engine capability, harness, source/header and manifest checks pass. Strict Clippy across the eight affected crates and automatic checks pass. PR #450 merged as `6ef630fb9`, closing #449/#451/#452; its completed branches are removed and primary main is updated. The review recommendation to silently drop unknown-language persisted routines was rejected against the existing atomic restoration contract, with six migration/rollback regressions passing. No performance measurement or manual CI action is included.
 
 ## Stored SQL body reconstruction and routine visibility
 
 [Issue #453](https://github.com/cognica-io/uqa-engine/issues/453) records that pg_get_function_sqlbody returns NULL for built-in SQL routines even when their typed pg_proc body exists. [Issue #454](https://github.com/cognica-io/uqa-engine/issues/454) records that stored user SQL bodies drop pg_catalog qualification under a same-signature shadow. Both are independently reproduced on main and belong to the existing SQL-body deparser contract. The checked-in twenty-message PostgreSQL 18.4 reference includes all five built-in SQL bodies, their raw typed QUERY nodes, NULL/internal and user RETURN/ATOMIC/source bodies, same- and different-signature shadows, stored view/default/generated expressions and retained values.
 
 - [x] Reproduce both errors and capture independent reference values before changing the implementation.
-- [ ] Reuse SQL's typed node renderer for scalar RETURN bodies and external parameters, with query-shape validation and owner tests.
-- [ ] Reuse Execution's exact-signature routine visibility for built-in and stored SQL reconstruction; preserve invoking search-path semantics.
-- [ ] Verify the four providers, durable reopening and affected owner/catalog/manual regressions.
+- [x] Reuse SQL's typed node renderer for scalar RETURN bodies and external parameters, with query-shape validation and owner tests.
+- [x] Reuse Execution's exact-signature routine visibility for built-in and stored SQL reconstruction; preserve invoking search-path semantics.
+- [x] Verify the four providers, durable reopening and affected owner/catalog/manual regressions.
 - [ ] Synchronize the manual, HISTORY, manifest and all inherited checklist records; review, merge and remove the completed branch.
 
 SQL owns typed node parsing and rendering; Execution owns catalog identity and invoking name visibility. The existing Engine catalog/session adapters are sufficient. Owning manifests and dependency direction were checked, and no dependency or feature addition is needed. For a stored routine identity, emitting the unqualified name is valid only when the current search path selects that same argument-type signature; otherwise its schema must be printed. Thus reconstructed calls preserve the original binding under reuse. RETURN reconstruction traverses the existing typed expression instead of inventing a second source string, and rejects query shapes whose clauses it cannot preserve. These are read-only observations: they do not alter scalar carriers, query operators, stored values, routine execution or transaction effects. The broader pg_get_functiondef and original 41 open work items remain preserved.
+
+All twenty independent PostgreSQL 18.4 messages pass on memory, native SQLite, SQLite Key/Value and redb, with thirty additional observations after durable reopening. All 1,330 SQL owner tests, eleven Execution catalog/rendering tests and 164 affected Engine integration tests pass, including the manual SQL harness. The final shared build completed in 1m56s. Independent code review found no additional defect. Rustfmt, dependency direction, Engine capability, test harness, Rust source/header and manifest checks pass. Strict Clippy across the eight affected crates passes in 39.12s. Automatic PR review, merge and branch cleanup are tracked in the pull request.
