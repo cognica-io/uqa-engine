@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Resolve named array-transform calls alongside user overloads during preparation and stored binding, preserving argument positions and declared Boolean option types. Reconstruct stored named calls with PostgreSQL argument notation.
+
 - Preserve wildcard syntax while binding SQL-standard routine parameters, including stored-column rename and deletion, and omit redundant casts of parameters whose declared type already matches the selected argument.
 - Honor the session DateStyle order for numeric date inputs, including arrays, domains and ranges; normalize partial settings and aliases with PostgreSQL diagnostics, preserve prepared and stored input values, and carry the active order through transactions, cursors and parallel execution. Short BC years retain their written era. Stored domain-array inputs execute their checks once, and interval input retains its declared fields.
 - Resolve scalar element types for multidimensional ANY/ALL and polymorphic array functions, accept catalog vectors as anyarray inputs, and retain array-domain conversions in stored comparisons.
