@@ -19,6 +19,7 @@ pub enum ScalarSubqueryCacheEntry {
     Materialized(CachedScalarSubquery),
     Membership(Arc<CachedSubqueryMembership>),
     Scalar(Value),
+    Row(Option<crate::OwnedPhysicalRow>),
     Exists(bool),
 }
 

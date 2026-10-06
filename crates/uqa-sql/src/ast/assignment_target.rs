@@ -8,6 +8,105 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+/// The targets of one SET item. A multiple target consumes one positional subquery result.
+/// Single targets retain the predecessor's string or indirection-object encoding.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AssignmentTargets<E = super::Expr> {
+    Single(AssignmentTarget<E>),
+    Multiple(MultipleAssignmentTargets<E>),
+}
+
+/// Positional outputs remain stable when a stored MERGE loses one of its target columns.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MultipleAssignmentTargets<E> {
+    pub targets: Vec<AssignmentTarget<E>>,
+    pub source_positions: Vec<usize>,
+    pub source_width: usize,
+}
+
+impl<E> From<Vec<AssignmentTarget<E>>> for MultipleAssignmentTargets<E> {
+    fn from(targets: Vec<AssignmentTarget<E>>) -> Self {
+        Self {
+            source_positions: (0..targets.len()).collect(),
+            source_width: targets.len(),
+            targets,
+        }
+    }
+}
+
+impl<E> From<AssignmentTarget<E>> for AssignmentTargets<E> {
+    fn from(target: AssignmentTarget<E>) -> Self {
+        Self::Single(target)
+    }
+}
+
+impl<E> From<String> for AssignmentTargets<E> {
+    fn from(column: String) -> Self {
+        Self::Single(column.into())
+    }
+}
+
+impl<E> From<&str> for AssignmentTargets<E> {
+    fn from(column: &str) -> Self {
+        column.to_owned().into()
+    }
+}
+
+impl<E> AssignmentTargets<E> {
+    pub fn targets(&self) -> &[AssignmentTarget<E>] {
+        match self {
+            Self::Single(target) => std::slice::from_ref(target),
+            Self::Multiple(group) => &group.targets,
+        }
+    }
+
+    pub fn targets_mut(&mut self) -> &mut [AssignmentTarget<E>] {
+        match self {
+            Self::Single(target) => std::slice::from_mut(target),
+            Self::Multiple(group) => &mut group.targets,
+        }
+    }
+
+    pub fn source_position(&self, target: usize) -> usize {
+        match self {
+            Self::Single(_) => target,
+            Self::Multiple(group) => group.source_positions[target],
+        }
+    }
+
+    pub fn column_names(&self) -> impl Iterator<Item = &str> {
+        self.targets().iter().map(|target| target.column.as_str())
+    }
+
+    pub fn expressions(&self) -> impl Iterator<Item = &E> {
+        self.targets()
+            .iter()
+            .flat_map(AssignmentTarget::expressions)
+    }
+
+    pub fn expressions_mut(&mut self) -> impl Iterator<Item = &mut E> {
+        self.targets_mut()
+            .iter_mut()
+            .flat_map(AssignmentTarget::expressions_mut)
+    }
+
+    pub fn map<T>(self, mut map: impl FnMut(E) -> T) -> AssignmentTargets<T> {
+        match self {
+            Self::Single(target) => AssignmentTargets::Single(target.map(map)),
+            Self::Multiple(group) => AssignmentTargets::Multiple(MultipleAssignmentTargets {
+                targets: group
+                    .targets
+                    .into_iter()
+                    .map(|target| target.map(&mut map))
+                    .collect(),
+                source_positions: group.source_positions,
+                source_width: group.source_width,
+            }),
+        }
+    }
+}
+
 /// Target syntax is separate from the value expression. Every bound belongs to the original input row, even when repeated targets compose writes to one column.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentTarget<E = super::Expr> {
@@ -147,6 +246,16 @@ mod tests {
         assert!(target.is_whole_column());
         assert_eq!(target.column, "value");
         assert_eq!(serde_json::to_string(&target).unwrap(), "\"value\"");
+        let group: AssignmentTargets<i32> = serde_json::from_str("\"value\"").unwrap();
+        assert!(matches!(group, AssignmentTargets::Single(_)));
+        assert_eq!(serde_json::to_string(&group).unwrap(), "\"value\"");
+        let grouped: AssignmentTargets<i32> =
+            AssignmentTargets::Multiple(vec!["a".into(), "b".into()].into());
+        let encoded = serde_json::to_string(&grouped).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AssignmentTargets<i32>>(&encoded).unwrap(),
+            grouped
+        );
     }
 
     #[test]

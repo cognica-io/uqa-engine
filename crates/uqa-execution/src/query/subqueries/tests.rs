@@ -354,3 +354,50 @@ fn predicate_preparation_checks_shape_slot_and_volatility_before_catalog_capture
     );
     assert_eq!(*services.events.lock(), ["volatility"]);
 }
+
+#[test]
+fn grouped_row_cache_preserves_positional_columns_without_reexecution() {
+    let services = Services::default();
+    let scope = CteScope::new();
+    let query = plan("SELECT 1 AS value, 2 AS value");
+    let row = crate::OwnedPhysicalRow::new(
+        RowSchema::new(vec!["value".into(), "value".into()]),
+        PhysicalRow::from_values(vec![Value::Int(1), Value::Int(2)]),
+    );
+    scope.cache_subquery(0, ScalarSubqueryCacheEntry::Row(Some(row)));
+    scope.cache_subquery(1, ScalarSubqueryCacheEntry::Row(None));
+    let context = services.context(&scope);
+    for _ in 0..2 {
+        let row = context
+            .row_subquery_value(0, &query, PhysicalOuterRow::Absent, &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.view().value_at(0), Some(&Value::Int(1)));
+        assert_eq!(row.view().value_at(1), Some(&Value::Int(2)));
+        assert!(context
+            .row_subquery_value(1, &query, PhysicalOuterRow::Absent, &[])
+            .unwrap()
+            .is_none());
+    }
+    assert!(services.events.lock().is_empty());
+}
+
+#[test]
+fn grouped_row_consumer_does_not_pull_past_the_second_row() {
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = Arc::clone(&count);
+    let rows = (0..5).map(move |value| {
+        observed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(crate::OwnedPhysicalRow::new(
+            RowSchema::new(vec!["value".into()]),
+            PhysicalRow::from_values(vec![Value::Int(value)]),
+        ))
+    });
+    let result = crate::SubqueryResult {
+        columns: vec!["value".into()],
+        rows: Box::new(rows),
+    };
+    let error = result.into_single_row().err().unwrap();
+    assert_eq!(error.sqlstate(), Some("21000"));
+    assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 2);
+}

@@ -106,7 +106,8 @@ pub fn try_run_point_update<S: Clone + 'static>(
             &stmt
                 .assignments
                 .iter()
-                .map(|assignment| assignment.target.column.clone())
+                .flat_map(|assignment| assignment.target.column_names())
+                .map(str::to_owned)
                 .collect::<Vec<_>>(),
         ),
     )?;
@@ -195,14 +196,17 @@ pub fn row_independent_update_values<S: Clone + 'static>(
         stmt.relations_bound,
     )?;
     for assignment in &stmt.assignments {
-        if !assignment.target.is_whole_column() || !expr_is_row_independent(&assignment.value) {
+        let uqa_sql::ast::AssignmentTargets::Single(target) = &assignment.target else {
+            return Ok(None);
+        };
+        if !target.is_whole_column() || !expr_is_row_independent(&assignment.value) {
             return Ok(None);
         }
         let value = coerce_to_column_type(
             context.assignment.assignment,
             context.assignment.columns,
             &stmt.table,
-            &assignment.target.column,
+            &target.column,
             eval_mutation_expr(
                 context.assignment.expressions,
                 &ctes,
@@ -214,13 +218,13 @@ pub fn row_independent_update_values<S: Clone + 'static>(
         if let Some(ty @ (ColumnType::Vector(_) | ColumnType::Tensor(_))) = context
             .constraints
             .catalog
-            .column_type(&stmt.table, &assignment.target.column)
+            .column_type(&stmt.table, &target.column)
             .map_err(|err| dml_storage_error("UPDATE", err))?
         {
             let values = index_vectors_for_type(&value, &ty)?;
-            vectors.insert(assignment.target.column.clone(), values);
+            vectors.insert(target.column.clone(), values);
         }
-        updates.insert(assignment.target.column.clone(), value);
+        updates.insert(target.column.clone(), value);
     }
     Ok(Some((updates, vectors)))
 }

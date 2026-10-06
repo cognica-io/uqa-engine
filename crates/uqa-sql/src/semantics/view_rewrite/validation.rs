@@ -96,7 +96,9 @@ pub(super) fn validate_insert_targets(
     if let ConflictActionPlan::Update { assignments, .. } = &conflict.action {
         validate_view_target_columns(
             layer,
-            assignments.iter().map(|assignment| &assignment.target),
+            assignments
+                .iter()
+                .flat_map(|assignment| assignment.target.targets()),
             duplicate_assignment,
         )?;
     }
@@ -109,7 +111,9 @@ pub(super) fn validate_update_targets(
 ) -> Result<(), SQLError> {
     validate_view_target_columns(
         layer,
-        plan.assignments.iter().map(|assignment| &assignment.target),
+        plan.assignments
+            .iter()
+            .flat_map(|assignment| assignment.target.targets()),
         duplicate_assignment,
     )
 }
@@ -471,7 +475,9 @@ pub(super) fn validate_merge_targets(
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
                 validate_view_target_columns(
                     layer,
-                    assignments.iter().map(|assignment| &assignment.target),
+                    assignments
+                        .iter()
+                        .flat_map(|assignment| assignment.target.targets()),
                     duplicate_assignment,
                 )?;
             }
@@ -497,12 +503,12 @@ pub fn validate_public_merge_targets(
                     &plan.target,
                     assignments
                         .iter()
-                        .map(|assignment| assignment.target.column.as_str()),
+                        .flat_map(|assignment| assignment.target.column_names()),
                 )?;
                 validate_mapped_columns(
                     &assignments
                         .iter()
-                        .map(|assignment| assignment.target.clone())
+                        .flat_map(|assignment| assignment.target.targets().iter().cloned())
                         .collect::<Vec<_>>(),
                     duplicate_assignment,
                 )?;

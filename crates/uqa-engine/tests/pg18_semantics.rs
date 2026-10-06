@@ -170,3 +170,6 @@ mod datestyle;
 
 #[path = "pg18_semantics/array_inspection_identities.rs"]
 mod array_inspection_identities;
+
+#[path = "pg18_semantics/multiple_column_assignment.rs"]
+mod multiple_column_assignment;

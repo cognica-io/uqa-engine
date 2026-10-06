@@ -375,6 +375,19 @@ RETURNING task_id, state;
 
 A multiple-column item assigns each listed column the element of a row constructor at its position, as in `SET (state, priority) = ('closed', 1)` or `SET (state, priority) = ROW('closed', 1)`, in `UPDATE`, `ON CONFLICT DO UPDATE`, and `MERGE` alike. A row with a different number of elements reports `42601`, and a source that is neither a row constructor nor a sub-SELECT reports `0A000`.
 
+`SET (a, b) = (SELECT ...)` consumes a single query result by position in UPDATE, ON CONFLICT DO UPDATE and MERGE. The query must return exactly as many columns as the target list; zero rows assign NULL to every target, one row supplies its values, and a second row raises SQLSTATE `21000`. Each target retains its own assignment conversion and constraint checks. Correlated queries and target subscripts see the original row; an uncorrelated query executes once per statement, including when it calls a volatile function. A failed statement preserves its previous table rows, while sequence calls retain PostgreSQL's nontransactional effects.
+
+Rewrite rules that refer through `NEW` to one of these grouped target columns are rejected with `0A000`, as in PostgreSQL. Rules using only `OLD`, automatically updatable views, prepared statements and stored SQL or PL/pgSQL bodies retain the same assignment semantics.
+
+```sql execute
+CREATE TABLE manual_grouped_assignment(id integer PRIMARY KEY, a integer, b text);
+INSERT INTO manual_grouped_assignment VALUES (1, 10, 'initial');
+UPDATE manual_grouped_assignment AS t
+SET (a, b) = (SELECT t.a + 1, t.b || '-changed')
+WHERE id = 1 RETURNING id, a, b;
+DROP TABLE manual_grouped_assignment;
+```
+
 `UPDATE ... FROM` is implemented:
 
 ```sql

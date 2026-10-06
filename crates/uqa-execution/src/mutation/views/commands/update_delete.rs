@@ -45,30 +45,47 @@ fn evaluate_view_update_assignments<S: Clone + Send + Sync + 'static>(
 ) -> Result<(), SQLError> {
     for (assignment_index, assignment) in stmt.assignments.iter().enumerate() {
         if pending.evaluated_assignments.contains(&assignment_index)
-            || required.is_some_and(|required| !required.contains(&assignment.target.column))
+            || required.is_some_and(|required| {
+                assignment
+                    .target
+                    .targets()
+                    .iter()
+                    .all(|target| !required.contains(&target.column))
+            })
         {
             continue;
         }
-        let position = target
-            .columns
-            .iter()
-            .position(|column| column == &assignment.target.column)
-            .ok_or_else(|| SQLError::UnknownColumn(assignment.target.column.clone()))?;
-        pending.new[position] = crate::mutation::assignment::eval_typed_assignment(
+        let source = crate::mutation::assignment::AssignmentSource::evaluate(
             *services,
             scope,
-            crate::mutation::assignment::TypedAssignmentTarget {
-                target: &assignment.target,
-                ty: target.types[position].as_ref(),
-                current: Some(&pending.new[position]),
-                final_column_write: !stmt.assignments[assignment_index + 1..]
-                    .iter()
-                    .any(|next| next.target.column == assignment.target.column),
-            },
-            &assignment.value,
+            assignment,
             Some(&pending.evaluation_row),
             params,
         )?;
+        for (target_position, assignment_target) in assignment.target.targets().iter().enumerate() {
+            let position = target
+                .columns
+                .iter()
+                .position(|column| column == &assignment_target.column)
+                .ok_or_else(|| SQLError::UnknownColumn(assignment_target.column.clone()))?;
+            pending.new[position] = crate::mutation::assignment::eval_typed_assignment_input(
+                *services,
+                scope,
+                crate::mutation::assignment::TypedAssignmentTarget {
+                    target: assignment_target,
+                    ty: target.types[position].as_ref(),
+                    current: Some(&pending.new[position]),
+                    final_column_write: crate::mutation::assignment::final_column_write(
+                        &stmt.assignments,
+                        assignment_index,
+                        target_position,
+                    ),
+                },
+                source.input(assignment.target.source_position(target_position)),
+                Some(&pending.evaluation_row),
+                params,
+            )?;
+        }
         pending.evaluated_assignments.insert(assignment_index);
     }
     Ok(())
@@ -180,14 +197,15 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
     let assigned_columns = stmt
         .assignments
         .iter()
-        .map(|assignment| assignment.target.column.clone())
+        .flat_map(|assignment| assignment.target.column_names())
+        .map(str::to_owned)
         .collect::<Vec<_>>();
     let _ = target_columns(
         &target,
         &stmt
             .assignments
             .iter()
-            .map(|assignment| assignment.target.clone())
+            .flat_map(|assignment| assignment.target.targets().iter().cloned())
             .collect::<Vec<_>>(),
         "UPDATE",
     )?;

@@ -294,14 +294,20 @@ pub(super) fn bind_projections(
 }
 
 pub(super) fn bind_assignments(
-    items: &[(crate::ast::AssignmentTarget, Expr)],
+    items: &[(crate::ast::AssignmentTargets, Expr)],
     r: &mut dyn VariableResolver,
-) -> Result<Vec<(crate::ast::AssignmentTarget, Expr)>> {
+) -> Result<Vec<(crate::ast::AssignmentTargets, Expr)>> {
     items
         .iter()
         .map(|(target, expression)| {
             Ok((
-                bind_assignment_target(target, r)?,
+                {
+                    let mut group = target.clone();
+                    for target in group.targets_mut() {
+                        *target = bind_assignment_target(target, r)?;
+                    }
+                    group
+                },
                 bind_expr(expression, r)?,
             ))
         })

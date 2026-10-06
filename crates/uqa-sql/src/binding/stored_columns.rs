@@ -394,7 +394,9 @@ impl<'a> StoredColumnBinder<'a> {
             } = &mut conflict.action
             {
                 for (column, expression) in assignments {
-                    self.bind_target_name(&mut column.column, &target);
+                    for target_column in column.targets_mut() {
+                        self.bind_target_name(&mut target_column.column, &target);
+                    }
                     for expression in column.expressions_mut() {
                         self.bind_expr(expression, &target_scopes, &context)?;
                     }
@@ -439,7 +441,9 @@ impl<'a> StoredColumnBinder<'a> {
         let (local, scopes) =
             self.bind_dml_source(update.from.as_mut(), &target, outer, &context)?;
         for (column, expression) in &mut update.assignments {
-            self.bind_target_name(&mut column.column, &target);
+            for target_column in column.targets_mut() {
+                self.bind_target_name(&mut target_column.column, &target);
+            }
             for expression in column.expressions_mut() {
                 self.bind_expr(expression, &scopes, &context)?;
             }

@@ -452,7 +452,15 @@ pub fn routine_body_definition(
     }
     let mut body = String::from("BEGIN ATOMIC\n");
     for statement in statements {
-        let plan = uqa_sql::plan::UnifiedPlan::lower(statement.clone());
+        let mut statement = statement.clone();
+        uqa_sql::routines::merge_columns::render_stored_merge_target_columns(
+            &routine_body::StoredMergeColumns {
+                catalog,
+                resolution: &deparser.bound,
+            },
+            &mut statement,
+        )?;
+        let plan = uqa_sql::plan::UnifiedPlan::lower(statement);
         body.push_str(&deparser.statement(&plan, &scope)?);
         body.push_str(";\n");
     }

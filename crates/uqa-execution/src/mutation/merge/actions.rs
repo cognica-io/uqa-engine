@@ -142,27 +142,39 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                     .ok_or_else(|| missing_document_error("MERGE update", target_table, doc_id))?;
                 let mut new_document = old_document.clone();
                 for (position, assignment) in assignments.iter().enumerate() {
-                    let value = eval_mutation_assignment(
+                    let source = crate::mutation::assignment::AssignmentSource::evaluate(
                         services,
                         ctes,
-                        MutationAssignmentTarget {
-                            table: target_table,
-                            target: &assignment.target,
-                            current: new_document.get(&assignment.target.column),
-                            final_column_write: !assignments[position + 1..]
-                                .iter()
-                                .any(|next| next.target.column == assignment.target.column),
-                            action: "MERGE UPDATE",
-                            new_row: false,
-                        },
-                        &assignment.value,
+                        assignment,
                         Some(action_row),
                         params,
                     )?;
-                    if let Some(value) = value {
-                        new_document.insert(assignment.target.column.clone(), value);
-                    } else {
-                        new_document.remove(&assignment.target.column);
+                    for (target_position, target) in assignment.target.targets().iter().enumerate()
+                    {
+                        let value = crate::mutation::assignment::eval_mutation_assignment_input(
+                            services,
+                            ctes,
+                            MutationAssignmentTarget {
+                                table: target_table,
+                                target,
+                                current: new_document.get(&target.column),
+                                final_column_write: crate::mutation::assignment::final_column_write(
+                                    assignments,
+                                    position,
+                                    target_position,
+                                ),
+                                action: "MERGE UPDATE",
+                                new_row: false,
+                            },
+                            source.input(assignment.target.source_position(target_position)),
+                            Some(action_row),
+                            params,
+                        )?;
+                        if let Some(value) = value {
+                            new_document.insert(target.column.clone(), value);
+                        } else {
+                            new_document.remove(&target.column);
+                        }
                     }
                 }
                 Ok(SelectedMergeAction::Update {
@@ -171,7 +183,8 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                     new_document,
                     updated_columns: assignments
                         .iter()
-                        .map(|assignment| assignment.target.column.clone())
+                        .flat_map(|assignment| assignment.target.column_names())
+                        .map(str::to_owned)
                         .collect(),
                 })
             }

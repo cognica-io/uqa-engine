@@ -244,6 +244,7 @@
       "aggregates.mode-equality-and-ties",
       "types.legacy-vector-coherence",
       "dml.assignment-subscripts",
+      "dml.grouped-subquery-assignments",
       "dml.failing-row-details",
       "types.common-type-selection"
     ],
@@ -1094,6 +1095,14 @@
       "postgresql_reference": "PostgreSQL 18.4 Docker: tests/parity/pg18/capture_assignment_subscripts.py captures 76 direct-statement cases in assignment_subscripts.expected.json, including rows, bounds, SQLSTATE, primary message, DETAIL and HINT. Stored index rendering has 22 independently captured pg_get_indexdef comparisons. See issue #148.",
       "uqa_test": "crates/uqa-core/src/types/array/assignment/tests.rs; crates/uqa-sql/src/assignment/targets.rs; crates/uqa-execution/src/mutation/assignment/subscripts.rs; crates/uqa-execution/src/catalog/projection/view_definition/subscripts.rs; crates/uqa-engine/tests/pg18_semantics/assignment_subscripts.rs",
       "supported_version": "Unreleased: preserve ordered array element/slice targets through binding, INSERT VALUES/SELECT, UPDATE, ON CONFLICT, MERGE and automatic views. Bounds and RHS use the original row; partial writes compose before array-domain checks. Stored SQL functions/rules retain targets and dependencies after rename, old-name reuse and reopen. Generated columns, unique indexes and rejecting domain/trigger histories preserve atomicity. Unique-key DETAIL preserves structural expressions, type output and SELECT authorization. Linux Docker passes all 456 oracle/provider/preparation combinations, 255 Core and 998 SQL unit tests across affected changes, all 809 current Execution tests (two pre-existing ignored), the manual SQL harness and strict Clippy. Review correction rejects untyped partial view targets before RHS/trigger effects; all 467 selected Engine tests plus the twelve-path native-callback regression pass. Final product 5c7723c0 passes full Linux/macOS Rust CI, JavaScript/WASM and Python (36037283997, 36037285505, 36037288625), including every unchanged native/WASM Nori allocation gate. The review finding is resolved; merge awaits the protected-branch approval rule.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "dml.grouped-subquery-assignments",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured in tests/parity/pg18/multi_column_assignment_oracle.expected.json using capture_command_completion_oracle.py --rows --details --notices: 72 initial Simple Query messages and five durable observations; capture and input hashes are retained in the compact fixture.",
+      "uqa_test": "cargo test -p uqa-sql --lib assignment; cargo test -p uqa-sql --lib routines::merge_columns; cargo test -p uqa-execution --lib query::subqueries; cargo test -p uqa-engine --test integration multiple_column_assignment",
+      "supported_version": "Unreleased: positional multi-column subquery assignment in UPDATE, ON CONFLICT DO UPDATE and MERGE, with source-width/type/name diagnostics, zero-row NULLs, second-row cardinality errors, original-row inputs, volatile correlated and uncorrelated evaluation, correlated VALUES and UNION ALL, target subscripts/domains, duplicate output names, automatic views, PostgreSQL rule NEW rejection, prepared statements, SQL/PLpgSQL routines, stored rule actions, column renames and retained MERGE source positions after target deletion. All 77 observations match memory, native SQLite, SQLite Key/Value and redb; persistent providers reopen before the five durable observations.",
       "status": "verified",
       "open_issue": null
     },

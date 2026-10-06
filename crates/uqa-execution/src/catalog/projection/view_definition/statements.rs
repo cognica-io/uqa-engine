@@ -456,7 +456,19 @@ impl Deparser<'_> {
             .map(|assignment| {
                 Ok(format!(
                     "{} = {}",
-                    self.assignment_target(&assignment.target, scope, subqueries)?,
+                    match &assignment.target {
+                        uqa_sql::ast::AssignmentTargets::Single(target) =>
+                            self.assignment_target(target, scope, subqueries)?,
+                        uqa_sql::ast::AssignmentTargets::Multiple(group) => format!(
+                            "({})",
+                            group
+                                .targets
+                                .iter()
+                                .map(|target| self.assignment_target(target, scope, subqueries))
+                                .collect::<Result<Vec<_>, _>>()?
+                                .join(", ")
+                        ),
+                    },
                     self.expression(&assignment.value, scope, subqueries)?
                 ))
             })

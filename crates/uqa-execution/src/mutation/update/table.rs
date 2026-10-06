@@ -61,7 +61,9 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
         uqa_sql::assignment::columns::validate_mutation_targets(
             context.mutation.preparation.referential.assignment.columns,
             &stmt.table,
-            stmt.assignments.iter().map(|assignment| &assignment.target),
+            stmt.assignments
+                .iter()
+                .flat_map(|assignment| assignment.target.targets()),
             "UPDATE",
             false,
         )?;
@@ -69,11 +71,13 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             context.mutation.preparation.referential.assignment.columns,
             &stmt.table,
         )?
-        .validate_update(stmt.assignments.iter().map(|assignment| {
-            (
-                assignment.target.column.as_str(),
-                matches!(assignment.value, crate::ScalarExpr::Default),
-            )
+        .validate_update(stmt.assignments.iter().flat_map(|assignment| {
+            assignment.target.targets().iter().map(move |target| {
+                (
+                    target.column.as_str(),
+                    matches!(assignment.value, crate::ScalarExpr::Default),
+                )
+            })
         }))?;
     }
     let privilege_expressions =
@@ -84,7 +88,8 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     let assigned_columns = stmt
         .assignments
         .iter()
-        .map(|assignment| assignment.target.column.clone())
+        .flat_map(|assignment| assignment.target.column_names())
+        .map(str::to_owned)
         .collect::<Vec<_>>();
     let statement_relation = crate::mutation::constraints::statement_relation(
         context.mutation.preparation.referential.constraints,
@@ -500,40 +505,68 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     }
                 }
                 if evaluate_view_assignments {
+                    let mut assignment_position = 0;
                     for (position, assignment) in stmt.assignments.iter().enumerate() {
-                        let value = if view_original_query {
-                            crate::mutation::assignment::eval_mutation_assignment(
-                                read_context.mutation.preparation.referential.assignment,
-                                &snapshot_ctes,
-                                MutationAssignmentTarget {
-                                    table: &stmt.table,
-                                    target: &assignment.target,
-                                    current: doc.get(&assignment.target.column),
-                                    final_column_write: !stmt.assignments[position + 1..]
-                                        .iter()
-                                        .any(|next| next.target.column == assignment.target.column),
-                                    action: "UPDATE",
-                                    new_row: false,
-                                },
-                                &assignment.value,
-                                Some(&target_row),
-                                params,
-                            )?
-                        } else {
-                            crate::mutation::assignment::eval_view_rule_update_assignment(
-                                read_context.mutation.preparation.referential.assignment,
-                                &snapshot_ctes,
-                                stmt,
+                        let source = crate::mutation::assignment::AssignmentSource::evaluate(
+                            read_context.mutation.preparation.referential.assignment,
+                            &snapshot_ctes,
+                            assignment,
+                            Some(&target_row),
+                            params,
+                        )?;
+                        for (target_position, assignment_target) in
+                            assignment.target.targets().iter().enumerate()
+                        {
+                            let final_write = crate::mutation::assignment::final_column_write(
+                                &stmt.assignments,
                                 position,
-                                doc.get(&assignment.target.column),
-                                Some(&target_row),
-                                params,
-                            )?
-                        };
-                        if let Some(value) = value {
-                            doc.insert(assignment.target.column.clone(), value);
-                        } else {
-                            doc.remove(&assignment.target.column);
+                                target_position,
+                            );
+                            let value = if view_original_query {
+                                crate::mutation::assignment::eval_mutation_assignment_input(
+                                    read_context.mutation.preparation.referential.assignment,
+                                    &snapshot_ctes,
+                                    MutationAssignmentTarget {
+                                        table: &stmt.table,
+                                        target: assignment_target,
+                                        current: doc.get(&assignment_target.column),
+                                        final_column_write: final_write,
+                                        action: "UPDATE",
+                                        new_row: false,
+                                    },
+                                    source
+                                        .input(assignment.target.source_position(target_position)),
+                                    Some(&target_row),
+                                    params,
+                                )?
+                            } else {
+                                crate::mutation::assignment::eval_view_rule_update_assignment(
+                                    read_context.mutation.preparation.referential.assignment,
+                                    &snapshot_ctes,
+                                    stmt,
+                                    crate::mutation::assignment::ViewRuleAssignment {
+                                        position: assignment_position,
+                                        target:
+                                            crate::mutation::assignment::TypedAssignmentTarget {
+                                                target: assignment_target,
+                                                ty: None,
+                                                current: doc.get(&assignment_target.column),
+                                                final_column_write: final_write,
+                                            },
+                                        input: source.input(
+                                            assignment.target.source_position(target_position),
+                                        ),
+                                    },
+                                    Some(&target_row),
+                                    params,
+                                )?
+                            };
+                            if let Some(value) = value {
+                                doc.insert(assignment_target.column.clone(), value);
+                            } else {
+                                doc.remove(&assignment_target.column);
+                            }
+                            assignment_position += 1;
                         }
                     }
                 }

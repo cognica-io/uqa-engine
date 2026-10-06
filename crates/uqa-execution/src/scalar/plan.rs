@@ -38,6 +38,17 @@ pub trait PhysicalSubqueryRunner {
         params: &[SQLParam],
     ) -> Result<SubqueryResult, SQLError>;
 
+    fn row_subquery_value(
+        &self,
+        subquery: SubqueryId,
+        plan: &QueryPlan,
+        outer_row: PhysicalOuterRow<'_>,
+        params: &[SQLParam],
+    ) -> Result<Option<crate::OwnedPhysicalRow>, SQLError> {
+        self.execute_subquery(subquery, plan, outer_row, params)?
+            .into_single_row()
+    }
+
     fn scalar_subquery_value(
         &self,
         subquery: SubqueryId,

@@ -62,8 +62,12 @@ impl StoredColumnBinder<'_> {
                     assignments,
                 } => {
                     for (column, expression) in assignments {
-                        if self.mode.is_rename() && !dropped_targets.contains(&column.column) {
-                            self.bind_target_name(&mut column.column, &target);
+                        for target_column in column.targets_mut() {
+                            if self.mode.is_rename()
+                                && !dropped_targets.contains(&target_column.column)
+                            {
+                                self.bind_target_name(&mut target_column.column, &target);
+                            }
                         }
                         for expression in column.expressions_mut() {
                             self.bind_expr(expression, &scopes, &context)?;

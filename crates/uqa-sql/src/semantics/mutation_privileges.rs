@@ -42,10 +42,14 @@ pub fn ensure_update_target_privileges<'a>(
         .target_privilege_subject
         .clone()
         .unwrap_or_else(|| catalog.current_role());
-    for assignment in &statement.assignments {
+    for target in statement
+        .assignments
+        .iter()
+        .flat_map(|assignment| assignment.target.targets())
+    {
         catalog.ensure_column_privilege_for(
             &statement.table,
-            &assignment.target.column,
+            &target.column,
             &privilege_subject,
             TableAclPrivilege::Update,
         )?;

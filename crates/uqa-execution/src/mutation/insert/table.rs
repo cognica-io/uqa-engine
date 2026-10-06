@@ -138,14 +138,17 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         validate_mutation_targets(
             assignment.columns,
             &stmt.table,
-            assignments.iter().map(|assignment| &assignment.target),
+            assignments
+                .iter()
+                .flat_map(|assignment| assignment.target.targets()),
             "INSERT ON CONFLICT DO UPDATE",
             false,
         )?;
         Some(
             assignments
                 .iter()
-                .map(|assignment| assignment.target.column.clone())
+                .flat_map(|assignment| assignment.target.column_names())
+                .map(str::to_owned)
                 .collect::<Vec<_>>(),
         )
     } else {

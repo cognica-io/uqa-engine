@@ -32,12 +32,16 @@ pub fn bind_stored_merge_target_columns(
             match action {
                 MergeWhen::UpdateMatched { assignments, .. }
                 | MergeWhen::UpdateNotMatchedBySource { assignments, .. } => {
-                    targets.extend(assignments.iter().map(|(target, _)| target.column.clone()));
+                    targets.extend(assignments.iter().flat_map(|(group, _)| {
+                        group.targets().iter().map(|target| target.column.clone())
+                    }));
                     coerced_targets.extend(
                         assignments
                             .iter()
                             .filter(|(_, expression)| !matches!(expression, Expr::Default))
-                            .map(|(target, _)| target.column.clone()),
+                            .flat_map(|(group, _)| {
+                                group.targets().iter().map(|target| target.column.clone())
+                            }),
                     );
                 }
                 MergeWhen::InsertNotMatched {
@@ -64,7 +68,11 @@ pub fn bind_stored_merge_target_columns(
             }
         }
         for name in targets {
-            if let Some(column) = definitions.iter().find(|column| column.name == name) {
+            if let Some((position, column)) = definitions
+                .iter()
+                .enumerate()
+                .find(|(_, column)| column.name == name)
+            {
                 if let Some(object_id) = column.object_id {
                     let mut domain_dependencies = BTreeSet::new();
                     if coerced_targets.contains(&name) {
@@ -75,6 +83,11 @@ pub fn bind_stored_merge_target_columns(
                         .entry(name)
                         .or_insert(MergeTargetColumnBinding {
                             object_id,
+                            attribute_number: Some(i16::try_from(position + 1).map_err(|_| {
+                                SQLError::Internal(
+                                    "MERGE target attribute number is out of range".into(),
+                                )
+                            })?),
                             domain_dependencies,
                         });
                 }
@@ -129,12 +142,31 @@ pub fn normalize_stored_merge_target_columns(
             match action {
                 MergeWhen::UpdateMatched { assignments, .. }
                 | MergeWhen::UpdateNotMatchedBySource { assignments, .. } => {
-                    assignments.retain_mut(|(name, _)| {
-                        if let Some(current) = name_for(&name.column) {
-                            name.column = current;
-                            true
-                        } else {
-                            false
+                    assignments.retain_mut(|(group, _)| match group {
+                        crate::ast::AssignmentTargets::Single(name) => {
+                            if let Some(current) = name_for(&name.column) {
+                                name.column = current;
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        crate::ast::AssignmentTargets::Multiple(targets) => {
+                            let mut positions = Vec::new();
+                            let mut surviving = Vec::new();
+                            for (mut target, position) in std::mem::take(&mut targets.targets)
+                                .into_iter()
+                                .zip(std::mem::take(&mut targets.source_positions))
+                            {
+                                if let Some(current) = name_for(&target.column) {
+                                    target.column = current;
+                                    surviving.push(target);
+                                    positions.push(position);
+                                }
+                            }
+                            targets.targets = surviving;
+                            targets.source_positions = positions;
+                            !targets.targets.is_empty()
                         }
                     });
                 }
@@ -155,6 +187,52 @@ pub fn normalize_stored_merge_target_columns(
                     }
                     *columns = surviving;
                     *values = expressions;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Reconstruct stored target names without normalizing away their original query outputs.
+pub fn render_stored_merge_target_columns(
+    catalog: &dyn StoredMergeColumnCatalog,
+    statement: &mut Statement,
+) -> Result<(), SQLError> {
+    crate::catalog::stored_ast::visit_stored_statement_merges(statement, &mut |merge| {
+        let current = catalog
+            .stored_merge_target_definitions(&merge.target)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|column| column.object_id.map(|id| (id, column.name)))
+            .collect::<BTreeMap<_, _>>();
+        let rename = |target: &mut crate::ast::AssignmentTarget| {
+            if let Some(binding) = merge.target_column_bindings.get(&target.column) {
+                if let Some(name) = current.get(&binding.object_id) {
+                    target.column.clone_from(name);
+                } else if let Some(number) = binding.attribute_number {
+                    target.column =
+                        crate::catalog::composite_type::StoredCompositeAttribute::dropped_name(
+                            number,
+                        );
+                }
+            }
+        };
+        for action in &mut merge.when_clauses {
+            match action {
+                MergeWhen::UpdateMatched { assignments, .. }
+                | MergeWhen::UpdateNotMatchedBySource { assignments, .. } => {
+                    for (targets, _) in assignments {
+                        for target in targets.targets_mut() {
+                            rename(target);
+                        }
+                    }
+                }
+                MergeWhen::InsertNotMatched { columns, .. } => {
+                    for target in columns {
+                        rename(target);
+                    }
                 }
                 _ => {}
             }
@@ -188,3 +266,6 @@ pub fn statement_has_removed_merge_target(
     )?;
     Ok(changed)
 }
+
+#[cfg(test)]
+mod tests;

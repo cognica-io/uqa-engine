@@ -79,3 +79,18 @@ impl Deparser<'_> {
         }
     }
 }
+
+pub(super) struct StoredMergeColumns<'a> {
+    pub catalog: &'a crate::catalog::CatalogReadView,
+    pub resolution: &'a crate::catalog::RelationNameResolution,
+}
+
+impl uqa_sql::routines::merge_columns::StoredMergeColumnCatalog for StoredMergeColumns<'_> {
+    fn stored_merge_target_definitions(&self, table: &str) -> Option<Vec<uqa_sql::ast::ColumnDef>> {
+        self.catalog
+            .table(self.resolution, table)
+            .ok()
+            .flatten()
+            .map(|table| table.columns.as_ref().clone())
+    }
+}

@@ -84,7 +84,8 @@ pub fn required_view_update_columns(
     columns.extend(
         stmt.assignments
             .iter()
-            .map(|assignment| assignment.target.column.clone()),
+            .flat_map(|assignment| assignment.target.column_names())
+            .map(str::to_owned),
     );
     for expression in stmt
         .assignments
@@ -200,7 +201,7 @@ pub fn validate_view_merge_targets(
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
                 let columns = assignments
                     .iter()
-                    .map(|assignment| assignment.target.clone())
+                    .flat_map(|assignment| assignment.target.targets().iter().cloned())
                     .collect::<Vec<_>>();
                 let _ = target_columns(target, &columns, "UPDATE")?;
             }

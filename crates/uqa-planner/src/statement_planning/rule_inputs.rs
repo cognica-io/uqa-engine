@@ -129,6 +129,13 @@ fn prune_rule_inputs(
         _ => return Ok(()),
     };
     let table = context.rules.resolve_mutation_target(table, bound)?;
+    if let CommandPlan::Update(plan) = command {
+        uqa_sql::semantics::view_rewrite::validate_grouped_rule_inputs(
+            context.views,
+            &table,
+            &plan.assignments,
+        )?;
+    }
     let Some(requirements) =
         uqa_sql::semantics::view_rewrite::rule_input_requirements(context.views, &table, event)?
     else {
@@ -189,13 +196,7 @@ fn prune_rule_inputs(
             }
         }
         CommandPlan::Update(plan) => {
-            for assignment in &mut plan.assignments {
-                if !required.contains(&assignment.target.column) {
-                    for expression in assignment.expressions_mut() {
-                        *expression = ScalarExpr::Literal(Value::Null);
-                    }
-                }
-            }
+            prune_update_assignments(&mut plan.assignments, &required);
             if !requires_rows {
                 plan.source = None;
                 plan.predicate = None;
@@ -212,4 +213,44 @@ fn prune_rule_inputs(
         _ => {}
     }
     Ok(())
+}
+
+fn prune_update_assignments(
+    assignments: &mut Vec<uqa_sql::plan::AssignmentPlan>,
+    required: &BTreeSet<String>,
+) {
+    *assignments = std::mem::take(assignments)
+        .into_iter()
+        .flat_map(|assignment| {
+            if assignment
+                .target
+                .column_names()
+                .all(|column| !required.contains(column))
+            {
+                assignment
+                    .target
+                    .targets()
+                    .iter()
+                    .cloned()
+                    .map(|target| uqa_sql::plan::AssignmentPlan {
+                        target: target.into(),
+                        value: ScalarExpr::Literal(Value::Null),
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![assignment]
+            }
+        })
+        .collect();
+    for assignment in assignments {
+        if assignment
+            .target
+            .column_names()
+            .all(|column| !required.contains(column))
+        {
+            for expression in assignment.expressions_mut() {
+                *expression = ScalarExpr::Literal(Value::Null);
+            }
+        }
+    }
 }

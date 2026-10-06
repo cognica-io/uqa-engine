@@ -7,7 +7,7 @@
 //! INSERT conflict tuple locking, EXCLUDED projection and typed update preparation.
 use super::{find_insert_conflict, CurrentInsertConflict, InsertConflictOverlay};
 use crate::mutation::{
-    assignment::{eval_mutation_assignment, MutationAssignmentTarget},
+    assignment::MutationAssignmentTarget,
     candidate::{MutationLockTarget, PhysicalDocumentIdentity},
     constraints::lock_document_key_dependencies,
     errors::{dml_storage_error, missing_document_error},
@@ -85,50 +85,7 @@ fn build_conflict_update<S: Clone + 'static>(
         existing_id,
         &existing_doc,
     )?;
-    let definitions = context
-        .constraints
-        .catalog
-        .try_describe_table(table)
-        .map_err(|error| dml_storage_error("INSERT EXCLUDED schema", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let mut excluded_document = document.clone();
-    crate::query::generated::materialize_virtual_generated_columns(
-        &definitions,
-        &mut excluded_document,
-    )?;
-    let excluded_columns = if definitions.is_empty() {
-        excluded_document.keys().cloned().collect::<Vec<_>>()
-    } else {
-        definitions
-            .iter()
-            .map(|definition| definition.name.clone())
-            .collect::<Vec<_>>()
-    };
-    let excluded_types = excluded_columns
-        .iter()
-        .map(|column| {
-            definitions
-                .iter()
-                .find(|definition| definition.name == *column)
-                .map(|definition| definition.ty.clone())
-        })
-        .collect::<Vec<_>>();
-    let excluded_values = excluded_columns
-        .iter()
-        .map(|column| {
-            excluded_document
-                .get(column)
-                .cloned()
-                .unwrap_or(Value::Null)
-        })
-        .collect();
-    let conflict_row = dml_append_hidden_qualified_row(
-        &target_row,
-        "excluded",
-        &excluded_columns,
-        &excluded_types,
-        excluded_values,
-    );
+    let conflict_row = conflict_evaluation_row(context, table, &target_row, document)?;
     if let Some(predicate) = predicate {
         let keep = eval_mutation_expr(
             context.assignment.expressions,
@@ -143,27 +100,38 @@ fn build_conflict_update<S: Clone + 'static>(
     }
     let mut updated_doc = existing_doc.clone();
     for (position, assignment) in assignments.iter().enumerate() {
-        let value = eval_mutation_assignment(
+        let source = crate::mutation::assignment::AssignmentSource::evaluate(
             context.assignment,
             scope,
-            MutationAssignmentTarget {
-                table,
-                target: &assignment.target,
-                current: updated_doc.get(&assignment.target.column),
-                final_column_write: !assignments[position + 1..]
-                    .iter()
-                    .any(|next| next.target.column == assignment.target.column),
-                action: "INSERT ON CONFLICT DO UPDATE",
-                new_row: false,
-            },
-            &assignment.value,
+            assignment,
             Some(&conflict_row),
             params,
         )?;
-        if let Some(value) = value {
-            updated_doc.insert(assignment.target.column.clone(), value);
-        } else {
-            updated_doc.remove(&assignment.target.column);
+        for (target_position, target) in assignment.target.targets().iter().enumerate() {
+            let value = crate::mutation::assignment::eval_mutation_assignment_input(
+                context.assignment,
+                scope,
+                MutationAssignmentTarget {
+                    table,
+                    target,
+                    current: updated_doc.get(&target.column),
+                    final_column_write: crate::mutation::assignment::final_column_write(
+                        assignments,
+                        position,
+                        target_position,
+                    ),
+                    action: "INSERT ON CONFLICT DO UPDATE",
+                    new_row: false,
+                },
+                source.input(assignment.target.source_position(target_position)),
+                Some(&conflict_row),
+                params,
+            )?;
+            if let Some(value) = value {
+                updated_doc.insert(target.column.clone(), value);
+            } else {
+                updated_doc.remove(&target.column);
+            }
         }
     }
     Ok(BuiltConflictUpdate::Update {
@@ -222,7 +190,8 @@ impl InsertConflictLocks {
                             &existing.table,
                             &assignments
                                 .iter()
-                                .map(|assignment| assignment.target.column.clone())
+                                .flat_map(|assignment| assignment.target.column_names())
+                                .map(str::to_owned)
                                 .collect::<Vec<_>>(),
                         ),
                     )? {
@@ -358,7 +327,8 @@ impl InsertConflictLocks {
             } => {
                 let updated_columns = assignments
                     .iter()
-                    .map(|assignment| assignment.target.column.clone())
+                    .flat_map(|assignment| assignment.target.column_names())
+                    .map(str::to_owned)
                     .collect::<Vec<_>>();
                 let Some(triggered_document) = crate::mutation::triggers::fire_before_row_triggers(
                     &context.triggers,
@@ -390,4 +360,56 @@ impl InsertConflictLocks {
             }
         }
     }
+}
+
+fn conflict_evaluation_row<S: Clone + 'static>(
+    context: &ReferentialContext<'_, S>,
+    table: &str,
+    target_row: &crate::OwnedPhysicalRow,
+    document: &Document,
+) -> Result<crate::OwnedPhysicalRow, SQLError> {
+    let definitions = context
+        .constraints
+        .catalog
+        .try_describe_table(table)
+        .map_err(|error| dml_storage_error("INSERT EXCLUDED schema", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let mut excluded_document = document.clone();
+    crate::query::generated::materialize_virtual_generated_columns(
+        &definitions,
+        &mut excluded_document,
+    )?;
+    let excluded_columns = if definitions.is_empty() {
+        excluded_document.keys().cloned().collect::<Vec<_>>()
+    } else {
+        definitions
+            .iter()
+            .map(|definition| definition.name.clone())
+            .collect::<Vec<_>>()
+    };
+    let excluded_types = excluded_columns
+        .iter()
+        .map(|column| {
+            definitions
+                .iter()
+                .find(|definition| definition.name == *column)
+                .map(|definition| definition.ty.clone())
+        })
+        .collect::<Vec<_>>();
+    let excluded_values = excluded_columns
+        .iter()
+        .map(|column| {
+            excluded_document
+                .get(column)
+                .cloned()
+                .unwrap_or(Value::Null)
+        })
+        .collect();
+    Ok(dml_append_hidden_qualified_row(
+        target_row,
+        "excluded",
+        &excluded_columns,
+        &excluded_types,
+        excluded_values,
+    ))
 }

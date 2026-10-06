@@ -208,7 +208,7 @@ pub fn rewrite_insert_to_base(
                     .chain(
                         conflict_updates
                             .iter()
-                            .map(|assignment| assignment.target.column.as_str()),
+                            .flat_map(|assignment| assignment.target.column_names()),
                     ),
                 ColumnWrite::Insert,
             )?;
@@ -268,8 +268,10 @@ pub fn rewrite_insert_to_base(
                     include_excluded: true,
                 };
                 for assignment in assignments.iter_mut() {
-                    assignment.target.column =
-                        writable_column(&layer, &assignment.target.column, ColumnWrite::Insert)?;
+                    for target in assignment.target.targets_mut() {
+                        target.column =
+                            writable_column(&layer, &target.column, ColumnWrite::Insert)?;
+                    }
                     for expression in assignment.expressions_mut() {
                         rewrite_target_expression(
                             services,
@@ -282,7 +284,7 @@ pub fn rewrite_insert_to_base(
                 }
                 let mapped = assignments
                     .iter()
-                    .map(|assignment| assignment.target.clone())
+                    .flat_map(|assignment| assignment.target.targets().iter().cloned())
                     .collect::<Vec<_>>();
                 validate_mapped_columns(&mapped, duplicate_assignment)?;
                 if let Some(predicate) = predicate {

@@ -92,6 +92,14 @@ fn validate_insert_columns(statement: &InsertPlan, available: &[String]) -> Resu
     )
 }
 
+fn assigned_column_names(assignments: &[crate::plan::AssignmentPlan]) -> Vec<String> {
+    assignments
+        .iter()
+        .flat_map(|assignment| assignment.target.column_names())
+        .map(str::to_owned)
+        .collect()
+}
+
 pub fn ensure_insert(
     services: &dyn ViewPrivilegeCatalog,
     statement: &InsertPlan,
@@ -158,12 +166,11 @@ pub fn ensure_insert(
         ..
     }) = statement.on_conflict.as_ref()
     {
-        let update_columns = assignments
-            .iter()
-            .map(|assignment| assignment.target.column.clone())
-            .collect::<Vec<_>>();
+        let update_columns = assigned_column_names(assignments);
         crate::assignment::targets::validate_repeated_targets(
-            assignments.iter().map(|assignment| &assignment.target),
+            assignments
+                .iter()
+                .flat_map(|assignment| assignment.target.targets()),
             false,
         )?;
         validate_columns(&statement.table, &available, &update_columns)?;
@@ -206,13 +213,14 @@ pub fn ensure_update(
     let columns = statement
         .assignments
         .iter()
-        .map(|assignment| assignment.target.column.clone())
+        .flat_map(|assignment| assignment.target.column_names())
+        .map(str::to_owned)
         .collect::<Vec<_>>();
     crate::assignment::targets::validate_repeated_targets(
         statement
             .assignments
             .iter()
-            .map(|assignment| &assignment.target),
+            .flat_map(|assignment| assignment.target.targets()),
         false,
     )?;
     validate_columns(&statement.table, &available, &columns)?;
@@ -324,12 +332,11 @@ pub fn ensure_merge(
             }
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                let columns = assignments
-                    .iter()
-                    .map(|assignment| assignment.target.column.clone())
-                    .collect::<Vec<_>>();
+                let columns = assigned_column_names(assignments);
                 crate::assignment::targets::validate_repeated_targets(
-                    assignments.iter().map(|assignment| &assignment.target),
+                    assignments
+                        .iter()
+                        .flat_map(|assignment| assignment.target.targets()),
                     false,
                 )?;
                 validate_columns(&statement.target, &available, &columns)?;

@@ -46,7 +46,7 @@ mod type_privileges;
 mod types;
 
 pub use acl_role_specification::AclRoleSpecification;
-pub use assignment_target::{AssignmentStep, AssignmentTarget};
+pub use assignment_target::{AssignmentStep, AssignmentTarget, AssignmentTargets};
 pub use composites::*;
 pub use constraints::*;
 pub use cte::*;
@@ -237,7 +237,7 @@ pub enum OnConflictAction {
     /// listed assignments to the existing row when the conflict
     /// target matches.
     Update {
-        assignments: Vec<(AssignmentTarget, Expr)>,
+        assignments: Vec<(AssignmentTargets, Expr)>,
         r#where: Option<Box<Expr>>,
     },
 }
@@ -347,7 +347,7 @@ pub struct UpdateStmt {
     pub target_alias: Option<String>,
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,
-    pub assignments: Vec<(AssignmentTarget, Expr)>,
+    pub assignments: Vec<(AssignmentTargets, Expr)>,
     pub r#where: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
@@ -685,6 +685,9 @@ pub struct TruncateTarget {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MergeTargetColumnBinding {
     pub object_id: [u8; 16],
+    /// Original target position for reconstructing a removed attribute's catalog name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribute_number: Option<i16>,
     /// Domain identities used by non-DEFAULT assignment coercions, including after target deletion.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub domain_dependencies: std::collections::BTreeSet<u32>,
@@ -715,14 +718,14 @@ pub enum MergeWhen {
     /// `WHEN MATCHED [AND <cond>] THEN UPDATE SET ...`.
     UpdateMatched {
         condition: Option<Expr>,
-        assignments: Vec<(AssignmentTarget, Expr)>,
+        assignments: Vec<(AssignmentTargets, Expr)>,
     },
     /// `WHEN MATCHED [AND <cond>] THEN DELETE`.
     DeleteMatched { condition: Option<Expr> },
     /// `WHEN NOT MATCHED BY SOURCE [AND <cond>] THEN UPDATE SET ...`.
     UpdateNotMatchedBySource {
         condition: Option<Expr>,
-        assignments: Vec<(AssignmentTarget, Expr)>,
+        assignments: Vec<(AssignmentTargets, Expr)>,
     },
     /// `WHEN NOT MATCHED BY SOURCE [AND <cond>] THEN DELETE`.
     DeleteNotMatchedBySource { condition: Option<Expr> },

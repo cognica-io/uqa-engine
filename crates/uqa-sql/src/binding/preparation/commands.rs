@@ -221,24 +221,63 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        let mut values = assignments
-            .iter()
-            .map(|assignment| self.expression(&assignment.value, input, subqueries))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut values = Vec::with_capacity(assignments.len());
+        for assignment in assignments {
+            values.push(match &assignment.target {
+                crate::ast::AssignmentTargets::Single(_) => {
+                    vec![self.expression(&assignment.value, input, subqueries)?]
+                }
+                crate::ast::AssignmentTargets::Multiple(targets) => {
+                    let ScalarExpr::ScalarSubquery(index) = &assignment.value else {
+                        return Err(error(
+                            "XX000",
+                            "multiple-column assignment lost its query source".into(),
+                        ));
+                    };
+                    let query = subqueries.get(*index).ok_or_else(|| {
+                        error(
+                            "XX000",
+                            "assignment subquery slot is outside its plan".into(),
+                        )
+                    })?;
+                    let output = self.query(query, Some(input))?;
+                    if targets.source_width != output.columns().len() {
+                        return Err(error(
+                            "42601",
+                            "number of columns does not match number of values".into(),
+                        ));
+                    }
+                    targets
+                        .source_positions
+                        .iter()
+                        .copied()
+                        .map(|position| {
+                            ExpressionType::resolved(output.column_type(position).cloned())
+                        })
+                        .collect()
+                }
+            });
+        }
         validate_target_columns(
             table,
-            assignments.iter().map(|assignment| &assignment.target),
+            assignments
+                .iter()
+                .flat_map(|assignment| assignment.target.targets()),
             target,
         )?;
         targets::validate_repeated_targets(
-            assignments.iter().map(|assignment| &assignment.target),
+            assignments
+                .iter()
+                .flat_map(|assignment| assignment.target.targets()),
             false,
         )?;
-        for (assignment, value) in assignments.iter().zip(&mut values) {
-            if matches!(assignment.value, ScalarExpr::Default) {
-                targets::validate_assignment_default(&assignment.target)?;
+        for (assignment, values) in assignments.iter().zip(&mut values) {
+            for (column, value) in assignment.target.targets().iter().zip(values) {
+                if matches!(assignment.value, ScalarExpr::Default) {
+                    targets::validate_assignment_default(column)?;
+                }
+                self.assignment(value, column, target, input, subqueries)?;
             }
-            self.assignment(value, &assignment.target, target, input, subqueries)?;
         }
         Ok(())
     }

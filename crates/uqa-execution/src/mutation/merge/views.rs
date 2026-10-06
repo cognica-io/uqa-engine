@@ -238,34 +238,46 @@ fn selected_clause_action<S: Clone + 'static>(
                 .ok_or_else(|| SQLError::Internal("view MERGE update lost OLD".into()))?;
             let mut new = old.clone();
             for (assignment_index, assignment) in assignments.iter().enumerate() {
-                let position = input
-                    .target
-                    .columns
-                    .iter()
-                    .position(|column| column == &assignment.target.column)
-                    .ok_or_else(|| SQLError::UnknownColumn(assignment.target.column.clone()))?;
-                let value = evaluate_view_assignment(
+                let source = crate::mutation::assignment::AssignmentSource::evaluate(
                     input.assignment,
-                    input.target,
-                    position,
-                    &assignment.target,
-                    Some(&new[position]),
-                    !assignments[assignment_index + 1..]
-                        .iter()
-                        .any(|next| next.target.column == assignment.target.column),
-                    &assignment.value,
-                    input.action_row,
-                    input.params,
                     input.ctes,
+                    assignment,
+                    Some(input.action_row),
+                    input.params,
                 )?;
-                new[position] = value;
+                for (target_position, target) in assignment.target.targets().iter().enumerate() {
+                    let position = input
+                        .target
+                        .columns
+                        .iter()
+                        .position(|column| column == &target.column)
+                        .ok_or_else(|| SQLError::UnknownColumn(target.column.clone()))?;
+                    new[position] = crate::mutation::assignment::eval_typed_assignment_input(
+                        input.assignment,
+                        input.ctes,
+                        crate::mutation::assignment::TypedAssignmentTarget {
+                            target,
+                            ty: input.target.types[position].as_ref(),
+                            current: Some(&new[position]),
+                            final_column_write: crate::mutation::assignment::final_column_write(
+                                assignments,
+                                assignment_index,
+                                target_position,
+                            ),
+                        },
+                        source.input(assignment.target.source_position(target_position)),
+                        Some(input.action_row),
+                        input.params,
+                    )?;
+                }
             }
             Ok(SelectedViewMergeAction::Update {
                 old,
                 new,
                 updated_columns: assignments
                     .iter()
-                    .map(|assignment| assignment.target.column.clone())
+                    .flat_map(|assignment| assignment.target.column_names())
+                    .map(str::to_owned)
                     .collect(),
             })
         }
