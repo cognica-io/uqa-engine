@@ -55,6 +55,7 @@ fn bound_projection_order_and_limit_build_with_explicit_runtime_view() {
         subqueries: Vec::new(),
         access: AccessPathPlan::Row,
         locking: Vec::new(),
+        windows: Vec::new(),
     };
 
     let (mut operator, resjunk) = build_relational_operator(

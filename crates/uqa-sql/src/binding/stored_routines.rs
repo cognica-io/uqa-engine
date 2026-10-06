@@ -165,6 +165,7 @@ fn command_statement_query(
         relations_bound: true,
         ctes: inputs.ctes,
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
+            windows: Vec::new(),
             projections,
             from: inputs.source,
             r#where: None,

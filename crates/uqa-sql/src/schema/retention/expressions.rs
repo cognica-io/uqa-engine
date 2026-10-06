@@ -71,6 +71,7 @@ impl<'a> Walker<'a> {
                 self.text(name)?;
                 self.children(args, Node::Expr)?;
                 self.optional_boxed_expr(filter.as_deref())?;
+                self.charge(size_of::<WindowSpec>())?;
                 self.window(spec)?;
             }
             Expr::Case {
@@ -122,6 +123,8 @@ impl<'a> Walker<'a> {
 
     fn window(&mut self, window: &'a WindowSpec) -> Result<()> {
         let WindowSpec {
+            definition: _,
+            raw_definition: _,
             reference,
             partition_by,
             order_by,

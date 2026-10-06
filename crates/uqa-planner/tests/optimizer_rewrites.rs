@@ -58,6 +58,7 @@ fn select_with_where(filter: Expr) -> SelectStmt {
         distinct: false,
         distinct_on: Vec::new(),
         locking: Vec::new(),
+        windows: Vec::new(),
     }
 }
 
@@ -196,6 +197,86 @@ fn nested_and_flattens() {
     // Should mention "And" exactly once (the outer one).
     let occurrences = dbg.matches("And(").count();
     assert_eq!(occurrences, 1, "expected flattened And, got {dbg}");
+}
+
+#[test]
+fn unused_window_constants_keep_postgresql_planning_errors() {
+    for sql in [
+        "SELECT 1 WINDOW unused AS (ORDER BY 1/0)",
+        "SELECT 1 WINDOW unused AS (ORDER BY (SELECT 1/0))",
+    ] {
+        let statement = uqa_sql::compile(sql).unwrap().remove(0);
+        let error = optimize(
+            UnifiedPlan::lower(statement),
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        )
+        .unwrap_err();
+        // Independently captured in named_window_viewdef_oracle.expected.json.
+        let uqa_planner::optimizer::OptimizerError::Expression(error) = error else {
+            panic!("expected expression error: {sql}: {error}")
+        };
+        assert_eq!(error.sqlstate(), Some("22012"), "{sql}: {error}");
+    }
+}
+
+#[test]
+fn unused_window_aggregate_still_selects_aggregate_execution() {
+    let Statement::Select(select) = uqa_sql::compile(
+        "SELECT 1 FROM (VALUES(1),(2)) AS t(v) WINDOW unused AS (ORDER BY sum(v))",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("expected SELECT")
+    };
+    let UnifiedPlan::Query(query) = optimize_select(*select) else {
+        panic!("expected query")
+    };
+    let RelationalPlan::QueryBlock(block) = query.root else {
+        panic!("expected query block")
+    };
+    assert!(matches!(
+        block.compute,
+        uqa_sql::plan::ComputePlan::Aggregate
+    ));
+}
+
+#[test]
+fn window_definitions_follow_subquery_remapping_and_source_constants() {
+    let Statement::Select(select) = uqa_sql::compile(
+        "SELECT row_number() OVER w FROM (VALUES(2)) AS source(v) WINDOW w AS (ORDER BY v + 1), unused AS (ORDER BY (SELECT 3))",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("expected SELECT")
+    };
+    let plan = optimize_select(*select);
+    let UnifiedPlan::Query(query) = &plan else {
+        panic!("expected query")
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("expected query block")
+    };
+    assert_eq!(
+        block.windows[0].spec.order_by[0].expr,
+        ScalarExpr::Literal(Value::Int(3))
+    );
+    let ScalarExpr::WindowCall { spec, .. } = &block.projections[0].expr else {
+        panic!("expected window call")
+    };
+    assert_eq!(spec.order_by, block.windows[0].spec.order_by);
+    let ScalarExpr::ScalarSubquery(id) = block.windows[1].spec.order_by[0].expr else {
+        panic!("expected retained unused window subquery")
+    };
+    assert!(id < block.subqueries.len());
+    let repeated = optimize(
+        plan.clone(),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(repeated).unwrap(),
+        serde_json::to_value(plan).unwrap()
+    );
 }
 
 /// Equality helper: panics with a useful message instead of using

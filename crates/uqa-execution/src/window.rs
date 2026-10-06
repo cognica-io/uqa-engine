@@ -82,7 +82,7 @@ impl PreparedWindowPlan {
         let mut schema = input.clone();
         for pass in &self.passes {
             let types = slot_types(pass, context, &schema, params)?;
-            schema = RowSchema::append_internal_typed(&schema, &types);
+            schema = pass_output_schema(&schema, &types);
         }
         Ok(schema)
     }
@@ -145,10 +145,20 @@ impl WindowExecutor for PhysicalWindowExecutor<'_> {
                 self.work_mem_bytes,
                 self.params,
             )?;
-            schema = RowSchema::append_internal_typed(&schema, &types);
+            schema = pass_output_schema(&schema, &types);
         }
         Ok(input)
     }
+}
+
+/// Each pass sorts into a compact layout before appending its window values.
+/// Keep the declared layout and the next pass's input aligned with those rows.
+fn pass_output_schema(
+    input: &RowSchema,
+    types: &[(uqa_sql::ast::InternalColumnRef, Option<ColumnType>)],
+) -> RowSchema {
+    let (partition, _) = input.canonical_projection();
+    RowSchema::append_internal_typed(&partition, types)
 }
 
 pub fn has_window(projections: &[ProjectionPlan]) -> bool {

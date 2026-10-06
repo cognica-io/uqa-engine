@@ -101,6 +101,7 @@ fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
                         subqueries: subqueries.clone(),
                         access: AccessPathPlan::Row,
                         locking: Vec::new(),
+                        windows: Vec::new(),
                     }
                 });
             let execution = crate::query::relational::sets::SetSpillExecution::new(

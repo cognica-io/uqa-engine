@@ -105,8 +105,26 @@ pub enum NullsOrder {
     Last,
 }
 
+/// One query-local window definition. The specification owns only its written clauses; inheritance is resolved through an earlier named definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindowDefinition<S = WindowSpec> {
+    pub name: Option<String>,
+    pub inherited: Option<usize>,
+    pub spec: S,
+}
+
+/// Compiler-only equality key for a raw window declaration; not part of stored SQL.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowDefinitionSyntax(pub(crate) serde_json::Value);
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WindowSpec {
+    /// Raw syntax survives only until the compiler selects its query-local definition.
+    #[serde(skip)]
+    pub raw_definition: Option<WindowDefinitionSyntax>,
+    /// Canonical definition in the enclosing query block. Older stored inline specifications have no slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition: Option<usize>,
     /// Named window referenced by this specification while the SQL compiler resolves a `WINDOW` clause. Compiler-produced plans clear this field before lowering into the unified scalar IR.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<WindowReference>,
@@ -115,6 +133,26 @@ pub struct WindowSpec {
     /// `ROWS` / `RANGE` frame, or `None` when not specified (defaults
     /// to `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`).
     pub frame: Option<WindowFrame>,
+}
+
+impl WindowSpec {
+    /// Scalar roots owned by this specification, excluding separately stored inherited clauses.
+    pub fn expressions_mut(&mut self) -> impl Iterator<Item = &mut Expr> {
+        self.partition_by
+            .iter_mut()
+            .chain(self.order_by.iter_mut().map(|order| &mut order.expr))
+            .chain(
+                self.frame
+                    .iter_mut()
+                    .flat_map(|frame| [&mut frame.start, &mut frame.end])
+                    .filter_map(|bound| match bound {
+                        FrameBound::Preceding(value) | FrameBound::Following(value) => {
+                            Some(value.as_mut())
+                        }
+                        _ => None,
+                    }),
+            )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,7 +347,7 @@ pub enum Expr {
     WindowCall {
         name: String,
         args: Vec<Expr>,
-        spec: WindowSpec,
+        spec: Box<WindowSpec>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         filter: Option<Box<Expr>>,
         #[serde(default, skip_serializing_if = "WindowCallModifiers::is_empty")]
@@ -665,6 +703,11 @@ impl SelectStmt {
     #[doc(hidden)]
     pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
         let mut changed = upgrade_projections(&mut self.projections);
+        for window in &mut self.windows {
+            for expression in window.spec.expressions_mut() {
+                changed |= expression.upgrade_legacy_serialized_dispatches();
+            }
+        }
         changed |= upgrade_rows(&mut self.values);
         if let Some(from) = &mut self.from {
             changed |= from.upgrade_legacy_serialized_dispatches();

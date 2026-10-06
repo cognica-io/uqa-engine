@@ -213,6 +213,7 @@ impl Deparser<'_> {
                 .as_ref()
                 .is_some_and(|source| source_count(source) > 1);
         scope.range_table |= block.from.is_some();
+        self.prepare_windows(block, &mut scope)?;
         let mut rendered = String::from(if self.indent { " SELECT" } else { "SELECT" });
         if !block.distinct_on.is_empty() {
             write!(
@@ -248,6 +249,7 @@ impl Deparser<'_> {
             );
         }
         self.group_having(&mut rendered, block, &scope)?;
+        self.window_clause(&mut rendered, &scope);
         rendered.push_str(&self.order_limit(
             &block.order_by,
             block.limit.as_ref(),

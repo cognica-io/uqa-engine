@@ -8,6 +8,8 @@ use super::*;
 use crate::aggregation::{AggregateAccumulatorTemplate, AggregateStatePlan};
 use uqa_sql::expr::RowLookup as _;
 
+mod source_layout;
+
 struct NoSequences;
 
 impl uqa_sql::expr::EngineHook for NoSequences {
@@ -53,6 +55,7 @@ fn pass(order_by: Vec<ScalarOrder>, slots: usize) -> WindowPass {
                 name: "window".into(),
                 args: Vec::new(),
                 spec: ScalarWindowSpec {
+                    definition: None,
                     partition_by: Vec::new(),
                     order_by: order_by.clone(),
                     frame: None,

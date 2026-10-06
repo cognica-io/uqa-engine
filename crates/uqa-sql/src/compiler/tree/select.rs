@@ -22,7 +22,7 @@ pub(in crate::compiler) fn compile_select(
     if stmt.into_clause.is_some() {
         return Err(SQLError::Unsupported("SELECT INTO is not supported".into()));
     }
-    let named_windows = compile_named_windows(&stmt.window_clause)?;
+    let mut named_windows = compile_named_windows(&stmt.window_clause)?;
     let with_ties = stmt.limit_option() == pg_query::protobuf::LimitOption::WithTies;
     if with_ties && stmt.sort_clause.is_empty() {
         return Err(SQLError::Routine {
@@ -151,6 +151,7 @@ pub(in crate::compiler) fn compile_select(
 
     let (distinct, distinct_on) = compile_distinct_clause(&stmt.distinct_clause)?;
     let mut compiled = SelectStmt {
+        windows: Vec::new(),
         projections,
         values,
         from,
@@ -169,7 +170,7 @@ pub(in crate::compiler) fn compile_select(
         distinct_on,
         locking,
     };
-    super::resolve_named_windows_in_select(&mut compiled, &named_windows)?;
+    super::resolve_named_windows_in_select(&mut compiled, &mut named_windows)?;
     super::locking::validate_select_locking(&compiled)?;
     super::locking::propagate_select_locking(&mut compiled)?;
     Ok(compiled)

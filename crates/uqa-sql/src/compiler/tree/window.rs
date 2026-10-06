@@ -6,17 +6,102 @@
 
 //! Window-frame and type-cast lowering.
 
-use std::collections::BTreeMap;
-
 use super::{
     compile_expr, compile_named_window_spec, extract_strings, Expr, FromClause, Node, NodeEnum,
     Result, SQLError, SelectStmt, WindowReferenceKind, WindowSpec,
 };
 
-pub(in crate::compiler) type NamedWindows = BTreeMap<String, WindowSpec>;
+use crate::ast::{WindowDefinition, WindowDefinitionSyntax};
+
+#[derive(Default)]
+pub(in crate::compiler) struct NamedWindows {
+    definitions: Vec<WindowDefinition>,
+    syntax: Vec<WindowDefinitionSyntax>,
+    resolved: Vec<WindowSpec>,
+}
+
+impl NamedWindows {
+    fn named(&self, name: &str) -> Result<usize> {
+        self.definitions
+            .iter()
+            .position(|definition| definition.name.as_deref() == Some(name))
+            .ok_or_else(|| window_error("42704", format!("window \"{name}\" does not exist")))
+    }
+
+    fn append(
+        &mut self,
+        name: Option<String>,
+        mut spec: WindowSpec,
+        site: WindowSpecSite,
+    ) -> Result<usize> {
+        if spec
+            .expressions_mut()
+            .any(|expression| expression.contains_window())
+        {
+            return Err(window_error(
+                "42P20",
+                "window functions are not allowed in window definitions".into(),
+            ));
+        }
+        let syntax = spec.raw_definition.take().ok_or_else(|| {
+            SQLError::Internal("compiled window is missing its raw syntax".into())
+        })?;
+        let inherited = spec
+            .reference
+            .as_ref()
+            .map(|reference| self.named(&reference.name))
+            .transpose()?;
+        let mut resolved = spec.clone();
+        resolve_window_reference(&mut resolved, self, site)?;
+        spec.reference = None;
+        spec.definition = None;
+        let slot = self.definitions.len();
+        self.definitions.push(WindowDefinition {
+            name,
+            inherited,
+            spec,
+        });
+        self.syntax.push(syntax);
+        self.resolved.push(resolved);
+        Ok(slot)
+    }
+}
+
+/// Match `PostgreSQL`'s raw `WindowDef` comparison before lowering erases explicit sort spellings.
+pub(super) fn raw_definition(definition: &pg_query::protobuf::WindowDef) -> WindowDefinitionSyntax {
+    let mut key = serde_json::json!({
+        "refname": definition.refname,
+        "partition": definition.partition_clause,
+        "order": definition.order_clause,
+        "frame": definition.frame_options,
+        "start": definition.start_offset,
+        "end": definition.end_offset,
+    });
+    remove_source_locations(&mut key);
+    WindowDefinitionSyntax(key)
+}
+
+fn remove_source_locations(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            fields.remove("location");
+            fields.remove("stmt_location");
+            fields.remove("stmt_len");
+            for value in fields.values_mut() {
+                remove_source_locations(value);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for value in items {
+                remove_source_locations(value);
+            }
+        }
+        _ => {}
+    }
+}
 
 pub(in crate::compiler) fn compile_named_windows(nodes: &[Node]) -> Result<NamedWindows> {
-    let mut windows = NamedWindows::new();
+    let mut windows = NamedWindows::default();
     for node in nodes {
         let Some(NodeEnum::WindowDef(definition)) = node.node.as_ref() else {
             return Err(SQLError::Internal(format!(
@@ -29,23 +114,28 @@ pub(in crate::compiler) fn compile_named_windows(nodes: &[Node]) -> Result<Named
                 "WINDOW clause definition has an empty name".into(),
             ));
         }
-        if windows.contains_key(&definition.name) {
+        if windows
+            .definitions
+            .iter()
+            .any(|window| window.name.as_deref() == Some(&definition.name))
+        {
             return Err(window_error(
                 "42P20",
                 format!("window \"{}\" is already defined", definition.name),
             ));
         }
-        let mut spec = compile_named_window_spec(definition)?;
-        resolve_window_spec(&mut spec, &windows, WindowSpecSite::WindowClause)?;
-        resolve_window_spec_expressions(&mut spec, &windows)?;
-        windows.insert(definition.name.clone(), spec);
+        windows.append(
+            Some(definition.name.clone()),
+            compile_named_window_spec(definition)?,
+            WindowSpecSite::WindowClause,
+        )?;
     }
     Ok(windows)
 }
 
 pub(in crate::compiler) fn resolve_named_windows_in_expr(
     expr: &mut Expr,
-    windows: &NamedWindows,
+    windows: &mut NamedWindows,
 ) -> Result<()> {
     match expr {
         Expr::Default
@@ -100,7 +190,7 @@ pub(in crate::compiler) fn resolve_named_windows_in_expr(
             if let Some(filter) = filter {
                 resolve_named_windows_in_expr(filter, windows)?;
             }
-            resolve_window_spec(spec, windows, WindowSpecSite::OverClause)?;
+            resolve_window_spec(spec, windows)?;
             resolve_window_spec_expressions(spec, windows)?;
         }
         Expr::Case {
@@ -126,7 +216,7 @@ pub(in crate::compiler) fn resolve_named_windows_in_expr(
 
 pub(in crate::compiler) fn resolve_named_windows_in_select(
     select: &mut SelectStmt,
-    windows: &NamedWindows,
+    windows: &mut NamedWindows,
 ) -> Result<()> {
     for projection in &mut select.projections {
         resolve_named_windows_in_expr(&mut projection.expr, windows)?;
@@ -164,10 +254,18 @@ pub(in crate::compiler) fn resolve_named_windows_in_select(
             resolve_named_windows_in_expr(expression, windows)?;
         }
     }
+    let mut index = 0;
+    while index < windows.definitions.len() {
+        let mut own = windows.definitions[index].spec.clone();
+        resolve_window_spec_expressions(&mut own, windows)?;
+        windows.definitions[index].spec = own;
+        index += 1;
+    }
+    select.windows = std::mem::take(&mut windows.definitions);
     Ok(())
 }
 
-fn resolve_named_windows_in_from(from: &mut FromClause, windows: &NamedWindows) -> Result<()> {
+fn resolve_named_windows_in_from(from: &mut FromClause, windows: &mut NamedWindows) -> Result<()> {
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } => {}
         FromClause::Join {
@@ -196,7 +294,7 @@ fn resolve_named_windows_in_from(from: &mut FromClause, windows: &NamedWindows) 
     Ok(())
 }
 
-fn resolve_named_windows_in_exprs(exprs: &mut [Expr], windows: &NamedWindows) -> Result<()> {
+fn resolve_named_windows_in_exprs(exprs: &mut [Expr], windows: &mut NamedWindows) -> Result<()> {
     for expr in exprs {
         resolve_named_windows_in_expr(expr, windows)?;
     }
@@ -211,7 +309,31 @@ enum WindowSpecSite {
 }
 
 /// Apply a window reference as `transformWindowDefinitions` does, checking the `PARTITION BY`, `ORDER BY` and frame of the copy in that order.
-fn resolve_window_spec(
+fn resolve_window_spec(spec: &mut WindowSpec, windows: &mut NamedWindows) -> Result<()> {
+    let Some(syntax) = spec.raw_definition.as_ref() else {
+        return Ok(());
+    };
+    let slot = if let Some(reference) = spec
+        .reference
+        .as_ref()
+        .filter(|reference| reference.kind == WindowReferenceKind::Direct)
+    {
+        windows.named(&reference.name)?
+    } else if let Some(slot) = windows
+        .syntax
+        .iter()
+        .position(|candidate| candidate == syntax)
+    {
+        slot
+    } else {
+        windows.append(None, spec.clone(), WindowSpecSite::OverClause)?
+    };
+    *spec = windows.resolved[slot].clone();
+    spec.definition = Some(slot);
+    Ok(())
+}
+
+fn resolve_window_reference(
     spec: &mut WindowSpec,
     windows: &NamedWindows,
     site: WindowSpecSite,
@@ -219,12 +341,7 @@ fn resolve_window_spec(
     let Some(reference) = spec.reference.take() else {
         return Ok(());
     };
-    let base = windows.get(&reference.name).ok_or_else(|| {
-        window_error(
-            "42704",
-            format!("window \"{}\" does not exist", reference.name),
-        )
-    })?;
+    let base = &windows.resolved[windows.named(&reference.name)?];
     match reference.kind {
         WindowReferenceKind::Direct => {
             if !spec.partition_by.is_empty() || !spec.order_by.is_empty() || spec.frame.is_some() {
@@ -285,7 +402,10 @@ fn resolve_window_spec(
     Ok(())
 }
 
-fn resolve_window_spec_expressions(spec: &mut WindowSpec, windows: &NamedWindows) -> Result<()> {
+fn resolve_window_spec_expressions(
+    spec: &mut WindowSpec,
+    windows: &mut NamedWindows,
+) -> Result<()> {
     resolve_named_windows_in_exprs(&mut spec.partition_by, windows)?;
     for order in &mut spec.order_by {
         resolve_named_windows_in_expr(&mut order.expr, windows)?;

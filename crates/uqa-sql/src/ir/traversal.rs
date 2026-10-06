@@ -661,6 +661,7 @@ mod tests {
             name: "sum".into(),
             args: vec![ScalarExpr::Column("amount".into())],
             spec: super::super::ScalarWindowSpec {
+                definition: None,
                 partition_by: vec![ScalarExpr::QualifiedColumn {
                     qualifier: "orders".into(),
                     column: "account_id".into(),
@@ -703,6 +704,7 @@ mod tests {
                     name: "sum".into(),
                     args: vec![literal()],
                     spec: super::super::ScalarWindowSpec {
+                        definition: None,
                         partition_by: Vec::new(),
                         order_by: Vec::new(),
                         frame: Some(super::super::ScalarWindowFrame {

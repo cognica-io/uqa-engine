@@ -128,6 +128,11 @@ impl Deparser<'_> {
         {
             reference_expression(expression, &scope, references);
         }
+        for definition in &block.windows {
+            for expression in definition.spec.expressions() {
+                reference_expression(expression, &scope, references);
+            }
+        }
         for order in &block.order_by {
             // An output column named by its alias was referenced by its projection.
             let is_output = matches!(&order.expr, ScalarExpr::Column(name) if block.projections.iter().any(|projection| projection.alias.as_ref() == Some(name)));

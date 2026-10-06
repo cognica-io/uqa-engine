@@ -157,6 +157,11 @@ impl Deparser<'_> {
         {
             rename_expression(expression, &scope, rename);
         }
+        for definition in &mut block.windows {
+            for expression in definition.spec.expressions_mut() {
+                rename_expression(expression, &scope, rename);
+            }
+        }
         for order in &mut block.order_by {
             let is_output = matches!(&order.expr, ScalarExpr::Column(name) if block.projections.iter().any(|projection| projection.alias.as_ref() == Some(name)));
             if !is_output {

@@ -11,6 +11,42 @@ use crate::ast::{BinaryOp, Expr, FromClause, FunctionOrderSyntax, Statement};
 use crate::SQLError;
 
 #[test]
+fn named_window_rendering_preserves_shared_inputs_and_nested_scopes() {
+    for sql in [
+        "SELECT row_number() OVER w + row_number() OVER (w) AS n WINDOW w AS (ORDER BY '{1}'::integer[]), unused AS (PARTITION BY 3)",
+        "SELECT DISTINCT ON (row_number() OVER w) row_number() OVER (w) AS n WINDOW w AS (ORDER BY '{1}'::integer[])",
+        "SELECT sum(v) OVER \"Framed W\" FROM t WINDOW base AS (PARTITION BY g), ordered AS (base ORDER BY v), \"Framed W\" AS (ordered ROWS UNBOUNDED PRECEDING) ORDER BY row_number() OVER ordered",
+        "WITH q AS (SELECT row_number() OVER w AS n WINDOW w AS (ORDER BY 1)) SELECT row_number() OVER w FROM q WINDOW w AS (ORDER BY n DESC)",
+    ] {
+        let statement = crate::compile(sql).unwrap().remove(0);
+        let rendered = statement_sql(&statement).unwrap();
+        let reparsed = crate::compile(&rendered).unwrap().remove(0);
+        assert_eq!(statement_sql(&reparsed).unwrap(), rendered, "{sql}");
+        assert!(rendered.contains(" WINDOW "), "{rendered}");
+        if sql.contains("'{1}'") {
+            assert_eq!(rendered.matches("'{1}'").count(), 1, "{rendered}");
+            assert!(rendered.contains("OVER w"), "{rendered}");
+            assert!(rendered.contains("OVER (w)"), "{rendered}");
+        }
+    }
+}
+
+#[test]
+fn standalone_window_expression_keeps_expanded_fallback_without_query_scope() {
+    let Statement::Select(select) =
+        crate::compile("SELECT row_number() OVER w WINDOW w AS (ORDER BY 1)")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("expected SELECT")
+    };
+    assert_eq!(
+        expression_sql(&select.projections[0].expr).unwrap(),
+        "row_number() OVER (ORDER BY 1)"
+    );
+}
+
+#[test]
 fn unrenderable_nested_nodes_return_errors_instead_of_panicking() {
     let value = EnumValue::new(16_384, EnumLabelKey::from_bytes(vec![0x80]).unwrap());
     let expected = crate::expr::catalog_output_required(&value).to_string();

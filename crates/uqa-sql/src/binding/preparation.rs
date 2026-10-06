@@ -61,6 +61,7 @@ pub(crate) fn read_prepared_inputs(
     let constants = analysis.parameters.take_input_constants();
     let parameters = analysis.parameters.finish()?;
     constants.apply(plan)?;
+    plan.normalize_window_definitions()?;
     let mut dependencies = analysis.scope.prepared_dependencies.unwrap_or_default();
     plan.visit_scalar_expressions(&mut |expression| dependencies.include_expression(expression));
     Ok(PreparedInputAnalysis {
@@ -113,7 +114,8 @@ pub(crate) fn read_executable_inputs(
     if finish_parameters {
         analysis.parameters.finish()?;
     }
-    constants.apply(plan)
+    constants.apply(plan)?;
+    plan.normalize_window_definitions()
 }
 
 pub fn infer_prepared_parameter_types(

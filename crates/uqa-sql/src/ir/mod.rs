@@ -125,9 +125,50 @@ pub struct ScalarOrder {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScalarWindowSpec {
+    /// Canonical definition in the enclosing query block; absent in legacy inline plans.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition: Option<usize>,
     pub partition_by: Vec<ScalarExpr>,
     pub order_by: Vec<ScalarOrder>,
     pub frame: Option<ScalarWindowFrame>,
+}
+
+impl ScalarWindowSpec {
+    /// Borrow each key and frame-offset root owned by this specification.
+    pub fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+        self.partition_by
+            .iter()
+            .chain(self.order_by.iter().map(|order| &order.expr))
+            .chain(
+                self.frame
+                    .iter()
+                    .flat_map(|frame| [&frame.start, &frame.end])
+                    .filter_map(|bound| match bound {
+                        ScalarFrameBound::Preceding(value) | ScalarFrameBound::Following(value) => {
+                            Some(value.as_ref())
+                        }
+                        _ => None,
+                    }),
+            )
+    }
+
+    /// Mutably borrow each key and frame-offset root without visiting derived call copies.
+    pub fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
+        self.partition_by
+            .iter_mut()
+            .chain(self.order_by.iter_mut().map(|order| &mut order.expr))
+            .chain(
+                self.frame
+                    .iter_mut()
+                    .flat_map(|frame| [&mut frame.start, &mut frame.end])
+                    .filter_map(|bound| match bound {
+                        ScalarFrameBound::Preceding(value) | ScalarFrameBound::Following(value) => {
+                            Some(value.as_mut())
+                        }
+                        _ => None,
+                    }),
+            )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

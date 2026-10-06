@@ -53,6 +53,11 @@ pub(super) fn rewrite_query_scalars(
             for expression in &mut block.distinct_on {
                 rewrite_scalar(expression, rewrite);
             }
+            for window in &mut block.windows {
+                for expression in window.spec.expressions_mut() {
+                    rewrite_scalar(expression, rewrite);
+                }
+            }
             for subquery in &mut block.subqueries {
                 rewrite_query_scalars(subquery, rewrite);
             }

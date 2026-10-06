@@ -302,6 +302,7 @@ pub fn bind_expression_variables(
 /// `SELECT expression`, the query `PostgreSQL` analyzes for an embedded expression.
 fn expression_query(expression: Expr) -> Statement {
     Statement::Select(Box::new(SelectStmt {
+        windows: Vec::new(),
         projections: vec![Projection {
             expr: expression,
             alias: None,

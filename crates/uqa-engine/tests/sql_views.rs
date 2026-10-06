@@ -28,6 +28,8 @@ mod definitions;
 mod input_analysis_order;
 #[path = "sql_views/materialized_creation_order.rs"]
 mod materialized_creation_order;
+#[path = "sql_views/named_window_definitions.rs"]
+mod named_window_definitions;
 #[path = "sql_views/updatability_diagnostics.rs"]
 mod updatability_diagnostics;
 

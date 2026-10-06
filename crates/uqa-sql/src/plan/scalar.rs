@@ -53,6 +53,16 @@ pub(super) fn lower_scalar_expression(
         .expect("owned lowering has no admission failure")
 }
 
+pub(super) fn lower_window_spec(
+    specification: WindowSpec,
+    aggregates: &dyn AggregateClassifier,
+    subqueries: &mut Vec<QueryPlan>,
+) -> ScalarWindowSpec {
+    Lowering { control: None }
+        .window(Source::Owned(specification), aggregates, subqueries)
+        .expect("owned lowering has no admission failure")
+}
+
 impl Lowering<'_> {
     #[expect(
         clippy::too_many_lines,

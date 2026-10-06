@@ -9,7 +9,7 @@
 use super::{expression_identity, resolve_grouping_expression};
 use crate::plan::QueryBlockPlan;
 use crate::routines::RoutineResolution;
-use crate::semantics::aggregates::{has_aggregate, is_aggregate};
+use crate::semantics::aggregates::{contains_aggregate, has_aggregate, is_aggregate};
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 
 /// Validate the grouped expressions of a query whose own columns `schema` holds over `outer`, the scope of the queries that enclose it.
@@ -25,6 +25,11 @@ pub fn validate_grouped_expressions(
         && statement.grouping_sets.is_empty()
         && statement.having.is_none()
         && !has_aggregate(&aggregates, &statement.projections)
+        && !statement
+            .windows
+            .iter()
+            .flat_map(|window| window.spec.expressions())
+            .any(|expression| contains_aggregate(&aggregates, expression))
     {
         return Ok(());
     }
@@ -56,6 +61,13 @@ pub fn validate_grouped_expressions(
                 .map(|expression| (expression, false)),
         )
         .chain(statement.order_by.iter().map(|order| (&order.expr, true)))
+        .chain(
+            statement
+                .windows
+                .iter()
+                .flat_map(|window| window.spec.expressions())
+                .map(|expression| (expression, false)),
+        )
         .chain(
             statement
                 .distinct_on

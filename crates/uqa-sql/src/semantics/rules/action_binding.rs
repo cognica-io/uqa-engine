@@ -336,6 +336,34 @@ fn bind_rule_function_expression(
     })
 }
 
+fn bind_window_spec(
+    spec: &crate::ast::WindowSpec,
+    resolver: &mut dyn VariableResolver,
+    scope: &RuleBindingScope,
+    context: &RuleBindingContext<'_>,
+) -> Result<crate::ast::WindowSpec, SQLError> {
+    Ok(crate::ast::WindowSpec {
+        definition: spec.definition,
+        raw_definition: None,
+        reference: spec.reference.clone(),
+        partition_by: bind_exprs(&spec.partition_by, resolver, scope, context)?,
+        order_by: bind_orders(&spec.order_by, resolver, scope, context)?,
+        frame: spec
+            .frame
+            .as_ref()
+            .map(|frame| -> Result<crate::ast::WindowFrame, SQLError> {
+                Ok(crate::ast::WindowFrame {
+                    mode: frame.mode,
+                    start: bind_frame_bound(&frame.start, resolver, scope, context)?,
+                    end: bind_frame_bound(&frame.end, resolver, scope, context)?,
+                    between: frame.between,
+                    exclusion: frame.exclusion,
+                })
+            })
+            .transpose()?,
+    })
+}
+
 fn bind_rule_window_expression(
     expr: &Expr,
     resolver: &mut dyn VariableResolver,
@@ -360,24 +388,7 @@ fn bind_rule_window_expression(
             .as_deref()
             .map(|filter| bind_rule_expr_with_scope(filter, resolver, scope, context).map(Box::new))
             .transpose()?,
-        spec: crate::ast::WindowSpec {
-            reference: spec.reference.clone(),
-            partition_by: bind_exprs(&spec.partition_by, resolver, scope, context)?,
-            order_by: bind_orders(&spec.order_by, resolver, scope, context)?,
-            frame: spec
-                .frame
-                .as_ref()
-                .map(|frame| -> Result<crate::ast::WindowFrame, SQLError> {
-                    Ok(crate::ast::WindowFrame {
-                        mode: frame.mode,
-                        start: bind_frame_bound(&frame.start, resolver, scope, context)?,
-                        end: bind_frame_bound(&frame.end, resolver, scope, context)?,
-                        between: frame.between,
-                        exclusion: frame.exclusion,
-                    })
-                })
-                .transpose()?,
-        },
+        spec: Box::new(bind_window_spec(spec, resolver, scope, context)?),
     })
 }
 
@@ -538,6 +549,17 @@ fn bind_select_with_scope(
         collect_visible_scope(source, &local_context, &mut scope)?;
     }
     Ok(SelectStmt {
+        windows: select
+            .windows
+            .iter()
+            .map(|window| {
+                Ok(crate::ast::WindowDefinition {
+                    name: window.name.clone(),
+                    inherited: window.inherited,
+                    spec: bind_window_spec(&window.spec, resolver, &scope, &local_context)?,
+                })
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?,
         projections: bind_projections(&select.projections, resolver, &scope, &local_context)?,
         values: select
             .values

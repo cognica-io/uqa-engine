@@ -134,6 +134,11 @@ pub(super) fn optimize_query_block(
     for expression in &mut block.distinct_on {
         optimize_scalar_slot(expression, config)?;
     }
+    for window in &mut block.windows {
+        for expression in window.spec.expressions_mut() {
+            optimize_scalar_slot(expression, config)?;
+        }
+    }
 
     let is_aggregate = |name: &str| {
         crate::unified_plan::is_builtin_aggregate(name) || aggregates.is_registered_aggregate(name)
@@ -144,7 +149,12 @@ pub(super) fn optimize_query_block(
         || block
             .projections
             .iter()
-            .any(|projection| projection.expr.contains_aggregate(&is_aggregate));
+            .any(|projection| projection.expr.contains_aggregate(&is_aggregate))
+        || block
+            .windows
+            .iter()
+            .flat_map(|window| window.spec.expressions())
+            .any(|expression| expression.contains_aggregate(&is_aggregate));
     let has_window = block
         .projections
         .iter()

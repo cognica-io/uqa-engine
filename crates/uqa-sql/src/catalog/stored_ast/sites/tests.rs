@@ -140,3 +140,42 @@ fn unresolved_legacy_function_order_is_preserved_without_serialized_metadata() {
         .unwrap()
         .contains("order_syntax"));
 }
+
+#[test]
+fn canonical_window_input_sites_preserve_each_stored_copy_without_raw_orphan_queries() {
+    let mut syntax = crate::compile("SELECT sum(v) OVER w, row_number() OVER w FROM t WINDOW w AS (ORDER BY (SELECT '7'::integer)), unused AS (ORDER BY '9'::integer)").unwrap().remove(0);
+    let Statement::Select(statement) = &syntax else {
+        panic!("SELECT expected")
+    };
+    let original = QueryPlan::lower(statement.as_ref().clone());
+    let crate::plan::RelationalPlan::QueryBlock(block) = &original.root else {
+        panic!("query block")
+    };
+    assert_eq!(block.subqueries.len(), 1);
+    let mut bound = original.clone();
+    bound.rewrite_scalar_expressions(&mut |node| {
+        if let ScalarExpr::Literal(Value::Str(text)) = node {
+            if let Ok(value) = text.parse::<i64>() {
+                *node = ScalarExpr::TypedLiteral {
+                    value: Value::Int(value),
+                    ty: "integer".into(),
+                    bound_type: None,
+                    parameter_index: None,
+                };
+            }
+        }
+    });
+    bound.normalize_window_definitions().unwrap();
+    let sites = query_syntax_sites(&original, &bound).unwrap();
+    assert!(bind_stored_statement_sites(&mut syntax, &sites).unwrap());
+    let Statement::Select(statement) = &syntax else {
+        panic!("SELECT expected")
+    };
+    let restored = QueryPlan::lower(statement.as_ref().clone());
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap(),
+        serde_json::to_value(&bound).unwrap()
+    );
+    let sites = query_syntax_sites(&restored, &restored).unwrap();
+    assert!(!bind_stored_statement_sites(&mut syntax, &sites).unwrap());
+}

@@ -8,7 +8,6 @@
 
 use std::fmt::Write as _;
 
-use crate::{ScalarFrameBound, ScalarWindowSpec};
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, ColumnType, Expr, FunctionBinding, FunctionDispatch};
 use uqa_sql::ir::ScalarExpr;
@@ -601,87 +600,6 @@ impl Deparser<'_> {
         }
         rendered.push_str(" END");
         Ok(rendered)
-    }
-
-    /// A window call as `get_windowfunc_expr` prints it: the call, its `FILTER`, and `OVER` with the window.
-    fn window_call(
-        &self,
-        name: &str,
-        args: &[ScalarExpr],
-        (filter, spec): (Option<&ScalarExpr>, &ScalarWindowSpec),
-        scope: &Scope,
-        subqueries: &[QueryPlan],
-    ) -> Result<String, SQLError> {
-        let filter = filter
-            .map(|filter| self.expression(filter, scope, subqueries))
-            .transpose()?
-            .map(|filter| format!(" FILTER (WHERE {filter})"))
-            .unwrap_or_default();
-        Ok(format!(
-            "{}{filter} OVER ({})",
-            self.function(name, None, args, scope, subqueries)?,
-            self.window(spec, scope, subqueries)?
-        ))
-    }
-
-    fn window(
-        &self,
-        spec: &ScalarWindowSpec,
-        scope: &Scope,
-        subqueries: &[QueryPlan],
-    ) -> Result<String, SQLError> {
-        let mut parts = Vec::new();
-        if !spec.partition_by.is_empty() {
-            parts.push(format!(
-                "PARTITION BY {}",
-                self.expressions(&spec.partition_by, scope, subqueries)?
-            ));
-        }
-        if !spec.order_by.is_empty() {
-            let order = spec
-                .order_by
-                .iter()
-                .map(|order| {
-                    self.order_expression(
-                        &order.expr,
-                        order.descending,
-                        order.nulls,
-                        scope,
-                        subqueries,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            parts.push(format!("ORDER BY {}", order.join(", ")));
-        }
-        if let Some(frame) = &spec.frame {
-            parts.push(uqa_sql::render::frame_clause_sql(
-                frame.mode,
-                &self.frame_bound(&frame.start, scope, subqueries)?,
-                &self.frame_bound(&frame.end, scope, subqueries)?,
-                frame.between,
-                frame.exclusion,
-            ));
-        }
-        Ok(parts.join(" "))
-    }
-
-    fn frame_bound(
-        &self,
-        bound: &ScalarFrameBound,
-        scope: &Scope,
-        subqueries: &[QueryPlan],
-    ) -> Result<String, SQLError> {
-        Ok(match bound {
-            ScalarFrameBound::UnboundedPreceding => "UNBOUNDED PRECEDING".into(),
-            ScalarFrameBound::UnboundedFollowing => "UNBOUNDED FOLLOWING".into(),
-            ScalarFrameBound::CurrentRow => "CURRENT ROW".into(),
-            ScalarFrameBound::Preceding(value) => {
-                format!("{} PRECEDING", self.expression(value, scope, subqueries)?)
-            }
-            ScalarFrameBound::Following(value) => {
-                format!("{} FOLLOWING", self.expression(value, scope, subqueries)?)
-            }
-        })
     }
 }
 

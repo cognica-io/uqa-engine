@@ -31,6 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve named WINDOW declarations and selected OVER references in stored view definitions, including quoted names, inheritance, equivalent inline definitions and unused declarations. Analyze each definition's literal inputs once, retain its dependencies, and preserve prepared values and legacy expanded definitions across reopen. Correct window passes over projected rows so nested views and multiple sorts retain the actual physical row layout in memory and spill.
 - Analyze CREATE VIEW literal inputs before output aliases and target checks, retaining definition-time conversions across execution and reopen while leaving runtime expressions deferred. Failed replacement preserves the previous view.
 
 - Resolve ordinary WITHIN GROUP calls with both direct and ordering arguments, preserving PostgreSQL overload selection, modifier diagnostics, FILTER order and implicit-input effects. Retain ordered-set syntax and function identity in stored definitions, restore legacy expressions and accept typed prepared percentile fractions.

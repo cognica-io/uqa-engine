@@ -147,7 +147,20 @@ impl Walk {
                 }
                 self.optional(lowered.limit.as_ref(), bound.limit.as_ref(), subqueries)?;
                 self.optional(lowered.offset.as_ref(), bound.offset.as_ref(), subqueries)?;
-                self.scalars(&lowered.distinct_on, &bound.distinct_on, subqueries)
+                self.scalars(&lowered.distinct_on, &bound.distinct_on, subqueries)?;
+                for (lowered, bound) in
+                    pairs(&lowered.windows, &bound.windows, "WINDOW definitions")?
+                {
+                    if lowered.name != bound.name || lowered.inherited != bound.inherited {
+                        return Err(shape_error("WINDOW identity"));
+                    }
+                    let lowered: Vec<_> = lowered.spec.expressions().collect();
+                    let bound: Vec<_> = bound.spec.expressions().collect();
+                    for (lowered, bound) in pairs(&lowered, &bound, "WINDOW expressions")? {
+                        self.scalar(lowered, bound, subqueries)?;
+                    }
+                }
+                Ok(())
             }
             (
                 RelationalPlan::SetOp {
