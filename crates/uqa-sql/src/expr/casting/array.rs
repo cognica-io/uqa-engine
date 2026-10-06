@@ -196,7 +196,12 @@ impl<'a, 'control> PgArrayLiteralParser<'a, 'control> {
 
     fn parse_array(&mut self) -> Result<Produced<Vec<Value>>> {
         if self.chars.next() != Some('{') {
-            return Err(self.error("array value must start with `{`"));
+            return Err(SQLError::Diagnostic {
+                sqlstate: "22P02".into(),
+                message: format!("malformed array literal: \"{}\"", self.source),
+                detail: Some("Array value must start with \"{\" or dimension information.".into()),
+                hint: None,
+            });
         }
         self.skip_whitespace()?;
         if self.chars.next_if_eq(&'}').is_some() {

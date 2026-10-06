@@ -148,6 +148,41 @@ fn controlled_array_concatenation_keeps_multidimensional_shape_and_subscripts() 
 }
 
 #[test]
+fn array_dimension_diagnostics_release_controlled_scratch() {
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let row = array(vec![Value::Int(1)], 1);
+    let matrix = Value::Array(
+        ArrayValue::try_new(vec![Value::List(vec![Value::Int(2), Value::Int(3)])]).unwrap(),
+    );
+    for (name, values, code, message, detail) in [
+        (
+            "array_append",
+            vec![matrix.clone(), Value::Int(4)],
+            "22000",
+            "argument must be empty or one-dimensional array",
+            None,
+        ),
+        (
+            "array_cat",
+            vec![row, matrix],
+            "2202E",
+            "cannot concatenate incompatible arrays",
+            Some("Arrays with differing dimensions are not compatible for concatenation."),
+        ),
+    ] {
+        let error = eval_array_functions_with_control(name, &values, &control)
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some(code));
+        assert_eq!(error.to_string(), message);
+        assert_eq!(error.detail(), detail);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn array_quota_and_both_cancellations_release_partial_outputs() {
     let source = array(
         vec![Value::Str("x".repeat(32)), Value::Str("y".repeat(1024))],
