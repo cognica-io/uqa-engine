@@ -15,7 +15,7 @@ use uqa_sql::semantics::parameters::definition::{
 };
 use uqa_sql::semantics::parameters::identifier_list::split_identifier_list;
 use uqa_sql::semantics::parameters::value::{
-    invalid_value_message, name_truncation_notice, parse_setting,
+    invalid_value_message, name_truncation_notice, parse_setting_with_context,
 };
 use uqa_sql::SQLNotice;
 
@@ -141,7 +141,12 @@ impl Engine {
         if let Some(notice) = name_truncation_notice(definition, value) {
             self.push_sql_notice(SQLNotice::notice(notice).with_sqlstate("42622"));
         }
-        let setting = parse_setting(definition, value)?;
+        let setting = parse_setting_with_context(
+            definition,
+            value,
+            &self.session.setting(definition.name),
+            &self.session.reset_setting(definition),
+        )?;
         match definition.name {
             "application_name" => Ok(clean_ascii(&setting)),
             "search_path" => {

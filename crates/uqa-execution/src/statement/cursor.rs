@@ -30,7 +30,7 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
             error.into(),
         ));
     }
-    let _transaction_clock = super::context::transaction_clock_scope(context.statements);
+    let _temporal_input = super::context::temporal_input_scope(context.statements);
     let cached = context.cache.cached_sql_statement(sql);
     if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
         if let Some((plan, parser)) = cached.as_ref().and_then(|cached| {

@@ -92,6 +92,7 @@ fn register(registry: &Registry) -> Result<(), SQLError> {
             aggregates: registry,
             registry,
             transaction_timestamp_micros: None,
+            date_order: None,
             clock,
         },
         "saved".into(),
