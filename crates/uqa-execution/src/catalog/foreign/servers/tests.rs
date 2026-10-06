@@ -20,6 +20,7 @@ fn definition() -> ForeignServerDefinition {
         fdw_type: "memory_fdw".into(),
         options: BTreeMap::from([("metadata_json".into(), "user option".into())]),
         metadata: ForeignServerMetadata {
+            wrapper_reference: None,
             oid: 16_384,
             object_id: [1; 16],
             owner: RoleIdentity::BOOTSTRAP,
@@ -124,7 +125,7 @@ fn foreign_server_restore_rejects_bad_envelopes_and_dangling_role_incarnations()
     for marker in [
         "{}",
         "null",
-        r#"{"version":2}"#,
+        r#"{"version":3}"#,
         r#"{"version":1,"extra":true}"#,
     ] {
         catalog.set_metadata(FORMAT_KEY, marker).unwrap();
@@ -149,5 +150,33 @@ fn foreign_server_restore_rejects_oid_and_incarnation_aliases() {
         persist(&catalog, &first).unwrap();
         persist(&catalog, &second).unwrap();
         assert!(restore(&catalog, &roles(), true).is_err());
+    }
+}
+
+#[test]
+fn wrapper_conversion_fences_old_readers_even_when_no_server_exists() {
+    for previous in [None, Some(r#"{"version":1}"#)] {
+        let catalog = catalog();
+        if let Some(marker) = previous {
+            catalog.set_metadata(FORMAT_KEY, marker).unwrap();
+        }
+        assert!(restore(&catalog, &roles(), false).is_err());
+        let restored = restore(&catalog, &roles(), true).unwrap();
+        assert!(restored.definitions.is_empty());
+        assert_eq!(
+            catalog.get_metadata(FORMAT_KEY).unwrap().as_deref(),
+            previous
+        );
+        restored.persist_migrations(&catalog).unwrap();
+        let marker = catalog.get_metadata(FORMAT_KEY).unwrap().unwrap();
+        // The preceding reader accepts exactly {"version":1}; this rejects before any rows are read.
+        assert_ne!(
+            serde_json::from_str::<serde_json::Value>(&marker).unwrap(),
+            serde_json::json!({"version":1})
+        );
+        assert!(restore(&catalog, &roles(), false)
+            .unwrap()
+            .definitions
+            .is_empty());
     }
 }

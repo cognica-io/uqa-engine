@@ -102,6 +102,7 @@ pub(super) struct DurableCatalogState {
     pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub(super) named_analyzers: CatalogCell<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: CatalogCell<TableFieldAnalyzerRegistry>,
+    pub(super) foreign_wrappers: CatalogCell<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub(super) foreign_servers:
         CatalogCell<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
     pub(super) foreign_tables:
@@ -145,6 +146,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub(super) named_analyzers: Arc<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
+    pub(super) foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub(super) foreign_servers:
         Arc<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
     pub(super) foreign_tables: Arc<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
@@ -185,6 +187,7 @@ impl DurableCatalogState {
             sequence_security: CatalogCell::new(BTreeMap::new()),
             named_analyzers: CatalogCell::new(BTreeMap::new()),
             table_field_analyzers: CatalogCell::new(BTreeMap::new()),
+            foreign_wrappers: CatalogCell::new(uqa_sql::catalog::foreign_wrapper::native_wrappers()),
             foreign_servers: CatalogCell::new(BTreeMap::new()),
             foreign_tables: CatalogCell::new(BTreeMap::new()),
             foreign_table_security: CatalogCell::new(BTreeMap::new()),
@@ -223,6 +226,7 @@ impl DurableCatalogState {
             sequence_security: self.sequence_security.snapshot(),
             named_analyzers: self.named_analyzers.snapshot(),
             table_field_analyzers: self.table_field_analyzers.snapshot(),
+            foreign_wrappers: self.foreign_wrappers.snapshot(),
             foreign_servers: self.foreign_servers.snapshot(),
             foreign_tables: self.foreign_tables.snapshot(),
             foreign_table_security: self.foreign_table_security.snapshot(),
@@ -259,6 +263,7 @@ impl DurableCatalogState {
         self.named_analyzers.restore(&snapshot.named_analyzers);
         self.table_field_analyzers
             .restore(&snapshot.table_field_analyzers);
+        self.foreign_wrappers.restore(&snapshot.foreign_wrappers);
         self.foreign_servers.restore(&snapshot.foreign_servers);
         self.foreign_tables.restore(&snapshot.foreign_tables);
         self.foreign_table_security

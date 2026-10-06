@@ -12,6 +12,7 @@ fn definition() -> ForeignServerDefinition {
         fdw_type: "memory_fdw".into(),
         options: BTreeMap::new(),
         metadata: ForeignServerMetadata {
+            wrapper_reference: None,
             oid: 20_000,
             object_id: [1; 16],
             owner: RoleIdentity::BOOTSTRAP,

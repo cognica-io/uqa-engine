@@ -19,6 +19,9 @@ pub struct ForeignServerMetadata {
     pub owner: RoleIdentity,
     pub server_type: Option<String>,
     pub version: Option<String>,
+    /// Missing only while restoring a catalog that predates wrapper identities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrapper_reference: Option<super::foreign_wrapper::ForeignWrapperReference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +30,21 @@ pub struct ForeignServerDefinition {
     pub fdw_type: String,
     pub options: BTreeMap<String, String>,
     pub metadata: ForeignServerMetadata,
+}
+
+impl ForeignServerDefinition {
+    pub fn bound_wrapper<'a>(
+        &self,
+        wrappers: &'a super::foreign_wrapper::ForeignWrappers,
+    ) -> Result<&'a super::foreign_wrapper::ForeignWrapperDefinition, SQLError> {
+        let reference = self.metadata.wrapper_reference.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "foreign server `{}` has no wrapper identity",
+                self.name
+            ))
+        })?;
+        super::foreign_wrapper::bound_wrapper(wrappers, &self.fdw_type, reference)
+    }
 }
 
 /// Validate identities before publishing any restored definition. A name, OID or incarnation cannot alias another server, and an owner must still be the role incarnation that created it.

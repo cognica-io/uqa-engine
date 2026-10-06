@@ -15,7 +15,8 @@ use uqa_sql::catalog::{
 use uqa_storage::{CatalogFacade, ForeignServerRow, StorageBackendError, StorageBackendResult};
 
 const FORMAT_KEY: &str = "foreign-server-metadata-format";
-const FORMAT_MARKER: &str = r#"{"version":1}"#;
+// Even an empty catalog must fence readers that do not retain wrapper references.
+const FORMAT_MARKER: &str = r#"{"version":2}"#;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,9 +50,14 @@ pub fn persist(
     catalog: &dyn CatalogFacade,
     server: &ForeignServerDefinition,
 ) -> StorageBackendResult<()> {
-    let current = check_format(catalog)?;
+    let format = catalog_format(catalog)?;
+    if format == Some(1) {
+        return Err(invalid(
+            "foreign-server catalog requires initial-open migration",
+        ));
+    }
     catalog.save_foreign_server_row(&catalog_row(server)?)?;
-    if !current {
+    if format.is_none() {
         catalog.set_metadata(FORMAT_KEY, FORMAT_MARKER)?;
     }
     Ok(())
@@ -84,7 +90,13 @@ pub(super) fn restore(
     roles: &BTreeMap<String, RoleDefinition>,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredServers> {
-    let current = check_format(catalog)?;
+    let format = catalog_format(catalog)?;
+    if format != Some(2) && !allow_migration {
+        return Err(invalid(
+            "foreign-server catalog requires initial-open migration",
+        ));
+    }
+    let current = format.is_some();
     let rows = catalog.load_foreign_server_rows()?;
     let mut definitions = BTreeMap::new();
     let mut legacy = Vec::new();
@@ -146,6 +158,7 @@ pub(super) fn restore(
             &mut definitions,
             row,
             ForeignServerMetadata {
+                wrapper_reference: None,
                 oid,
                 object_id,
                 owner: RoleIdentity::BOOTSTRAP,
@@ -159,7 +172,7 @@ pub(super) fn restore(
     Ok(RestoredServers {
         definitions,
         migrations,
-        initialize_format: !current && allow_migration,
+        initialize_format: format != Some(2) && allow_migration,
     })
 }
 
@@ -180,14 +193,17 @@ fn insert(
     Ok(())
 }
 
-fn check_format(catalog: &dyn CatalogFacade) -> StorageBackendResult<bool> {
+fn catalog_format(catalog: &dyn CatalogFacade) -> StorageBackendResult<Option<u32>> {
     let Some(marker) = catalog.get_metadata(FORMAT_KEY)? else {
-        return Ok(false);
+        return Ok(None);
     };
-    if serde_json::from_str::<serde_json::Value>(&marker)? != serde_json::json!({"version": 1}) {
-        return Err(invalid("unsupported foreign server metadata format marker"));
+    let marker: serde_json::Value = serde_json::from_str(&marker)?;
+    for version in [1, 2] {
+        if marker == serde_json::json!({"version": version}) {
+            return Ok(Some(version));
+        }
     }
-    Ok(true)
+    Err(invalid("unsupported foreign server metadata format marker"))
 }
 
 fn invalid(message: impl Into<String>) -> StorageBackendError {

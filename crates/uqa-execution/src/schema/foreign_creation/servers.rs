@@ -71,18 +71,7 @@ impl ForeignCreationContext<'_> {
             }
             return Err(diagnostic("42710", message));
         }
-        if !matches!(
-            statement.fdw_type.as_str(),
-            "duckdb_fdw" | "arrow_fdw" | "memory_fdw"
-        ) {
-            return Err(diagnostic(
-                "42704",
-                format!(
-                    "foreign-data wrapper \"{}\" does not exist",
-                    statement.fdw_type
-                ),
-            ));
-        }
+        let wrapper_reference = self.bind_server_wrapper(&statement.fdw_type)?;
         self.creation.retain_owner(&owner)?;
         let oid = crate::catalog::identity::reserve_new_catalog_oid(
             self.creation.locks,
@@ -123,6 +112,7 @@ impl ForeignCreationContext<'_> {
             fdw_type: statement.fdw_type.clone(),
             options,
             metadata: ForeignServerMetadata {
+                wrapper_reference: Some(wrapper_reference),
                 oid: u32::try_from(oid).map_err(|error| SQLError::Internal(error.to_string()))?,
                 object_id: crate::catalog::identity::new_nonzero_catalog_identity(
                     &statement.name,
@@ -143,6 +133,38 @@ impl ForeignCreationContext<'_> {
             .insert(statement.name.clone(), definition);
         self.changes.catalog_registry_changed();
         Ok(())
+    }
+
+    fn bind_server_wrapper(
+        &self,
+        name: &str,
+    ) -> Result<uqa_sql::catalog::foreign_wrapper::ForeignWrapperReference, SQLError> {
+        let reference = self
+            .registry
+            .wrappers()
+            .get(name)
+            .map(|wrapper| wrapper.identity)
+            .ok_or_else(|| {
+                diagnostic(
+                    "42704",
+                    format!("foreign-data wrapper \"{name}\" does not exist"),
+                )
+            })?;
+        let guard = self.creation.locks.acquire_shared_catalog(
+            SharedCatalogLock::Object {
+                class_id: uqa_sql::catalog::dependencies::FOREIGN_WRAPPER_CLASS,
+                oid: reference.oid,
+            },
+            RelationLockMode::AccessShare,
+        )?;
+        self.creation.locks.refresh_shared_catalog()?;
+        uqa_sql::catalog::foreign_wrapper::bound_wrapper(
+            &self.registry.wrappers(),
+            name,
+            reference,
+        )?;
+        guard.retain();
+        Ok(reference)
     }
 }
 

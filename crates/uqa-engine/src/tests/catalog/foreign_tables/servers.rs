@@ -123,6 +123,7 @@ fn foreign_server_initial_open_upgrades_legacy_metadata_once_for_each_persistent
         raw.catalog
             .delete_metadata("foreign-server-metadata-format")
             .unwrap();
+        super::wrappers::remove_wrapper_format(raw.catalog.as_ref());
         raw.catalog
             .save_foreign_server("legacy", "memory_fdw", r#"{"key":"original"}"#)
             .unwrap();
@@ -145,6 +146,16 @@ fn foreign_server_initial_open_upgrades_legacy_metadata_once_for_each_persistent
         assert!(raw.catalog.load_foreign_server_rows().unwrap()[0]
             .metadata_json
             .is_none());
+        assert!(raw
+            .catalog
+            .get_metadata("foreign-wrapper-catalog-format")
+            .unwrap()
+            .is_none());
+        assert!(raw
+            .catalog
+            .metadata_with_prefix("foreign-wrapper/")
+            .unwrap()
+            .is_empty());
         raw.catalog.delete_metadata("sql_triggers_json").unwrap();
         let upgraded = Engine::from_persistent_provider(Arc::clone(&factory)).unwrap();
         let expected = server(&upgraded, "legacy");

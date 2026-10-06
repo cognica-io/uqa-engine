@@ -10,6 +10,7 @@ mod definitions;
 mod runtime;
 mod server_deletion;
 mod servers;
+mod wrappers;
 use std::{
     cell::Cell,
     collections::BTreeMap,
@@ -55,6 +56,9 @@ struct Publication<'a> {
     changes: Cell<usize>,
 }
 impl ForeignRegistryReads for Publication<'_> {
+    fn wrappers(&self) -> uqa_execution::catalog::foreign::reads::ForeignWrappersRead<'_> {
+        Box::new(self.engine.durable.foreign_wrappers.read())
+    }
     fn servers(&self) -> ForeignServersRead<'_> {
         Box::new(self.engine.durable.foreign_servers.read())
     }

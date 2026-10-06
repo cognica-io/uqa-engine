@@ -775,6 +775,7 @@ impl Engine {
         self.durable.schemas.write().clear();
         self.durable.path_indexes.write().clear();
         self.durable.named_analyzers.write().clear();
+        self.durable.foreign_wrappers.write().clear();
         self.durable.foreign_servers.write().clear();
         uqa_execution::catalog::foreign::restoration::retain_temporary_registry(self);
         self.durable.builtin_routine_security.write().clear();

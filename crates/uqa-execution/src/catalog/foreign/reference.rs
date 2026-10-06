@@ -64,7 +64,11 @@ pub fn validate_query_source(
     name: &str,
 ) -> Result<(), SQLError> {
     if let Some(table) = catalog.foreign_table_resolved(resolution, name)? {
-        table.bound_server(&catalog.snapshot().definitions.foreign_servers)?;
+        let definitions = &catalog.snapshot().definitions;
+        table
+            .bound_server(&definitions.foreign_servers)?
+            .bound_wrapper(&definitions.foreign_wrappers)?
+            .require_handler()?;
     }
     Ok(())
 }

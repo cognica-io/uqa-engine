@@ -10,6 +10,9 @@ use uqa_sql::{ast::RelationPersistence, catalog::roles::RoleIdentity};
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
 impl ForeignRegistryReads for RestoredForeignCatalog {
+    fn wrappers(&self) -> ForeignWrappersRead<'_> {
+        Box::new(&self.wrappers)
+    }
     fn servers(&self) -> ForeignServersRead<'_> {
         Box::new(&self.servers)
     }
@@ -36,6 +39,7 @@ fn table(name: &str, persistence: RelationPersistence) -> StoredForeignTable {
 
 fn registry() -> RestoredForeignCatalog {
     RestoredForeignCatalog {
+        wrappers: uqa_sql::catalog::foreign_wrapper::native_wrappers(),
         servers: BTreeMap::new(),
         tables: BTreeMap::new(),
         security: BTreeMap::new(),
