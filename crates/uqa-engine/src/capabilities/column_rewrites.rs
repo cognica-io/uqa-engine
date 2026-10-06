@@ -32,6 +32,7 @@ impl Engine {
     }
     pub(crate) fn column_backfill_context(&self) -> ColumnBackfillContext<'_> {
         ColumnBackfillContext {
+            input_types: self,
             rewrite: self.column_rewrite_context(),
             state: self,
             volatility: self,

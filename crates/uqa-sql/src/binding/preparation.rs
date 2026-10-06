@@ -48,7 +48,12 @@ pub(crate) fn read_prepared_inputs(
     let mut analysis = Preparation {
         routines,
         scope,
-        parameters: ParameterTypes::with_input_constants(declared, aliases, routines.enum_labels()),
+        parameters: ParameterTypes::with_input_constants(
+            declared,
+            aliases,
+            routines.enum_labels(),
+            routines.catalog_input_functions(),
+        ),
         schema_expression: None,
     };
     analysis.plan(plan)?;
@@ -63,11 +68,11 @@ pub(crate) fn read_prepared_inputs(
     })
 }
 
-/// Read ordinary statement inputs in the same order as prepared analysis,
-/// without freezing them into the source or evaluating runtime expressions.
-pub(crate) fn check_executable_inputs(
+/// Read ordinary statement inputs in prepared-analysis order and retain their
+/// converted values in this executable plan. Runtime expressions stay deferred.
+pub(crate) fn read_executable_inputs(
     routines: &dyn RoutineResolution,
-    plan: &UnifiedPlan,
+    plan: &mut UnifiedPlan,
     params: &[crate::SQLParam],
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
@@ -80,10 +85,12 @@ pub(crate) fn check_executable_inputs(
             &declared,
             Some(aliases),
             routines.enum_labels(),
+            routines.catalog_input_functions(),
         ),
         schema_expression: None,
     };
-    match plan {
+    let mut finish_parameters = false;
+    match &*plan {
         UnifiedPlan::Query(query) => {
             analysis.query(query, None)?;
         }
@@ -95,12 +102,16 @@ pub(crate) fn check_executable_inputs(
             }
             _ if command.mutation_target().is_some() => {
                 analysis.command(command)?;
-                analysis.parameters.finish()?;
+                finish_parameters = true;
             }
             _ => {}
         },
     }
-    Ok(())
+    let constants = analysis.parameters.take_input_constants();
+    if finish_parameters {
+        analysis.parameters.finish()?;
+    }
+    constants.apply(plan)
 }
 
 pub fn infer_prepared_parameter_types(
@@ -119,10 +130,10 @@ pub fn infer_prepared_parameter_types(
     analysis.parameters.finish()
 }
 
-/// Analyze a USING expression against the original table row type before the ALTER target or its new type is checked. Transform expressions admit no parameters or query-valued descendants and do not evaluate constants.
+/// Analyze a USING expression against the original table row type before the ALTER target or its new type is checked. Transform expressions admit no parameters or query-valued descendants; input functions run during analysis and runtime expressions stay deferred.
 pub fn analyze_column_type_transform(
     catalog: &dyn crate::schema::SchemaExpressionCatalog,
-    expression: &crate::plan::ExpressionPlan,
+    expression: &mut crate::plan::ExpressionPlan,
     input: &RowSchema,
     binding: &BindingContext<'_>,
 ) -> Result<Option<ColumnType>, SQLError> {
@@ -138,7 +149,7 @@ pub fn analyze_column_type_transform(
 /// Analyze the new domain CHECK against VALUE's base type. This uses the same ordered expression analysis as ordinary SQL and rejects query, aggregate, window and set-valued expressions at their own analysis boundary.
 pub(crate) fn analyze_domain_check(
     catalog: &dyn crate::schema::SchemaExpressionCatalog,
-    expression: &crate::plan::ExpressionPlan,
+    expression: &mut crate::plan::ExpressionPlan,
     input: &RowSchema,
     binding: &BindingContext<'_>,
 ) -> Result<Option<ColumnType>, SQLError> {
@@ -153,23 +164,38 @@ pub(crate) fn analyze_domain_check(
 
 fn analyze_schema_expression(
     catalog: &dyn crate::schema::SchemaExpressionCatalog,
-    expression: &crate::plan::ExpressionPlan,
+    expression: &mut crate::plan::ExpressionPlan,
     input: &RowSchema,
     binding: &BindingContext<'_>,
     kind: SchemaExpressionKind,
 ) -> Result<Option<ColumnType>, SQLError> {
-    let mut analysis = Preparation {
-        routines: catalog,
-        scope: SchemaScope::for_analysis(binding)?,
-        parameters: ParameterTypes::new(&[]),
-        schema_expression: Some(SchemaExpressionContext {
+    analyze_expression_inputs(
+        catalog,
+        catalog,
+        expression,
+        input,
+        binding,
+        Some(SchemaExpressionContext {
             aggregates: catalog,
             kind,
         }),
-    };
-    analysis
-        .expression(&expression.scalar, input, &expression.subqueries)
-        .map(|expression| expression.ty)
+    )
+}
+
+/// Retain input literals in typed stored syntax before routine binding and publication.
+pub(crate) fn analyze_stored_expression_inputs(
+    catalog: &dyn crate::schema::SchemaExpressionCatalog,
+    expression: &mut crate::plan::ExpressionPlan,
+    binding: &BindingContext<'_>,
+) -> Result<Option<ColumnType>, SQLError> {
+    analyze_expression_inputs(
+        catalog,
+        catalog,
+        expression,
+        &RowSchema::default(),
+        binding,
+        None,
+    )
 }
 
 /// Analyze and freeze input literals in a DEFAULT with no parameter or row namespace. Expression restrictions apply in `PostgreSQL`'s traversal order.
@@ -180,6 +206,27 @@ pub(crate) fn analyze_default_inputs(
     expression: &mut crate::plan::ExpressionPlan,
     binding: &BindingContext<'_>,
 ) -> Result<Option<ColumnType>, SQLError> {
+    analyze_expression_inputs(
+        routines,
+        aliases,
+        expression,
+        &RowSchema::default(),
+        binding,
+        Some(SchemaExpressionContext {
+            aggregates,
+            kind: SchemaExpressionKind::Default,
+        }),
+    )
+}
+
+fn analyze_expression_inputs<'a>(
+    routines: &'a dyn RoutineResolution,
+    aliases: &'a dyn OidAliasInput,
+    expression: &mut crate::plan::ExpressionPlan,
+    input: &RowSchema,
+    binding: &BindingContext<'_>,
+    schema_expression: Option<SchemaExpressionContext<'a>>,
+) -> Result<Option<ColumnType>, SQLError> {
     let mut analysis = Preparation {
         routines,
         scope: SchemaScope::for_analysis(binding)?,
@@ -187,18 +234,12 @@ pub(crate) fn analyze_default_inputs(
             &[],
             Some(aliases),
             routines.enum_labels(),
+            routines.catalog_input_functions(),
         ),
-        schema_expression: Some(SchemaExpressionContext {
-            aggregates,
-            kind: SchemaExpressionKind::Default,
-        }),
+        schema_expression,
     };
     let ty = analysis
-        .expression(
-            &expression.scalar,
-            &RowSchema::default(),
-            &expression.subqueries,
-        )?
+        .expression(&expression.scalar, input, &expression.subqueries)?
         .ty;
     analysis
         .parameters

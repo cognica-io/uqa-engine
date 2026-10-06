@@ -65,6 +65,7 @@ pub(super) struct ParameterTypes<'a> {
     input_constants: Option<InputConstants>,
     aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
     enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
+    catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
 }
 
 /// Original leaf identities, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
@@ -112,6 +113,7 @@ impl<'a> ParameterTypes<'a> {
             input_constants: None,
             aliases: None,
             enum_labels: None,
+            catalog_inputs: None,
         }
     }
 
@@ -119,11 +121,13 @@ impl<'a> ParameterTypes<'a> {
         types: &[Option<ColumnType>],
         aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
         enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
+        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
     ) -> Self {
         Self {
             input_constants: Some(InputConstants::default()),
             aliases,
             enum_labels,
+            catalog_inputs,
             ..Self::new(types)
         }
     }
@@ -159,53 +163,7 @@ impl<'a> ParameterTypes<'a> {
         }
         let target = target.without_type_modifiers();
         if let Some((origin, text)) = &expression.literal {
-            // `coerce_type` reads a domain input with its base type's input function, then leaves the enclosing domain coercion to apply its modifiers and constraints.
-            let mut input_type = &target;
-            while let ColumnType::Domain { base, .. } = input_type {
-                input_type = base;
-            }
-            let input_type = input_type.without_type_modifiers();
-            let enum_value = if self.input_constants.is_some()
-                && crate::expr::enums::is_enum_bearing(&input_type)
-            {
-                crate::expr::enums::fold_unknown_literal(
-                    self.enum_labels,
-                    &Value::Str(text.clone()),
-                    &input_type,
-                )?
-            } else {
-                None
-            };
-            let value = if enum_value.is_some() {
-                enum_value
-            } else if crate::type_resolution::catalog_input_type(&input_type) {
-                self.aliases.map_or(Ok(None), |catalog| {
-                    crate::schema::dependencies::oid_alias::read_unknown_constant(
-                        catalog,
-                        &input_type,
-                        text,
-                    )
-                })?
-            } else {
-                Some(crate::expr::cast_value_from(
-                    &Value::Str(text.clone()),
-                    &input_type.catalog_name(),
-                    None,
-                )?)
-            };
-            if let Some(value) = value {
-                if let Some(constants) = &mut self.input_constants {
-                    constants.0.insert(
-                        *origin,
-                        ScalarExpr::TypedLiteral {
-                            value,
-                            ty: input_type.catalog_name(),
-                            bound_type: Some(input_type),
-                            parameter_index: None,
-                        },
-                    );
-                }
-            }
+            self.read_literal(*origin, text, &target)?;
         }
         if let Some(occurrence) = expression.occurrence {
             let (index, observed) = &mut self.occurrences[occurrence];
@@ -220,6 +178,73 @@ impl<'a> ParameterTypes<'a> {
         }
         expression.ty = Some(target);
         Ok(())
+    }
+
+    fn read_literal(
+        &mut self,
+        origin: NonNull<ScalarExpr>,
+        text: &str,
+        target: &ColumnType,
+    ) -> Result<(), SQLError> {
+        // Scalar domains read their base input and keep an outer runtime check;
+        // an array input invokes the domain input function for every element.
+        let mut input_type = target;
+        while let ColumnType::Domain { base, .. } = input_type {
+            input_type = base;
+        }
+        let input_type = input_type.without_type_modifiers();
+        if self.input_constants.as_ref().is_some_and(|constants| {
+            matches!(constants.0.get(&origin), Some(ScalarExpr::TypedLiteral { bound_type: Some(ty), .. }) if *ty == input_type)
+        }) {
+            return Ok(());
+        }
+        if let Some(value) = self.input_value(text, &input_type)? {
+            if let Some(constants) = &mut self.input_constants {
+                constants.0.insert(
+                    origin,
+                    ScalarExpr::TypedLiteral {
+                        value,
+                        ty: input_type.catalog_name(),
+                        bound_type: Some(input_type),
+                        parameter_index: None,
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn input_value(&self, text: &str, input_type: &ColumnType) -> Result<Option<Value>, SQLError> {
+        if crate::expr::requires_domain_array_input(input_type) {
+            if self.input_constants.is_none() {
+                return Ok(None);
+            }
+            let catalog = self.catalog_inputs.ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "catalog input functions are unavailable for {}",
+                    input_type.sql_name()
+                ))
+            })?;
+            return catalog.read_unknown_input(text, input_type).map(Some);
+        }
+        if self.input_constants.is_some() && crate::expr::enums::is_enum_bearing(input_type) {
+            if let Some(value) = crate::expr::enums::fold_unknown_literal(
+                self.enum_labels,
+                &Value::Str(text.into()),
+                input_type,
+            )? {
+                return Ok(Some(value));
+            }
+        }
+        if crate::type_resolution::catalog_input_type(input_type) {
+            return self.aliases.map_or(Ok(None), |catalog| {
+                crate::schema::dependencies::oid_alias::read_unknown_constant(
+                    catalog, input_type, text,
+                )
+            });
+        }
+        crate::expr::cast_value_from(&Value::Str(text.into()), &input_type.catalog_name(), None)
+            .map(Some)
     }
 
     pub(super) fn values(&self) -> Vec<SQLParam> {

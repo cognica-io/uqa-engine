@@ -168,6 +168,10 @@ impl FunctionTypeResolver for Engine {
         Some(self)
     }
 
+    fn catalog_input_functions(&self) -> Option<&dyn uqa_sql::expr::CatalogInputFunctions> {
+        Some(self)
+    }
+
     fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
         Some(self)
     }
@@ -236,6 +240,16 @@ impl FunctionTypeResolver for Engine {
                 explicit_variadic,
                 builtins,
             )
+    }
+}
+
+impl uqa_sql::expr::CatalogInputFunctions for Engine {
+    fn read_unknown_input(
+        &self,
+        text: &str,
+        target: &ColumnType,
+    ) -> Result<uqa_core::Value, SQLError> {
+        uqa_sql::expr::read_catalog_array_input(text, target, self)
     }
 }
 

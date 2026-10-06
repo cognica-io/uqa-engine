@@ -6,6 +6,9 @@
 
 //! Live `PostgreSQL` evidence for domain identity, coercion, and catalog transactions.
 
+#[path = "sql_domains/array_inputs.rs"]
+mod array_inputs;
+
 use uqa_core::Value;
 use uqa_engine::sql::{format_postgres_text, postgres_result_type};
 use uqa_engine::Engine;

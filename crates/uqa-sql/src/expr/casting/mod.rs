@@ -260,7 +260,13 @@ pub fn cast_value_from_with_control(
             return character_value(text, limit, false, control);
         }
         "bpchar" if modifier.is_none() => {
-            return text_value(cast_text(v, source_ty, control)?, true, control)
+            let text = match v {
+                // A relabel to the same unlimited type keeps its padding;
+                // conversion through text would trim significant enum input.
+                Value::FixedChar(text) => control.copy_text(text)?,
+                _ => cast_text(v, source_ty, control)?,
+            };
+            return text_value(text, true, control);
         }
         "character" | "char" | "bpchar" => {
             let text = cast_text(v, source_ty, control)?;

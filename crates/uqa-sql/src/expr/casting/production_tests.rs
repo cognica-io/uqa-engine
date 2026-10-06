@@ -27,6 +27,18 @@ fn controlled_casts_preserve_arrays_character_numeric_temporal_and_binary_semant
             Value::FixedChar("é  ".into()),
         ),
         (
+            Value::FixedChar("é  ".into()),
+            "bpchar",
+            Some("bpchar"),
+            Value::FixedChar("é  ".into()),
+        ),
+        (
+            Value::FixedChar("é  ".into()),
+            "text",
+            Some("bpchar"),
+            Value::Str("é".into()),
+        ),
+        (
             Value::Str("-12.345".into()),
             "numeric(4,2)",
             None,

@@ -39,7 +39,7 @@ pub fn analyze_type_transform(
     let mut plan = ExpressionPlan::lower(expression.clone());
     let source_type = crate::binding::analyze_column_type_transform(
         context.catalog,
-        &plan,
+        &mut plan,
         &row_schema,
         context.binding,
     )?;
@@ -98,6 +98,7 @@ pub fn coerce_type_transform(
             let mut expression = Expr::Literal(value.clone());
             crate::catalog::stored_ast::read_unknown_stored_literal(
                 crate::FunctionTypeResolver::enum_labels(context.catalog),
+                crate::FunctionTypeResolver::catalog_input_functions(context.catalog),
                 &mut expression,
                 target,
                 false,

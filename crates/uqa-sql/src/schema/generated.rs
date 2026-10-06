@@ -80,6 +80,7 @@ pub fn prepare_generated_column(
         // The literal is read by the column type's input function and stored as a constant, as `cookDefault` coerces it.
         crate::catalog::stored_ast::read_unknown_stored_literal(
             crate::FunctionTypeResolver::enum_labels(context.catalog),
+            crate::FunctionTypeResolver::catalog_input_functions(context.catalog),
             &mut prepared.expression,
             &column.ty,
             false,

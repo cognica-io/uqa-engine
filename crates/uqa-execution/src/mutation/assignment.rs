@@ -72,44 +72,23 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
             if new_row {
                 return Ok(None);
             }
-            let next = crate::query::catalog_expression::eval_lowered_expression(
-                services.expressions.expressions,
-                services.scopes.current_routine_scope(),
-                &uqa_sql::schema::sequences::implicit::sequence_next_value(&sequence),
-                None,
-                params,
-            )?;
-            return uqa_sql::assignment::columns::coerce_to_column_type(
-                services.assignment,
-                services.columns,
+            return evaluate_column_default(
+                services,
                 table,
                 column,
-                next,
+                Some(&uqa_sql::schema::sequences::implicit::sequence_next_value(
+                    &sequence,
+                )),
+                params,
             )
             .map(Some);
         }
-        let value = match services
+        let default = services
             .columns
             .try_column_insert_default_expr(table, column)
-            .map_err(|error| dml_storage_error(action, error))?
-        {
-            Some(default) => crate::query::catalog_expression::eval_lowered_expression(
-                services.expressions.expressions,
-                services.scopes.current_routine_scope(),
-                &default,
-                None,
-                params,
-            )?,
-            None => Value::Null,
-        };
-        return uqa_sql::assignment::columns::coerce_to_column_type(
-            services.assignment,
-            services.columns,
-            table,
-            column,
-            value,
-        )
-        .map(Some);
+            .map_err(|error| dml_storage_error(action, error))?;
+        return evaluate_column_default(services, table, column, default.as_ref(), params)
+            .map(Some);
     }
     if generated.is_some() {
         return Err(if new_row {
@@ -137,6 +116,34 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
         params,
     )
     .map(Some)
+}
+
+/// Keep a default's declared source type through assignment: a domain value has
+/// already passed its constraints when its expression returns it.
+fn evaluate_column_default<S: Clone + 'static>(
+    services: MutationAssignmentContext<'_, S>,
+    table: &str,
+    column: &str,
+    expression: Option<&uqa_sql::ast::Expr>,
+    params: &[SQLParam],
+) -> Result<Value, SQLError> {
+    let (value, source) = expression.map_or(Ok((Value::Null, None)), |expression| {
+        crate::query::catalog_expression::eval_lowered_expression_with_type(
+            services.expressions.expressions,
+            services.scopes.current_routine_scope(),
+            expression,
+            None,
+            params,
+        )
+    })?;
+    uqa_sql::assignment::columns::coerce_to_column_type_from(
+        services.assignment,
+        services.columns,
+        table,
+        column,
+        value,
+        source.as_ref(),
+    )
 }
 
 /// Apply a value from INSERT SELECT using its declared source type and the original bound scope.
@@ -414,19 +421,8 @@ pub fn apply_missing_column_defaults<S: Clone + 'static>(
             .try_column_insert_default_expr(table, &col)
             .map_err(|err| dml_storage_error("INSERT defaults", err))?
         {
-            let value = uqa_sql::assignment::columns::coerce_to_column_type(
-                services.assignment,
-                services.columns,
-                table,
-                &col,
-                crate::query::catalog_expression::eval_lowered_expression(
-                    services.expressions.expressions,
-                    services.scopes.current_routine_scope(),
-                    &default_expr,
-                    None,
-                    params,
-                )?,
-            )?;
+            let value =
+                evaluate_column_default(services, table, &col, Some(&default_expr), params)?;
             document.insert(col, value);
         }
     }

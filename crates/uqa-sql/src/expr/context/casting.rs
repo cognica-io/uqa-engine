@@ -18,6 +18,35 @@ use crate::{
     error::{Result, SQLError},
 };
 
+/// Catalog input needed after analysis selects a type for an unknown literal. Domain array input includes each element's constraints, so the caller must retain this value rather than read the text again at execution.
+pub trait CatalogInputFunctions {
+    fn read_unknown_input(&self, text: &str, target: &ColumnType) -> Result<Value>;
+}
+
+pub(crate) fn requires_domain_array_input(target: &ColumnType) -> bool {
+    matches!(target, ColumnType::Array(element) if matches!(array_leaf_type(element), ColumnType::Domain { .. }))
+}
+
+/// Read an array whose elements are domains with the same input and constraint path as a catalog-aware cast. The resolved target preserves domain identity; a scalar outer domain remains the surrounding expression's runtime coercion.
+pub fn read_catalog_array_input(
+    text: &str,
+    target: &ColumnType,
+    engine: &dyn EngineHook,
+) -> Result<Value> {
+    if !requires_domain_array_input(target) {
+        return Err(SQLError::Internal(
+            "catalog array input requires domain elements".into(),
+        ));
+    }
+    let control = ProductionControl::uncontrolled();
+    let parsed = parse_pg_array_literal_with_control(text, &control)?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary catalog array input owner".into()))?;
+    cast_catalog_array(&Value::Array(parsed), None, target, engine, &control)?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary catalog array input owner".into()))
+}
+
 #[must_use]
 pub fn coercion_type_name(ty: &ColumnType) -> String {
     coercion_type_name_with_control(ty, &ProductionControl::uncontrolled())

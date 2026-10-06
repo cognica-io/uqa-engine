@@ -266,7 +266,7 @@ fn domain_input_constants_use_the_base_type_without_erasing_parameter_identity()
                 .unwrap()
                 .remove(0),
         );
-        let mut parameters = ParameterTypes::with_input_constants(&[None], None, None);
+        let mut parameters = ParameterTypes::with_input_constants(&[None], None, None, None);
         plan.rewrite_scalar_expressions(&mut |expression| {
             if let ScalarExpr::Literal(uqa_core::Value::Str(text)) = expression {
                 let text = text.clone();

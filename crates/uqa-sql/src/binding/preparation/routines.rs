@@ -33,6 +33,7 @@ pub(crate) fn analyze_routine_body_inputs(
             &declared,
             Some(aliases),
             routines.enum_labels(),
+            routines.catalog_input_functions(),
         ),
         schema_expression: None,
     };
@@ -72,6 +73,7 @@ pub(crate) fn analyze_routine_body_argument(
             &declared,
             Some(aliases),
             routines.enum_labels(),
+            routines.catalog_input_functions(),
         ),
         schema_expression: None,
     };
