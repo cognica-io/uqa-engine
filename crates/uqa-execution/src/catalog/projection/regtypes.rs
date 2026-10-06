@@ -27,7 +27,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use super::pg_catalog::{build_pg_type_without_defaults, catalog_index_relations};
 use super::pg_namespace::build_pg_namespace;
 use super::pg_proc::build_pg_proc_without_defaults;
-use super::relation_catalog::build_pg_class;
+use super::relation_catalog::relation_catalog_identities;
 
 mod procedures;
 mod type_names;
@@ -109,29 +109,10 @@ pub fn resolve_regclass_kind_by_oid(
     let catalog = context.catalog_read_view();
     let catalog = catalog.metadata_view();
     let resolution = context.session_execution_view().relation_name_resolution();
-    for row in build_pg_class(context, &catalog, &resolution)? {
-        if row.get("oid") != Some(&Value::Int(oid)) {
-            continue;
-        }
-        let name = match row.get("relname") {
-            Some(Value::Str(name) | Value::FixedChar(name)) => name.clone(),
-            _ => {
-                return Err(SQLError::Internal(format!(
-                    "pg_class row {oid} has no relname"
-                )))
-            }
-        };
-        let kind = match row.get("relkind") {
-            Some(Value::Str(kind) | Value::FixedChar(kind)) => kind.clone(),
-            _ => {
-                return Err(SQLError::Internal(format!(
-                    "pg_class row {oid} has no relkind"
-                )))
-            }
-        };
-        return Ok(Some((name, kind)));
-    }
-    Ok(None)
+    Ok(relation_catalog_identities(&catalog, &resolution)?
+        .into_iter()
+        .find(|entry| entry.oid == oid)
+        .map(|entry| (entry.relation.name, entry.kind.to_string())))
 }
 
 fn object_name(names: &[String]) -> Result<(Option<&str>, &str), SQLError> {
@@ -518,20 +499,23 @@ impl RegtypeOutputCatalog {
         // Output functions read catalog rows, which name relations canonically; they need no privilege on their schemas, as `regclassout` and `regtypeout` do not.
         let mut resolution = context.session_execution_view().relation_name_resolution();
         resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
-        let classes = build_pg_class(context, &catalog, &resolution)?
+        let classes = relation_catalog_identities(&catalog, &resolution)?
             .into_iter()
-            .filter_map(|row| {
-                Some((
-                    catalog_int(&row, "oid")?,
+            .map(|entry| {
+                (
+                    entry.oid,
                     RegtypeCatalogEntry {
-                        name: catalog_str(&row, "relname")?.to_string(),
-                        namespace_oid: catalog_int(&row, "relnamespace")?,
+                        name: entry.relation.name,
+                        namespace_oid: super::helpers::oids::namespace_oid(
+                            &catalog,
+                            &entry.relation.schema,
+                        ),
                         overloaded: false,
                         argument_types: Vec::new(),
                         array_oid: 0,
                         element_oid: 0,
                     },
-                ))
+                )
             })
             .collect();
         Self::assemble(&catalog, &resolution, classes)

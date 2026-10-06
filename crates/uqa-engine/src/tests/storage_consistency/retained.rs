@@ -513,6 +513,43 @@ fn current_private_snapshot_does_not_read_rows_to_reapply_its_own_changes() {
 }
 
 #[test]
+fn catalog_only_cursor_retains_metadata_without_capturing_unscanned_rows() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE catalog_only (id integer); BEGIN", &[])
+        .unwrap();
+    let table = engine.require_table("catalog_only").unwrap();
+    let probe = PortalSnapshotProbeStore::from_table(&engine, "catalog_only");
+    let reads = Arc::clone(&probe.row_reads);
+    let ids = Arc::clone(&probe.doc_id_calls);
+    let captures = Arc::clone(&probe.snapshot_calls);
+    *table.document_store.write() = Box::new(probe);
+    let owners = Arc::strong_count(&table);
+    engine
+        .sql(
+            "DECLARE metadata_cursor SCROLL CURSOR WITH HOLD FOR SELECT 'catalog_only'::regclass::text AS relation FROM generate_series(1,3)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(Arc::strong_count(&table), owners);
+    engine.sql("COMMIT", &[]).unwrap();
+    for sql in [
+        "FETCH LAST FROM metadata_cursor",
+        "FETCH FIRST FROM metadata_cursor",
+    ] {
+        let result = engine.sql(sql, &[]).unwrap();
+        assert_eq!(
+            result.value_at(0, 0),
+            Some(&Value::Str("catalog_only".into()))
+        );
+    }
+    engine.sql("CLOSE metadata_cursor", &[]).unwrap();
+    for counter in [reads, ids, captures] {
+        assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+}
+
+#[test]
 fn changed_schema_snapshot_retains_base_rows_until_the_query_reads_them() {
     let engine = Engine::new();
     engine.sql("CREATE TABLE adapted_rows (id INTEGER PRIMARY KEY, payload TEXT); INSERT INTO adapted_rows VALUES (1, 'original'), (2, 'other')", &[]).unwrap();

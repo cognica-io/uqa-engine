@@ -61,7 +61,10 @@ fn public_sequence_inspection_keeps_live_catalog_authority_coherent() {
 fn sequence_enumeration_preserves_a_retained_query_catalog() {
     let mut engine = crate::Engine::new();
     sql(&engine, "CREATE SEQUENCE retained_ids");
-    let retained = std::sync::Arc::new(engine.durable.snapshot());
+    let retained = std::sync::Arc::new(crate::session::RetainedCatalogSnapshot {
+        durable: engine.durable.snapshot(),
+        read_view: engine.catalog_read_view(),
+    });
     sql(&engine, "CREATE SEQUENCE later_ids");
     engine.query_catalog_snapshot = Some(retained);
     assert_eq!(engine.list_sequences().unwrap(), ["public.retained_ids"]);

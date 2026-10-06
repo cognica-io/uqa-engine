@@ -218,7 +218,7 @@ type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState
 type SessionPortalViewSnapshots = Arc<BTreeMap<RelationIdentity, StoredView>>;
 type SessionPortalSQLFunctionSnapshots =
     Arc<BTreeMap<String, Vec<Arc<user_functions::SQLUserFunction>>>>;
-type SessionPortalCatalogSnapshot = Arc<DurableCatalogSnapshot>;
+type SessionPortalCatalogSnapshot = Arc<session::RetainedCatalogSnapshot>;
 type SessionPortalTransactionOverlay =
     Arc<BTreeMap<String, uqa_execution::query::document_changes::DocumentChanges>>;
 type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
