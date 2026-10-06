@@ -221,15 +221,9 @@ fn publish(
             }
             let mut table = current.clone();
             table.row_type_array_name = Some(name);
-            if let Some(catalog) = context.storage {
-                catalog
-                    .save_foreign_table(
-                        &table
-                            .catalog_row(&holder.relation, &security)
-                            .map_err(storage)?,
-                    )
-                    .map_err(storage)?;
-            }
+            table
+                .persist(context.storage, &holder.relation, &security)
+                .map_err(storage)?;
             tables.insert(holder.relation.clone(), table);
             drop(tables);
             context.changes.catalog_registry_changed();

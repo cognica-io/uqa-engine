@@ -88,10 +88,17 @@ impl ForeignAuthorizationContext<'_> {
     }
 }
 pub fn persist_foreign_table_security(
+    registry: &dyn ForeignTableAlterCatalog,
     catalog: Option<&dyn CatalogFacade>,
     relation: &RelationIdentity,
     security: &BoundTableSecurity,
 ) -> Result<(), SQLError> {
+    if registry
+        .table(relation)
+        .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+    {
+        return Ok(());
+    }
     let Some(catalog) = catalog else {
         return Ok(());
     };

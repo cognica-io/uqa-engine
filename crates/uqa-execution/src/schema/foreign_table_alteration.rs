@@ -172,11 +172,11 @@ pub fn alter_foreign_table(
                     .catalog
                     .table(relation)
                     .ok_or_else(|| SQLError::Internal("moved foreign table disappeared".into()))?;
-                if let Some(target) = context.schema_moves.target(
-                    relation,
-                    schema,
-                    uqa_sql::ast::RelationPersistence::Permanent,
-                )? {
+                if let Some(target) =
+                    context
+                        .schema_moves
+                        .target(relation, schema, current.persistence)?
+                {
                     let relocation =
                         context
                             .schema_moves
@@ -340,17 +340,18 @@ fn rename_foreign_table_to(
             ))
         },
     )?;
-    if context
-        .publication
-        .persist_rename(relation, &target)
-        .map_err(|error| {
-            SQLError::Internal(format!(
-                "persist foreign table rename `{}` to `{}`: {error}",
-                relation.qualified_name(),
-                target.qualified_name()
-            ))
-        })?
-        == Some(false)
+    if current.persistence != uqa_sql::ast::RelationPersistence::Temporary
+        && context
+            .publication
+            .persist_rename(relation, &target)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "persist foreign table rename `{}` to `{}`: {error}",
+                    relation.qualified_name(),
+                    target.qualified_name()
+                ))
+            })?
+            == Some(false)
     {
         return Err(SQLError::Internal(format!(
             "foreign table `{}` disappeared during rename",

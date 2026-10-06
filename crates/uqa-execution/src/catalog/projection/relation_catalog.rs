@@ -206,7 +206,7 @@ pub fn build_pg_class(
     for (name, foreign_table) in catalog.foreign_tables() {
         let (schema, table) = split_schema_name(&name)?;
         let security = catalog.foreign_table_security(&name)?;
-        let mut row = pg_class_row(
+        let mut row = pg_class_row_with_lifecycle(
             catalog,
             &schema,
             &table,
@@ -217,6 +217,9 @@ pub fn build_pg_class(
             )?,
             0.0,
             false,
+            foreign_table.persistence,
+            true,
+            &[],
         );
         row.insert(
             "oid".into(),

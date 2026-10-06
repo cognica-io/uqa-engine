@@ -39,9 +39,11 @@ pub fn rewrite_view_relation_references(
     .map_err(StorageBackendError::Other)?;
     if context.publication.has_catalog() {
         for (relation, view) in &updates {
-            context
-                .publication
-                .save_view(&catalog_view_row(relation, view)?)?;
+            if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+                context
+                    .publication
+                    .save_view(&catalog_view_row(relation, view)?)?;
+            }
         }
     }
     let mut views = context.registry.views_write();

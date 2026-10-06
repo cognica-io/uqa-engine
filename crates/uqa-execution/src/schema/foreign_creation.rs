@@ -73,7 +73,9 @@ impl ForeignCreationContext<'_> {
             .map_err(|error| {
                 uqa_sql::SQLError::Internal(format!("refresh FDW catalog: {error}"))
             })?;
-        let name = self.creation.persistent_relation_name(name)?;
+        let (name, _) = self
+            .creation
+            .relation_target(name, uqa_sql::ast::RelationPersistence::Permanent)?;
         let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
             uqa_sql::SQLError::Internal(format!("decode foreign table `{name}`: {error}"))
         })?;
@@ -190,12 +192,15 @@ impl ForeignCreationContext<'_> {
         else {
             return Ok(());
         };
+        let persistence = self
+            .creation
+            .adjusted_persistence(name, uqa_sql::ast::RelationPersistence::Permanent)?;
         implicit::materialize_implicit_sequences(
             &self.sequences,
             "CREATE FOREIGN TABLE",
             name,
             &mut statement.columns,
-            uqa_sql::ast::RelationPersistence::Permanent,
+            persistence,
         )?;
         let catalog_oids = self.prepare_foreign_table_definition(&relation, &mut statement)?;
         let server_reference = self
@@ -215,6 +220,7 @@ impl ForeignCreationContext<'_> {
         let owner_columns = statement.columns.clone();
         let table = StoredForeignTable {
             name: name.to_string(),
+            persistence,
             object_id,
             catalog_oids: Some(catalog_oids),
             row_type_array_name: Some(crate::schema::types::arrays::reserve_array_name(
@@ -236,17 +242,11 @@ impl ForeignCreationContext<'_> {
                 "foreign table `{name}` changed during creation"
             )));
         }
-        if let Some(catalog) = self.catalog {
-            catalog
-                .save_foreign_table(&table.catalog_row(&relation, &security).map_err(|error| {
-                    uqa_sql::SQLError::Internal(format!(
-                        "serialize foreign table `{name}`: {error}"
-                    ))
-                })?)
-                .map_err(|error| {
-                    uqa_sql::SQLError::Internal(format!("persist foreign table `{name}`: {error}"))
-                })?;
-        }
+        table
+            .persist(self.catalog, &relation, &security)
+            .map_err(|error| {
+                uqa_sql::SQLError::Internal(format!("persist foreign table `{name}`: {error}"))
+            })?;
         tables.insert(relation.clone(), table);
         table_security.insert(relation, security);
         drop(table_security);

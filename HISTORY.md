@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve temporary foreign definitions, generated sequences and privileges through creation, catalog refresh, rename and rollback; keep their metadata and dependent temporary-view reference rewrites out of durable storage, retain role dependencies across sessions, and remove session-owned memory rows on `DISCARD TEMP`.
+
 - Create session-local materialized views in `pg_temp`, including names resolved through `search_path`, and preserve their private rows and population state through refresh, rollback and rename without writing them to the durable catalog.
 
 - Restore generated-column rejection of host callbacks without declared SQL return types, including nested calls, explicit casts and branches eliminated by planning. Explicitly qualified builtin calls remain valid.

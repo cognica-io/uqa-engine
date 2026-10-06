@@ -249,6 +249,7 @@ fn occupied(oid: i64) -> CatalogReadView {
         uqa_core::RelationIdentity::new("hidden_schema", "peer"),
         crate::catalog::foreign::StoredForeignTable {
             name: "hidden_schema.peer".into(),
+            persistence: uqa_sql::ast::RelationPersistence::Permanent,
             object_id: [90; 16],
             catalog_oids: None,
             row_type_array_name: None,
