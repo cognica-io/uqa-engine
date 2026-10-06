@@ -347,11 +347,15 @@ impl QueryBlockPlan {
         if let Some(source) = &self.from {
             source.push_expressions(&mut expressions);
         }
+        // Scan projections initialize before scan qualifications; aggregate and window outputs initialize after their input scan.
+        if matches!(self.compute, ComputePlan::Project) {
+            expressions.extend(self.projections.iter().map(|projection| &projection.expr));
+        }
         if let Some(filter) = &self.r#where {
             expressions.push(filter);
         }
-        for projection in &self.projections {
-            expressions.push(&projection.expr);
+        if !matches!(self.compute, ComputePlan::Project) {
+            expressions.extend(self.projections.iter().map(|projection| &projection.expr));
         }
         expressions.extend(&self.group_by);
         for set in &self.grouping_sets {
