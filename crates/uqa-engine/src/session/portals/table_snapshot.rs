@@ -9,6 +9,21 @@
 use super::{DocumentStore, Engine, InvertedIndex, SQLError, TableState};
 use uqa_storage::ReadOnlySnapshot;
 
+/// Catalog definitions remain complete even when a portal scans no user table.
+/// The view holds immutable metadata Arcs, independently of row/index snapshots.
+pub(crate) struct RetainedCatalogSnapshot {
+    pub(crate) durable: crate::state::DurableCatalogSnapshot,
+    pub(crate) read_view: uqa_execution::catalog::CatalogReadView,
+}
+
+impl std::ops::Deref for RetainedCatalogSnapshot {
+    type Target = crate::state::DurableCatalogSnapshot;
+
+    fn deref(&self) -> &Self::Target {
+        &self.durable
+    }
+}
+
 impl Engine {
     pub(super) fn capture_session_portal_catalog_snapshot(
         &self,
@@ -20,7 +35,11 @@ impl Engine {
         let mut snapshot = self.durable.snapshot();
         snapshot.graphs = self
             .freeze_graph_read_handles(dependencies.graphs.as_ref(), dependencies.graph_catalog)?;
-        Ok(std::sync::Arc::new(snapshot))
+        let read_view = self.catalog_read_view_from(&snapshot, self.storage.tables.read().clone());
+        Ok(std::sync::Arc::new(RetainedCatalogSnapshot {
+            durable: snapshot,
+            read_view,
+        }))
     }
 
     pub(crate) fn query_retention_control(

@@ -28,6 +28,7 @@ pub trait StatementAnalysisScopes {
 pub struct StatementAnalysisContext<'a> {
     pub scopes: &'a dyn StatementAnalysisScopes,
     pub routines: &'a dyn RoutineResolution,
+    pub aliases: &'a dyn crate::schema::dependencies::oid_alias::OidAliasInput,
 }
 
 /// The result a statement's analysis derives: the column types of a query or of a data-modifying statement's `RETURNING` list, `None` where analysis derives no type, or no result for any other statement.
@@ -76,9 +77,11 @@ pub fn analyze_executable_plan(
                     analyze_executable_plan(context, body, params)?;
                     AnalyzedResult::Command
                 }
-                _ => analyze_plan_result(context.routines, plan, params, scope)?,
+                _ => analyze_plan_result(context.routines, context.aliases, plan, params, scope)?,
             },
-            UnifiedPlan::Query(_) => analyze_plan_result(context.routines, plan, params, scope)?,
+            UnifiedPlan::Query(_) => {
+                analyze_plan_result(context.routines, context.aliases, plan, params, scope)?
+            }
         });
         Ok(())
     })?;
@@ -88,49 +91,33 @@ pub fn analyze_executable_plan(
 /// Analyze every catalog and scalar reference of a statement within one binding scope, and derive its result without running it.
 pub fn analyze_plan_result(
     routines: &dyn RoutineResolution,
+    aliases: &dyn crate::schema::dependencies::oid_alias::OidAliasInput,
     plan: &UnifiedPlan,
     params: &[SQLParam],
     scope: &dyn StatementBindingScope,
 ) -> Result<AnalyzedResult, SQLError> {
+    let binding = scope.binding_context()?;
+    super::preparation::check_executable_inputs(routines, plan, params, &binding, aliases)?;
     let rows = AnalyzedResult::Schema;
     match plan {
-        UnifiedPlan::Query(query) => super::analyze_query_plan_schema(
-            routines,
-            query,
-            params,
-            &scope.binding_context()?,
-            None,
-        )
-        .map(rows),
+        UnifiedPlan::Query(query) => {
+            super::analyze_query_plan_schema(routines, query, params, &binding, None).map(rows)
+        }
         UnifiedPlan::Command(command) => match command.as_ref() {
             CommandPlan::Explain { body, .. } => {
-                analyze_plan_result(routines, body, params, scope)?;
+                analyze_plan_result(routines, aliases, body, params, scope)?;
                 Ok(AnalyzedResult::Command)
             }
             CommandPlan::CreateTableAs { query, .. }
             | CommandPlan::CreateMaterializedView { query, .. }
             | CommandPlan::DeclareCursor { query, .. } => {
-                super::analyze_query_plan_schema(
-                    routines,
-                    query,
-                    params,
-                    &scope.binding_context()?,
-                    None,
-                )?;
+                super::analyze_query_plan_schema(routines, query, params, &binding, None)?;
                 Ok(AnalyzedResult::Command)
             }
-            _ => {
-                if command.mutation_target().is_some() {
-                    analyze_command_parameters(routines, command, params, scope)?;
-                }
-                Ok(super::analyze_prepared_command_schema(
-                    routines,
-                    command,
-                    params,
-                    &scope.binding_context()?,
-                )?
-                .map_or(AnalyzedResult::Command, rows))
-            }
+            _ => Ok(
+                super::analyze_prepared_command_schema(routines, command, params, &binding)?
+                    .map_or(AnalyzedResult::Command, rows),
+            ),
         },
     }
 }
@@ -141,13 +128,7 @@ pub fn analyze_command_parameters(
     params: &[SQLParam],
     scope: &dyn StatementBindingScope,
 ) -> Result<(), SQLError> {
-    let schema = RowSchema::default();
-    let declared = (1..=params.len())
-        .map(|index| match &params[index - 1] {
-            SQLParam::Scalar(Value::Str(_) | Value::Null) => Ok(None),
-            _ => crate::scalar_type(&ScalarExpr::Param(index), &schema, params),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let declared = parameter_input_types(params)?;
     super::infer_prepared_parameter_types(
         routines,
         &UnifiedPlan::Command(Box::new(command.clone())),
@@ -155,6 +136,18 @@ pub fn analyze_command_parameters(
         &scope.binding_context()?,
     )?;
     Ok(())
+}
+
+pub(super) fn parameter_input_types(
+    params: &[SQLParam],
+) -> Result<Vec<Option<crate::ColumnType>>, SQLError> {
+    let schema = RowSchema::default();
+    (1..=params.len())
+        .map(|index| match &params[index - 1] {
+            SQLParam::Scalar(Value::Str(_) | Value::Null) => Ok(None),
+            _ => crate::scalar_type(&ScalarExpr::Param(index), &schema, params),
+        })
+        .collect()
 }
 
 #[cfg(test)]

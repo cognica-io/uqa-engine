@@ -63,6 +63,46 @@ pub(crate) fn read_prepared_inputs(
     })
 }
 
+/// Read ordinary statement inputs in the same order as prepared analysis,
+/// without freezing them into the source or evaluating runtime expressions.
+pub(crate) fn check_executable_inputs(
+    routines: &dyn RoutineResolution,
+    plan: &UnifiedPlan,
+    params: &[crate::SQLParam],
+    binding: &BindingContext<'_>,
+    aliases: &dyn OidAliasInput,
+) -> Result<(), SQLError> {
+    let declared = super::statements::parameter_input_types(params)?;
+    let mut analysis = Preparation {
+        routines,
+        scope: SchemaScope::for_analysis(binding)?,
+        parameters: ParameterTypes::with_input_constants(
+            &declared,
+            Some(aliases),
+            routines.enum_labels(),
+        ),
+        schema_expression: None,
+    };
+    match plan {
+        UnifiedPlan::Query(query) => {
+            analysis.query(query, None)?;
+        }
+        UnifiedPlan::Command(command) => match command.as_ref() {
+            crate::plan::CommandPlan::CreateTableAs { query, .. }
+            | crate::plan::CommandPlan::CreateMaterializedView { query, .. }
+            | crate::plan::CommandPlan::DeclareCursor { query, .. } => {
+                analysis.query(query, None)?;
+            }
+            _ if command.mutation_target().is_some() => {
+                analysis.command(command)?;
+                analysis.parameters.finish()?;
+            }
+            _ => {}
+        },
+    }
+    Ok(())
+}
+
 pub fn infer_prepared_parameter_types(
     routines: &dyn RoutineResolution,
     plan: &UnifiedPlan,
@@ -219,10 +259,23 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<Option<ColumnType>, SQLError> {
         let mut canonical;
-        let expression = if self.scope.routine_parameters.is_some() {
+        let defer_windows = self.schema_expression.is_none()
+            && crate::semantics::windows::expr_has_window(expression);
+        let expression = if self.scope.routine_parameters.is_some() || defer_windows {
             canonical = expression.clone();
             self.scope
                 .canonicalize_routine_parameters(&mut canonical, input);
+            if defer_windows {
+                // Window functions bind their arguments with the target list;
+                // their specifications are transformed after the query clauses.
+                canonical.visit_mut(&mut |node| {
+                    if let ScalarExpr::WindowCall { spec, .. } = node {
+                        spec.partition_by.clear();
+                        spec.order_by.clear();
+                        spec.frame = None;
+                    }
+                });
+            }
             &canonical
         } else {
             expression

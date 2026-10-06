@@ -222,15 +222,12 @@ impl Engine {
     }
 
     pub(crate) fn catalog_read_view(&self) -> CatalogReadView {
-        let durable = self.query_catalog_snapshot.clone().unwrap_or_else(|| {
-            let mut snapshot = self.durable.snapshot();
-            snapshot.graphs = self.visible_graph_handles();
-            Arc::new(snapshot)
-        });
-        let table_sources = self.query_table_snapshots.as_ref().map_or_else(
-            || self.storage.tables.read().clone(),
-            |tables| (**tables).clone(),
-        );
+        if let Some(snapshot) = &self.query_catalog_snapshot {
+            return self.with_sequence_positions(snapshot.read_view.clone());
+        }
+        let mut durable = self.durable.snapshot();
+        durable.graphs = self.visible_graph_handles();
+        let table_sources = self.storage.tables.read().clone();
         self.with_sequence_positions(self.catalog_read_view_from(&durable, table_sources))
     }
 
@@ -259,7 +256,7 @@ impl Engine {
         }
     }
 
-    fn catalog_read_view_from(
+    pub(crate) fn catalog_read_view_from(
         &self,
         durable: &DurableCatalogSnapshot,
         table_sources: BTreeMap<super::RelationIdentity, Arc<super::TableState>>,

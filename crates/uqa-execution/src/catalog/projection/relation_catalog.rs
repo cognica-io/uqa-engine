@@ -6,6 +6,9 @@
 
 //! `pg_class` and `pg_inherits` rows for physical and virtual relations.
 
+mod identities;
+pub(super) use identities::relation_catalog_identities;
+
 use super::helpers::acl::acl_identifier;
 use super::helpers::oids::split_schema_name;
 use super::helpers::rows::{bool_value, catalog_array, catalog_usize, int_value, row, str_value};

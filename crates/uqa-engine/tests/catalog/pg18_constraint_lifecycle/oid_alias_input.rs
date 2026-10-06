@@ -28,6 +28,78 @@ fn oid_alias_input_matches_postgresql_sqlite() {
     verify_oid_alias_input(&Engine::open(&directory.path().join("oid-alias-input.db")).unwrap());
 }
 
+#[test]
+fn oid_alias_errors_follow_source_and_target_analysis_order() {
+    let engine = Engine::new();
+    let mut mismatches = Vec::new();
+    for (sql, state, message) in [
+        (
+            "SELECT 'absent'::regclass FROM missing_source",
+            "42P01",
+            "relation \"missing_source\" does not exist",
+        ),
+        (
+            "SELECT 'absent'::regclass, missing_column",
+            "42P01",
+            "relation \"absent\" does not exist",
+        ),
+        (
+            "SELECT missing_column, 'absent'::regclass",
+            "42703",
+            "column \"missing_column\" does not exist",
+        ),
+        (
+            "SELECT 'absent'::regclass, 1 / 0",
+            "42P01",
+            "relation \"absent\" does not exist",
+        ),
+        (
+            "SELECT 'absent'::regclass WHERE false",
+            "42P01",
+            "relation \"absent\" does not exist",
+        ),
+    ] {
+        let error = engine.sql(sql, &[]).unwrap_err();
+        if error.sqlstate() != Some(state) || error.to_string() != message {
+            mismatches.push(format!("{sql}: {error:?}; expected {state}: {message}"));
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn statement_input_order_matches_postgresql(
+    #[case] provider: usize,
+    #[values(0, 1)] fixture: usize,
+) {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("statement-input-order.db");
+    let engine = match provider {
+        0 => Engine::new(),
+        1 => Engine::open(&path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    };
+    let reference = [
+        include_str!("../../../../../tests/parity/pg18/statement_input_order_oracle.expected.json"),
+        include_str!(
+            "../../../../../tests/parity/pg18/statement_input_clause_order_oracle.expected.json"
+        ),
+    ][fixture];
+    crate::pg18_oracle::verify(&engine, reference);
+}
+
 fn text_at(engine: &Engine, sql: &str, column: usize) -> String {
     match engine.sql(sql, &[]).unwrap().value_at(0, column) {
         Some(Value::Str(text)) => text.clone(),

@@ -114,11 +114,6 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        for item in &spec.partition_by {
-            let mut value = self.expression(item, input, subqueries)?;
-            self.parameters
-                .coerce_unknown(&mut value, &ColumnType::Text)?;
-        }
         let mut order_type = None;
         for item in &spec.order_by {
             let mut value = self.expression(&item.expr, input, subqueries)?;
@@ -127,6 +122,11 @@ impl Preparation<'_> {
             if order_type.is_none() {
                 order_type = value.ty;
             }
+        }
+        for item in &spec.partition_by {
+            let mut value = self.expression(item, input, subqueries)?;
+            self.parameters
+                .coerce_unknown(&mut value, &ColumnType::Text)?;
         }
         if let Some(frame) = &spec.frame {
             // An untyped offset takes the type an `unknown` literal would: `bigint` for `ROWS` and `GROUPS`, and for `RANGE` the offset type of the ordering column's `in_range` support. A `RANGE` frame without exactly one ordering column is rejected when the query is analyzed.

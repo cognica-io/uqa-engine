@@ -7,6 +7,57 @@
 use super::*;
 
 #[test]
+fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
+    use crate::catalog::{security::BoundTableSecurity, test_support, CatalogTableSnapshot};
+    use uqa_core::RelationIdentity;
+    use uqa_sql::catalog::{
+        relation_oids::{RelationCatalogOids, RelationOidKind},
+        roles::RoleIdentity,
+    };
+
+    let mut snapshot = test_support::empty_catalog().snapshot().clone();
+    let identity = RelationIdentity::new("public", "original");
+    let oids = RelationCatalogOids::legacy(RelationOidKind::Table, &[7; 16]);
+    snapshot.tables.insert(
+        identity.clone(),
+        CatalogTableSnapshot {
+            object_id: [7; 16],
+            catalog_oids: oids,
+            row_type_array_name: None,
+            security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)),
+            columns: Arc::default(),
+            columns_declared: true,
+            checks: Arc::default(),
+            foreign_keys: Arc::default(),
+            keys: Arc::default(),
+            hierarchy: Arc::default(),
+            persistence: uqa_sql::ast::RelationPersistence::Permanent,
+        },
+    );
+    let retained = CatalogReadView::new(snapshot.clone());
+    let table = snapshot.tables.remove(&identity).unwrap();
+    let renamed = RelationIdentity::new("other", "renamed");
+    snapshot.tables.insert(renamed.clone(), table);
+    let current = CatalogReadView::new(snapshot);
+    let resolution = RelationNameResolution {
+        search_path: vec!["public".into()],
+        temporary_schema: "pg_temp_1".into(),
+        temporary_namespace_allocated: false,
+        current_user: "uqa".into(),
+        lookup_mode: crate::catalog::RelationLookupMode::Bound,
+    };
+    for (catalog, expected) in [(retained, identity), (current, renamed)] {
+        let identities = relation_catalog_identities(&catalog, &resolution).unwrap();
+        let table = identities
+            .into_iter()
+            .find(|entry| entry.oid == i64::from(oids.relation))
+            .unwrap();
+        assert_eq!(table.relation, expected);
+        assert_eq!(table.kind, "r");
+    }
+}
+
+#[test]
 fn legacy_vector_array_type_lookup_uses_the_array_identity() {
     let mut catalog = RegtypeOutputCatalog {
         namespaces: BTreeMap::from([(11, "pg_catalog".into())]),

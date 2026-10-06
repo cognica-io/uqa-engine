@@ -267,7 +267,9 @@ impl Preparation<'_> {
                     self.require_boolean(filter, input, subqueries, "FILTER")?;
                 }
                 self.check_schema_window(name, (args, filter.is_some(), *modifiers), input)?;
-                self.window_specification(spec, input, subqueries)?;
+                if self.schema_expression.is_some() {
+                    self.window_specification(spec, input, subqueries)?;
+                }
                 self.known_type(expression, input, subqueries)?
             }
             _ => self.known_type(expression, input, subqueries)?,

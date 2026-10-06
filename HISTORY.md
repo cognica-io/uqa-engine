@@ -31,6 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Analyze ordinary SQL literal inputs before optimization in PostgreSQL's relation, expression and clause order, including UPDATE RETURNING and window specifications. Retain catalog-only cursor references without capturing unscanned table rows.
 - Validate SQL source-body literal inputs and return layouts in PostgreSQL order without executing the body. Preserve failed replacements and typed row descriptors through CASE, materialization, spill and routine returns; resolve relation row types for routine signatures.
 
 - Analyze routine parameter defaults in PostgreSQL declaration order, including unknown input conversion and delayed call-time evaluation. Preserve NULL defaults, polymorphic default types, creation-time constants and durable bindings; reject removal or type changes of existing defaults during routine replacement.

@@ -21,7 +21,7 @@ mod analyze;
 mod analyze_helpers;
 mod clocks;
 mod portals;
-pub(crate) use portals::StatementReadSnapshot;
+pub(crate) use portals::{RetainedCatalogSnapshot, StatementReadSnapshot};
 mod parameter_registry;
 mod schemas;
 pub(crate) use parameter_registry::SessionParameterRegistry;

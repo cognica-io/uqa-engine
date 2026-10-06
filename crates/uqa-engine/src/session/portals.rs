@@ -11,6 +11,7 @@ mod statement_snapshot;
 mod table_snapshot;
 mod worker;
 pub(crate) use statement_snapshot::StatementReadSnapshot;
+pub(crate) use table_snapshot::RetainedCatalogSnapshot;
 
 use crate::{
     DocumentStore, Engine, EpochCoordinator, InvertedIndex, PinnedPortalTransactionControl,

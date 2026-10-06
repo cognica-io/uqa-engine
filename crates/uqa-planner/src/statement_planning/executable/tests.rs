@@ -44,6 +44,11 @@ impl FunctionTypeResolver for NoRoutines {
     }
 }
 impl RoutineResolution for NoRoutines {}
+impl uqa_sql::schema::dependencies::oid_alias::OidAliasInput for NoRoutines {
+    fn resolve_oid_alias_input(&self, _: &ColumnType, _: &str) -> Result<Option<i64>, SQLError> {
+        panic!("analysis scope acquisition failed")
+    }
+}
 
 #[test]
 fn failed_sql_analysis_precedes_optimizer_inputs_and_constant_evaluation() {
@@ -55,6 +60,7 @@ fn failed_sql_analysis_precedes_optimizer_inputs_and_constant_evaluation() {
         analysis: StatementAnalysisContext {
             scopes: &inputs,
             routines: &NoRoutines,
+            aliases: &NoRoutines,
         },
         aggregates: &aggregates,
         optimization: &inputs,
