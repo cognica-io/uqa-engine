@@ -67,6 +67,11 @@ pub(super) fn parse(name: &str) -> Option<Zone> {
     }))
 }
 
+enum YearTransitions {
+    Changes(i64, i64),
+    NoChanges,
+}
+
 impl PosixTimeZone {
     pub(super) fn offset_at(self, unix_seconds: i64) -> Option<i32> {
         let current_year = UtcDateTime::from_timespec(unix_seconds, 0).ok()?.year();
@@ -76,7 +81,7 @@ impl PosixTimeZone {
         // some years. Ordinary rules finish after inspecting three adjacent years.
         for distance in 0..=401 {
             let year = current_year.checked_add(1)?.checked_sub(distance)?;
-            if let Some((start, end)) = self.transitions(year)? {
+            if let YearTransitions::Changes(start, end) = self.transitions(year)? {
                 for (at, offset) in [(start, self.daylight), (end, self.standard)] {
                     if at <= unix_seconds && latest.is_none_or(|(last, _)| at > last) {
                         latest = Some((at, offset));
@@ -104,7 +109,7 @@ impl PosixTimeZone {
         Some(chosen.unwrap_or_else(|| self.standard.min(self.daylight)))
     }
 
-    fn transitions(self, year: i32) -> Option<Option<(i64, i64)>> {
+    fn transitions(self, year: i32) -> Option<YearTransitions> {
         let start = self
             .start
             .unix_seconds(year)?
@@ -117,7 +122,11 @@ impl PosixTimeZone {
         let valid = end < start
             || (start < end
                 && end - start < year_seconds + i64::from(self.daylight - self.standard));
-        Some(valid.then_some((start, end)))
+        Some(if valid {
+            YearTransitions::Changes(start, end)
+        } else {
+            YearTransitions::NoChanges
+        })
     }
 }
 
