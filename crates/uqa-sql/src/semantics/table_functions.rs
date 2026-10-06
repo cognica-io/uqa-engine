@@ -19,6 +19,34 @@ pub struct ResolvedUserTableFunction {
     pub binding: FunctionBinding,
 }
 
+/// Correct the old integer series declaration, which recorded a nonexistent default on the three-argument overload. This only accepts the exact builtin catalog shape; it never resolves a persisted call by its display name.
+pub(crate) fn upgrade_legacy_table_function_binding(
+    binding: &mut Option<FunctionBinding>,
+    argument_count: usize,
+) -> bool {
+    let Some(binding) = binding else {
+        return false;
+    };
+    if argument_count != 2
+        || !binding.builtin
+        || binding.object_id.is_some()
+        || binding.name != "pg_catalog.generate_series"
+        || binding.dispatch.is_some()
+        || binding.invocation.is_some()
+        || binding.resolution_error.is_some()
+    {
+        return false;
+    }
+    let [first, second, third] = binding.argument_types.as_slice() else {
+        return false;
+    };
+    if !matches!(first.as_str(), "integer" | "bigint") || first != second || first != third {
+        return false;
+    }
+    binding.argument_types.truncate(2);
+    true
+}
+
 pub fn user_function_output_columns_for(function: &SQLUserFunction) -> Option<Vec<String>> {
     let outputs = function.def.output_params();
     if outputs.is_empty() {
@@ -262,26 +290,16 @@ fn builtin_table_function_overloads(
     };
     match name {
         "pg_listening_channels" => vec![overload(Vec::new(), 0, ColumnType::Text)],
-        "generate_series" => vec![
-            overload(
-                vec![
-                    ColumnType::Integer,
-                    ColumnType::Integer,
-                    ColumnType::Integer,
-                ],
-                1,
-                ColumnType::Integer,
-            ),
-            overload(
-                vec![
-                    ColumnType::BigInteger,
-                    ColumnType::BigInteger,
-                    ColumnType::BigInteger,
-                ],
-                1,
-                ColumnType::BigInteger,
-            ),
-        ],
+        "generate_series" => crate::type_resolution::fixed_builtin_overloads(name)
+            .expect("generate_series has fixed catalog signatures")
+            .into_iter()
+            .filter(|overload| {
+                matches!(
+                    overload.return_type,
+                    ColumnType::Integer | ColumnType::BigInteger
+                )
+            })
+            .collect(),
         "unnest" => {
             let [Some(argument)] = argument_types else {
                 return Vec::new();
@@ -486,6 +504,7 @@ pub fn validate_table_function_alias_count(
 
 pub struct TableFunctionTypeRequest<'a> {
     pub name: &'a str,
+    pub binding: Option<&'a FunctionBinding>,
     pub args: &'a [ScalarExpr],
     pub user_function: Option<&'a SQLUserFunction>,
     pub user_invocation: Option<&'a RoutineInvocationBinding>,
@@ -507,6 +526,7 @@ pub fn table_function_column_types(
 ) -> Vec<Option<ColumnType>> {
     let TableFunctionTypeRequest {
         name,
+        binding,
         args,
         user_function,
         user_invocation,
@@ -546,16 +566,21 @@ pub fn table_function_column_types(
     } else {
         let normalized =
             crate::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase());
-        let argument_type = |position: usize| {
-            args.get(position)
-                .and_then(|argument| {
-                    crate::scalar_type_with_resolver(argument, input_schema, params, resolver).ok()
-                })
-                .flatten()
-        };
         align(match normalized.as_str() {
             "pg_listening_channels" => vec![Some(ColumnType::Text)],
-            "generate_series" => vec![argument_type(0)],
+            "generate_series" => vec![resolve_table_function_binding(
+                routines,
+                name,
+                binding,
+                args,
+                input_schema,
+                params,
+                resolver,
+            )
+            .ok()
+            .flatten()
+            .as_ref()
+            .and_then(crate::type_resolution::fixed_builtin_return_type)],
             "analyze_text" => vec![Some(ColumnType::JsonB)],
             "unnest" => args
                 .iter()
@@ -783,3 +808,6 @@ pub fn alias_join_schema(
         schema.column_types().to_vec(),
     ))
 }
+
+#[cfg(test)]
+mod tests;

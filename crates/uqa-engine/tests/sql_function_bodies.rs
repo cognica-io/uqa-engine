@@ -12,6 +12,9 @@ mod body_inputs;
 #[path = "sql_function_bodies/body_results.rs"]
 mod body_results;
 
+#[path = "sql_function_bodies/series_binding.rs"]
+mod series_binding;
+
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::{SQLError, SQLResult};

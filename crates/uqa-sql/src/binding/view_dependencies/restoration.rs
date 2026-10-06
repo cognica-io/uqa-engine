@@ -17,6 +17,20 @@ pub fn upgrade_legacy_view_dispatches(plan: &mut QueryPlan) -> bool {
         };
         changed |= FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
     });
+    plan.visit_sources_mut(&mut |source| match source {
+        crate::plan::SourcePlan::Function { binding, args, .. } => {
+            changed |= crate::semantics::upgrade_legacy_table_function_binding(binding, args.len());
+        }
+        crate::plan::SourcePlan::FunctionGroup { functions, .. } => {
+            for function in functions {
+                changed |= crate::semantics::upgrade_legacy_table_function_binding(
+                    &mut function.binding,
+                    function.args.len(),
+                );
+            }
+        }
+        _ => {}
+    });
     changed
 }
 
