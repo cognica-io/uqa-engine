@@ -25,6 +25,7 @@ use uqa_storage::StorageBackendResult;
 impl Engine {
     pub(crate) fn foreign_table_alter_context(&self) -> ForeignTableAlterContext<'_> {
         ForeignTableAlterContext {
+            deletion: self,
             schema_moves: self.relation_schema_context(),
             names: self,
             catalog: self,

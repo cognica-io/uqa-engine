@@ -170,27 +170,13 @@ impl ColumnSearch<'_> {
             .tables
             .get(table)
             .ok_or_else(|| SQLError::UnknownTable(table.qualified_name()))?;
-        if uqa_sql::schema::columns::POSTGRES_SYSTEM_COLUMNS.contains(&column) {
-            return Err(error(
-                "0A000",
-                format!("cannot drop system column \"{column}\""),
-            ));
-        }
-        if !entry
-            .columns
-            .iter()
-            .any(|candidate| candidate.name == column)
-        {
-            if if_exists && !recursing {
-                return Ok(false);
-            }
-            return Err(error(
-                "42703",
-                format!(
-                    "column \"{column}\" of relation \"{}\" does not exist",
-                    entry.identity.name
-                ),
-            ));
+        if !uqa_sql::schema::columns::validate_drop_column(
+            &entry.columns,
+            &entry.identity.qualified_name(),
+            column,
+            if_exists && !recursing,
+        )? {
+            return Ok(false);
         }
         if !recursing && self.tables.inheritance_count(entry, column) > 0 {
             return Err(error(

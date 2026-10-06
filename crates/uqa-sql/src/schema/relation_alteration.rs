@@ -108,7 +108,9 @@ pub fn foreign_table_alter_target(
 ) -> Result<Option<RelationAlterTarget>, SQLError> {
     let resolution = if matches!(
         statement.action,
-        AlterForeignTableAction::RenameTo(_) | AlterForeignTableAction::SetSchema(_)
+        AlterForeignTableAction::RenameTo(_)
+            | AlterForeignTableAction::SetSchema(_)
+            | AlterForeignTableAction::DropColumns(_)
     ) {
         let Some((canonical, kind)) = resolve_relation_rename_source(
             resolution,

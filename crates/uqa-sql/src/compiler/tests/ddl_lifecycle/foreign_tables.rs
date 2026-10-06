@@ -333,3 +333,46 @@ fn foreign_definition_ast_and_plan_read_legacy_if_not_exists_without_changing_pl
         resolve(&restored).unwrap();
     }
 }
+
+#[test]
+fn foreign_column_drop_keeps_written_actions_and_round_trips() {
+    let sql = "ALTER FOREIGN TABLE IF EXISTS app.items
+               DROP COLUMN IF EXISTS first CASCADE, DROP COLUMN second RESTRICT";
+    let Statement::AlterForeignTable(statement) = first(sql) else {
+        panic!("expected foreign column deletion");
+    };
+    assert_eq!(statement.name, "app.items");
+    assert!(statement.if_exists);
+    let crate::ast::AlterForeignTableAction::DropColumns(columns) = &statement.action else {
+        panic!("expected drop actions");
+    };
+    assert_eq!(
+        columns,
+        &[
+            crate::ast::DropColumnAction {
+                name: "first".into(),
+                if_exists: true,
+                cascade: true
+            },
+            crate::ast::DropColumnAction {
+                name: "second".into(),
+                if_exists: false,
+                cascade: false
+            },
+        ]
+    );
+    let encoded = serde_json::to_string(&statement).unwrap();
+    assert_eq!(
+        serde_json::from_str::<crate::ast::AlterForeignTableStmt>(&encoded).unwrap(),
+        statement
+    );
+    assert!(serde_json::from_str::<crate::ast::AlterForeignTableStmt>(
+        r#"{"name":"items","if_exists":false,"drop_columns":[]}"#
+    )
+    .is_err());
+    let ambiguous = serde_json::json!({
+        "name": "items", "if_exists": false, "owner": "owner",
+        "drop_columns": [{"name": "a", "if_exists": false, "cascade": false}]
+    });
+    assert!(serde_json::from_value::<crate::ast::AlterForeignTableStmt>(ambiguous).is_err());
+}

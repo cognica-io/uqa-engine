@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Support foreign-column DROP through both ALTER FOREIGN TABLE and ALTER TABLE, preserving PostgreSQL notices, dependency checks, CASCADE, atomic multi-column changes, rollback and durable attribute slots.
+
 - Preserve PostgreSQL relation attribute numbers and dropped slots across column deletion, addition, rename, type changes, rollback and persistent reopening. Keep catalog constraints, indexes, column privileges and stored definitions bound to the surviving columns.
 
 - Preserve PostgreSQL grouped subquery assignments in UPDATE, ON CONFLICT and MERGE, including positional values, original-row correlation, statement-scoped volatile evaluation, NULLs, constraints, stored bodies and second-row cardinality errors.
