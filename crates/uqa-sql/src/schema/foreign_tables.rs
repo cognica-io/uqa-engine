@@ -130,23 +130,27 @@ impl ForeignSchemaContext<'_> {
         let check_columns = columns.to_vec();
         for column in columns.iter_mut() {
             if let Some(default) = &mut column.default {
-                prepare_foreign_table_sequence_references(
-                    self.references,
-                    self.sequences,
-                    default,
-                    stored,
-                )?;
+                if stored {
+                    prepare_foreign_table_sequence_references(
+                        self.references,
+                        self.sequences,
+                        default,
+                        true,
+                    )?;
+                }
                 if !validate_default_expression(self, default, &column.ty, &column.name)? {
                     column.default = None;
                 }
             }
             if let Some(check) = &mut column.check {
-                prepare_foreign_table_sequence_references(
-                    self.references,
-                    self.sequences,
-                    check,
-                    stored,
-                )?;
+                if stored {
+                    prepare_foreign_table_sequence_references(
+                        self.references,
+                        self.sequences,
+                        check,
+                        true,
+                    )?;
+                }
                 validate_check_expression(self, table_name, &qualifier, &check_columns, check)?;
                 crate::catalog::regrole_dependencies::reject_stored_regrole_constants(
                     self.schema,
@@ -164,12 +168,14 @@ impl ForeignSchemaContext<'_> {
             }
         }
         for check in checks.iter_mut() {
-            prepare_foreign_table_sequence_references(
-                self.references,
-                self.sequences,
-                &mut check.expr,
-                stored,
-            )?;
+            if stored {
+                prepare_foreign_table_sequence_references(
+                    self.references,
+                    self.sequences,
+                    &mut check.expr,
+                    true,
+                )?;
+            }
             validate_check_expression(
                 self,
                 table_name,
@@ -259,6 +265,10 @@ fn prepare_foreign_table_sequence_references(
     )
     .map_err(|error| SQLError::Internal(error.to_string()))?;
     let result = if stored {
+        crate::schema::dependencies::regclass::bind_legacy_sequence_regclass_constants(
+            references, sequences, expression,
+        )
+        .map_err(SQLError::Internal)?;
         crate::schema::dependencies::rewrites::rewrite_sequence_function_references(
             expression,
             &mut |reference| {

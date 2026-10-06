@@ -64,20 +64,31 @@ pub fn validate_default_expression(
     if !cook_constant(context, expression, target)? {
         return Ok(false);
     }
-    // The `reg*` input functions read an OID alias constant's name when the default is defined, so a missing object is reported here and the stored constant follows a rename.
-    crate::schema::dependencies::oid_alias::read_oid_alias_constants(context.catalog, expression)?;
-    // The cooked expression has the type `coerce_to_target_type` checks: a literal the column type read is of that type.
-    let cooked = crate::plan::ExpressionPlan::lower(expression.clone());
-    let source = crate::type_resolution::scalar_type_with_resolver(
-        &cooked.scalar,
-        &RowSchema::default(),
-        &[],
+    // Coercion follows the selected function signature: an unknown regclass input
+    // freezes an OID, while an explicitly typed text expression stays late-bound.
+    let original = crate::plan::ExpressionPlan::lower_with(expression.clone(), &|name: &str| {
+        context.catalog.has_registered_aggregate_function(name)
+    });
+    let mut bound = original.clone();
+    let source = crate::binding::analyze_default_inputs(
         context.catalog,
+        context.catalog,
+        context.catalog,
+        &mut bound,
+        context.binding,
     )?;
     if let Some(source) = source {
         check_assignable(&source, target, column, "default expression")?;
     }
-    bind_stored_schema_expression(context, expression, expression.clone())?;
+    crate::binding::bind_expression_plan_routines_for_storage(
+        context.catalog,
+        &mut bound,
+        &[],
+        context.binding,
+        &RowSchema::default(),
+    )?;
+    let sites = crate::binding::syntax_sites::expression_syntax_sites(&original, &bound)?;
+    crate::catalog::stored_ast::bind_stored_expression_sites(expression, &sites)?;
     Ok(true)
 }
 
@@ -166,7 +177,12 @@ pub fn bind_stored_schema_expression(
         &RowSchema::default(),
     )?;
     let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
-    crate::catalog::stored_ast::bind_stored_expression_sites(expression, &sites)
+    let changed = crate::catalog::stored_ast::bind_stored_expression_sites(expression, &sites)?;
+    // Function binding can introduce regclass casts in CHECK expressions too.
+    // Read those inputs before publication so refresh never repairs a new schema.
+    let before_inputs = expression.clone();
+    crate::schema::dependencies::oid_alias::read_oid_alias_constants(context.catalog, expression)?;
+    Ok(changed || *expression != before_inputs)
 }
 
 fn default_error(sqlstate: &str, message: &str) -> SQLError {

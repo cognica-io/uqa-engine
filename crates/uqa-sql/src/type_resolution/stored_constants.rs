@@ -41,7 +41,7 @@ pub fn fold_stored_enum_constants(
     transfer(expression, &bound, &mut EnumConstants { catalog })
 }
 
-/// Store the coercions binding adds to the operands of an operator, as `PostgreSQL` stores the `RelabelType` nodes and coerced constants of an analyzed expression: an `unknown` literal becomes the constant the selected operand type's input function read (`1` in `a + '1'`, `'16384'::oid` against a `regclass` column), an operand of `oid` or one of its alias types gains its cast to `oid`, and an array operand its cast to `oid[]`. Constants of the types whose input consults the catalog keep their cast, which the stored expression's binding resolves. Returns whether anything changed.
+/// Store the coercions binding adds to function arguments and the operands of an operator, as `PostgreSQL` stores the `RelabelType` nodes and coerced constants of an analyzed expression: an `unknown` literal becomes the constant the selected operand type's input function read (`1` in `a + '1'`, `'16384'::oid` against a `regclass` column), an operand of `oid` or one of its alias types gains its cast to `oid`, and an array operand its cast to `oid[]`. Selected function arguments retain their input casts, including runtime text-to-regclass conversion and integer-to-bigint conversion. Constants of the types whose input consults the catalog keep their cast, which the stored expression's binding resolves. Returns whether anything changed.
 pub fn store_operand_coercions(
     expression: &mut ScalarExpr,
     schema: &dyn ScalarTypeSchema,
@@ -63,6 +63,10 @@ trait Folding {
     fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError>;
     /// The casts binding added around a node, outermost first, which the stored node may take over.
     fn added_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool;
+    /// Casts at a selected function's argument boundary retain its declared input type.
+    fn argument_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool {
+        self.added_casts(stored, casts)
+    }
 }
 
 struct EnumConstants<'a> {
@@ -115,15 +119,23 @@ impl Folding for OperatorCoercions {
         if casts.is_empty() || !casts.iter().all(|ty| *ty == "oid" || *ty == "oid[]") {
             return false;
         }
-        for ty in casts.iter().rev() {
-            let inner = std::mem::replace(stored, ScalarExpr::Literal(Value::Null));
-            *stored = ScalarExpr::Cast {
-                expr: Box::new(inner),
-                ty: (*ty).to_string(),
-            };
-        }
-        true
+        store_casts(stored, casts)
     }
+
+    fn argument_casts(&mut self, stored: &mut ScalarExpr, casts: &[&str]) -> bool {
+        store_casts(stored, casts)
+    }
+}
+
+fn store_casts(stored: &mut ScalarExpr, casts: &[&str]) -> bool {
+    for ty in casts.iter().rev() {
+        let inner = std::mem::replace(stored, ScalarExpr::Literal(Value::Null));
+        *stored = ScalarExpr::Cast {
+            expr: Box::new(inner),
+            ty: (*ty).to_string(),
+        };
+    }
+    !casts.is_empty()
 }
 
 /// Casts that binding added around a node are not part of the stored tree. A cast the stored tree already has keeps its written type name, which binding never changes. Returns the node under the added casts and their type names, outermost first.
@@ -188,6 +200,7 @@ fn transfer_children(
             },
             ScalarExpr::Func {
                 name: bound_name,
+                binding: bound_binding,
                 args: bound_args,
                 order_by: bound_order,
                 filter: bound_filter,
@@ -196,13 +209,13 @@ fn transfer_children(
         ) => {
             // Binding may replace a call by another with rearranged arguments; such a call keeps its literals.
             if name != bound_name
-                || args.len() != bound_args.len()
                 || order_by.len() != bound_order.len()
                 || filter.is_some() != bound_filter.is_some()
             {
                 return Ok(false);
             }
-            let mut changed = transfer_all(args, bound_args, folding)?;
+            let mut changed =
+                transfer_call_arguments(args, bound_args, bound_binding.as_ref(), folding)?;
             for (order, bound) in order_by.iter_mut().zip(bound_order) {
                 changed |= transfer(&mut order.expr, &bound.expr, folding)?;
             }
@@ -316,6 +329,63 @@ fn transfer_children(
         }
         _ => false,
     })
+}
+
+/// Fixed built-ins may reorder named arguments and insert defaults in the bound
+/// copy. Map supplied values back through the selected signature, retaining the
+/// original argument markers and written order in stored syntax.
+fn transfer_call_arguments(
+    stored: &mut [ScalarExpr],
+    bound: &[ScalarExpr],
+    binding: Option<&crate::ast::FunctionBinding>,
+    folding: &mut dyn Folding,
+) -> Result<bool, SQLError> {
+    let selected = binding.filter(|binding| binding.builtin);
+    let positions = if let Some(binding) = selected {
+        let arguments = crate::scalar_call_arguments(stored)?;
+        let names = arguments
+            .iter()
+            .map(|arg| arg.name.map(str::to_string))
+            .collect::<Vec<_>>();
+        super::fixed_builtin::resolve_fixed_builtin_call(
+            &binding.name,
+            Some(binding),
+            &names,
+            &vec![None; stored.len()],
+            arguments.iter().any(|arg| arg.explicit_variadic),
+            None,
+        )?
+        .and_then(|selected| selected.builtin_argument_positions)
+    } else {
+        None
+    };
+    if positions.is_none() && stored.len() != bound.len() {
+        return Ok(false);
+    }
+    let mut changed = false;
+    for (index, argument) in stored.iter_mut().enumerate() {
+        let (argument, position) = if let Some(positions) = &positions {
+            (call_argument_value_mut(argument), positions[index])
+        } else {
+            (argument, index)
+        };
+        let (bound, casts) = split_added_casts(argument, &bound[position]);
+        changed |= transfer(argument, bound, folding)?;
+        changed |= folding.argument_casts(argument, &casts);
+    }
+    Ok(changed)
+}
+
+fn call_argument_value_mut(expression: &mut ScalarExpr) -> &mut ScalarExpr {
+    if !matches!(expression, ScalarExpr::Func { binding: Some(binding), .. }
+        if matches!(binding.dispatch, Some(crate::ast::FunctionDispatch::NamedArgument | crate::ast::FunctionDispatch::VariadicArgument)))
+    {
+        return expression;
+    }
+    let ScalarExpr::Func { args, .. } = expression else {
+        unreachable!("argument marker is a structural call");
+    };
+    call_argument_value_mut(args.last_mut().expect("validated argument marker"))
 }
 
 fn transfer_all(

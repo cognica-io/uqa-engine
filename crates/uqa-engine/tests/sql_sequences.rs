@@ -13,6 +13,8 @@ use uqa_storage_sqlite::ManagedConnection;
 
 #[path = "sql_sequences/cache.rs"]
 mod cache;
+#[path = "sql_sequences/default_inputs.rs"]
+mod default_inputs;
 #[path = "sql_sequences/introspection.rs"]
 mod introspection;
 #[path = "sql_sequences/lifecycle.rs"]

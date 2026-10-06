@@ -13,7 +13,9 @@ use crate::{
 use crate::{expr::EngineHook, semantics::sets::SetFunctionCatalog};
 
 /// Definition lookup for generated columns and immutable index expressions.
-pub trait SchemaExpressionCatalog: EngineHook + SetFunctionCatalog {
+pub trait SchemaExpressionCatalog:
+    EngineHook + SetFunctionCatalog + super::dependencies::oid_alias::OidAliasInput
+{
     fn registered_runtime_function_volatility(&self, name: &str) -> Option<FunctionVolatility>;
     fn schema_expression_columns(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, SQLError>;
 }

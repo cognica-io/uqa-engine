@@ -216,3 +216,28 @@ fn bind_default_routines(
         typed,
     )
 }
+
+/// Upgrade legacy sequence defaults using loaded object identities, then retain
+/// the selected function's other input coercions before the candidate is stored.
+pub fn restore_legacy_default_sequence_inputs(
+    context: &SchemaDependencyBindingContext<'_>,
+    sequences: &dyn crate::schema::sequences::implicit_ownership::StoredSequenceNames,
+    columns: &mut [ColumnDef],
+) -> Result<bool, String> {
+    let mut changed = false;
+    for default in columns
+        .iter_mut()
+        .filter_map(|column| column.default.as_mut())
+    {
+        if super::regclass::bind_legacy_sequence_regclass_constants(
+            context.references,
+            sequences,
+            default,
+        )? {
+            bind_default_routines(context, default, default.clone())
+                .map_err(|error| error.to_string())?;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}

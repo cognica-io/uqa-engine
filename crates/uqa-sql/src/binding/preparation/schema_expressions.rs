@@ -14,7 +14,7 @@ use crate::plan::AggregateClassifier;
 pub(super) enum SchemaExpressionKind {
     TypeTransform,
     DomainCheck,
-    RoutineDefault,
+    Default,
 }
 
 impl SchemaExpressionKind {
@@ -22,7 +22,7 @@ impl SchemaExpressionKind {
         match self {
             Self::TypeTransform => "transform expression",
             Self::DomainCheck => "check constraint",
-            Self::RoutineDefault => "DEFAULT expression",
+            Self::Default => "DEFAULT expression",
         }
     }
 
@@ -30,7 +30,7 @@ impl SchemaExpressionKind {
         match self {
             Self::TypeTransform => "transform expressions",
             Self::DomainCheck => "check constraints",
-            Self::RoutineDefault => "DEFAULT expressions",
+            Self::Default => "DEFAULT expressions",
         }
     }
 }

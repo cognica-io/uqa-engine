@@ -33,10 +33,10 @@ mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
 pub use preparation::{analyze_column_type_transform, infer_prepared_parameter_types};
-pub(crate) use preparation::{analyze_domain_check, read_prepared_inputs};
 pub(crate) use preparation::{
-    analyze_routine_body_argument, analyze_routine_body_inputs, analyze_routine_default,
+    analyze_default_inputs, analyze_routine_body_argument, analyze_routine_body_inputs,
 };
+pub(crate) use preparation::{analyze_domain_check, read_prepared_inputs};
 
 #[cfg(test)]
 mod tests;

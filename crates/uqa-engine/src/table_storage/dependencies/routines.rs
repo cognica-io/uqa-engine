@@ -55,7 +55,8 @@ impl Engine {
                     &table_name,
                     &mut columns,
                     &mut checks,
-                )?;
+                )?
+                | self.bind_legacy_default_sequence_constants(&mut columns)?;
             if !generated_requires_migration && !expression_requires_migration {
                 continue;
             }

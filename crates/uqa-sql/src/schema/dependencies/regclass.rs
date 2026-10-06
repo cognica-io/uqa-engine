@@ -7,7 +7,11 @@
 //! Bind literal relation references in persisted SQL schema expressions to the relations they name when the expressions are published or loaded. Analysis reads them earlier, in `oid_alias`.
 use super::walk_schema_expr_mut;
 use crate::ast::{ColumnDef, Expr, TableCheck};
+use crate::schema::sequences::implicit_ownership::StoredSequenceNames;
 use uqa_core::Value;
+
+#[cfg(test)]
+mod tests;
 
 pub trait SchemaReferenceCatalog {
     fn loaded_relation_name(&self, reference: &str) -> Result<Option<String>, String>;
@@ -91,4 +95,49 @@ pub fn bind_sequence_references_in_expr(
     })?;
     bind_schema_regclass_constants(catalog, expression, false)?;
     Ok(())
+}
+
+/// Convert a legacy selected builtin's creation-bound sequence name to its OID.
+/// The caller owns initial-open publication; this only changes its candidate.
+/// Explicit text conversions and user or unresolved routine bindings remain unchanged.
+pub fn bind_legacy_sequence_regclass_constants(
+    catalog: &dyn SchemaReferenceCatalog,
+    sequences: &dyn StoredSequenceNames,
+    expression: &mut Expr,
+) -> Result<bool, String> {
+    let mut changed = false;
+    walk_schema_expr_mut(expression, &mut |node| {
+        let Expr::Func {
+            name,
+            binding: Some(binding),
+            args,
+            ..
+        } = node
+        else {
+            return Ok(());
+        };
+        if !super::rewrites::is_sequence_function(name, Some(binding)) {
+            return Ok(());
+        }
+        let Some(argument @ Expr::Literal(Value::Str(_))) = args.first_mut() else {
+            return Ok(());
+        };
+        let Expr::Literal(Value::Str(reference)) = &*argument else {
+            unreachable!("legacy sequence argument is a string literal");
+        };
+        let canonical = sequences.stored_sequence_name(reference)?;
+        let oid = catalog
+            .bound_relation_oid(&canonical)?
+            .ok_or_else(|| format!("relation \"{canonical}\" does not exist"))?;
+        *argument = Expr::TypedLiteral {
+            value: Value::Int(oid),
+            ty: "regclass".into(),
+        };
+        if let Some(target) = binding.argument_types.first_mut() {
+            "regclass".clone_into(target);
+        }
+        changed = true;
+        Ok(())
+    })?;
+    Ok(changed)
 }
