@@ -6,7 +6,7 @@
 
 //! Operator grouping and explicit or implicit function notation.
 
-use super::{atom, invalid, list, parentheses, prefix, Field, Node, Renderer, SQLError};
+use super::{atom, invalid, list, parentheses, prefix, values, Field, Node, Renderer, SQLError};
 
 impl Renderer<'_> {
     pub(super) fn operator(&self, node: &Node, outer: bool) -> Result<String, SQLError> {
@@ -59,6 +59,9 @@ impl Renderer<'_> {
             return self.cast(arg, node.integer("funcresulttype")?, modifier);
         }
         if format == 3 {
+            if (6199..=6204).contains(&node.integer("funcid")?) {
+                return self.extract(args);
+            }
             return Err(SQLError::Unsupported(format!(
                 "catalog function syntax format {format}"
             )));
@@ -78,6 +81,28 @@ impl Renderer<'_> {
             .map(|arg| self.field(arg, false))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(format!("{name}({})", arguments.join(", ")))
+    }
+
+    fn extract(&self, arguments: &[Field]) -> Result<String, SQLError> {
+        let [Field::Node(field), source] = arguments else {
+            return Err(invalid("invalid EXTRACT operands"));
+        };
+        if field.kind != "CONST"
+            || field.integer("consttype")? != 25
+            || field.boolean("constisnull")?
+            || field.boolean("constbyval")?
+        {
+            return Err(invalid("EXTRACT field is not a text constant"));
+        }
+        let Field::Datum { length, bytes } = field.field("constvalue")? else {
+            return Err(invalid("EXTRACT field has no Datum"));
+        };
+        let field = std::str::from_utf8(values::varlena_payload(*length, bytes)?)
+            .map_err(|_| invalid("invalid UTF-8 in EXTRACT field"))?;
+        Ok(format!(
+            "EXTRACT({field} FROM {})",
+            self.field(source, false)?
+        ))
     }
 
     pub(super) fn boolean(&self, node: &Node, outer: bool) -> Result<String, SQLError> {

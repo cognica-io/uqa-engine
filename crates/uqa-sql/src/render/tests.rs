@@ -11,6 +11,78 @@ use crate::ast::{BinaryOp, Expr, FromClause, FunctionOrderSyntax, Statement};
 use crate::SQLError;
 
 #[test]
+fn extract_syntax_survives_compilation_lowering_storage_and_executable_rendering() {
+    use crate::ast::FunctionCallSyntax;
+    use crate::plan::ExpressionPlan;
+
+    for (sql, syntax, catalog) in [
+        (
+            "EXTRACT(epoch FROM ts)",
+            FunctionCallSyntax::Extract,
+            "EXTRACT(epoch FROM ts)",
+        ),
+        (
+            "EXTRACT(YEAR FROM ts)",
+            FunctionCallSyntax::Extract,
+            "EXTRACT(year FROM ts)",
+        ),
+        (
+            "EXTRACT('YEAR' FROM ts)",
+            FunctionCallSyntax::Extract,
+            "EXTRACT(YEAR FROM ts)",
+        ),
+        (
+            "EXTRACT('strange unit' FROM ts)",
+            FunctionCallSyntax::Extract,
+            "EXTRACT(strange unit FROM ts)",
+        ),
+        (
+            "EXTRACT('o''clock' FROM ts)",
+            FunctionCallSyntax::Extract,
+            "EXTRACT(o'clock FROM ts)",
+        ),
+        (
+            "pg_catalog.extract('epoch', ts)",
+            FunctionCallSyntax::Ordinary,
+            "pg_catalog.extract('epoch', ts)",
+        ),
+        (
+            "\"extract\"('epoch', ts)",
+            FunctionCallSyntax::Ordinary,
+            "\"extract\"('epoch', ts)",
+        ),
+    ] {
+        let Statement::Select(mut select) =
+            crate::compile(&format!("SELECT {sql}")).unwrap().remove(0)
+        else {
+            panic!("SELECT expected");
+        };
+        let expression = select.projections.remove(0).expr;
+        let Expr::Func { order_syntax, .. } = &expression else {
+            panic!("function expected");
+        };
+        assert_eq!(*order_syntax, syntax, "{sql}");
+        assert_eq!(
+            crate::catalog::expression_text::schema_expr_text(&expression).unwrap(),
+            catalog
+        );
+        let rendered = expression_sql(&expression).unwrap();
+        let Statement::Select(mut restored) = crate::compile(&format!("SELECT {rendered}"))
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("SELECT expected");
+        };
+        assert_eq!(restored.projections.remove(0).expr, expression, "{sql}");
+        let plan = ExpressionPlan::lower(expression);
+        let stored = serde_json::to_string(&plan).unwrap();
+        let restored: ExpressionPlan = serde_json::from_str(&stored).unwrap();
+        assert_eq!(plan.scalar, restored.scalar, "{sql}");
+        assert!(restored.subqueries.is_empty());
+    }
+}
+
+#[test]
 fn named_window_rendering_preserves_shared_inputs_and_nested_scopes() {
     for sql in [
         "SELECT row_number() OVER w + row_number() OVER (w) AS n WINDOW w AS (ORDER BY '{1}'::integer[]), unused AS (PARTITION BY 3)",

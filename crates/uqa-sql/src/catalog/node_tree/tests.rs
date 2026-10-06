@@ -398,3 +398,154 @@ fn rejects_unknown_function_format_tags() {
         Some("XX000")
     );
 }
+
+// PostgreSQL 18.4 pg_attrdef.adbin for EXTRACT(epoch FROM timestamptz '2024-01-01+00').
+const EXTRACT_EPOCH: &str = "{FUNCEXPR :funcid 6203 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 3 :funccollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 101 112 111 99 104 ]} {CONST :consttype 1184 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 0 64 233 212 213 176 2 0 ]}) :location -1}";
+
+struct ExtractRoutines;
+
+impl deparse::ExpressionNames for ExtractRoutines {
+    fn column(&self, attribute: i64) -> Result<String, SQLError> {
+        deparse::ExpressionNames::column(&Routines, attribute)
+    }
+
+    fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError> {
+        assert!((6199..=6204).contains(&oid));
+        Ok(vec!["extract".into()])
+    }
+
+    fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError> {
+        deparse::ExpressionNames::type_name(&Routines, oid, modifier)
+    }
+}
+
+impl expressions::ExpressionRoutines for ExtractRoutines {
+    fn resolve(
+        &self,
+        name: &str,
+        _: Option<&crate::ast::FunctionBinding>,
+        arguments: &[Option<crate::ColumnType>],
+    ) -> Result<expressions::RoutineIdentity, SQLError> {
+        assert!(matches!(name, "extract" | "pg_catalog.extract"));
+        assert_eq!(arguments.len(), 2);
+        assert_eq!(arguments[1], Some(crate::ColumnType::TimestampTz));
+        Ok(expressions::RoutineIdentity {
+            oid: 6203,
+            argument_types: vec![crate::ColumnType::Text, crate::ColumnType::TimestampTz],
+            result_type: crate::ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            },
+        })
+    }
+}
+
+#[test]
+fn extract_keyword_and_explicit_call_nodes_match_postgresql() {
+    let schema = crate::RowSchema::with_types(vec![], vec![]);
+    let context = expressions::ExpressionContext {
+        schema: &schema,
+        domain_value: None,
+        types: None,
+        routines: &ExtractRoutines,
+    };
+    for (sql, format, output) in [
+        (
+            "EXTRACT(epoch FROM timestamptz '2024-01-01+00')",
+            3,
+            "EXTRACT(epoch FROM '2024-01-01 00:00:00+00'::timestamp with time zone)",
+        ),
+        (
+            "pg_catalog.extract('epoch', timestamptz '2024-01-01+00')",
+            0,
+            "\"extract\"('epoch'::text, '2024-01-01 00:00:00+00'::timestamp with time zone)",
+        ),
+        (
+            "\"extract\"('epoch', timestamptz '2024-01-01+00')",
+            0,
+            "\"extract\"('epoch'::text, '2024-01-01 00:00:00+00'::timestamp with time zone)",
+        ),
+    ] {
+        let crate::Statement::CreateTable(mut table) =
+            crate::compile(&format!("CREATE TABLE d(value numeric DEFAULT {sql})"))
+                .unwrap()
+                .remove(0)
+        else {
+            panic!("expected a table declaration")
+        };
+        let expression = crate::ast::Expr::IsNull {
+            expr: Box::new(table.columns[0].default.take().unwrap()),
+            negated: false,
+        };
+        let check = context.check(&expression).unwrap();
+        let actual = check.field("arg").unwrap();
+        let expected = EXTRACT_EPOCH.replace(":funcformat 3", &format!(":funcformat {format}"));
+        assert_eq!(actual, &parse(&expected).unwrap(), "{sql}");
+        assert_eq!(parse(&actual.to_string()).unwrap(), *actual);
+        for pretty in [false, true] {
+            assert_eq!(
+                deparse::expression(actual, &ExtractRoutines, pretty).unwrap(),
+                output,
+                "{sql}"
+            );
+        }
+    }
+}
+
+#[test]
+fn extract_fields_keep_postgresql_catalog_spelling() {
+    // Independently captured pg_get_expr output and text Datums preserve raw field contents.
+    for (datum, field) in [
+        ("8 [ 32 0 0 0 121 101 97 114 ]", "year"),
+        ("8 [ 32 0 0 0 89 69 65 82 ]", "YEAR"),
+        (
+            "17 [ 68 0 0 0 116 105 109 101 122 111 110 101 95 104 111 117 114 ]",
+            "timezone_hour",
+        ),
+        (
+            "16 [ 64 0 0 0 115 116 114 97 110 103 101 32 117 110 105 116 ]",
+            "strange unit",
+        ),
+        ("9 [ 36 0 0 0 77 105 88 101 68 ]", "MiXeD"),
+        ("11 [ 44 0 0 0 111 39 99 108 111 99 107 ]", "o'clock"),
+        ("7 [ 28 0 0 0 97 34 98 ]", "a\"b"),
+    ] {
+        let source = EXTRACT_EPOCH.replace("9 [ 36 0 0 0 101 112 111 99 104 ]", datum);
+        let node = parse(&source).unwrap();
+        assert_eq!(parse(&node.to_string()).unwrap(), node);
+        let output =
+            format!("EXTRACT({field} FROM '2024-01-01 00:00:00+00'::timestamp with time zone)");
+        for pretty in [false, true] {
+            assert_eq!(
+                deparse::expression(&node, &ExtractRoutines, pretty).unwrap(),
+                output
+            );
+        }
+    }
+}
+
+#[test]
+fn extract_syntax_rejects_unknown_functions_and_invalid_field_nodes() {
+    let unknown = parse(&EXTRACT_EPOCH.replace(":funcid 6203", ":funcid 1")).unwrap();
+    assert_eq!(
+        deparse::expression(&unknown, &ExtractRoutines, false)
+            .unwrap_err()
+            .sqlstate(),
+        Some("0A000")
+    );
+    for (from, to) in [
+        (":consttype 25", ":consttype 23"),
+        (":constbyval false", ":constbyval true"),
+        (":constisnull false", ":constisnull true"),
+        ("36 0 0 0 101", "36 0 0 0 255"),
+    ] {
+        let node = parse(&EXTRACT_EPOCH.replacen(from, to, 1)).unwrap();
+        assert_eq!(
+            deparse::expression(&node, &ExtractRoutines, false)
+                .unwrap_err()
+                .sqlstate(),
+            Some("XX000"),
+            "{to}"
+        );
+    }
+}

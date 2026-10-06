@@ -47,6 +47,13 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
             filter,
             ..
         } => {
+            if *order_syntax == crate::ast::FunctionCallSyntax::Extract {
+                let (field, source) = crate::render::function_syntax::extract_fields(args)?;
+                return Ok(format!(
+                    "EXTRACT({field} FROM {})",
+                    schema_expr_text(source)?
+                ));
+            }
             if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
                 binding.as_ref().and_then(|binding| binding.dispatch)
             {
@@ -77,6 +84,7 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
             if *distinct {
                 rendered_args = format!("DISTINCT {rendered_args}");
             }
+            let name = crate::render::function_syntax::ordinary_function_name(name);
             let mut rendered = format!("{name}({rendered_args})");
             if !order_by.is_empty() {
                 let order = order_by
