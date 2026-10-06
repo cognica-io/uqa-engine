@@ -743,13 +743,21 @@ All 1,235 SQL owner tests pass, as do 163 Core value tests, ten K/V retained-dec
 
 This unit carries forward the unchecked PR #396 task requiring a statement's FROM relations to be resolved before its target-list reg* inputs. The SQL preparation analyzer already owns ordered relation, expression and unknown-input analysis for prepared definitions and source bodies. Ordinary execution must use that owner before optimization, preserving nested query, CTE and command analysis boundaries. Engine continues to provide retained catalog and session adapters; no runtime dependency or Cargo feature is added.
 
-- [ ] Capture independent PostgreSQL 18.4 diagnostic-order cases and reproduce the ordinary-statement discrepancy.
-- [ ] Reuse SQL-owned ordered input analysis at the ordinary statement boundary, keeping prepared input lifetime, runtime casts and stored definitions intact.
-- [ ] Verify owner regressions and the independent reference across memory, native SQLite, SQLite Key/Value and redb, including no effects from rejected statements.
-- [ ] Synchronize the public behavior, verification evidence and all inherited tasks; merge and remove the completed branch before starting another unit.
+- [x] Capture 137 independent PostgreSQL 18.4 statement-order messages and 13 additional UPDATE/window clause-order messages; reproduce the ordinary-statement discrepancy before implementation.
+- [x] Reuse SQL-owned ordered input analysis at the ordinary statement boundary, keeping prepared input lifetime, runtime casts and stored definitions intact. Commit `95274bd98` is pushed in PR #425.
+- [x] Verify owner regressions and all 150 reference messages across memory, native SQLite, SQLite Key/Value and redb, including no effects from rejected statements. Each independently captured reference runs in a fresh database so its initial namespace matches PostgreSQL.
+- [x] Synchronize the public behavior, verification evidence and all inherited tasks. Merge and branch cleanup are recorded on PR #425 before starting another implementation unit.
 
 ### Preservation obligations
 
 For a statement $S$ and retained catalog scope $C$, let $A(S,C)$ visit each analysis node in PostgreSQL order and read unknown constants through the selected type's input function. The first failing node determines the diagnostic; no runtime expression or mutation is executed by $A$. Once $A$ accepts, the existing optimizer and execution operators receive the same statement and runtime parameters. Reading catalog inputs at analysis must not change prepared constants' retained lifetime, stored-object identity, or the time at which ordinary typed casts execute.
 
 This correction introduces no algebraic operator or new carrier. For every accepted statement with unchanged PostgreSQL behavior, its ordered result, types and effect trace remain identical; substituting those equal observations into existing relational, graph or ranked compositions preserves those compositions. Rejected statements execute no statement effects. Independent diagnostics and side-effect observations, together with SQL owner tests, must establish these premises before completion.
+
+### Verification and catalog retention
+
+The ordinary statement correction passes all 1,237 SQL owner tests, twelve statement-planning tests, 67 prepared-statement tests, sixteen window tests, 68 callback tests, 23 SQL-body tests and twelve routine-parameter tests. The manual harness compiles its SQL examples and executes only the fences marked for execution. Repository dependency, ownership, test-harness, header, file-size and compatibility-manifest checks pass; strict Clippy passes for the affected package union. Final PR records identify the verified source and review result.
+
+The reference also reproduced #426: a cursor selecting only a regclass constant had no scanned table, so its retained catalog omitted the referenced table. Engine now retains complete immutable table metadata separately from selected row/index snapshots. Execution's OID-name and relation-kind consumers use a metadata-only identity projection, preserving the same relation names, OIDs and kinds without evaluating table or graph counts, view schemas or partition bounds. Full pg_class projection retains its statistics behavior. The owner test checks immutable names across a later rename; the Engine probe verifies catalog-only hold/scroll traversal without retaining the table handle or reading rows, enumerating IDs or capturing row snapshots. All sixteen retained-storage tests, 45 cursor lifecycle tests, 98 sequence lifecycle tests, fifteen AGE catalog tests and the existing OID-alias/reopen tests pass.
+
+This unit completes the inherited relation-before-input task and closes #426 with PR #425. All 75 original checklist records remain preserved in that PR and the parent: 70 work items, of which 45 remain open after this correction, plus five historical verification records. Broader OID alias catalog coverage remains partial.
