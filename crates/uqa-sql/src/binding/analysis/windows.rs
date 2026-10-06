@@ -150,18 +150,7 @@ pub(in crate::binding) fn references_local_column(
     expression: &ScalarExpr,
     source: &RowSchema,
 ) -> bool {
-    let mut found = false;
-    expression.visit(&mut |part| {
-        found |= match part {
-            ScalarExpr::Column(column) => source.resolves_local_column(None, column),
-            ScalarExpr::QualifiedColumn { qualifier, column } => {
-                source.resolves_local_column(Some(qualifier), column)
-            }
-            ScalarExpr::Position(_) | ScalarExpr::InternalColumn(_) => true,
-            _ => false,
-        };
-    });
-    found
+    crate::semantics::references_current_row(expression, Some(source))
 }
 
 fn windowing_error(message: &str) -> SQLError {

@@ -73,25 +73,33 @@ pub(super) struct ParameterTypes<'a> {
 pub(super) struct InputConstants(
     BTreeMap<NonNull<ScalarExpr>, ScalarExpr>,
     BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionBinding>,
+    BTreeMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
 );
 
 impl InputConstants {
     /// Ordinary messages must repeat session/catalog-dependent input functions.
     /// Prepared definitions intentionally retain these same converted constants.
     pub(super) fn reusable_across_messages(&self) -> bool {
-        self.0.values().all(|expression| {
-            let ScalarExpr::TypedLiteral {
-                bound_type: Some(ty),
-                ..
-            } = expression
-            else {
-                return false;
-            };
-            !crate::expr::requires_domain_array_input(ty)
-                && !matches!(ty, ColumnType::Composite(_))
-                && crate::type_resolution::cast_volatility(&ColumnType::Text, ty)
-                    == crate::ast::FunctionVolatility::Immutable
-        })
+        self.0
+            .values()
+            .chain(
+                self.2
+                    .values()
+                    .flat_map(|membership| membership.left_constants.iter().flatten()),
+            )
+            .all(|expression| {
+                let ScalarExpr::TypedLiteral {
+                    bound_type: Some(ty),
+                    ..
+                } = expression
+                else {
+                    return false;
+                };
+                !crate::expr::requires_domain_array_input(ty)
+                    && !matches!(ty, ColumnType::Composite(_))
+                    && crate::type_resolution::cast_volatility(&ColumnType::Text, ty)
+                        == crate::ast::FunctionVolatility::Immutable
+            })
     }
 
     fn apply_node(&mut self, expression: &mut ScalarExpr) {
@@ -106,11 +114,30 @@ impl InputConstants {
         }
     }
 
-    pub(super) fn apply_expression(mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
+    #[cfg(test)]
+    pub(super) fn apply_expression(self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
+        self.apply_expression_with_subqueries(expression, &mut Vec::new())
+    }
+
+    pub(super) fn apply_expression_with_subqueries(
+        mut self,
+        expression: &mut ScalarExpr,
+        subqueries: &mut Vec<crate::plan::QueryPlan>,
+    ) -> Result<(), SQLError> {
         crate::plan::rewrite_scalar_expression(expression, &mut |node| {
             self.apply_node(node);
         });
-        if self.0.is_empty() && self.1.is_empty() {
+        for query in subqueries.iter_mut() {
+            query.rewrite_scalar_expressions(&mut |node| self.apply_node(node));
+        }
+        if !self.2.is_empty() {
+            crate::plan::subqueries::rewrite_expression_with_arena(
+                expression,
+                subqueries,
+                &mut |node, arena| self.apply_membership(node, arena),
+            )?;
+        }
+        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -124,7 +151,12 @@ impl InputConstants {
         plan.rewrite_scalar_expressions(&mut |expression| {
             self.apply_node(expression);
         });
-        if self.0.is_empty() && self.1.is_empty() {
+        if !self.2.is_empty() {
+            crate::plan::subqueries::rewrite_with_arenas(plan, &mut |node, arena| {
+                self.apply_membership(node, arena)
+            })?;
+        }
+        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -132,9 +164,37 @@ impl InputConstants {
             ))
         }
     }
+
+    fn apply_membership(
+        &mut self,
+        node: &mut ScalarExpr,
+        arena: &mut Vec<crate::plan::QueryPlan>,
+    ) -> Result<(), SQLError> {
+        if let Some(analysis) = self.2.remove(&NonNull::from(&*node)) {
+            analysis.apply(node, arena)?;
+        }
+        Ok(())
+    }
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn take_literal(&mut self, expression: &ScalarExpr) -> Option<ScalarExpr> {
+        self.input_constants
+            .as_mut()?
+            .0
+            .remove(&NonNull::from(expression))
+    }
+
+    pub(super) fn retain_membership(
+        &mut self,
+        expression: &ScalarExpr,
+        analysis: super::membership::MembershipAnalysis,
+    ) {
+        if let Some(constants) = &mut self.input_constants {
+            constants.2.insert(NonNull::from(expression), analysis);
+        }
+    }
+
     pub(super) fn new(types: &[Option<ColumnType>]) -> Self {
         Self {
             types: types.to_vec(),

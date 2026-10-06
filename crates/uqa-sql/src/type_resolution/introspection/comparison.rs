@@ -101,41 +101,6 @@ impl Binder<'_, '_> {
         Ok(())
     }
 
-    /// `a IN (b, c, ...)` compares every item with `a` using the common type of all of them. Without a common type each item keeps the type selected by its own equality operator.
-    pub(super) fn coerce_in_list(
-        &mut self,
-        value: &mut ScalarExpr,
-        list: &mut [ScalarExpr],
-    ) -> Result<(), SQLError> {
-        for expression in std::iter::once(&*value).chain(list.iter()) {
-            if !unknown_input(expression)
-                && self
-                    .semantic(self.common_context(expression))?
-                    .flatten()
-                    .is_none()
-            {
-                return Ok(());
-            }
-        }
-        let common = self.common_type(std::iter::once(&*value).chain(list.iter()))?;
-        if let Some(common) = common {
-            self.operand_cast(value, &common)?;
-            for item in list {
-                self.operand_cast(item, &common)?;
-            }
-            return Ok(());
-        }
-        for item in list {
-            if let Some(types) = self
-                .semantic(self.binary_operand_types(BinaryOp::Equal, value, item))?
-                .flatten()
-            {
-                self.operand_cast(item, &types[1])?;
-            }
-        }
-        Ok(())
-    }
-
     /// Comparison syntax represented as a call: `IS DISTINCT FROM`, `BETWEEN SYMMETRIC`, `op ANY/ALL (array)` and `NULLIF`.
     pub(super) fn coerce_comparison_call(
         &mut self,

@@ -12,11 +12,13 @@ pub mod cte_strategy;
 mod ctes;
 mod expression_shape;
 mod functions;
+mod membership;
 mod projection;
 mod source_shape;
 pub use ctes::*;
 pub use expression_shape::*;
 pub use functions::*;
+pub use membership::*;
 pub use projection::*;
 pub use source_shape::*;
 

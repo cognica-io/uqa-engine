@@ -15,6 +15,8 @@ use uqa_core::Value;
 /// An expression site of stored syntax and what binding recorded for it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueSite {
+    /// Positions grouped into a scalar-array comparison; the other IN items become individual comparisons.
+    Membership { array_items: Vec<usize> },
     /// A cast, with the type name binding gave it.
     Cast(String),
     /// An `unknown` literal that binding left unconverted.
@@ -385,8 +387,13 @@ impl Walk {
         Ok(())
     }
 
-    fn subquery(&mut self, index: usize, subqueries: Subqueries<'_>) -> Result<(), SQLError> {
-        match (subqueries.0.get(index), subqueries.1.get(index)) {
+    fn subquery(
+        &mut self,
+        index: usize,
+        bound_index: usize,
+        subqueries: Subqueries<'_>,
+    ) -> Result<(), SQLError> {
+        match (subqueries.0.get(index), subqueries.1.get(bound_index)) {
             (Some(lowered), Some(bound)) => self.query(lowered, bound, false),
             _ => Err(SQLError::Internal(format!(
                 "stored syntax cannot resolve subquery slot {index}"
@@ -404,6 +411,27 @@ impl Walk {
         bound: &ScalarExpr,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
+        if let Some(shape) = crate::type_resolution::membership::stored_shape(lowered, bound) {
+            let ScalarExpr::InList {
+                expr,
+                list,
+                negated,
+            } = lowered
+            else {
+                unreachable!()
+            };
+            self.sites.values.push(ValueSite::Membership {
+                array_items: shape.array_items.clone(),
+            });
+            let rewritten = crate::type_resolution::membership::rewrite(
+                expr.clone(),
+                list.clone(),
+                *negated,
+                &shape,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?;
+            return self.scalar(&rewritten, bound, subqueries);
+        }
         // Binding wraps an operand in the casts its operator needs, outside the casts the syntax writes.
         let mut bound = bound;
         for _ in 0..cast_depth(bound).saturating_sub(cast_depth(lowered)) {
@@ -587,7 +615,7 @@ impl Walk {
                 ScalarExpr::Exists {
                     subquery: bound, ..
                 },
-            ) if index == bound => self.subquery(*index, subqueries),
+            ) => self.subquery(*index, *bound, subqueries),
             (
                 ScalarExpr::InSubquery {
                     expr,
@@ -599,9 +627,9 @@ impl Walk {
                     subquery: bound,
                     ..
                 },
-            ) if index == bound => {
+            ) => {
                 self.scalar(expr, bound_expr, subqueries)?;
-                self.subquery(*index, subqueries)
+                self.subquery(*index, *bound, subqueries)
             }
             // Leaves: binding may replace a column by its structural reference or a typed placeholder.
             (

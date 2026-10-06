@@ -11,6 +11,9 @@ use std::collections::BTreeMap;
 
 use super::{CommandPlan, QueryPlan, RelationalPlan, SourcePlan};
 
+mod transform;
+pub(crate) use transform::{copy_occurrences, rewrite_expression_with_arena, rewrite_with_arenas};
+
 /// Drop unreferenced query children and remap local command expressions without evaluating them.
 pub fn prune_command(command: &mut CommandPlan) {
     let Some(arena) = command_arena(command) else {

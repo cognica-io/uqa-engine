@@ -35,6 +35,7 @@ mod introspection;
 mod json_strip;
 mod length;
 mod md5;
+pub(crate) mod membership;
 mod operator_errors;
 pub use operator_errors::{
     ambiguous_binary_operator, ambiguous_prefix_operator, undefined_binary_operator,

@@ -91,6 +91,31 @@ fn apply_value_site<'a>(
             "stored catalog binding does not match the {what} of its syntax"
         ))
     };
+    if let Some(ValueSite::Membership { array_items }) = sites.peek() {
+        let shape = crate::type_resolution::membership::MembershipShape {
+            array_items: array_items.clone(),
+        };
+        sites.next();
+        let Expr::InList {
+            expr,
+            list,
+            negated,
+        } = std::mem::replace(node, Expr::Literal(Value::Null))
+        else {
+            return Err(mismatch("membership comparison"));
+        };
+        *node = crate::type_resolution::membership::rewrite(
+            expr,
+            list,
+            negated,
+            &shape,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .into_uncontrolled()
+        .expect("ordinary stored syntax");
+        apply_value_site(node, sites)?;
+        return Ok(true);
+    }
     // A relabel wraps the node, whose own site the visitor reads when it descends into the wrapped node.
     if let Some(ValueSite::Relabel(ty)) = sites.peek() {
         let ty = (*ty).clone();

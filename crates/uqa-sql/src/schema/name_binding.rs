@@ -541,7 +541,20 @@ impl RowSchema {
             Some(qualifier) => self.qualified_slot(qualifier, column),
             None => self.column_slot(column),
         };
-        slot.is_some_and(|slot| self.index.cold.local_width.is_none_or(|width| slot < width))
+        slot.is_some_and(|slot| self.slot_is_local(slot))
+    }
+
+    pub(crate) fn slot_is_local(&self, slot: usize) -> bool {
+        self.index.cold.local_width.is_none_or(|width| slot < width)
+    }
+
+    pub(crate) fn internal_identities(
+        &self,
+    ) -> impl Iterator<Item = (InternalColumnRef, usize)> + '_ {
+        self.index
+            .executor_attributes
+            .iter()
+            .filter_map(|(column, slot)| (*slot != super::NULL_SLOT).then_some((*column, *slot)))
     }
 
     /// Add binding-only identities and preserve collisions as ambiguous names. This models SQL scopes that expose a hidden generated column for explicit lookup while deliberately excluding it from wildcard expansion.
