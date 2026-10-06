@@ -1256,8 +1256,22 @@ The inspected manifests, enabled features, dependency policy, manual ownership a
 - [x] Preserve the original 75 records and 34 open tasks, reproduce the errors independently and identify owning interfaces.
 - [x] Preserve written foreign-key order, complete each constraint before the next, and validate generated sequence ownership after table constraints.
 - [x] Verify PostgreSQL diagnostics, successful self references, constraint naming, rollback, all four providers and durable reopening with owner regressions.
-- [ ] Synchronize manual, HISTORY, manifest and task state; review, merge, close #507 and clean the branch.
+- [x] Synchronize manual, HISTORY, manifest and task state; review, merge, close #507 and clean the branch. PR #508 merged as `6022c45a1`, #507 is closed, main is updated and its branches are removed. All 75 records remain, with 33 original tasks open.
 
 For an ordered declaration list, each successful constraint must bind to the same referenced key, local columns and stable identities regardless of its column or table syntax. Validation and identity allocation for one declaration precede the next; failed statements retain atomic catalog publication. The existing relational constraints and sequence semantics are corrected without adding an algebraic carrier or operator. RI-trigger and TOAST OID allocation remain their separate original open task; their absence is not accepted as compatibility.
 
 The expanded 48-message reference reproduced 24 differences, including discarded earlier REFERENCES clauses in CREATE TABLE and ADD COLUMN and incorrect sequence ownership when another schema contains a same-named table. The first implementation matched 47 messages on all four providers and passed 1,435 SQL owner tests; the remaining identity DEFAULT case exposed use of a sequence owned by an unrelated table. The final 58-message reference additionally checks explicit values, UPDATE DEFAULT, direct partition writes using an ancestor sequence and ordinary inheritance. These are part of the same correction; expectations remain PostgreSQL-captured. All 58 PostgreSQL messages and fifteen read-only observations after each persistent reopening match the four providers. All 1,437 SQL owner tests and 127 affected Engine integrations pass, including existing table creation, constraint lifecycle, identity/sequence ownership, inheritance/partition and temporal foreign-key coverage. The final source cleanup only reuses a String allocation and removes an unused argument; strict Clippy passes on that tree. Rustfmt, dependency/ownership/harness/source-size/legal-copy/manifest checks pass. The actual shared target cache is 87 GB, below the 100 GB guard. No performance measurement or manual CI action was used.
+
+
+## Array inspection builtin identities
+
+Issue [#509](https://github.com/cognica-io/uqa-engine/issues/509) continues the original missing-builtin-identities item with six existing array inspection routines: `array_dims`, `array_ndims`, `array_lower`, `array_upper`, `array_length` and `cardinality`. An independent nine-message PostgreSQL 18.4 Docker reference reproduces seven differences in routine/signature inputs and catalog projection; ordinary multidimensional values already match.
+
+Execution owns the existing builtin routine catalog entries, which SQL binding, stored identities and EXECUTE checks consume. SQL owns the established array typing and evaluation. The inspected SQL/Execution manifests, enabled features, dependency policy and existing implementations require no new dependency or feature and no Engine algorithm. PostgreSQL's `pg_proc.dat` and the captured catalog independently provide OIDs and attributes.
+
+- [x] Preserve all 75 inherited records, with 33 original tasks open, and reproduce the missing identities.
+- [ ] Add the six identities and verify catalog metadata, exact inputs, overload behavior and existing values.
+- [ ] Verify stored definitions, EXECUTE privileges, rollback and provider/reopen behavior with owner regressions.
+- [ ] Synchronize public documentation and inherited task progress; review, merge, close #509 and clean the branch.
+
+This exposes catalog identities for existing functions without introducing an algebraic carrier or operator. Routine identity must select the same typed implementation and preserve its values, NULL behavior, errors, effects and retained stored dependencies. The broader missing-builtin family item remains open until all remaining families are completed.
