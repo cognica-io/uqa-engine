@@ -17,10 +17,19 @@ pub(super) type Result<T> = std::result::Result<T, CatalogRetentionError>;
 
 pub(super) struct Control<'a> {
     pub(super) memory: MemoryReservation,
-    production: ProductionControl<'a>,
+    pub(super) production: ProductionControl<'a>,
 }
 
 impl<'a> Control<'a> {
+    pub(super) fn from_production(production: ProductionControl<'a>) -> Self {
+        Self {
+            memory: production
+                .empty_reservation()
+                .expect("controlled scalar copy"),
+            production,
+        }
+    }
+
     pub(super) fn new(
         budget: &'a MemoryBudget,
         original: &'a CancellationToken,
