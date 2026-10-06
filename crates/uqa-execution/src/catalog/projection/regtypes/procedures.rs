@@ -4,9 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Shared exact routine lookup for strict regprocedure input and nullable catalog inquiry.
+//! Exact routine lookup and signature-aware catalog output names.
 
-use super::{object_name, parse_dash_or_oid, parsed_regtype_oid, regtype_output_catalog};
+use super::{
+    format_regtype, namespace_name, object_name, parse_dash_or_oid, parsed_regtype_oid,
+    qualified_name, regtype_output_catalog, OutputVisibility, RegtypeCatalogEntry,
+    RegtypeOutputCatalog,
+};
 use crate::catalog::{context::CatalogContext, security::schema::SchemaAclPrivilege};
 use uqa_sql::SQLError;
 
@@ -97,5 +101,220 @@ fn input_error(sqlstate: &str, message: String) -> SQLError {
     SQLError::Routine {
         sqlstate: sqlstate.into(),
         message,
+    }
+}
+
+pub(super) fn format_regproc(
+    visibility: &OutputVisibility,
+    catalog: &RegtypeOutputCatalog,
+    oid: i64,
+) -> Option<String> {
+    let entry = catalog.procs.get(&oid)?;
+    let schema = namespace_name(catalog, entry.namespace_oid)?;
+    let visible_schema = visibility.schemas.iter().find(|candidate_schema| {
+        catalog
+            .namespace_oid(candidate_schema)
+            .and_then(|candidate_oid| catalog.proc_names_by_namespace.get(&candidate_oid))
+            .is_some_and(|names| names.contains(entry.name.as_str()))
+    });
+    Some(
+        if !entry.overloaded && visible_schema.map(String::as_str) == Some(schema) {
+            uqa_sql::expr::quote_ident(&entry.name)
+        } else {
+            qualified_name(schema, &entry.name)
+        },
+    )
+}
+
+/// The selected routine's decoded name parts; quoting belongs to the SQL renderer.
+pub fn routine_name_parts(
+    context: &CatalogContext<'_>,
+    oid: i64,
+) -> Result<Option<Vec<String>>, SQLError> {
+    let catalog = regtype_output_catalog(context)?;
+    let visibility = OutputVisibility::from_context(context)?;
+    Ok(catalog
+        .procs
+        .get(&oid)
+        .and_then(|entry| entry_name_parts(&visibility, &catalog, entry)))
+}
+
+pub(super) fn signature_name_parts(
+    visibility: &OutputVisibility,
+    catalog: &RegtypeOutputCatalog,
+    schema: &str,
+    name: &str,
+    argument_types: &[i64],
+) -> Option<Vec<String>> {
+    let namespace = catalog.namespace_oid(schema)?;
+    let entry = catalog.procs.values().find(|entry| {
+        entry.namespace_oid == namespace
+            && entry.name == name
+            && entry.argument_types == argument_types
+    })?;
+    entry_name_parts(visibility, catalog, entry)
+}
+
+fn entry_name_parts(
+    visibility: &OutputVisibility,
+    catalog: &RegtypeOutputCatalog,
+    entry: &RegtypeCatalogEntry,
+) -> Option<Vec<String>> {
+    let schema = namespace_name(catalog, entry.namespace_oid)?;
+    let visible_schema = visibility.schemas.iter().find(|candidate_schema| {
+        catalog
+            .namespace_oid(candidate_schema)
+            .is_some_and(|namespace_oid| {
+                catalog.procs.values().any(|candidate| {
+                    candidate.namespace_oid == namespace_oid
+                        && candidate.name == entry.name
+                        && candidate.argument_types == entry.argument_types
+                })
+            })
+    });
+    Some(if visible_schema.map(String::as_str) == Some(schema) {
+        vec![entry.name.clone()]
+    } else {
+        vec![schema.to_owned(), entry.name.clone()]
+    })
+}
+
+pub(super) fn format_regprocedure(
+    visibility: &OutputVisibility,
+    catalog: &RegtypeOutputCatalog,
+    oid: i64,
+) -> Option<String> {
+    let entry = catalog.procs.get(&oid)?;
+    let routine_name = entry_name_parts(visibility, catalog, entry)?
+        .iter()
+        .map(|part| uqa_sql::expr::quote_ident(part))
+        .collect::<Vec<_>>()
+        .join(".");
+    let arguments = entry
+        .argument_types
+        .iter()
+        .map(|oid| format_regtype(visibility, catalog, *oid).unwrap_or_else(|| oid.to_string()))
+        .collect::<Vec<_>>();
+    Some(format!("{routine_name}({})", arguments.join(",")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        format_regproc, format_regprocedure, OutputVisibility, RegtypeCatalogEntry,
+        RegtypeOutputCatalog,
+    };
+    use crate::catalog::projection::regtypes::AliasConstantOutput;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn entry(
+        name: &str,
+        namespace: i64,
+        arguments: &[i64],
+        overloaded: bool,
+    ) -> RegtypeCatalogEntry {
+        RegtypeCatalogEntry {
+            name: name.into(),
+            namespace_oid: namespace,
+            overloaded,
+            argument_types: arguments.to_vec(),
+            array_oid: 0,
+            element_oid: 0,
+        }
+    }
+
+    fn output() -> AliasConstantOutput {
+        AliasConstantOutput {
+            catalog: RegtypeOutputCatalog {
+                namespaces: BTreeMap::from([
+                    (11, "pg_catalog".into()),
+                    (20_000, "body_shadow".into()),
+                ]),
+                classes: BTreeMap::new(),
+                procs: BTreeMap::from([
+                    (720, entry("octet_length", 11, &[17], true)),
+                    (1374, entry("octet_length", 11, &[25], true)),
+                    (20_001, entry("octet_length", 20_000, &[25], false)),
+                ]),
+                proc_names_by_namespace: BTreeMap::from([
+                    (11, BTreeSet::from(["octet_length".into()])),
+                    (20_000, BTreeSet::from(["octet_length".into()])),
+                ]),
+                types: BTreeMap::from([
+                    (17, entry("bytea", 11, &[], false)),
+                    (25, entry("text", 11, &[], false)),
+                ]),
+                dependencies: std::sync::OnceLock::new(),
+            },
+            visibility: OutputVisibility {
+                schemas: vec!["body_shadow".into(), "pg_catalog".into()],
+            },
+        }
+    }
+
+    #[test]
+    fn selected_names_share_regprocedure_visibility_and_ignore_other_overloads() {
+        let mut output = output();
+        for (oid, argument, names, procedure) in [
+            (
+                720,
+                17,
+                vec!["octet_length".to_owned()],
+                "octet_length(bytea)",
+            ),
+            (
+                1374,
+                25,
+                vec!["pg_catalog".to_owned(), "octet_length".to_owned()],
+                "pg_catalog.octet_length(text)",
+            ),
+        ] {
+            assert_eq!(
+                output.routine_name_parts("pg_catalog", "octet_length", &[argument]),
+                Some(names)
+            );
+            assert_eq!(
+                format_regprocedure(&output.visibility, &output.catalog, oid).as_deref(),
+                Some(procedure)
+            );
+        }
+        assert_eq!(
+            format_regproc(&output.visibility, &output.catalog, 720).as_deref(),
+            Some("pg_catalog.octet_length")
+        );
+        assert_eq!(
+            output.routine_name_parts("pg_catalog", "octet_length", &[23]),
+            None
+        );
+        assert_eq!(
+            output.routine_name_parts("missing", "octet_length", &[17]),
+            None
+        );
+        output.visibility.schemas.reverse();
+        assert_eq!(
+            output.routine_name_parts("pg_catalog", "octet_length", &[25]),
+            Some(vec!["octet_length".to_owned()])
+        );
+        assert_eq!(
+            output.routine_name_parts("body_shadow", "octet_length", &[25]),
+            Some(vec!["body_shadow".to_owned(), "octet_length".to_owned()])
+        );
+    }
+
+    #[test]
+    fn name_parts_preserve_identifiers_until_the_caller_quotes_them() {
+        let mut output = output();
+        output
+            .catalog
+            .procs
+            .insert(20_002, entry("a.b \"quoted\"", 20_000, &[], false));
+        let names = output
+            .routine_name_parts("body_shadow", "a.b \"quoted\"", &[])
+            .unwrap();
+        assert_eq!(names, vec!["a.b \"quoted\"".to_owned()]);
+        assert_eq!(
+            format_regprocedure(&output.visibility, &output.catalog, 20_002).as_deref(),
+            Some("\"a.b \"\"quoted\"\"\"()")
+        );
     }
 }

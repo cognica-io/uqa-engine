@@ -31,8 +31,8 @@ use super::relation_catalog::relation_catalog_identities;
 
 mod procedures;
 mod type_names;
-use procedures::lookup_regprocedure_oid;
-pub use procedures::resolve_regprocedure_input_oid;
+use procedures::{format_regproc, format_regprocedure, lookup_regprocedure_oid};
+pub use procedures::{resolve_regprocedure_input_oid, routine_name_parts};
 
 pub use type_names::{
     catalog_routine_type_oid, catalog_type_display_name, catalog_user_type_identity,
@@ -665,6 +665,22 @@ impl AliasConstantOutput {
         })
     }
 
+    /// Names a selected catalog signature using the same visibility rule as `regprocedure` output.
+    pub(crate) fn routine_name_parts(
+        &self,
+        schema: &str,
+        name: &str,
+        argument_types: &[i64],
+    ) -> Option<Vec<String>> {
+        procedures::signature_name_parts(
+            &self.visibility,
+            &self.catalog,
+            schema,
+            name,
+            argument_types,
+        )
+    }
+
     /// The constant's output text, or `None` when no object holds the OID or the type is not one this output prints.
     pub(crate) fn text(&self, ty: &ColumnType, oid: i64) -> Option<String> {
         match ty {
@@ -790,59 +806,6 @@ fn format_regclass(
             qualified_name(schema, &entry.name)
         },
     ))
-}
-
-fn format_regproc(
-    visibility: &OutputVisibility,
-    catalog: &RegtypeOutputCatalog,
-    oid: i64,
-) -> Option<String> {
-    let entry = catalog.procs.get(&oid)?;
-    let schema = namespace_name(catalog, entry.namespace_oid)?;
-    let visible_schema = visibility.schemas.iter().find(|candidate_schema| {
-        catalog
-            .namespace_oid(candidate_schema)
-            .and_then(|candidate_oid| catalog.proc_names_by_namespace.get(&candidate_oid))
-            .is_some_and(|names| names.contains(entry.name.as_str()))
-    });
-    Some(
-        if !entry.overloaded && visible_schema.map(String::as_str) == Some(schema) {
-            uqa_sql::expr::quote_ident(&entry.name)
-        } else {
-            qualified_name(schema, &entry.name)
-        },
-    )
-}
-
-fn format_regprocedure(
-    visibility: &OutputVisibility,
-    catalog: &RegtypeOutputCatalog,
-    oid: i64,
-) -> Option<String> {
-    let entry = catalog.procs.get(&oid)?;
-    let schema = namespace_name(catalog, entry.namespace_oid)?;
-    let visible_schema = visibility.schemas.iter().find(|candidate_schema| {
-        catalog
-            .namespace_oid(candidate_schema)
-            .is_some_and(|namespace_oid| {
-                catalog.procs.values().any(|candidate| {
-                    candidate.namespace_oid == namespace_oid
-                        && candidate.name == entry.name
-                        && candidate.argument_types == entry.argument_types
-                })
-            })
-    });
-    let routine_name = if visible_schema.map(String::as_str) == Some(schema) {
-        uqa_sql::expr::quote_ident(&entry.name)
-    } else {
-        qualified_name(schema, &entry.name)
-    };
-    let arguments = entry
-        .argument_types
-        .iter()
-        .map(|oid| format_regtype(visibility, catalog, *oid).unwrap_or_else(|| oid.to_string()))
-        .collect::<Vec<_>>();
-    Some(format!("{routine_name}({})", arguments.join(",")))
 }
 
 fn pg_catalog_type_output(typname: &str) -> String {
