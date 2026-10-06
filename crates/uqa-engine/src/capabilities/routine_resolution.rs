@@ -61,6 +61,25 @@ impl RoutineResolution for Engine {
         })
     }
 
+    fn routine_analysis_body(
+        &self,
+        function: &SQLUserFunction,
+    ) -> Result<Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError> {
+        if matches!(function.body, uqa_sql::routines::RoutineBody::Source)
+            && function.def.language == "sql"
+        {
+            self.session.routine_bodies.inspect(function, |definition| {
+                uqa_execution::routines::invocation::bodies::compile_analysis_body(
+                    self,
+                    &self.routine_compilation_context(),
+                    definition,
+                )
+            })
+        } else {
+            self.routine_body(function)
+        }
+    }
+
     fn lookup_bound_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
         Engine::lookup_bound_sql_functions(self, name)
     }

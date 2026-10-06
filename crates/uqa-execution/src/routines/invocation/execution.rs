@@ -50,6 +50,7 @@ pub(super) fn execute_routine(
         let body = context.lookup.routine_body(function)?;
         execute_compiled_body(
             context,
+            function,
             definition,
             specialized.is_some(),
             &body,
@@ -61,6 +62,7 @@ pub(super) fn execute_routine(
 
 fn execute_compiled_body(
     context: &RoutineInvocationContext<'_>,
+    function: &SQLUserFunction,
     definition: &CreateFunction,
     specialized: bool,
     compiled: &CompiledFunctionBody,
@@ -81,9 +83,14 @@ fn execute_compiled_body(
                 execute_plpgsql_language(context, definition, parsed, bound)
             }
         }
-        CompiledFunctionBody::SQL(statements) => {
-            execute_sql_language(context, definition, statements, &bound, record_target)
-        }
+        CompiledFunctionBody::SQL(statements) => execute_sql_language(
+            context,
+            function,
+            definition,
+            statements,
+            &bound,
+            record_target,
+        ),
     }
 }
 
@@ -121,6 +128,7 @@ fn execute_plpgsql_language(
 
 fn execute_sql_language(
     context: &RoutineInvocationContext<'_>,
+    function: &SQLUserFunction,
     definition: &CreateFunction,
     plans: &[uqa_sql::plan::UnifiedPlan],
     bound: &[Value],
@@ -130,8 +138,11 @@ fn execute_sql_language(
         context.runtime,
         context.types,
         &context.overloads,
-        definition,
-        plans,
+        crate::routines::sql_body::SQLBody {
+            function,
+            definition,
+            plans,
+        },
         bound,
         record_target,
     )

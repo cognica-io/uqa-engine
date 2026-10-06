@@ -24,6 +24,9 @@ pub trait StatementOptimizationContexts {
     > {
         None
     }
+    fn routine_inlining(&self) -> Option<uqa_sql::routines::inlining::RoutineInliningContext<'_>> {
+        None
+    }
 }
 pub struct StatementPlanningContext<'a> {
     pub analysis: StatementAnalysisContext<'a>,
@@ -43,6 +46,11 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
             &mut plan,
             params,
         )?;
+        let reusable = reusable
+            && !self
+                .optimization
+                .routine_inlining()
+                .is_some_and(|routines| routines.requires_replanning(&plan));
         Ok((optimize_plan(self, plan)?, reusable))
     }
 
@@ -93,6 +101,7 @@ pub fn optimize_plan(
         context.aggregates,
         context.constant_evaluator,
         context.optimization.builtin_permissions(),
+        context.optimization.routine_inlining(),
         plan,
     )
 }

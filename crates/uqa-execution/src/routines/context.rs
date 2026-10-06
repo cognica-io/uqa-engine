@@ -34,6 +34,10 @@ pub trait RoutineExpressions: RoutineValueContext {
 pub type StatementResultCheck<'a> = &'a dyn Fn(&AnalyzedResult) -> Result<(), SQLError>;
 /// Nested statement execution and planning retain the caller's active routine context.
 pub trait RoutineStatements {
+    fn body_input_context(&self) -> Option<super::sql_body::inputs::SQLRoutineInputContext<'_>> {
+        None
+    }
+
     fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
         uqa_sql::parser::ParserSettings::default()
     }

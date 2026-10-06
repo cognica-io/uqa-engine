@@ -211,7 +211,9 @@ fn compile_sql_routine_plans(
                     preserve_target_expressions: false,
                 },
             )?;
-            // A SQL-standard body is analyzed when the routine is defined, so its names resolve against the catalog of that moment, as `PostgreSQL` stores the analyzed statements. A body given as a string keeps its names until each statement is analyzed before it runs, and keeps the types the session resolved when it compiled the body.
+            // A SQL-standard body keeps definition-time names. Source syntax
+            // stays unbound so statement reanalysis can use the current path;
+            // successful first-use analysis retains its own type identities.
             if bind_catalog_dependencies {
                 let binding = context.catalog.binding_snapshot()?;
                 crate::binding::bind_routine_parameter_references(
@@ -230,8 +232,6 @@ fn compile_sql_routine_plans(
                         None,
                     )?;
                 }
-            } else {
-                bind_session_plan_types(context, &mut plan)?;
             }
             // Stored definitions retain their analyzed logical expressions;
             // immutable evaluation belongs to invocation planning.
@@ -328,13 +328,14 @@ pub(super) fn validate_sql_standard_statement(statement: &Statement) -> Result<(
     Ok(())
 }
 
-/// A session's compilation of a source body keeps the types it resolved, as its analyzed plan holds type OIDs that renaming an enum does not invalidate. A domain coercion records the domain as a plan dependency, so a changed domain is resolved again, and relations and routines are resolved when the plan runs.
-fn bind_session_plan_types(
-    context: &RoutineCompilationContext<'_>,
+/// A successfully analyzed body keeps resolved type identities independently of
+/// its raw source. Domain coercions still resolve current constraint definitions.
+pub fn bind_analyzed_sql_body_types(
+    types: &dyn RoutineTypeCatalog,
     plan: &mut UnifiedPlan,
 ) -> Result<(), SQLError> {
     crate::binding::stored_types::bind_unified_plan_type_identities(plan, &mut |name| {
-        let resolved = context.types.resolve_catalog_column_type(name);
+        let resolved = types.resolve_catalog_column_type(name);
         let mut element = resolved.as_ref();
         while let Some(ColumnType::Array(inner)) = element {
             element = Some(inner.as_ref());

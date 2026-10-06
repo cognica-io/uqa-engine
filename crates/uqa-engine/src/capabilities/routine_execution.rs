@@ -83,6 +83,17 @@ impl RoutineExpressions for Engine {
     }
 }
 impl RoutineStatements for Engine {
+    fn body_input_context(
+        &self,
+    ) -> Option<uqa_execution::routines::sql_body::inputs::SQLRoutineInputContext<'_>> {
+        Some(
+            uqa_execution::routines::sql_body::inputs::SQLRoutineInputContext {
+                cache: self.session.routine_bodies.sql_inputs(),
+                analysis: self.prepared_definition_context(),
+            },
+        )
+    }
+
     fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
         Engine::parser_settings(self)
     }

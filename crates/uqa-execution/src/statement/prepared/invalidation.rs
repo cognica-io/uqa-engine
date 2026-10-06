@@ -43,6 +43,15 @@ pub enum PreparedCatalogChange {
 }
 
 impl PreparedCatalogChange {
+    pub fn invalidate_with_routines<'a>(
+        self,
+        entries: impl IntoIterator<Item = &'a mut PreparedStatementPlan>,
+        routines: &crate::routines::sql_body::inputs::SQLRoutineInputs,
+    ) {
+        self.invalidate(entries);
+        routines.invalidate(|dependencies| self.affects(dependencies));
+    }
+
     fn affects(self, dependencies: &PreparedAnalysisDependencies) -> bool {
         match self {
             Self::Relation(oid) => dependencies.relations.contains(&oid),
@@ -71,6 +80,15 @@ pub struct PreparedInvalidationLog {
 }
 
 impl PreparedInvalidationLog {
+    pub fn invalidate_with_routines<'a>(
+        &self,
+        entries: impl IntoIterator<Item = &'a mut PreparedStatementPlan>,
+        routines: &crate::routines::sql_body::inputs::SQLRoutineInputs,
+    ) {
+        self.invalidate(entries);
+        routines.invalidate(|dependencies| self.affects(dependencies));
+    }
+
     fn current(&mut self) -> &mut BTreeSet<PreparedCatalogChange> {
         if self.levels.is_empty() {
             self.levels.push(BTreeSet::new());

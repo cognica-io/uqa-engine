@@ -22,9 +22,10 @@ impl Engine {
         wrote_records: bool,
     ) -> Result<(), SQLError> {
         if committed.storage_savepoint.is_none() {
-            committed
-                .prepared_changes
-                .invalidate(self.session.prepared.write().values_mut());
+            committed.prepared_changes.invalidate_with_routines(
+                self.session.prepared.write().values_mut(),
+                self.session.routine_bodies.sql_inputs(),
+            );
             self.session.state.write().graph_overlay = None;
             self.restore_local_runtime_parameters();
             let publication_result = self.row_locks.publish_row_changes(

@@ -52,7 +52,10 @@ impl Engine {
     /// Read original input syntax again after a binding dependency changes.
     pub(crate) fn invalidate_prepared_analysis(&self) {
         uqa_execution::statement::prepared::invalidation::PreparedCatalogChange::GlobalCatalog
-            .invalidate(self.session.prepared.write().values_mut());
+            .invalidate_with_routines(
+                self.session.prepared.write().values_mut(),
+                self.session.routine_bodies.sql_inputs(),
+            );
     }
 
     pub fn deallocate_prepared(&self, name: Option<&str>) {

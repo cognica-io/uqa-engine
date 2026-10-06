@@ -61,7 +61,15 @@ fn is_constant(expression: &ScalarExpr) -> bool {
         | ScalarExpr::Or(items) => items.iter().all(is_constant),
         ScalarExpr::Cast { expr, ty } => {
             is_constant(expr)
-                && ColumnType::from_sql_name(ty).is_ok_and(|ty| immutable_cast_type(&ty))
+                && ColumnType::from_sql_name(ty).is_ok_and(|target| {
+                    immutable_cast_type(&target)
+                        && scalar_type(expr, &RowSchema::default(), &[]).is_ok_and(|source| {
+                            source.is_none_or(|source| {
+                                uqa_sql::type_resolution::cast_volatility(&source, &target)
+                                    == uqa_sql::ast::FunctionVolatility::Immutable
+                            })
+                        })
+                })
         }
         ScalarExpr::Binary { lhs, rhs, .. } => is_constant(lhs) && is_constant(rhs),
         ScalarExpr::UnaryMinus(inner)

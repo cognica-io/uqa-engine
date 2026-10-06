@@ -15,6 +15,7 @@ pub mod declaration;
 mod defaults;
 pub mod definition_output;
 pub mod dependencies;
+pub mod inlining;
 pub mod lifecycle;
 pub mod merge_columns;
 pub mod privilege_inquiry;
@@ -95,7 +96,7 @@ pub fn analyzable_routine_body(
     resolution: &(impl RoutineResolution + ?Sized),
     function: &SQLUserFunction,
 ) -> Result<Option<Arc<CompiledFunctionBody>>, SQLError> {
-    match resolution.routine_body(function) {
+    match resolution.routine_analysis_body(function) {
         Ok(body) => Ok(Some(body)),
         Err(SQLError::Internal(message)) => Err(SQLError::Internal(message)),
         Err(_) => Ok(None),
@@ -138,6 +139,16 @@ pub trait RoutineResolution: FunctionTypeResolver {
                 function.def.name
             ))),
         }
+    }
+
+    /// Inspect a body for static effects and portal dependencies. A session may
+    /// compile source independently here without creating its execution cache
+    /// entry or issuing diagnostics for a body the query never reaches.
+    fn routine_analysis_body(
+        &self,
+        function: &SQLUserFunction,
+    ) -> Result<Arc<CompiledFunctionBody>, SQLError> {
+        self.routine_body(function)
     }
 
     fn has_registered_table_function(&self, _name: &str) -> bool {

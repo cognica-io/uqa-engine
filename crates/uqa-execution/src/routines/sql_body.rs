@@ -6,37 +6,51 @@
 
 use std::cell::RefCell;
 
+pub mod inputs;
+mod statements;
+
 use super::transaction::DirectRoutineCommandGuard;
 use super::{CreateFunction, RoutineContext, RoutineOutcome, SQLError, SQLParam, SQLResult, Value};
 use uqa_sql::{
     assignment::routines::coerce_routine_value_from,
     ast::FunctionBody,
-    binding::{bind_routine_parameter_references, statements::AnalyzedResult},
+    binding::statements::AnalyzedResult,
     plan::{CommandPlan, UnifiedPlan},
     plpgsql::runtime_diagnostics::result_row_values,
     routines::{
         body_parameters::{is_sql_body_parameter, sql_body_parameter_scope},
-        body_validation::{reject_output_argument_call, reject_undefined_parameters},
         declaration::RoutineTypeCatalog,
         resolution::RoutineOverloadContext,
         result_check::{
             check_sql_function_result, sql_function_result_layout, validate_sql_function_record,
             SQLFunctionResultKind, SQLFunctionResultLayout,
         },
-        routine_returns_anonymous_record,
+        routine_returns_anonymous_record, SQLUserFunction,
     },
 };
 
-/// `LANGUAGE sql` body: run every statement, each analyzed just before it runs as `PostgreSQL` analyzes them, with the final statement checked against the declared result before it runs; the last statement's result shapes the routine output. A body given as a string resolves the names of its parameters in each statement when that statement is analyzed.
+pub struct SQLBody<'a> {
+    pub function: &'a SQLUserFunction,
+    pub definition: &'a CreateFunction,
+    pub plans: &'a [UnifiedPlan],
+}
+
+/// `LANGUAGE sql` statements retain their first successful analysis until the
+/// routine, concrete input types, namespace or selected dependencies change.
+/// The final statement is checked before execution and shapes the routine output.
 pub fn execute_sql_language(
     context: RoutineContext<'_>,
     types: &dyn RoutineTypeCatalog,
     overloads: &RoutineOverloadContext<'_>,
-    def: &CreateFunction,
-    plans: &[UnifiedPlan],
+    body: SQLBody<'_>,
     bound: &[Value],
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
 ) -> Result<RoutineOutcome, SQLError> {
+    let SQLBody {
+        function,
+        definition: def,
+        plans,
+    } = body;
     let call_params = def.call_params();
     if call_params.len() != bound.len() {
         return Err(SQLError::Internal(format!(
@@ -89,30 +103,31 @@ pub fn execute_sql_language(
     let parameters = matches!(def.body, FunctionBody::Source(_))
         .then(|| sql_body_parameter_scope(def, &params))
         .transpose()?;
+    let identity = inputs::SQLBodyIdentity::new(function)?;
+    let parameter_types = params
+        .iter()
+        .map(|param| {
+            param
+                .declared_scalar_type()
+                .cloned()
+                .ok_or_else(|| SQLError::Internal("SQL body parameter has no concrete type".into()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let statements = statements::SQLStatements {
+        context,
+        types,
+        overloads,
+        params: &params,
+        parameters,
+        identity,
+        parameter_types,
+        inputs: context.statements.body_input_context(),
+    };
     let mut last = SQLResult::empty();
     for (position, plan) in plans.iter().enumerate() {
-        let mut statement = plan.clone();
-        if let Some(parameters) = &parameters {
-            context
-                .statements
-                .with_statement_scope(&mut |routines, ctes| {
-                    bind_routine_parameter_references(
-                        routines,
-                        &mut statement,
-                        &params,
-                        ctes,
-                        parameters,
-                    )
-                })?;
-        }
-        reject_undefined_parameters(&mut statement, params.len())?;
-        if let UnifiedPlan::Command(command) = &statement {
-            if let CommandPlan::Call { name, args } = command.as_ref() {
-                reject_output_argument_call(overloads, types, name, args, &mut |argument| {
-                    context.expressions.expression_type(argument, &params)
-                })?;
-            }
-        }
+        let check = (position + 1 == plans.len())
+            .then_some(&check_result as super::context::StatementResultCheck<'_>);
+        let statement = statements.prepare(plan, position, check)?;
         let _direct_routine_command = matches!(
             &statement,
             UnifiedPlan::Command(command)
@@ -122,8 +137,6 @@ pub fn execute_sql_language(
                 )
         )
         .then(|| DirectRoutineCommandGuard::enter(context.session));
-        let check = (position + 1 == plans.len())
-            .then_some(&check_result as super::context::StatementResultCheck<'_>);
         last = context
             .statements
             .execute_body_statement(statement, &params, check)?;

@@ -126,12 +126,24 @@ fn optimize_scalar(
         ScalarExpr::Func {
             order_syntax,
             name,
-            binding,
-            args,
+            mut binding,
+            mut args,
             distinct,
             mut order_by,
             filter,
         } => {
+            if !distinct && order_by.is_empty() && filter.is_none() {
+                if let (Some(context), Some(selected)) =
+                    (config.routine_inlining.as_ref(), binding.as_ref())
+                {
+                    if let Some((selected, materialized)) =
+                        context.materialize_call(selected, &args)?
+                    {
+                        binding = Some(selected);
+                        args = materialized;
+                    }
+                }
+            }
             for order in &mut order_by {
                 optimize_scalar_slot(&mut order.expr, config)?;
             }
@@ -193,6 +205,26 @@ fn optimize_scalar(
         },
         other => other,
     };
+    if let (
+        Some(context),
+        ScalarExpr::Func {
+            binding: Some(binding),
+            args,
+            distinct: false,
+            order_by,
+            filter: None,
+            ..
+        },
+    ) = (config.routine_inlining.as_ref(), &optimized)
+    {
+        if order_by.is_empty() {
+            if let Some(inlined) = context.prepare(binding, args, &config.active_inline_routines)? {
+                let mut nested = config.clone();
+                nested.active_inline_routines.push(inlined.identity);
+                return optimize_scalar(inlined.expression, &nested);
+            }
+        }
+    }
     fold_authorized_literal(
         optimized,
         config.constant_evaluator,

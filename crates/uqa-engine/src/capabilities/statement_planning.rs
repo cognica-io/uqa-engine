@@ -172,6 +172,18 @@ impl uqa_planner::statement_planning::executable::StatementOptimizationContexts 
     fn rule_inputs(&self) -> RuleInputPlanningContext<'_> {
         self.rule_input_planning_context()
     }
+    fn routine_inlining(&self) -> Option<uqa_sql::routines::inlining::RoutineInliningContext<'_>> {
+        let compilation = self.routine_definition_context().compilation.analysis;
+        Some(uqa_sql::routines::inlining::RoutineInliningContext {
+            routines: compilation.routines,
+            types: compilation.types,
+            parsers: compilation.parsers,
+            catalog: compilation.catalog,
+            authority: self,
+            volatility: self,
+            expressions: self,
+        })
+    }
 }
 
 pub(crate) fn estimate_engine_plan(
@@ -199,4 +211,23 @@ pub(crate) fn optimize_engine_plan(
         &engine.statement_planning_context(),
         plan,
     )
+}
+
+impl uqa_sql::routines::inlining::RoutinePlanExpressions for Engine {
+    fn evaluate_constant_routine(
+        &self,
+        expression: &ScalarExpr,
+    ) -> Result<uqa_core::Value, SQLError> {
+        uqa_execution::query::catalog_expression::eval_expression_plan_with_schema(
+            self,
+            crate::capabilities::query_scope::new_for_current_routine(self),
+            uqa_sql::plan::ExpressionPlan {
+                scalar: expression.clone(),
+                subqueries: Vec::new(),
+            },
+            &uqa_sql::ResultRow::new(),
+            &uqa_sql::RowSchema::default(),
+            &[],
+        )
+    }
 }
