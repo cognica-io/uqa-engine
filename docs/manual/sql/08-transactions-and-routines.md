@@ -193,7 +193,9 @@ A name of two or more identifiers separated by dots that no parameter defines be
 
 `pg_sleep(double precision)`, `pg_sleep_for(interval)` and `pg_sleep_until(timestamp with time zone)` sleep for the requested time and end at once when the statement is canceled or times out; a zero, negative or NaN duration returns at once.
 
-`client_min_messages` withholds a notice below its level as the notice is raised, as PostgreSQL decides when it reports one: the default `notice` withholds `RAISE DEBUG` and `RAISE LOG`, `INFO` always reaches the client, and a routine with `SET client_min_messages = warning` silences only the notices raised while it runs. `default_tablespace` accepts the empty string, `pg_default` and `pg_global`; `default_table_access_method` accepts `heap`, reports `55000` for an index access method and `22023` for an unknown one; `default_with_oids` accepts only `false`. `xmloption`, `row_security` and `escape_string_warning` take their PostgreSQL values; `standard_conforming_strings` accepts `on`, and `off` is rejected with `0A000` until the parser honors it.
+`client_min_messages` withholds a notice below its level as the notice is raised, as PostgreSQL decides when it reports one: the default `notice` withholds `RAISE DEBUG` and `RAISE LOG`, `INFO` always reaches the client, and a routine with `SET client_min_messages = warning` silences only the notices raised while it runs. `default_tablespace` accepts the empty string, `pg_default` and `pg_global`; `default_table_access_method` accepts `heap`, reports `55000` for an index access method and `22023` for an unknown one; `default_with_oids` accepts only `false`. `xmloption` and `row_security` take their PostgreSQL values.
+
+`standard_conforming_strings` defaults to `on`: ordinary single-quoted strings keep backslashes literally, while `E'...'` interprets escapes. With `off`, ordinary strings interpret escapes too; `escape_string_warning = on` reports PostgreSQL warnings for those legacy escapes. `backslash_quote` accepts `on`, `off` or the default `safe_encoding`; in UTF-8, `safe_encoding` permits escaped quotes, while `off` rejects them with `22P06` and the original HINT. Scanner settings are captured for each complete SQL message, so a `SET` inside that message affects parsing only in a later message. Prepared literals keep their parsed values; routine source bodies use the settings at body compilation, including their own `SET` clauses. Cached statements retain the same lexical settings and replay parser notices through the current `client_min_messages` filter. Syntax errors retain the parser's original SQLSTATE, primary message, DETAIL and HINT.
 
 | Setting | Default or behavior |
 | --- | --- |
@@ -213,6 +215,7 @@ A name of two or more identifiers separated by dots that no parameter defines be
 | `transaction_isolation`, `transaction_read_only`, `transaction_deferrable` | The current transaction's values |
 | `session_replication_role` | Superuser setting, `origin` |
 | `application_name`, `default_tablespace`, `default_table_access_method` | Empty, empty and `heap` |
+| `backslash_quote` | `safe_encoding` |
 | `standard_conforming_strings`, `escape_string_warning`, `row_security`, `xmloption`, `default_with_oids` | `on`, `on`, `on`, `content`, `off` |
 | `integer_datetimes`, `in_hot_standby`, `is_superuser` | Preset values; `is_superuser` follows the session or `SET ROLE` role |
 

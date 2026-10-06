@@ -99,7 +99,8 @@
     "M0": [
       "baseline.pg18-differential-probes",
       "baseline.tpch-derived-queries",
-      "parser.pg18-chain"
+      "parser.pg18-chain",
+      "parser.session-scanner-diagnostics"
     ],
     "M1": [
       "query.parenthesized-join-alias",
@@ -254,6 +255,14 @@
       "open_issue": null
     },
     {
+      "id": "parser.session-scanner-diagnostics",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured message values, command tags, original SQLSTATE/DETAIL/HINT and notices in tests/parity/pg18/parser_settings_oracle.expected.json; scoped scanner and ErrorData transport from the exact parser_chain revisions",
+      "uqa_test": "cargo test -p uqa-sql --lib parser::tests; cargo test -p uqa-engine --test integration parser_settings; cargo test -p uqa-engine --lib queries::scope",
+      "supported_version": "Unreleased: complete-message standard_conforming_strings, backslash_quote and escape_string_warning boundaries, statement/cursor cache notice replay through the current filter, SET LOCAL restoration, retained PREPARE inputs, routine-local lexical settings, and reanalysis of live ordinary input conversions. Forty-two independent messages pass all four storage providers, with nine additional observations after reopening the three durable providers.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "baseline.tpch-derived-queries",
       "postgresql_reference": "PostgreSQL 18.4 provenance in benchmarks/tpch/expected/pg18.json",
       "uqa_test": "python3 scripts/run-tpch-pg18.py --iterations 3",
@@ -267,7 +276,7 @@
       "uqa_test": "cargo test -p uqa-sql --test integration",
       "supported_version": "PostgreSQL 18",
       "status": "partial",
-      "open_issue": "The top-level statement and semantically relevant option inventory is not complete."
+      "open_issue": "The top-level statement and semantically relevant option inventory is not complete. Source SQL-function inlining and first-use PL/pgSQL expression preparation remain tracked in #465, with the complete independent routine_parser_lifetime_oracle.expected.json preserved; #460 and #316 remain open for that work."
     },
     {
       "id": "query.join-using-natural",
