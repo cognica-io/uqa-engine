@@ -538,14 +538,13 @@ fn validate_routine_output_types(
         let type_name = canonical_routine_type_name(output_type);
         match polymorphic_family(&type_name) {
             Some(RoutinePolymorphicFamily::Simple) if !inputs.simple => {
-                return Err(routine_definition_error(format!(
-                    "cannot determine result data type: a result of type {type_name} requires at least one simple polymorphic input"
-                )));
+                return Err(polymorphic_result_error(
+                    &type_name,
+                    "anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange",
+                ));
             }
             Some(RoutinePolymorphicFamily::Compatible) if !inputs.compatible => {
-                return Err(routine_definition_error(format!(
-                    "cannot determine result data type: a result of type {type_name} requires at least one compatible polymorphic input"
-                )));
+                return Err(polymorphic_result_error(&type_name, "anycompatible, anycompatiblearray, anycompatiblenonarray, anycompatiblerange, or anycompatiblemultirange"));
             }
             None if ROUTINE_RESULT_PSEUDO_TYPES.contains(&type_name.as_str())
                 && !matches!(type_name.as_str(), "record" | "refcursor" | "void")
@@ -561,6 +560,17 @@ fn validate_routine_output_types(
         }
     }
     Ok(())
+}
+
+fn polymorphic_result_error(result: &str, inputs: &str) -> SQLError {
+    SQLError::Diagnostic {
+        sqlstate: "42P13".into(),
+        message: "cannot determine result data type".into(),
+        detail: Some(format!(
+            "A result of type {result} requires at least one input of type {inputs}."
+        )),
+        hint: None,
+    }
 }
 
 /// A pseudo-type the routine's language rejects, reported as its validator reports it: `fmgr_sql_validator` as an invalid definition, and `plpgsql_validator` as an unsupported feature.

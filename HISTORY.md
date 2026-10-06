@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve stored role-constant dependency checks after input conversion and partition-key optimization, and match PostgreSQL routine declaration error ordering and CHECK diagnostics.
+
 - Resolve named array-transform calls alongside user overloads during preparation and stored binding, preserving argument positions and declared Boolean option types. Reconstruct stored named calls with PostgreSQL argument notation.
 
 - Preserve wildcard syntax while binding SQL-standard routine parameters, including stored-column rename and deletion, and omit redundant casts of parameters whose declared type already matches the selected argument.

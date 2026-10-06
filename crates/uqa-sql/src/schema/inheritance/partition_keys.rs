@@ -37,10 +37,12 @@ pub(super) fn validate_partition_keys(
             "cannot use \"list\" partition strategy with more than one column",
         ));
     }
+    let mut regroles = crate::catalog::regrole_dependencies::StoredRegroleConstants::default();
     for key in &spec.keys {
         if !matches!(key, Expr::Column(_)) {
             let plan = crate::plan::ExpressionPlan::lower(key.clone());
             analyze_key_expression(context, &plan.scalar, &table.columns)?;
+            regroles.collect_scalar_expression(&plan.scalar);
         }
     }
     for key in &mut spec.keys {
@@ -50,14 +52,7 @@ pub(super) fn validate_partition_keys(
         }
     }
     validate_hash_partition_spec(&context.partitions, spec, &table.columns)?;
-    for key in &spec.keys {
-        crate::catalog::regrole_dependencies::reject_stored_regrole_constants(
-            context.roles,
-            key,
-            None,
-        )?;
-    }
-    Ok(())
+    regroles.reject(context.roles)
 }
 
 /// `EXPR_KIND_PARTITION_EXPRESSION` analysis: unknown columns, then aggregates, window functions and set-returning functions, with a call's arguments analyzed before the call.
