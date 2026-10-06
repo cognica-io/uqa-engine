@@ -78,8 +78,8 @@ pub fn prepare_generated_column(
     )?;
     if matches!(expression_type, typing::GenerationType::UnknownLiteral(_)) {
         // The literal is read by the column type's input function and stored as a constant, as `cookDefault` coerces it.
-        super::defaults::cook_unknown_literal(
-            context,
+        crate::catalog::stored_ast::read_unknown_stored_literal(
+            crate::FunctionTypeResolver::enum_labels(context.catalog),
             &mut prepared.expression,
             &column.ty,
             false,

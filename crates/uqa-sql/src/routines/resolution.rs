@@ -12,7 +12,7 @@ use super::{
     declaration::RoutineTypeCatalog, routine_signature_types, SQLUserFunction, StaticFunctionMatch,
 };
 use crate::type_resolution::{
-    canonical_routine_type_name, match_routine_signature, rank_function_matches,
+    canonical_routine_type_name, match_routine_candidate, rank_function_matches,
     BuiltinFunctionOverload, FunctionTypeResolver, MatchedRoutineSignature,
     ResolvedFunctionOverload, RoutineCallDescriptor, RoutineParameterDescriptor,
     RoutineSignatureMatchError,
@@ -283,6 +283,7 @@ impl RoutineOverloadContext<'_> {
                 }
                 StaticFunctionMatch {
                     function,
+                    default_error: None,
                     invocation: invocation.clone(),
                     argument_types: invocation.argument_targets.clone(),
                     raw_exact_matches: 0,
@@ -312,13 +313,14 @@ impl RoutineOverloadContext<'_> {
                 kind,
                 &matched.function.def,
             )?;
+            check_selected_default_types(self.catalog, kind, name, &matched)?;
             return Ok(Some(matched));
         }
         let Some(overloads) = self.catalog.lookup_sql_routine_candidates(name)? else {
             return Ok(None);
         };
         resolve_static_routine_overload(
-            &self.catalog.routine_type_snapshot(),
+            self.catalog,
             name,
             overloads,
             argument_names,
@@ -331,7 +333,7 @@ impl RoutineOverloadContext<'_> {
 }
 
 fn resolve_static_routine_overload(
-    catalog: &RoutineTypeSnapshot,
+    catalog: &dyn RoutineOverloadCatalog,
     name: &str,
     overloads: Vec<Arc<SQLUserFunction>>,
     argument_names: &[Option<String>],
@@ -339,11 +341,12 @@ fn resolve_static_routine_overload(
     explicit_variadic: bool,
     kind: RoutineCallKind,
 ) -> Result<StaticFunctionMatch, SQLError> {
+    let snapshot = catalog.routine_type_snapshot();
     let mut candidates = Vec::new();
     let mut match_error = None;
     for function in overloads {
         match static_routine_match(
-            catalog,
+            &snapshot,
             function,
             argument_names,
             argument_types,
@@ -390,6 +393,7 @@ fn resolve_static_routine_overload(
         kind,
         &matched.function.def,
     )?;
+    check_selected_default_types(catalog, kind, name, &matched)?;
     Ok(matched)
 }
 
@@ -437,7 +441,8 @@ fn static_routine_match(
     let invocation = routine_invocation_binding(&function.def, &parameter_indices, &matched);
     Ok(Some(StaticFunctionMatch {
         function,
-        argument_types: matched.argument_targets,
+        argument_types: matched.argument_signature,
+        default_error: matched.default_error,
         raw_exact_matches: matched.raw_exact_matches,
         exact_matches: matched.exact_matches,
         preferred_matches: matched.preferred_matches,
@@ -480,10 +485,11 @@ fn match_static_function_signature(
             type_name: canonical_routine_type_name(&parameter.type_name),
             column_type: declared_parameter_type(catalog, &parameter.type_name),
             has_default: parameter.default.is_some(),
+            default_type: parameter.default_type.clone(),
             variadic: parameter.mode == FunctionParamMode::Variadic,
         })
         .collect::<Vec<_>>();
-    match_routine_signature(
+    match_routine_candidate(
         &parameters,
         RoutineCallDescriptor {
             argument_names,
@@ -608,19 +614,17 @@ fn routine_invocation_binding(
 }
 
 pub(super) fn static_signature_error(
-    kind: RoutineCallKind,
-    name: &str,
+    _kind: RoutineCallKind,
+    _name: &str,
     error: RoutineSignatureMatchError,
 ) -> SQLError {
     let sqlstate = error.sqlstate().to_string();
     let message = match error {
         RoutineSignatureMatchError::InvalidVariadicSignature { reason } => reason,
         RoutineSignatureMatchError::IndeterminatePolymorphicType { .. } => {
-            format!(
-                "could not determine polymorphic type for {} `{name}` because an input has type unknown",
-                kind.name()
-            )
+            "could not determine polymorphic type because input has type unknown".into()
         }
+        _ => unreachable!("default consistency is checked after candidate selection"),
     };
     SQLError::Routine { sqlstate, message }
 }
@@ -769,4 +773,122 @@ fn static_routine_argument_types(
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Defaults do not exclude or rank an overload. Their polymorphic consistency is
+/// checked only after the ordinary supplied-argument rules choose one candidate.
+pub(super) fn check_selected_default_types(
+    catalog: &dyn RoutineTypeCatalog,
+    _kind: RoutineCallKind,
+    _name: &str,
+    matched: &StaticFunctionMatch,
+) -> Result<(), SQLError> {
+    if let Some(error) = &matched.default_error {
+        return Err(default_type_error(catalog, error)?);
+    }
+    // An actual anyarray supplies no element identity. Its sole-input exception
+    // permits an anyarray result, but cannot specialize an anyelement result.
+    if matched
+        .invocation
+        .parameter_types
+        .iter()
+        .any(|ty| ty == "anyarray")
+        && matched.invocation.return_type.as_deref().is_some_and(|ty| {
+            matches!(
+                canonical_routine_type_name(ty).as_str(),
+                "anyelement" | "anynonarray" | "anyenum"
+            )
+        })
+    {
+        return Err(default_type_error(
+            catalog,
+            &RoutineSignatureMatchError::IndeterminateArrayElement,
+        )?);
+    }
+    Ok(())
+}
+
+fn default_type_error(
+    catalog: &dyn RoutineTypeCatalog,
+    error: &RoutineSignatureMatchError,
+) -> Result<SQLError, SQLError> {
+    use RoutineSignatureMatchError as E;
+    let format = |actual: &crate::ast::RoutineDefaultType| match actual {
+        crate::ast::RoutineDefaultType::Concrete(ty) => catalog.format_type(ty),
+        crate::ast::RoutineDefaultType::Polymorphic(name) => Ok(name.clone()),
+    };
+    let mut detail = None;
+    let message = match error {
+        E::InconsistentDefault {
+            declared,
+            first,
+            second,
+        } => {
+            detail = Some(format!("{} versus {}", format(first)?, format(second)?));
+            format!("arguments declared \"{declared}\" are not all alike")
+        }
+        E::InconsistentPolymorphicTypes {
+            first_declared,
+            second_declared,
+            first,
+            second,
+        } => {
+            detail = Some(format!("{} versus {}", format(first)?, format(second)?));
+            format!("argument declared {first_declared} is not consistent with argument declared {second_declared}")
+        }
+        E::InvalidPolymorphicActual { declared, actual } => {
+            let kind = if declared.ends_with("multirange") {
+                "a multirange type"
+            } else if declared.ends_with("range") {
+                "a range type"
+            } else {
+                "an array"
+            };
+            format!(
+                "argument declared {declared} is not {kind} but type {}",
+                format(actual)?
+            )
+        }
+        E::IncompatibleDefaultTypes { first, second } => format!(
+            "argument types {} and {} cannot be matched",
+            catalog.format_type(first)?,
+            catalog.format_type(second)?
+        ),
+        E::IncompatibleRangeSubtype {
+            declared,
+            range,
+            common,
+        } => format!(
+            "{declared} type {} does not match anycompatible type {}",
+            catalog.format_type(range)?,
+            catalog.format_type(common)?
+        ),
+        E::InvalidPolymorphicElement { declared, actual } => {
+            let shape = if declared == "anyenum" {
+                "not an enum type"
+            } else {
+                "an array type"
+            };
+            format!(
+                "type matched to {declared} is {shape}: {}",
+                catalog.format_type(actual)?
+            )
+        }
+        E::IndeterminatePolymorphicArgument { declared } => format!(
+            "could not determine polymorphic type {declared} because input has type unknown"
+        ),
+        E::IndeterminateArrayElement => {
+            "cannot determine element type of \"anyarray\" argument".into()
+        }
+        E::IndeterminatePolymorphicType { .. } => {
+            "could not determine polymorphic type because input has type unknown".into()
+        }
+        E::InvalidVariadicSignature { reason } => reason.clone(),
+    };
+    Ok(SQLError::Diagnostic {
+        sqlstate: error.sqlstate().into(),
+        message,
+        detail,
+        hint: None,
+    })
 }

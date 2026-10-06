@@ -10,7 +10,8 @@ use super::overload_resolution::{
     canonical_column_type_name, canonical_routine_type_name, RankedFunctionMatch,
 };
 use crate::ast::{
-    ColumnType, RoutineInvocationBinding, RoutineVariadicMode as InvocationVariadicMode,
+    ColumnType, RoutineDefaultType, RoutineInvocationBinding,
+    RoutineVariadicMode as InvocationVariadicMode,
 };
 
 /// One declared input or output parameter participating in routine-call matching.
@@ -21,6 +22,8 @@ pub struct RoutineParameterDescriptor {
     /// Catalog-resolved declaration, including named domains and their base type.
     pub column_type: Option<ColumnType>,
     pub has_default: bool,
+    /// Type of the analyzed default, considered only for a structurally omitted input.
+    pub default_type: Option<RoutineDefaultType>,
     pub variadic: bool,
 }
 
@@ -104,8 +107,44 @@ pub enum RoutinePolymorphicFamily {
 /// A structural or polymorphic-resolution error that must be distinguished from an ordinary non-matching candidate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoutineSignatureMatchError {
-    InvalidVariadicSignature { reason: String },
-    IndeterminatePolymorphicType { family: RoutinePolymorphicFamily },
+    InvalidVariadicSignature {
+        reason: String,
+    },
+    InconsistentDefault {
+        declared: String,
+        first: Box<RoutineDefaultType>,
+        second: Box<RoutineDefaultType>,
+    },
+    InconsistentPolymorphicTypes {
+        first_declared: String,
+        second_declared: String,
+        first: Box<RoutineDefaultType>,
+        second: Box<RoutineDefaultType>,
+    },
+    InvalidPolymorphicActual {
+        declared: String,
+        actual: RoutineDefaultType,
+    },
+    IncompatibleDefaultTypes {
+        first: Box<ColumnType>,
+        second: Box<ColumnType>,
+    },
+    IncompatibleRangeSubtype {
+        declared: String,
+        range: Box<ColumnType>,
+        common: Box<ColumnType>,
+    },
+    InvalidPolymorphicElement {
+        declared: String,
+        actual: ColumnType,
+    },
+    IndeterminatePolymorphicArgument {
+        declared: String,
+    },
+    IndeterminateArrayElement,
+    IndeterminatePolymorphicType {
+        family: RoutinePolymorphicFamily,
+    },
 }
 
 impl RoutineSignatureMatchError {
@@ -114,7 +153,7 @@ impl RoutineSignatureMatchError {
     pub const fn sqlstate(&self) -> &'static str {
         match self {
             Self::InvalidVariadicSignature { .. } => "42P13",
-            Self::IndeterminatePolymorphicType { .. } => "42804",
+            _ => "42804",
         }
     }
 }
@@ -192,6 +231,10 @@ impl RoutineTypeSubstitutions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchedRoutineSignature {
     pub declared_identity: Vec<String>,
+    /// Declared types of supplied arguments, used for ranking before defaults are inserted.
+    pub argument_signature: Vec<String>,
+    /// Candidate-only failure reported after overload selection; never publish its coercion plan.
+    pub default_error: Option<RoutineSignatureMatchError>,
     /// Effective target signature, one entry per supplied argument.
     pub argument_targets: Vec<String>,
     pub argument_sources: Vec<Option<String>>,
@@ -241,7 +284,7 @@ impl MatchedRoutineSignature {
 
     #[must_use]
     pub fn effective_argument_signature(&self) -> &[String] {
-        &self.argument_targets
+        &self.argument_signature
     }
 
     /// Materialize the stable AST binding contract consumed by scalar, FROM, CALL, and PL/pgSQL execution paths.
@@ -283,7 +326,7 @@ impl MatchedRoutineSignature {
 
 impl RankedFunctionMatch for MatchedRoutineSignature {
     fn argument_types(&self) -> &[String] {
-        &self.argument_targets
+        &self.argument_signature
     }
 
     fn raw_exact_matches(&self) -> usize {
@@ -307,6 +350,7 @@ mod mapping;
 mod matching;
 mod polymorphic;
 
+pub(crate) use matching::match_routine_candidate;
 pub use matching::match_routine_signature;
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ fn parameter(type_name: &str) -> RoutineParameterDescriptor {
         type_name: type_name.into(),
         column_type: ColumnType::from_sql_name(type_name).ok(),
         has_default: false,
+        default_type: None,
         variadic: false,
     }
 }
@@ -579,4 +580,278 @@ fn concrete_and_generic_ranking_matches_postgresql_oracle() {
         &[Some(ColumnType::SmallInteger)]
     ));
     assert_eq!(ambiguous.len(), 2);
+}
+
+#[test]
+fn omitted_polymorphic_defaults_supply_types_without_changing_explicit_inputs() {
+    let mut input = parameter("anyelement");
+    input.has_default = true;
+    input.default_type = Some(crate::ast::RoutineDefaultType::Concrete(
+        ColumnType::Integer,
+    ));
+    let omitted = match_types(&[input.clone()], &[]).unwrap().unwrap();
+    assert_eq!(
+        omitted.substitute_type("anyelement"),
+        Some(ColumnType::Integer)
+    );
+    assert!(omitted.argument_positions.is_empty());
+    let explicit = match_types(&[input], &[Some(ColumnType::Text)])
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        explicit.substitute_type("anyelement"),
+        Some(ColumnType::Text)
+    );
+    let mut compatible = parameter("anycompatible");
+    compatible.has_default = true;
+    compatible.default_type = Some(crate::ast::RoutineDefaultType::Concrete(
+        ColumnType::BigInteger,
+    ));
+    let selected = match_types(
+        &[parameter("anycompatible"), compatible],
+        &[Some(ColumnType::Integer)],
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        selected.substitute_type("anycompatible"),
+        Some(ColumnType::BigInteger)
+    );
+}
+
+fn default_parameter(
+    type_name: &str,
+    actual: Option<RoutineDefaultType>,
+) -> RoutineParameterDescriptor {
+    let mut parameter = parameter(type_name);
+    parameter.has_default = true;
+    parameter.default_type = actual;
+    parameter
+}
+
+#[test]
+fn inconsistent_default_candidates_preserve_overload_ambiguity_and_exact_matches() {
+    let arguments = [Some(ColumnType::Text)];
+    let parameters = [
+        parameter("anyelement"),
+        default_parameter(
+            "anyarray",
+            Some(RoutineDefaultType::Concrete(ColumnType::Array(Box::new(
+                ColumnType::Integer,
+            )))),
+        ),
+    ];
+    let candidate = super::match_routine_candidate(
+        &parameters,
+        RoutineCallDescriptor {
+            argument_names: &[None],
+            argument_types: &arguments,
+            explicit_variadic: false,
+        },
+    )
+    .unwrap()
+    .unwrap();
+    assert!(matches!(
+        candidate.default_error,
+        Some(RoutineSignatureMatchError::InconsistentPolymorphicTypes { .. })
+    ));
+    assert_eq!(candidate.argument_signature, ["anyelement"]);
+    assert_eq!(candidate.argument_targets, ["anyelement"]);
+    assert_eq!(candidate.coercion_targets[0].column_type, None);
+
+    let varchar = match_types(&[parameter("varchar")], &arguments)
+        .unwrap()
+        .unwrap();
+    let mut ambiguous = vec![candidate.clone(), varchar];
+    assert!(rank_function_matches(&mut ambiguous, &arguments));
+    assert_eq!(ambiguous.len(), 2);
+    let text = match_types(&[parameter("text")], &arguments)
+        .unwrap()
+        .unwrap();
+    let mut exact = vec![candidate, text];
+    assert!(rank_function_matches(&mut exact, &arguments));
+    assert_eq!(exact.len(), 1);
+    assert_eq!(exact[0].declared_identity, ["text"]);
+    assert!(exact[0].default_error.is_none());
+}
+
+#[test]
+fn unknown_simple_default_keeps_an_unresolved_candidate_without_text_substitution() {
+    let parameters = [default_parameter("anyelement", None)];
+    let candidate = super::match_routine_candidate(
+        &parameters,
+        RoutineCallDescriptor {
+            argument_names: &[],
+            argument_types: &[],
+            explicit_variadic: false,
+        },
+    )
+    .unwrap()
+    .unwrap();
+    assert!(matches!(
+        candidate.default_error,
+        Some(RoutineSignatureMatchError::IndeterminatePolymorphicType {
+            family: RoutinePolymorphicFamily::Simple
+        })
+    ));
+    assert_eq!(candidate.parameter_types, ["anyelement"]);
+    assert_eq!(candidate.parameter_type_values, [None]);
+    assert_eq!(candidate.substitute_type("anyelement"), None);
+    assert_eq!(
+        match_types(&parameters, &[]).unwrap_err().sqlstate(),
+        "42804"
+    );
+
+    let compatible = match_types(&[default_parameter("anycompatible", None)], &[])
+        .unwrap()
+        .unwrap();
+    assert_eq!(compatible.parameter_types, ["text"]);
+}
+
+#[test]
+fn null_container_defaults_retain_pseudo_type_identity() {
+    let array = match_types(
+        &[default_parameter(
+            "anyarray",
+            Some(RoutineDefaultType::Polymorphic("anyarray".into())),
+        )],
+        &[],
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(array.parameter_types, ["anyarray"]);
+    assert_eq!(
+        array.substitute_type("anyarray"),
+        Some(ColumnType::AnyArray)
+    );
+    assert_eq!(array.substitute_type("anyelement"), None);
+    for name in [
+        "anyrange",
+        "anymultirange",
+        "anycompatiblearray",
+        "anycompatiblerange",
+        "anycompatiblemultirange",
+    ] {
+        assert_eq!(
+            match_types(
+                &[default_parameter(
+                    name,
+                    Some(RoutineDefaultType::Polymorphic(name.into()))
+                )],
+                &[]
+            )
+            .unwrap_err(),
+            RoutineSignatureMatchError::InvalidPolymorphicActual {
+                declared: name.into(),
+                actual: RoutineDefaultType::Polymorphic(name.into()),
+            }
+        );
+    }
+    assert_eq!(
+        match_types(
+            &[
+                parameter("anyelement"),
+                default_parameter(
+                    "anyarray",
+                    Some(RoutineDefaultType::Polymorphic("anyarray".into()))
+                )
+            ],
+            &[Some(ColumnType::Integer)]
+        )
+        .unwrap_err(),
+        RoutineSignatureMatchError::IndeterminateArrayElement
+    );
+}
+
+#[test]
+fn omitted_container_defaults_report_the_container_and_element_types() {
+    for (name, actual) in [
+        ("anyarray", ColumnType::Array(Box::new(ColumnType::Integer))),
+        ("anyrange", ColumnType::Range(RangeSubtype::Integer)),
+    ] {
+        let error = match_types(
+            &[
+                parameter("anyelement"),
+                default_parameter(name, Some(RoutineDefaultType::Concrete(actual.clone()))),
+            ],
+            &[Some(ColumnType::Text)],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            RoutineSignatureMatchError::InconsistentPolymorphicTypes {
+                first_declared: name.into(),
+                second_declared: "anyelement".into(),
+                first: Box::new(RoutineDefaultType::Concrete(actual)),
+                second: Box::new(RoutineDefaultType::Concrete(ColumnType::Text)),
+            }
+        );
+    }
+    assert_eq!(
+        match_types(
+            &[
+                parameter("anyrange"),
+                default_parameter(
+                    "anymultirange",
+                    Some(RoutineDefaultType::Concrete(ColumnType::Multirange(
+                        RangeSubtype::BigInteger
+                    )))
+                )
+            ],
+            &[Some(ColumnType::Range(RangeSubtype::Integer))]
+        )
+        .unwrap_err(),
+        RoutineSignatureMatchError::InconsistentPolymorphicTypes {
+            first_declared: "anymultirange".into(),
+            second_declared: "anyrange".into(),
+            first: Box::new(RoutineDefaultType::Concrete(ColumnType::Multirange(
+                RangeSubtype::BigInteger
+            ))),
+            second: Box::new(RoutineDefaultType::Concrete(ColumnType::Range(
+                RangeSubtype::Integer
+            ))),
+        }
+    );
+}
+
+#[test]
+fn compatible_defaults_do_not_promote_range_identity_or_mix_polymorphic_families() {
+    assert_eq!(
+        match_types(
+            &[
+                parameter("anycompatible"),
+                default_parameter(
+                    "anycompatiblerange",
+                    Some(RoutineDefaultType::Concrete(ColumnType::Range(
+                        RangeSubtype::Integer
+                    )))
+                )
+            ],
+            &[Some(ColumnType::BigInteger)]
+        )
+        .unwrap_err(),
+        RoutineSignatureMatchError::IncompatibleRangeSubtype {
+            declared: "anycompatiblerange".into(),
+            range: Box::new(ColumnType::Range(RangeSubtype::Integer)),
+            common: Box::new(ColumnType::BigInteger),
+        }
+    );
+    assert_eq!(
+        match_types(
+            &[
+                parameter("anyelement"),
+                parameter("anycompatible"),
+                default_parameter(
+                    "anycompatible",
+                    Some(RoutineDefaultType::Concrete(ColumnType::Text))
+                )
+            ],
+            &[Some(ColumnType::BigInteger), Some(ColumnType::Integer)]
+        )
+        .unwrap_err(),
+        RoutineSignatureMatchError::IncompatibleDefaultTypes {
+            first: Box::new(ColumnType::Integer),
+            second: Box::new(ColumnType::Text),
+        }
+    );
 }

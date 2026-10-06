@@ -43,13 +43,30 @@ pub fn bind_routine_definition_dependencies(
         });
         let mut plan = lowered.clone();
         let binding = context.catalog.binding_snapshot()?;
-        bind_expression_plan_routines_for_storage(
+        let default_type = bind_expression_plan_routines_for_storage(
             context.routines,
             &mut plan,
             &[],
             &binding.context(),
             &RowSchema::default(),
         )?;
+        let default_type =
+            if crate::type_resolution::routine_polymorphic_type(&parameter.type_name).is_some() {
+                default_type
+            } else {
+                Some(
+                    context
+                        .types
+                        .resolve_catalog_column_type_name(&parameter.type_name)?
+                        .without_type_modifiers(),
+                )
+            };
+        let default_type =
+            super::defaults::default_expression_type(&parameter.type_name, default, default_type);
+        if parameter.default_type != default_type {
+            parameter.default_type = default_type;
+            changed = true;
+        }
         let sites = expression_syntax_sites(&lowered, &plan)?;
         changed |= stored_ast::bind_stored_expression_sites(default, &sites)?;
         // A default is assigned to its parameter.

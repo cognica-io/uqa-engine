@@ -231,9 +231,11 @@ fn build_pg_proc_rows(
         let argument_defaults = input_params
             .iter()
             .filter(|_| with_defaults)
-            .filter_map(|parameter| parameter.default.as_ref())
-            .map(|default| {
-                super::view_definition::stored_expression_text(catalog, resolution, default)
+            .filter_map(|parameter| {
+                super::routine_definitions::routine_parameter_default_text(
+                    catalog, resolution, parameter,
+                )
+                .transpose()
             })
             .collect::<Result<Vec<_>, SQLError>>()?;
         let argument_defaults = if argument_defaults.is_empty() {

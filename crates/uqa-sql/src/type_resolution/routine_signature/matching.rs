@@ -6,7 +6,7 @@
 
 //! Coercion planning and ranked result construction for one routine candidate.
 
-use crate::ast::{ColumnType, RangeSubtype};
+use crate::ast::{ColumnType, RangeSubtype, RoutineDefaultType};
 
 use super::super::common::base_type;
 use super::super::overload_resolution::{
@@ -15,20 +15,35 @@ use super::super::overload_resolution::{
 };
 use super::mapping::{effective_declared_type, structural_mapping};
 use super::polymorphic::{
-    actual_accepts_polymorphic_target, collect_polymorphic_actual, range_subtype_for_scalar,
-    resolve_target,
+    actual_accepts_polymorphic_target, collect_polymorphic_actual, default_substitutions,
+    range_subtype_for_scalar, resolve_target,
 };
 use super::{
     routine_polymorphic_type, MatchedRoutineSignature, RoutineCallDescriptor,
-    RoutineParameterDescriptor, RoutinePolymorphicFamily, RoutineSignatureMatchError,
-    RoutineTypeSubstitutions, RoutineVariadicMode, RoutineVariadicPlan,
+    RoutineCoercionTarget, RoutineParameterDescriptor, RoutinePolymorphicFamily,
+    RoutineSignatureMatchError, RoutineTypeSubstitutions, RoutineVariadicMode, RoutineVariadicPlan,
 };
+
+/// Match one selected signature and require its defaults to have consistent types.
+pub fn match_routine_signature(
+    parameters: &[RoutineParameterDescriptor],
+    call: RoutineCallDescriptor<'_>,
+) -> Result<Option<MatchedRoutineSignature>, RoutineSignatureMatchError> {
+    let matched = match_routine_candidate(parameters, call)?;
+    if let Some(error) = matched
+        .as_ref()
+        .and_then(|matched| matched.default_error.clone())
+    {
+        return Err(error);
+    }
+    Ok(matched)
+}
 
 #[expect(
     clippy::too_many_lines,
     reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
 )]
-pub fn match_routine_signature(
+pub(crate) fn match_routine_candidate(
     parameters: &[RoutineParameterDescriptor],
     call: RoutineCallDescriptor<'_>,
 ) -> Result<Option<MatchedRoutineSignature>, RoutineSignatureMatchError> {
@@ -57,6 +72,7 @@ pub fn match_routine_signature(
         }
     }
 
+    let mut polymorphic_inputs = Vec::new();
     let mut simple_element: Option<ColumnType> = None;
     let mut simple_array: Option<ColumnType> = None;
     let mut simple_range_subtype: Option<RangeSubtype> = None;
@@ -72,6 +88,12 @@ pub fn match_routine_signature(
         let Some(polymorphic) = routine_polymorphic_type(&effective_declared) else {
             continue;
         };
+        polymorphic_inputs.push((
+            polymorphic,
+            call.argument_types[argument_index]
+                .clone()
+                .map(RoutineDefaultType::Concrete),
+        ));
         let Some(actual) = call.argument_types[argument_index].as_ref() else {
             continue;
         };
@@ -88,43 +110,58 @@ pub fn match_routine_signature(
         }
     }
 
-    if simple_used {
-        let Some(element) = simple_element else {
-            return Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
-                family: RoutinePolymorphicFamily::Simple,
-            });
-        };
-        substitutions.simple_array =
-            Some(simple_array.unwrap_or_else(|| ColumnType::Array(Box::new(element.clone()))));
-        substitutions.simple_element = Some(element);
-        if simple_range_used {
-            let Some(subtype) = simple_range_subtype else {
+    let mut default_error = None;
+    if mapping.defaulted_parameters.is_empty() {
+        if simple_used {
+            let Some(element) = simple_element else {
                 return Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
                     family: RoutinePolymorphicFamily::Simple,
                 });
             };
-            substitutions.simple_range = Some(ColumnType::Range(subtype));
-            substitutions.simple_multirange = Some(ColumnType::Multirange(subtype));
-        }
-    }
-    if compatible_used {
-        let element = compatible_element.unwrap_or(ColumnType::Text);
-        substitutions.compatible_array = Some(ColumnType::Array(Box::new(element.clone())));
-        if compatible_range_used {
-            if !compatible_range_seen {
-                return Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
-                    family: RoutinePolymorphicFamily::Compatible,
-                });
+            substitutions.simple_array =
+                Some(simple_array.unwrap_or_else(|| ColumnType::Array(Box::new(element.clone()))));
+            substitutions.simple_element = Some(element);
+            if simple_range_used {
+                let Some(subtype) = simple_range_subtype else {
+                    return Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
+                        family: RoutinePolymorphicFamily::Simple,
+                    });
+                };
+                substitutions.simple_range = Some(ColumnType::Range(subtype));
+                substitutions.simple_multirange = Some(ColumnType::Multirange(subtype));
             }
-            let Some(subtype) = range_subtype_for_scalar(&element) else {
-                return Ok(None);
-            };
-            substitutions.compatible_range = Some(ColumnType::Range(subtype));
-            substitutions.compatible_multirange = Some(ColumnType::Multirange(subtype));
         }
-        substitutions.compatible_element = Some(element);
+        if compatible_used {
+            let element = compatible_element.unwrap_or(ColumnType::Text);
+            substitutions.compatible_array = Some(ColumnType::Array(Box::new(element.clone())));
+            if compatible_range_used {
+                if !compatible_range_seen {
+                    return Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
+                        family: RoutinePolymorphicFamily::Compatible,
+                    });
+                }
+                let Some(subtype) = range_subtype_for_scalar(&element) else {
+                    return Ok(None);
+                };
+                substitutions.compatible_range = Some(ColumnType::Range(subtype));
+                substitutions.compatible_multirange = Some(ColumnType::Multirange(subtype));
+            }
+            substitutions.compatible_element = Some(element);
+        }
+    } else {
+        for &index in &mapping.defaulted_parameters {
+            let parameter = &parameters[index];
+            if let Some(polymorphic) = routine_polymorphic_type(&parameter.type_name) {
+                polymorphic_inputs.push((polymorphic, parameter.default_type.clone()));
+            }
+        }
+        match default_substitutions(&polymorphic_inputs) {
+            Ok(resolved) => substitutions = resolved,
+            Err(error) => default_error = Some(error),
+        }
     }
 
+    let mut argument_signature = Vec::with_capacity(call.argument_types.len());
     let mut argument_targets = Vec::with_capacity(call.argument_types.len());
     let mut coercion_targets = Vec::with_capacity(call.argument_types.len());
     let mut raw_exact_matches = 0usize;
@@ -137,6 +174,7 @@ pub fn match_routine_signature(
             Some(parameter_index) == mapping.variadic_index
                 && mapping.variadic_mode == RoutineVariadicMode::Pack,
         );
+        argument_signature.push(effective_declared.clone());
         let actual = call.argument_types[argument_index].as_ref();
         let declared = parameters[parameter_index].column_type.as_ref().map(|ty| {
             if Some(parameter_index) == mapping.variadic_index
@@ -153,7 +191,8 @@ pub fn match_routine_signature(
             declared.as_ref(),
             actual,
             &substitutions,
-        ) else {
+        )
+        .or_else(|| unresolved_candidate_target(&effective_declared, default_error.as_ref())) else {
             return Ok(None);
         };
         if routine_polymorphic_type(&effective_declared).is_none() {
@@ -178,7 +217,8 @@ pub fn match_routine_signature(
                 } else {
                     return Ok(None);
                 }
-            } else if !actual_accepts_polymorphic_target(actual, &target) {
+            } else if default_error.is_none() && !actual_accepts_polymorphic_target(actual, &target)
+            {
                 return Ok(None);
             }
         }
@@ -201,7 +241,8 @@ pub fn match_routine_signature(
             parameter.column_type.as_ref(),
             actual,
             &substitutions,
-        ) else {
+        )
+        .or_else(|| unresolved_candidate_target(&parameter.type_name, default_error.as_ref())) else {
             return Ok(None);
         };
         parameter_types.push(target.type_name);
@@ -237,6 +278,8 @@ pub fn match_routine_signature(
 
     Ok(Some(MatchedRoutineSignature {
         declared_identity,
+        argument_signature,
+        default_error,
         argument_targets,
         // Invocation re-resolves the source types, so user-defined types are recorded by OID identity rather than by a name the search path may not reach.
         argument_sources: call
@@ -256,4 +299,18 @@ pub fn match_routine_signature(
         exact_matches,
         preferred_matches,
     }))
+}
+
+/// A failed candidate carries only its declared identity, never a fabricated value
+/// type. Its error must be raised before this candidate can publish a binding.
+fn unresolved_candidate_target(
+    declared: &str,
+    error: Option<&RoutineSignatureMatchError>,
+) -> Option<RoutineCoercionTarget> {
+    (error.is_some() && routine_polymorphic_type(declared).is_some()).then(|| {
+        RoutineCoercionTarget {
+            type_name: canonical_routine_type_name(declared),
+            column_type: None,
+        }
+    })
 }

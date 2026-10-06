@@ -155,7 +155,12 @@ fn bind_domain_check(
             ));
         }
     } else if matches!(expression, Expr::Literal(Value::Null | Value::Str(_))) {
-        super::defaults::cook_unknown_literal(context, expression, &ColumnType::Boolean, false)?;
+        crate::catalog::stored_ast::read_unknown_stored_literal(
+            crate::FunctionTypeResolver::enum_labels(context.catalog),
+            expression,
+            &ColumnType::Boolean,
+            false,
+        )?;
     } else {
         *expression = Expr::Cast {
             expr: Box::new(expression.clone()),

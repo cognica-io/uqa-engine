@@ -7,6 +7,18 @@
 use super::*;
 use uqa_storage::SequenceOwnerDependency;
 
+const FOREIGN_SERVER_REFERENCE_FORMAT: &str = "foreign-table-server-reference-format";
+
+fn foreign_schema(catalog: &dyn uqa_storage::CatalogFacade, name: &str) -> String {
+    catalog
+        .load_foreign_tables()
+        .unwrap()
+        .into_iter()
+        .find(|table| table.relation.name == name)
+        .unwrap()
+        .columns_json
+}
+
 fn sqlstate(engine: &Engine, sql: &str) -> String {
     engine
         .sql(sql, &[])
@@ -448,11 +460,17 @@ fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
         .find(|table| table.relation.name == "migration_foreign_items")
         .unwrap();
     let mut schema: serde_json::Value = serde_json::from_str(&table.columns_json).unwrap();
-    assert_eq!(schema["version"], 1);
+    assert_eq!(schema["version"], 2);
+    let server_reference = schema["server_reference"].clone();
+    assert!(server_reference.is_object());
     let mut columns = schema["columns"].take();
     assert_eq!(remove_expression_function_bindings(&mut columns), 2);
     let legacy_schema = serde_json::to_string(&columns).unwrap();
     table.columns_json.clone_from(&legacy_schema);
+    // A legacy database predates both the reference field and its migration marker.
+    catalog
+        .delete_metadata(FOREIGN_SERVER_REFERENCE_FORMAT)
+        .unwrap();
     catalog.save_foreign_table(table).unwrap();
 
     let Err(error) = engine.new_session() else {
@@ -460,15 +478,13 @@ fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
     };
     assert!(error.to_string().contains("initial-open migration"));
     assert_eq!(
-        catalog
-            .load_foreign_tables()
-            .unwrap()
-            .into_iter()
-            .find(|table| table.relation.name == "migration_foreign_items")
-            .unwrap()
-            .columns_json,
+        foreign_schema(&catalog, "migration_foreign_items"),
         legacy_schema
     );
+    assert!(catalog
+        .get_metadata(FOREIGN_SERVER_REFERENCE_FORMAT)
+        .unwrap()
+        .is_none());
     let rules = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
     catalog.set_metadata("sql_rules_json", "{").unwrap();
     drop(catalog);
@@ -478,15 +494,13 @@ fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
     let catalog =
         crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     assert_eq!(
-        catalog
-            .load_foreign_tables()
-            .unwrap()
-            .into_iter()
-            .find(|table| table.relation.name == "migration_foreign_items")
-            .unwrap()
-            .columns_json,
+        foreign_schema(&catalog, "migration_foreign_items"),
         legacy_schema
     );
+    assert!(catalog
+        .get_metadata(FOREIGN_SERVER_REFERENCE_FORMAT)
+        .unwrap()
+        .is_none());
     catalog.set_metadata("sql_rules_json", &rules).unwrap();
     drop(catalog);
 
@@ -501,15 +515,14 @@ fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
     drop(reopened);
     let catalog =
         crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
-    let migrated = catalog
-        .load_foreign_tables()
-        .unwrap()
-        .into_iter()
-        .find(|table| table.relation.name == "migration_foreign_items")
-        .unwrap()
-        .columns_json;
+    let migrated = foreign_schema(&catalog, "migration_foreign_items");
     let migrated: serde_json::Value = serde_json::from_str(&migrated).unwrap();
-    assert_eq!(migrated["version"], 1);
+    assert_eq!(migrated["version"], 2);
+    assert_eq!(migrated["server_reference"], server_reference);
+    assert!(catalog
+        .get_metadata(FOREIGN_SERVER_REFERENCE_FORMAT)
+        .unwrap()
+        .is_some());
     assert!(migrated["columns"].to_string().contains("\"binding\""));
 }
 
@@ -834,6 +847,52 @@ fn foreign_table_owner_transfer_moves_owned_sequences_atomically() {
     );
 }
 
+fn legacy_generated_sequence_fixture(
+    catalog: &dyn uqa_storage::CatalogFacade,
+) -> (String, serde_json::Value) {
+    let mut table = catalog
+        .load_foreign_tables()
+        .unwrap()
+        .into_iter()
+        .find(|table| table.relation.name == "legacy_foreign_generated_items")
+        .unwrap();
+    let schema: serde_json::Value = serde_json::from_str(&table.columns_json).unwrap();
+    assert_eq!(schema["version"], 2);
+    let server_reference = schema["server_reference"].clone();
+    assert!(server_reference.is_object());
+    let mut columns: Vec<uqa_sql::ast::ColumnDef> =
+        serde_json::from_value(schema["columns"].clone()).unwrap();
+    for column in &mut columns {
+        column.object_id = None;
+        column.default = None;
+        let provenance = column.auto_increment.as_mut().unwrap();
+        provenance.sequence = None;
+        provenance.owner = None;
+    }
+    table.columns_json = serde_json::to_string(&columns).unwrap();
+    let legacy_schema = table.columns_json.clone();
+    catalog
+        .delete_metadata(FOREIGN_SERVER_REFERENCE_FORMAT)
+        .unwrap();
+    catalog.save_foreign_table(&table).unwrap();
+    let mut collision = catalog
+        .load_sequence_rows()
+        .unwrap()
+        .into_iter()
+        .find(|row| row.relation.name == "legacy_foreign_generated_items_serial_id_seq")
+        .unwrap();
+    assert!(catalog
+        .drop_sequence_row("public.legacy_foreign_generated_items_serial_id_seq")
+        .unwrap());
+    assert!(catalog
+        .drop_sequence_row("public.legacy_foreign_generated_items_identity_id_seq")
+        .unwrap());
+    collision.owner = None;
+    assert!(catalog.create_sequence_row(&collision).unwrap());
+    catalog.set_metadata("sql_rules_json", "{").unwrap();
+    (legacy_schema, server_reference)
+}
+
 #[test]
 fn legacy_foreign_generated_sequences_are_migrated_once() {
     use uqa_storage_sqlite::ManagedConnection;
@@ -853,40 +912,7 @@ fn legacy_foreign_generated_sequences_are_migrated_once() {
     }
     let catalog =
         crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
-    let mut table = catalog
-        .load_foreign_tables()
-        .unwrap()
-        .into_iter()
-        .find(|table| table.relation.name == "legacy_foreign_generated_items")
-        .unwrap();
-    let schema: serde_json::Value = serde_json::from_str(&table.columns_json).unwrap();
-    let mut columns: Vec<uqa_sql::ast::ColumnDef> =
-        serde_json::from_value(schema["columns"].clone()).unwrap();
-    for column in &mut columns {
-        column.object_id = None;
-        column.default = None;
-        let provenance = column.auto_increment.as_mut().unwrap();
-        provenance.sequence = None;
-        provenance.owner = None;
-    }
-    table.columns_json = serde_json::to_string(&columns).unwrap();
-    let legacy_schema = table.columns_json.clone();
-    catalog.save_foreign_table(&table).unwrap();
-    let mut collision = catalog
-        .load_sequence_rows()
-        .unwrap()
-        .into_iter()
-        .find(|row| row.relation.name == "legacy_foreign_generated_items_serial_id_seq")
-        .unwrap();
-    assert!(catalog
-        .drop_sequence_row("public.legacy_foreign_generated_items_serial_id_seq")
-        .unwrap());
-    assert!(catalog
-        .drop_sequence_row("public.legacy_foreign_generated_items_identity_id_seq")
-        .unwrap());
-    collision.owner = None;
-    assert!(catalog.create_sequence_row(&collision).unwrap());
-    catalog.set_metadata("sql_rules_json", "{").unwrap();
+    let (legacy_schema, server_reference) = legacy_generated_sequence_fixture(&catalog);
     drop(catalog);
 
     assert!(Engine::open(&database).is_err());
@@ -899,6 +925,10 @@ fn legacy_foreign_generated_sequences_are_migrated_once() {
         .find(|table| table.relation.name == "legacy_foreign_generated_items")
         .unwrap();
     assert_eq!(table.columns_json, legacy_schema);
+    assert!(catalog
+        .get_metadata(FOREIGN_SERVER_REFERENCE_FORMAT)
+        .unwrap()
+        .is_none());
     let sequence_names = catalog
         .load_sequence_rows()
         .unwrap()
@@ -921,6 +951,17 @@ fn legacy_foreign_generated_sequences_are_migrated_once() {
         Value::Bool(true)
     );
     drop(migrated);
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
+    let migrated_schema = foreign_schema(&catalog, "legacy_foreign_generated_items");
+    let schema: serde_json::Value = serde_json::from_str(&migrated_schema).unwrap();
+    assert_eq!(schema["version"], 2);
+    assert_eq!(schema["server_reference"], server_reference);
+    assert!(catalog
+        .get_metadata(FOREIGN_SERVER_REFERENCE_FORMAT)
+        .unwrap()
+        .is_some());
+    drop(catalog);
     let reopened = Engine::open(&database).unwrap();
     assert_eq!(
         scalar(
@@ -928,5 +969,12 @@ fn legacy_foreign_generated_sequences_are_migrated_once() {
             "SELECT pg_get_serial_sequence('legacy_foreign_generated_items', 'serial_id') IS NOT NULL AND pg_get_serial_sequence('legacy_foreign_generated_items', 'identity_id') IS NOT NULL AS v"
         ),
         Value::Bool(true)
+    );
+    drop(reopened);
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
+    assert_eq!(
+        foreign_schema(&catalog, "legacy_foreign_generated_items"),
+        migrated_schema
     );
 }

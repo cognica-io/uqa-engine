@@ -237,6 +237,7 @@ pub(super) fn compile_create_function(
             written_type: Some(attributes::written_type_name(arg_type)?),
             mode,
             default,
+            default_type: None,
         });
     }
 

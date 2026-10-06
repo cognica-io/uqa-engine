@@ -6,6 +6,8 @@
 
 //! Static `pg_type` and `pg_range` projection.
 
+mod polymorphic;
+
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, RangeSubtype};
 use uqa_sql::ResultRow;
@@ -158,6 +160,7 @@ fn build_pg_type_rows(
             )
         })
         .collect::<Vec<_>>();
+    types.extend(polymorphic::rows());
     for domain in super::super::schema::information_schema_domains() {
         let ColumnType::Domain { oid, base, .. } = &domain else {
             unreachable!("information schema type constructor returned a non-domain")

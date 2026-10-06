@@ -70,6 +70,7 @@ pub fn prepare_routine_replacement(
     current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    signature: &str,
 ) -> Result<(), SQLError> {
     if !def.or_replace {
         // `ProcedureCreate` names the existing routine by its unqualified name.
@@ -105,6 +106,7 @@ pub fn prepare_routine_replacement(
             message: "cannot change return type of existing function".into(),
         });
     }
+    validate_replacement_defaults(existing, def, signature)?;
     // CREATE OR REPLACE changes the definition but not object ownership or privileges.
     def.object_id = Some(existing.object_id.ok_or_else(|| {
         SQLError::Internal(format!(
@@ -116,6 +118,58 @@ pub fn prepare_routine_replacement(
     def.owner = existing.owner;
     def.execute_acl.clone_from(&existing.execute_acl);
     Ok(())
+}
+
+/// Existing default expressions keep their result type, as `ProcedureCreate` compares `exprType` after assignment coercion. Additional defaults may precede the existing suffix; type modifiers are not type identities.
+fn validate_replacement_defaults(
+    existing: &CreateFunction,
+    replacement: &CreateFunction,
+    signature: &str,
+) -> Result<(), SQLError> {
+    let defaults = |definition: &CreateFunction| {
+        definition
+            .params
+            .iter()
+            .filter(|parameter| parameter.default.is_some())
+            .map(|parameter| {
+                parameter.default_type.as_ref().map_or(705, |ty| match ty {
+                    crate::ast::RoutineDefaultType::Concrete(ty) => {
+                        crate::catalog::type_metadata::pg_type_oid(ty)
+                    }
+                    crate::ast::RoutineDefaultType::Polymorphic(name) => {
+                        crate::catalog::type_metadata::routine_type_oid(name)
+                    }
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let existing_defaults = defaults(existing);
+    let replacement_defaults = defaults(replacement);
+    let message = if replacement_defaults.len() < existing_defaults.len() {
+        "cannot remove parameter defaults from existing function"
+    } else if !existing_defaults
+        .iter()
+        .rev()
+        .zip(replacement_defaults.iter().rev())
+        .all(|(existing, replacement)| existing == replacement)
+    {
+        "cannot change data type of existing parameter default value"
+    } else {
+        return Ok(());
+    };
+    Err(SQLError::Diagnostic {
+        sqlstate: "42P13".into(),
+        message: message.into(),
+        detail: None,
+        hint: Some(format!(
+            "Use DROP {} {signature} first.",
+            if existing.is_procedure {
+                "PROCEDURE"
+            } else {
+                "FUNCTION"
+            }
+        )),
+    })
 }
 
 /// Apply the actions of `ALTER FUNCTION` to the routine `AlterFunction` found and whose ownership it checked, in its order: the actions in written order, which a procedure may not use for its function-only attributes and none may repeat; LEAKPROOF, which needs a superuser; COST; ROWS, positive and only for a set-returning routine; the SUPPORT function; and PARALLEL. The SET actions are left for the caller to apply last.
@@ -190,3 +244,6 @@ fn same_return_shape(a: &CreateFunction, b: &CreateFunction) -> bool {
     };
     same_kind && same_outputs
 }
+
+#[cfg(test)]
+mod tests;

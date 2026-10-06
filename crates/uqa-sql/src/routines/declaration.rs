@@ -28,9 +28,10 @@ pub trait RoutineTypeCatalog {
 
 /// Resolve the declared argument and result types, as `interpret_function_parameter_list` and `compute_return_type` do. Each argument in order requires `USAGE` on its type, a missing one named as written and unquoted; then no input may follow a VARIADIC argument, nor an output in a procedure, a VARIADIC argument must be an array, a name may not repeat within one direction, only inputs may have defaults, and after one every input needs one, as every procedure output does not. The result type follows, a missing one quoted.
 pub fn resolve_routine_type_references(
-    catalog: &dyn RoutineTypeCatalog,
+    context: &super::compilation::RoutineCompilationContext<'_>,
     def: &mut CreateFunction,
 ) -> Result<(), SQLError> {
+    let catalog = context.types;
     let mut have_defaults = false;
     let mut after_variadic = false;
     for index in 0..def.params.len() {
@@ -82,12 +83,14 @@ pub fn resolve_routine_type_references(
                 parameter.name
             )));
         }
-        if parameter.default.is_some() {
+        if let Some(default) = &mut parameter.default {
             if !input {
                 return Err(routine_definition_error(
                     "only input parameters can have default values",
                 ));
             }
+            parameter.default_type =
+                super::defaults::analyze_parameter_default(context, default, &parameter.type_name)?;
             have_defaults = true;
         } else if input && have_defaults {
             return Err(routine_definition_error(

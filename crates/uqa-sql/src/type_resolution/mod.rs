@@ -116,6 +116,7 @@ pub use overload_resolution::{
 #[doc(hidden)]
 pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
 #[doc(hidden)]
+pub(crate) use routine_signature::match_routine_candidate;
 pub use routine_signature::{
     match_routine_signature, routine_polymorphic_type, MatchedRoutineSignature,
     RoutineCallDescriptor, RoutineCoercionTarget, RoutineParameterDescriptor,

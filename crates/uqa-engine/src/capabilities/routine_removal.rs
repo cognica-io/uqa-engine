@@ -37,6 +37,15 @@ impl RoutineNameCatalog for Engine {
         )
         .map_or_else(|| type_name.to_string(), |ty| ty.display_name())
     }
+    fn routine_identity_display(&self, oid: u32) -> Result<String, SQLError> {
+        uqa_execution::catalog::projection::resolve_regtype_output(
+            &self.catalog_execution(),
+            &uqa_sql::ast::ColumnType::Regprocedure,
+            i64::from(oid),
+        )
+        .map_err(SQLError::Internal)?
+        .ok_or_else(|| SQLError::Internal(format!("routine OID {oid} has no catalog identity")))
+    }
 }
 
 use uqa_execution::routines::removal::context::{

@@ -68,6 +68,21 @@ pub(super) struct ParameterTypes<'a> {
 pub(super) struct InputConstants(BTreeMap<NonNull<ScalarExpr>, ScalarExpr>);
 
 impl InputConstants {
+    pub(super) fn apply_expression(mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
+        crate::plan::rewrite_scalar_expression(expression, &mut |node| {
+            if let Some(constant) = self.0.remove(&NonNull::from(&*node)) {
+                *node = constant;
+            }
+        });
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            Err(SQLError::Internal(
+                "default input constant did not belong to the analyzed expression".into(),
+            ))
+        }
+    }
+
     pub(super) fn apply(mut self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
         // Replacing leaves preserves every other node's address; the plan is neither cloned nor moved between analysis and this walk.
         plan.rewrite_scalar_expressions(&mut |expression| {

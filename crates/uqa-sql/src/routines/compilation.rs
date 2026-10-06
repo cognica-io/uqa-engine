@@ -36,7 +36,7 @@ use crate::{
 pub trait RoutineParserCatalog {
     fn plpgsql_catalog(&self) -> Result<PlpgsqlCatalog, SQLError>;
 }
-pub trait RoutineCompilationCatalog {
+pub trait RoutineCompilationCatalog: crate::schema::dependencies::oid_alias::OidAliasInput {
     fn has_registered_aggregate_function(&self, name: &str) -> bool;
     fn binding_snapshot(&self) -> Result<BindingSnapshot, SQLError>;
     fn stored_query_namespace(&self) -> StoredQueryNamespace;

@@ -509,23 +509,8 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
         .as_ref()
         .ok_or_else(|| SQLError::Internal("TypeCast without a target type".into()))?;
     let ty = compile_cast_type_name(type_name)?;
-    if matches!(
-        arg.node.as_ref(),
-        Some(NodeEnum::AConst(constant))
-            if matches!(
-                constant.val.as_ref(),
-                Some(pg_query::protobuf::a_const::Val::Sval(_))
-            )
-    ) {
-        let Expr::Literal(value) = &inner else {
-            return Err(SQLError::Internal(
-                "string constant did not compile to a literal".into(),
-            ));
-        };
-        if crate::ast::ColumnType::from_sql_name(&ty).is_ok() {
-            crate::expr::cast_value(value, &ty)?;
-        }
-    }
+    // Input conversion belongs to ordered semantic analysis, after the owning
+    // declaration's target, authority and preceding expressions are checked.
     Ok(Expr::Cast {
         expr: Box::new(inner),
         ty,

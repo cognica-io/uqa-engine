@@ -8,12 +8,13 @@
 
 use super::{error, Preparation, RowSchema, SQLError, ScalarExpr};
 use crate::ast::FunctionBinding;
-use crate::schema::SchemaExpressionCatalog;
+use crate::plan::AggregateClassifier;
 
 #[derive(Clone, Copy)]
 pub(super) enum SchemaExpressionKind {
     TypeTransform,
     DomainCheck,
+    RoutineDefault,
 }
 
 impl SchemaExpressionKind {
@@ -21,6 +22,7 @@ impl SchemaExpressionKind {
         match self {
             Self::TypeTransform => "transform expression",
             Self::DomainCheck => "check constraint",
+            Self::RoutineDefault => "DEFAULT expression",
         }
     }
 
@@ -28,13 +30,14 @@ impl SchemaExpressionKind {
         match self {
             Self::TypeTransform => "transform expressions",
             Self::DomainCheck => "check constraints",
+            Self::RoutineDefault => "DEFAULT expressions",
         }
     }
 }
 
 #[derive(Clone, Copy)]
 pub(super) struct SchemaExpressionContext<'a> {
-    pub(super) catalog: &'a dyn SchemaExpressionCatalog,
+    pub(super) aggregates: &'a dyn AggregateClassifier,
     pub(super) kind: SchemaExpressionKind,
 }
 
@@ -101,7 +104,7 @@ impl Preparation<'_> {
             .unwrap_or(false);
         if !scalar
             && (crate::semantics::is_builtin_aggregate_call(name, selected)
-                || context.catalog.is_registered_aggregate(name))
+                || context.aggregates.is_registered_aggregate(name))
         {
             return Err(error(
                 "42803",
@@ -112,8 +115,8 @@ impl Preparation<'_> {
             ));
         }
         if crate::semantics::sets::validation::function_may_return_set(
-            context.catalog,
-            context.catalog,
+            self.routines,
+            self.routines,
             name,
             selected,
             args,

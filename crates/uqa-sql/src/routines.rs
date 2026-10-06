@@ -12,6 +12,7 @@ pub mod body_validation;
 pub mod compilation;
 pub mod configuration;
 pub mod declaration;
+mod defaults;
 pub mod dependencies;
 pub mod lifecycle;
 pub mod merge_columns;
@@ -232,6 +233,7 @@ pub struct StaticFunctionMatch {
     pub exact_matches: usize,
     pub preferred_matches: usize,
     pub variadic_expansion: bool,
+    pub default_error: Option<crate::type_resolution::RoutineSignatureMatchError>,
 }
 
 impl StaticFunctionMatch {

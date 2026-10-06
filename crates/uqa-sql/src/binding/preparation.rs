@@ -120,11 +120,50 @@ fn analyze_schema_expression(
         routines: catalog,
         scope: SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::new(&[]),
-        schema_expression: Some(SchemaExpressionContext { catalog, kind }),
+        schema_expression: Some(SchemaExpressionContext {
+            aggregates: catalog,
+            kind,
+        }),
     };
     analysis
         .expression(&expression.scalar, input, &expression.subqueries)
         .map(|expression| expression.ty)
+}
+
+/// Analyze and freeze input literals in a routine DEFAULT with no parameter or
+/// row namespace. Expression restrictions apply in `PostgreSQL`'s traversal order.
+pub(crate) fn analyze_routine_default(
+    routines: &dyn RoutineResolution,
+    aggregates: &dyn crate::plan::AggregateClassifier,
+    aliases: &dyn OidAliasInput,
+    expression: &mut crate::plan::ExpressionPlan,
+    binding: &BindingContext<'_>,
+) -> Result<Option<ColumnType>, SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope: SchemaScope::for_analysis(binding)?,
+        parameters: ParameterTypes::with_input_constants(
+            &[],
+            Some(aliases),
+            routines.enum_labels(),
+        ),
+        schema_expression: Some(SchemaExpressionContext {
+            aggregates,
+            kind: SchemaExpressionKind::RoutineDefault,
+        }),
+    };
+    let ty = analysis
+        .expression(
+            &expression.scalar,
+            &RowSchema::default(),
+            &expression.subqueries,
+        )?
+        .ty;
+    analysis
+        .parameters
+        .take_input_constants()
+        .apply_expression(&mut expression.scalar)?;
+    Ok(ty)
 }
 
 struct Preparation<'a> {

@@ -13,12 +13,14 @@ use crate::{
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 mod expressions;
+mod literals;
 mod merge;
 mod routines;
 mod sites;
 mod sources;
 mod types;
 pub use expressions::*;
+pub use literals::read_unknown_stored_literal;
 pub use merge::visit_stored_statement_merges;
 pub use routines::*;
 pub use sites::*;

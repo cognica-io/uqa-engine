@@ -56,6 +56,17 @@ pub struct FunctionParam {
     /// `DEFAULT <expr>` for trailing input parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Expr>,
+    /// The analyzed default expression type, used when an omitted polymorphic input supplies call typing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_type: Option<RoutineDefaultType>,
+}
+
+/// The type of a stored routine default. Some NULL inputs retain a polymorphic
+/// pseudo-type without claiming that it is a concrete SQL value carrier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RoutineDefaultType {
+    Concrete(super::ColumnType),
+    Polymorphic(String),
 }
 
 /// Structured relation-column identity carried by a routine `%TYPE` declaration until catalog binding resolves it to a concrete SQL type.
