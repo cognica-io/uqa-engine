@@ -233,7 +233,7 @@ fn comparison_operator(operator: &str) -> Option<BinaryOp> {
     })
 }
 
-fn unknown_input(expression: &ScalarExpr) -> bool {
+pub(super) fn unknown_input(expression: &ScalarExpr) -> bool {
     matches!(
         expression,
         ScalarExpr::Literal(Value::Null | Value::Str(_)) | ScalarExpr::Param(_)

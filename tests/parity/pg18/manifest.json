@@ -146,7 +146,8 @@
       "aggregates.within-group-call-analysis",
       "expressions.stored-common-type-coercions",
       "expressions.stored-operator-coercions",
-      "types.multidimensional-array-input"
+      "types.multidimensional-array-input",
+      "expressions.array-concatenation-coercions"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -1351,6 +1352,14 @@
       "postgresql_reference": "PostgreSQL 18.4 independently captured in tests/parity/pg18/multidimensional_array_input_oracle.expected.json (10 Simple Query messages); array input and scalar element conversion",
       "uqa_test": "cargo test -p uqa-sql --lib multidimensional_casts_convert_scalar_leaves; cargo test -p uqa-engine --test integration multidimensional_array_input_matches_postgresql; cargo test -p uqa-engine --test integration array_types_coerce_elements_and_survive_engine_reopen",
       "supported_version": "Repeated declared array brackets select the scalar leaf type without enforcing the value rank. Assignments and casts preserve actual dimensions, explicit lower bounds, NULL elements, numeric modifiers, source conversions and empty arrays, and report the scalar input error for invalid leaves. All ten messages match memory, native SQLite, SQLite Key/Value and redb; persistent providers replay stored values after reopen. SQL owner tests verify bounded result ownership, failure cleanup and cancellation.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "expressions.array-concatenation-coercions",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured in tests/parity/pg18/array_concatenation_oracle.expected.json (35 Simple Query messages); array operator analysis, selected input conversions and stored definition output",
+      "uqa_test": "cargo test -p uqa-sql --lib type_resolution::functions::concat; cargo test -p uqa-engine --test integration array_concatenation_matches_postgresql",
+      "supported_version": "Array/array and array/scalar concatenation retain common element types and selected NULL roles. Numeric promotion, domains, legacy vectors, dimensions and lower bounds, unknown input and exact operator/input/dimension diagnostics match PostgreSQL. Stored views, generated columns and SQL-standard bodies preserve coercions, array-domain base conversions and operator labels through rename and reopen; volatile element-domain checks run exactly once per element. All 35 messages pass on memory, native SQLite, SQLite Key/Value and redb, with two replay messages per persistent provider. Controlled SQL owner checks cover cancellation, allocation failure, cleanup, serialization and rebinding.",
       "status": "verified",
       "open_issue": null
     }

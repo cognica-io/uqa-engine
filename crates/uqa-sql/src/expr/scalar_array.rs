@@ -153,9 +153,10 @@ fn append(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
         Value::Array(array) if array.dimensions().len() <= 1 => Some(array),
         Value::LegacyVector(vector) => Some(vector.as_array()),
         Value::Array(_) => {
-            return Err(SQLError::TypeMismatch(
-                "argument must be an empty or one-dimensional array".into(),
-            ))
+            return Err(SQLError::Routine {
+                sqlstate: "22000".into(),
+                message: "argument must be empty or one-dimensional array".into(),
+            })
         }
         Value::Null => None,
         other => return Err(not_an_array(name, other)),
@@ -395,7 +396,10 @@ fn concatenate(
         if left.dimensions().get(1..) != right.dimensions().get(1..)
             || left.lower_bounds().get(1..) != right.lower_bounds().get(1..)
         {
-            return Err(incompatible_array_concat());
+            return Err(incompatible_array_concat(Some(
+                "Arrays with differing element dimensions are not compatible for concatenation."
+                    .into(),
+            )));
         }
         copy_into(left.elements(), &mut elements, control)?;
         copy_into(right.elements(), &mut elements, control)?;
@@ -404,7 +408,9 @@ fn concatenate(
         if left.dimensions() != &right.dimensions()[1..]
             || left.lower_bounds() != &right.lower_bounds()[1..]
         {
-            return Err(incompatible_array_concat());
+            return Err(incompatible_array_concat(Some(
+                "Arrays with differing dimensions are not compatible for concatenation.".into(),
+            )));
         }
         elements.push_produced(list(copy_elements(left.elements(), control)?, control)?)?;
         copy_into(right.elements(), &mut elements, control)?;
@@ -413,13 +419,19 @@ fn concatenate(
         if &left.dimensions()[1..] != right.dimensions()
             || &left.lower_bounds()[1..] != right.lower_bounds()
         {
-            return Err(incompatible_array_concat());
+            return Err(incompatible_array_concat(Some(
+                "Arrays with differing dimensions are not compatible for concatenation.".into(),
+            )));
         }
         copy_into(left.elements(), &mut elements, control)?;
         elements.push_produced(list(copy_elements(right.elements(), control)?, control)?)?;
         left.lower_bounds()
     } else {
-        return Err(incompatible_array_concat());
+        return Err(incompatible_array_concat(Some(format!(
+            "Arrays of {} and {} dimensions are not compatible for concatenation.",
+            left.dimensions().len(),
+            right.dimensions().len(),
+        ))));
     };
     finish_array(
         ArrayValue::with_lower_bounds_with_control(
@@ -428,14 +440,16 @@ fn concatenate(
             control,
         )?,
         control,
-        incompatible_array_concat,
+        || incompatible_array_concat(None),
     )
 }
 
-fn incompatible_array_concat() -> SQLError {
-    SQLError::Routine {
+fn incompatible_array_concat(detail: Option<String>) -> SQLError {
+    SQLError::Diagnostic {
         sqlstate: "2202E".into(),
         message: "cannot concatenate incompatible arrays".into(),
+        detail,
+        hint: None,
     }
 }
 

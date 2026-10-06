@@ -11,8 +11,10 @@ use uqa_core::memory::{Produced, ProductionControl};
 use crate::{scalar_call_argument, schema::ScalarTypeSchema, ScalarExpr};
 
 use super::{fixed_builtin, scalar_type_inner, FunctionTypeResolver};
+mod concat;
 mod production;
 mod signatures;
+pub(super) use concat::{array_concat_argument, array_concat_types};
 pub(super) use production::builtin_function_type_with_control;
 
 #[derive(Clone, Copy)]
@@ -86,6 +88,23 @@ pub fn builtin_function_argument_targets(
             });
         }
         "concat_op" if targets.len() == 2 => {
+            if let Ok(Some((dispatch, array))) = array_concat_types(
+                targets[0].as_ref(),
+                targets[1].as_ref(),
+                &ProductionControl::uncontrolled(),
+            ) {
+                let ColumnType::Array(element) = &*array else {
+                    unreachable!("array concatenation result");
+                };
+                for (position, target) in targets.iter_mut().enumerate() {
+                    *target = Some(if array_concat_argument(dispatch, position) {
+                        (*array).clone()
+                    } else {
+                        (**element).clone()
+                    });
+                }
+                return targets;
+            }
             for position in 0..2 {
                 if targets[position].is_none() {
                     targets[position] = Some(concat_argument_type(targets[1 - position].as_ref()));

@@ -12,6 +12,21 @@ use crate::{plan::ExpressionPlan, RowSchema};
 struct Catalog;
 
 impl FunctionTypeResolver for Catalog {
+    fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+        let name = name.trim_matches('"');
+        let (element, oid) = match name {
+            "ints" => (ColumnType::Integer, 50_010),
+            "bigints" => (ColumnType::BigInteger, 50_011),
+            _ => return Ok(None),
+        };
+        Ok(Some(ColumnType::Domain {
+            schema: "public".into(),
+            name: name.into(),
+            oid,
+            array_oid: None,
+            base: Box::new(ColumnType::Array(Box::new(element))),
+        }))
+    }
     fn resolve_function_type(
         &self,
         _: &str,
@@ -94,5 +109,21 @@ fn stored_operators_preserve_explicit_cast_origin() {
         let mut stored = original.clone();
         assert!(!store_operand_coercions(&mut stored, &schema(), &[], &Catalog).unwrap());
         assert_eq!(stored, original, "{sql}");
+    }
+}
+
+#[test]
+fn array_domains_keep_only_required_base_conversions_and_bind_idempotently() {
+    for (sql, expected) in [
+        ("ARRAY[i]::ints", "ARRAY[i]::ints"),
+        ("ARRAY[i]::bigints", "(ARRAY[i]::bigint[])::bigints"),
+        ("ARRAY[]::ints", "(ARRAY[]::integer[])::ints"),
+    ] {
+        let mut stored = expression(sql);
+        store_operand_coercions(&mut stored, &schema(), &[], &Catalog).unwrap();
+        assert_eq!(stored, expression(expected), "{sql}");
+        let once = stored.clone();
+        assert!(!store_operand_coercions(&mut stored, &schema(), &[], &Catalog).unwrap());
+        assert_eq!(stored, once);
     }
 }

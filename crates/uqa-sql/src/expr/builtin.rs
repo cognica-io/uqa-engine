@@ -244,6 +244,9 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::JsonExtract { .. }
             | FunctionDispatch::Range { .. } => Some(true),
             FunctionDispatch::ArraySlices
+            | FunctionDispatch::ArrayConcat
+            | FunctionDispatch::ArrayAppend
+            | FunctionDispatch::ArrayPrepend
             | FunctionDispatch::Slice
             | FunctionDispatch::AnyOperator
             | FunctionDispatch::AllOperator
@@ -345,6 +348,17 @@ pub(super) fn eval_dispatched_builtin_with_control(
         }
         FunctionDispatch::ArraySortJson => {
             scalar_array::eval_dispatched_json_array_sort_with_control(evaluated, control)
+        }
+        FunctionDispatch::ArrayConcat
+        | FunctionDispatch::ArrayAppend
+        | FunctionDispatch::ArrayPrepend => {
+            let name = match dispatch {
+                FunctionDispatch::ArrayConcat => "array_cat",
+                FunctionDispatch::ArrayAppend => "array_append",
+                _ => "array_prepend",
+            };
+            scalar_array::eval_array_functions_with_control(name, evaluated, control)
+                .expect("registered array concatenation operation")
         }
         FunctionDispatch::Range {
             operation,

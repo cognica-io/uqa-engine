@@ -67,6 +67,9 @@ pub fn store_operand_coercions(
 
 /// What a transfer takes from the bound copy of a stored expression.
 trait Folding {
+    fn array_domain_input(&mut self, _: &mut ScalarExpr) -> Result<bool, SQLError> {
+        Ok(false)
+    }
     /// A stored `unknown` literal and what binding made of it.
     fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError>;
     /// The casts binding added around a node, outermost first, which the stored node may take over.
@@ -105,6 +108,37 @@ struct OperatorCoercions<'a> {
 }
 
 impl Folding for OperatorCoercions<'_> {
+    fn array_domain_input(&mut self, stored: &mut ScalarExpr) -> Result<bool, SQLError> {
+        if !matches!(stored, ScalarExpr::Cast { expr, .. } if matches!(**expr, ScalarExpr::Array(_)))
+        {
+            return Ok(false);
+        }
+        let Some(target @ ColumnType::Domain { .. }) =
+            super::scalar_type_with_resolver(stored, self.schema, self.params, self.resolver)?
+        else {
+            return Ok(false);
+        };
+        let base = super::common::base_type(&target);
+        if !matches!(base, ColumnType::Array(_)) {
+            return Ok(false);
+        }
+        let ScalarExpr::Cast { expr, .. } = stored else {
+            unreachable!()
+        };
+        let source =
+            super::scalar_type_with_resolver(expr, self.schema, self.params, self.resolver)?;
+        if source.as_ref() == Some(base) {
+            return Ok(false);
+        }
+        // A domain coercion wraps an array of its base type. Record a required base conversion separately, so reconstruction never invents casts of already compatible elements.
+        let inner = std::mem::replace(expr, Box::new(ScalarExpr::Literal(Value::Null)));
+        *expr = Box::new(ScalarExpr::Cast {
+            expr: inner,
+            ty: base.catalog_name(),
+            implicit: false,
+        });
+        Ok(true)
+    }
     fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError> {
         let ScalarExpr::TypedLiteral {
             value,
@@ -195,6 +229,7 @@ fn transfer(
         transfer_children(stored, bound, folding)?
     };
     changed |= folding.added_casts(stored, &added);
+    changed |= folding.array_domain_input(stored)?;
     Ok(changed)
 }
 

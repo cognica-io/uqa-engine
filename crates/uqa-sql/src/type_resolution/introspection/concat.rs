@@ -4,11 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! The `unknown` operand of `||` takes the type of the typed operand, as `oper_select_candidate` selects the operator: `bytea || bytea`, `jsonb || jsonb` and the array operators match the typed operand exactly where `anynonarray || text` and `text || anynonarray` do not, and every other operand type selects the `text` operand. The literal is read by the selected type's input function and stored as its constant.
+//! Retain `||` input conversions and its selected array operation before runtime values erase their declared types.
 
-use super::{Binder, BindingCall, SQLError};
+use super::{Binder, BindingCall, ColumnType, FunctionBinding, SQLError};
 use crate::type_resolution::{
-    common::local_routine_name, functions::concat_argument_type, is_unknown_literal,
+    common::local_routine_name,
+    functions::{array_concat_argument, array_concat_types, concat_argument_type},
+    is_unknown_literal,
 };
 
 impl Binder<'_, '_> {
@@ -24,6 +26,37 @@ impl Binder<'_, '_> {
         let [left, right] = call.arguments.as_mut_slice() else {
             return Ok(());
         };
+        let left_type = self.semantic(self.common_context(left))?.flatten();
+        let right_type = self.semantic(self.common_context(right))?.flatten();
+        // A schema-less column is a dynamic carrier, not an unknown SQL literal or parameter.
+        if (left_type.is_none() && !super::comparison::unknown_input(left))
+            || (right_type.is_none() && !super::comparison::unknown_input(right))
+        {
+            return Ok(());
+        }
+        if let Some((dispatch, array)) = self
+            .semantic(array_concat_types(
+                left_type.as_deref(),
+                right_type.as_deref(),
+                &self.control,
+            ))?
+            .flatten()
+        {
+            let ColumnType::Array(element) = &*array else {
+                unreachable!("array concatenation result");
+            };
+            for (position, operand) in [left, right].into_iter().enumerate() {
+                let target = if array_concat_argument(dispatch, position) {
+                    &*array
+                } else {
+                    element
+                };
+                self.operand_cast(operand, target)?;
+            }
+            let binding = FunctionBinding::dispatched_with_control(dispatch, &self.control)?;
+            call.binding = Some(self.retain(binding));
+            return Ok(());
+        }
         let (unknown, typed) = match (is_unknown_literal(left), is_unknown_literal(right)) {
             (true, false) => (left, right),
             (false, true) => (right, left),
