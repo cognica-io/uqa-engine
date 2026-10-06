@@ -57,6 +57,11 @@ impl QueryPlan {
                 {
                     visit(expression);
                 }
+                for window in &block.windows {
+                    for expression in window.spec.expressions() {
+                        visit(expression);
+                    }
+                }
                 for subquery in &block.subqueries {
                     subquery.visit_scalar_expressions(visit);
                 }

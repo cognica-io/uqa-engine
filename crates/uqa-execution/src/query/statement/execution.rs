@@ -343,6 +343,7 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
                     subqueries: subqueries.clone(),
                     access: AccessPathPlan::Row,
                     locking: Vec::new(),
+                    windows: Vec::new(),
                 };
                 let ordering_scope = ctes.enter_scalar_subqueries(subqueries);
                 let evaluator = context.source.relational.evaluator(params, &ordering_scope);

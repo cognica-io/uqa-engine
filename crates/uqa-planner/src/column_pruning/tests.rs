@@ -134,3 +134,26 @@ fn accelerated_count_prunes_only_consumed_filter_columns() {
         Some(BTreeSet::from(["quantity".into()]))
     );
 }
+
+#[test]
+fn unused_window_definition_keeps_its_required_source_columns() {
+    let catalog = fixture::Fixture::new();
+    let statement =
+        uqa_sql::compile("SELECT 1 FROM items WINDOW unused AS (ORDER BY sum(quantity))")
+            .unwrap()
+            .remove(0);
+    let UnifiedPlan::Query(query) = UnifiedPlan::lower(statement) else {
+        panic!("query required")
+    };
+    let RelationalPlan::QueryBlock(block) = query.root else {
+        panic!("query block required")
+    };
+    let mut projection =
+        column_prune_for_stmt(catalog.context(), &block, block.from.as_ref().unwrap())
+            .unwrap()
+            .unwrap();
+    assert_eq!(
+        projection.remove("items").unwrap().explicit_columns(),
+        Some(BTreeSet::from(["quantity".into()]))
+    );
+}

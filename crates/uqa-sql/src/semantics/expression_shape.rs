@@ -239,6 +239,7 @@ mod tests {
                 column: "amount".into(),
             }],
             spec: ScalarWindowSpec {
+                definition: None,
                 partition_by: Vec::new(),
                 order_by: Vec::new(),
                 frame: Some(ScalarWindowFrame {

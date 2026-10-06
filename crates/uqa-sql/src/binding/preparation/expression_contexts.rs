@@ -114,6 +114,17 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
+        self.window_definition(spec, input, subqueries, None)
+            .map(|_| ())
+    }
+
+    pub(super) fn window_definition(
+        &mut self,
+        spec: &crate::ScalarWindowSpec,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        inherited: Option<&(usize, Option<ColumnType>)>,
+    ) -> Result<(usize, Option<ColumnType>), SQLError> {
         let mut order_type = None;
         for item in &spec.order_by {
             let mut value = self.expression(&item.expr, input, subqueries)?;
@@ -128,10 +139,15 @@ impl Preparation<'_> {
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::Text)?;
         }
+        let (order_count, order_type) = if spec.order_by.is_empty() {
+            inherited.cloned().unwrap_or_default()
+        } else {
+            (spec.order_by.len(), order_type)
+        };
         if let Some(frame) = &spec.frame {
             // An untyped offset takes the type an `unknown` literal would: `bigint` for `ROWS` and `GROUPS`, and for `RANGE` the offset type of the ordering column's `in_range` support. A `RANGE` frame without exactly one ordering column is rejected when the query is analyzed.
             let target = match frame.mode {
-                crate::ast::FrameMode::Range if spec.order_by.len() == 1 => {
+                crate::ast::FrameMode::Range if order_count == 1 => {
                     Some(crate::range_frame_offset_type(order_type.as_ref(), None)?)
                 }
                 crate::ast::FrameMode::Range => None,
@@ -150,6 +166,6 @@ impl Preparation<'_> {
                 }
             }
         }
-        Ok(())
+        Ok((order_count, order_type))
     }
 }

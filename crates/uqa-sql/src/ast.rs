@@ -244,6 +244,9 @@ pub enum OnConflictAction {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SelectStmt {
+    /// Named declarations followed by deduplicated anonymous specifications, in analysis order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<WindowDefinition>,
     pub projections: Vec<Projection>,
     /// Rows owned by a `VALUES` query body. `PostgreSQL` represents `VALUES`
     /// through the same query node used for `SELECT`, so nested query bodies

@@ -31,6 +31,7 @@ mod routine_body;
 mod statements;
 mod subscripts;
 mod types;
+mod windows;
 pub use references::query_references;
 pub use rename::{rename_view_column_query, view_query_references_column};
 pub use routine_body::RoutineNamespace;
@@ -205,6 +206,7 @@ struct Scope {
     columns: Vec<Column>,
     outer: Vec<Column>,
     ctes: BTreeMap<String, Vec<String>>,
+    windows: Vec<windows::RenderedWindow>,
     indent: usize,
     nested: bool,
     qualify: bool,

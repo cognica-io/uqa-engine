@@ -102,6 +102,42 @@ fn column_types_charge_domain_names_and_every_boxed_base() {
 }
 
 #[test]
+fn window_call_retention_charges_the_boxed_specification() {
+    let name = spare_text("row_number", 128);
+    let expected = name.capacity() + size_of::<crate::ast::WindowSpec>();
+    let expression = Expr::WindowCall {
+        name,
+        args: Vec::new(),
+        spec: Box::new(crate::ast::WindowSpec {
+            raw_definition: None,
+            definition: None,
+            reference: None,
+            partition_by: Vec::new(),
+            order_by: Vec::new(),
+            frame: None,
+        }),
+        filter: None,
+        modifiers: crate::ast::WindowCallModifiers::default(),
+    };
+    let cancellation = CancellationToken::new();
+    let budget = MemoryBudget::new(expected);
+    let memory = expression
+        .reserve_column_payload(&budget, &cancellation)
+        .unwrap();
+    assert_eq!(memory.bytes(), expected);
+    assert_eq!(budget.used(), expected);
+    drop(memory);
+    assert_eq!(budget.used(), 0);
+
+    let budget = MemoryBudget::new(expected - 1);
+    assert!(matches!(
+        expression.reserve_column_payload(&budget, &cancellation),
+        Err(CatalogRetentionError::Memory(MemoryError::Limit { .. }))
+    ));
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn column_literals_reuse_core_value_ownership_including_spare_capacity() {
     let mut fields = Vec::with_capacity(9);
     fields.push((

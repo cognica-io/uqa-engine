@@ -37,11 +37,14 @@ impl QueryPlan {
         let ctes = lower_ctes(&statement.with, aggregates);
         statement.with.clear();
         let root = lower_relational_root(statement, aggregates);
-        Self {
+        let mut plan = Self {
             relations_bound: false,
             ctes,
             root,
-        }
+        };
+        plan.normalize_window_definitions()
+            .expect("compiler windows belong to their query block");
+        plan
     }
 }
 
@@ -247,6 +250,19 @@ impl QueryBlockPlan {
             .into_iter()
             .map(|projection| ProjectionPlan::lower_with(projection, aggregates, &mut subqueries))
             .collect();
+        let windows: Vec<_> = statement
+            .windows
+            .into_iter()
+            .map(|definition| crate::ast::WindowDefinition {
+                name: definition.name,
+                inherited: definition.inherited,
+                spec: super::scalar::lower_window_spec(
+                    definition.spec,
+                    aggregates,
+                    &mut subqueries,
+                ),
+            })
+            .collect();
         let is_aggregate =
             |name: &str| is_builtin_aggregate(name) || aggregates.is_registered_aggregate(name);
         let has_aggregate = !statement.group_by.is_empty()
@@ -254,7 +270,11 @@ impl QueryBlockPlan {
             || statement.having.is_some()
             || projections
                 .iter()
-                .any(|projection| projection.expr.contains_aggregate(&is_aggregate));
+                .any(|projection| projection.expr.contains_aggregate(&is_aggregate))
+            || windows
+                .iter()
+                .flat_map(|window| window.spec.expressions())
+                .any(|expression| expression.contains_aggregate(&is_aggregate));
         let has_window = projections
             .iter()
             .any(|projection| projection.expr.contains_window());
@@ -266,6 +286,7 @@ impl QueryBlockPlan {
             ComputePlan::Project
         };
         Self {
+            windows,
             projections,
             from: statement
                 .from
@@ -346,6 +367,11 @@ impl QueryBlockPlan {
             expressions.push(offset);
         }
         expressions.extend(&self.distinct_on);
+        expressions.extend(
+            self.windows
+                .iter()
+                .flat_map(|window| window.spec.expressions()),
+        );
         expressions
     }
 }

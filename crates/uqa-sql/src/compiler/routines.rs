@@ -461,6 +461,7 @@ pub(super) fn compile_sql_standard_body(node: &Node) -> Result<(Vec<Statement>, 
 /// `SELECT <expr>` statement wrapping a single expression.
 fn select_of_expr(expr: Expr) -> Statement {
     Statement::Select(Box::new(crate::ast::SelectStmt {
+        windows: Vec::new(),
         projections: vec![crate::ast::Projection { expr, alias: None }],
         values: Vec::new(),
         from: None,

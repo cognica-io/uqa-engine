@@ -236,7 +236,7 @@ fn compile_window_call(
     Ok(Expr::WindowCall {
         name,
         args,
-        spec,
+        spec: Box::new(spec),
         filter,
         modifiers: crate::ast::WindowCallModifiers {
             distinct: f.agg_distinct,
@@ -312,6 +312,8 @@ fn compile_window_spec_parts(
     }
     let frame = compile_window_frame(w)?;
     Ok(WindowSpec {
+        definition: None,
+        raw_definition: Some(super::window::raw_definition(w)),
         reference,
         partition_by,
         order_by,

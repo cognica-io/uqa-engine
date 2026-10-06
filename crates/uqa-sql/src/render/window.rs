@@ -7,10 +7,22 @@
 //! Window specifications as SQL: a referenced window, `PARTITION BY`, `ORDER BY` and the frame clause.
 
 use super::{expr_list, ident, order_by_sql, render_expr};
-use crate::ast::{FrameBound, FrameMode, WindowReferenceKind, WindowSpec};
+use crate::ast::{FrameBound, FrameMode, WindowDefinition, WindowReferenceKind, WindowSpec};
 use crate::SQLError;
 
-pub(super) fn window_sql(spec: &WindowSpec) -> Result<String, SQLError> {
+pub(super) fn window_sql(
+    spec: &WindowSpec,
+    windows: &[WindowDefinition],
+) -> Result<String, SQLError> {
+    if let Some(slot) = spec.definition.filter(|_| !windows.is_empty()) {
+        let definition = windows.get(slot).ok_or_else(|| {
+            SQLError::Internal("window call has no query-local definition".into())
+        })?;
+        return definition
+            .name
+            .as_ref()
+            .map_or_else(|| definition_sql(slot, windows), |name| Ok(ident(name)));
+    }
     if let Some(reference) = &spec.reference {
         if reference.kind == WindowReferenceKind::Direct
             && spec.partition_by.is_empty()
@@ -20,9 +32,56 @@ pub(super) fn window_sql(spec: &WindowSpec) -> Result<String, SQLError> {
             return Ok(ident(&reference.name));
         }
     }
+    specification_sql(
+        spec,
+        spec.reference
+            .as_ref()
+            .map(|reference| reference.name.as_str()),
+    )
+}
+
+pub(super) fn window_clause_sql(windows: &[WindowDefinition]) -> Result<String, SQLError> {
+    let declarations = windows
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, definition)| {
+            definition.name.as_ref().map(|name| {
+                Ok(format!(
+                    "{} AS {}",
+                    ident(name),
+                    definition_sql(slot, windows)?
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    Ok(if declarations.is_empty() {
+        String::new()
+    } else {
+        format!(" WINDOW {}", declarations.join(", "))
+    })
+}
+
+fn definition_sql(slot: usize, windows: &[WindowDefinition]) -> Result<String, SQLError> {
+    let definition = &windows[slot];
+    let inherited = definition
+        .inherited
+        .map(|parent| {
+            windows
+                .get(parent)
+                .filter(|_| parent < slot)
+                .and_then(|window| window.name.as_deref())
+                .ok_or_else(|| {
+                    SQLError::Internal("window inherits no preceding named definition".into())
+                })
+        })
+        .transpose()?;
+    specification_sql(&definition.spec, inherited)
+}
+
+fn specification_sql(spec: &WindowSpec, reference: Option<&str>) -> Result<String, SQLError> {
     let mut parts = Vec::new();
-    if let Some(reference) = &spec.reference {
-        parts.push(ident(&reference.name));
+    if let Some(reference) = reference {
+        parts.push(ident(reference));
     }
     if !spec.partition_by.is_empty() {
         parts.push(format!("PARTITION BY {}", expr_list(&spec.partition_by)?));

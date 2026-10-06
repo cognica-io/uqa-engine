@@ -149,7 +149,12 @@ fn collect_query_block_prune_columns(
         .chain(stmt.grouping_sets.iter().flatten())
         .chain(stmt.having.iter())
         .chain(stmt.order_by.iter().map(|order| &order.expr))
-        .chain(stmt.distinct_on.iter());
+        .chain(stmt.distinct_on.iter())
+        .chain(
+            stmt.windows
+                .iter()
+                .flat_map(|window| window.spec.expressions()),
+        );
     for expression in expressions {
         collect_expr_prune_columns(expression, scope, prune, valid);
     }

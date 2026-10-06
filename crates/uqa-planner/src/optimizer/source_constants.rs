@@ -67,6 +67,12 @@ pub(super) fn propagate_source_constants(block: &mut QueryBlockPlan) {
         .chain(block.limit.iter_mut())
         .chain(block.offset.iter_mut())
         .chain(&mut block.distinct_on)
+        .chain(
+            block
+                .windows
+                .iter_mut()
+                .flat_map(|window| window.spec.expressions_mut()),
+        )
     {
         rewrite(expression, &mut replace);
     }

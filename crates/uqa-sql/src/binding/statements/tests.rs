@@ -360,3 +360,43 @@ fn scalar_domains_and_explicit_text_do_not_call_array_input_during_analysis() {
     }
     assert_eq!(inputs.0.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
+
+#[test]
+fn canonical_window_inputs_are_owned_once_in_used_unused_and_subquery_definitions() {
+    for sql in [
+        "SELECT sum(id) OVER w,row_number() OVER w FROM items WINDOW w AS (ORDER BY '{1,2}'::positive[])",
+        "SELECT 1 WINDOW unused AS (ORDER BY '{1,2}'::positive[])",
+        "SELECT sum(id) OVER child,row_number() OVER base FROM items WINDOW base AS (ORDER BY '{1,2}'::positive[]), child AS (base ROWS CURRENT ROW)",
+        "SELECT sum(id) OVER w,row_number() OVER w FROM items WINDOW w AS (ORDER BY (SELECT '{1,2}'::positive[]))",
+        "CREATE VIEW kept AS SELECT sum(id) OVER w,row_number() OVER w FROM items WINDOW w AS (ORDER BY '{1,2}'::positive[])",
+    ] {
+        let inputs = DomainInputs(std::sync::atomic::AtomicUsize::new(0));
+        let scopes = Scopes::default();
+        let context = StatementAnalysisContext { scopes: &scopes, routines: &inputs, aliases: &NoRoutines };
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        analyze_executable_plan(&context, &mut plan, &[]).unwrap_or_else(|error|panic!("{sql}: {error}"));
+        assert_eq!(inputs.0.load(std::sync::atomic::Ordering::SeqCst),1,"{sql}");
+        analyze_executable_plan(&context, &mut plan, &[]).unwrap_or_else(|error|panic!("repeat {sql}: {error}"));
+        assert_eq!(inputs.0.load(std::sync::atomic::Ordering::SeqCst),1,"repeat {sql}");
+    }
+}
+
+#[test]
+fn unused_windows_participate_in_name_input_and_grouping_validation() {
+    for (sql, state) in [
+        ("SELECT 1 WINDOW w AS (ORDER BY 'bad'::integer)", "22P02"),
+        ("SELECT 1 WINDOW w AS (PARTITION BY missing)", "42703"),
+        (
+            "SELECT id FROM items WINDOW w AS (ORDER BY sum(id))",
+            "42803",
+        ),
+    ] {
+        let error = analyze(&Scopes::default(), sql).unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
+    }
+    analyze(
+        &Scopes::default(),
+        "SELECT 1 FROM items WINDOW w AS (ORDER BY sum(id))",
+    )
+    .unwrap();
+}

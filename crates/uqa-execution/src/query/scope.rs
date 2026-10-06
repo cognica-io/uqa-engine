@@ -182,6 +182,7 @@ mod tests {
             name: "sum".into(),
             args: vec![ScalarExpr::Column("amount".into())],
             spec: crate::ScalarWindowSpec {
+                definition: None,
                 partition_by: Vec::new(),
                 order_by: Vec::new(),
                 frame: Some(crate::ScalarWindowFrame {

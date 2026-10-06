@@ -181,22 +181,7 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             modifiers: *modifiers,
             name: name.clone(),
             args: bind_exprs(args, r)?,
-            spec: crate::ast::WindowSpec {
-                reference: spec.reference.clone(),
-                partition_by: bind_exprs(&spec.partition_by, r)?,
-                order_by: bind_order_by(&spec.order_by, r)?,
-                frame: spec
-                    .frame
-                    .as_ref()
-                    .map(|frame| -> Result<crate::ast::WindowFrame> {
-                        Ok(crate::ast::WindowFrame {
-                            start: bind_frame_bound(&frame.start, r)?,
-                            end: bind_frame_bound(&frame.end, r)?,
-                            ..frame.clone()
-                        })
-                    })
-                    .transpose()?,
-            },
+            spec: Box::new(bind_window_spec(spec, r)?),
             filter: match filter {
                 Some(f) => Some(Box::new(bind_expr(f, r)?)),
                 None => None,
@@ -366,9 +351,44 @@ pub(super) fn bind_rows(
     rows.iter().map(|row| bind_exprs(row, r)).collect()
 }
 
+fn bind_window_spec(
+    spec: &crate::ast::WindowSpec,
+    r: &mut dyn VariableResolver,
+) -> Result<crate::ast::WindowSpec> {
+    Ok(crate::ast::WindowSpec {
+        definition: spec.definition,
+        raw_definition: None,
+        reference: spec.reference.clone(),
+        partition_by: bind_exprs(&spec.partition_by, r)?,
+        order_by: bind_order_by(&spec.order_by, r)?,
+        frame: spec
+            .frame
+            .as_ref()
+            .map(|frame| -> Result<crate::ast::WindowFrame> {
+                Ok(crate::ast::WindowFrame {
+                    start: bind_frame_bound(&frame.start, r)?,
+                    end: bind_frame_bound(&frame.end, r)?,
+                    ..frame.clone()
+                })
+            })
+            .transpose()?,
+    })
+}
+
 /// Rewrite a `SELECT` body, substituting resolvable variables.
 pub fn bind_select(stmt: &SelectStmt, r: &mut dyn VariableResolver) -> Result<SelectStmt> {
     Ok(SelectStmt {
+        windows: stmt
+            .windows
+            .iter()
+            .map(|window| {
+                Ok(crate::ast::WindowDefinition {
+                    name: window.name.clone(),
+                    inherited: window.inherited,
+                    spec: bind_window_spec(&window.spec, r)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
         projections: bind_projections(&stmt.projections, r)?,
         values: bind_rows(&stmt.values, r)?,
         from: match stmt.from.as_ref() {

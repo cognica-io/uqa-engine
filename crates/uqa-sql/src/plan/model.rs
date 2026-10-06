@@ -157,6 +157,9 @@ pub enum RelationalPlan {
 /// into explicit parent/child nodes.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryBlockPlan {
+    /// The canonical owners of window inputs; calls keep resolved execution copies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<crate::ast::WindowDefinition<crate::ir::ScalarWindowSpec>>,
     pub projections: Vec<ProjectionPlan>,
     pub from: Option<SourcePlan>,
     pub r#where: Option<ScalarExpr>,

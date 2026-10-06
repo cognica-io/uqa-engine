@@ -45,24 +45,30 @@ impl Lowering<'_> {
         subqueries: &mut Vec<QueryPlan>,
     ) -> Result<ScalarWindowSpec> {
         self.check()?;
-        let (unresolved, partition_by, order_by, frame) = match source {
+        let (definition, unresolved, partition_by, order_by, frame) = match source {
             Source::Owned(WindowSpec {
+                definition,
+                raw_definition: _,
                 reference,
                 partition_by,
                 order_by,
                 frame,
             }) => (
+                definition,
                 reference.is_some(),
                 Items::Owned(partition_by.into_iter()),
                 Items::Owned(order_by.into_iter()),
                 frame.map(Source::Owned),
             ),
             Source::Borrowed(WindowSpec {
+                definition,
+                raw_definition: _,
                 reference,
                 partition_by,
                 order_by,
                 frame,
             }) => (
+                *definition,
                 reference.is_some(),
                 Items::Borrowed(partition_by.iter()),
                 Items::Borrowed(order_by.iter()),
@@ -74,6 +80,7 @@ impl Lowering<'_> {
             "named window reference must be resolved before unified-plan lowering"
         );
         Ok(ScalarWindowSpec {
+            definition,
             partition_by: self.map(partition_by, |this, expression| {
                 this.expression(expression, aggregates, subqueries)
             })?,

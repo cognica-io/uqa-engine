@@ -353,7 +353,7 @@ fn owned_window_call<'a>(window: Expr) -> Node<'a> {
     Node::WindowCall {
         name: Source::Owned(name),
         args: Items::Owned(args.into_iter()),
-        spec: Source::Owned(spec),
+        spec: Source::Owned(*spec),
         filter: filter.map(Source::Owned),
         modifiers,
     }

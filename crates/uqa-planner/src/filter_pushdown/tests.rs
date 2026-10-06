@@ -73,6 +73,7 @@ fn query_block(filter: ScalarExpr, from: SourcePlan) -> QueryBlockPlan {
         subqueries: Vec::new(),
         access: AccessPathPlan::Row,
         locking: Vec::new(),
+        windows: Vec::new(),
     }
 }
 

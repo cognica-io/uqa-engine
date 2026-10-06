@@ -325,9 +325,9 @@
     },
     {
       "id": "query.named-window",
-      "postgresql_reference": "PostgreSQL 18.4 live named WINDOW results and SQLSTATEs plus SELECT documentation",
-      "uqa_test": "cargo test -p uqa-sql --lib named_window; cargo test -p uqa-engine --test integration named_windows_share_and_extend_definitions; tests/parity/pg18/probes.sql",
-      "supported_version": "PostgreSQL 18.4 named window definitions, direct references, left-to-right partition and ordering inheritance, legal ordering and frame extension, and definition validation",
+      "postgresql_reference": "PostgreSQL 18.4 live named WINDOW results and SQLSTATEs; independently captured named_window_viewdef_oracle.expected.json (39 Simple Query messages); SELECT documentation",
+      "uqa_test": "cargo test -p uqa-sql --lib canonical_windows; cargo test -p uqa-sql --lib plan::windows; cargo test -p uqa-engine --test integration named_window; cargo test -p uqa-planner --test integration optimizer_rewrites; cargo test -p uqa-execution --lib window::tests; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 named definitions, direct references, left-to-right inheritance and extension, raw-syntax definition selection, WINDOW/OVER catalog output, shared and unused definition analysis, once-only input conversion and prepared execution. The 39-message independent reference matches memory, native SQLite, SQLite K/V and redb, with eighteen persistent-reopen observations and legacy expanded definitions checked across two reopenings.",
       "status": "verified",
       "open_issue": null
     },

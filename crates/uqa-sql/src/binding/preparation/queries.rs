@@ -190,6 +190,25 @@ impl Preparation<'_> {
     }
 
     fn query_windows(&mut self, block: &QueryBlockPlan, input: &RowSchema) -> Result<(), SQLError> {
+        let mut order_types = Vec::with_capacity(block.windows.len());
+        for (slot, window) in block.windows.iter().enumerate() {
+            let inherited = window
+                .inherited
+                .map(|parent| {
+                    order_types
+                        .get(parent)
+                        .filter(|_| parent < slot)
+                        .ok_or_else(|| {
+                            SQLError::Internal(
+                                "window inheritance is outside its query block".into(),
+                            )
+                        })
+                })
+                .transpose()?;
+            let order =
+                self.window_definition(&window.spec, input, &block.subqueries, inherited)?;
+            order_types.push(order);
+        }
         let mut result = Ok(());
         for expression in block
             .projections
@@ -200,7 +219,16 @@ impl Preparation<'_> {
             expression.visit(&mut |node| {
                 if result.is_ok() {
                     if let ScalarExpr::WindowCall { spec, .. } = node {
-                        result = self.window_specification(spec, input, &block.subqueries);
+                        if spec.definition.is_none() {
+                            result = self.window_specification(spec, input, &block.subqueries);
+                        } else if spec
+                            .definition
+                            .is_some_and(|slot| slot >= block.windows.len())
+                        {
+                            result = Err(SQLError::Internal(
+                                "window call is outside its query block".into(),
+                            ));
+                        }
                     }
                 }
             });

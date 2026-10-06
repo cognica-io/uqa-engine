@@ -233,6 +233,11 @@ where
         for expression in &mut select.distinct_on {
             self.bind_expr(expression, &visible)?;
         }
+        for window in &mut select.windows {
+            for expression in window.spec.expressions_mut() {
+                self.bind_expr(expression, &visible)?;
+            }
+        }
         if let Some(set) = &mut select.set_op {
             if let Some(left) = &mut set.left {
                 self.bind_select(left, &visible)?;

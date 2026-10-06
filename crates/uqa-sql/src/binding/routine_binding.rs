@@ -430,6 +430,20 @@ impl SchemaScope {
                         outer,
                     )?;
                 }
+                for expression in block
+                    .windows
+                    .iter_mut()
+                    .flat_map(|window| window.spec.expressions_mut())
+                {
+                    self.bind_scalar_routines_for_storage(
+                        routines,
+                        expression,
+                        &expression_schema,
+                        &block.subqueries,
+                        params,
+                        outer,
+                    )?;
+                }
             }
             RelationalPlan::SetOp {
                 order_by,

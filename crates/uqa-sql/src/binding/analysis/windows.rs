@@ -26,7 +26,21 @@ impl SchemaScope {
         block: &QueryBlockPlan,
         scope: &WindowFrameScope<'_>,
     ) -> Result<(), SQLError> {
-        let mut specs = Vec::new();
+        for expression in block
+            .windows
+            .iter()
+            .flat_map(|window| window.spec.expressions())
+        {
+            self.validate_expression_references(
+                engine,
+                expression,
+                scope.source,
+                None,
+                scope.subqueries,
+                scope.params,
+            )?;
+        }
+        let mut specs = crate::plan::windows::resolved_window_definitions(block)?;
         for expression in block
             .projections
             .iter()
@@ -35,7 +49,7 @@ impl SchemaScope {
         {
             expression.visit(&mut |part| {
                 if let ScalarExpr::WindowCall { spec, .. } = part {
-                    if spec.frame.is_some() {
+                    if spec.definition.is_none() && spec.frame.is_some() {
                         specs.push(spec.clone());
                     }
                 }
