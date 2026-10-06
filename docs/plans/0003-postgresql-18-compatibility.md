@@ -721,7 +721,7 @@ The verified unit in [PR #424](https://github.com/cognica-io/uqa-engine/pull/424
 - [x] Verify the focused owner tests and four-provider reference, including delayed validation, first-call state, replacement, rollback and durable reopening where relevant.
 - [x] Record the preservation argument and verified evidence; synchronize the manual, upgrade guide, HISTORY, plan index and inherited PR checklist. The merge and branch-cleanup record is maintained on PR #424.
 
-The user requested a pause after this unit is merged and its branch is cleaned up. The original checklist remains intact: SQL source-body input analysis and final return checking are complete, with 46 other work items still open. The five historical verification records from #396 are also preserved in the successor PR. Do not start another compatibility or extension unit before resumption.
+PR #424 merged as `70bbdcd6`; its local and remote branches and isolated worktree were removed, and the primary checkout returned to main. The user resumed work immediately after this unit. The original checklist remains intact: SQL source-body input analysis and final return checking are complete, with 46 other work items still open. The five historical verification records from #396 remain preserved in each successor PR.
 
 ### Preservation obligations
 
@@ -737,3 +737,19 @@ A returned anonymous row now carries $(v,D)$, where $v$ is the ordered field val
 The independently captured PostgreSQL 18.4 fixtures contain 83 input messages and 115 return-layout messages. All 23 SQL-body integration tests pass on memory, native SQLite, SQLite Key/Value and redb, including 19 input and 49 result observations replayed after durable reopen. They cover ordered diagnostics, CALL and DML input scopes, replacement and rollback, per-column assignment versus whole-record type identity, changing CASE/SETOF descriptors, NULL and empty records, and rejection before final-statement sequence effects. The related MERGE parameter regression is checked against PostgreSQL 18.4 and fixed in the same SQL-owned analysis path.
 
 All 1,235 SQL owner tests pass, as do 163 Core value tests, ten K/V retained-decoder tests, sixteen SQLite controlled-decoder tests, eight Execution routine tests, forty-one spill tests and four aggregate-memory tests. The existing Engine parameter suite (12), routine-identity suite (107), PL/pgSQL suite (104), table-function suite (35) and stored SQL-body catalog tests (2) pass. The manual harness compiles ordinary SQL fences and executes the marked executable fences. Strict Clippy covers the owning crates and native Python, Node.js, WASM, CLI and client targets with analyzer defaults disabled; this is binding compilation evidence, not packaged runtime qualification. Formatting, workspace dependencies, Engine capabilities, test harness registration, Rust file headers and line limits, and the unchanged 130-item/51-incomplete compatibility manifest pass. No performance claim or manually dispatched, rerun or cancelled CI is part of this unit.
+
+
+## Ordinary statement input analysis order
+
+This unit carries forward the unchecked PR #396 task requiring a statement's FROM relations to be resolved before its target-list reg* inputs. The SQL preparation analyzer already owns ordered relation, expression and unknown-input analysis for prepared definitions and source bodies. Ordinary execution must use that owner before optimization, preserving nested query, CTE and command analysis boundaries. Engine continues to provide retained catalog and session adapters; no runtime dependency or Cargo feature is added.
+
+- [ ] Capture independent PostgreSQL 18.4 diagnostic-order cases and reproduce the ordinary-statement discrepancy.
+- [ ] Reuse SQL-owned ordered input analysis at the ordinary statement boundary, keeping prepared input lifetime, runtime casts and stored definitions intact.
+- [ ] Verify owner regressions and the independent reference across memory, native SQLite, SQLite Key/Value and redb, including no effects from rejected statements.
+- [ ] Synchronize the public behavior, verification evidence and all inherited tasks; merge and remove the completed branch before starting another unit.
+
+### Preservation obligations
+
+For a statement $S$ and retained catalog scope $C$, let $A(S,C)$ visit each analysis node in PostgreSQL order and read unknown constants through the selected type's input function. The first failing node determines the diagnostic; no runtime expression or mutation is executed by $A$. Once $A$ accepts, the existing optimizer and execution operators receive the same statement and runtime parameters. Reading catalog inputs at analysis must not change prepared constants' retained lifetime, stored-object identity, or the time at which ordinary typed casts execute.
+
+This correction introduces no algebraic operator or new carrier. For every accepted statement with unchanged PostgreSQL behavior, its ordered result, types and effect trace remain identical; substituting those equal observations into existing relational, graph or ranked compositions preserves those compositions. Rejected statements execute no statement effects. Independent diagnostics and side-effect observations, together with SQL owner tests, must establish these premises before completion.
