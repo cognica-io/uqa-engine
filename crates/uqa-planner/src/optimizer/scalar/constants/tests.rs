@@ -7,17 +7,32 @@
 use super::*;
 
 fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
+    let selected = match name {
+        "lower" | "upper" | "replace" => uqa_sql::resolve_fixed_builtin_call(
+            name,
+            None,
+            &vec![None; args.len()],
+            &vec![Some(ColumnType::Text); args.len()],
+            false,
+            None,
+        )
+        .unwrap()
+        .map(|call| call.selected.binding),
+        _ => None,
+    };
     ScalarExpr::Func {
         order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: name.into(),
-        binding: Some(FunctionBinding {
-            name: name.into(),
-            argument_types: Vec::new(),
-            builtin: true,
-            object_id: None,
-            dispatch: None,
-            invocation: None,
-            resolution_error: None,
+        binding: selected.or_else(|| {
+            Some(FunctionBinding {
+                name: name.into(),
+                argument_types: Vec::new(),
+                builtin: true,
+                object_id: None,
+                dispatch: None,
+                invocation: None,
+                resolution_error: None,
+            })
         }),
         args,
         distinct: false,
@@ -130,5 +145,142 @@ fn constant_numeric_comparisons_match_postgresql_before_replacing_the_expression
                 );
             }
         }
+    }
+}
+
+#[derive(Debug)]
+struct DeniedBuiltin;
+impl uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution for DeniedBuiltin {
+    fn require_execute(&self, _: &FunctionBinding) -> Result<(), SQLError> {
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: "permission denied for function lower".into(),
+        })
+    }
+}
+
+#[test]
+fn constant_evaluation_checks_selected_permission_after_strict_null_simplification() {
+    let nonnull = bound_call(
+        "lower",
+        vec![ScalarExpr::Literal(Value::Str("HELLO".into()))],
+    );
+    let error = fold_authorized_literal(
+        nonnull,
+        |_| panic!("denied function ran"),
+        Some(&DeniedBuiltin),
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    let null = bound_call(
+        "lower",
+        vec![ScalarExpr::TypedLiteral {
+            value: Value::Null,
+            ty: "text".into(),
+            bound_type: Some(ColumnType::Text),
+            parameter_index: None,
+        }],
+    );
+    let output = fold_authorized_literal(
+        null,
+        |_| panic!("strict NULL function ran"),
+        Some(&DeniedBuiltin),
+    )
+    .unwrap();
+    assert_eq!(literal_value(&output), Some(&Value::Null));
+}
+
+#[test]
+fn eliminated_conditional_calls_do_not_require_execute_permission() {
+    let mut expression = ScalarExpr::Case {
+        base: None,
+        when: vec![(
+            ScalarExpr::Literal(Value::Bool(false)),
+            bound_call(
+                "lower",
+                vec![ScalarExpr::Literal(Value::Str("HELLO".into()))],
+            ),
+        )],
+        else_branch: Some(Box::new(ScalarExpr::Literal(Value::Str("ok".into())))),
+    };
+    let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    config.builtin_permissions = Some(std::sync::Arc::new(DeniedBuiltin));
+    crate::optimizer::optimize_scalar_expression(&mut expression, &config).unwrap();
+    assert_eq!(literal_value(&expression), Some(&Value::Str("ok".into())));
+}
+
+#[test]
+fn strict_null_simplification_does_not_evaluate_nonconstant_siblings() {
+    let mut expression = bound_call(
+        "replace",
+        vec![
+            ScalarExpr::TypedLiteral {
+                value: Value::Null,
+                ty: "text".into(),
+                bound_type: Some(ColumnType::Text),
+                parameter_index: None,
+            },
+            ScalarExpr::Column("v".into()),
+            ScalarExpr::Literal(Value::Str("x".into())),
+        ],
+    );
+    if let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &mut expression
+    {
+        binding.argument_types = vec!["text".into(); 3];
+    }
+    let folded = fold_authorized_literal(
+        expression,
+        |_| panic!("strict NULL evaluated a sibling"),
+        Some(&DeniedBuiltin),
+    )
+    .unwrap();
+    assert_eq!(literal_value(&folded), Some(&Value::Null));
+    assert_eq!(
+        scalar_type(&folded, &RowSchema::default(), &[]).unwrap(),
+        Some(ColumnType::Text)
+    );
+}
+
+#[test]
+fn unreachable_scalar_subqueries_keep_types_without_constant_evaluation() {
+    for (sql, denied) in [
+        (
+            "SELECT CASE WHEN false THEN (SELECT lower('HELLO')) ELSE 'ok' END",
+            false,
+        ),
+        ("VALUES (CASE WHEN false THEN (SELECT lower('HELLO')) ELSE 'ok' END)", false),
+        ("INSERT INTO target VALUES (CASE WHEN false THEN (SELECT lower('HELLO')) ELSE 'ok' END)", false),
+        ("UPDATE target SET value=CASE WHEN false THEN (SELECT lower('HELLO')) ELSE 'ok' END", false),
+        ("DELETE FROM target RETURNING CASE WHEN false THEN (SELECT lower('HELLO')) ELSE 'ok' END", false),
+        ("MERGE INTO target t USING source s ON t.id=s.id WHEN MATCHED THEN UPDATE SET value=CASE WHEN false THEN (SELECT lower('HELLO')) ELSE 'ok' END", false),
+        (
+            "SELECT CASE WHEN random() < 0 THEN (SELECT lower('HELLO')) ELSE 'ok' END",
+            true,
+        ),
+    ] {
+        let mut plan = crate::UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0));
+        plan.rewrite_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::Func { name, binding, .. } = expression {
+                if name == "lower" {
+                    *binding = uqa_sql::resolve_fixed_builtin_call(
+                        name,
+                        None,
+                        &[None],
+                        &[Some(ColumnType::Text)],
+                        false,
+                        None,
+                    )
+                    .unwrap()
+                    .map(|call| call.selected.binding);
+                }
+            }
+        });
+        let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        config.builtin_permissions = Some(std::sync::Arc::new(DeniedBuiltin));
+        let result = crate::optimizer::optimize(plan, &config);
+        assert_eq!(result.is_err(), denied, "{sql}: {result:?}");
     }
 }

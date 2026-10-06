@@ -41,31 +41,11 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<SQLResult, SQLError> {
-    let privilege_subject = stmt
-        .target_privilege_subject
-        .clone()
-        .unwrap_or_else(|| context.mutation.privileges.current_role());
-    context.mutation.privileges.ensure_table_privilege_for(
-        &stmt.table,
-        &privilege_subject,
-        uqa_sql::catalog::security::table::TableAclPrivilege::Delete,
-    )?;
-    let privilege_expressions = stmt
-        .predicate
-        .iter()
-        .chain(stmt.returning.iter().map(|projection| &projection.expr))
-        .collect::<Vec<_>>();
-    context.mutation.privileges.ensure_target_select(
-        uqa_sql::semantics::privileges::TargetSelectPrivilegeRequest {
-            table: &stmt.table,
-            privilege_subject: stmt.target_privilege_subject.as_ref(),
-            target_qualifier: &stmt.target_qualifier,
-            returning_aliases: &stmt.returning_aliases,
-            expressions: &privilege_expressions,
-            subqueries: &stmt.subqueries,
-            required_columns: &[],
-        },
-    )?;
+    let privilege_expressions =
+        uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges(
+            context.mutation.privileges,
+            stmt,
+        )?;
     let (statement_commands, _running_statement) =
         statement_end::statement_commands(inherited_ctes);
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
@@ -116,6 +96,9 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
         && !delete_rules
             .iter()
             .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    if delete_original_query {
+        crate::mutation::routine_calls::delete(context, stmt, params, inherited_ctes)?;
+    }
     let has_before_statement_trigger = delete_original_query
         && !context
             .mutation

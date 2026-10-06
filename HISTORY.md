@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Support mutable EXECUTE privileges for builtin catalog routines, including schema-wide targets, aggregate/window identities, grant dependencies, transaction rollback and persistent reopening. Retain analyzed function identities through constant planning, preserve column authorization when pruning unused outputs, and check surviving calls before row production or argument side effects.
+
 - Implement PostgreSQL domain constraint addition, removal and validation, including NOT VALID checks, dependent stored values, catalog identities and transactional restoration across all storage providers.
 - Support PostgreSQL 18 configuration definitions, custom parameter placeholders, `set_config`, `SHOW ALL`, `client_min_messages` and startup values restored by `RESET`.
 - Implement `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `idle_session_timeout`, `transaction_timeout`, and the `pg_sleep` functions. Report the cancellation reason and preserve permanent session termination through `Engine::session_termination`.
@@ -31,6 +33,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Apply GRANT and REVOKE across user-defined functions and procedures in named schemas with PostgreSQL target order, namespace privileges, atomic ACL publication and durable identities. Correct the permission error for a grant attempted without EXECUTE or grant-option authority, including NOINHERIT role membership.
 - Honor PostgreSQL string scanner settings at SQL-message boundaries, including legacy backslash escapes, prepared literals and routine-local settings during compilation and dynamic SQL execution. Preserve original parser SQLSTATE, DETAIL, HINT and warnings, including warnings before errors and current notice filtering on cache hits. Ordinary statement caches reanalyze session-dependent input values while preserving reusable immutable inputs and PREPARE's separate lifetime.
 - Preserve the separate integer `generate_series` signatures and selected result type in stored SQL bodies, views and `ROWS FROM`. Correct legacy two-argument builtin bindings before catalog restoration, preserving user identities and later search-path shadows. Expose the four implemented overloads and their planner support metadata in `pg_proc`.
 - Restore `pg_get_function_sqlbody` output for built-in SQL routines from their existing typed catalog bodies. Preserve selected routine identities when reconstructing SQL bodies, views, defaults and generated expressions under search-path shadows.

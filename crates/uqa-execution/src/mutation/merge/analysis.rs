@@ -37,7 +37,7 @@ pub fn merge_analysis_scope<S: Clone>(
     Ok(scope)
 }
 
-pub(super) fn ensure_merge_privileges<S: Clone + 'static>(
+pub(in crate::mutation) fn ensure_merge_privileges<S: Clone + 'static>(
     mutation: &MutationExecutionContext<'_, S>,
     stmt: &MergePlan,
     inherited: Option<&CteScope<S>>,

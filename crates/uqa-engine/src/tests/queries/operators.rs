@@ -31,6 +31,7 @@ fn bound_projection_order_and_limit_build_with_explicit_runtime_view() {
         uqa_execution::scan::TableScan::from_physical_rows(schema, rows),
     );
     let statement = QueryBlockPlan {
+        privilege_columns: std::collections::BTreeSet::default(),
         projections: vec![ProjectionPlan {
             expr: ScalarExpr::Column("id".into()),
             alias: None,

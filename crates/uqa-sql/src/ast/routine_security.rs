@@ -149,6 +149,14 @@ pub enum RoutineRevokeBehavior {
     Cascade,
 }
 
+/// A routine privilege clause is retained until target and recipient lookup finish.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RoutinePrivilege {
+    Execute,
+    Unsupported(String),
+    ColumnsUnsupported,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantRoutineStmt {
     pub kind: AlterRoutineKind,
@@ -156,6 +164,12 @@ pub struct GrantRoutineStmt {
     pub grant_option: bool,
     pub grant_option_only: bool,
     pub items: Vec<GrantRoutineItem>,
+    /// `ALL ... IN SCHEMA`, in written order. Legacy statements omit this and keep explicit `items`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schemas: Option<Vec<String>>,
+    /// Empty means `ALL PRIVILEGES`, also the legacy representation of `EXECUTE`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub privileges: Vec<RoutinePrivilege>,
     pub grantees: Vec<AclRoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grantor: Option<RoleSpecification>,

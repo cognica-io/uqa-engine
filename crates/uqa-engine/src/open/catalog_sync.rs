@@ -254,6 +254,14 @@ impl Engine {
             snapshot.sql_user_functions,
             &snapshot.roles,
         )?;
+        snapshot.builtin_routine_security = Arc::new(
+            uqa_execution::catalog::security::builtin_routines::merge_private(
+                self.storage.catalog.as_deref(),
+                &current.builtin_routine_security,
+                (*snapshot.builtin_routine_security).clone(),
+                &snapshot.roles,
+            )?,
+        );
         snapshot.system_relation_security = Arc::new(system_relations::merge_private(
             self.storage.catalog.as_deref(),
             &current.system_relation_security,
@@ -768,6 +776,7 @@ impl Engine {
         self.durable.foreign_servers.write().clear();
         self.durable.foreign_tables.write().clear();
         self.durable.foreign_table_security.write().clear();
+        self.durable.builtin_routine_security.write().clear();
         self.durable.system_relation_security.write().clear();
         self.durable.sql_user_functions.write().clear();
         self.durable.models.write().clear();

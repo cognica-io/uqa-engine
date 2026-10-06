@@ -183,9 +183,20 @@ impl MutationCoordinator<'_> {
     }
 
     pub(crate) fn note_catalog_registry_changed(&self) {
-        uqa_execution::statement::prepared::invalidation::invalidate_execution_plans(
-            self.session.prepared.write().values_mut(),
+        self.note_catalog_registry_change(
+            uqa_execution::statement::prepared::invalidation::CatalogRegistryChange::Definitions,
         );
+    }
+
+    pub(crate) fn note_catalog_registry_change(
+        &self,
+        change: uqa_execution::statement::prepared::invalidation::CatalogRegistryChange,
+    ) {
+        change.invalidate(self.session.prepared.write().values_mut());
+        // Ordinary messages must plan again under the newly published ACL.
+        if change == uqa_execution::statement::prepared::invalidation::CatalogRegistryChange::BuiltinRoutinePrivileges {
+            self.session.state.write().sql_statement_cache.clear();
+        }
         self.runtime.regtype_output_cache.clear();
         self.runtime.bayesian_params_cache.write().clear();
         if !self.session.transactions.lock().is_empty() {
@@ -303,6 +314,7 @@ impl Engine {
                 graph_catalog_oids: durable.graph_catalog_oids.clone(),
                 sequence_security: durable.sequence_security.clone(),
                 foreign_table_security: durable.foreign_table_security.clone(),
+                builtin_routine_security: durable.builtin_routine_security.clone(),
                 system_relation_security: durable.system_relation_security.clone(),
                 roles: durable.roles.clone(),
                 triggers: durable.triggers.clone(),

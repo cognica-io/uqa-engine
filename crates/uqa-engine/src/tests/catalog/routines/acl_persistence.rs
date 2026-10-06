@@ -99,7 +99,7 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
             .unwrap()
             .unwrap();
         let mut catalog: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(catalog["routine_catalog_format"], 2);
+        assert_eq!(catalog["routine_catalog_format"], 3);
         let original_owner = first.durable.roles.read()["acl_owner"].identity();
         let mut legacy = catalog["definitions"].take();
         for overloads in legacy.as_object_mut().unwrap().values_mut() {
@@ -152,7 +152,7 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(stored["routine_catalog_format"], 2);
+        assert_eq!(stored["routine_catalog_format"], 3);
         let definition = stored["definitions"]
             .as_object()
             .unwrap()

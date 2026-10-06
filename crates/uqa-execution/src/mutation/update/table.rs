@@ -123,6 +123,9 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
         && !update_rules
             .iter()
             .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    if update_original_query {
+        crate::mutation::routine_calls::update(context, stmt, params, inherited_ctes)?;
+    }
     let evaluate_view_assignments = view_original_query
         || uqa_sql::semantics::rules::analysis::surviving_view_rules_reference_row(
             context.mutation.rules.rules.analysis,

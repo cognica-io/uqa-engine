@@ -170,4 +170,12 @@ impl uqa_execution::statement::context::StatementMutationInputs<StatementReadSna
     ) -> uqa_execution::mutation::entry::MutationEntryContext<'_, StatementReadSnapshot> {
         self.mutation_entry_context()
     }
+    fn mutation_initialization_context(
+        &self,
+    ) -> uqa_execution::mutation::statement::context::MutationStatementContext<
+        '_,
+        StatementReadSnapshot,
+    > {
+        self.mutation_statement_context()
+    }
 }

@@ -386,6 +386,7 @@ mod grouping;
 mod notifications;
 mod query_features;
 mod relations;
+mod routine_grants;
 mod routines;
 mod row_locking;
 mod schema_definitions;

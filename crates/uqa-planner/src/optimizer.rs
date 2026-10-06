@@ -25,6 +25,7 @@ use crate::{
 mod access_path;
 mod api;
 mod command;
+mod derived_projection;
 mod implicit_fusion;
 mod join_reorder;
 mod scalar;

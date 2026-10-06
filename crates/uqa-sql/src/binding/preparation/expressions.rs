@@ -367,6 +367,10 @@ impl Preparation<'_> {
             Some(selected) => Some(selected.return_type.clone()),
             None => self.known_type(expression, input, subqueries)?,
         };
+        if let Some(selected) = &selected {
+            self.parameters
+                .retain_fixed_builtin(expression, &selected.binding);
+        }
         self.check_schema_function(
             expression,
             selected

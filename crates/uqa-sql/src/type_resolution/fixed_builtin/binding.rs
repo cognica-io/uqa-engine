@@ -54,6 +54,12 @@ pub(in crate::type_resolution) fn bind_call_in_place_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     call::check_memory(memory.as_ref(), control)?;
+    if matches!(
+        call.binding.as_ref().and_then(|b| b.dispatch),
+        Some(crate::ast::FunctionDispatch::Range { .. })
+    ) {
+        return Ok(());
+    }
     let Some((registered, _)) = registry::lookup(&call.name) else {
         return Ok(());
     };

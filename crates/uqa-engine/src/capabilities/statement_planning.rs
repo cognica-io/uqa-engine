@@ -160,6 +160,12 @@ impl Engine {
     }
 }
 impl uqa_planner::statement_planning::executable::StatementOptimizationContexts for Engine {
+    fn builtin_permissions(
+        &self,
+    ) -> Option<Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>>
+    {
+        Some(Arc::new(uqa_execution::catalog::security::builtin_routines::execution::BuiltinRoutinePermissions::capture(&self.catalog_execution())))
+    }
     fn statistics(&self) -> StatementStatisticsContext<'_> {
         self.statement_statistics_context()
     }

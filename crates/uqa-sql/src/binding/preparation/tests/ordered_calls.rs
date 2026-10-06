@@ -98,3 +98,28 @@ fn legacy_ordered_set_identity_requires_initial_catalog_binding() {
         );
     }
 }
+
+#[test]
+fn analyzed_fixed_calls_retain_their_declaration_before_optimization() {
+    for sql in [
+        "SELECT lower('HELLO') WHERE false",
+        "SELECT lower(id::text) FROM assignment_target",
+        "SELECT 1 FROM assignment_target WINDOW unused AS (ORDER BY lower(id::text))",
+        "UPDATE assignment_target SET id=id RETURNING lower(id::text)",
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        read_prepared_inputs(&NoRoutines, &mut plan, &[], &assignment_context(), None).unwrap();
+        let mut observed = false;
+        plan.visit_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::Func { name, binding, .. } = expression {
+                if name == "lower" {
+                    let binding = binding.as_ref().expect("analyzed fixed declaration");
+                    assert_eq!(binding.name, "pg_catalog.lower");
+                    assert_eq!(binding.argument_types, ["text"]);
+                    observed = true;
+                }
+            }
+        });
+        assert!(observed, "{sql}");
+    }
+}

@@ -42,6 +42,10 @@ pub struct OptimizerConfig {
     pub enable_join_reordering: bool,
     /// Shared scalar execution supplied by the engine composition boundary.
     pub constant_evaluator: ConstantEvaluator,
+    /// Retained selected-call authority for immutable evaluation. An absent catalog has no mutable routine ACLs.
+    pub builtin_permissions: Option<
+        std::sync::Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
+    >,
 }
 
 impl OptimizerConfig {
@@ -53,6 +57,7 @@ impl OptimizerConfig {
             enable_vector_threshold_merge: true,
             enable_join_reordering: true,
             constant_evaluator,
+            builtin_permissions: None,
         }
     }
 }

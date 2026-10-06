@@ -114,6 +114,12 @@ impl NamespaceCatalogChanges for MutationCoordinator<'_> {
     fn catalog_registry_changed(&self) {
         self.note_catalog_registry_changed();
     }
+    fn catalog_registry_changed_kind(
+        &self,
+        change: uqa_execution::statement::prepared::invalidation::CatalogRegistryChange,
+    ) {
+        self.note_catalog_registry_change(change);
+    }
 }
 impl NamespaceCatalogChanges for Engine {
     fn prepared_catalog_changed(
@@ -124,6 +130,13 @@ impl NamespaceCatalogChanges for Engine {
     }
     fn catalog_registry_changed(&self) {
         self.note_catalog_registry_changed();
+    }
+    fn catalog_registry_changed_kind(
+        &self,
+        change: uqa_execution::statement::prepared::invalidation::CatalogRegistryChange,
+    ) {
+        self.mutation_coordinator()
+            .note_catalog_registry_change(change);
     }
 }
 impl SchemaRegistration for Engine {

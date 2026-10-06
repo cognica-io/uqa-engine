@@ -11,7 +11,7 @@ fn unknown_or_malformed_routine_formats_are_not_treated_as_legacy() {
     let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
     for json in [
         r#"{"routine_catalog_format":0,"definitions":{}}"#,
-        r#"{"routine_catalog_format":3,"definitions":{}}"#,
+        r#"{"routine_catalog_format":4,"definitions":{}}"#,
         r#"{"routine_catalog_format":2}"#,
         r#"{"routine_catalog_format":null,"definitions":{}}"#,
     ] {
@@ -161,4 +161,26 @@ fn malformed_current_authority_never_falls_back_to_a_name_or_default_acl() {
             );
         }
     }
+}
+
+#[test]
+fn former_routine_format_requires_initial_open_before_builtin_acl_capability() {
+    let (definitions, roles) = fixture();
+    let mut old: serde_json::Value =
+        serde_json::from_str(&encode(definitions.clone()).unwrap()).unwrap();
+    old["routine_catalog_format"] = 2.into();
+    let old = old.to_string();
+    assert!(decode(Some(&old), &roles, false).is_err());
+    let (restored, migrated) = decode(Some(&old), &roles, true).unwrap();
+    assert!(migrated);
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap(),
+        serde_json::to_value(definitions).unwrap()
+    );
+    let encoded = encode(restored).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&encoded).unwrap()["routine_catalog_format"],
+        3
+    );
+    assert!(!decode(Some(&encoded), &roles, false).unwrap().1);
 }

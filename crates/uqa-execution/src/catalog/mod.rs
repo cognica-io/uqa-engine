@@ -96,6 +96,8 @@ pub use uqa_sql::catalog::resolution::RelationResolution;
 /// Shared immutable definition maps captured from one catalog generation.
 #[derive(Clone)]
 pub struct CatalogDefinitionSnapshot {
+    pub builtin_routine_security:
+        Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub sequence_persistence: Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub foreign_tables: Arc<BTreeMap<RelationIdentity, foreign::StoredForeignTable>>,
     pub foreign_servers:
