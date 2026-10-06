@@ -26,6 +26,7 @@ pub(crate) struct CachedSQLStatement {
     pub(crate) logical_plan: Arc<uqa_planner::UnifiedPlan>,
     pub(crate) optimized_plan: Option<Arc<uqa_planner::UnifiedPlan>>,
     catalog_epochs: CatalogEpochs,
+    pub(crate) parser: uqa_sql::parser::ParserMetadata,
 }
 
 pub(crate) use uqa_sql::catalog::session::PreparedStatementMetadata;
@@ -42,12 +43,14 @@ impl SQLStatementCache {
         statement: Arc<uqa_sql::ast::Statement>,
         logical_plan: Arc<uqa_planner::UnifiedPlan>,
         catalog_epochs: CatalogEpochs,
+        parser: uqa_sql::parser::ParserMetadata,
     ) {
         let cached = CachedSQLStatement {
             statement,
             logical_plan,
             optimized_plan: None,
             catalog_epochs,
+            parser,
         };
         if let Entry::Occupied(mut entry) = self.entries.entry(sql.clone()) {
             entry.insert(cached);
@@ -85,9 +88,12 @@ impl SQLStatementCache {
 impl Engine {
     pub(crate) fn cached_sql_statement(&self, sql: &str) -> Option<CachedSQLStatement> {
         let cached = self.session.state.read().sql_statement_cache.get(sql)?;
-        (cached.catalog_epochs == self.catalog_epochs()).then_some(cached)
+        (cached.catalog_epochs == self.catalog_epochs()
+            && cached.parser.settings == self.parser_settings())
+        .then_some(cached)
     }
 
+    #[cfg(test)]
     pub(crate) fn cached_optimized_sql_plan(
         &self,
         sql: &str,
@@ -100,13 +106,16 @@ impl Engine {
         sql: String,
         statement: Arc<uqa_sql::ast::Statement>,
         logical_plan: Arc<uqa_planner::UnifiedPlan>,
+        parser: uqa_sql::parser::ParserMetadata,
     ) {
         let epochs = self.catalog_epochs();
-        self.session
-            .state
-            .write()
-            .sql_statement_cache
-            .insert(sql, statement, logical_plan, epochs);
+        self.session.state.write().sql_statement_cache.insert(
+            sql,
+            statement,
+            logical_plan,
+            epochs,
+            parser,
+        );
     }
 
     pub(crate) fn cache_optimized_sql_plan(

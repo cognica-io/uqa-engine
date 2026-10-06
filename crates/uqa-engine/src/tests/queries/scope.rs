@@ -28,8 +28,55 @@ fn cached_temporal_inputs_read_each_messages_transaction_clock() {
         assert_eq!(result.rows[0]["input_clock"], expected);
         assert_eq!(result.rows[0]["transaction_clock"], expected);
         assert_eq!(result.rows[0]["implicit_input"], Value::Bool(true));
-        assert!(engine.cached_optimized_sql_plan(sql).is_some());
+        assert!(engine.cached_sql_statement(sql).is_some());
+        assert!(engine.cached_optimized_sql_plan(sql).is_none());
         assert_eq!(uqa_sql::expr::transaction_clock_micros(), Some(5));
+    }
+}
+
+#[test]
+fn cached_cursor_inputs_read_each_messages_transaction_clock() {
+    let engine = Engine::new();
+    let sql = "SELECT 'now'::timestamp AS value";
+    for clock in [90_123_456_789, 190_123_456_789] {
+        engine
+            .session
+            .statement_started_at_micros
+            .store(clock, Ordering::Relaxed);
+        let cursor =
+            uqa_execution::statement::cursor::execute(&engine.batch_execution_context(), sql, &[])
+                .unwrap();
+        let rows = cursor
+            .flat_map(|batch| batch.unwrap().into_rows())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows[0]["value"],
+            Value::Temporal(uqa_core::TemporalValue::Timestamp { micros: clock })
+        );
+        assert!(engine.cached_sql_statement(sql).is_some());
+        assert!(engine.cached_optimized_sql_plan(sql).is_none());
+    }
+}
+
+#[test]
+fn immutable_inputs_reuse_optimized_plans_while_parameter_types_are_reanalyzed() {
+    let engine = Engine::new();
+    let sql = "SELECT '42'::integer AS value";
+    engine.sql(sql, &[]).unwrap();
+    let first = engine.cached_optimized_sql_plan(sql).unwrap();
+    engine.sql(sql, &[]).unwrap();
+    assert!(Arc::ptr_eq(
+        &first,
+        &engine.cached_optimized_sql_plan(sql).unwrap()
+    ));
+    for value in [
+        uqa_sql::SQLParam::Scalar(Value::Int(7)),
+        uqa_sql::SQLParam::Scalar(Value::Str("text".into())),
+    ] {
+        engine.sql("SELECT $1 AS value", &[value]).unwrap();
+        assert!(engine
+            .cached_optimized_sql_plan("SELECT $1 AS value")
+            .is_none());
     }
 }
 

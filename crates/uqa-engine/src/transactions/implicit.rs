@@ -492,6 +492,7 @@ impl Engine {
         self.transaction(|engine| {
             uqa_execution::statement::notifications::admit_sql_batch(
                 engine.notification_subscriptions_required(),
+                engine.parser_settings(),
                 statements.iter().map(|(sql, _)| *sql),
                 &engine.runtime.cancellation,
             )?;

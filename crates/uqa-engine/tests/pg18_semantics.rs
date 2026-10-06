@@ -158,3 +158,6 @@ mod finite_extraction;
 
 #[path = "pg18_semantics/builtin_sqlbody.rs"]
 mod builtin_sqlbody;
+
+#[path = "pg18_semantics/parser_settings.rs"]
+mod parser_settings;

@@ -7,7 +7,7 @@
 //! Single-query scheduling that seals a bounded result before committing its snapshot.
 
 use super::{
-    batch::context::BatchExecutionContext,
+    batch::context::{BatchExecutionContext, CachedStatement},
     plan_executor::UnifiedPlanExecutor,
     transactions::{
         abort_explicit_statement_error, rollback_after_statement_error, rollback_implicit_statement,
@@ -31,11 +31,20 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
         ));
     }
     let _transaction_clock = super::context::transaction_clock_scope(context.statements);
+    let cached = context.cache.cached_sql_statement(sql);
     if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
-        if let Some(plan) = context.cache.cached_optimized_sql_plan(sql) {
+        if let Some((plan, parser)) = cached.as_ref().and_then(|cached| {
+            cached
+                .optimized_plan
+                .as_ref()
+                .map(|plan| (plan, &cached.parser))
+        }) {
             if !context.statements.notification_subscriptions_required()
                 || matches!(plan.as_ref(), UnifiedPlan::Query(_))
             {
+                for notice in parser.notices.iter() {
+                    context.runtime.notices.push(notice.clone());
+                }
                 let executor = UnifiedPlanExecutor::new(
                     context.statements.statement_execution_context(),
                     params,
@@ -44,7 +53,7 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
             }
         }
     }
-    execute_uncached_or_snapshot_scoped(context, sql, params)
+    execute_uncached_or_snapshot_scoped(context, sql, params, cached)
 }
 
 #[inline(never)]
@@ -56,17 +65,28 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     context: &BatchExecutionContext<'_, S>,
     sql: &str,
     params: &[SQLParam],
+    cached: Option<CachedStatement>,
 ) -> Result<SQLCursor, SQLError> {
-    let cached = context.cache.cached_sql_statement(sql);
-    let (statement, initial_plan, cached_optimized) = if let Some(cached) = cached {
+    let (statement, initial_plan, cached_optimized, parser) = if let Some(cached) = cached {
+        for notice in cached.parser.notices.iter() {
+            context.runtime.notices.push(notice.clone());
+        }
         (
             cached.statement.as_ref().clone(),
             cached.logical_plan,
             cached.optimized_plan,
+            cached.parser,
         )
     } else {
-        let parsed = uqa_sql::parse_statements(sql)
-            .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
+        let (parsed, parser) =
+            uqa_sql::parser::with_settings(context.statements.parser_settings(), || {
+                uqa_sql::parse_statements(sql)
+            });
+        for notice in parser.notices.iter() {
+            context.runtime.notices.push(notice.clone());
+        }
+        let parsed =
+            parsed.map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
         if context.statements.notification_subscriptions_required() {
             for statement in &parsed {
                 context.runtime.cancellation.check().map_err(|error| {
@@ -100,8 +120,9 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             sql.to_string(),
             Arc::new(statement.clone()),
             Arc::clone(&plan),
+            parser.clone(),
         );
-        (statement, plan, None)
+        (statement, plan, None, parser)
     };
     if context.statements.notification_subscriptions_required()
         && matches!(
@@ -138,6 +159,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             sql.to_string(),
             Arc::new(statement.clone()),
             Arc::new(plan.clone()),
+            parser.clone(),
         );
         if query_may_mutate_engine(&context.effects.query_effect_context(), current_query)
             .map_err(|error| context.transactions.abort_after_error(error))?
@@ -154,6 +176,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 sql.to_string(),
                 Arc::new(statement.clone()),
                 Arc::new(plan.clone()),
+                parser.clone(),
             );
         }
         let optimized = context
@@ -175,14 +198,15 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         let optimized = if let Some(plan) = cached_optimized {
             plan
         } else {
-            let plan = Arc::new(
+            let (plan, reusable) = context
+                .planning
+                .plan_for_statement_cache(initial_plan.as_ref().clone(), params)?;
+            let plan = Arc::new(plan);
+            if reusable {
                 context
-                    .planning
-                    .plan_for_execution(initial_plan.as_ref().clone(), params)?,
-            );
-            context
-                .cache
-                .cache_optimized_sql_plan(sql, Arc::clone(&plan));
+                    .cache
+                    .cache_optimized_sql_plan(sql, Arc::clone(&plan));
+            }
             plan
         };
         let executor =
@@ -207,6 +231,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         sql.to_string(),
         Arc::new(statement.clone()),
         Arc::new(plan.clone()),
+        parser.clone(),
     );
     let must_restart_as_writer = if is_read_query && context.persistent_backend && !has_row_locks {
         match query_from_plan(&plan).and_then(|query| {
@@ -240,6 +265,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             sql.to_string(),
             Arc::new(statement.clone()),
             Arc::new(plan.clone()),
+            parser.clone(),
         );
     }
     let mutating_query = match query_from_plan(&plan)
@@ -259,6 +285,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     sql.to_string(),
                     Arc::new(statement.clone()),
                     Arc::new(plan.clone()),
+                    parser.clone(),
                 );
             }
             Ok(false) => {}

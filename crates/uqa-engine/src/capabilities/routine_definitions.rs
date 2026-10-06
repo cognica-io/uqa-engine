@@ -95,6 +95,14 @@ impl StoredMergeColumnCatalog for Engine {
     }
 }
 impl RoutineParserCatalog for Engine {
+    fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
+        Engine::parser_settings(self)
+    }
+
+    fn parser_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.runtime.notices.push(notice);
+    }
+
     fn plpgsql_catalog(&self) -> Result<PlpgsqlCatalog, SQLError> {
         uqa_execution::catalog::projection::plpgsql_catalog(&self.catalog_execution())
     }
