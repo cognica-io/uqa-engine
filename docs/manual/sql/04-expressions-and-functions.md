@@ -470,6 +470,8 @@ The window functions are `row_number`, `rank`, `dense_rank`, `percent_rank`, `cu
 | JSON expansion functions | Key/value or element rows |
 | Registered table callbacks | Schema returned by the callback |
 
+`generate_series` has separate two- and three-argument overloads for `integer` and `bigint`; the two-argument form is a distinct function rather than a default argument on the three-argument form. The selected overload determines the output type, so `generate_series(1, 3::bigint)` returns `bigint`. SQL routine bodies, stored views and `ROWS FROM` retain that selected identity across reopening and later search-path shadowing. The corresponding `pg_proc` rows expose the set-returning flag, argument types, result type, row estimate and planner support identity.
+
 Table functions accept a relation alias, positional output-column aliases, and a column definition list where the function contract requires one. PostgreSQL's `ROWS FROM (function_call [AS (column type, ...)], ...) [WITH ORDINALITY] [AS alias (column, ...)]` form preserves each member and its declared columns independently, while the relation alias, positional aliases, and ordinality apply to the complete group.
 
 Each `ROWS FROM` member resolves as an ordinary table-function call against its own arguments and the active `search_path`. The group concatenates member columns in declaration order, emits as many rows as its longest member, and fills columns from exhausted members with SQL NULL. `WITH ORDINALITY` appends one group-wide, one-based `bigint` column after all member columns and resets for each correlated LATERAL invocation.
