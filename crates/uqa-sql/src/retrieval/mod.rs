@@ -15,6 +15,8 @@ mod graph;
 mod ir;
 mod joins;
 mod predicates;
+#[cfg(test)]
+mod tests;
 use crate::semantics::graph_functions::{
     default_graph_name as default_operator_graph, GraphNameCatalog,
 };
@@ -101,6 +103,14 @@ impl OptionalStringConstant {
 
 /// Lower representable SQL predicates using the supplied constant evaluator. Unsupported scalar shapes remain relational predicates.
 pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Option<RetrievalExpr> {
+    if let Some(membership) = crate::semantics::membership_operands(expr) {
+        return lower_membership(
+            membership.value,
+            membership.items,
+            membership.negated,
+            constants,
+        );
+    }
     match expr {
         ScalarExpr::And(parts) => {
             let mut out: Vec<RetrievalExpr> = Vec::with_capacity(parts.len());
@@ -150,50 +160,60 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
                 source: None,
             })
         }
-        ScalarExpr::InList {
-            expr,
-            list,
-            negated,
-        } => {
-            let field = predicates::filter_field(expr, constants)?;
-            let mut set: BTreeSet<Value> = BTreeSet::new();
-            let mut has_null = false;
-            for v in list {
-                let value = const_value(v, constants)?;
-                if matches!(value, Value::Null) {
-                    has_null = true;
-                    continue;
-                }
-                set.insert(value);
-            }
-            if *negated {
-                // `col NOT IN (...)`: a NULL in the list means no row
-                // can ever satisfy it; otherwise complement the match
-                // set but keep NULL rows excluded (three-valued NOT).
-                if has_null {
-                    return Some(RetrievalExpr::Empty);
-                }
-                let filter = RetrievalExpr::Filter {
-                    field: field.clone(),
-                    predicate: Predicate::InSet(set),
-                    source: None,
-                };
-                let not_null = RetrievalExpr::Filter {
-                    field,
-                    predicate: Predicate::IsNotNull,
-                    source: None,
-                };
-                return Some(RetrievalExpr::Intersect(vec![
-                    RetrievalExpr::Complement(Box::new(filter)),
-                    not_null,
-                ]));
-            }
-            Some(RetrievalExpr::Filter {
-                field,
-                predicate: Predicate::InSet(set),
-                source: None,
-            })
-        }
         _ => None,
     }
+}
+
+fn lower_membership(
+    expr: &ScalarExpr,
+    list: crate::semantics::MembershipItems<'_>,
+    negated: bool,
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
+    let field = predicates::filter_field(expr, constants)?;
+    let mut set: BTreeSet<Value> = BTreeSet::new();
+    let mut has_null = false;
+    for item in list.iter() {
+        let value = match item {
+            crate::semantics::MembershipItem::Expression(expression) => {
+                const_value(expression, constants)?
+            }
+            crate::semantics::MembershipItem::Constant(value) => value.clone(),
+        };
+        if matches!(value, Value::Array(_)) {
+            return None;
+        }
+        if matches!(value, Value::Null) {
+            has_null = true;
+            continue;
+        }
+        set.insert(value);
+    }
+    if negated {
+        // `col NOT IN (...)`: a NULL in the list means no row
+        // can ever satisfy it; otherwise complement the match
+        // set but keep NULL rows excluded (three-valued NOT).
+        if has_null {
+            return Some(RetrievalExpr::Empty);
+        }
+        let filter = RetrievalExpr::Filter {
+            field: field.clone(),
+            predicate: Predicate::InSet(set),
+            source: None,
+        };
+        let not_null = RetrievalExpr::Filter {
+            field,
+            predicate: Predicate::IsNotNull,
+            source: None,
+        };
+        return Some(RetrievalExpr::Intersect(vec![
+            RetrievalExpr::Complement(Box::new(filter)),
+            not_null,
+        ]));
+    }
+    Some(RetrievalExpr::Filter {
+        field,
+        predicate: Predicate::InSet(set),
+        source: None,
+    })
 }

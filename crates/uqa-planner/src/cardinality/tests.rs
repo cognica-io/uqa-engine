@@ -37,6 +37,41 @@ fn equality_uses_distinct_count() {
 }
 
 #[test]
+fn analyzed_membership_keeps_column_statistics() {
+    let stats = RelationStats::new(1000).with_column(
+        "id",
+        ColumnStats {
+            distinct_count: 250,
+            row_count: 1000,
+            ..Default::default()
+        },
+    );
+    for (negated, expected) in [(false, 2.0 / 250.0), (true, 1.0 - 2.0 / 250.0)] {
+        let scalar = uqa_sql::ScalarExpr::InList {
+            expr: Box::new(uqa_sql::ScalarExpr::Column("id".into())),
+            list: vec![
+                uqa_sql::ScalarExpr::Literal(Value::Int(1)),
+                uqa_sql::ScalarExpr::Literal(Value::Int(2)),
+            ],
+            negated,
+        };
+        let scalar = uqa_sql::bind_type_introspection(
+            scalar,
+            &uqa_sql::RowSchema::with_types(
+                vec!["id".into()],
+                vec![Some(uqa_sql::ColumnType::Integer)],
+            ),
+            &[],
+        );
+        assert!(matches!(scalar, uqa_sql::ScalarExpr::Func { .. }));
+        let actual = CardinalityEstimator::new()
+            .scalar_selectivity(&scalar, &stats)
+            .raw();
+        assert!((actual - expected).abs() < 1e-12, "{scalar:?}: {actual}");
+    }
+}
+
+#[test]
 fn rare_equality_uses_probability_left_after_common_and_null_values() {
     let column = ColumnStats {
         row_count: 10_000,

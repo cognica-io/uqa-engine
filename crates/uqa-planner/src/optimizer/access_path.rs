@@ -74,6 +74,15 @@ fn root_score_retrieval(expression: &ScalarExpr) -> bool {
 pub use uqa_sql::semantics::contains_retrieval;
 
 fn operator_compatible(expression: &ScalarExpr) -> bool {
+    if let Some(membership) = uqa_sql::semantics::membership_operands(expression) {
+        return scalar_operand(membership.value)
+            && membership.items.iter().all(|item| match item {
+                uqa_sql::semantics::MembershipItem::Expression(expression) => {
+                    scalar_operand(expression)
+                }
+                uqa_sql::semantics::MembershipItem::Constant(_) => true,
+            });
+    }
     match expression {
         ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             !items.is_empty() && items.iter().all(operator_compatible)
@@ -94,9 +103,6 @@ fn operator_compatible(expression: &ScalarExpr) -> bool {
         ScalarExpr::IsNull { expr, .. } => scalar_operand(expr),
         ScalarExpr::Between { expr, low, high } => {
             scalar_operand(expr) && scalar_operand(low) && scalar_operand(high)
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            scalar_operand(expr) && list.iter().all(scalar_operand)
         }
         ScalarExpr::Func { name, .. } => retrieval_function(name),
         _ => false,

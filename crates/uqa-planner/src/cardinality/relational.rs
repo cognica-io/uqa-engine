@@ -108,6 +108,40 @@ impl CardinalityEstimator {
     /// keeps join ordering sensitive to local WHERE filters without converting
     /// the optimized plan back into parser AST nodes.
     pub fn scalar_selectivity(&self, predicate: &ScalarExpr, stats: &RelationStats) -> Selectivity {
+        if let Some(membership) = uqa_sql::semantics::membership_operands(predicate) {
+            let selectivity = scalar_column(membership.value)
+                .and_then(|column| stats.column(column))
+                .map_or(
+                    self.default_selectivity * membership.items.len() as f64,
+                    |column| {
+                        membership
+                            .items
+                            .iter()
+                            .map(|item| {
+                                match item {
+                                    uqa_sql::semantics::MembershipItem::Expression(expression) => {
+                                        scalar_literal(expression)
+                                    }
+                                    uqa_sql::semantics::MembershipItem::Constant(value) => {
+                                        Some(value.clone())
+                                    }
+                                }
+                                .map_or_else(
+                                    || column.equality_selectivity(),
+                                    |value| column.equality_selectivity_for(&value),
+                                )
+                            })
+                            .sum()
+                    },
+                )
+                .min(1.0);
+            return Selectivity(if membership.negated {
+                1.0 - selectivity
+            } else {
+                selectivity
+            })
+            .clamp();
+        }
         match predicate {
             ScalarExpr::And(parts) => Selectivity(
                 parts
@@ -154,31 +188,6 @@ impl CardinalityEstimator {
             | ScalarExpr::TypedLiteral {
                 value: Value::Null, ..
             } => Selectivity(0.0),
-            ScalarExpr::InList {
-                expr,
-                list,
-                negated,
-            } => {
-                let selectivity = scalar_column(expr)
-                    .and_then(|column| stats.column(column))
-                    .map_or(self.default_selectivity * list.len() as f64, |column| {
-                        list.iter()
-                            .map(|item| {
-                                scalar_literal(item).map_or_else(
-                                    || column.equality_selectivity(),
-                                    |value| column.equality_selectivity_for(&value),
-                                )
-                            })
-                            .sum()
-                    })
-                    .min(1.0);
-                Selectivity(if *negated {
-                    1.0 - selectivity
-                } else {
-                    selectivity
-                })
-                .clamp()
-            }
             ScalarExpr::Between { .. } => Selectivity(self.range_selectivity).clamp(),
             ScalarExpr::Func { name, .. } if name.eq_ignore_ascii_case("like") => {
                 Selectivity(self.like_selectivity).clamp()

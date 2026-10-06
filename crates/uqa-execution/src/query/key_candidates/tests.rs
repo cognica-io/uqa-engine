@@ -191,3 +191,35 @@ fn an_aliased_key_is_named_as_the_filter_writes_it() {
         None
     );
 }
+
+#[test]
+fn analyzed_membership_keeps_exact_key_candidates() {
+    let definitions = columns("CREATE TABLE t (id integer PRIMARY KEY)");
+    let schema =
+        uqa_sql::RowSchema::with_types(vec!["id".into()], vec![Some(uqa_sql::ColumnType::Integer)]);
+    let scalar = uqa_sql::bind_type_introspection(
+        within(column("id"), vec![int(5), int(2), int(5)]),
+        &schema,
+        &[],
+    );
+    assert!(matches!(scalar, ScalarExpr::Func { .. }));
+    assert_eq!(keyed(&scalar, &[], &definitions, true), Some(vec![2, 5]));
+    let mut folded = scalar.clone();
+    let ScalarExpr::Func { args, .. } = &mut folded else {
+        unreachable!()
+    };
+    args[1] = ScalarExpr::Literal(
+        crate::eval_scalar(&args[1], &crate::ScalarEvalContext::new(None, &[])).unwrap(),
+    );
+    assert_eq!(keyed(&folded, &[], &definitions, true), Some(vec![2, 5]));
+    let negated = uqa_sql::bind_type_introspection(
+        ScalarExpr::InList {
+            expr: Box::new(column("id")),
+            list: vec![int(2), int(5)],
+            negated: true,
+        },
+        &schema,
+        &[],
+    );
+    assert_eq!(keyed(&negated, &[], &definitions, true), None);
+}
