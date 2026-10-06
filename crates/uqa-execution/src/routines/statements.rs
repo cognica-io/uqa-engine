@@ -7,9 +7,8 @@
 //! PL/pgSQL statement dispatch.
 
 use super::{
-    result_row_count, result_row_values, return_query_context_error, strict_into_check,
-    DirectRoutineCommandGuard, Flow, Interpreter, LoopSignal, PLpgSQLStmt, SQLError, Statement,
-    Value,
+    result_row_count, result_row_values, return_query_context_error, strict_into_check, Flow,
+    Interpreter, LoopSignal, PLpgSQLStmt, SQLError, Value,
 };
 
 impl Interpreter<'_> {
@@ -188,11 +187,9 @@ impl Interpreter<'_> {
                 self.exec_assert(condition, message.as_ref())
             }
             PLpgSQLStmt::ExecSQL { stmt, into, strict } => {
-                let _direct_routine_command =
-                    matches!(stmt, Statement::Call { .. } | Statement::DoBlock { .. })
-                        .then(|| DirectRoutineCommandGuard::enter(self.services.session));
-                let result = self.exec_query(stmt)?;
-                self.consume_statement_result(stmt, &result, into.as_ref(), *strict)?;
+                let prepared = self.prepare_statement(stmt)?;
+                let result = self.execute_fragment(&prepared)?;
+                self.consume_statement_result(prepared.is_call(), &result, into.as_ref(), *strict)?;
                 Ok(Flow::Normal)
             }
             PLpgSQLStmt::DynExecute {

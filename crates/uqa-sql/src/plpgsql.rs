@@ -40,6 +40,7 @@ use crate::error::{Result, SQLError};
 /// outermost block.
 #[derive(Debug, Clone)]
 pub struct PLpgSQLFunction {
+    pub compilation: PLpgSQLCompilationIdentity,
     pub datums: Vec<PLpgSQLDatum>,
     pub action: PLpgSQLBlock,
     /// Datum holding the implicit `NEW` record for a trigger function.
@@ -188,7 +189,7 @@ pub struct PLpgSQLVar {
     pub type_name: String,
     /// Exact relation-column identity emitted by the PL/pgSQL parser for a table-backed `%TYPE` declaration.
     pub type_reference: Option<RoutineColumnTypeReference>,
-    pub default: Option<Expr>,
+    pub default: Option<PLpgSQLExpression>,
     pub constant: bool,
     pub not_null: bool,
     /// Definition of a bound cursor declared with `CURSOR (...) FOR query`.
@@ -200,7 +201,7 @@ pub struct PLpgSQLVar {
 
 #[derive(Debug, Clone)]
 pub struct PLpgSQLCursor {
-    pub query: Statement,
+    pub query: PLpgSQLStatement,
     pub source_sql: std::sync::Arc<str>,
     pub argument_row: Option<usize>,
     /// Explicit declaration scroll mode. `None` leaves scrollability query-dependent.
@@ -217,16 +218,16 @@ pub struct PLpgSQLCursorArgument {
 #[derive(Debug, Clone)]
 pub enum PLpgSQLCursorOpen {
     Bound {
-        arguments: Vec<PLpgSQLCursorArgument>,
+        arguments: PLpgSQLCursorArguments,
     },
     Static {
-        query: Box<Statement>,
+        query: Box<PLpgSQLStatement>,
         source_sql: std::sync::Arc<str>,
         scroll: Option<bool>,
     },
     Dynamic {
-        query: Expr,
-        params: Vec<Expr>,
+        query: PLpgSQLExpression,
+        params: Vec<PLpgSQLExpression>,
         scroll: Option<bool>,
     },
 }
@@ -235,7 +236,7 @@ pub enum PLpgSQLCursorOpen {
 #[derive(Debug, Clone)]
 pub enum PLpgSQLCursorCount {
     Constant(i64),
-    Expression(Expr),
+    Expression(PLpgSQLExpression),
 }
 
 /// `name -> datum` slot of a row target.
@@ -248,6 +249,7 @@ pub struct PLpgSQLRowField {
 /// `[DECLARE ...] BEGIN ... [EXCEPTION ...] END` block.
 #[derive(Debug, Clone)]
 pub struct PLpgSQLBlock {
+    pub initvarnos: Vec<usize>,
     pub label: Option<String>,
     pub body: Vec<PLpgSQLStmt>,
     pub exceptions: Vec<PLpgSQLExceptionArm>,
@@ -316,20 +318,20 @@ pub enum PLpgSQLStmt {
     /// `target := expr` (also `=`). `target` indexes the datum table.
     Assign {
         target: usize,
-        expr: Expr,
+        expr: PLpgSQLExpression,
     },
     If {
-        cond: Expr,
+        cond: PLpgSQLExpression,
         then_body: Vec<PLpgSQLStmt>,
-        elsifs: Vec<(Expr, Vec<PLpgSQLStmt>)>,
+        elsifs: Vec<(PLpgSQLExpression, Vec<PLpgSQLStmt>)>,
         else_body: Option<Vec<PLpgSQLStmt>>,
     },
     /// CASE statement. Simple form carries `t_expr` + the temporary
     /// datum the compiler references from each rewritten WHEN.
     Case {
-        t_expr: Option<Expr>,
+        t_expr: Option<PLpgSQLExpression>,
         t_varno: Option<usize>,
-        arms: Vec<(Expr, Vec<PLpgSQLStmt>)>,
+        arms: Vec<(PLpgSQLExpression, Vec<PLpgSQLStmt>)>,
         else_body: Option<Vec<PLpgSQLStmt>>,
     },
     Loop {
@@ -338,16 +340,16 @@ pub enum PLpgSQLStmt {
     },
     While {
         label: Option<String>,
-        cond: Expr,
+        cond: PLpgSQLExpression,
         body: Vec<PLpgSQLStmt>,
     },
     /// `FOR i IN [REVERSE] lower..upper [BY step] LOOP`.
     ForI {
         label: Option<String>,
         var: usize,
-        lower: Expr,
-        upper: Expr,
-        step: Option<Expr>,
+        lower: PLpgSQLExpression,
+        upper: PLpgSQLExpression,
+        step: Option<PLpgSQLExpression>,
         reverse: bool,
         body: Vec<PLpgSQLStmt>,
     },
@@ -355,7 +357,7 @@ pub enum PLpgSQLStmt {
     ForQuery {
         label: Option<String>,
         target: IntoTarget,
-        query: Statement,
+        query: PLpgSQLStatement,
         source_sql: std::sync::Arc<str>,
         body: Vec<PLpgSQLStmt>,
     },
@@ -363,8 +365,8 @@ pub enum PLpgSQLStmt {
     ForDynamic {
         label: Option<String>,
         target: IntoTarget,
-        query: Expr,
-        params: Vec<Expr>,
+        query: PLpgSQLExpression,
+        params: Vec<PLpgSQLExpression>,
         body: Vec<PLpgSQLStmt>,
     },
     /// `FOR recordvar IN bound_cursor [(arguments)] LOOP`.
@@ -372,7 +374,7 @@ pub enum PLpgSQLStmt {
         label: Option<String>,
         target: usize,
         cursor: usize,
-        arguments: Vec<PLpgSQLCursorArgument>,
+        arguments: PLpgSQLCursorArguments,
         body: Vec<PLpgSQLStmt>,
     },
     /// `FOREACH target [SLICE n] IN ARRAY expression LOOP`.
@@ -380,7 +382,7 @@ pub enum PLpgSQLStmt {
         label: Option<String>,
         target: usize,
         slice: usize,
-        expr: Expr,
+        expr: PLpgSQLExpression,
         body: Vec<PLpgSQLStmt>,
     },
     /// `EXIT` (`is_exit`) or `CONTINUE`, optionally labelled and
@@ -388,7 +390,7 @@ pub enum PLpgSQLStmt {
     Exit {
         is_exit: bool,
         label: Option<String>,
-        cond: Option<Expr>,
+        cond: Option<PLpgSQLExpression>,
     },
     Return {
         value: Option<PLpgSQLReturnValue>,
@@ -399,38 +401,38 @@ pub enum PLpgSQLStmt {
         value: Option<PLpgSQLReturnValue>,
     },
     ReturnQuery {
-        query: Statement,
+        query: PLpgSQLStatement,
     },
     ReturnQueryExecute {
-        query: Expr,
-        params: Vec<Expr>,
+        query: PLpgSQLExpression,
+        params: Vec<PLpgSQLExpression>,
     },
     Raise {
         level: RaiseLevel,
         condition: Option<String>,
         message: Option<String>,
-        params: Vec<Expr>,
+        params: Vec<PLpgSQLExpression>,
     },
     /// `ASSERT condition [, message]`.
     Assert {
-        condition: Expr,
-        message: Option<Expr>,
+        condition: PLpgSQLExpression,
+        message: Option<PLpgSQLExpression>,
     },
     /// Embedded SQL statement, optionally `INTO [STRICT] target`.
     ExecSQL {
-        stmt: Statement,
+        stmt: PLpgSQLStatement,
         into: Option<IntoTarget>,
         strict: bool,
     },
     /// `EXECUTE <string> [INTO [STRICT] target] [USING params]`.
     DynExecute {
-        query: Expr,
-        params: Vec<Expr>,
+        query: PLpgSQLExpression,
+        params: Vec<PLpgSQLExpression>,
         into: Option<IntoTarget>,
         strict: bool,
     },
     Perform {
-        query: Statement,
+        query: PLpgSQLStatement,
     },
     OpenCursor {
         cursor: usize,
@@ -468,7 +470,7 @@ pub enum PLpgSQLStmt {
 /// datum reference in `retvarno`, distinct from a general SQL expression.
 #[derive(Debug, Clone)]
 pub enum PLpgSQLReturnValue {
-    Expr(Expr),
+    Expr(PLpgSQLExpression),
     Datum(usize),
 }
 
@@ -504,6 +506,7 @@ pub use lowering_expression::compile_expression_text;
 pub use options::{compile_options, CompileOptions, VariableConflict};
 pub use parsing::{
     parse_do_block, parse_do_block_with_catalog, parse_function, parse_function_with_catalog,
+    parse_function_with_catalog_mode,
 };
 pub use pg_query::{PlpgsqlCatalog, PlpgsqlType};
 pub use variable_conflicts::{
@@ -514,3 +517,16 @@ pub use variable_conflicts::{
 mod tests;
 
 pub mod runtime_diagnostics;
+
+mod fragments;
+pub use fragments::{
+    PLpgSQLCompilationIdentity, PLpgSQLCompileMode, PLpgSQLCursorArguments, PLpgSQLExpression,
+    PLpgSQLFragment, PLpgSQLParseMode, PLpgSQLSource, PLpgSQLStatement,
+};
+
+mod parameters;
+pub use parameters::{
+    parameterize_statement_variables, PLpgSQLVariableBindings, PLpgSQLVariableReference,
+};
+
+mod blocks;

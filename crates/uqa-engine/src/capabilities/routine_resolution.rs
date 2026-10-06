@@ -65,9 +65,7 @@ impl RoutineResolution for Engine {
         &self,
         function: &SQLUserFunction,
     ) -> Result<Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError> {
-        if matches!(function.body, uqa_sql::routines::RoutineBody::Source)
-            && function.def.language == "sql"
-        {
+        if matches!(function.body, uqa_sql::routines::RoutineBody::Source) {
             self.session.routine_bodies.inspect(function, |definition| {
                 uqa_execution::routines::invocation::bodies::compile_analysis_body(
                     self,

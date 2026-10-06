@@ -8,8 +8,9 @@
 
 use super::{
     canonical_routine_type_name, coerce_routine_value, result_row_values, to_i64_value,
-    value_type_name, ArrayValue, ColumnType, Expr, Flow, FunctionReturns, Interpreter, LoopSignal,
-    PLpgSQLDatum, PLpgSQLReturnValue, PLpgSQLStmt, RoutineContext, SQLError, SQLResult, Value,
+    value_type_name, ArrayValue, ColumnType, Flow, FunctionReturns, Interpreter, LoopSignal,
+    PLpgSQLDatum, PLpgSQLExpression, PLpgSQLReturnValue, PLpgSQLStmt, RoutineContext, SQLError,
+    SQLResult, Value,
 };
 
 impl Interpreter<'_> {
@@ -45,9 +46,9 @@ impl Interpreter<'_> {
         &mut self,
         label: Option<&str>,
         var: usize,
-        lower: &Expr,
-        upper: &Expr,
-        step: Option<&Expr>,
+        lower: &PLpgSQLExpression,
+        upper: &PLpgSQLExpression,
+        step: Option<&PLpgSQLExpression>,
         reverse: bool,
         body: &[PLpgSQLStmt],
     ) -> Result<Flow, SQLError> {
@@ -109,7 +110,7 @@ impl Interpreter<'_> {
         label: Option<&str>,
         target: usize,
         slice: usize,
-        expr: &Expr,
+        expr: &PLpgSQLExpression,
         body: &[PLpgSQLStmt],
     ) -> Result<Flow, SQLError> {
         let (value, declared_type) = self.eval_expr_with_type(expr)?;
@@ -188,7 +189,11 @@ impl Interpreter<'_> {
         })
     }
 
-    pub(super) fn eval_loop_bound(&self, expr: &Expr, which: &str) -> Result<i64, SQLError> {
+    pub(super) fn eval_loop_bound(
+        &self,
+        expr: &PLpgSQLExpression,
+        which: &str,
+    ) -> Result<i64, SQLError> {
         let value = self.eval_expr(expr)?;
         if matches!(value, Value::Null) {
             return Err(SQLError::Routine {

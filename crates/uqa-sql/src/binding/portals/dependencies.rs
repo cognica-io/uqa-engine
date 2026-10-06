@@ -530,7 +530,12 @@ pub fn collect_session_portal_routine_dependencies(
             Some(crate::routines::CompiledFunctionBody::PLpgSQL(_)) => {
                 *dependencies = SessionPortalTableDependencies::all();
             }
-            // A body that does not compile cannot run in this session, so it reads no relation.
+            // Procedural fragments may be valid only under the settings in
+            // effect when execution reaches them. Unknown dependencies retain
+            // all tables without parsing or caching those fragments here.
+            None if function.def.language == "plpgsql" => {
+                *dependencies = SessionPortalTableDependencies::all();
+            }
             None => {}
         }
         visiting_routines.remove(&key);

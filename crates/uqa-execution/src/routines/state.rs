@@ -7,17 +7,16 @@
 //! Interpreter activation state, expression binding, and routine lifecycle.
 
 use super::{
-    bind_expression_variables, bind_statement_variables, cast_value_from, coercion_type_name,
-    BTreeSet, ColumnType, CreateFunction, DatumResolver, Expr, Flow, FunctionReturns, HashMap,
-    Interpreter, PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction, RoutineContext, RoutineOutcome,
-    SQLError, SQLParam, SQLResult, Statement, Value,
+    cast_value_from, coercion_type_name, BTreeSet, ColumnType, CreateFunction, DatumResolver, Flow,
+    FunctionReturns, HashMap, Interpreter, PLpgSQLBlock, PLpgSQLExpression, PLpgSQLFunction,
+    PLpgSQLStatement, RoutineContext, RoutineOutcome, SQLError, SQLParam, SQLResult, Statement,
+    Value,
 };
 use uqa_sql::binding::{resolve_variable_sites, VariableSiteResolution};
 use uqa_sql::plan::UnifiedPlan;
 use uqa_sql::ScalarExpr;
 
 impl<'a> Interpreter<'a> {
-    #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
     pub fn new(
         services: RoutineContext<'a>,
         def: &'a CreateFunction,
@@ -41,9 +40,13 @@ impl<'a> Interpreter<'a> {
         }
         let loop_vars: BTreeSet<usize> = parsed.loop_local_variable_datums();
         let cursor_arguments: BTreeSet<usize> = parsed.cursor_argument_datums();
+        let block_variables = parsed.block_variable_datums();
         let mut bindings: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, datum) in datums.iter().enumerate() {
-            if loop_vars.contains(&idx) || cursor_arguments.contains(&idx) {
+            if loop_vars.contains(&idx)
+                || cursor_arguments.contains(&idx)
+                || block_variables.contains(&idx)
+            {
                 continue;
             }
             if let Some(name) = datum.name() {
@@ -64,12 +67,14 @@ impl<'a> Interpreter<'a> {
             }
         }
         let mut interpreter = Self {
+            preparations: services.statements.plpgsql_preparations(def, parsed),
             services,
             def,
             datums,
             values: vec![Value::Null; datums.len()],
             record_types: HashMap::new(),
             bindings,
+            cursor_arguments,
             err_stack: Vec::new(),
             set_rows: Vec::new(),
             ret: Value::Null,
@@ -111,39 +116,9 @@ impl<'a> Interpreter<'a> {
                 def.name
             )));
         }
-        // Initialize FOUND and declared-variable defaults.
+        // Each block initializes its own declared variables when reached.
         if let Some(found) = interpreter.found {
             interpreter.values[found] = Value::Bool(false);
-        }
-        for (idx, datum) in datums.iter().enumerate().skip(def.params.len()) {
-            let PLpgSQLDatum::Var(var) = datum else {
-                continue;
-            };
-            if var.name.eq_ignore_ascii_case("found")
-                || var.name.eq_ignore_ascii_case("sqlstate")
-                || var.name.eq_ignore_ascii_case("sqlerrm")
-            {
-                continue;
-            }
-            let (value, source) = match &var.default {
-                Some(default) => interpreter.eval_expr_with_type(default)?,
-                None => (Value::Null, None),
-            };
-            interpreter.values[idx] = super::coerce_routine_value_from(
-                interpreter.services.expressions,
-                &value,
-                &var.type_name,
-                source.as_ref(),
-            )?;
-            if var.not_null && matches!(interpreter.values[idx], Value::Null) {
-                return Err(SQLError::Routine {
-                    sqlstate: "22004".into(),
-                    message: format!(
-                        "null value cannot be assigned to variable \"{}\" declared NOT NULL",
-                        var.name
-                    ),
-                });
-            }
         }
         Ok(interpreter)
     }
@@ -262,41 +237,35 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub(super) fn eval_expr(&self, expr: &Expr) -> Result<Value, SQLError> {
-        let bound = self.bind_expression(expr)?;
-        self.services.expressions.evaluate(&bound)
+    pub(super) fn eval_expr(&self, expr: &PLpgSQLExpression) -> Result<Value, SQLError> {
+        self.eval_expr_with_type(expr).map(|(value, _)| value)
     }
 
     pub(super) fn eval_expr_with_type(
         &self,
-        expr: &Expr,
+        expr: &PLpgSQLExpression,
     ) -> Result<(Value, Option<ColumnType>), SQLError> {
-        let bound = self.bind_expression(expr)?;
-        self.services.expressions.evaluate_with_type(&bound)
-    }
-
-    /// Bind the variables an embedded expression names, each checked against the columns its subqueries can see.
-    pub(super) fn bind_expression(&self, expr: &Expr) -> Result<Expr, SQLError> {
-        bind_expression_variables(
-            expr,
-            &mut self.resolver(),
-            self.variable_conflict,
-            &mut |statement, params, names| self.resolve_variable_sites(statement, &params, names),
-        )
-    }
-
-    /// Bind the variables an embedded statement names, each checked against the columns and relations the statement can see.
-    pub(super) fn bind_query(&self, statement: &Statement) -> Result<Statement, SQLError> {
-        bind_statement_variables(
-            statement,
-            &mut self.resolver(),
-            self.variable_conflict,
-            &mut |statement, params, names| self.resolve_variable_sites(statement, &params, names),
-        )
+        let prepared = self.prepare_expression(expr)?;
+        let result = self.execute_fragment(&prepared)?;
+        if result.rows.len() > 1 {
+            return Err(SQLError::Routine {
+                sqlstate: "21000".into(),
+                message: "query returned more than one row".into(),
+            });
+        }
+        if result.columns.len() != 1 {
+            return Err(SQLError::Internal(
+                "PL/pgSQL expression returned multiple columns".into(),
+            ));
+        }
+        Ok((
+            result.value_at(0, 0).cloned().unwrap_or(Value::Null),
+            result.column_types.first().cloned().flatten(),
+        ))
     }
 
     /// How each variable site of `statement` resolves in the scope the statement runs in.
-    fn resolve_variable_sites(
+    pub(super) fn resolve_variable_sites(
         &self,
         statement: Statement,
         params: &[SQLParam],
@@ -322,7 +291,7 @@ impl<'a> Interpreter<'a> {
         Ok(resolutions)
     }
 
-    pub(super) fn eval_boolean(&self, expr: &Expr) -> Result<Option<bool>, SQLError> {
+    pub(super) fn eval_boolean(&self, expr: &PLpgSQLExpression) -> Result<Option<bool>, SQLError> {
         let (value, declared_type) = self.eval_expr_with_type(expr)?;
         let source_type = declared_type.as_ref().map(coercion_type_name);
         match cast_value_from(&value, "boolean", source_type.as_deref())? {
@@ -334,9 +303,9 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub(super) fn exec_query(&self, statement: &Statement) -> Result<SQLResult, SQLError> {
-        let bound = self.bind_query(statement)?;
-        self.services.statements.execute_bound(bound, &[])
+    pub(super) fn exec_query(&self, statement: &PLpgSQLStatement) -> Result<SQLResult, SQLError> {
+        let prepared = self.prepare_statement(statement)?;
+        self.execute_fragment(&prepared)
     }
 
     pub(super) fn set_found(&mut self, value: bool) {

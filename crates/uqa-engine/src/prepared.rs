@@ -54,7 +54,7 @@ impl Engine {
         uqa_execution::statement::prepared::invalidation::PreparedCatalogChange::GlobalCatalog
             .invalidate_with_routines(
                 self.session.prepared.write().values_mut(),
-                self.session.routine_bodies.sql_inputs(),
+                &self.session.routine_bodies,
             );
     }
 

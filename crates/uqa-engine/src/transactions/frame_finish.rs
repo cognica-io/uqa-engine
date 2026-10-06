@@ -535,7 +535,7 @@ impl Engine {
         self.restore_session_state(&session_snapshot);
         frame.prepared_changes.invalidate_with_routines(
             self.session.prepared.write().values_mut(),
-            self.session.routine_bodies.sql_inputs(),
+            &self.session.routine_bodies,
         );
         self.apply_nontransactional_sequence_values(&nontransactional_sequence_values);
         let begin_lock_mark = frame.begin_lock_mark;

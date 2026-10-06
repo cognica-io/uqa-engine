@@ -56,12 +56,15 @@ impl DatumResolver<'_> {
         };
         ResolvedVariable {
             value,
-            declared_type: self.datum_type(index).map(|ty| ty.sql_name()),
+            declared_type: self.datum_type(index).map(|ty| ty.catalog_name()),
         }
     }
 }
 
 impl VariableResolver for DatumResolver<'_> {
+    fn parameter_type(&self, name: &str) -> Option<ColumnType> {
+        self.services.expressions.catalog_column_type(name)
+    }
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         if let Some((state, message)) = self.error {
             if name.eq_ignore_ascii_case("sqlstate") {
@@ -100,7 +103,7 @@ impl VariableResolver for DatumResolver<'_> {
                             value,
                             declared_type: self
                                 .record_field_type(idx, column)
-                                .map(|ty| ty.sql_name()),
+                                .map(|ty| ty.catalog_name()),
                         })),
                         None => Err(SQLError::Routine {
                             sqlstate: "42703".into(),

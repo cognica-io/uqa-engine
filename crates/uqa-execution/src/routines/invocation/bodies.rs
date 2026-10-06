@@ -12,7 +12,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_sql::ast::CreateFunction;
 use uqa_sql::routines::{
-    compilation::{compile_function_body, RoutineCompilationContext},
+    compilation::{
+        compile_function_body, compile_function_body_for_execution, RoutineCompilationContext,
+    },
     CompiledFunctionBody, RoutineBody, SQLUserFunction,
 };
 use uqa_sql::SQLError;
@@ -27,19 +29,29 @@ pub trait RoutineBodySession {
 }
 
 /// A session's compilation of a routine body and the definition version it was compiled from.
-struct CompiledRoutine {
-    version: u64,
-    body: Arc<CompiledFunctionBody>,
+pub(super) struct CompiledRoutine {
+    pub(super) version: u64,
+    pub(super) body: Arc<CompiledFunctionBody>,
+    pub(super) plpgsql: Vec<super::plpgsql_cache::PreparedBody>,
 }
 
 /// Compilations of routine source bodies, by routine identity.
 #[derive(Default)]
 pub struct SessionRoutineBodies {
-    compiled: Mutex<BTreeMap<[u8; 16], CompiledRoutine>>,
+    pub(super) compiled: Mutex<BTreeMap<[u8; 16], CompiledRoutine>>,
     sql_inputs: crate::routines::sql_body::inputs::SQLRoutineInputs,
+    pub(in crate::routines) procedural: crate::routines::preparation::PLpgSQLPreparationRegistry,
 }
 
 impl SessionRoutineBodies {
+    pub(crate) fn invalidate(
+        &self,
+        affects: impl Fn(&uqa_sql::prepared::dependencies::PreparedAnalysisDependencies) -> bool,
+    ) {
+        self.sql_inputs.invalidate(&affects);
+        self.procedural.invalidate(&affects);
+    }
+
     pub fn sql_inputs(&self) -> &crate::routines::sql_body::inputs::SQLRoutineInputs {
         &self.sql_inputs
     }
@@ -57,13 +69,9 @@ impl SessionRoutineBodies {
         let version = function.definition_version()?;
         // Compiling can resolve and compile other routines, so the cache is not held meanwhile.
         let body = Arc::new(compile(&function.def)?);
-        self.compiled.lock().insert(
-            identity,
-            CompiledRoutine {
-                version,
-                body: Arc::clone(&body),
-            },
-        );
+        self.compiled
+            .lock()
+            .insert(identity, CompiledRoutine::new(version, Arc::clone(&body)));
         Ok(body)
     }
 
@@ -104,18 +112,14 @@ impl SessionRoutineBodies {
     ) -> Result<(), SQLError> {
         let identity = routine_identity(function)?;
         let version = function.definition_version()?;
-        self.compiled.lock().insert(
-            identity,
-            CompiledRoutine {
-                version,
-                body: Arc::new(body),
-            },
-        );
+        self.compiled
+            .lock()
+            .insert(identity, CompiledRoutine::new(version, Arc::new(body)));
         Ok(())
     }
 }
 
-fn routine_identity(function: &SQLUserFunction) -> Result<[u8; 16], SQLError> {
+pub(super) fn routine_identity(function: &SQLUserFunction) -> Result<[u8; 16], SQLError> {
     function.def.object_id.ok_or_else(|| {
         SQLError::Internal(format!(
             "routine `{}` has no object identity",
@@ -131,7 +135,7 @@ pub fn compile_session_body(
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
     let compile = || {
-        let mut body = compile_function_body(compilation, def)?;
+        let mut body = compile_function_body_for_execution(compilation, def)?;
         if let CompiledFunctionBody::PLpgSQL(parsed) = &mut body {
             crate::routines::compilation::apply_session_compile_options(session, parsed);
         }
@@ -165,7 +169,18 @@ pub fn compile_analysis_body(
         parsers: &parsers,
         ..*compilation
     };
-    compile_session_body(session, &analysis, def)
+    let compile = || {
+        let mut body = compile_function_body(&analysis, def)?;
+        if let CompiledFunctionBody::PLpgSQL(parsed) = &mut body {
+            crate::routines::compilation::apply_session_compile_options(session, parsed);
+        }
+        Ok(body)
+    };
+    if def.config.is_empty() && !def.security.security_definer {
+        compile()
+    } else {
+        super::scopes::with_routine_context(session, def, compile)
+    }
 }
 
 #[cfg(test)]

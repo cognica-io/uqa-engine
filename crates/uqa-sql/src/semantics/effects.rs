@@ -455,7 +455,9 @@ fn sql_routine_may_mutate_engine(
             }
             let Some(body) = crate::routines::analyzable_routine_body(context.catalog, &function)?
             else {
-                return Ok(false);
+                // Unavailable procedural inspection says nothing about the
+                // effects of statements whose syntax is deferred until reach.
+                return Ok(function.def.language == "plpgsql");
             };
             match &*body {
                 crate::routines::CompiledFunctionBody::SQL(plans) => (|| {

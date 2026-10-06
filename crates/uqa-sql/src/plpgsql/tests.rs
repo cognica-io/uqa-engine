@@ -80,7 +80,10 @@ fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {
     let definition = cursor.cursor.as_ref().expect("bound cursor definition");
     assert!(definition.argument_row.is_some());
     assert_eq!(definition.scroll, None);
-    assert!(matches!(definition.query, Statement::Select(_)));
+    assert!(matches!(
+        definition.query.validation(),
+        Some(Statement::Select(_))
+    ));
 
     let PLpgSQLStmt::OpenCursor {
         cursor,
@@ -92,13 +95,21 @@ fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {
     assert_eq!(*cursor, cursor_index);
     assert_eq!(
         arguments
+            .validation()
+            .unwrap()
             .iter()
             .map(|argument| argument.name.as_deref())
             .collect::<Vec<_>>(),
         vec![Some("a"), Some("b")]
     );
-    assert!(matches!(arguments[0].expr, Expr::Literal(Value::Int(1))));
-    assert!(matches!(arguments[1].expr, Expr::Literal(Value::Int(2))));
+    assert!(matches!(
+        arguments.validation().unwrap()[0].expr,
+        Expr::Literal(Value::Int(1))
+    ));
+    assert!(matches!(
+        arguments.validation().unwrap()[1].expr,
+        Expr::Literal(Value::Int(2))
+    ));
     assert!(matches!(
         parsed.action.body[1],
         PLpgSQLStmt::FetchCursor {
@@ -186,6 +197,8 @@ fn pg18_dynamic_and_bound_cursor_for_loops_lower_structurally() {
     assert_eq!(*lowered_cursor, cursor);
     assert_eq!(
         arguments
+            .validation()
+            .unwrap()
             .iter()
             .map(|argument| argument.name.as_deref())
             .collect::<Vec<_>>(),
@@ -355,7 +368,8 @@ fn trigger_datum_indices_must_reference_existing_datums() {
             "action": { "PLpgSQL_stmt_block": { "body": [] } }
         });
         function[field] = serde_json::json!(0);
-        let error = lower_function(&function).expect_err("out-of-range trigger datum must fail");
+        let error = lower_function(&function, PLpgSQLCompileMode::Validate)
+            .expect_err("out-of-range trigger datum must fail");
         assert!(
             matches!(error, SQLError::Internal(ref message) if message.contains(field) && message.contains("out-of-range")),
             "{error}"
@@ -533,7 +547,7 @@ fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
         "PLpgSQL_stmt_assign": { "expr": json_expr("target := 1", 3) }
     });
     assert!(matches!(
-        lower_stmt(&assignment, &datums).unwrap(),
+        lower_stmt(&assignment, &datums, PLpgSQLCompileMode::Validate).unwrap(),
         PLpgSQLStmt::Assign { target: 0, .. }
     ));
 
@@ -543,7 +557,7 @@ fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
         }
     });
     assert!(matches!(
-        lower_stmt(&diagnostics, &datums).unwrap(),
+        lower_stmt(&diagnostics, &datums, PLpgSQLCompileMode::Validate).unwrap(),
         PLpgSQLStmt::GetDiagnostics { items } if items == vec![("ROW_COUNT".into(), 0)]
     ));
 
@@ -554,7 +568,7 @@ fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
         }
     });
     assert!(matches!(
-        lower_stmt(&foreach, &datums).unwrap(),
+        lower_stmt(&foreach, &datums, PLpgSQLCompileMode::Validate).unwrap(),
         PLpgSQLStmt::ForeachArray {
             target: 0,
             slice: 0,
@@ -570,7 +584,7 @@ fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
         }
     });
     assert!(matches!(
-        lower_stmt(&missing_foreach_target, &datums),
+        lower_stmt(&missing_foreach_target, &datums, PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(message)) if message.contains("missing datum 1")
     ));
 
@@ -582,7 +596,7 @@ fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
         }
     });
     assert!(matches!(
-        lower_stmt(&negative_foreach_slice, &datums),
+        lower_stmt(&negative_foreach_slice, &datums, PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(message)) if message.contains("slice")
     ));
 
@@ -598,7 +612,7 @@ fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
             }
         });
         assert!(matches!(
-            lower_stmt(&malformed, &datums),
+            lower_stmt(&malformed, &datums, PLpgSQLCompileMode::Validate),
             Err(SQLError::Internal(_))
         ));
     }
@@ -612,12 +626,12 @@ fn malformed_datum_identity_type_and_cross_references_are_rejected() {
         }
     });
     assert!(
-        matches!(lower_datum(&missing_name), Err(SQLError::Internal(message)) if message.contains("refname"))
+        matches!(lower_datum(&missing_name, PLpgSQLCompileMode::Validate), Err(SQLError::Internal(message)) if message.contains("refname"))
     );
 
     let missing_type = serde_json::json!({ "PLpgSQL_var": { "refname": "x" } });
     assert!(
-        matches!(lower_datum(&missing_type), Err(SQLError::Internal(message)) if message.contains("datatype"))
+        matches!(lower_datum(&missing_type, PLpgSQLCompileMode::Validate), Err(SQLError::Internal(message)) if message.contains("datatype"))
     );
 
     let wrong_parent = vec![
@@ -665,13 +679,13 @@ fn malformed_nested_statement_tags_and_lists_are_never_skipped() {
     ];
     for malformed in cases {
         assert!(matches!(
-            lower_stmt(&malformed, &datums),
+            lower_stmt(&malformed, &datums, PLpgSQLCompileMode::Validate),
             Err(SQLError::Internal(_))
         ));
     }
 
     assert!(matches!(
-        lower_stmt_list(&serde_json::json!({ "not": "an array" }), &datums),
+        lower_stmt_list(&serde_json::json!({ "not": "an array" }), &datums, PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(message)) if message.contains("not an array")
     ));
 
@@ -684,7 +698,7 @@ fn malformed_nested_statement_tags_and_lists_are_never_skipped() {
         }
     });
     assert!(matches!(
-        lower_block(&malformed_exception, &datums),
+        lower_block(&malformed_exception, &datums, PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(message)) if message.contains("exception arm")
     ));
 
@@ -704,7 +718,7 @@ fn malformed_nested_statement_tags_and_lists_are_never_skipped() {
         }
     });
     assert!(matches!(
-        lower_block(&unknown_exception_condition, &datums),
+        lower_block(&unknown_exception_condition, &datums, PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(message)) if message.contains("not_a_condition")
     ));
 
@@ -715,7 +729,7 @@ fn malformed_nested_statement_tags_and_lists_are_never_skipped() {
         }
     });
     assert!(matches!(
-        lower_stmt(&unknown_raise_condition, &datums),
+        lower_stmt(&unknown_raise_condition, &datums, PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(message)) if message.contains("not_a_condition")
     ));
 }
@@ -741,7 +755,7 @@ fn malformed_into_diagnostics_and_expression_modes_fail_at_lowering() {
         }
     });
     assert!(matches!(
-        lower_stmt(&missing_into_target, &datums),
+        lower_stmt(&missing_into_target, &datums, PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(message)) if message.contains("INTO but no target")
     ));
 
@@ -751,17 +765,17 @@ fn malformed_into_diagnostics_and_expression_modes_fail_at_lowering() {
         }
     });
     assert!(matches!(
-        lower_stmt(&missing_kind, &datums),
+        lower_stmt(&missing_kind, &datums, PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(message)) if message.contains("kind")
     ));
 
     assert!(matches!(
-        lower_expr(&json_expr("1", 0)),
-        Err(SQLError::Internal(message)) if message.contains("parse mode 0")
+        lower_expr(&json_expr("1", 0), PLpgSQLCompileMode::Validate),
+        Err(SQLError::Internal(message)) if message.contains("statement parse mode")
     ));
     assert!(matches!(
-        lower_full_statement(&json_expr("SELECT 1", 2)),
-        Err(SQLError::Internal(message)) if message.contains("parse mode 2")
+        lower_full_statement(&json_expr("SELECT 1", 2), PLpgSQLCompileMode::Validate),
+        Err(SQLError::Internal(message)) if message.contains("expression parse mode")
     ));
 }
 
@@ -773,7 +787,7 @@ fn malformed_assert_nodes_fail_at_lowering() {
         }
     });
     assert!(matches!(
-        lower_stmt(&missing_condition, &[]),
+        lower_stmt(&missing_condition, &[], PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(message)) if message.contains("cond")
     ));
 
@@ -784,7 +798,7 @@ fn malformed_assert_nodes_fail_at_lowering() {
         }
     });
     assert!(matches!(
-        lower_stmt(&malformed_message, &[]),
+        lower_stmt(&malformed_message, &[], PLpgSQLCompileMode::Validate),
         Err(SQLError::Internal(_))
     ));
 }

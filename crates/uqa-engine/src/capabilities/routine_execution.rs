@@ -94,6 +94,28 @@ impl RoutineStatements for Engine {
         )
     }
 
+    fn plpgsql_preparations(
+        &self,
+        definition: &uqa_sql::ast::CreateFunction,
+        parsed: &uqa_sql::plpgsql::PLpgSQLFunction,
+    ) -> std::sync::Arc<uqa_execution::routines::preparation::PLpgSQLPreparations> {
+        self.session
+            .routine_bodies
+            .plpgsql_preparations(definition, parsed)
+    }
+    fn analyze_static_plan(
+        &self,
+        plan: &mut UnifiedPlan,
+        parameters: &[SQLParam],
+    ) -> Result<uqa_sql::binding::statements::ProceduralPlanAnalysis, SQLError> {
+        uqa_sql::binding::statements::analyze_procedural_plan(
+            &self.statement_planning_context().analysis,
+            &uqa_sql::routines::resolution::RoutineOverloadContext { catalog: self },
+            self,
+            plan,
+            parameters,
+        )
+    }
     fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
         Engine::parser_settings(self)
     }

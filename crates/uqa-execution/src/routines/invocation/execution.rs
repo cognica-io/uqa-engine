@@ -8,7 +8,7 @@
 use super::{context::RoutineInvocationContext, depth::DepthGuard};
 use crate::routines::{
     transaction::RoutineTransactionGuard, CreateFunction, FunctionReturns, Interpreter,
-    PLpgSQLDatum, RoutineOutcome, TriggerRoutineContext,
+    RoutineOutcome, TriggerRoutineContext,
 };
 use uqa_core::Value;
 use uqa_sql::{
@@ -47,16 +47,12 @@ pub(super) fn execute_routine(
     let _transaction_context = RoutineTransactionGuard::enter(context.runtime.session, nonatomic);
     uqa_sql::routines::security::ensure_routine_execute_privilege(context.authority, definition)?;
     super::scopes::with_routine_context(context.session, definition, || {
-        let body = context.lookup.routine_body(function)?;
-        execute_compiled_body(
-            context,
-            function,
-            definition,
-            specialized.is_some(),
-            &body,
-            bound,
-            record_target,
-        )
+        let body = if definition.language == "plpgsql" {
+            context.session.plpgsql_body(function, definition, None)?
+        } else {
+            context.lookup.routine_body(function)?
+        };
+        execute_compiled_body(context, function, definition, &body, bound, record_target)
     })
 }
 
@@ -64,24 +60,13 @@ fn execute_compiled_body(
     context: &RoutineInvocationContext<'_>,
     function: &SQLUserFunction,
     definition: &CreateFunction,
-    specialized: bool,
     compiled: &CompiledFunctionBody,
     bound: Vec<Value>,
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
 ) -> Result<RoutineOutcome, SQLError> {
     match compiled {
         CompiledFunctionBody::PLpgSQL(parsed) => {
-            if specialized {
-                let mut parsed = parsed.clone();
-                for (index, parameter) in definition.params.iter().enumerate() {
-                    if let Some(PLpgSQLDatum::Var(variable)) = parsed.datums.get_mut(index) {
-                        variable.type_name.clone_from(&parameter.type_name);
-                    }
-                }
-                execute_plpgsql_language(context, definition, &parsed, bound)
-            } else {
-                execute_plpgsql_language(context, definition, parsed, bound)
-            }
+            execute_plpgsql_language(context, definition, parsed, bound)
         }
         CompiledFunctionBody::SQL(statements) => execute_sql_language(
             context,
@@ -102,7 +87,10 @@ pub fn execute_trigger_routine(
     let _guard = DepthGuard::enter(context.session)?;
     let _transaction_context = RoutineTransactionGuard::enter(context.runtime.session, false);
     super::scopes::with_routine_context(context.session, &function.def, || {
-        let body = context.lookup.routine_body(function)?;
+        let body =
+            context
+                .session
+                .plpgsql_body(function, &function.def, Some(trigger.relation_oid))?;
         let CompiledFunctionBody::PLpgSQL(parsed) = &*body else {
             return Err(SQLError::Unsupported(
                 "only LANGUAGE plpgsql trigger functions are executable".into(),

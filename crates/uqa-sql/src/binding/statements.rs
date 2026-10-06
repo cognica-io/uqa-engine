@@ -71,6 +71,9 @@ pub fn analyze_executable_plan(
     analyze_executable_plan_for_cache(context, plan, params).map(|(result, _)| result)
 }
 
+mod procedural;
+pub use procedural::{analyze_procedural_plan, ProceduralPlanAnalysis};
+
 /// Analyze once and report whether the converted inputs can be reused by a later
 /// ordinary message. Prepared definitions use their separate creation lifetime.
 pub fn analyze_executable_plan_for_cache(
@@ -138,25 +141,36 @@ fn analyze_plan_result_inner(
     let binding = scope.binding_context()?;
     *reusable &=
         super::preparation::read_executable_inputs(routines, plan, params, &binding, aliases)?;
+    if let UnifiedPlan::Command(command) = plan {
+        if let CommandPlan::Explain { body, .. } = command.as_mut() {
+            analyze_plan_result_inner(routines, aliases, body, params, scope, reusable)?;
+            return Ok(AnalyzedResult::Command);
+        }
+    }
+    analyze_bound_result(routines, plan, params, &binding)
+}
+
+fn analyze_bound_result(
+    routines: &dyn RoutineResolution,
+    plan: &UnifiedPlan,
+    params: &[SQLParam],
+    binding: &BindingContext<'_>,
+) -> Result<AnalyzedResult, SQLError> {
     let rows = AnalyzedResult::Schema;
     match plan {
         UnifiedPlan::Query(query) => {
-            super::analyze_query_plan_schema(routines, query, params, &binding, None).map(rows)
+            super::analyze_query_plan_schema(routines, query, params, binding, None).map(rows)
         }
-        UnifiedPlan::Command(command) => match command.as_mut() {
-            CommandPlan::Explain { body, .. } => {
-                analyze_plan_result_inner(routines, aliases, body, params, scope, reusable)?;
-                Ok(AnalyzedResult::Command)
-            }
+        UnifiedPlan::Command(command) => match command.as_ref() {
             CommandPlan::CreateView { query, .. }
             | CommandPlan::CreateTableAs { query, .. }
             | CommandPlan::CreateMaterializedView { query, .. }
             | CommandPlan::DeclareCursor { query, .. } => {
-                super::analyze_query_plan_schema(routines, query, params, &binding, None)?;
+                super::analyze_query_plan_schema(routines, query, params, binding, None)?;
                 Ok(AnalyzedResult::Command)
             }
             _ => Ok(
-                super::analyze_prepared_command_schema(routines, command, params, &binding)?
+                super::analyze_prepared_command_schema(routines, command, params, binding)?
                     .map_or(AnalyzedResult::Command, rows),
             ),
         },

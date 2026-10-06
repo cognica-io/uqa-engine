@@ -20,10 +20,10 @@ use uqa_sql::ast::{
 use uqa_sql::expr::{cast_value_from, coercion_type_name, value_type_name};
 use uqa_sql::plpgsql::runtime_diagnostics as diagnostics;
 use uqa_sql::plpgsql::{
-    bind_expression_variables, bind_statement_variables, condition_sqlstate, IntoTarget,
-    PLpgSQLBlock, PLpgSQLCursorArgument, PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum,
-    PLpgSQLFunction, PLpgSQLReturnValue, PLpgSQLRowField, PLpgSQLStmt, RaiseLevel,
-    ResolvedVariable, VariableConflict, VariableResolver,
+    condition_sqlstate, IntoTarget, PLpgSQLBlock, PLpgSQLCursorCount, PLpgSQLCursorOpen,
+    PLpgSQLDatum, PLpgSQLExpression, PLpgSQLFunction, PLpgSQLReturnValue, PLpgSQLRowField,
+    PLpgSQLStatement, PLpgSQLStmt, RaiseLevel, ResolvedVariable, VariableConflict,
+    VariableResolver,
 };
 use uqa_sql::type_resolution::canonical_routine_type_name;
 use uqa_sql::{compile, SQLError, SQLParam, SQLResult};
@@ -44,6 +44,7 @@ mod blocks;
 mod control_flow;
 mod cursors;
 mod datum;
+pub mod preparation;
 mod records;
 mod resolver;
 mod sql_runtime;
@@ -92,12 +93,14 @@ pub struct RoutineOutcome {
 
 /// Mutable activation record for one PL/pgSQL invocation.
 pub struct Interpreter<'a> {
+    preparations: std::sync::Arc<preparation::PLpgSQLPreparations>,
     services: RoutineContext<'a>,
     def: &'a CreateFunction,
     datums: &'a [PLpgSQLDatum],
     values: Vec<Value>,
     record_types: HashMap<usize, Vec<Option<ColumnType>>>,
     bindings: HashMap<String, Vec<usize>>,
+    cursor_arguments: BTreeSet<usize>,
     err_stack: Vec<CaughtError>,
     set_rows: Vec<Vec<Value>>,
     ret: Value,
