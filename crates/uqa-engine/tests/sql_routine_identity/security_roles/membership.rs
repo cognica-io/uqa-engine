@@ -50,19 +50,17 @@ fn assert_noinherit_member_cannot_manage_owned_routines(engine: &Engine) {
         ),
         "42501"
     );
-    engine
+    let error = engine
         .sql(
             "GRANT EXECUTE ON FUNCTION owner_grant_probe() TO owner_acl_grantee",
             &[],
         )
-        .unwrap();
-    assert_eq!(
-        engine.take_sql_notices(),
-        [
-            uqa_engine::SQLNotice::warning("no privileges were granted for \"owner_grant_probe\"")
-                .with_sqlstate("01007")
-        ]
-    );
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    assert!(error
+        .to_string()
+        .contains("permission denied for function owner_grant_probe"));
+    assert!(engine.take_sql_notices().is_empty());
     assert_eq!(
         sqlstate(engine, "DROP FUNCTION owner_drop_probe()"),
         "42501"

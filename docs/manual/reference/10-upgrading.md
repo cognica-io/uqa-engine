@@ -6,6 +6,10 @@ This page separates unreleased changes on `main` from released upgrade requireme
 
 The following changes were merged after the 0.4.9 tag and are not present in that release. They do not change its package versions. The first open rewrites the user-defined type names of stored SQL, as the next section describes.
 
+### Routine privilege declarations
+
+Rust code constructing `uqa_sql::ast::GrantRoutineStmt` now supplies `schemas: None` for explicit signatures or `Some(names)` for schema-wide selection and a `privileges` list of `RoutinePrivilege` declarations. Deserialization defaults both new fields for older serialized statements. Privilege-name checks occur after target and recipient binding. This AST change does not change stored routine catalog formats.
+
 ### Stored user-defined type names
 
 Databases written by 0.4.9 and earlier record a user-defined domain in stored SQL by its name: in casts and typed constants, in routine parameter and result types, and in the argument and result types of bound routine calls inside views, column defaults, CHECK constraints, generation expressions, index expressions and predicates, partition keys and bounds, domain defaults and checks, routine defaults and SQL-standard bodies, trigger conditions and rules. Later releases record the domain's OID instead, as PostgreSQL does, so renaming or moving a domain no longer changes what a stored reference means. The first open by a later release rewrites every such name to the OID of the domain it named, reading an unqualified name in the `public` schema, or for a routine along the search path it was created under, in the initial catalog transaction; a name that denotes no domain keeps its spelling. A version marker records the completed upgrade, and later opens skip it. Without this upgrade a bound call on a domain-typed routine could not be resolved when the database opened.
