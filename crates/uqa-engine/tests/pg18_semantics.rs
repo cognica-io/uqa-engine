@@ -164,3 +164,6 @@ mod parser_settings;
 
 #[path = "pg18_semantics/function_definition.rs"]
 mod function_definition;
+
+#[path = "pg18_semantics/datestyle.rs"]
+mod datestyle;
