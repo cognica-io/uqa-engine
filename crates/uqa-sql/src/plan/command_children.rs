@@ -121,98 +121,13 @@ impl CommandPlan {
 impl CommandPlan {
     /// Scalar expressions owned by the command, excluding its relational children.
     pub fn expressions(&self) -> Vec<&super::ScalarExpr> {
-        use super::{ConflictActionPlan, MergeWhenPlan};
-        let mut expressions = Vec::new();
         match self {
-            Self::Insert(plan) => {
-                expressions.extend(
-                    plan.columns
-                        .iter()
-                        .flat_map(crate::ast::AssignmentTarget::expressions),
-                );
-                expressions.extend(plan.rows.iter().flatten());
-                if let Some(conflict) = &plan.on_conflict {
-                    expressions.extend(&conflict.expressions);
-                    expressions.extend(conflict.predicate.as_deref());
-                    if let ConflictActionPlan::Update {
-                        assignments,
-                        predicate,
-                    } = &conflict.action
-                    {
-                        expressions.extend(
-                            assignments
-                                .iter()
-                                .flat_map(super::AssignmentPlan::expressions),
-                        );
-                        expressions.extend(predicate.as_deref());
-                    }
-                }
-                expressions.extend(plan.returning.iter().map(|projection| &projection.expr));
-                expressions.extend(plan.view_checks.iter().map(|check| &check.predicate));
-            }
-            Self::Update(plan) => {
-                expressions.extend(
-                    plan.assignments
-                        .iter()
-                        .flat_map(super::AssignmentPlan::expressions),
-                );
-                expressions.extend(plan.predicate.as_ref());
-                expressions.extend(plan.returning.iter().map(|projection| &projection.expr));
-                expressions.extend(plan.view_checks.iter().map(|check| &check.predicate));
-            }
-            Self::Delete(plan) => {
-                expressions.extend(plan.predicate.as_ref());
-                expressions.extend(plan.returning.iter().map(|projection| &projection.expr));
-            }
-            Self::Merge(plan) => {
-                expressions.extend(plan.target_predicate.as_ref());
-                expressions.push(&plan.join_condition);
-                for clause in &plan.when_clauses {
-                    match clause {
-                        MergeWhenPlan::UpdateMatched {
-                            condition,
-                            assignments,
-                        }
-                        | MergeWhenPlan::UpdateNotMatchedBySource {
-                            condition,
-                            assignments,
-                        } => {
-                            expressions.extend(condition.as_ref());
-                            expressions.extend(
-                                assignments
-                                    .iter()
-                                    .flat_map(super::AssignmentPlan::expressions),
-                            );
-                        }
-                        MergeWhenPlan::InsertNotMatched {
-                            condition,
-                            columns,
-                            values,
-                            ..
-                        } => {
-                            expressions.extend(condition.as_ref());
-                            expressions.extend(
-                                columns
-                                    .iter()
-                                    .flat_map(crate::ast::AssignmentTarget::expressions),
-                            );
-                            expressions.extend(values);
-                        }
-                        MergeWhenPlan::DeleteMatched { condition }
-                        | MergeWhenPlan::DeleteNotMatchedBySource { condition }
-                        | MergeWhenPlan::NothingMatched { condition }
-                        | MergeWhenPlan::NothingNotMatched { condition }
-                        | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
-                            expressions.extend(condition.as_ref());
-                        }
-                    }
-                }
-                expressions.extend(plan.returning.iter().map(|projection| &projection.expr));
-                expressions.extend(plan.view_checks.iter().map(|check| &check.predicate));
-            }
-            _ => {}
+            Self::Insert(plan) => plan.expressions(),
+            Self::Update(plan) => plan.expressions(),
+            Self::Delete(plan) => plan.expressions(),
+            Self::Merge(plan) => plan.expressions(),
+            _ => Vec::new(),
         }
-        expressions
     }
 
     /// Scalar expressions owned by the command, excluding its relational children.
@@ -375,6 +290,41 @@ impl CommandPlan {
 }
 
 impl InsertPlan {
+    /// Scalar expressions owned by this command, excluding its relational children.
+    pub fn expressions(&self) -> Vec<&super::ScalarExpr> {
+        let mut expressions = Vec::new();
+        expressions.extend(
+            self.columns
+                .iter()
+                .flat_map(crate::ast::AssignmentTarget::expressions),
+        );
+        expressions.extend(self.rows.iter().flatten());
+        if let Some(conflict) = &self.on_conflict {
+            expressions.extend(&conflict.expressions);
+            expressions.extend(conflict.predicate.as_deref());
+            expressions.extend(self.conflict_update_expressions());
+        }
+        expressions.extend(self.returning.iter().map(|projection| &projection.expr));
+        expressions.extend(self.view_checks.iter().map(|check| &check.predicate));
+
+        expressions
+    }
+
+    /// Expressions that see the additional EXCLUDED relation in ON CONFLICT DO UPDATE.
+    pub fn conflict_update_expressions(&self) -> Vec<&super::ScalarExpr> {
+        match self.on_conflict.as_ref().map(|conflict| &conflict.action) {
+            Some(super::ConflictActionPlan::Update {
+                assignments,
+                predicate,
+            }) => assignments
+                .iter()
+                .flat_map(super::AssignmentPlan::expressions)
+                .chain(predicate.as_deref())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// Query children evaluated in the command's WITH scope: the source query and every `subqueries` entry.
     pub fn query_inputs(&self) -> Vec<&QueryPlan> {
         self.source
@@ -386,6 +336,21 @@ impl InsertPlan {
 }
 
 impl UpdatePlan {
+    /// Scalar expressions owned by this command, excluding its relational children.
+    pub fn expressions(&self) -> Vec<&super::ScalarExpr> {
+        let mut expressions = Vec::new();
+        expressions.extend(
+            self.assignments
+                .iter()
+                .flat_map(super::AssignmentPlan::expressions),
+        );
+        expressions.extend(self.predicate.as_ref());
+        expressions.extend(self.returning.iter().map(|projection| &projection.expr));
+        expressions.extend(self.view_checks.iter().map(|check| &check.predicate));
+
+        expressions
+    }
+
     /// Query children evaluated in the command's WITH scope, which are its `subqueries` entries.
     pub fn query_inputs(&self) -> Vec<&QueryPlan> {
         self.subqueries.iter().collect()
@@ -398,6 +363,15 @@ impl UpdatePlan {
 }
 
 impl DeletePlan {
+    /// Scalar expressions owned by this command, excluding its relational children.
+    pub fn expressions(&self) -> Vec<&super::ScalarExpr> {
+        let mut expressions = Vec::new();
+        expressions.extend(self.predicate.as_ref());
+        expressions.extend(self.returning.iter().map(|projection| &projection.expr));
+
+        expressions
+    }
+
     /// Query children evaluated in the command's WITH scope, which are its `subqueries` entries.
     pub fn query_inputs(&self) -> Vec<&QueryPlan> {
         self.subqueries.iter().collect()
@@ -410,6 +384,58 @@ impl DeletePlan {
 }
 
 impl MergePlan {
+    /// Scalar expressions owned by this command, excluding its relational children.
+    pub fn expressions(&self) -> Vec<&super::ScalarExpr> {
+        use super::MergeWhenPlan;
+        let mut expressions = Vec::new();
+        expressions.extend(self.target_predicate.as_ref());
+        expressions.push(&self.join_condition);
+        for clause in &self.when_clauses {
+            match clause {
+                MergeWhenPlan::UpdateMatched {
+                    condition,
+                    assignments,
+                }
+                | MergeWhenPlan::UpdateNotMatchedBySource {
+                    condition,
+                    assignments,
+                } => {
+                    expressions.extend(condition.as_ref());
+                    expressions.extend(
+                        assignments
+                            .iter()
+                            .flat_map(super::AssignmentPlan::expressions),
+                    );
+                }
+                MergeWhenPlan::InsertNotMatched {
+                    condition,
+                    columns,
+                    values,
+                    ..
+                } => {
+                    expressions.extend(condition.as_ref());
+                    expressions.extend(
+                        columns
+                            .iter()
+                            .flat_map(crate::ast::AssignmentTarget::expressions),
+                    );
+                    expressions.extend(values);
+                }
+                MergeWhenPlan::DeleteMatched { condition }
+                | MergeWhenPlan::DeleteNotMatchedBySource { condition }
+                | MergeWhenPlan::NothingMatched { condition }
+                | MergeWhenPlan::NothingNotMatched { condition }
+                | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
+                    expressions.extend(condition.as_ref());
+                }
+            }
+        }
+        expressions.extend(self.returning.iter().map(|projection| &projection.expr));
+        expressions.extend(self.view_checks.iter().map(|check| &check.predicate));
+
+        expressions
+    }
+
     /// Query children evaluated in the command's WITH scope, which are its `subqueries` entries.
     pub fn query_inputs(&self) -> Vec<&QueryPlan> {
         self.subqueries.iter().collect()
