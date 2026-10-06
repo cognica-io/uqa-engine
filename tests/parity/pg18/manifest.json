@@ -139,6 +139,7 @@
       "aggregates.null-and-enum-inputs",
       "expressions.boolean-conditions",
       "expressions.interval-arithmetic",
+      "functions.date-trunc",
       "routines.sql-standard-body-deparse",
       "aggregates.within-group-call-analysis"
     ],
@@ -1130,6 +1131,14 @@
       "supported_version": "Unreleased: 45 PostgreSQL 18.4 cases on memory and SQLite engines cover the conditions of WHERE, HAVING, JOIN ON, searched CASE, AND, OR, NOT and aggregate FILTER in queries, updates and deletes: a condition of another type than boolean or a domain over it is 42804 naming its construct, and an unknown literal is read as boolean input with prefixes and surrounding spaces, invalid text being 22P02",
       "status": "verified",
       "open_issue": null
+    },
+    {
+      "id": "functions.date-trunc",
+      "postgresql_reference": "PostgreSQL 18.4 command tags, rows, type identities, SQLSTATEs, messages and DETAIL in tests/parity/pg18/date_trunc_interval_oracle.expected.json; timestamp_trunc and interval_trunc in src/backend/utils/adt/timestamp.c; DecodeUnits and deltatktbl in src/backend/utils/adt/datetime.c",
+      "uqa_test": "cargo test -p uqa-sql --lib expr::time::date_trunc::tests; cargo test -p uqa-engine --test integration date_trunc_interval",
+      "supported_version": "Unreleased: finite interval and timestamp date_trunc behavior across canonical units, aliases, signed/mixed symbolic interval fields, BC and negative-epoch calendar values, NULL inputs, interval boundaries, minimum-Julian timestamp inputs and results with UTC-offset-before-range-check ordering, exact 22008/22023/0A000 diagnostics and stored default/generated/view/prepared expression lifetimes; the independent reference is replayed on all four storage providers with durable reopen",
+      "status": "partial",
+      "open_issue": "Issue #442 tracks the reproduced explicit-timezone overload and session-TimeZone runtime differences and their catalog identities. Global infinite temporal carriers and full date/timestamp ranges remain in the inherited compatibility tasks."
     },
     {
       "id": "expressions.interval-arithmetic",

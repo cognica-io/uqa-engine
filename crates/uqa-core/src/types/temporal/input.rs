@@ -117,9 +117,11 @@ impl TemporalValue {
     /// `timestamp_in`: a date with an optional time of day, or `now`, `today`, `tomorrow`, `yesterday` or `epoch`; a zone is read and ignored.
     pub fn timestamp_input(text: &str, now_micros: i64) -> Input<Self> {
         let fields = decode(text)?;
-        Ok(Self::Timestamp {
-            micros: instant(&fields, now_micros)?,
-        })
+        let micros = instant(&fields, now_micros)?;
+        if !Self::timestamp_micros_in_range(micros) {
+            return Err(TemporalInputError::OutOfRange);
+        }
+        Ok(Self::Timestamp { micros })
     }
 
     /// `timestamptz_in`: as `timestamp_input`, with the UTC offset applied; a text without one is read in the `UTC` session time zone.
@@ -130,6 +132,9 @@ impl TemporalValue {
         let micros = local
             .checked_sub(offset)
             .ok_or(TemporalInputError::OutOfRange)?;
+        if !Self::timestamp_micros_in_range(micros) {
+            return Err(TemporalInputError::OutOfRange);
+        }
         Ok(Self::TimestampTz { micros })
     }
 }

@@ -54,6 +54,13 @@ pub enum TemporalValue {
 }
 
 impl TemporalValue {
+    /// Test a finite Unix-microsecond timestamp against `PostgreSQL`'s Julian range. The epoch conversion uses a wider integer because `PostgreSQL`'s upper bound lies beyond this carrier's largest Unix-microsecond value.
+    #[must_use]
+    pub const fn timestamp_micros_in_range(micros: i64) -> bool {
+        let postgres_micros = micros as i128 - 946_684_800_000_000;
+        postgres_micros >= -211_813_488_000_000_000 && postgres_micros < 9_223_371_331_200_000_000
+    }
+
     /// The `parse_*` readers are the input functions with the wall clock standing in for the transaction start that `now` and `today` name; a text the type rejects reads as `None`.
     pub fn parse_date(input: &str) -> Option<Self> {
         Self::date_input(input, wall_clock_micros()).ok()
