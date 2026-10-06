@@ -16,6 +16,8 @@ use uqa_engine::{Engine, SQLResult, SQLScalarFunction};
 use uqa_sql::{ColumnType, SQLError};
 use uqa_storage_sqlite::ManagedConnection;
 
+#[path = "sql_views/alteration_diagnostics.rs"]
+mod alteration_diagnostics;
 #[path = "sql_views/automatic_updatability.rs"]
 mod automatic_updatability;
 #[path = "sql_views/catalog_function_dispatch.rs"]
