@@ -32,7 +32,7 @@ pub(super) fn analyze_parameter_default(
     let original = ExpressionPlan::lower_with(expression.clone(), &aggregate);
     let mut bound = original.clone();
     let binding = context.catalog.binding_snapshot()?;
-    let source = crate::binding::analyze_routine_default(
+    let source = crate::binding::analyze_default_inputs(
         context.routines,
         &aggregate,
         context.catalog,

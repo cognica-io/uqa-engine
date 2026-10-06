@@ -172,9 +172,8 @@ fn analyze_schema_expression(
         .map(|expression| expression.ty)
 }
 
-/// Analyze and freeze input literals in a routine DEFAULT with no parameter or
-/// row namespace. Expression restrictions apply in `PostgreSQL`'s traversal order.
-pub(crate) fn analyze_routine_default(
+/// Analyze and freeze input literals in a DEFAULT with no parameter or row namespace. Expression restrictions apply in `PostgreSQL`'s traversal order.
+pub(crate) fn analyze_default_inputs(
     routines: &dyn RoutineResolution,
     aggregates: &dyn crate::plan::AggregateClassifier,
     aliases: &dyn OidAliasInput,
@@ -191,7 +190,7 @@ pub(crate) fn analyze_routine_default(
         ),
         schema_expression: Some(SchemaExpressionContext {
             aggregates,
-            kind: SchemaExpressionKind::RoutineDefault,
+            kind: SchemaExpressionKind::Default,
         }),
     };
     let ty = analysis
