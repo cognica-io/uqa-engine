@@ -103,6 +103,8 @@ num-bigint = "=0.4.6"
 num-traits = "0.2"
 rusqlite = { version = "0.39", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+tz-rs = { version = "=0.7.3", default-features = false }
+tzdb_data = "=0.2.5"
 argon2 = { version = "0.5", default-features = false }
 chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc", "zeroize"] }
 # Preserve stream-buffer zeroization as well as the AEAD key and cipher state.
