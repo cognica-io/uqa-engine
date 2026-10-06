@@ -238,6 +238,15 @@ dump_block(StringInfo out, PLpgSQL_stmt_block *node)
 
 	WRITE_INT_FIELD(lineno, lineno, lineno);
 	WRITE_STRING_FIELD(label, label, label);
+	/* Exact datum ownership, including empty blocks; never infer from names or lines. */
+	appendStringInfoString(out, "\"initvarnos\":[");
+	for (int i = 0; i < node->n_initvars; i++)
+	{
+		if (i > 0)
+			appendStringInfoChar(out, ',');
+		appendStringInfo(out, "%d", node->initvarnos[i]);
+	}
+	appendStringInfoString(out, "],");
 	WRITE_STATEMENTS_FIELD(body);
 	WRITE_OBJ_FIELD(exceptions, dump_exception_block);
 

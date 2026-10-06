@@ -8,15 +8,15 @@
 
 use super::{
     cast_value_from, coercion_type_name, compile, condition_sqlstate, format_raise_message,
-    looks_like_sqlstate, result_row_count, result_row_values, strict_into_check, Expr, Flow,
-    Interpreter, IntoTarget, RaiseLevel, SQLError, SQLParam, SQLResult, Statement, Value,
+    looks_like_sqlstate, result_row_count, result_row_values, strict_into_check, Flow, Interpreter,
+    IntoTarget, PLpgSQLExpression, RaiseLevel, SQLError, SQLParam, SQLResult, Statement, Value,
 };
 
 impl Interpreter<'_> {
     pub(super) fn exec_assert(
         &mut self,
-        condition: &Expr,
-        message: Option<&Expr>,
+        condition: &PLpgSQLExpression,
+        message: Option<&PLpgSQLExpression>,
     ) -> Result<Flow, SQLError> {
         if !self.services.statements.assertions_enabled() {
             return Ok(Flow::Normal);
@@ -51,7 +51,7 @@ impl Interpreter<'_> {
         level: RaiseLevel,
         condition: Option<&str>,
         message: Option<&str>,
-        params: &[Expr],
+        params: &[PLpgSQLExpression],
     ) -> Result<Flow, SQLError> {
         // Bare RAISE re-throws the error being handled.
         if condition.is_none() && message.is_none() {
@@ -108,8 +108,8 @@ impl Interpreter<'_> {
 
     pub(super) fn exec_dynamic(
         &mut self,
-        query: &Expr,
-        params: &[Expr],
+        query: &PLpgSQLExpression,
+        params: &[PLpgSQLExpression],
     ) -> Result<SQLResult, SQLError> {
         let (text, bound_params) = self.eval_dynamic_sql(query, params)?;
         let (statements, parser) =
@@ -140,8 +140,8 @@ impl Interpreter<'_> {
 
     pub(super) fn eval_dynamic_sql(
         &self,
-        query: &Expr,
-        params: &[Expr],
+        query: &PLpgSQLExpression,
+        params: &[PLpgSQLExpression],
     ) -> Result<(String, Vec<SQLParam>), SQLError> {
         let text = match self.eval_expr(query)? {
             Value::Str(text) => text,
@@ -168,7 +168,7 @@ impl Interpreter<'_> {
     /// `FOUND`, and `INTO` assignment.
     pub(super) fn consume_statement_result(
         &mut self,
-        statement: &Statement,
+        is_call: bool,
         result: &SQLResult,
         into: Option<&IntoTarget>,
         strict: bool,
@@ -188,7 +188,7 @@ impl Interpreter<'_> {
             )?;
         }
         // CALL statements leave FOUND untouched.
-        if !matches!(statement, Statement::Call { .. }) {
+        if !is_call {
             self.set_found(row_count > 0);
         }
         Ok(())

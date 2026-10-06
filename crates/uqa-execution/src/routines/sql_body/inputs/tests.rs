@@ -52,7 +52,7 @@ fn definition() -> Result<PreparedDefinition, SQLError> {
         parameter_types: vec![],
         result_schema: None,
         effective_search_path: None,
-        dependencies: Default::default(),
+        dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default(),
         dependency_snapshot: None,
     })
 }
@@ -130,7 +130,8 @@ fn publication_and_undo_events_invalidate_only_selected_analysis_dependencies() 
     use crate::statement::prepared::invalidation::{
         PreparedCatalogChange, PreparedInvalidationLog,
     };
-    let cache = SQLRoutineInputs::default();
+    let bodies = crate::routines::invocation::bodies::SessionRoutineBodies::default();
+    let cache = bodies.sql_inputs();
     let identity = SQLBodyIdentity {
         object: [5; 16],
         version: 1,
@@ -143,7 +144,7 @@ fn publication_and_undo_events_invalidate_only_selected_analysis_dependencies() 
     let original = cache
         .statement(identity, 0, &[], &context(), prepare)
         .unwrap();
-    PreparedCatalogChange::Relation(99).invalidate_with_routines(std::iter::empty(), &cache);
+    PreparedCatalogChange::Relation(99).invalidate_with_routines(std::iter::empty(), &bodies);
     let unchanged = cache
         .statement(identity, 0, &[], &context(), || {
             panic!("unrelated relation")
@@ -152,12 +153,12 @@ fn publication_and_undo_events_invalidate_only_selected_analysis_dependencies() 
     assert!(Arc::ptr_eq(&original, &unchanged));
     let mut log = PreparedInvalidationLog::default();
     log.record(PreparedCatalogChange::Relation(42));
-    log.invalidate_with_routines(std::iter::empty(), &cache);
+    log.invalidate_with_routines(std::iter::empty(), &bodies);
     let changed = cache
         .statement(identity, 0, &[], &context(), prepare)
         .unwrap();
     assert!(!Arc::ptr_eq(&original, &changed));
-    log.invalidate_with_routines(std::iter::empty(), &cache);
+    log.invalidate_with_routines(std::iter::empty(), &bodies);
     let restored = cache
         .statement(identity, 0, &[], &context(), prepare)
         .unwrap();

@@ -7,13 +7,14 @@
 //! Bound PL/pgSQL cursor execution.
 
 use super::{
-    coerce_routine_value, compile, result_row_values, CursorDirection, Expr, FetchCursorStmt, Flow,
-    Interpreter, IntoTarget, LoopSignal, PLpgSQLCursorArgument, PLpgSQLCursorCount,
-    PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLRowField, PLpgSQLStmt, SQLError, SQLParam, Statement,
-    Value,
+    coerce_routine_value, compile, result_row_values, CursorDirection, FetchCursorStmt, Flow,
+    Interpreter, IntoTarget, LoopSignal, PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum,
+    PLpgSQLRowField, PLpgSQLStmt, SQLError, SQLParam, Statement, Value,
 };
 use uqa_sql::plan::UnifiedPlan;
-use uqa_sql::plpgsql::PLpgSQLCursor;
+use uqa_sql::plpgsql::{
+    PLpgSQLCursor, PLpgSQLCursorArguments, PLpgSQLExpression, PLpgSQLStatement,
+};
 
 impl Interpreter<'_> {
     pub(super) fn exec_open_cursor(
@@ -24,27 +25,30 @@ impl Interpreter<'_> {
         let cursor_name = self.cursor_variable_name(cursor_index, "OPEN")?.to_string();
         let portal_name = self.portal_name_for_open(cursor_index, &cursor_name)?;
         self.services.portals.ensure_available(&portal_name)?;
-        let (query, params, scroll, source_sql) = match open {
+        let (plan, params, scroll, source_sql) = match open {
             PLpgSQLCursorOpen::Bound { arguments } => {
                 let (definition, fields) = self.bound_cursor_query(cursor_index)?;
-                let query = self.bind_bound_cursor_query(
+                let (plan, params) = self.bind_bound_cursor_query(
                     &cursor_name,
                     definition.query,
                     &fields,
                     arguments,
                 )?;
-                (query, Vec::new(), definition.scroll, definition.source_sql)
+                (plan, params, definition.scroll, definition.source_sql)
             }
             PLpgSQLCursorOpen::Static {
                 query,
                 scroll,
                 source_sql,
-            } => (
-                self.bind_query(query)?,
-                Vec::new(),
-                *scroll,
-                std::sync::Arc::clone(source_sql),
-            ),
+            } => {
+                let prepared = self.prepare_statement(query)?;
+                (
+                    prepared.plan.clone(),
+                    self.fragment_parameters(&prepared)?,
+                    *scroll,
+                    std::sync::Arc::clone(source_sql),
+                )
+            }
             PLpgSQLCursorOpen::Dynamic {
                 query,
                 params,
@@ -52,14 +56,16 @@ impl Interpreter<'_> {
             } => {
                 let (text, params) = self.eval_dynamic_sql(query, params)?;
                 (
-                    self.compile_dynamic_cursor(&text)?,
+                    UnifiedPlan::lower_with(self.compile_dynamic_cursor(&text)?, &|name: &str| {
+                        self.services.runtime.has_aggregate_function(name)
+                    }),
                     params,
                     *scroll,
                     text.into(),
                 )
             }
         };
-        let plan = self.lower_cursor_plan(query)?;
+        let plan = self.services.statements.optimize_plan(plan)?;
         self.services
             .portals
             .open(&params, &portal_name, scroll, &plan, &source_sql)?;
@@ -131,13 +137,17 @@ impl Interpreter<'_> {
         &mut self,
         label: Option<&str>,
         target: &IntoTarget,
-        query: &Statement,
+        query: &PLpgSQLStatement,
         source_sql: &str,
         body: &[PLpgSQLStmt],
     ) -> Result<Flow, SQLError> {
-        let query = self.bind_query(query)?;
-        let plan = self.lower_cursor_plan(query)?;
-        let portal_name = self.open_internal_for_portal(&[], &plan, source_sql)?;
+        let prepared = self.prepare_statement(query)?;
+        let params = self.fragment_parameters(&prepared)?;
+        let plan = self
+            .services
+            .statements
+            .optimize_plan(prepared.plan.clone())?;
+        let portal_name = self.open_internal_for_portal(&params, &plan, source_sql)?;
         self.exec_pinned_for_portal(&portal_name, label, target, body, true)
     }
 
@@ -145,8 +155,8 @@ impl Interpreter<'_> {
         &mut self,
         label: Option<&str>,
         target: &IntoTarget,
-        query: &Expr,
-        params: &[Expr],
+        query: &PLpgSQLExpression,
+        params: &[PLpgSQLExpression],
         body: &[PLpgSQLStmt],
     ) -> Result<Flow, SQLError> {
         let (text, params) = self.eval_dynamic_sql(query, params)?;
@@ -161,7 +171,7 @@ impl Interpreter<'_> {
         label: Option<&str>,
         target: usize,
         cursor: usize,
-        arguments: &[PLpgSQLCursorArgument],
+        arguments: &PLpgSQLCursorArguments,
         body: &[PLpgSQLStmt],
     ) -> Result<Flow, SQLError> {
         let cursor_was_null = match self.values.get(cursor) {
@@ -175,7 +185,7 @@ impl Interpreter<'_> {
         self.exec_open_cursor(
             cursor,
             &PLpgSQLCursorOpen::Bound {
-                arguments: arguments.to_vec(),
+                arguments: arguments.clone(),
             },
         )?;
         let portal_name = self.open_portal_name(cursor, "FOR")?;
@@ -349,10 +359,10 @@ impl Interpreter<'_> {
     fn bind_bound_cursor_query(
         &mut self,
         cursor_name: &str,
-        query: Statement,
+        query: PLpgSQLStatement,
         fields: &[PLpgSQLRowField],
-        arguments: &[PLpgSQLCursorArgument],
-    ) -> Result<Statement, SQLError> {
+        arguments: &PLpgSQLCursorArguments,
+    ) -> Result<(UnifiedPlan, Vec<SQLParam>), SQLError> {
         let values = self.evaluate_cursor_arguments(cursor_name, fields, arguments)?;
         let saved_values = fields
             .iter()
@@ -371,7 +381,9 @@ impl Interpreter<'_> {
         for field in fields {
             self.push_binding(&field.name, field.varno);
         }
-        let query = self.bind_query(&query);
+        let query = self
+            .prepare_statement(&query)
+            .and_then(|prepared| Ok((prepared.plan.clone(), self.fragment_parameters(&prepared)?)));
         for field in fields.iter().rev() {
             self.pop_binding(&field.name);
         }
@@ -410,8 +422,16 @@ impl Interpreter<'_> {
         &self,
         cursor_name: &str,
         fields: &[PLpgSQLRowField],
-        arguments: &[PLpgSQLCursorArgument],
+        arguments: &PLpgSQLCursorArguments,
     ) -> Result<Vec<Value>, SQLError> {
+        if fields.is_empty() && arguments.source().query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let prepared = self.prepare_cursor_arguments(arguments)?;
+        let Statement::Select(query) = &prepared.syntax else {
+            return Err(SQLError::Internal("cursor arguments have no SELECT".into()));
+        };
+        let arguments = &query.projections;
         if fields.len() != arguments.len() {
             return Err(SQLError::Internal(format!(
                 "PL/pgSQL cursor `{cursor_name}` expected {} arguments but received {}",
@@ -419,10 +439,16 @@ impl Interpreter<'_> {
                 arguments.len()
             )));
         }
+        let result = self.execute_fragment(&prepared)?;
+        if result.rows.len() != 1 {
+            return Err(SQLError::Internal(
+                "cursor arguments did not produce one row".into(),
+            ));
+        }
         let mut values = vec![None; fields.len()];
         let mut next_positional = 0usize;
-        for argument in arguments {
-            let index = if let Some(name) = &argument.name {
+        for (column, argument) in arguments.iter().enumerate() {
+            let index = if let Some(name) = &argument.alias {
                 fields
                     .iter()
                     .position(|field| field.name.eq_ignore_ascii_case(name))
@@ -448,8 +474,8 @@ impl Interpreter<'_> {
                     fields[index].name
                 )));
             }
-            *slot = Some(self.eval_expr(&argument.expr)?);
-            if argument.name.is_none() {
+            *slot = Some(result.value_at(0, column).cloned().unwrap_or(Value::Null));
+            if argument.alias.is_none() {
                 next_positional += 1;
             }
         }

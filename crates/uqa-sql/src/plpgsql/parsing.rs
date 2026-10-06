@@ -13,8 +13,8 @@ use super::{
     json_optional_i64, json_usize_or_zero, lower_block, lower_cursor_scroll_options, lower_expr,
     normalize_plpgsql_type, optional_array, require, require_nonempty_str,
     validate_assignable_datum, CreateFunction, FunctionBody, FunctionParamMode, FunctionReturns,
-    JSONValue, PLpgSQLCursor, PLpgSQLDatum, PLpgSQLFunction, PLpgSQLRowField, PLpgSQLVar, Result,
-    RoutineColumnTypeReference, SQLError,
+    JSONValue, PLpgSQLCompilationIdentity, PLpgSQLCompileMode, PLpgSQLCursor, PLpgSQLDatum,
+    PLpgSQLFunction, PLpgSQLRowField, PLpgSQLVar, Result, RoutineColumnTypeReference, SQLError,
 };
 
 pub fn parse_function(def: &CreateFunction) -> Result<PLpgSQLFunction> {
@@ -32,6 +32,14 @@ pub fn parse_function_with_catalog(
     def: &CreateFunction,
     catalog: &pg_query::PlpgsqlCatalog,
 ) -> Result<PLpgSQLFunction> {
+    parse_function_with_catalog_mode(def, catalog, PLpgSQLCompileMode::Validate)
+}
+
+pub fn parse_function_with_catalog_mode(
+    def: &CreateFunction,
+    catalog: &pg_query::PlpgsqlCatalog,
+    mode: PLpgSQLCompileMode,
+) -> Result<PLpgSQLFunction> {
     let FunctionBody::Source(body) = &def.body else {
         return Err(SQLError::Internal(
             "PL/pgSQL parser invoked on a SQL-standard body".into(),
@@ -41,7 +49,10 @@ pub fn parse_function_with_catalog(
         catalog_type_spelling(catalog, type_name)
     })?;
     Ok(with_compile_options(
-        lower_plpgsql_json(&crate::parser::parse_plpgsql(&text, Some(catalog))?)?,
+        lower_plpgsql_json(
+            &crate::parser::parse_plpgsql_mode(&text, Some(catalog), mode)?,
+            mode,
+        )?,
         body,
     ))
 }
@@ -77,10 +88,13 @@ pub fn parse_do_block_with_catalog(
 ) -> Result<PLpgSQLFunction> {
     let tag = fresh_dollar_tag(body);
     Ok(with_compile_options(
-        lower_plpgsql_json(&crate::parser::parse_plpgsql(
-            &format!("DO {tag}{body}{tag} LANGUAGE plpgsql;"),
-            Some(catalog),
-        )?)?,
+        lower_plpgsql_json(
+            &crate::parser::parse_plpgsql(
+                &format!("DO {tag}{body}{tag} LANGUAGE plpgsql;"),
+                Some(catalog),
+            )?,
+            PLpgSQLCompileMode::Validate,
+        )?,
         body,
     ))
 }
@@ -188,14 +202,17 @@ pub(super) fn fresh_dollar_tag(body: &str) -> String {
 }
 
 pub(super) fn parse_plpgsql_text(text: &str) -> Result<PLpgSQLFunction> {
-    lower_plpgsql_json(&crate::parser::parse_plpgsql(text, None)?)
+    lower_plpgsql_json(
+        &crate::parser::parse_plpgsql(text, None)?,
+        PLpgSQLCompileMode::Validate,
+    )
 }
 
-fn lower_plpgsql_json(json: &JSONValue) -> Result<PLpgSQLFunction> {
-    crate::parser::without_notices(|| lower_parsed_plpgsql(json))
+fn lower_plpgsql_json(json: &JSONValue, mode: PLpgSQLCompileMode) -> Result<PLpgSQLFunction> {
+    crate::parser::without_notices(|| lower_parsed_plpgsql(json, mode))
 }
 
-fn lower_parsed_plpgsql(json: &JSONValue) -> Result<PLpgSQLFunction> {
+fn lower_parsed_plpgsql(json: &JSONValue, mode: PLpgSQLCompileMode) -> Result<PLpgSQLFunction> {
     let functions = json
         .as_array()
         .ok_or_else(|| SQLError::Internal("PL/pgSQL parse returned no function list".into()))?;
@@ -206,26 +223,24 @@ fn lower_parsed_plpgsql(json: &JSONValue) -> Result<PLpgSQLFunction> {
         )));
     }
     let function = expect_tag(&functions[0], "PLpgSQL_function", "parsed function")?;
-    lower_function(function)
+    lower_function(function, mode)
 }
 
 // ---------------------------------------------------------------------
 // JSON lowering
 // ---------------------------------------------------------------------
 
-/// Divergence from `PostgreSQL`: the JSON dump does not carry each
-/// block's `initvarnos`, so declared-variable defaults (including
-/// those of nested `DECLARE` sections) are evaluated once at routine
-/// entry rather than on every block entry, and a nested declaration
-/// shadows its outer namesake for the whole body.
-pub(super) fn lower_function(function: &JSONValue) -> Result<PLpgSQLFunction> {
+pub(super) fn lower_function(
+    function: &JSONValue,
+    mode: PLpgSQLCompileMode,
+) -> Result<PLpgSQLFunction> {
     let raw_datums = function
         .get("datums")
         .and_then(JSONValue::as_array)
         .ok_or_else(|| SQLError::Internal("PL/pgSQL function without datums".into()))?;
     let mut datums = Vec::with_capacity(raw_datums.len());
     for raw in raw_datums {
-        datums.push(lower_datum(raw)?);
+        datums.push(lower_datum(raw, mode)?);
     }
     validate_datums(&datums)?;
     let trigger_datum = |field: &str, name: &str| -> Result<Option<usize>> {
@@ -265,8 +280,9 @@ pub(super) fn lower_function(function: &JSONValue) -> Result<PLpgSQLFunction> {
         .position(|d| matches!(d, PLpgSQLDatum::Var(v) if v.name.eq_ignore_ascii_case("found")));
     let raw_action = require(function, "action")?;
     let action = expect_tag(raw_action, "PLpgSQL_stmt_block", "function body")?;
-    let action = lower_block(action, &datums)?;
+    let action = lower_block(action, &datums, mode)?;
     Ok(PLpgSQLFunction {
+        compilation: PLpgSQLCompilationIdentity::default(),
         datums,
         action,
         new_datum,
@@ -328,7 +344,7 @@ fn lower_percent_type_reference(
     }
 }
 
-pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
+pub(super) fn lower_datum(raw: &JSONValue, mode: PLpgSQLCompileMode) -> Result<PLpgSQLDatum> {
     ensure_single_tag(raw, "datum")?;
     if let Some(var) = raw.get("PLpgSQL_var") {
         let name = require_nonempty_str(var, "refname", "variable datum")?;
@@ -348,11 +364,11 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
             .then(|| lower_percent_type_reference(datatype, &name))
             .transpose()?;
         let default = match var.get("default_val") {
-            Some(node) => Some(lower_expr(node)?),
+            Some(node) => Some(lower_expr(node, mode)?),
             None => None,
         };
         let cursor = if let Some(query) = var.get("cursor_explicit_expr") {
-            let (query, source_sql) = lower_sourced_statement(query)?;
+            let (query, source_sql) = lower_sourced_statement(query, mode)?;
             Some(PLpgSQLCursor {
                 query,
                 source_sql: source_sql.into(),

@@ -132,3 +132,47 @@ fn subscription_policy_admission_keeps_legacy_strings_and_single_warnings() {
         Value::Int(1)
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn procedural_sql_is_prepared_when_each_source_occurrence_is_first_reached(
+    #[case] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("first-use.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/plpgsql_first_use_oracle.expected.json"),
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn procedural_input_reanalysis_preserves_first_use_syntax(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("procedural-inputs.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/plpgsql_input_lifetime_oracle.expected.json"),
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn procedural_cursor_scope_and_anonymous_invalidation_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("procedural-scope.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/plpgsql_scope_oracle.expected.json"),
+    );
+}

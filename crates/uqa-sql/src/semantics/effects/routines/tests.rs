@@ -157,3 +157,41 @@ fn domain_constraint_changes_remain_forbidden_in_read_only_transactions() {
         );
     }
 }
+
+#[test]
+fn unparsed_procedural_statement_is_conservative_without_running_the_parser() {
+    let crate::ast::Statement::CreateFunction(def) = crate::compile(
+        "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN PERFORM 1 +; END$$",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("function")
+    };
+    let parsed = crate::plpgsql::parse_function_with_catalog_mode(
+        &def,
+        &crate::plpgsql::PlpgsqlCatalog::default(),
+        crate::plpgsql::PLpgSQLCompileMode::Runtime,
+    )
+    .unwrap();
+    let crate::plpgsql::PLpgSQLStmt::Perform { query: statement } = &parsed.action.body[0] else {
+        panic!("statement")
+    };
+    let context = QueryEffectContext {
+        catalog: &Catalog,
+        optimizer_effects: |_| false,
+        graph_effects: |_| Ok(false),
+    };
+    let (mutates, metadata) =
+        crate::parser::with_settings(crate::parser::ParserSettings::default(), || {
+            embedded_statement_may_mutate_engine(
+                &context,
+                statement,
+                &mut BTreeSet::new(),
+                &mut BTreeSet::new(),
+                MutabilityClassification::ENGINE_MUTATIONS,
+            )
+        });
+    assert!(mutates.unwrap());
+    assert!(metadata.notices.is_empty());
+    assert!(statement.validation().is_none());
+}

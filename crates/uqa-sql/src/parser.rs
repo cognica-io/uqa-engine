@@ -163,10 +163,23 @@ pub(crate) fn parse_plpgsql(
     sql: &str,
     catalog: Option<&pg_query::PlpgsqlCatalog>,
 ) -> Result<serde_json::Value, SQLError> {
-    finish(pg_query::parse_plpgsql_with_options(
+    parse_plpgsql_mode(sql, catalog, crate::plpgsql::PLpgSQLCompileMode::Validate)
+}
+
+pub(crate) fn parse_plpgsql_mode(
+    sql: &str,
+    catalog: Option<&pg_query::PlpgsqlCatalog>,
+    mode: crate::plpgsql::PLpgSQLCompileMode,
+) -> Result<serde_json::Value, SQLError> {
+    let mode = match mode {
+        crate::plpgsql::PLpgSQLCompileMode::Validate => pg_query::PlpgsqlCompileMode::Validate,
+        crate::plpgsql::PLpgSQLCompileMode::Runtime => pg_query::PlpgsqlCompileMode::Runtime,
+    };
+    finish(pg_query::parse_plpgsql_with_mode(
         sql,
         catalog,
         settings().options(pg_query::ParseMode::Default),
+        mode,
     ))
 }
 

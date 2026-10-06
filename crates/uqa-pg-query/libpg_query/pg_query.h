@@ -186,6 +186,8 @@ typedef enum
 #define PG_QUERY_DISABLE_BACKSLASH_QUOTE 16 // backslash_quote = off (default is safe_encoding, which is effectively on)
 #define PG_QUERY_DISABLE_STANDARD_CONFORMING_STRINGS 32 // standard_conforming_strings = off (default is on)
 #define PG_QUERY_DISABLE_ESCAPE_STRING_WARNING 64 // escape_string_warning = off (default is on)
+// Skip validator-only checks of embedded SQL; declarations must have concrete types.
+#define PG_QUERY_PLPGSQL_RUNTIME 128
 
 #ifdef __cplusplus
 extern "C" {

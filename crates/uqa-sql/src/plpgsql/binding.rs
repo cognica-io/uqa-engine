@@ -39,6 +39,12 @@ impl ResolvedVariable {
 /// Resolves routine variables while a compiled expression / statement
 /// is being specialized for one execution.
 pub trait VariableResolver {
+    /// Concrete parameter metadata for a declared datum; catalog implementations
+    /// preserve user-type identity instead of inferring from a carrier value.
+    fn parameter_type(&self, name: &str) -> Option<crate::ColumnType> {
+        crate::ColumnType::from_sql_name(name).ok()
+    }
+
     /// Current value of an unqualified name. `Ok(None)` leaves the
     /// column reference for the engine to resolve.
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>>;

@@ -61,9 +61,9 @@
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
     "wrapper_repository": "https://github.com/jaepil/pg_query.rs",
-    "wrapper_revision": "521df17ffb14b831145a148cb3f4b432a746b544",
+    "wrapper_revision": "ee4c1a19615242fc94608b529c4f8968025fde85",
     "library_repository": "https://github.com/jaepil/libpg_query",
-    "library_revision": "942f2a62b2c5747587fba9bfbb42dd958f9a0ca2"
+    "library_revision": "727e274e8943fb2526695c8b72bb4ff90a052c97"
   },
   "milestones": {
     "M0": {
@@ -257,9 +257,9 @@
     },
     {
       "id": "parser.session-scanner-diagnostics",
-      "postgresql_reference": "PostgreSQL 18.4 independently captured message values, command tags, original SQLSTATE/DETAIL/HINT and notices in tests/parity/pg18/parser_settings_oracle.expected.json and dynamic_parser_settings_oracle.expected.json; scoped scanner and ErrorData transport from the exact parser_chain revisions; SQL caller/runtime lifetime selections in routine_parser_lifetime_oracle.expected.json and sql_caller_plan_lifetime_oracle.expected.json; inline_eligibility_oracle.expected.json and strict_routine_authority_oracle.expected.json",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured message values, command tags, original SQLSTATE/DETAIL/HINT and notices in tests/parity/pg18/parser_settings_oracle.expected.json and dynamic_parser_settings_oracle.expected.json; scoped scanner and ErrorData transport from the exact parser_chain revisions; Complete SQL and PL/pgSQL caller/runtime lifetimes in routine_parser_lifetime_oracle.expected.json and sql_caller_plan_lifetime_oracle.expected.json; inline_eligibility_oracle.expected.json and strict_routine_authority_oracle.expected.json; plpgsql_first_use_oracle.expected.json and plpgsql_input_lifetime_oracle.expected.json and plpgsql_scope_oracle.expected.json; PL/pgSQL exec_prepare_plan and plancache invalidation in REL_18_STABLE",
       "uqa_test": "cargo test -p uqa-sql --lib parser::tests; cargo test -p uqa-engine --test integration parser_settings; cargo test -p uqa-engine --lib queries::scope",
-      "supported_version": "Unreleased: complete-message standard_conforming_strings, backslash_quote and escape_string_warning boundaries, statement/cursor cache notice replay through the current filter, SET LOCAL restoration, retained PREPARE inputs, routine-local lexical settings and dynamic EXECUTE/cursor parsing, and reanalysis of live ordinary input conversions. Forty-two core and eleven dynamic SQL messages pass all four storage providers, with nine additional observations after reopening the three durable providers. SQL caller-plan expansion preserves selected arguments, current ordinary/custom-plan scanner settings and notices, reused generic inputs, and independent runtime compilation; static inspection does not initialize runtime caches. The SQL selections preserve all PL reference observations for issue #465.",
+      "supported_version": "Unreleased: complete-message standard_conforming_strings, backslash_quote and escape_string_warning boundaries, statement/cursor cache notice replay through the current filter, SET LOCAL restoration, retained PREPARE inputs, routine-local lexical settings and dynamic EXECUTE/cursor parsing, and reanalysis of live ordinary input conversions. Forty-two core and eleven dynamic SQL messages pass all four storage providers, with nine additional observations after reopening the three durable providers. SQL caller-plan expansion preserves selected arguments, current ordinary/custom-plan scanner settings and notices, reused generic inputs, and independent runtime compilation; static inspection does not initialize runtime caches. PL/pgSQL first-reached expressions retain independent site, concrete signature and trigger relation lifetimes. Initial failures retry; successful preparation survives execution errors. Catalog, namespace and DISCARD reanalysis preserve previously parsed syntax and lexical diagnostics. Complete 52- and 27-message lifetimes and the additional 57/31/8-message first-use/invalidation/scope references pass on all four providers.",
       "status": "verified",
       "open_issue": null
     },
@@ -277,7 +277,7 @@
       "uqa_test": "cargo test -p uqa-sql --test integration",
       "supported_version": "PostgreSQL 18",
       "status": "partial",
-      "open_issue": "The top-level statement and semantically relevant option inventory is not complete. Source SQL-function inlining and first-use PL/pgSQL expression preparation remain tracked in #465, with the complete independent routine_parser_lifetime_oracle.expected.json preserved; #460 and #316 remain open for that work."
+      "open_issue": "The top-level statement and semantically relevant option inventory is not complete. Scanner and SQL/PLpgSQL source preparation lifetimes are covered by the dedicated parser.session-scanner-diagnostics item; broader procedural executable-plan reuse remains tracked in #357."
     },
     {
       "id": "query.join-using-natural",

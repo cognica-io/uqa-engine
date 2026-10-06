@@ -38,6 +38,17 @@ pub trait RoutineStatements {
         None
     }
 
+    fn plpgsql_preparations(
+        &self,
+        definition: &uqa_sql::ast::CreateFunction,
+        parsed: &uqa_sql::plpgsql::PLpgSQLFunction,
+    ) -> std::sync::Arc<super::preparation::PLpgSQLPreparations>;
+    /// SQL analysis only: publication precedes optimization and statement effects.
+    fn analyze_static_plan(
+        &self,
+        plan: &mut UnifiedPlan,
+        parameters: &[SQLParam],
+    ) -> Result<uqa_sql::binding::statements::ProceduralPlanAnalysis, SQLError>;
     fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
         uqa_sql::parser::ParserSettings::default()
     }

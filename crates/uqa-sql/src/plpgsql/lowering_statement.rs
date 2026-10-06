@@ -13,12 +13,16 @@ use super::{
     lower_full_statement, lower_row_fields, normalize_condition, optional_array, require,
     require_i64, require_nonempty_str, validate_assignable_datum, validate_record_datum,
     validate_scalar_datum, CursorDirection, IntoTarget, JSONValue, PLpgSQLBlock,
-    PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLExceptionArm, PLpgSQLReturnValue,
-    PLpgSQLStmt, RaiseLevel, Result, SQLError,
+    PLpgSQLCompileMode, PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLExceptionArm,
+    PLpgSQLReturnValue, PLpgSQLStmt, RaiseLevel, Result, SQLError,
 };
 
-pub(super) fn lower_block(block: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLpgSQLBlock> {
-    let body = lower_optional_stmt_list(block, "body", datums)?;
+pub(super) fn lower_block(
+    block: &JSONValue,
+    datums: &[PLpgSQLDatum],
+    mode: PLpgSQLCompileMode,
+) -> Result<PLpgSQLBlock> {
+    let body = lower_optional_stmt_list(block, "body", datums, mode)?;
     let mut exceptions = Vec::new();
     if let Some(raw_exceptions) = block.get("exceptions") {
         let exc = expect_tag(raw_exceptions, "PLpgSQL_exception_block", "exception block")?;
@@ -56,11 +60,28 @@ pub(super) fn lower_block(block: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<
                     "PL/pgSQL exception arm without conditions".into(),
                 ));
             }
-            let body = lower_optional_stmt_list(arm, "action", datums)?;
+            let body = lower_optional_stmt_list(arm, "action", datums, mode)?;
             exceptions.push(PLpgSQLExceptionArm { conditions, body });
         }
     }
+    let initvarnos = optional_array(block, "initvarnos")?
+        .ok_or_else(|| {
+            SQLError::Internal("PL/pgSQL block lacks initializer ownership metadata".into())
+        })?
+        .iter()
+        .map(|index| {
+            let index = index
+                .as_u64()
+                .and_then(|index| usize::try_from(index).ok())
+                .ok_or_else(|| {
+                    SQLError::Internal("PL/pgSQL block has invalid initializer datum".into())
+                })?;
+            validate_assignable_datum(datums, index, "block initializer")?;
+            Ok(index)
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(PLpgSQLBlock {
+        initvarnos,
         label: json_optional_str(block, "label")?,
         body,
         exceptions,
@@ -70,13 +91,14 @@ pub(super) fn lower_block(block: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<
 pub(super) fn lower_stmt_list(
     list: &JSONValue,
     datums: &[PLpgSQLDatum],
+    mode: PLpgSQLCompileMode,
 ) -> Result<Vec<PLpgSQLStmt>> {
     let items = list
         .as_array()
         .ok_or_else(|| SQLError::Internal("PL/pgSQL statement list is not an array".into()))?;
     let mut out = Vec::with_capacity(items.len());
     for item in items {
-        out.push(lower_stmt(item, datums)?);
+        out.push(lower_stmt(item, datums, mode)?);
     }
     Ok(out)
 }
@@ -85,9 +107,10 @@ pub(super) fn lower_optional_stmt_list(
     object: &JSONValue,
     key: &str,
     datums: &[PLpgSQLDatum],
+    mode: PLpgSQLCompileMode,
 ) -> Result<Vec<PLpgSQLStmt>> {
     match object.get(key) {
-        Some(list) => lower_stmt_list(list, datums),
+        Some(list) => lower_stmt_list(list, datums, mode),
         None => Ok(Vec::new()),
     }
 }
@@ -96,35 +119,41 @@ pub(super) fn lower_optional_stmt_list(
     clippy::too_many_lines,
     reason = "PL/pgSQL lowering preserves parser order and datum validation"
 )]
-pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLpgSQLStmt> {
+pub(super) fn lower_stmt(
+    raw: &JSONValue,
+    datums: &[PLpgSQLDatum],
+    mode: PLpgSQLCompileMode,
+) -> Result<PLpgSQLStmt> {
     ensure_single_tag(raw, "statement")?;
     if let Some(block) = raw.get("PLpgSQL_stmt_block") {
-        return Ok(PLpgSQLStmt::Block(lower_block(block, datums)?));
+        return Ok(PLpgSQLStmt::Block(lower_block(block, datums, mode)?));
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_assign") {
         // Zero-valued varno fields are omitted from the JSON dump.
         let target = json_usize_or_zero(stmt, "varno")?;
         validate_assignable_datum(datums, target, "assignment target")?;
-        let expr =
-            lower_expr(stmt.get("expr").ok_or_else(|| {
+        let expr = lower_expr(
+            stmt.get("expr").ok_or_else(|| {
                 SQLError::Internal("PL/pgSQL assignment without expression".into())
-            })?)?;
+            })?,
+            mode,
+        )?;
         return Ok(PLpgSQLStmt::Assign { target, expr });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_if") {
-        let cond = lower_expr(require(stmt, "cond")?)?;
-        let then_body = lower_optional_stmt_list(stmt, "then_body", datums)?;
+        let cond = lower_expr(require(stmt, "cond")?, mode)?;
+        let then_body = lower_optional_stmt_list(stmt, "then_body", datums, mode)?;
         let mut elsifs = Vec::new();
         if let Some(list) = optional_array(stmt, "elsif_list")? {
             for e in list {
                 let e = expect_tag(e, "PLpgSQL_if_elsif", "ELSIF arm")?;
-                let cond = lower_expr(require(e, "cond")?)?;
-                let body = lower_optional_stmt_list(e, "stmts", datums)?;
+                let cond = lower_expr(require(e, "cond")?, mode)?;
+                let body = lower_optional_stmt_list(e, "stmts", datums, mode)?;
                 elsifs.push((cond, body));
             }
         }
         let else_body = match stmt.get("else_body") {
-            Some(body) => Some(lower_stmt_list(body, datums)?),
+            Some(body) => Some(lower_stmt_list(body, datums, mode)?),
             None => None,
         };
         return Ok(PLpgSQLStmt::If {
@@ -136,7 +165,7 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_case") {
         let t_expr = match stmt.get("t_expr") {
-            Some(node) => Some(lower_expr(node)?),
+            Some(node) => Some(lower_expr(node, mode)?),
             None => None,
         };
         let t_varno = if t_expr.is_some() {
@@ -155,8 +184,8 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
         if let Some(list) = optional_array(stmt, "case_when_list")? {
             for arm in list {
                 let arm = expect_tag(arm, "PLpgSQL_case_when", "CASE arm")?;
-                let cond = lower_expr(require(arm, "expr")?)?;
-                let body = lower_optional_stmt_list(arm, "stmts", datums)?;
+                let cond = lower_expr(require(arm, "expr")?, mode)?;
+                let body = lower_optional_stmt_list(arm, "stmts", datums, mode)?;
                 arms.push((cond, body));
             }
         }
@@ -165,7 +194,7 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
         }
         let have_else = json_bool_or_false(stmt, "have_else")?;
         let else_body = if have_else {
-            Some(lower_optional_stmt_list(stmt, "else_stmts", datums)?)
+            Some(lower_optional_stmt_list(stmt, "else_stmts", datums, mode)?)
         } else {
             if stmt.get("else_stmts").is_some() {
                 return Err(SQLError::Internal(
@@ -184,14 +213,14 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
     if let Some(stmt) = raw.get("PLpgSQL_stmt_loop") {
         return Ok(PLpgSQLStmt::Loop {
             label: json_optional_str(stmt, "label")?,
-            body: lower_optional_stmt_list(stmt, "body", datums)?,
+            body: lower_optional_stmt_list(stmt, "body", datums, mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_while") {
         return Ok(PLpgSQLStmt::While {
             label: json_optional_str(stmt, "label")?,
-            cond: lower_expr(require(stmt, "cond")?)?,
-            body: lower_optional_stmt_list(stmt, "body", datums)?,
+            cond: lower_expr(require(stmt, "cond")?, mode)?,
+            body: lower_optional_stmt_list(stmt, "body", datums, mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_fori") {
@@ -204,17 +233,17 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             SQLError::Internal(format!("FOR loop variable `{name}` has no datum"))
         })?;
         let step = match stmt.get("step") {
-            Some(node) => Some(lower_expr(node)?),
+            Some(node) => Some(lower_expr(node, mode)?),
             None => None,
         };
         return Ok(PLpgSQLStmt::ForI {
             label: json_optional_str(stmt, "label")?,
             var,
-            lower: lower_expr(require(stmt, "lower")?)?,
-            upper: lower_expr(require(stmt, "upper")?)?,
+            lower: lower_expr(require(stmt, "lower")?, mode)?,
+            upper: lower_expr(require(stmt, "upper")?, mode)?,
             step,
             reverse: json_bool_or_false(stmt, "reverse")?,
-            body: lower_optional_stmt_list(stmt, "body", datums)?,
+            body: lower_optional_stmt_list(stmt, "body", datums, mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_foreach_a") {
@@ -229,8 +258,8 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             label: json_optional_str(stmt, "label")?,
             target,
             slice: json_usize_or_zero(stmt, "slice")?,
-            expr: lower_expr(require(stmt, "expr")?)?,
-            body: lower_optional_stmt_list(stmt, "body", datums)?,
+            expr: lower_expr(require(stmt, "expr")?, mode)?,
+            body: lower_optional_stmt_list(stmt, "body", datums, mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_forc") {
@@ -256,33 +285,33 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             label: json_optional_str(stmt, "label")?,
             target,
             cursor,
-            arguments: lower_cursor_arguments(stmt.get("argquery"))?,
-            body: lower_optional_stmt_list(stmt, "body", datums)?,
+            arguments: lower_cursor_arguments(stmt.get("argquery"), mode)?,
+            body: lower_optional_stmt_list(stmt, "body", datums, mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_dynfors") {
         return Ok(PLpgSQLStmt::ForDynamic {
             label: json_optional_str(stmt, "label")?,
             target: lower_into_target(require(stmt, "var")?, datums)?,
-            query: lower_expr(require(stmt, "query")?)?,
-            params: lower_expr_list(stmt.get("params"))?,
-            body: lower_optional_stmt_list(stmt, "body", datums)?,
+            query: lower_expr(require(stmt, "query")?, mode)?,
+            params: lower_expr_list(stmt.get("params"), mode)?,
+            body: lower_optional_stmt_list(stmt, "body", datums, mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_fors") {
         let target = lower_into_target(require(stmt, "var")?, datums)?;
-        let (query, source_sql) = lower_sourced_statement(require(stmt, "query")?)?;
+        let (query, source_sql) = lower_sourced_statement(require(stmt, "query")?, mode)?;
         return Ok(PLpgSQLStmt::ForQuery {
             label: json_optional_str(stmt, "label")?,
             target,
             query,
             source_sql: source_sql.into(),
-            body: lower_optional_stmt_list(stmt, "body", datums)?,
+            body: lower_optional_stmt_list(stmt, "body", datums, mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_exit") {
         let cond = match stmt.get("cond") {
-            Some(node) => Some(lower_expr(node)?),
+            Some(node) => Some(lower_expr(node, mode)?),
             None => None,
         };
         return Ok(PLpgSQLStmt::Exit {
@@ -293,24 +322,24 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_return") {
         return Ok(PLpgSQLStmt::Return {
-            value: lower_return_value(stmt, datums, "RETURN")?,
+            value: lower_return_value(stmt, datums, "RETURN", mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_return_next") {
         return Ok(PLpgSQLStmt::ReturnNext {
-            value: lower_return_value(stmt, datums, "RETURN NEXT")?,
+            value: lower_return_value(stmt, datums, "RETURN NEXT", mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_return_query") {
         if let Some(query) = stmt.get("query") {
             return Ok(PLpgSQLStmt::ReturnQuery {
-                query: lower_full_statement(query)?,
+                query: lower_full_statement(query, mode)?,
             });
         }
         if let Some(dynquery) = stmt.get("dynquery") {
             return Ok(PLpgSQLStmt::ReturnQueryExecute {
-                query: lower_expr(dynquery)?,
-                params: lower_expr_list(stmt.get("params"))?,
+                query: lower_expr(dynquery, mode)?,
+                params: lower_expr_list(stmt.get("params"), mode)?,
             });
         }
         return Err(SQLError::Internal("RETURN QUERY without a query".into()));
@@ -340,17 +369,20 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             level,
             condition,
             message: json_optional_str(stmt, "message")?,
-            params: lower_expr_list(stmt.get("params"))?,
+            params: lower_expr_list(stmt.get("params"), mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_assert") {
         return Ok(PLpgSQLStmt::Assert {
-            condition: lower_expr(require(stmt, "cond")?)?,
-            message: stmt.get("message").map(lower_expr).transpose()?,
+            condition: lower_expr(require(stmt, "cond")?, mode)?,
+            message: stmt
+                .get("message")
+                .map(|expression| lower_expr(expression, mode))
+                .transpose()?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_execsql") {
-        let sql = lower_full_statement(require(stmt, "sqlstmt")?)?;
+        let sql = lower_full_statement(require(stmt, "sqlstmt")?, mode)?;
         let has_into = json_bool_or_false(stmt, "into")?;
         let strict = json_bool_or_false(stmt, "strict")?;
         if strict && !has_into {
@@ -380,7 +412,7 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_dynexecute") {
-        let query = lower_expr(require(stmt, "query")?)?;
+        let query = lower_expr(require(stmt, "query")?, mode)?;
         let has_into = json_bool_or_false(stmt, "into")?;
         let strict = json_bool_or_false(stmt, "strict")?;
         if strict && !has_into {
@@ -405,14 +437,14 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
         };
         return Ok(PLpgSQLStmt::DynExecute {
             query,
-            params: lower_expr_list(stmt.get("params"))?,
+            params: lower_expr_list(stmt.get("params"), mode)?,
             into,
             strict,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_perform") {
         return Ok(PLpgSQLStmt::Perform {
-            query: lower_full_statement(require(stmt, "expr")?)?,
+            query: lower_full_statement(require(stmt, "expr")?, mode)?,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_open") {
@@ -439,7 +471,7 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
                     "PL/pgSQL bound cursor OPEN contains a static query".into(),
                 ));
             }
-            let (query, source_sql) = lower_sourced_statement(query)?;
+            let (query, source_sql) = lower_sourced_statement(query, mode)?;
             PLpgSQLCursorOpen::Static {
                 query: Box::new(query),
                 source_sql: source_sql.into(),
@@ -452,8 +484,8 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
                 ));
             }
             PLpgSQLCursorOpen::Dynamic {
-                query: lower_expr(query)?,
-                params: lower_expr_list(stmt.get("params"))?,
+                query: lower_expr(query, mode)?,
+                params: lower_expr_list(stmt.get("params"), mode)?,
                 scroll: lower_cursor_scroll_options(stmt, "OPEN")?,
             }
         } else {
@@ -463,7 +495,7 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
                 ));
             }
             PLpgSQLCursorOpen::Bound {
-                arguments: lower_cursor_arguments(argquery)?,
+                arguments: lower_cursor_arguments(argquery, mode)?,
             }
         };
         return Ok(PLpgSQLStmt::OpenCursor { cursor, open });
@@ -482,7 +514,7 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             },
         )?)?;
         let count = match stmt.get("expr") {
-            Some(expr) => PLpgSQLCursorCount::Expression(lower_expr(expr)?),
+            Some(expr) => PLpgSQLCursorCount::Expression(lower_expr(expr, mode)?),
             None => PLpgSQLCursorCount::Constant(require_i64(
                 stmt,
                 "how_many",
@@ -516,7 +548,7 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
     if let Some(stmt) = raw.get("PLpgSQL_stmt_call") {
         // CALL inside a body: run the CALL statement; INOUT results
         // flow back through the target row like an INTO clause.
-        let call = lower_full_statement(require(stmt, "expr")?)?;
+        let call = lower_full_statement(require(stmt, "expr")?, mode)?;
         let into = match stmt.get("target") {
             Some(target) => Some(lower_into_target(target, datums)?),
             None => None,
@@ -569,6 +601,7 @@ fn lower_return_value(
     stmt: &JSONValue,
     datums: &[PLpgSQLDatum],
     context: &str,
+    mode: PLpgSQLCompileMode,
 ) -> Result<Option<PLpgSQLReturnValue>> {
     let expr = stmt.get("expr");
     let datum = json_optional_usize(stmt, "retvarno")?;
@@ -576,7 +609,7 @@ fn lower_return_value(
         (Some(_), Some(_)) => Err(SQLError::Internal(format!(
             "PL/pgSQL {context} contains both expr and retvarno"
         ))),
-        (Some(expr), None) => Ok(Some(PLpgSQLReturnValue::Expr(lower_expr(expr)?))),
+        (Some(expr), None) => Ok(Some(PLpgSQLReturnValue::Expr(lower_expr(expr, mode)?))),
         (None, Some(index)) => {
             match datums.get(index) {
                 Some(

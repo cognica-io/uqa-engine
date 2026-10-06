@@ -61,14 +61,37 @@ pub fn compile_function_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(context, def, false)
+    compile_function_body_inner(
+        context,
+        def,
+        false,
+        crate::plpgsql::PLpgSQLCompileMode::Validate,
+    )
+}
+
+/// Compile executable procedural structure without validating unreached SQL fragments.
+pub fn compile_function_body_for_execution(
+    context: &RoutineCompilationContext<'_>,
+    def: &CreateFunction,
+) -> Result<CompiledFunctionBody, SQLError> {
+    compile_function_body_inner(
+        context,
+        def,
+        false,
+        crate::plpgsql::PLpgSQLCompileMode::Runtime,
+    )
 }
 
 pub fn compile_persisted_function_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(context, def, true)
+    compile_function_body_inner(
+        context,
+        def,
+        true,
+        crate::plpgsql::PLpgSQLCompileMode::Validate,
+    )
 }
 
 /// The body `CREATE FUNCTION` compiles under `check_function_bodies = off`: the declaration is checked as always, a SQL-standard body, which the statement itself analyzes, is compiled, and a body given as a string is left unexamined, `None`, for each session to compile when it first calls the routine.
@@ -129,9 +152,10 @@ fn compile_function_body_inner(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
     persisted_definition: bool,
+    mode: crate::plpgsql::PLpgSQLCompileMode,
 ) -> Result<CompiledFunctionBody, SQLError> {
     with_parser_context(context.parsers, || {
-        compile_body(context, def, persisted_definition)
+        compile_body(context, def, persisted_definition, mode)
     })
 }
 
@@ -151,6 +175,7 @@ fn compile_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
     persisted_definition: bool,
+    mode: crate::plpgsql::PLpgSQLCompileMode,
 ) -> Result<CompiledFunctionBody, SQLError> {
     let mut stored_regrole_constants = validate_routine_signature(context, def)?;
     match def.language.as_str() {
@@ -158,7 +183,8 @@ fn compile_body(
             stored_regrole_constants.reject_with(context.regroles)?;
             reject_trigger_function_arguments(def)?;
             let catalog = context.parsers.plpgsql_catalog()?;
-            let mut function = crate::plpgsql::parse_function_with_catalog(def, &catalog)?;
+            let mut function =
+                crate::plpgsql::parse_function_with_catalog_mode(def, &catalog, mode)?;
             resolve_plpgsql_datum_types(context.types, &mut function)?;
             Ok(CompiledFunctionBody::PLpgSQL(function))
         }

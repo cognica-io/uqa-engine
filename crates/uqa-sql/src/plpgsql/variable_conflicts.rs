@@ -11,7 +11,7 @@
 use super::binding::{bind_expr, bind_statement, ResolvedVariable, VariableResolver};
 use super::options::VariableConflict;
 use super::{Expr, Projection, Result, SelectStmt, Statement};
-use crate::ast::{ColumnType, InternalColumnRef};
+use crate::ast::InternalColumnRef;
 use crate::binding::VariableSiteResolution;
 use crate::{SQLError, SQLParam, ScalarExpr};
 use uqa_core::Value;
@@ -170,10 +170,10 @@ fn ambiguous_variable_error(reference: &Expr) -> SQLError {
 }
 
 /// The typed parameter that stands for a site's value while the binder resolves the statement.
-fn site_parameter(binding: &Expr) -> SQLParam {
+pub(super) fn site_parameter(binding: &Expr, resolver: &dyn VariableResolver) -> SQLParam {
     match binding {
-        Expr::TypedLiteral { value, ty } => ColumnType::from_sql_name(ty).map_or_else(
-            |_| SQLParam::scalar(value.clone()),
+        Expr::TypedLiteral { value, ty } => resolver.parameter_type(ty).map_or_else(
+            || SQLParam::scalar(value.clone()),
             |ty| SQLParam::typed_scalar(value.clone(), ty),
         ),
         Expr::Literal(value) => SQLParam::scalar(value.clone()),
@@ -221,27 +221,7 @@ pub fn bind_statement_variables(
     conflict: VariableConflict,
     resolve_sites: VariableSiteResolver<'_>,
 ) -> Result<Statement> {
-    let mut numbering = VariableSiteMarker {
-        inner: resolver,
-        sites: Vec::new(),
-    };
-    let numbered = bind_statement(statement, &mut numbering)?;
-    let sites = numbering.sites;
-    if sites.is_empty() {
-        return Ok(numbered);
-    }
-    let resolutions = resolve_sites(
-        numbered,
-        sites
-            .iter()
-            .map(|site| site_parameter(&site.binding))
-            .collect(),
-        sites
-            .iter()
-            .map(|site| site_name(&site.reference))
-            .collect(),
-    )?;
-    let keep = kept_names(&sites, &resolutions, conflict)?;
+    let keep = statement_variable_names(statement, resolver, conflict, resolve_sites)?;
     bind_statement(
         statement,
         &mut VariableSiteFilter {
@@ -250,6 +230,36 @@ pub fn bind_statement_variables(
             next: 0,
         },
     )
+}
+
+/// Resolve names without retaining invocation values in the compiled syntax.
+pub(super) fn statement_variable_names(
+    statement: &Statement,
+    resolver: &mut dyn VariableResolver,
+    conflict: VariableConflict,
+    resolve_sites: VariableSiteResolver<'_>,
+) -> Result<Vec<bool>> {
+    let mut numbering = VariableSiteMarker {
+        inner: resolver,
+        sites: Vec::new(),
+    };
+    let numbered = bind_statement(statement, &mut numbering)?;
+    let sites = numbering.sites;
+    if sites.is_empty() {
+        return Ok(Vec::new());
+    }
+    let resolutions = resolve_sites(
+        numbered,
+        sites
+            .iter()
+            .map(|site| site_parameter(&site.binding, resolver))
+            .collect(),
+        sites
+            .iter()
+            .map(|site| site_name(&site.reference))
+            .collect(),
+    )?;
+    kept_names(&sites, &resolutions, conflict)
 }
 
 /// Bind the variables of an embedded expression, which `PostgreSQL` analyzes as `SELECT expression`: only a subquery lets a name of the expression meet a column, so an expression without one binds every variable it names.
@@ -281,7 +291,7 @@ pub fn bind_expression_variables(
         expression_query(numbered),
         sites
             .iter()
-            .map(|site| site_parameter(&site.binding))
+            .map(|site| site_parameter(&site.binding, resolver))
             .collect(),
         sites
             .iter()
@@ -300,7 +310,7 @@ pub fn bind_expression_variables(
 }
 
 /// `SELECT expression`, the query `PostgreSQL` analyzes for an embedded expression.
-fn expression_query(expression: Expr) -> Statement {
+pub(crate) fn expression_query(expression: Expr) -> Statement {
     Statement::Select(Box::new(SelectStmt {
         windows: Vec::new(),
         projections: vec![Projection {

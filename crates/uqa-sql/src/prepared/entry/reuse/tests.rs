@@ -19,7 +19,7 @@ fn entry(source: &str, executable: &str) -> PreparedStatementPlan {
         logical_plan: source,
         needs_analysis: false,
         effective_search_path: None,
-        dependencies: Default::default(),
+        dependencies: crate::prepared::dependencies::PreparedAnalysisDependencies::default(),
         dependency_snapshot: None,
         plan: Some(plan(executable)),
         parameter_types: Vec::new(),

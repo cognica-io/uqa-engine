@@ -32,13 +32,61 @@ fn lowered_statement_may_mutate_engine(
     }
 }
 
-fn plpgsql_expression_may_mutate_engine(
+fn embedded_statement_may_mutate_engine(
     context: &QueryEffectContext<'_>,
-    expression: &crate::ast::Expr,
+    statement: &crate::plpgsql::PLpgSQLStatement,
     visiting_views: &mut BTreeSet<String>,
     visiting_routines: &mut BTreeSet<String>,
     classification: MutabilityClassification,
 ) -> Result<bool, SQLError> {
+    // Runtime compilation intentionally leaves unreachable SQL unparsed. It
+    // cannot be classified as pure, nor parsed here to populate runtime state.
+    statement.validation().map_or(Ok(true), |statement| {
+        lowered_statement_may_mutate_engine(
+            context,
+            statement.clone(),
+            visiting_views,
+            visiting_routines,
+            classification,
+        )
+    })
+}
+fn cursor_arguments_may_mutate_engine(
+    context: &QueryEffectContext<'_>,
+    arguments: &crate::plpgsql::PLpgSQLCursorArguments,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    let Some(arguments) = arguments.validation() else {
+        return Ok(true);
+    };
+    for argument in arguments {
+        if lowered_statement_may_mutate_engine(
+            context,
+            crate::ast::Statement::Values {
+                rows: vec![vec![argument.expr.clone()]],
+            },
+            visiting_views,
+            visiting_routines,
+            classification,
+        )? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn plpgsql_expression_may_mutate_engine(
+    context: &QueryEffectContext<'_>,
+    expression: &crate::plpgsql::PLpgSQLExpression,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    let Some(expression) = expression.validation() else {
+        return Ok(true);
+    };
     lowered_statement_may_mutate_engine(
         context,
         crate::ast::Statement::Values {
@@ -52,7 +100,7 @@ fn plpgsql_expression_may_mutate_engine(
 
 fn plpgsql_expressions_may_mutate_engine<'a>(
     context: &QueryEffectContext<'_>,
-    expressions: impl IntoIterator<Item = &'a crate::ast::Expr>,
+    expressions: impl IntoIterator<Item = &'a crate::plpgsql::PLpgSQLExpression>,
     visiting_views: &mut BTreeSet<String>,
     visiting_routines: &mut BTreeSet<String>,
     classification: MutabilityClassification,
@@ -321,9 +369,9 @@ fn plpgsql_statement_may_mutate_engine(
             classification,
         )?),
         PLpgSQLStmt::ForQuery { query, body, .. } => Ok(classification.include_transaction_scopes
-            || lowered_statement_may_mutate_engine(
+            || embedded_statement_may_mutate_engine(
                 context,
-                query.clone(),
+                query,
                 visiting_views,
                 visiting_routines,
                 classification,
@@ -344,9 +392,9 @@ fn plpgsql_statement_may_mutate_engine(
             ..
         } => {
             if classification.include_transaction_scopes
-                || plpgsql_expressions_may_mutate_engine(
+                || cursor_arguments_may_mutate_engine(
                     context,
-                    arguments.iter().map(|argument| &argument.expr),
+                    arguments,
                     visiting_views,
                     visiting_routines,
                     classification,
@@ -361,9 +409,9 @@ fn plpgsql_statement_may_mutate_engine(
                 _ => None,
             });
             Ok(query.map_or(Ok(false), |query| {
-                lowered_statement_may_mutate_engine(
+                embedded_statement_may_mutate_engine(
                     context,
-                    query.clone(),
+                    query,
                     visiting_views,
                     visiting_routines,
                     classification,
@@ -412,9 +460,9 @@ fn plpgsql_statement_may_mutate_engine(
         }
         PLpgSQLStmt::ReturnQuery { query }
         | PLpgSQLStmt::ExecSQL { stmt: query, .. }
-        | PLpgSQLStmt::Perform { query } => lowered_statement_may_mutate_engine(
+        | PLpgSQLStmt::Perform { query } => embedded_statement_may_mutate_engine(
             context,
-            query.clone(),
+            query,
             visiting_views,
             visiting_routines,
             classification,
@@ -440,9 +488,9 @@ fn plpgsql_statement_may_mutate_engine(
             }
             match open {
                 crate::plpgsql::PLpgSQLCursorOpen::Bound { arguments } => {
-                    if plpgsql_expressions_may_mutate_engine(
+                    if cursor_arguments_may_mutate_engine(
                         context,
-                        arguments.iter().map(|argument| &argument.expr),
+                        arguments,
                         visiting_views,
                         visiting_routines,
                         classification,
@@ -456,9 +504,9 @@ fn plpgsql_statement_may_mutate_engine(
                         _ => None,
                     });
                     query.map_or(Ok(false), |query| {
-                        lowered_statement_may_mutate_engine(
+                        embedded_statement_may_mutate_engine(
                             context,
-                            query.clone(),
+                            query,
                             visiting_views,
                             visiting_routines,
                             classification,
@@ -466,9 +514,9 @@ fn plpgsql_statement_may_mutate_engine(
                     })
                 }
                 crate::plpgsql::PLpgSQLCursorOpen::Static { query, .. } => {
-                    lowered_statement_may_mutate_engine(
+                    embedded_statement_may_mutate_engine(
                         context,
-                        *query.clone(),
+                        query,
                         visiting_views,
                         visiting_routines,
                         classification,

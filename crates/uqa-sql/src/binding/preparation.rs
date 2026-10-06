@@ -15,7 +15,8 @@ mod parameters;
 mod queries;
 mod routines;
 pub(crate) use routines::{
-    analyze_routine_body_argument, analyze_routine_body_inputs, prepare_routine_body_inputs,
+    analyze_routine_body_argument, analyze_routine_body_inputs, prepare_procedure_call,
+    prepare_routine_body_inputs,
 };
 mod schema_expressions;
 mod sources;
@@ -81,10 +82,41 @@ pub(crate) fn read_executable_inputs(
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
 ) -> Result<bool, SQLError> {
+    read_executable_inputs_inner(routines, plan, params, binding, aliases, false)
+        .map(|(reusable, _)| reusable)
+}
+
+pub(crate) fn read_procedural_inputs(
+    routines: &dyn RoutineResolution,
+    plan: &mut UnifiedPlan,
+    params: &[crate::SQLParam],
+    binding: &BindingContext<'_>,
+    aliases: &dyn OidAliasInput,
+) -> Result<crate::prepared::dependencies::PreparedAnalysisDependencies, SQLError> {
+    read_executable_inputs_inner(routines, plan, params, binding, aliases, true)
+        .map(|(_, dependencies)| dependencies)
+}
+
+fn read_executable_inputs_inner(
+    routines: &dyn RoutineResolution,
+    plan: &mut UnifiedPlan,
+    params: &[crate::SQLParam],
+    binding: &BindingContext<'_>,
+    aliases: &dyn OidAliasInput,
+    track_dependencies: bool,
+) -> Result<
+    (
+        bool,
+        crate::prepared::dependencies::PreparedAnalysisDependencies,
+    ),
+    SQLError,
+> {
     let declared = super::statements::parameter_input_types(params)?;
+    let mut scope = SchemaScope::for_analysis(binding)?;
+    scope.prepared_dependencies = track_dependencies.then(Default::default);
     let mut analysis = Preparation {
         routines,
-        scope: SchemaScope::for_analysis(binding)?,
+        scope,
         parameters: ParameterTypes::with_input_constants(
             &declared,
             Some(aliases),
@@ -119,7 +151,13 @@ pub(crate) fn read_executable_inputs(
     let reusable = constants.reusable_across_messages();
     constants.apply(plan)?;
     plan.normalize_window_definitions()?;
-    Ok(reusable)
+    let mut dependencies = analysis.scope.prepared_dependencies.unwrap_or_default();
+    if track_dependencies {
+        plan.visit_scalar_expressions(&mut |expression| {
+            dependencies.include_expression(expression);
+        });
+    }
+    Ok((reusable, dependencies))
 }
 
 pub fn infer_prepared_parameter_types(

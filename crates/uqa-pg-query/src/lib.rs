@@ -47,7 +47,8 @@ mod node_structs;
 mod parse_result;
 mod plpgsql_catalog;
 pub use plpgsql_catalog::{
-    parse_plpgsql_with_catalog, parse_plpgsql_with_options, PlpgsqlCatalog, PlpgsqlType,
+    parse_plpgsql_with_catalog, parse_plpgsql_with_mode, parse_plpgsql_with_options,
+    PlpgsqlCatalog, PlpgsqlCompileMode, PlpgsqlType,
 };
 mod parse_options;
 pub use parse_options::{parse_with_options, Diagnostic, ParseOptions, ParseOutcome};

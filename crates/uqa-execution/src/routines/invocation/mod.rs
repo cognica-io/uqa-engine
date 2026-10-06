@@ -20,3 +20,5 @@ pub use handlers::{
     call_user_table_function, resolved_bound_user_function_returns_set,
     resolved_user_function_returns_set, run_call,
 };
+
+mod plpgsql_cache;

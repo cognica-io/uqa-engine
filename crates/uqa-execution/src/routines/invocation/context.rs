@@ -18,6 +18,12 @@ pub trait RoutineInvocationState {
     fn finish(&mut self);
 }
 pub trait RoutineInvocationSession {
+    fn plpgsql_body(
+        &self,
+        function: &uqa_sql::routines::SQLUserFunction,
+        definition: &uqa_sql::ast::CreateFunction,
+        relation: Option<i64>,
+    ) -> Result<std::sync::Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError>;
     fn depth_limit(&self) -> usize;
     fn state_guard(
         &self,

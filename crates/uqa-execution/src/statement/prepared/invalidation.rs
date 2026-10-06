@@ -46,7 +46,7 @@ impl PreparedCatalogChange {
     pub fn invalidate_with_routines<'a>(
         self,
         entries: impl IntoIterator<Item = &'a mut PreparedStatementPlan>,
-        routines: &crate::routines::sql_body::inputs::SQLRoutineInputs,
+        routines: &crate::routines::invocation::bodies::SessionRoutineBodies,
     ) {
         self.invalidate(entries);
         routines.invalidate(|dependencies| self.affects(dependencies));
@@ -83,7 +83,7 @@ impl PreparedInvalidationLog {
     pub fn invalidate_with_routines<'a>(
         &self,
         entries: impl IntoIterator<Item = &'a mut PreparedStatementPlan>,
-        routines: &crate::routines::sql_body::inputs::SQLRoutineInputs,
+        routines: &crate::routines::invocation::bodies::SessionRoutineBodies,
     ) {
         self.invalidate(entries);
         routines.invalidate(|dependencies| self.affects(dependencies));

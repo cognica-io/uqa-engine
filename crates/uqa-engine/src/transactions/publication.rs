@@ -24,7 +24,7 @@ impl Engine {
         if committed.storage_savepoint.is_none() {
             committed.prepared_changes.invalidate_with_routines(
                 self.session.prepared.write().values_mut(),
-                self.session.routine_bodies.sql_inputs(),
+                &self.session.routine_bodies,
             );
             self.session.state.write().graph_overlay = None;
             self.restore_local_runtime_parameters();

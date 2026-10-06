@@ -7,11 +7,15 @@
 //! Embedded SQL expression and assignment-target lowering.
 
 use super::{
-    expect_tag, json_i64_or_zero, require_nonempty_str, Expr, JSONValue, PLpgSQLCursorArgument,
-    Result, SQLError, Statement,
+    expect_tag, json_i64_or_zero, require_nonempty_str, Expr, JSONValue, PLpgSQLCompileMode,
+    PLpgSQLCursorArgument, PLpgSQLCursorArguments, PLpgSQLExpression, PLpgSQLFragment,
+    PLpgSQLParseMode, PLpgSQLSource, PLpgSQLStatement, Result, SQLError, Statement,
 };
 
-pub(super) fn lower_expr_list(raw: Option<&JSONValue>) -> Result<Vec<Expr>> {
+pub(super) fn lower_expr_list(
+    raw: Option<&JSONValue>,
+    mode: PLpgSQLCompileMode,
+) -> Result<Vec<PLpgSQLExpression>> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
     };
@@ -20,38 +24,59 @@ pub(super) fn lower_expr_list(raw: Option<&JSONValue>) -> Result<Vec<Expr>> {
         .ok_or_else(|| SQLError::Internal("PL/pgSQL expression list is not an array".into()))?;
     let mut out = Vec::with_capacity(list.len());
     for item in list {
-        out.push(lower_expr(item)?);
+        out.push(lower_expr(item, mode)?);
     }
     Ok(out)
 }
 
 /// Lower a `PLpgSQL_expr` node whose text is a scalar expression
 /// (parse modes 2 = expression, 3/4/5 = assignment source).
-pub(super) fn lower_expr(raw: &JSONValue) -> Result<Expr> {
+fn source(raw: &JSONValue) -> Result<std::sync::Arc<PLpgSQLSource>> {
     let (query, mode) = expr_text(raw)?;
-    let parse_mode = match mode {
-        2 => pg_query::ParseMode::PlPgSqlExpr,
-        3 => pg_query::ParseMode::PlPgSqlAssign1,
-        4 => pg_query::ParseMode::PlPgSqlAssign2,
-        5 => pg_query::ParseMode::PlPgSqlAssign3,
-        other => {
-            return Err(SQLError::Internal(format!(
-                "PL/pgSQL scalar expression has invalid parse mode {other}"
-            )));
-        }
-    };
-    let node = parse_one_raw_node(&query, parse_mode)?;
+    Ok(std::sync::Arc::new(PLpgSQLSource {
+        query: query.into(),
+        mode: mode.try_into()?,
+    }))
+}
+
+pub(super) fn lower_expr(raw: &JSONValue, mode: PLpgSQLCompileMode) -> Result<PLpgSQLExpression> {
+    let source = source(raw)?;
+    if source.mode == PLpgSQLParseMode::Statement {
+        return Err(SQLError::Internal(
+            "PL/pgSQL scalar expression has statement parse mode".into(),
+        ));
+    }
+    let validation = mode
+        .validates()
+        .then(|| compile_expression_source(&source))
+        .transpose()?;
+    Ok(PLpgSQLFragment::new(source, validation))
+}
+
+pub(super) fn compile_expression_source(source: &PLpgSQLSource) -> Result<Expr> {
+    let query = &*source.query;
+    let mode = source.mode;
+    let parse_mode = mode.parser_mode();
+    let node = parse_one_raw_node(query, parse_mode)?;
     match (mode, node.node.as_ref()) {
-        (2, Some(pg_query::NodeEnum::SelectStmt(select))) => {
-            compile_single_select_expression(select, &query)
+        (PLpgSQLParseMode::Expression, Some(pg_query::NodeEnum::SelectStmt(select))) => {
+            compile_single_select_expression(select, query)
         }
-        (3..=5, Some(pg_query::NodeEnum::PlassignStmt(assign))) => {
-            let expected_names = i32::try_from(mode - 2).map_err(|_| {
-                SQLError::Internal(format!("invalid PL/pgSQL assignment parse mode {mode}"))
-            })?;
+        (
+            PLpgSQLParseMode::Assignment1
+            | PLpgSQLParseMode::Assignment2
+            | PLpgSQLParseMode::Assignment3,
+            Some(pg_query::NodeEnum::PlassignStmt(assign)),
+        ) => {
+            let expected_names = match mode {
+                PLpgSQLParseMode::Assignment1 => 1,
+                PLpgSQLParseMode::Assignment2 => 2,
+                PLpgSQLParseMode::Assignment3 => 3,
+                _ => unreachable!(),
+            };
             if assign.nnames != expected_names {
                 return Err(SQLError::Internal(format!(
-                    "PL/pgSQL assignment parser returned {} target names for parse mode {mode}",
+                    "PL/pgSQL assignment parser returned {} target names for parse mode {mode:?}",
                     assign.nnames
                 )));
             }
@@ -59,10 +84,10 @@ pub(super) fn lower_expr(raw: &JSONValue) -> Result<Expr> {
                 .val
                 .as_deref()
                 .ok_or_else(|| SQLError::Internal("PL/pgSQL assignment has no value".into()))?;
-            compile_single_select_expression(value, &query)
+            compile_single_select_expression(value, query)
         }
         (_, Some(other)) => Err(SQLError::Internal(format!(
-            "PL/pgSQL parse mode {mode} returned unexpected node {other:?}"
+            "PL/pgSQL parse mode {mode:?} returned unexpected node {other:?}"
         ))),
         (_, None) => Err(SQLError::Internal(
             "PL/pgSQL expression parser returned an empty node".into(),
@@ -72,20 +97,35 @@ pub(super) fn lower_expr(raw: &JSONValue) -> Result<Expr> {
 
 /// Lower a `PLpgSQL_expr` node holding a complete SQL statement
 /// (parse mode 0: queries, PERFORM bodies, CALL statements).
-pub(super) fn lower_full_statement(raw: &JSONValue) -> Result<Statement> {
-    lower_sourced_statement(raw).map(|(statement, _)| statement)
+pub(super) fn lower_full_statement(
+    raw: &JSONValue,
+    mode: PLpgSQLCompileMode,
+) -> Result<PLpgSQLStatement> {
+    lower_sourced_statement(raw, mode).map(|(statement, _)| statement)
 }
 
-pub(super) fn lower_sourced_statement(raw: &JSONValue) -> Result<(Statement, String)> {
-    let (query, mode) = expr_text(raw)?;
-    if mode != 0 {
-        return Err(SQLError::Internal(format!(
-            "embedded PL/pgSQL statement has invalid parse mode {mode}"
-        )));
+pub(super) fn lower_sourced_statement(
+    raw: &JSONValue,
+    mode: PLpgSQLCompileMode,
+) -> Result<(PLpgSQLStatement, String)> {
+    let source = source(raw)?;
+    if source.mode != PLpgSQLParseMode::Statement {
+        return Err(SQLError::Internal(
+            "embedded PL/pgSQL statement has expression parse mode".into(),
+        ));
     }
-    let mut stmts = crate::compile(&query)?;
-    match stmts.len() {
-        1 => Ok((stmts.remove(0), query)),
+    let validation = mode
+        .validates()
+        .then(|| compile_statement_source(&source))
+        .transpose()?;
+    let query = source.query.to_string();
+    Ok((PLpgSQLFragment::new(source, validation), query))
+}
+
+pub(super) fn compile_statement_source(source: &PLpgSQLSource) -> Result<Statement> {
+    let mut statements = crate::compile(&source.query)?;
+    match statements.len() {
+        1 => Ok(statements.remove(0)),
         n => Err(SQLError::Internal(format!(
             "embedded PL/pgSQL query compiled to {n} statements"
         ))),
@@ -94,36 +134,52 @@ pub(super) fn lower_sourced_statement(raw: &JSONValue) -> Result<(Statement, Str
 
 pub(super) fn lower_cursor_arguments(
     raw: Option<&JSONValue>,
-) -> Result<Vec<PLpgSQLCursorArgument>> {
+    mode: PLpgSQLCompileMode,
+) -> Result<PLpgSQLCursorArguments> {
     let Some(raw) = raw else {
-        return Ok(Vec::new());
+        return Ok(PLpgSQLCursorArguments::empty());
     };
-    let (query, mode) = expr_text(raw)?;
-    if mode != 2 {
-        return Err(SQLError::Internal(format!(
-            "PL/pgSQL cursor arguments have invalid parse mode {mode}"
-        )));
+    let source = source(raw)?;
+    if source.mode != PLpgSQLParseMode::Expression {
+        return Err(SQLError::Internal(
+            "PL/pgSQL cursor arguments have non-expression parse mode".into(),
+        ));
     }
-    let node = parse_one_raw_node(&query, pg_query::ParseMode::PlPgSqlExpr)?;
+    let validation = mode
+        .validates()
+        .then(|| compile_cursor_arguments_source(&source))
+        .transpose()?;
+    Ok(PLpgSQLFragment::new(source, validation))
+}
+
+pub(super) fn compile_cursor_arguments_source(
+    source: &PLpgSQLSource,
+) -> Result<Vec<PLpgSQLCursorArgument>> {
+    let query = &*source.query;
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let node = parse_one_raw_node(query, pg_query::ParseMode::PlPgSqlExpr)?;
     let Some(pg_query::NodeEnum::SelectStmt(select)) = node.node.as_ref() else {
         return Err(SQLError::Internal(format!(
             "PL/pgSQL cursor arguments did not parse as a SELECT target list: {query}"
         )));
     };
-    validate_select_expression_envelope(select, &query)?;
+    validate_select_expression_envelope(select, query)?;
     if select.target_list.is_empty() {
         return Err(SQLError::Parse(format!(
             "PL/pgSQL cursor argument list is empty: {query}"
         )));
     }
-    let projections = crate::compiler::compile_pg_projections(&select.target_list)?;
-    Ok(projections
-        .into_iter()
-        .map(|projection| PLpgSQLCursorArgument {
-            name: projection.alias.map(|name| name.to_ascii_lowercase()),
-            expr: projection.expr,
-        })
-        .collect())
+    Ok(
+        crate::compiler::compile_pg_projections(&select.target_list)?
+            .into_iter()
+            .map(|projection| PLpgSQLCursorArgument {
+                name: projection.alias.map(|name| name.to_ascii_lowercase()),
+                expr: projection.expr,
+            })
+            .collect(),
+    )
 }
 
 pub(super) fn expr_text(raw: &JSONValue) -> Result<(String, i64)> {

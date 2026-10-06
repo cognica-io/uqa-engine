@@ -83,7 +83,7 @@ fn cached_entry(executable: &str) -> PreparedStatementPlan {
         logical_plan: source,
         needs_analysis: false,
         effective_search_path: None,
-        dependencies: Default::default(),
+        dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default(),
         dependency_snapshot: None,
         plan: Some(lower(executable)),
         parameter_types: Vec::new(),

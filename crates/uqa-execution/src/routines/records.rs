@@ -7,22 +7,27 @@
 //! Runtime record descriptors and positional trigger-result validation.
 
 use super::{
-    ColumnType, Expr, Interpreter, PLpgSQLDatum, PLpgSQLReturnValue, RoutineOutcome, SQLError,
-    TriggerRoutineContext, Value,
+    ColumnType, Expr, Interpreter, PLpgSQLDatum, PLpgSQLExpression, PLpgSQLReturnValue,
+    RoutineOutcome, SQLError, TriggerRoutineContext, Value,
 };
 
 impl Interpreter<'_> {
-    pub(super) fn expression_type(&self, expr: &Expr) -> Result<Option<ColumnType>, SQLError> {
-        let bound = self.bind_expression(expr)?;
-        let plan = uqa_sql::plan::ExpressionPlan::lower(bound);
-        self.services.expressions.expression_type(&plan, &[])
-    }
-
     pub(super) fn datum_type(&self, index: usize) -> Option<ColumnType> {
         self.resolver().datum_type(index)
     }
 
     pub(super) fn record_expression_types(
+        &self,
+        expression: &PLpgSQLExpression,
+    ) -> Result<Option<Vec<Option<ColumnType>>>, SQLError> {
+        let prepared = self.prepare_expression(expression)?;
+        if let Some(fields) = prepared.analysis.result.record_fields(0) {
+            return Ok(Some(fields.to_vec()));
+        }
+        self.raw_record_expression_types(prepared.expression()?)
+    }
+
+    fn raw_record_expression_types(
         &self,
         expr: &Expr,
     ) -> Result<Option<Vec<Option<ColumnType>>>, SQLError> {
@@ -31,12 +36,7 @@ impl Interpreter<'_> {
                 .resolver()
                 .lookup(name)
                 .and_then(|index| self.record_types.get(&index).cloned())),
-            Expr::Row(fields) => fields
-                .iter()
-                .map(|field| self.expression_type(field))
-                .collect::<Result<Vec<_>, _>>()
-                .map(Some),
-            Expr::Cast { expr, ty } if ty == "record" => self.record_expression_types(expr),
+            Expr::Cast { expr, ty } if ty == "record" => self.raw_record_expression_types(expr),
             _ => Ok(None),
         }
     }
@@ -64,7 +64,14 @@ impl Interpreter<'_> {
         value: &PLpgSQLReturnValue,
     ) -> Result<Option<ColumnType>, SQLError> {
         match value {
-            PLpgSQLReturnValue::Expr(expr) => self.expression_type(expr),
+            PLpgSQLReturnValue::Expr(expr) => Ok(self
+                .prepare_expression(expr)?
+                .analysis
+                .result
+                .column_types()
+                .and_then(|types| types.first())
+                .cloned()
+                .flatten()),
             PLpgSQLReturnValue::Datum(index) => Ok(self.datum_type(*index)),
         }
     }

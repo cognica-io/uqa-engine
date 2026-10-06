@@ -11,6 +11,61 @@ use super::{arm_matches, routine_message, Flow, Interpreter, PLpgSQLBlock, PLpgS
 impl Interpreter<'_> {
     /// Run one block, routing failures through its EXCEPTION arms.
     pub(super) fn exec_block(&mut self, block: &PLpgSQLBlock) -> Result<Flow, SQLError> {
+        let mut names = Vec::with_capacity(block.initvarnos.len());
+        let result = self
+            .initialize_block(block, &mut names)
+            .and_then(|()| self.exec_initialized_block(block));
+        for name in names.iter().rev() {
+            self.pop_binding(name);
+        }
+        result
+    }
+
+    fn initialize_block(
+        &mut self,
+        block: &PLpgSQLBlock,
+        names: &mut Vec<String>,
+    ) -> Result<(), SQLError> {
+        for index in &block.initvarnos {
+            // Re-entry resets values but does not discard prepared expressions.
+            self.values[*index] = super::Value::Null;
+            self.record_types.remove(index);
+            if let super::PLpgSQLDatum::Var(variable) = &self.datums[*index] {
+                let (value, source) = match &variable.default {
+                    Some(expression) => self.eval_expr_with_type(expression)?,
+                    None => (super::Value::Null, None),
+                };
+                let value = super::coerce_routine_value_from(
+                    self.services.expressions,
+                    &value,
+                    &variable.type_name,
+                    source.as_ref(),
+                )?;
+                if variable.not_null && matches!(value, super::Value::Null) {
+                    return Err(SQLError::Routine {
+                        sqlstate: "22004".into(),
+                        message: format!(
+                            "null value cannot be assigned to variable \"{}\" declared NOT NULL",
+                            variable.name
+                        ),
+                    });
+                }
+                self.values[*index] = value;
+            }
+            // A declaration's DEFAULT sees preceding declarations and the
+            // enclosing scope, before this declaration starts shadowing it.
+            // Cursor arguments occur in initvarnos but their namespace is
+            // visible only while preparing that cursor's query.
+            if !self.cursor_arguments.contains(index) {
+                let name = self.datum_name(*index)?;
+                self.push_binding(&name, *index);
+                names.push(name);
+            }
+        }
+        Ok(())
+    }
+
+    fn exec_initialized_block(&mut self, block: &PLpgSQLBlock) -> Result<Flow, SQLError> {
         let result = if block.exceptions.is_empty() {
             self.exec_stmts(&block.body)
         } else {

@@ -29,6 +29,22 @@ impl RoutineInvocationState for crate::roles::RoutineSessionStateGuard<'_> {
     }
 }
 impl RoutineInvocationSession for Engine {
+    fn plpgsql_body(
+        &self,
+        function: &SQLUserFunction,
+        definition: &uqa_sql::ast::CreateFunction,
+        relation: Option<i64>,
+    ) -> Result<std::sync::Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError> {
+        self.session
+            .routine_bodies
+            .plpgsql_body(function, definition, relation, |definition| {
+                uqa_execution::routines::invocation::bodies::compile_session_body(
+                    self,
+                    &self.routine_definition_context().compilation.analysis,
+                    definition,
+                )
+            })
+    }
     fn depth_limit(&self) -> usize {
         self.sql_function_depth_limit()
     }

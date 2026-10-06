@@ -16,7 +16,7 @@ impl MutationCoordinator<'_> {
         }
         change.invalidate_with_routines(
             self.session.prepared.write().values_mut(),
-            self.session.routine_bodies.sql_inputs(),
+            &self.session.routine_bodies,
         );
     }
     pub(crate) fn note_prepared_relation_change(&self, relation: &uqa_core::RelationIdentity) {

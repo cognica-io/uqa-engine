@@ -76,7 +76,7 @@ fn builtin_acl_restore_rejects_invalid_keys_versions_and_roles_without_writes() 
             }
             _ => {
                 json["entry"]["execute_acl"][0]["grantor"]["object_id"] =
-                    serde_json::json!(vec![9; 16])
+                    serde_json::json!(vec![9; 16]);
             }
         }
         let text = json.to_string();

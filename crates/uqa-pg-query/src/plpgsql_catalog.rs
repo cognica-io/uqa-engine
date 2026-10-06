@@ -154,12 +154,35 @@ pub fn parse_plpgsql_with_catalog(
         })
 }
 
+/// Whether a PL/pgSQL structure is checked at definition or compiled for execution.
+/// Runtime compilation keeps embedded SQL text for its first reached preparation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlpgsqlCompileMode {
+    /// Validate a declaration, using representative types for polymorphic arguments.
+    #[default]
+    Validate,
+    /// Compile a caller-specialized declaration without checking unreached SQL.
+    /// Argument and result types must already be concrete.
+    Runtime,
+}
+
 /// Parse PL/pgSQL with a synchronous catalog snapshot, per-call scanner settings
 /// and structured diagnostics. A missing catalog uses PostgreSQL's builtin types.
 pub fn parse_plpgsql_with_options(
     stmt: &str,
     catalog: Option<&PlpgsqlCatalog>,
     options: crate::ParseOptions,
+) -> crate::ParseOutcome<serde_json::Value> {
+    parse_plpgsql_with_mode(stmt, catalog, options, PlpgsqlCompileMode::Validate)
+}
+
+/// Compile a PL/pgSQL structure with the caller-selected validator/runtime boundary.
+/// This changes only PostgreSQL's own validator checks, not warning delivery.
+pub fn parse_plpgsql_with_mode(
+    stmt: &str,
+    catalog: Option<&PlpgsqlCatalog>,
+    options: crate::ParseOptions,
+    mode: PlpgsqlCompileMode,
 ) -> crate::ParseOutcome<serde_json::Value> {
     use crate::parse_options::{capture_diagnostic, parse_error};
     use crate::{Diagnostic, ParseOutcome};
@@ -195,7 +218,11 @@ pub fn parse_plpgsql_with_options(
             callbacks
                 .as_ref()
                 .map_or(std::ptr::null(), |callbacks| callbacks),
-            options.bits(),
+            options.bits()
+                | match mode {
+                    PlpgsqlCompileMode::Validate => 0,
+                    PlpgsqlCompileMode::Runtime => PG_QUERY_PLPGSQL_RUNTIME as i32,
+                },
             Some(capture_diagnostic),
             (&mut diagnostics as *mut Vec<Diagnostic>).cast(),
         )
@@ -215,3 +242,6 @@ pub fn parse_plpgsql_with_options(
         diagnostics,
     }
 }
+
+#[cfg(test)]
+mod first_use_tests;
