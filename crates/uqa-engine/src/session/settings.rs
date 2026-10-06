@@ -269,7 +269,7 @@ impl Engine {
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) -> Result<(), SQLError> {
         use uqa_sql::ast::DiscardTarget;
         let _statement = self.lock_statement_gate();
-        if target == DiscardTarget::All && self.in_explicit_transaction_block() {
+        if target == DiscardTarget::All && self.in_transaction_block() {
             return Err(SQLError::Routine {
                 sqlstate: "25001".into(),
                 message: "DISCARD ALL cannot run inside a transaction block".into(),
@@ -298,6 +298,7 @@ impl Engine {
                 session.session_vars.clear();
                 session.search_path = search_path;
                 self.session.prepared.write().clear();
+                self.invalidate_prepared_analysis();
                 session.sql_statement_cache.clear();
                 session.authorization.discard();
                 drop(session);

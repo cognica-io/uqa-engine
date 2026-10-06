@@ -14,7 +14,10 @@ impl MutationCoordinator<'_> {
         if let Some(frame) = self.session.transactions.lock().last_mut() {
             frame.prepared_changes.record(change);
         }
-        change.invalidate(self.session.prepared.write().values_mut());
+        change.invalidate_with_routines(
+            self.session.prepared.write().values_mut(),
+            self.session.routine_bodies.sql_inputs(),
+        );
     }
     pub(crate) fn note_prepared_relation_change(&self, relation: &uqa_core::RelationIdentity) {
         let oid =

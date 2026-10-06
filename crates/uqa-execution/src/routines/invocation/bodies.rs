@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Routine bodies compiled by one session. `PostgreSQL` compiles a routine whose body is a string the first time a backend runs it and keeps the compilation for the backend's lifetime until the routine's catalog entry changes: a type renamed afterwards does not affect the backend that compiled the body, while a backend that compiles it later resolves the names again. The cache is not transactional.
+//! Session-owned routine source compilation, retained until its definition changes. SQL statement input analysis has a separate dependency-aware lifetime; source syntax stays available for reanalysis. The caches are not transactional.
 
 use super::context::RoutineInvocationSession;
 use parking_lot::Mutex;
@@ -36,9 +36,14 @@ struct CompiledRoutine {
 #[derive(Default)]
 pub struct SessionRoutineBodies {
     compiled: Mutex<BTreeMap<[u8; 16], CompiledRoutine>>,
+    sql_inputs: crate::routines::sql_body::inputs::SQLRoutineInputs,
 }
 
 impl SessionRoutineBodies {
+    pub fn sql_inputs(&self) -> &crate::routines::sql_body::inputs::SQLRoutineInputs {
+        &self.sql_inputs
+    }
+
     /// The body the session executes: a bound body as defined, or the session's compilation of a source body, compiled when the session first needs it and again after the routine's catalog entry changed.
     pub fn body(
         &self,
@@ -62,10 +67,9 @@ impl SessionRoutineBodies {
         Ok(body)
     }
 
-    /// Inspect the executable body if it already exists, otherwise compile a
-    /// temporary body without initializing the runtime cache. This preserves
-    /// types previously retained by execution while allowing an unreached call
-    /// to remain uncompiled at its execution boundary.
+    /// Inspect retained source compilation if it exists, otherwise compile a
+    /// temporary body without initializing the runtime cache. An unreached call
+    /// therefore keeps its original execution-time compilation boundary.
     pub fn inspect(
         &self,
         function: &SQLUserFunction,

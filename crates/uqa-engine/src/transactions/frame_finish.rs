@@ -533,9 +533,10 @@ impl Engine {
             cleanup_errors.push(format!("sequence value restore: {error}"));
         }
         self.restore_session_state(&session_snapshot);
-        frame
-            .prepared_changes
-            .invalidate(self.session.prepared.write().values_mut());
+        frame.prepared_changes.invalidate_with_routines(
+            self.session.prepared.write().values_mut(),
+            self.session.routine_bodies.sql_inputs(),
+        );
         self.apply_nontransactional_sequence_values(&nontransactional_sequence_values);
         let begin_lock_mark = frame.begin_lock_mark;
         let first_snapshot_set = frame.first_snapshot_set;

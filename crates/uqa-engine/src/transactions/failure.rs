@@ -226,11 +226,15 @@ impl Engine {
                 frame
                     .prepared_changes
                     .rollback_to(savepoint.prepared_change_mark)
-                    .invalidate(self.session.prepared.write().values_mut());
+                    .invalidate_with_routines(
+                        self.session.prepared.write().values_mut(),
+                        self.session.routine_bodies.sql_inputs(),
+                    );
             } else {
-                frame
-                    .prepared_changes
-                    .invalidate(self.session.prepared.write().values_mut());
+                frame.prepared_changes.invalidate_with_routines(
+                    self.session.prepared.write().values_mut(),
+                    self.session.routine_bodies.sql_inputs(),
+                );
             }
         }
         self.release_aborted_statement_locks(rollback_state.keep_mark);

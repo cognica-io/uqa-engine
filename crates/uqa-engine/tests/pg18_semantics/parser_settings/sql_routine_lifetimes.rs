@@ -68,3 +68,19 @@ fn strict_null_routine_authority_matches_postgresql(#[case] provider: usize) {
         ),
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn sql_body_input_lifetimes_and_invalidation_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = super::open(provider, &directory.path().join("body-inputs.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!(
+            "../../../../../tests/parity/pg18/sql_body_input_lifetime_oracle.expected.json"
+        ),
+    );
+}

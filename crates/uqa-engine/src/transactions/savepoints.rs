@@ -163,7 +163,10 @@ impl Engine {
         frame
             .prepared_changes
             .rollback_to(savepoint.prepared_change_mark)
-            .invalidate(self.session.prepared.write().values_mut());
+            .invalidate_with_routines(
+                self.session.prepared.write().values_mut(),
+                self.session.routine_bodies.sql_inputs(),
+            );
         let keep_mark = savepoint.lock_mark;
         frame.restore_mutation_savepoint(position);
         frame.restore_pending_notification_savepoint(position);

@@ -159,14 +159,6 @@ impl Engine {
             .is_some_and(|frame| !frame.implicit_statement)
     }
 
-    pub(crate) fn in_explicit_transaction_block(&self) -> bool {
-        self.session
-            .transactions
-            .lock()
-            .last()
-            .is_some_and(|frame| frame.explicit_transaction_block)
-    }
-
     /// Tear down engine state cleanly, rolling back open transaction frames
     /// and clearing registries.
     /// The engine value can no longer be used afterwards in a
