@@ -146,29 +146,62 @@ pub fn parse_plpgsql_with_catalog(
     stmt: &str,
     catalog: &PlpgsqlCatalog,
 ) -> Result<serde_json::Value> {
-    let input = CString::new(stmt)?;
-    let mut context = CatalogContext {
-        catalog,
-        names: catalog
-            .types
-            .iter()
-            .map(|ty| CString::new(ty.name.as_str()))
-            .collect::<std::result::Result<Vec<_>, _>>()?,
+    parse_plpgsql_with_options(stmt, Some(catalog), crate::ParseOptions::default())
+        .result
+        .map_err(|error| match error {
+            Error::ParseDiagnostic(diagnostic) => Error::Parse(diagnostic.message),
+            other => other,
+        })
+}
+
+/// Parse PL/pgSQL with a synchronous catalog snapshot, per-call scanner settings
+/// and structured diagnostics. A missing catalog uses PostgreSQL's builtin types.
+pub fn parse_plpgsql_with_options(
+    stmt: &str,
+    catalog: Option<&PlpgsqlCatalog>,
+    options: crate::ParseOptions,
+) -> crate::ParseOutcome<serde_json::Value> {
+    use crate::parse_options::{capture_diagnostic, parse_error};
+    use crate::{Diagnostic, ParseOutcome};
+    let input = match CString::new(stmt) {
+        Ok(input) => input,
+        Err(error) => return ParseOutcome::error(error.into()),
     };
-    let callbacks = PgQueryPlpgsqlCatalog {
-        context: (&mut context as *mut CatalogContext<'_>).cast(),
+    let mut context = match catalog
+        .map(|catalog| {
+            catalog
+                .types
+                .iter()
+                .map(|ty| CString::new(ty.name.as_str()))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map(|names| CatalogContext { catalog, names })
+        })
+        .transpose()
+    {
+        Ok(context) => context,
+        Err(error) => return ParseOutcome::error(error.into()),
+    };
+    let callbacks = context.as_mut().map(|context| PgQueryPlpgsqlCatalog {
+        context: (context as *mut CatalogContext<'_>).cast(),
         lookup_namespace: Some(lookup_namespace),
         lookup_type_by_name: Some(lookup_type_by_name),
         lookup_type_by_oid: Some(lookup_type_by_oid),
         get_error: Some(catalog_error),
+    });
+    let mut diagnostics = Vec::<Diagnostic>::new();
+    let result = unsafe {
+        pg_query_parse_plpgsql_with_options(
+            input.as_ptr(),
+            callbacks
+                .as_ref()
+                .map_or(std::ptr::null(), |callbacks| callbacks),
+            options.bits(),
+            Some(capture_diagnostic),
+            (&mut diagnostics as *mut Vec<Diagnostic>).cast(),
+        )
     };
-    // All callbacks only inspect the immutable snapshot. Its C strings and context outlive the C parser's synchronous callback scope.
-    let result = unsafe { pg_query_parse_plpgsql_with_catalog(input.as_ptr(), &callbacks) };
     let structure = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }
-            .to_string_lossy()
-            .to_string();
-        Err(Error::Parse(message))
+        Err(unsafe { parse_error(result.error, &diagnostics) })
     } else if result.plpgsql_funcs.is_null() {
         Err(Error::InvalidPointer)
     } else {
@@ -177,5 +210,8 @@ pub fn parse_plpgsql_with_catalog(
             .map_err(|error| Error::InvalidJson(error.to_string()))
     };
     unsafe { pg_query_free_plpgsql_parse_result(result) };
-    structure
+    ParseOutcome {
+        result: structure,
+        diagnostics,
+    }
 }

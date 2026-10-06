@@ -492,7 +492,7 @@ fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {
     expression
 }
 
-fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
+pub(crate) fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
     let (name, signatures) = registry::lookup(name)?;
     Some(
         signatures

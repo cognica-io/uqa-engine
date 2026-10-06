@@ -793,6 +793,11 @@ mod unified_plan_tests {
             .expect("open persistent engine");
         root.sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
             .expect("create table");
+        // This test isolates the sibling's DDL invalidation. Publish initial
+        // statistics before warming the cache so automatic ANALYZE cannot be
+        // an independent cache-invalidating commit during the first query.
+        root.sql("ANALYZE items", &[])
+            .expect("initialize statistics");
         let writer = root.new_session().expect("writer session");
         let observer = root.new_session().expect("observer session");
         let query = "SELECT id FROM items WHERE id = 1";

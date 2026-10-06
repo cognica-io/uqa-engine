@@ -145,7 +145,7 @@ pub fn compile_expression_text(text: &str) -> Result<Expr> {
 }
 
 fn parse_one_raw_node(text: &str, mode: pg_query::ParseMode) -> Result<pg_query::protobuf::Node> {
-    let parsed = pg_query::parse_with_mode(text, mode)?;
+    let parsed = crate::parser::parse_with_mode(text, mode)?;
     let mut statements = parsed.protobuf.stmts;
     if statements.len() != 1 {
         return Err(SQLError::Parse(format!(

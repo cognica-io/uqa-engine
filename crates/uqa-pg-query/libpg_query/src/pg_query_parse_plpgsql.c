@@ -2,6 +2,8 @@
 
 #include "pg_query.h"
 #include "pg_query_internal.h"
+#include "pg_query_diagnostics.h"
+#include "pg_query_parser_options.h"
 #include "pg_query_json_plpgsql.h"
 #include "pg_query_plpgsql_catalog.h"
 #include "pg_query_proctup_attrs.h"
@@ -670,6 +672,7 @@ PgQueryInternalPlpgsqlFuncAndError pg_query_raw_parse_plpgsql(Node* stmt)
 
 		MemoryContextSwitchTo(cctx);
 		error_data = CopyErrorData();
+		pg_query_capture_diagnostic(error_data);
 
 		// Note: This is intentionally malloc so exiting the memory context doesn't free this
 		error = malloc(sizeof(PgQueryError));
@@ -737,9 +740,9 @@ static bool stmts_walker(Node *node, plStmts *state)
 	return result;
 }
 
-PgQueryPlpgsqlParseResult
-pg_query_parse_plpgsql_with_catalog(const char *input,
-									const PgQueryPlpgsqlCatalog *catalog)
+static PgQueryPlpgsqlParseResult
+parse_plpgsql(const char *input, const PgQueryPlpgsqlCatalog *catalog,
+    int parser_options)
 {
 	MemoryContext ctx = NULL;
 	PgQueryPlpgsqlParseResult result = {0};
@@ -762,8 +765,9 @@ pg_query_parse_plpgsql_with_catalog(const char *input,
 	}
 	ctx->libpg_query_plpgsql_catalog = catalog;
 
-	parse_result = pg_query_raw_parse(input, PG_QUERY_PARSE_DEFAULT);
+	parse_result = pg_query_raw_parse(input, parser_options);
 	result.error = parse_result.error;
+	free(parse_result.stderr_buffer);
 	if (result.error != NULL) {
 		pg_query_exit_memory_context(ctx);
 		return result;
@@ -823,10 +827,32 @@ pg_query_parse_plpgsql_with_catalog(const char *input,
 	result.plpgsql_funcs[strlen(result.plpgsql_funcs) - 2] = '\n';
 	result.plpgsql_funcs[strlen(result.plpgsql_funcs) - 1] = ']';
 
-	free(parse_result.stderr_buffer);
 	pg_query_exit_memory_context(ctx);
 
 	return result;
+}
+
+PgQueryPlpgsqlParseResult
+pg_query_parse_plpgsql_with_catalog(const char *input,
+    const PgQueryPlpgsqlCatalog *catalog)
+{
+    return parse_plpgsql(input, catalog, PG_QUERY_PARSE_DEFAULT);
+}
+
+PgQueryPlpgsqlParseResult
+pg_query_parse_plpgsql_with_options(const char *input,
+    const PgQueryPlpgsqlCatalog *catalog, int parser_options,
+    PgQueryDiagnosticCallback callback, void *context)
+{
+    PgQueryDiagnosticScope scope;
+    PgQueryPlpgsqlParseResult result;
+    PgQueryParserOptionsScope previous_options = pg_query_begin_parser_options(parser_options);
+
+    pg_query_begin_diagnostics(&scope, callback, context);
+    result = parse_plpgsql(input, catalog, parser_options & ~PG_QUERY_PARSE_MODE_BITMASK);
+    pg_query_end_diagnostics(&scope);
+    pg_query_end_parser_options(previous_options);
+    return result;
 }
 
 PgQueryPlpgsqlParseResult

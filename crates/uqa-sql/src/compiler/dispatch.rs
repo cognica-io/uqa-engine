@@ -40,6 +40,7 @@ use pg_query::protobuf::SelectStmt;
 pub struct ParsedStatement<'sql> {
     sql: &'sql str,
     node: Box<Node>,
+    settings: crate::parser::ParserSettings,
 }
 
 impl<'sql> ParsedStatement<'sql> {
@@ -58,17 +59,20 @@ impl<'sql> ParsedStatement<'sql> {
 
     /// Compile this statement into the engine's internal SQL representation.
     pub fn compile(&self) -> Result<Statement> {
-        let mut statement = compile_stmt(&self.node)?;
-        if let Statement::CreateForeignServer(server) = &mut statement {
-            super::foreign_servers::retain_string_presence(self.sql, server)?;
-        }
-        Ok(statement)
+        crate::parser::with_settings(self.settings, || {
+            let mut statement = compile_stmt(&self.node)?;
+            if let Statement::CreateForeignServer(server) = &mut statement {
+                super::foreign_servers::retain_string_presence(self.sql, server)?;
+            }
+            Ok(statement)
+        })
+        .0
     }
 }
 
 /// Parse an entire SQL message before exposing any statement for execution. `PostgreSQL` syntax errors reject the whole message; semantic compilation errors can be surfaced later, at the affected statement's boundary.
 pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement<'_>>> {
-    let parsed = pg_query::parse(sql)?;
+    let parsed = crate::parser::parse(sql)?;
     let mut out = Vec::with_capacity(parsed.protobuf.stmts.len());
     for raw in parsed.protobuf.stmts {
         let node = raw
@@ -90,7 +94,11 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement<'_>>> {
         let source = sql.get(start..end).ok_or_else(|| {
             SQLError::Internal("parser statement bounds do not match SQL text".into())
         })?;
-        out.push(ParsedStatement { sql: source, node });
+        out.push(ParsedStatement {
+            sql: source,
+            node,
+            settings: crate::parser::settings(),
+        });
     }
     Ok(out)
 }
@@ -105,7 +113,7 @@ pub fn compile(sql: &str) -> Result<Vec<Statement>> {
 pub fn resolve_deferred_create_table(
     deferred: &crate::ast::DeferredCreateTable,
 ) -> Result<crate::ast::CreateTable> {
-    let parsed = pg_query::parse(&deferred.definition_sql)?;
+    let parsed = crate::parser::parse(&deferred.definition_sql)?;
     let [raw] = parsed.protobuf.stmts.as_slice() else {
         return Err(SQLError::Internal(
             "deferred CREATE TABLE did not contain exactly one statement".into(),

@@ -78,7 +78,7 @@ pub(crate) fn read_executable_inputs(
     params: &[crate::SQLParam],
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
-) -> Result<(), SQLError> {
+) -> Result<bool, SQLError> {
     let declared = super::statements::parameter_input_types(params)?;
     let mut analysis = Preparation {
         routines,
@@ -114,8 +114,10 @@ pub(crate) fn read_executable_inputs(
     if finish_parameters {
         analysis.parameters.finish()?;
     }
+    let reusable = constants.reusable_across_messages();
     constants.apply(plan)?;
-    plan.normalize_window_definitions()
+    plan.normalize_window_definitions()?;
+    Ok(reusable)
 }
 
 pub fn infer_prepared_parameter_types(

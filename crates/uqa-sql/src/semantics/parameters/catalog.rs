@@ -31,6 +31,18 @@ pub mod message_levels {
     pub const ERROR: u8 = 21;
 }
 
+const BACKSLASH_QUOTE_OPTIONS: &[EnumOption] = &[
+    EnumOption::listed("safe_encoding", 2),
+    EnumOption::listed("on", 1),
+    EnumOption::listed("off", 0),
+    EnumOption::hidden("true", 1),
+    EnumOption::hidden("false", 0),
+    EnumOption::hidden("yes", 1),
+    EnumOption::hidden("no", 0),
+    EnumOption::hidden("1", 1),
+    EnumOption::hidden("0", 0),
+];
+
 const CLIENT_MESSAGE_LEVELS: &[EnumOption] = &[
     EnumOption::listed("debug5", message_levels::DEBUG5),
     EnumOption::listed("debug4", message_levels::DEBUG4),
@@ -142,6 +154,15 @@ static PARAMETERS: &[ParameterDefinition] = &[
         "Sets the application name to be reported in statistics and logs.",
         None,
         ParameterFlags::IS_NAME.union(ParameterFlags::REPORT),
+    ),
+    define(
+        "backslash_quote",
+        enumerated(2, BACKSLASH_QUOTE_OPTIONS),
+        ParameterContext::User,
+        PREVIOUS_VERSIONS,
+        "Sets whether \"\\'\" is allowed in string literals.",
+        None,
+        ParameterFlags::NONE,
     ),
     define(
         "check_function_bodies",

@@ -14,7 +14,7 @@ pub(super) fn retain_string_presence(
     sql: &str,
     statement: &mut CreateForeignServer,
 ) -> Result<(), SQLError> {
-    let scanned = pg_query::scan(sql)?;
+    let scanned = crate::parser::scan(sql)?;
     let tokens = scanned
         .tokens
         .iter()

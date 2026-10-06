@@ -34,6 +34,9 @@ pub trait RoutineExpressions: RoutineValueContext {
 pub type StatementResultCheck<'a> = &'a dyn Fn(&AnalyzedResult) -> Result<(), SQLError>;
 /// Nested statement execution and planning retain the caller's active routine context.
 pub trait RoutineStatements {
+    fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
+        uqa_sql::parser::ParserSettings::default()
+    }
     /// Run one statement of a SQL function body; `check` sees what the statement's analysis derives about its result before it runs, as `PostgreSQL` checks a body's final statement before running it.
     fn execute_body_statement(
         &self,

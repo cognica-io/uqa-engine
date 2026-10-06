@@ -85,11 +85,21 @@ impl BuiltinRoutineCatalogEntry {
     }
 
     pub const fn returns_set(self) -> bool {
-        matches!(self.oid, 3035 | 1689)
+        matches!(self.oid, 1066..=1069 | 3035 | 1689)
+    }
+
+    pub const fn support_oid(self) -> i64 {
+        match self.oid {
+            1066 | 1067 => 3994,
+            1068 | 1069 => 3995,
+            _ => 0,
+        }
     }
 
     pub const fn estimated_rows(self) -> f64 {
-        if self.returns_set() {
+        if matches!(self.oid, 1066..=1069) {
+            1000.0
+        } else if self.returns_set() {
             10.0
         } else {
             0.0
@@ -160,6 +170,7 @@ mod ranges;
 mod records;
 mod scalar;
 mod sequences;
+mod series;
 mod sleep_bodies;
 mod temporal;
 
@@ -195,6 +206,7 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     privileges::ROUTINES,
     ranges::ROUTINES,
     sequences::ROUTINES,
+    series::ROUTINES,
     &[
         subscript_handler(6098, "jsonb_subscript_handler"),
         subscript_handler(6179, "array_subscript_handler"),

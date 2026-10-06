@@ -154,51 +154,14 @@ pub type Result<T> = std::result::Result<T, SQLError>;
 impl From<pg_query::Error> for SQLError {
     fn from(value: pg_query::Error) -> Self {
         match value {
-            pg_query::Error::Parse(message)
-                if message == "WITH TIES cannot be specified without ORDER BY clause" =>
-            {
-                SQLError::Routine {
-                    sqlstate: "42601".into(),
-                    message,
-                }
-            }
-            // The grammar rejects impossible frame bounds as windowing errors.
-            pg_query::Error::Parse(message)
-                if matches!(
-                    message.as_str(),
-                    "frame start cannot be UNBOUNDED FOLLOWING"
-                        | "frame starting from following row cannot end with current row"
-                        | "frame end cannot be UNBOUNDED PRECEDING"
-                        | "frame starting from current row cannot have preceding rows"
-                        | "frame starting from following row cannot have preceding rows"
-                ) =>
-            {
-                SQLError::Routine {
-                    sqlstate: "42P20".into(),
-                    message,
-                }
-            }
-            // `processCASbits` reports a constraint attribute that the constraint's kind cannot take as unsupported.
-            pg_query::Error::Parse(message)
-                if message.contains("constraints cannot be altered to be NOT VALID")
-                    || message.contains(" constraints cannot be marked ") =>
-            {
-                SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message,
-                }
-            }
-            // The PL/pgSQL parser looks up declared types as parse_datatype does, which reports a missing type as an undefined object.
-            pg_query::Error::Parse(message)
-                if message.starts_with("type \"") && message.ends_with("\" does not exist") =>
-            {
-                SQLError::Routine {
-                    sqlstate: "42704".into(),
-                    message,
-                }
-            }
-            pg_query::Error::Parse(message) => SQLError::Parse(message),
-            other => SQLError::Parse(other.to_string()),
+            pg_query::Error::ParseDiagnostic(diagnostic) => Self::Diagnostic {
+                sqlstate: diagnostic.sqlstate,
+                message: diagnostic.message,
+                detail: diagnostic.detail,
+                hint: diagnostic.hint,
+            },
+            pg_query::Error::Parse(message) => Self::Parse(message),
+            other => Self::Parse(other.to_string()),
         }
     }
 }

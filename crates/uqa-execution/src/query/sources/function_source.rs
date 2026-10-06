@@ -202,6 +202,7 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         context.relational.catalog,
         TableFunctionTypeRequest {
             name: source.name,
+            binding: source.binding,
             args: source.args,
             user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
             user_invocation: resolved

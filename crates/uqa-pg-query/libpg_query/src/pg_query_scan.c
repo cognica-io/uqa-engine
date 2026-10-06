@@ -1,5 +1,6 @@
 #include "pg_query.h"
 #include "pg_query_internal.h"
+#include "pg_query_parser_options.h"
 
 #include "gramparse.h"
 #include "lib/stringinfo.h"
@@ -179,4 +180,13 @@ void pg_query_free_scan_result(PgQueryScanResult result)
   free(result.pbuf.data);
   free(result.tokens);
   free(result.stderr_buffer);
+}
+
+PgQueryScanResult
+pg_query_scan_opts(const char *input, int parser_options)
+{
+  PgQueryParserOptionsScope previous = pg_query_begin_parser_options(parser_options);
+  PgQueryScanResult result = pg_query_scan(input);
+  pg_query_end_parser_options(previous);
+  return result;
 }

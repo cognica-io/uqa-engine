@@ -753,6 +753,7 @@ impl SchemaScope {
                     routines,
                     TableFunctionTypeRequest {
                         name,
+                        binding: binding.as_ref(),
                         args,
                         user_function: user_function
                             .as_ref()

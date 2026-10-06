@@ -9,6 +9,8 @@ pub enum Error {
     Decode(#[from] prost::DecodeError),
     #[error("Invalid statement: {0}")]
     Parse(String),
+    #[error("Invalid statement: {0}")]
+    ParseDiagnostic(Box<crate::Diagnostic>),
     #[error("Error parsing JSON: {0}")]
     InvalidJson(String),
     #[error("Invalid pointer")]

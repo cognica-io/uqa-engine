@@ -691,10 +691,17 @@ impl FromClause {
                     | upgrade_optional(on)
             }
             Self::Values { rows, .. } => upgrade_rows(rows),
-            Self::Function { args, .. } => upgrade_exprs(args),
+            Self::Function { binding, args, .. } => {
+                crate::semantics::upgrade_legacy_table_function_binding(binding, args.len())
+                    | upgrade_exprs(args)
+            }
             Self::FunctionGroup { functions, .. } => {
                 functions.iter_mut().fold(false, |changed, function| {
-                    upgrade_exprs(&mut function.args) | changed
+                    crate::semantics::upgrade_legacy_table_function_binding(
+                        &mut function.binding,
+                        function.args.len(),
+                    ) | upgrade_exprs(&mut function.args)
+                        | changed
                 })
             }
             Self::Subquery { body, .. } => body.upgrade_legacy_serialized_dispatches(),

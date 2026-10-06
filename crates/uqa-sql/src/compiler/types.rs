@@ -121,7 +121,7 @@ pub fn parse_regtype_name(input: &str) -> Result<Option<ParsedRegtypeName>> {
     if input.bytes().all(scanner_isspace) {
         return Ok(None);
     }
-    let parsed = pg_query::parse_with_mode(input, pg_query::ParseMode::TypeName)?;
+    let parsed = crate::parser::parse_with_mode(input, pg_query::ParseMode::TypeName)?;
     let [raw] = parsed.protobuf.stmts.as_slice() else {
         return Ok(None);
     };
@@ -136,7 +136,7 @@ pub fn parse_regtype_name(input: &str) -> Result<Option<ParsedRegtypeName>> {
     if names.is_empty() {
         return Ok(None);
     }
-    let scanned = pg_query::scan(input)?;
+    let scanned = crate::parser::scan(input)?;
     let tokens = scanned
         .tokens
         .iter()

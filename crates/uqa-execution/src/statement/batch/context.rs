@@ -38,16 +38,17 @@ pub struct CachedStatement {
     pub statement: Arc<Statement>,
     pub logical_plan: Arc<UnifiedPlan>,
     pub optimized_plan: Option<Arc<UnifiedPlan>>,
+    pub parser: uqa_sql::parser::ParserMetadata,
 }
 
 pub trait StatementCache {
     fn cached_sql_statement(&self, sql: &str) -> Option<CachedStatement>;
-    fn cached_optimized_sql_plan(&self, sql: &str) -> Option<Arc<UnifiedPlan>>;
     fn cache_sql_statement(
         &self,
         sql: String,
         statement: Arc<Statement>,
         logical_plan: Arc<UnifiedPlan>,
+        parser: uqa_sql::parser::ParserMetadata,
     );
     fn cache_optimized_sql_plan(&self, sql: &str, optimized_plan: Arc<UnifiedPlan>);
 }

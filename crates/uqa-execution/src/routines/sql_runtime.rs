@@ -112,10 +112,24 @@ impl Interpreter<'_> {
         params: &[Expr],
     ) -> Result<SQLResult, SQLError> {
         let (text, bound_params) = self.eval_dynamic_sql(query, params)?;
-        if compile(&text)?
-            .iter()
-            .any(|statement| matches!(statement, Statement::Transaction(_)))
-        {
+        let (statements, parser) =
+            uqa_sql::parser::with_settings(self.services.statements.parser_settings(), || {
+                compile(&text)
+            });
+        let has_transaction = statements.as_ref().is_ok_and(|statements| {
+            statements
+                .iter()
+                .any(|statement| matches!(statement, Statement::Transaction(_)))
+        });
+        // Accepted text is parsed by execute_text at its statement boundary.
+        // A preflight rejection still exposes warnings that preceded the error.
+        if statements.is_err() || has_transaction {
+            for notice in parser.notices.iter() {
+                self.services.runtime.push_notice(notice.clone());
+            }
+        }
+        let _ = statements?;
+        if has_transaction {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: "EXECUTE of transaction commands is not implemented".into(),

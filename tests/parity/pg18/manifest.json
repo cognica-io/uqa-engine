@@ -61,9 +61,9 @@
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
     "wrapper_repository": "https://github.com/jaepil/pg_query.rs",
-    "wrapper_revision": "50329932e504c8ad96208a3bbafdec7d9fdaf81d",
+    "wrapper_revision": "521df17ffb14b831145a148cb3f4b432a746b544",
     "library_repository": "https://github.com/jaepil/libpg_query",
-    "library_revision": "a5356d05a1269f2982b906611d7e545c550bb369"
+    "library_revision": "942f2a62b2c5747587fba9bfbb42dd958f9a0ca2"
   },
   "milestones": {
     "M0": {
@@ -99,7 +99,8 @@
     "M0": [
       "baseline.pg18-differential-probes",
       "baseline.tpch-derived-queries",
-      "parser.pg18-chain"
+      "parser.pg18-chain",
+      "parser.session-scanner-diagnostics"
     ],
     "M1": [
       "query.parenthesized-join-alias",
@@ -254,6 +255,14 @@
       "open_issue": null
     },
     {
+      "id": "parser.session-scanner-diagnostics",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured message values, command tags, original SQLSTATE/DETAIL/HINT and notices in tests/parity/pg18/parser_settings_oracle.expected.json and dynamic_parser_settings_oracle.expected.json; scoped scanner and ErrorData transport from the exact parser_chain revisions",
+      "uqa_test": "cargo test -p uqa-sql --lib parser::tests; cargo test -p uqa-engine --test integration parser_settings; cargo test -p uqa-engine --lib queries::scope",
+      "supported_version": "Unreleased: complete-message standard_conforming_strings, backslash_quote and escape_string_warning boundaries, statement/cursor cache notice replay through the current filter, SET LOCAL restoration, retained PREPARE inputs, routine-local lexical settings and dynamic EXECUTE/cursor parsing, and reanalysis of live ordinary input conversions. Forty-two core and eleven dynamic SQL messages pass all four storage providers, with nine additional observations after reopening the three durable providers.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "baseline.tpch-derived-queries",
       "postgresql_reference": "PostgreSQL 18.4 provenance in benchmarks/tpch/expected/pg18.json",
       "uqa_test": "python3 scripts/run-tpch-pg18.py --iterations 3",
@@ -267,7 +276,7 @@
       "uqa_test": "cargo test -p uqa-sql --test integration",
       "supported_version": "PostgreSQL 18",
       "status": "partial",
-      "open_issue": "The top-level statement and semantically relevant option inventory is not complete."
+      "open_issue": "The top-level statement and semantically relevant option inventory is not complete. Source SQL-function inlining and first-use PL/pgSQL expression preparation remain tracked in #465, with the complete independent routine_parser_lifetime_oracle.expected.json preserved; #460 and #316 remain open for that work."
     },
     {
       "id": "query.join-using-natural",
@@ -527,9 +536,9 @@
     },
     {
       "id": "routines.table-setof-overload-resolution",
-      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live table-returning and SETOF candidate-selection results plus PostgreSQL function type-resolution, CREATE FUNCTION, table-function, and set-returning-function documentation",
-      "uqa_test": "cargo test -p uqa-engine --test integration functions::sql_routine_identity::table_routine_; cargo test -p uqa-engine --test integration functions::sql_routine_identity::multi_argument_from_unnest_uses_postgresql_syntax_before_user_overloads; cargo test -p uqa-engine --test integration functions::sql_table_functions::table_function_scalar_subqueries_preserve_declared_argument_types; cargo test -p uqa-engine --test integration functions::sql_plpgsql::set_returning::set_projection_; cargo test -p uqa-engine --test integration functions::pg18_semantics::md5_overloads::pg18_set_returning_user_overload_uses_the_combined_stable_binding",
-      "supported_version": "PostgreSQL 18.4 candidate selection for implemented table-returning and SETOF functions, including declared types from direct casts and scalar subqueries, unknown-category selection and ambiguity, exact implemented information-schema domain signatures, named and default arguments before effective-signature search-path shadowing, stable scalar-versus-set projection bindings, user-versus-built-in search-path selection, exact execution through DML and correlated LATERAL sources, and durable table-routine and stored-view identities across catalog reopen",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live table-returning and SETOF candidate-selection results plus PostgreSQL function type-resolution, CREATE FUNCTION, table-function, and set-returning-function documentation; tests/parity/pg18/series_binding_oracle.expected.json (28 independent PostgreSQL 18.4 messages)",
+      "uqa_test": "cargo test -p uqa-engine --test integration functions::sql_routine_identity::table_routine_; cargo test -p uqa-engine --test integration functions::sql_routine_identity::multi_argument_from_unnest_uses_postgresql_syntax_before_user_overloads; cargo test -p uqa-engine --test integration functions::sql_table_functions::table_function_scalar_subqueries_preserve_declared_argument_types; cargo test -p uqa-engine --test integration functions::sql_plpgsql::set_returning::set_projection_; cargo test -p uqa-engine --test integration functions::pg18_semantics::md5_overloads::pg18_set_returning_user_overload_uses_the_combined_stable_binding; cargo test -p uqa-engine --test integration functions::sql_function_bodies::series_binding",
+      "supported_version": "PostgreSQL 18.4 candidate selection for implemented table-returning and SETOF functions, including declared types from direct casts and scalar subqueries, unknown-category selection and ambiguity, exact implemented information-schema domain signatures, named and default arguments before effective-signature search-path shadowing, stable scalar-versus-set projection bindings, user-versus-built-in search-path selection, exact execution through DML and correlated LATERAL sources, and durable table-routine and stored-view identities across catalog reopen; separate integer/bigint generate_series two- and three-argument identities, selected mixed-argument result descriptors, exact pg_proc/support metadata and atomic legacy routine/view signature restoration, verified on all four providers and persistent reopening",
       "status": "verified",
       "open_issue": null
     },

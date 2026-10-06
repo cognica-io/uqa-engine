@@ -57,6 +57,18 @@ fn clean_ascii(value: &str) -> String {
 }
 
 impl Engine {
+    pub(crate) fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
+        let parameters = self.session.parameters.lock();
+        let state = self.session.state.read();
+        uqa_sql::parser::ParserSettings::from_settings(|name| {
+            state
+                .session_vars
+                .get(name)
+                .map(String::as_str)
+                .or_else(|| parameters.client_setting(name))
+        })
+    }
+
     /// Assign `value` to `name` for the session, as `SET name TO value` does before the assignment's lifetime applies: a defined parameter checks its context and value, and any other valid custom name becomes a placeholder.
     pub(super) fn assign_parameter(&self, name: &str, value: &str) -> Result<(), SQLError> {
         match self.session_execution_view().resolve_parameter(name) {
@@ -173,9 +185,6 @@ impl Engine {
                     format!("Table access method \"{setting}\" does not exist."),
                 )),
             },
-            "standard_conforming_strings" if setting == "off" => Err(SQLError::Unsupported(
-                "standard_conforming_strings = off is not supported".into(),
-            )),
             _ => Ok(setting),
         }
     }
