@@ -45,9 +45,12 @@ fn common_coercions_match_postgresql_and_survive_reopen(#[case] provider: usize)
     restored["cases"].as_array_mut().unwrap().retain(|case| {
         matches!(
             case["id"].as_str().unwrap(),
-            "reopen_definitions" | "reopen_values" | "reopen_stored_syntax"
+            "reopen_definitions"
+                | "reopen_values"
+                | "reopen_stored_syntax"
+                | "reopen_arbiter_inference"
         )
     });
-    assert_eq!(restored["cases"].as_array().unwrap().len(), 3);
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 4);
     crate::pg18_oracle::verify(&engine, &restored.to_string());
 }

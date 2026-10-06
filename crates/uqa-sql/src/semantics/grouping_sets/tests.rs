@@ -173,6 +173,23 @@ fn grouping_duplicate_aliases_use_analyzed_expression_identity() {
 }
 
 #[test]
+fn grouping_identity_ignores_common_cast_display_origin() {
+    let schema = RowSchema::with_types(
+        vec!["s".into(), "b".into()],
+        vec![Some(ColumnType::SmallInteger), Some(ColumnType::BigInteger)],
+    );
+    let original = block("SELECT coalesce(s,b) AS grouped_value, count(*) FROM t GROUP BY DISTINCT GROUPING SETS ((coalesce(s,b)), (coalesce(s::bigint,b)))");
+    let prepared = prepare_grouping_sets(&Catalog, &original, &schema, &[])
+        .unwrap()
+        .unwrap();
+    assert_eq!(prepared.grouping_sets.len(), 1);
+    let aliases = block("SELECT coalesce(s,b) AS grouped_value, coalesce(s::bigint,b) AS grouped_value FROM t GROUP BY grouped_value");
+    assert!(prepare_grouping_sets(&Catalog, &aliases, &schema, &[])
+        .unwrap()
+        .is_some());
+}
+
+#[test]
 fn grouping_aliases_retain_aggregate_and_window_context_errors() {
     for (sql, state) in [
         ("SELECT count(*) AS tally FROM t GROUP BY tally", "42803"),
