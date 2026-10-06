@@ -80,7 +80,7 @@ pub fn shape_trigger_outcome(
             .into_iter()
             .map(|(_, value)| value)
             .collect::<Vec<_>>(),
-        Value::Row(values) => values,
+        Value::Row(values) => values.into_values(),
         _ => return Err(trigger_shape_error()),
     };
     let types = outcome

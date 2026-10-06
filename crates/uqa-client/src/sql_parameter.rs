@@ -127,7 +127,8 @@ fn finite_value(value: &Value) -> bool {
     match value {
         Value::Float(value) => value.is_finite(),
         Value::Array(value) => value.elements().iter().all(finite_value),
-        Value::List(values) | Value::Row(values) => values.iter().all(finite_value),
+        Value::List(values) => values.iter().all(finite_value),
+        Value::Row(values) => values.iter().all(finite_value),
         Value::Record(values) => values.iter().all(|(_, value)| finite_value(value)),
         Value::Map(values) => values.values().all(finite_value),
         Value::Null

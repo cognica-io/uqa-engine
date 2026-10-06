@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Carry anonymous SQL rows in `RowValue` so their field type identities survive storage and copying. Rust callers constructing `Value::Row` from a vector use `Value::Row(values.into())`; existing serialized rows remain readable.
+
 - Use scalar indexes for row-independent parameter expressions such as `qty = $1 + 1`, including reversed comparisons, ranges and membership bounds. Evaluate each execution's parameters while preserving NULL behavior, comparison errors and CASE branch selection.
 - Probe exact field indexes before stored-row scans when private changes are present. Mask replaced or deleted identities, preserve private matches and explicit NULL fields, and retain typed comparison errors and serializable read dependencies.
 - Stream native SQLite private document and B-tree merges through retained spill entries, and reuse selected private readers for requested-ID projections in native SQLite and common Key/Value storage, including SQLite Key/Value and redb. Sparse requests seek spill blocks instead of scanning gaps; presence reads avoid private payloads, and stopped value callbacks do not load later payloads. Preserve input order, duplicates, fixed views, savepoint undo and callback reentry.
@@ -28,6 +30,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Run `CREATE TABLE` in `DefineRelation`'s order: `MergeAttributes`, `transformColumnDefinition` and `PARTITION OF` column options with PostgreSQL's diagnostics and notices, CHECK constraints named and merged in written order, defaults and generation expressions cooked as `cookDefault` cooks them, and the OIDs of the relation, its defaults, constraints and indexes allocated where `heap_create_with_catalog` and `DefineRelation` allocate them.
 
 ### Fixed
+
+- Validate SQL source-body literal inputs and return layouts in PostgreSQL order without executing the body. Preserve failed replacements and typed row descriptors through CASE, materialization, spill and routine returns; resolve relation row types for routine signatures.
 
 - Analyze routine parameter defaults in PostgreSQL declaration order, including unknown input conversion and delayed call-time evaluation. Preserve NULL defaults, polymorphic default types, creation-time constants and durable bindings; reject removal or type changes of existing defaults during routine replacement.
 - Match PostgreSQL materialized-view creation order for source analysis, target collisions, column lists and schema/type privileges; report IF NOT EXISTS notices and skip source evaluation for existing targets. Unpopulated materialized-view errors use the relation's unqualified name and include the REFRESH hint, including through stored views and after reopen.

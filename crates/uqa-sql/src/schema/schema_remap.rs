@@ -73,6 +73,7 @@ impl RowSchema {
             slots,
             input.physical_width(),
             SchemaBuildMetadata {
+                record_fields: input.index.cold.record_fields.clone(),
                 aliases: lookup_aliases,
                 alias_types,
                 internal: input.index.executor_attributes.clone(),
@@ -130,6 +131,7 @@ impl RowSchema {
             slots,
             input.physical_width(),
             SchemaBuildMetadata {
+                record_fields: input.index.cold.record_fields.clone(),
                 aliases: lookup_aliases,
                 alias_types,
                 internal: input.index.executor_attributes.clone(),
@@ -180,6 +182,7 @@ impl RowSchema {
             slots,
             input.physical_width(),
             SchemaBuildMetadata {
+                record_fields: input.index.cold.record_fields.clone(),
                 aliases: HashMap::new(),
                 alias_types: HashMap::new(),
                 internal: input.index.executor_attributes.clone(),

@@ -21,6 +21,7 @@ mod dependencies;
 mod merge_scopes;
 mod preparation;
 mod projection;
+mod record_fields;
 mod routine_binding;
 mod routine_parameters;
 mod scope;
@@ -31,9 +32,11 @@ mod type_resolution;
 mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
-pub(crate) use preparation::analyze_routine_default;
 pub use preparation::{analyze_column_type_transform, infer_prepared_parameter_types};
 pub(crate) use preparation::{analyze_domain_check, read_prepared_inputs};
+pub(crate) use preparation::{
+    analyze_routine_body_argument, analyze_routine_body_inputs, analyze_routine_default,
+};
 
 #[cfg(test)]
 mod tests;
@@ -312,8 +315,12 @@ impl SchemaScope {
         let labels = projection_columns(&block.projections);
         let mut columns = Vec::new();
         let mut types = Vec::new();
+        let mut records = Vec::new();
         for (position, projection) in block.projections.iter().enumerate() {
             if let Some(star_columns) = projection_star_columns(&projection.expr, &source)? {
+                records.extend(
+                    record_fields::star_fields(&projection.expr, &source).unwrap_or_default(),
+                );
                 for (column, ty) in star_columns {
                     columns.push(column);
                     types.push(ty);
@@ -342,8 +349,28 @@ impl SchemaScope {
                     )?
                 },
             );
+            records.push(
+                if types.last().is_some_and(|ty| {
+                    matches!(ty, Some(ColumnType::Record | ColumnType::Composite(_)))
+                }) {
+                    self.bind_record_fields(
+                        routines,
+                        &projection.expr,
+                        &expression_schema,
+                        &block.subqueries,
+                        params,
+                    )?
+                } else {
+                    None
+                },
+            );
         }
-        let output = RowSchema::with_types(columns, types);
+        let output = RowSchema::with_types(columns, types).with_record_fields(
+            records
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, fields)| fields.map(|fields| (index, fields))),
+        );
         let output = analysis::with_projected_open_columns(&output, &block.projections, &source);
         if self.validate_references {
             self.validate_query_block_clauses(
@@ -674,9 +701,30 @@ impl SchemaScope {
                 };
                 let columns = user_function
                     .as_ref()
-                    .and_then(|resolved| {
-                        crate::semantics::user_function_output_columns_for(&resolved.function)
+                    .map(|resolved| {
+                        crate::semantics::user_function_composite_result(
+                            routines,
+                            &resolved.function,
+                            resolved.binding.invocation.as_deref(),
+                        )
+                        .map(|descriptor| {
+                            descriptor
+                                .map(|descriptor| {
+                                    descriptor
+                                        .attributes
+                                        .iter()
+                                        .map(|attribute| attribute.name.clone())
+                                        .collect()
+                                })
+                                .or_else(|| {
+                                    crate::semantics::user_function_output_columns_for(
+                                        &resolved.function,
+                                    )
+                                })
+                        })
                     })
+                    .transpose()?
+                    .flatten()
                     .or(catalog_columns)
                     .map_or_else(
                         || {
@@ -821,115 +869,6 @@ impl SchemaScope {
                 })
             }
         }
-    }
-
-    fn bind_source_for_execution(
-        &mut self,
-        routines: &dyn RoutineResolution,
-        source: &mut SourcePlan,
-        subqueries: &[QueryPlan],
-        params: &[SQLParam],
-        outer: Option<&RowSchema>,
-    ) -> Result<RowSchema, SQLError> {
-        match source {
-            SourcePlan::Join {
-                left,
-                right,
-                kind,
-                on,
-                using,
-                natural,
-                alias,
-                column_aliases,
-                lateral,
-                ..
-            } => {
-                let left_schema =
-                    self.bind_source_for_execution(routines, left, subqueries, params, outer)?;
-                let implicit_lateral_function = matches!(
-                    right.as_ref(),
-                    SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-                );
-                let right_scope = (*lateral || implicit_lateral_function)
-                    .then(|| overlay_outer_schema(&left_schema, outer));
-                let right_schema = self.bind_source_for_execution(
-                    routines,
-                    right,
-                    subqueries,
-                    params,
-                    right_scope.as_ref().or(outer),
-                )?;
-                return self.bind_join_output_schema(JoinSchemaBinding {
-                    routines,
-                    kind: *kind,
-                    on: on.as_ref(),
-                    using: using.as_ref(),
-                    natural: *natural,
-                    alias: alias.as_deref(),
-                    column_aliases,
-                    left: &left_schema,
-                    right: &right_schema,
-                    subqueries,
-                    params,
-                    outer,
-                });
-            }
-            SourcePlan::Function {
-                name,
-                binding,
-                relations,
-                args,
-                ..
-            } => {
-                let lower = crate::semantics::builtin_function_dispatch_name(name);
-                if crate::registry::is_operator_join_table_function(&lower) {
-                    operator_join_relation_schemas(
-                        &self.catalog,
-                        &self.resolution,
-                        relations.as_ref(),
-                    )?;
-                    return self.bind_source(routines, source, subqueries, params, outer);
-                }
-                let input = outer.cloned().unwrap_or_default();
-                let resolver = self.query_function_type_resolver_for_subqueries(
-                    routines,
-                    args,
-                    &input,
-                    subqueries,
-                    params,
-                    Some(&input),
-                )?;
-                if let Some(selected) = crate::semantics::resolve_table_function_binding(
-                    routines,
-                    name,
-                    binding.as_ref(),
-                    args,
-                    &input,
-                    params,
-                    &resolver,
-                )? {
-                    *binding = Some(selected);
-                }
-            }
-            SourcePlan::FunctionGroup { functions, .. } => {
-                for function in functions {
-                    let mut member = table_function_member_source(function);
-                    self.bind_source_for_execution(
-                        routines,
-                        &mut member,
-                        subqueries,
-                        params,
-                        outer,
-                    )?;
-                    let SourcePlan::Function { binding, .. } = member else {
-                        unreachable!("table-function member changed source kind during binding")
-                    };
-                    function.binding = binding;
-                }
-            }
-            SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => {}
-        }
-        self.bind_source(routines, source, subqueries, params, outer)
     }
 }
 

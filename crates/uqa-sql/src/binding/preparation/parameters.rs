@@ -13,6 +13,7 @@ use uqa_core::Value;
 #[derive(Clone)]
 pub(super) struct ExpressionType {
     pub(super) ty: Option<ColumnType>,
+    pub(super) record_fields: Option<crate::schema::RecordFields>,
     occurrence: Option<usize>,
     // SQL unknown literals and parameters accept context coercion. Native
     // callbacks with no declared result type stay unresolved until execution.
@@ -25,6 +26,7 @@ impl ExpressionType {
     pub(super) fn resolved(ty: Option<ColumnType>) -> Self {
         Self {
             ty,
+            record_fields: None,
             occurrence: None,
             coercible_unknown: false,
             literal: None,
@@ -34,6 +36,7 @@ impl ExpressionType {
     pub(super) fn unknown() -> Self {
         Self {
             ty: None,
+            record_fields: None,
             occurrence: None,
             coercible_unknown: true,
             literal: None,
@@ -44,6 +47,7 @@ impl ExpressionType {
     pub(super) fn unknown_literal(expression: &ScalarExpr, text: String) -> Self {
         Self {
             ty: None,
+            record_fields: None,
             occurrence: None,
             coercible_unknown: true,
             literal: Some((NonNull::from(expression), text)),
@@ -138,6 +142,7 @@ impl<'a> ParameterTypes<'a> {
         self.occurrences.push((index, ty.clone()));
         Ok(ExpressionType {
             ty,
+            record_fields: None,
             occurrence: Some(occurrence),
             coercible_unknown: true,
             literal: None,

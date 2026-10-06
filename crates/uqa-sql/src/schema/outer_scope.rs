@@ -117,6 +117,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width() + outer_columns.len(),
             SchemaBuildMetadata {
+                record_fields: input.index.cold.record_fields.clone(),
                 aliases,
                 alias_types,
                 internal: input.index.executor_attributes.clone(),
@@ -284,6 +285,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width() + outer.physical_width(),
             SchemaBuildMetadata {
+                record_fields: Self::joined_record_fields(input, outer, input.physical_width()),
                 aliases,
                 alias_types,
                 internal,

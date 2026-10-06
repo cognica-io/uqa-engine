@@ -146,6 +146,7 @@ impl CatalogContext<'_> {
                             }
                         })
                 })
+                .or_else(|| super::composite_type::relations::by_name(&catalog, schema, local))
         };
         if let [schema, local] = names.as_slice() {
             return in_schema(schema, local);

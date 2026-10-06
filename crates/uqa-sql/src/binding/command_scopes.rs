@@ -81,11 +81,12 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<CommandScopes, SQLError> {
-        let (target, returning) = self.command_expression_schema(routines, command, params)?;
+        let (target, returning) =
+            self.command_expression_schema(routines, command, params, outer)?;
         let source = command
             .source_input()
             .map(|source| {
-                self.bind_source(routines, source, command.scalar_subqueries(), params, None)
+                self.bind_source(routines, source, command.scalar_subqueries(), params, outer)
             })
             .transpose()?;
         let qualifier = command.target_qualifier().unwrap_or_default();

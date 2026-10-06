@@ -31,6 +31,7 @@ pub(super) enum StoredValue {
     LegacyVector(uqa_core::LegacyVectorValue),
     List(Vec<StoredValue>),
     Row(Vec<StoredValue>),
+    TypedRow(uqa_core::RowValue),
     Record(Vec<(String, StoredValue)>),
     Map(BTreeMap<String, StoredValue>),
     Enum(uqa_core::EnumValue),
@@ -54,6 +55,7 @@ impl StoredValue {
             Value::Array(value) => Self::Array(value),
             Value::LegacyVector(value) => Self::LegacyVector(value),
             Value::List(values) => Self::List(values.into_iter().map(Self::from_value).collect()),
+            Value::Row(values) if values.field_types().is_some() => Self::TypedRow(values),
             Value::Row(values) => Self::Row(values.into_iter().map(Self::from_value).collect()),
             Value::Record(fields) => Self::Record(
                 fields
@@ -89,6 +91,7 @@ impl StoredValue {
             Self::LegacyVector(value) => Value::LegacyVector(value),
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
             Self::Row(values) => Value::Row(values.into_iter().map(Self::into_value).collect()),
+            Self::TypedRow(value) => Value::Row(value),
             Self::Record(fields) => Value::Record(
                 fields
                     .into_iter()

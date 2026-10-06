@@ -74,7 +74,7 @@ fn temporal_keys_and_hashes_match_postgresql_equality_and_index_order() {
                     .cmp(domain.encode(right, &control).unwrap().as_ref()),
                 expected
             );
-            let row = |value: &Value| [Value::Row(vec![value.clone(), Value::Null])];
+            let row = |value: &Value| [Value::Row(vec![value.clone(), Value::Null].into())];
             assert_eq!(
                 canonical_row_key(&row(left)).unwrap() == canonical_row_key(&row(right)).unwrap(),
                 equal

@@ -17,6 +17,44 @@ use uqa_core::{
     Value,
 };
 
+/// Retain a ROW field's analyzed SQL identity before its scalar carrier erases widths and typed NULLs. Only syntax that `PostgreSQL` leaves unknown receives the unknown OID.
+pub fn scalar_record_field_type_with_control(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    engine: Option<&dyn crate::expr::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<uqa_core::RecordFieldType>, SQLError> {
+    if matches!(expression, ScalarExpr::Literal(Value::Null | Value::Str(_))) {
+        return Ok(Some(uqa_core::RecordFieldType {
+            oid: 705,
+            type_modifier: -1,
+        }));
+    }
+    let Some(name) =
+        scalar_cast_source_type_name_with_control(expression, schema, params, control)?
+    else {
+        return Ok(None);
+    };
+    let ty = match ColumnType::from_sql_name_with_control(&name, control) {
+        Ok(ty) => Some(ty),
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+        Err(_) => engine
+            .map(|engine| engine.resolve_type_name(&name).map_err(SQLError::Internal))
+            .transpose()?
+            .flatten()
+            .map(|ty| {
+                ty.retain_external_with_control(control)
+                    .map_err(SQLError::from)
+            })
+            .transpose()?,
+    };
+    Ok(ty.map(|ty| uqa_core::RecordFieldType {
+        oid: crate::catalog::type_metadata::pg_type_oid(&ty) as u32,
+        type_modifier: crate::catalog::type_metadata::pg_type_modifier(&ty) as i32,
+    }))
+}
+
 pub fn scalar_operand_type_name(
     expression: &ScalarExpr,
     schema: &dyn ScalarTypeSchema,

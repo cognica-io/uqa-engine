@@ -631,7 +631,7 @@ fn annotate_recursive_row(
                 SQLError::Unsupported("recursive CTE depth exceeds bigint".into())
             })?));
             fields.extend(key);
-            Value::Row(fields)
+            Value::Row(fields.into())
         } else {
             let mut path = parent
                 .and_then(|parent| parent.search_sequence.as_ref())
@@ -640,7 +640,7 @@ fn annotate_recursive_row(
                     _ => None,
                 })
                 .unwrap_or_default();
-            path.push(Value::Row(key));
+            path.push(Value::Row(key.into()));
             Value::Array(ArrayValue::try_new(path).ok_or_else(|| {
                 SQLError::Internal("SEARCH path is not a rectangular SQL array".into())
             })?)

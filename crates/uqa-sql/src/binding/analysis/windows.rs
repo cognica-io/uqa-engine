@@ -133,7 +133,10 @@ impl SchemaScope {
 }
 
 /// Whether an expression refers to a column of the query block itself rather than of an enclosing query, as `contain_vars_of_level(n, 0)` asks.
-fn references_local_column(expression: &ScalarExpr, source: &RowSchema) -> bool {
+pub(in crate::binding) fn references_local_column(
+    expression: &ScalarExpr,
+    source: &RowSchema,
+) -> bool {
     let mut found = false;
     expression.visit(&mut |part| {
         found |= match part {

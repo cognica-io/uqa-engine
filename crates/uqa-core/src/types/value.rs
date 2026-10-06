@@ -8,7 +8,7 @@
 
 use super::{
     jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DecimalValue, Deserialize, Deserializer,
-    EnumValue, LegacyVectorValue, Serialize, Serializer, TemporalValue,
+    EnumValue, LegacyVectorValue, RowValue, Serialize, Serializer, TemporalValue,
 };
 
 pub(super) mod comparison_control;
@@ -57,7 +57,7 @@ pub enum Value {
     List(Vec<Value>),
     /// Anonymous `ROW(...)` constructor. This stays distinct from arrays so
     /// row comparisons retain SQL three-valued NULL semantics.
-    Row(Vec<Value>),
+    Row(RowValue),
     /// Named composite/record value in physical field order.
     Record(Vec<(String, Value)>),
     /// JSON/document object value. This is not a SQL composite record.
@@ -103,13 +103,6 @@ struct TaggedArray<'a> {
     #[serde(rename = "$uqa_type")]
     kind: &'static str,
     lower_bounds: &'a [i32],
-    values: &'a [Value],
-}
-
-#[derive(Serialize)]
-struct TaggedRow<'a> {
-    #[serde(rename = "$uqa_type")]
-    kind: &'static str,
     values: &'a [Value],
 }
 
@@ -169,11 +162,7 @@ impl Serialize for Value {
             .serialize(serializer),
             Self::LegacyVector(value) => value.serialize(serializer),
             Self::List(value) => value.serialize(serializer),
-            Self::Row(values) => TaggedRow {
-                kind: "row",
-                values,
-            }
-            .serialize(serializer),
+            Self::Row(values) => values.serialize(serializer),
             Self::Record(fields) => TaggedRecord {
                 kind: "record",
                 fields,
@@ -470,9 +459,8 @@ impl Ord for Value {
             (Value::Temporal(a), Value::Temporal(b)) => a.cmp(b),
             (Value::Array(a), Value::Array(b)) => compare_postgres_arrays(a, b),
             (Value::LegacyVector(a), Value::LegacyVector(b)) => a.cmp(b),
-            (Value::List(a), Value::List(b)) | (Value::Row(a), Value::Row(b)) => {
-                compare_postgres_container_values(a, b)
-            }
+            (Value::List(a), Value::List(b)) => compare_postgres_container_values(a, b),
+            (Value::Row(a), Value::Row(b)) => compare_postgres_container_values(a, b),
             (Value::Record(a), Value::Record(b)) => compare_postgres_record_values(a, b),
             (Value::Map(a), Value::Map(b)) => a.cmp(b),
             (Value::Enum(a), Value::Enum(b)) => a.cmp(b),

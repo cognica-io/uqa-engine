@@ -83,10 +83,26 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         }
         Expr::Row(elements) => {
             let mut out = Vec::with_capacity(elements.len());
+            let mut fields = Vec::with_capacity(elements.len());
             for element in elements {
+                let scalar = crate::plan::ExpressionPlan::lower(element.clone()).scalar;
+                if let Some(field) = crate::type_resolution::scalar_record_field_type_with_control(
+                    &scalar,
+                    &crate::RowSchema::default(),
+                    ctx.params,
+                    ctx.engine,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                )? {
+                    fields.push(field);
+                }
                 out.push(eval(element, ctx)?);
             }
-            Ok(Value::Row(out))
+            let row = if fields.len() == out.len() {
+                uqa_core::RowValue::typed(out, fields)?
+            } else {
+                uqa_core::RowValue::new(out)
+            };
+            Ok(Value::Row(row))
         }
         Expr::Star | Expr::QualifiedStar(_) => {
             Err(SQLError::Internal("`*` cannot be evaluated".into()))

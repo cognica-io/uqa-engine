@@ -85,6 +85,20 @@ impl<'a> ProcedureCallAnalysis<'a> {
         types: &dyn RoutineTypeCatalog,
         infer: &mut dyn FnMut(&ExpressionPlan) -> Result<Option<ColumnType>, SQLError>,
     ) -> Result<Option<RowSchema>, SQLError> {
+        let resolved = self.resolve(name, overloads, infer)?;
+        super::invocation::call_output_schema(
+            types,
+            &resolved.function.def,
+            &resolved.invocation.parameter_types,
+        )
+    }
+
+    pub(crate) fn resolve(
+        &self,
+        name: &str,
+        overloads: &RoutineOverloadContext<'_>,
+        infer: &mut dyn FnMut(&ExpressionPlan) -> Result<Option<ColumnType>, SQLError>,
+    ) -> Result<super::StaticFunctionMatch, SQLError> {
         let argument_types = infer_call_argument_types(self.arguments, &self.decoded, infer)?;
         let Some(resolved) = overloads.resolve_static_sql_routine_match(
             name,
@@ -114,10 +128,6 @@ impl<'a> ProcedureCallAnalysis<'a> {
                 ),
             });
         };
-        super::invocation::call_output_schema(
-            types,
-            &resolved.function.def,
-            &resolved.invocation.parameter_types,
-        )
+        Ok(resolved)
     }
 }

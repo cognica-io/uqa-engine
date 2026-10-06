@@ -39,9 +39,9 @@ fn values() -> Vec<Value> {
         Value::Array(ArrayValue::try_new(Vec::new()).unwrap()),
         Value::List(vec![
             Value::Bytes(vec![3; 8193]),
-            Value::Row(vec![Value::Void]),
+            Value::Row(vec![Value::Void].into()),
         ]),
-        Value::Row(vec![Value::Int(7), Value::Null]),
+        Value::Row(vec![Value::Int(7), Value::Null].into()),
         Value::Record(vec![
             ("duplicate".into(), Value::Int(1)),
             ("duplicate".into(), Value::Str("second".into())),
@@ -49,12 +49,12 @@ fn values() -> Vec<Value> {
         Value::Map(
             [(
                 "nested".into(),
-                Value::Record(vec![("field".into(), Value::Row(vec![Value::Null]))]),
+                Value::Record(vec![("field".into(), Value::Row(vec![Value::Null].into()))]),
             )]
             .into(),
         ),
         Value::List(Vec::new()),
-        Value::Row(Vec::new()),
+        Value::Row(Vec::new().into()),
         Value::Record(Vec::new()),
         Value::Map(BTreeMap::new()),
     ]
@@ -138,7 +138,6 @@ fn empty_value_carriers_and_inline_scalars_need_no_payload_or_traversal_allocati
         Value::Str(String::new()),
         Value::Bytes(Vec::new()),
         Value::List(Vec::new()),
-        Value::Row(Vec::new()),
         Value::Record(Vec::new()),
         Value::Map(BTreeMap::new()),
     ] {

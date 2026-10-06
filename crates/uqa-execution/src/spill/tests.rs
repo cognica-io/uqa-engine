@@ -270,7 +270,10 @@ fn exact_value_variants_and_float_bits_round_trip() {
                 .unwrap(),
             ),
         ),
-        ("row".into(), Value::Row(vec![Value::Int(1), Value::Null])),
+        (
+            "row".into(),
+            Value::Row(vec![Value::Int(1), Value::Null].into()),
+        ),
         (
             "record".into(),
             Value::Record(vec![
@@ -336,6 +339,32 @@ fn exact_value_variants_and_float_bits_round_trip() {
         };
         assert_eq!(actual.to_bits(), expected.to_bits());
     }
+}
+
+#[test]
+fn typed_rows_keep_field_identities_through_spill() {
+    let row = Value::Row(
+        uqa_core::RowValue::typed(
+            vec![Value::Int(1), Value::Null],
+            [20, 23]
+                .into_iter()
+                .map(|oid| uqa_core::RecordFieldType {
+                    oid,
+                    type_modifier: -1,
+                })
+                .collect(),
+        )
+        .unwrap(),
+    );
+    let mut buffer = SpillBuffer::new(0);
+    buffer
+        .push(Batch::new(
+            RowSchema::new(vec!["record".into()]),
+            vec![BTreeMap::from([("record".into(), row.clone())])],
+        ))
+        .unwrap();
+    let restored = buffer.drain_all().unwrap().remove(0).into_result_rows();
+    assert!(restored[0]["record"].has_same_representation(&row));
 }
 
 #[test]

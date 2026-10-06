@@ -102,8 +102,8 @@ fn controlled_array_order_is_stable_and_preserves_json_comparison_errors() {
     );
     let rows = array(
         vec![
-            Value::Row(vec![Value::Json("1".into())]),
-            Value::Row(vec![Value::Json("2".into())]),
+            Value::Row(vec![Value::Json("1".into())].into()),
+            Value::Row(vec![Value::Json("2".into())].into()),
         ],
         1,
     );

@@ -393,7 +393,25 @@ impl<'a> BinaryReader<'a> {
                 .map(Value::FixedChar),
             11 => self.read_string("JSON value").map(Value::Json),
             12 => self.read_string("JSONB value").map(Value::JsonB),
-            13 => {
+            tag @ (13 | 19) => {
+                let fields = if tag == 19 {
+                    let count = self.read_count("row descriptor length", 8)?;
+                    let mut fields = Vec::new();
+                    fields.try_reserve_exact(count).map_err(|error| {
+                        spill_error(format!("cannot allocate row descriptor: {error}"))
+                    })?;
+                    for _ in 0..count {
+                        fields.push(uqa_core::RecordFieldType {
+                            oid: u32::from_le_bytes(
+                                self.read_i32("row field type OID")?.to_le_bytes(),
+                            ),
+                            type_modifier: self.read_i32("row field type modifier")?,
+                        });
+                    }
+                    Some(fields)
+                } else {
+                    None
+                };
                 let count = self.read_count("row length", 1)?;
                 let mut values = Vec::new();
                 values
@@ -402,7 +420,12 @@ impl<'a> BinaryReader<'a> {
                 for _ in 0..count {
                     values.push(self.read_value(depth + 1)?);
                 }
-                Ok(Value::Row(values))
+                let row = match fields {
+                    Some(fields) => uqa_core::RowValue::typed(values, fields)
+                        .map_err(|error| spill_error(format!("invalid row descriptor: {error}")))?,
+                    None => uqa_core::RowValue::new(values),
+                };
+                Ok(Value::Row(row))
             }
             14 => {
                 let count = self.read_count("record length", 9)?;

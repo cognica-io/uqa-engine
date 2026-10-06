@@ -207,7 +207,18 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                         stack.push(Children::Values(array.elements().iter()))?;
                     }
                 }
-                Value::List(values) | Value::Row(values) => {
+                Value::List(values) => {
+                    output.push_byte(if matches!(value, Value::List(_)) {
+                        5
+                    } else {
+                        10
+                    })?;
+                    encode_len(values.len(), output)?;
+                    if !values.is_empty() {
+                        stack.push(Children::Values(values.iter()))?;
+                    }
+                }
+                Value::Row(values) => {
                     output.push_byte(if matches!(value, Value::List(_)) {
                         5
                     } else {

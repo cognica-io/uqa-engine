@@ -86,6 +86,8 @@ pub struct RoutineOutcome {
     pub out_values: Vec<Value>,
     pub set_rows: Vec<Vec<Value>>,
     pub anonymous_record_column_types: Option<Vec<Option<ColumnType>>>,
+    /// SQL's final statement layout controls whole-row checks versus per-column assignment. Procedural routines have no SQL result layout.
+    pub sql_result_kind: Option<uqa_sql::routines::result_check::SQLFunctionResultKind>,
 }
 
 /// Mutable activation record for one PL/pgSQL invocation.

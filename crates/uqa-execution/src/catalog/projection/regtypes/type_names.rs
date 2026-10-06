@@ -71,8 +71,9 @@ pub fn catalog_user_type_identity(
             .or_else(|| uqa_sql::catalog::system_catalog_domain(identity.oid))?,
         uqa_sql::ast::UserTypeKind::Composite => catalog
             .composites()
-            .find(|definition| definition.oid == identity.oid)?
-            .column_type(),
+            .find(|definition| definition.oid == identity.oid)
+            .map(uqa_sql::catalog::composite_type::StoredComposite::column_type)
+            .or_else(|| crate::catalog::composite_type::relations::by_oid(catalog, identity.oid))?,
     };
     for _ in 0..identity.dimensions {
         resolved = ColumnType::Array(Box::new(resolved));
@@ -118,7 +119,7 @@ pub fn resolve_catalog_user_type_by_oid(
             return Some(ColumnType::Array(Box::new(domain)));
         }
     }
-    None
+    crate::catalog::composite_type::relations::by_oid(&catalog, oid)
 }
 
 pub fn resolve_catalog_column_type(

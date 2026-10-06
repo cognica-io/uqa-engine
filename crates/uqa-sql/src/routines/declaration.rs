@@ -24,6 +24,17 @@ pub trait RoutineTypeCatalog {
     fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError>;
     /// The name `PostgreSQL`'s `format_type_be` gives a type in messages.
     fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError>;
+    /// Render a carried record field's type identity in a runtime diagnostic.
+    fn format_type_oid(&self, oid: u32) -> Result<String, SQLError> {
+        match self.resolve_catalog_user_type_by_oid(oid) {
+            Some(ty) => self.format_type(&ty),
+            None => Ok(crate::catalog::type_metadata::catalog_type_name(i64::from(oid)).into()),
+        }
+    }
+    /// Live composite attributes used to validate a SQL routine's returned row.
+    fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
+        None
+    }
 }
 
 /// Resolve the declared argument and result types, as `interpret_function_parameter_list` and `compute_return_type` do. Each argument in order requires `USAGE` on its type, a missing one named as written and unquoted; then no input may follow a VARIADIC argument, nor an output in a procedure, a VARIADIC argument must be an array, a name may not repeat within one direction, only inputs may have defaults, and after one every input needs one, as every procedure output does not. The result type follows, a missing one quoted.

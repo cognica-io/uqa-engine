@@ -193,10 +193,10 @@ mod null_test_tests {
 
     #[test]
     fn row_values_are_null_only_when_every_field_is() {
-        let all_null = Value::Row(vec![Value::Null, Value::Null]);
+        let all_null = Value::Row(vec![Value::Null, Value::Null].into());
         let mixed = Value::Record(vec![("x".into(), Value::Int(1)), ("y".into(), Value::Null)]);
-        let none_null = Value::Row(vec![Value::Int(1)]);
-        let empty = Value::Row(Vec::new());
+        let none_null = Value::Row(vec![Value::Int(1)].into());
+        let empty = Value::Row(Vec::new().into());
         for (value, is_null, is_not_null) in [
             (Some(&all_null), true, false),
             (Some(&mixed), false, false),

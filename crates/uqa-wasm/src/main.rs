@@ -635,7 +635,12 @@ fn value_to_json(value: Value) -> Result<JSON, String> {
             .map(value_to_json)
             .collect::<Result<Vec<_>, _>>()
             .map(JSON::Array),
-        Value::List(values) | Value::Row(values) => values
+        Value::List(values) => values
+            .into_iter()
+            .map(value_to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .map(JSON::Array),
+        Value::Row(values) => values
             .into_iter()
             .map(value_to_json)
             .collect::<Result<Vec<_>, _>>()

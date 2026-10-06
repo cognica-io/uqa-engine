@@ -24,6 +24,7 @@ pub(super) fn execute_routine(
     bound: Vec<Value>,
     invocation: &RoutineInvocationBinding,
     allow_nonatomic: bool,
+    record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
 ) -> Result<RoutineOutcome, SQLError> {
     if matches!(
         &function.def.returns,
@@ -47,7 +48,14 @@ pub(super) fn execute_routine(
     uqa_sql::routines::security::ensure_routine_execute_privilege(context.authority, definition)?;
     super::scopes::with_routine_context(context.session, definition, || {
         let body = context.lookup.routine_body(function)?;
-        execute_compiled_body(context, definition, specialized.is_some(), &body, bound)
+        execute_compiled_body(
+            context,
+            definition,
+            specialized.is_some(),
+            &body,
+            bound,
+            record_target,
+        )
     })
 }
 
@@ -57,6 +65,7 @@ fn execute_compiled_body(
     specialized: bool,
     compiled: &CompiledFunctionBody,
     bound: Vec<Value>,
+    record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
 ) -> Result<RoutineOutcome, SQLError> {
     match compiled {
         CompiledFunctionBody::PLpgSQL(parsed) => {
@@ -73,7 +82,7 @@ fn execute_compiled_body(
             }
         }
         CompiledFunctionBody::SQL(statements) => {
-            execute_sql_language(context, definition, statements, &bound)
+            execute_sql_language(context, definition, statements, &bound, record_target)
         }
     }
 }
@@ -115,6 +124,7 @@ fn execute_sql_language(
     definition: &CreateFunction,
     plans: &[uqa_sql::plan::UnifiedPlan],
     bound: &[Value],
+    record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
 ) -> Result<RoutineOutcome, SQLError> {
     crate::routines::sql_body::execute_sql_language(
         context.runtime,
@@ -123,5 +133,6 @@ fn execute_sql_language(
         definition,
         plans,
         bound,
+        record_target,
     )
 }

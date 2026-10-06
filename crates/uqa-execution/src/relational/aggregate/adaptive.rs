@@ -361,10 +361,14 @@ fn value_retained_bytes(value: &Value) -> usize {
                     .len()
                     .saturating_mul(std::mem::size_of::<usize>()),
             ),
-        Value::List(values) | Value::Row(values) => values
+        Value::List(values) => values
             .capacity()
             .saturating_mul(std::mem::size_of::<Value>())
             .saturating_add(values.iter().map(value_retained_bytes).sum()),
+        Value::Row(values) => values.iter().fold(
+            values.retained_buffer_bytes().unwrap_or(usize::MAX),
+            |bytes, value| bytes.saturating_add(value_retained_bytes(value)),
+        ),
         Value::Record(fields) => fields.iter().fold(0usize, |bytes, (name, value)| {
             bytes
                 .saturating_add(name.capacity())
@@ -390,6 +394,26 @@ fn value_retained_bytes(value: &Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn row_key_accounting_includes_the_header_and_descriptor_capacity() {
+        let mut fields = Vec::with_capacity(64);
+        fields.push(uqa_core::RecordFieldType {
+            oid: 23,
+            type_modifier: -1,
+        });
+        let descriptor_bytes = fields.capacity() * std::mem::size_of::<uqa_core::RecordFieldType>();
+        let row = Value::Row(uqa_core::RowValue::typed(vec![Value::Null], fields).unwrap());
+        let untyped = Value::Row(vec![Value::Null].into());
+        assert_eq!(
+            value_retained_bytes(&row),
+            value_retained_bytes(&untyped) + descriptor_bytes,
+        );
+        assert_eq!(
+            value_retained_bytes(&Value::Row(Vec::new().into())),
+            std::mem::size_of::<Value>() + uqa_core::RowValue::retained_header_bytes(),
+        );
+    }
 
     #[test]
     fn group_entry_accounting_includes_both_owned_key_copies() {

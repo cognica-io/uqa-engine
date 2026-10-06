@@ -26,7 +26,8 @@ pub fn analyze_prepared_command_schema(
     scope.set_command_lookup_mode(command);
     let previous = scope.bind_cte_schemas(routines, command.ctes(), params, None)?;
     let result = (|| {
-        let (target, expression) = scope.command_expression_schema(routines, command, params)?;
+        let (target, expression) =
+            scope.command_expression_schema(routines, command, params, None)?;
         let excluded = RowSchema::with_qualified_types(
             "excluded",
             target.columns().to_vec(),
@@ -173,12 +174,13 @@ impl SchemaScope {
         routines: &dyn RoutineResolution,
         command: &CommandPlan,
         params: &[SQLParam],
+        outer: Option<&RowSchema>,
     ) -> Result<(RowSchema, RowSchema), SQLError> {
         let target = self.bind_command_target(routines, command, params)?;
         let source = command
             .source_input()
             .map(|source| {
-                self.bind_source(routines, source, command.scalar_subqueries(), params, None)
+                self.bind_source(routines, source, command.scalar_subqueries(), params, outer)
             })
             .transpose()?;
         let aliases = command
@@ -204,7 +206,8 @@ impl SchemaScope {
     ) -> Result<RowSchema, SQLError> {
         let previous = self.bind_cte_schemas(routines, command.ctes(), params, None)?;
         let result = (|| {
-            let (target, expression) = self.command_expression_schema(routines, command, params)?;
+            let (target, expression) =
+                self.command_expression_schema(routines, command, params, None)?;
             if let CommandPlan::Insert(insert) = command {
                 if let Some(source) = &insert.source {
                     self.bind_query(routines, source, params, None)?;

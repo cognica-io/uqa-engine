@@ -39,6 +39,35 @@ pub fn user_function_output_columns_for(function: &SQLUserFunction) -> Option<Ve
     )
 }
 
+/// A named composite returned by a function expands to its live attributes in FROM, including a single composite OUT parameter.
+pub fn user_function_composite_result(
+    routines: &dyn RoutineResolution,
+    function: &SQLUserFunction,
+    invocation: Option<&RoutineInvocationBinding>,
+) -> Result<Option<Arc<crate::expr::composites::CompositeTypeDescriptor>>, SQLError> {
+    let outputs = function.def.output_params();
+    if outputs.len() > 1 {
+        return Ok(None);
+    }
+    let declared = match (&function.def.returns, outputs.first()) {
+        (_, Some(output)) => Some(output.type_name.as_str()),
+        (FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }, None) => {
+            Some(type_name.as_str())
+        }
+        _ => None,
+    };
+    let Some(name) = invocation
+        .and_then(|value| value.return_type.as_deref())
+        .or(declared)
+    else {
+        return Ok(None);
+    };
+    let Some(ColumnType::Composite(reference)) = routines.resolve_type_name(name)? else {
+        return Ok(None);
+    };
+    crate::expr::composites::descriptor(routines.composite_types(), reference.oid).map(Some)
+}
+
 fn validate_user_table_function_column_definition(
     function: &SQLUserFunction,
     declared_types: &[String],
@@ -630,6 +659,13 @@ fn user_function_column_types(
     function: &SQLUserFunction,
     invocation: Option<&RoutineInvocationBinding>,
 ) -> Vec<Option<ColumnType>> {
+    if let Ok(Some(descriptor)) = user_function_composite_result(routines, function, invocation) {
+        return descriptor
+            .attributes
+            .iter()
+            .map(|attribute| Some(attribute.ty.clone()))
+            .collect();
+    }
     let outputs = function
         .def
         .params

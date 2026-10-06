@@ -78,6 +78,9 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
+        if let Some(index) = self.scope.routine_parameter_reference(expression, input) {
+            return self.parameters.reference(index);
+        }
         self.check_schema_subquery(expression)?;
         if self.schema_expression.is_some() {
             if let ScalarExpr::QualifiedColumn { qualifier, .. }
@@ -141,12 +144,7 @@ impl Preparation<'_> {
                 self.common(crate::type_resolution::CommonTypeContext::Array, &mut items)?
                     .map(|element| ColumnType::Array(Box::new(element)))
             }
-            ScalarExpr::Row(items) => {
-                for item in items {
-                    self.expression(item, input, subqueries)?;
-                }
-                Some(ColumnType::Record)
-            }
+            ScalarExpr::Row(items) => return self.row_expression(items, input, subqueries),
             ScalarExpr::Between { .. }
             | ScalarExpr::InList { .. }
             | ScalarExpr::Case { .. }
@@ -167,7 +165,35 @@ impl Preparation<'_> {
             | ScalarExpr::QualifiedStar(_)
             | ScalarExpr::Default => self.known_type(expression, input, subqueries)?,
         };
-        Ok(ExpressionType::resolved(ty))
+        let mut result = ExpressionType::resolved(ty);
+        if matches!(result.ty, Some(ColumnType::Record)) {
+            result.record_fields = self.scope.bind_record_fields(
+                self.routines,
+                expression,
+                input,
+                subqueries,
+                &self.parameters.values(),
+            )?;
+        }
+        Ok(result)
+    }
+
+    fn row_expression(
+        &mut self,
+        items: &[ScalarExpr],
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<ExpressionType, SQLError> {
+        let fields = items
+            .iter()
+            .map(|item| {
+                self.expression(item, input, subqueries)
+                    .map(|value| value.ty)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut value = ExpressionType::resolved(Some(ColumnType::Record));
+        value.record_fields = Some(fields.into());
+        Ok(value)
     }
 
     fn compound_expression(

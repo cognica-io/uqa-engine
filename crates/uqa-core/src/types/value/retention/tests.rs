@@ -74,12 +74,16 @@ fn nested_collections_count_spare_slots_once_and_keep_field_names() {
     let mut fields = Vec::with_capacity(24);
     fields.push((
         text(512),
-        Value::Row(vec![Value::Map(
-            [(text(256), Value::Bytes(Vec::with_capacity(4096)))].into(),
-        )]),
+        Value::Row(
+            vec![Value::Map(
+                [(text(256), Value::Bytes(Vec::with_capacity(4096)))].into(),
+            )]
+            .into(),
+        ),
     ));
     let expected = fields.capacity() * size_of::<(String, Value)>()
         + 512
+        + crate::RowValue::decoded_header_bytes()
         + size_of::<Value>()
         + size_of::<(String, Value)>()
         + 256

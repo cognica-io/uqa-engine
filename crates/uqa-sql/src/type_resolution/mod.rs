@@ -52,7 +52,7 @@ mod stored_constants;
 pub use scalar_input::{
     scalar_cast_source_type_name_with_control, scalar_integer_operation_width,
     scalar_integer_operation_width_with_control, scalar_operand_type_name,
-    scalar_operand_type_name_with_control,
+    scalar_operand_type_name_with_control, scalar_record_field_type_with_control,
 };
 pub use stored_constants::{
     contains_unknown_literal, fold_stored_enum_constants, store_operand_coercions,

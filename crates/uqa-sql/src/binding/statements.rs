@@ -34,7 +34,26 @@ pub struct StatementAnalysisContext<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AnalyzedResult {
     Rows(Vec<Option<crate::ColumnType>>),
+    /// An analyzed output whose anonymous records retain their field descriptors.
+    Schema(RowSchema),
     Command,
+}
+
+impl AnalyzedResult {
+    pub fn column_types(&self) -> Option<&[Option<crate::ColumnType>]> {
+        match self {
+            Self::Rows(types) => Some(types),
+            Self::Schema(schema) => Some(schema.column_types()),
+            Self::Command => None,
+        }
+    }
+
+    pub fn record_fields(&self, column: usize) -> Option<&crate::schema::RecordFields> {
+        match self {
+            Self::Schema(schema) => schema.record_fields(column),
+            _ => None,
+        }
+    }
 }
 
 impl StatementBindingScope for super::snapshot::BindingSnapshot {
@@ -73,7 +92,7 @@ pub fn analyze_plan_result(
     params: &[SQLParam],
     scope: &dyn StatementBindingScope,
 ) -> Result<AnalyzedResult, SQLError> {
-    let rows = |schema: RowSchema| AnalyzedResult::Rows(schema.column_types().to_vec());
+    let rows = AnalyzedResult::Schema;
     match plan {
         UnifiedPlan::Query(query) => super::analyze_query_plan_schema(
             routines,

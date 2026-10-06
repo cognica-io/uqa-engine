@@ -36,7 +36,17 @@ pub(super) fn set_operation_output_schema(
             crate::require_equality_operator(ty)?;
         }
     }
-    Ok(RowSchema::with_types(left.columns().to_vec(), types))
+    Ok(
+        RowSchema::with_types(left.columns().to_vec(), types).with_record_fields(
+            (0..left.len()).filter_map(|index| {
+                super::record_fields::common_fields([
+                    left.record_fields(index),
+                    right.record_fields(index),
+                ])
+                .map(|fields| (index, fields))
+            }),
+        ),
+    )
 }
 
 pub(super) struct QueryFunctionTypeResolver<'a> {

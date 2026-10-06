@@ -224,7 +224,10 @@ pub fn compare_typed_values_with_control(
         (Value::Row(left), Value::Record(right)) => {
             return compare_sequence(left.iter(), right.iter().map(|(_, v)| v), control);
         }
-        (Value::Row(left), Value::Row(right)) | (Value::List(left), Value::List(right)) => {
+        (Value::Row(left), Value::Row(right)) => {
+            return compare_sequence(left.iter(), right.iter(), control);
+        }
+        (Value::List(left), Value::List(right)) => {
             return compare_sequence(left.iter(), right.iter(), control);
         }
         // Enum operators are declared on one enum type; binding coerces every other operand to it.
@@ -285,7 +288,8 @@ pub fn value_comparison_can_fail(value: &Value) -> bool {
             vector.kind() == uqa_core::LegacyVectorKind::Oid && !vector.has_vector_layout()
         }
         Value::Array(array) => array.elements().iter().any(value_comparison_can_fail),
-        Value::Row(values) | Value::List(values) => values.iter().any(value_comparison_can_fail),
+        Value::Row(values) => values.iter().any(value_comparison_can_fail),
+        Value::List(values) => values.iter().any(value_comparison_can_fail),
         Value::Record(fields) => fields
             .iter()
             .any(|(_, value)| value_comparison_can_fail(value)),
@@ -310,7 +314,8 @@ fn equal_sql_values(left: &Value, right: &Value, control: &ProductionControl<'_>
         (Value::Row(left), Value::Record(right)) => {
             equal_sequence(left.iter(), right.iter().map(|(_, v)| v), control)
         }
-        (Value::Row(left), Value::Row(right)) | (Value::List(left), Value::List(right)) => {
+        (Value::Row(left), Value::Row(right)) => equal_sequence(left.iter(), right.iter(), control),
+        (Value::List(left), Value::List(right)) => {
             equal_sequence(left.iter(), right.iter(), control)
         }
         _ => Ok(compare_sql_values(left, right, control)?.is_eq()),

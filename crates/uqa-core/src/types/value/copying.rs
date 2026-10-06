@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 
 use crate::{
     memory::{Budgeted, BudgetedString, BudgetedVec, MemoryBudget, MemoryReservation},
-    ArrayValue, CancellationToken, LegacyVectorKind, LegacyVectorValue, QueryCancelled, Value,
-    ValueRetentionError,
+    ArrayValue, CancellationToken, LegacyVectorKind, LegacyVectorValue, QueryCancelled, RowValue,
+    Value, ValueRetentionError,
 };
 
 impl Value {
@@ -93,7 +93,7 @@ enum Input<'a> {
 
 enum Sequence<'a> {
     List,
-    Row,
+    Row(&'a RowValue),
     Array(&'a ArrayValue, Option<LegacyVectorKind>),
 }
 
@@ -116,15 +116,21 @@ impl<'a> Frame<'a> {
         copier: &mut Copier<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
         let (input, output) = match source {
-            Value::List(values) | Value::Row(values) => {
-                let kind = if matches!(source, Value::List(_)) {
-                    Sequence::List
-                } else {
-                    Sequence::Row
-                };
+            Value::List(values) => {
                 let mut output = BudgetedVec::new(copier.budget);
                 output.reserve(values.len())?;
-                (Input::Values(values.iter()), Output::Values(output, kind))
+                (
+                    Input::Values(values.iter()),
+                    Output::Values(output, Sequence::List),
+                )
+            }
+            Value::Row(row) => {
+                let mut output = BudgetedVec::new(copier.budget);
+                output.reserve(row.len())?;
+                (
+                    Input::Values(row.iter()),
+                    Output::Values(output, Sequence::Row(row)),
+                )
             }
             Value::Array(array) => {
                 let mut output = BudgetedVec::new(copier.budget);
@@ -213,7 +219,20 @@ impl<'a> Frame<'a> {
                 self.memory.absorb(memory);
                 match kind {
                     Sequence::List => Value::List(values),
-                    Sequence::Row => Value::Row(values),
+                    Sequence::Row(source) => {
+                        let field_types = source
+                            .field_types()
+                            .map(|types| copier.slice(types))
+                            .transpose()?;
+                        self.memory.grow(RowValue::decoded_header_bytes())?;
+                        let field_types = field_types.map(|types| {
+                            let (types, memory) = types.into_parts();
+                            self.memory.absorb(memory);
+                            types
+                        });
+                        (copier.check)()?;
+                        Value::Row(RowValue::from_validated_parts(values, field_types))
+                    }
                     Sequence::Array(source, legacy_kind) => {
                         let dimensions = copier.slice(source.dimensions())?;
                         let lower_bounds = copier.slice(source.lower_bounds())?;

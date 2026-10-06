@@ -161,7 +161,7 @@ impl EnforcedKeyExecution for EnforcedKey {
                 .value_index_scan_key(
                     table,
                     &key,
-                    &uqa_core::Predicate::Equals(Value::Row(values.to_vec())),
+                    &uqa_core::Predicate::Equals(Value::Row(values.to_vec().into())),
                 )?
                 .ok_or_else(|| SQLError::Internal(format!("missing physical index {key:?}")))?;
             let changes = context

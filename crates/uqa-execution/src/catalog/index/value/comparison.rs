@@ -43,7 +43,8 @@ pub(super) fn field_needs_typed_comparison(value: &Value) -> bool {
     match value {
         Value::Enum(_) | Value::Record(_) => true,
         Value::Array(array) => array.elements().iter().any(field_needs_typed_comparison),
-        Value::Row(values) | Value::List(values) => values.iter().any(field_needs_typed_comparison),
+        Value::Row(values) => values.iter().any(field_needs_typed_comparison),
+        Value::List(values) => values.iter().any(field_needs_typed_comparison),
         _ => false,
     }
 }

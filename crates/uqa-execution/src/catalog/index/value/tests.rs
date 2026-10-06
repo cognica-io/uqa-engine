@@ -231,7 +231,7 @@ fn changing_the_use_of_a_column_keeps_its_stored_values() {
 
 #[test]
 fn raw_field_eligibility_survives_index_mutation_and_carried_conversion() {
-    let scalar_row = Value::Row(vec![Value::Int(1)]);
+    let scalar_row = Value::Row(vec![Value::Int(1)].into());
     let record = Value::Record(vec![("x".into(), Value::Int(1))]);
     let enumeration = Value::Enum(uqa_core::EnumValue::new(
         10,
@@ -241,7 +241,7 @@ fn raw_field_eligibility_survives_index_mutation_and_carried_conversion() {
         for wrap in [
             (|value| value) as fn(Value) -> Value,
             |value| Value::List(vec![value]),
-            |value| Value::Row(vec![value]),
+            |value| Value::Row(vec![value].into()),
         ] {
             let special = wrap(special.clone());
             let values = [(1, scalar_row.clone()), (2, special.clone())];

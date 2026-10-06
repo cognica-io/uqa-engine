@@ -16,6 +16,7 @@ mod temporal_keys;
 fn dynamic_value_keeps_variable_width_payloads_indirect() {
     let pointer_bytes = std::mem::size_of::<usize>();
     assert_eq!(std::mem::size_of::<ArrayValue>(), pointer_bytes);
+    assert_eq!(std::mem::size_of::<RowValue>(), pointer_bytes);
     assert_eq!(std::mem::size_of::<DecimalValue>(), pointer_bytes);
     assert!(std::mem::size_of::<Value>() <= 4 * pointer_bytes);
 }
@@ -773,7 +774,7 @@ fn value_json_round_trips_every_variant() {
         Value::Json("{\"b\":2,\"a\":1}".into()),
         Value::JsonB("{\"a\": 1, \"b\": 2}".into()),
         Value::List(vec![Value::Str("a".into()), Value::Int(300)]),
-        Value::Row(vec![Value::Int(1), Value::Null]),
+        Value::Row(vec![Value::Int(1), Value::Null].into()),
         Value::Record(vec![
             ("key".into(), Value::Str("a".into())),
             ("value".into(), Value::Json("1".into())),

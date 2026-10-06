@@ -43,6 +43,7 @@ mod jsonb;
 mod legacy_vector;
 mod occurrence;
 mod posting;
+mod row;
 mod temporal;
 mod value;
 
@@ -70,6 +71,7 @@ pub use jsonb::{
 pub use legacy_vector::{LegacyVectorKind, LegacyVectorValue};
 pub use occurrence::{TokenOccurrence, TokenOccurrenceError, TokenOffsets};
 pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingEntry};
+pub use row::{RecordFieldType, RowValue};
 pub use temporal::{TemporalInputError, TemporalValue};
 pub use value::{JsonValueDecoder, Value, ValueRetentionError};
 
