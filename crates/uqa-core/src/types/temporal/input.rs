@@ -9,6 +9,15 @@
 use super::{epoch_date, TemporalValue, MICROS_PER_DAY, MICROS_PER_SECOND};
 use chrono::NaiveDate;
 
+/// Field order for ambiguous numeric calendar dates. ISO and compact dates retain year-first interpretation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TemporalDateOrder {
+    #[default]
+    MonthDayYear,
+    DayMonthYear,
+    YearMonthDay,
+}
+
 /// Why date or time input was rejected, as `DateTimeParseError` distinguishes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TemporalInputError {
@@ -56,6 +65,7 @@ fn special(token: &str) -> Option<Special> {
 #[derive(Clone, Copy)]
 struct Calendar {
     year: i64,
+    is_two_digit_year: bool,
     month: u32,
     day: u32,
 }
@@ -82,7 +92,16 @@ struct Fields {
 impl TemporalValue {
     /// `date_in`: a calendar date, or `now`, `today`, `tomorrow`, `yesterday` or `epoch` resolved against `now_micros`; a time of day or zone after the date is read and ignored.
     pub fn date_input(text: &str, now_micros: i64) -> Input<Self> {
-        let fields = decode(text)?;
+        Self::date_input_in_order(text, now_micros, TemporalDateOrder::default())
+    }
+
+    /// Read this temporal family using the caller's date order and transaction clock.
+    pub fn date_input_in_order(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+    ) -> Input<Self> {
+        let fields = decode(text, order)?;
         let days = match fields.date {
             Some(DatePart::Calendar(calendar)) => calendar_days(calendar)?,
             Some(DatePart::Special(special)) => special_days(special, now_micros)?,
@@ -93,7 +112,16 @@ impl TemporalValue {
 
     /// `time_in`: a time of day, or `now` or `allballs`; a date before it or a zone after it is read and ignored.
     pub fn time_input(text: &str, now_micros: i64) -> Input<Self> {
-        let fields = decode(text)?;
+        Self::time_input_in_order(text, now_micros, TemporalDateOrder::default())
+    }
+
+    /// Read this temporal family using the caller's date order and transaction clock.
+    pub fn time_input_in_order(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+    ) -> Input<Self> {
+        let fields = decode(text, order)?;
         Ok(Self::Time {
             micros: time_of_day(&fields, now_micros)?,
         })
@@ -101,7 +129,16 @@ impl TemporalValue {
 
     /// `timetz_in`: a time of day with its UTC offset, `+00` when the text names none, as the `UTC` session time zone supplies it.
     pub fn time_tz_input(text: &str, now_micros: i64) -> Input<Self> {
-        let fields = decode(text)?;
+        Self::time_tz_input_in_order(text, now_micros, TemporalDateOrder::default())
+    }
+
+    /// Read this temporal family using the caller's date order and transaction clock.
+    pub fn time_tz_input_in_order(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+    ) -> Input<Self> {
+        let fields = decode(text, order)?;
         let micros = time_of_day(&fields, now_micros)?;
         let offset = fields.zone.unwrap_or(0);
         if offset % 60 != 0 {
@@ -116,7 +153,16 @@ impl TemporalValue {
 
     /// `timestamp_in`: a date with an optional time of day, or `now`, `today`, `tomorrow`, `yesterday` or `epoch`; a zone is read and ignored.
     pub fn timestamp_input(text: &str, now_micros: i64) -> Input<Self> {
-        let fields = decode(text)?;
+        Self::timestamp_input_in_order(text, now_micros, TemporalDateOrder::default())
+    }
+
+    /// Read this temporal family using the caller's date order and transaction clock.
+    pub fn timestamp_input_in_order(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+    ) -> Input<Self> {
+        let fields = decode(text, order)?;
         let micros = instant(&fields, now_micros)?;
         if !Self::timestamp_micros_in_range(micros) {
             return Err(TemporalInputError::OutOfRange);
@@ -126,7 +172,16 @@ impl TemporalValue {
 
     /// `timestamptz_in`: as `timestamp_input`, with the UTC offset applied; a text without one is read in the `UTC` session time zone.
     pub fn timestamp_tz_input(text: &str, now_micros: i64) -> Input<Self> {
-        let fields = decode(text)?;
+        Self::timestamp_tz_input_in_order(text, now_micros, TemporalDateOrder::default())
+    }
+
+    /// Read this temporal family using the caller's date order and transaction clock.
+    pub fn timestamp_tz_input_in_order(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+    ) -> Input<Self> {
+        let fields = decode(text, order)?;
         let local = instant(&fields, now_micros)?;
         let offset = fields.zone.unwrap_or(0) * MICROS_PER_SECOND;
         let micros = local
@@ -195,7 +250,7 @@ fn calendar_days(calendar: Calendar) -> Input<i32> {
 }
 
 /// Split the text into its fields as `ParseDateTime` and `DecodeDateTime` do for the ISO forms: a date, a time of day with an optional glued offset, a separate offset or zone name, a meridian, or one special word.
-fn decode(text: &str) -> Input<Fields> {
+fn decode(text: &str, order: TemporalDateOrder) -> Input<Fields> {
     let text = text.trim();
     if text.is_empty() {
         return Err(TemporalInputError::InvalidSyntax);
@@ -239,7 +294,7 @@ fn decode(text: &str) -> Input<Fields> {
             if fields.date.is_some() {
                 return Err(TemporalInputError::InvalidSyntax);
             }
-            fields.date = Some(DatePart::Calendar(decode_date(token)?));
+            fields.date = Some(DatePart::Calendar(decode_date(token, order)?));
             continue;
         }
         if token.bytes().all(|byte| byte.is_ascii_alphabetic()) {
@@ -351,51 +406,48 @@ fn set_zone(fields: &mut Fields, zone: i64) -> Input<()> {
     Ok(())
 }
 
-/// Read `YYYY-MM-DD`, `YYYY/MM/DD`, `YYYY.MM.DD`, `YYYYMMDD` and `YYMMDD`, and a first field of fewer than three digits in the `MDY` order of the default `DateStyle`. Calendar validity follows the remaining field decoding, as in `ValidateDate`.
-fn decode_date(token: &str) -> Input<Calendar> {
+/// Read separated numeric fields in the selected order; ISO years and compact dates remain unambiguous. Validation applies the era before interpreting a short year.
+fn decode_date(token: &str, order: TemporalDateOrder) -> Input<Calendar> {
     let parts: Vec<&str> = token.split(['-', '/', '.']).collect();
     let (year, month, day) = match parts.as_slice() {
         [compact] => match compact.len() {
-            8 => (
-                number(&compact[..4])?,
-                number(&compact[4..6])?,
-                number(&compact[6..])?,
-            ),
-            6 => (
-                two_digit_year(number(&compact[..2])?),
-                number(&compact[2..4])?,
-                number(&compact[4..])?,
-            ),
+            8 => (&compact[..4], &compact[4..6], &compact[6..]),
+            6 => (&compact[..2], &compact[2..4], &compact[4..]),
             _ => return Err(TemporalInputError::InvalidSyntax),
         },
         [first, second, third] => {
-            if first.len() >= 3 {
-                (number(first)?, number(second)?, number(third)?)
+            if first.len() >= 3 || order == TemporalDateOrder::YearMonthDay {
+                (*first, *second, *third)
+            } else if order == TemporalDateOrder::DayMonthYear {
+                (*third, *second, *first)
             } else {
-                let year = number(third)?;
-                let year = if third.len() <= 2 {
-                    two_digit_year(year)
-                } else {
-                    year
-                };
-                (year, number(first)?, number(second)?)
+                (*third, *first, *second)
             }
         }
         _ => return Err(TemporalInputError::InvalidSyntax),
     };
-    let (Ok(month), Ok(day)) = (u32::try_from(month), u32::try_from(day)) else {
+    let (Ok(month), Ok(day)) = (u32::try_from(number(month)?), u32::try_from(number(day)?)) else {
         return Err(TemporalInputError::FieldOverflow { date_style: true });
     };
-    Ok(Calendar { year, month, day })
+    Ok(Calendar {
+        year: number(year)?,
+        is_two_digit_year: year.len() <= 2,
+        month,
+        day,
+    })
 }
 
 /// `ValidateDate` runs after zone decoding and applies the era before checking leap days; 1 BC is the proleptic year zero, and the written year zero is never valid.
 fn validate_date(calendar: &mut Calendar, bc: bool) -> Input<()> {
-    if calendar.year <= 0 {
-        return Err(TemporalInputError::FieldOverflow { date_style: false });
-    }
     if bc {
+        if calendar.year <= 0 {
+            return Err(TemporalInputError::FieldOverflow { date_style: false });
+        }
         calendar.year = 1 - calendar.year;
+    } else if calendar.is_two_digit_year {
+        calendar.year = two_digit_year(calendar.year);
+    } else if calendar.year <= 0 {
+        return Err(TemporalInputError::FieldOverflow { date_style: false });
     }
     if !(1..=12).contains(&calendar.month) || !(1..=31).contains(&calendar.day) {
         return Err(TemporalInputError::FieldOverflow { date_style: true });

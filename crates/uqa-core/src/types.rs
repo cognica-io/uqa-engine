@@ -72,7 +72,7 @@ pub use legacy_vector::{LegacyVectorKind, LegacyVectorValue};
 pub use occurrence::{TokenOccurrence, TokenOccurrenceError, TokenOffsets};
 pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingEntry};
 pub use row::{RecordFieldType, RowValue};
-pub use temporal::{TemporalInputError, TemporalTimeZone, TemporalValue};
+pub use temporal::{TemporalDateOrder, TemporalInputError, TemporalTimeZone, TemporalValue};
 pub use value::{JsonValueDecoder, Value, ValueRetentionError};
 
 #[cfg(test)]
