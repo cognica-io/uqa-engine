@@ -22,6 +22,11 @@ impl FunctionTypeResolver for NoRoutines {
     }
 }
 impl RoutineResolution for NoRoutines {}
+impl crate::schema::dependencies::oid_alias::OidAliasInput for NoRoutines {
+    fn resolve_oid_alias_input(&self, _: &ColumnType, _: &str) -> Result<Option<i64>, SQLError> {
+        Ok(None)
+    }
+}
 #[derive(Default)]
 struct Scopes {
     events: RefCell<Vec<&'static str>>,
@@ -71,6 +76,7 @@ fn analyze(scopes: &Scopes, sql: &str) -> Result<(), SQLError> {
         &StatementAnalysisContext {
             scopes,
             routines: &NoRoutines,
+            aliases: &NoRoutines,
         },
         &plan,
         &[],
@@ -115,11 +121,55 @@ fn query_bearing_commands_validate_their_query_schema() {
 fn mutation_parameter_analysis_precedes_result_schema_binding_in_one_retained_scope() {
     let scopes = Scopes::default();
     analyze(&scopes, "INSERT INTO items VALUES (1) RETURNING id").unwrap();
-    assert_eq!(
-        *scopes.events.borrow(),
-        ["scope", "binding", "binding", "release"]
-    );
+    assert_eq!(*scopes.events.borrow(), ["scope", "binding", "release"]);
     scopes.events.borrow_mut().clear();
     assert!(analyze(&scopes, "INSERT INTO missing_table VALUES (1) RETURNING id").is_err());
     assert_eq!(*scopes.events.borrow(), ["scope", "binding", "release"]);
+}
+
+#[test]
+fn ordinary_inputs_are_read_after_sources_and_before_later_expressions() {
+    for (sql, state, message) in [
+        (
+            "SELECT 'absent'::regclass FROM missing_source",
+            "42P01",
+            "relation \"missing_source\" does not exist",
+        ),
+        (
+            "SELECT 'absent'::regclass, missing_column",
+            "42P01",
+            "relation \"absent\" does not exist",
+        ),
+        (
+            "SELECT missing_column, 'absent'::regclass",
+            "42703",
+            "column \"missing_column\" does not exist",
+        ),
+        (
+            "WITH q AS (SELECT 'absent'::regclass) SELECT missing_column",
+            "42P01",
+            "relation \"absent\" does not exist",
+        ),
+        (
+            "SELECT ('absent'::text)::regclass, missing_column",
+            "42703",
+            "column \"missing_column\" does not exist",
+        ),
+    ] {
+        let scopes = Scopes::default();
+        let error = analyze(&scopes, sql).unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
+        assert_eq!(error.to_string(), message, "{sql}");
+        assert_eq!(*scopes.events.borrow(), ["scope", "binding", "release"]);
+    }
+}
+
+#[test]
+fn input_analysis_leaves_runtime_casts_and_expressions_unevaluated() {
+    for sql in [
+        "SELECT 1 / 0, ('absent'::text)::regclass",
+        "SELECT CASE WHEN false THEN ('absent'::text)::regclass ELSE NULL END",
+    ] {
+        analyze(&Scopes::default(), sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
 }

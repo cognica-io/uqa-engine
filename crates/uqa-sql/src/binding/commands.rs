@@ -118,7 +118,7 @@ impl SchemaScope {
         }
     }
 
-    fn bind_command_target(
+    pub(super) fn bind_command_target(
         &mut self,
         routines: &dyn RoutineResolution,
         command: &CommandPlan,
@@ -183,19 +183,28 @@ impl SchemaScope {
                 self.bind_source(routines, source, command.scalar_subqueries(), params, outer)
             })
             .transpose()?;
+        let expression = Self::command_input_schema(command, &target, source.as_ref())?;
+        Ok((target, expression))
+    }
+
+    pub(super) fn command_input_schema(
+        command: &CommandPlan,
+        target: &RowSchema,
+        source: Option<&RowSchema>,
+    ) -> Result<RowSchema, SQLError> {
         let aliases = command
             .returning_aliases()
             .ok_or_else(|| SQLError::Internal("command CTE has no RETURNING namespace".into()))?;
         let mut expression = crate::semantics::returning_expression_schema(
-            &target,
+            target,
             command.target_qualifier().unwrap_or_default(),
             aliases,
-            source.as_ref(),
+            source,
         );
         if target.columns_are_open(None) {
             expression = RowSchema::with_open_columns(&expression, command.target_qualifier());
         }
-        Ok((target, expression))
+        Ok(expression)
     }
 
     pub(super) fn bind_command_returning(

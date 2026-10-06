@@ -175,6 +175,7 @@ impl Preparation<'_> {
             &input,
             &block.subqueries,
         )?;
+        self.query_windows(block, &input)?;
         crate::semantics::grouping_sets::validate_grouped_expressions(
             self.routines,
             block,
@@ -186,6 +187,25 @@ impl Preparation<'_> {
             self.resolve_targets(&mut output)?;
         }
         Ok(output)
+    }
+
+    fn query_windows(&mut self, block: &QueryBlockPlan, input: &RowSchema) -> Result<(), SQLError> {
+        let mut result = Ok(());
+        for expression in block
+            .projections
+            .iter()
+            .map(|projection| &projection.expr)
+            .chain(block.order_by.iter().map(|order| &order.expr))
+        {
+            expression.visit(&mut |node| {
+                if result.is_ok() {
+                    if let ScalarExpr::WindowCall { spec, .. } = node {
+                        result = self.window_specification(spec, input, &block.subqueries);
+                    }
+                }
+            });
+        }
+        result
     }
 
     pub(super) fn projections(

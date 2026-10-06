@@ -41,15 +41,14 @@ impl Preparation<'_> {
             }
             return Ok(None);
         }
-        if let Some(source) = command.source_input() {
-            self.source(source, command.scalar_subqueries(), outer)?;
-        }
-        let (target, input) = self.scope.command_expression_schema(
-            self.routines,
-            command,
-            &self.parameters.values(),
-            outer,
-        )?;
+        let target =
+            self.scope
+                .bind_command_target(self.routines, command, &self.parameters.values())?;
+        let source = command
+            .source_input()
+            .map(|source| self.source(source, command.scalar_subqueries(), outer))
+            .transpose()?;
+        let input = super::SchemaScope::command_input_schema(command, &target, source.as_ref())?;
         let input = outer.map_or(input.clone(), |outer| {
             RowSchema::with_outer_schema(&input, outer)
         });
@@ -84,11 +83,6 @@ impl Preparation<'_> {
                         predicate,
                     } = &conflict.action
                     {
-                        validate_target_columns(
-                            &insert.table,
-                            assignments.iter().map(|assignment| &assignment.target),
-                            &target,
-                        )?;
                         let excluded = RowSchema::with_qualified_types(
                             "excluded",
                             target.columns().to_vec(),
@@ -96,7 +90,13 @@ impl Preparation<'_> {
                         );
                         let conflict_input =
                             RowSchema::join(&input, &excluded, std::iter::empty::<String>());
-                        self.assignments(assignments, &target, &conflict_input, subqueries)?;
+                        self.assignments(
+                            &insert.table,
+                            assignments,
+                            &target,
+                            &conflict_input,
+                            subqueries,
+                        )?;
                         if let Some(predicate) = predicate {
                             self.require_boolean(predicate, &conflict_input, subqueries, "WHERE")?;
                         }
@@ -104,25 +104,30 @@ impl Preparation<'_> {
                 }
             }
             CommandPlan::Update(update) => {
-                validate_target_columns(
-                    &update.table,
-                    update
-                        .assignments
-                        .iter()
-                        .map(|assignment| &assignment.target),
-                    &target,
-                )?;
                 if let Some(predicate) = &update.predicate {
                     self.require_boolean(predicate, &input, subqueries, "WHERE")?;
                 }
-                self.assignments(&update.assignments, &target, &input, subqueries)?;
+                let result = self.command_result(command, &target, &input)?;
+                self.assignments(
+                    &update.table,
+                    &update.assignments,
+                    &target,
+                    &input,
+                    subqueries,
+                )?;
+                return Ok(result);
             }
             CommandPlan::Delete(delete) => {
                 if let Some(predicate) = &delete.predicate {
                     self.require_boolean(predicate, &input, subqueries, "WHERE")?;
                 }
             }
-            CommandPlan::Merge(merge) => self.merge(merge, &target, &input, subqueries)?,
+            CommandPlan::Merge(merge) => {
+                self.require_boolean(&merge.join_condition, &input, subqueries, "JOIN/ON")?;
+                let result = self.command_result(command, &target, &input)?;
+                self.merge(merge, &target, &input, subqueries)?;
+                return Ok(result);
+            }
             _ => {}
         }
         self.command_result(command, &target, &input)
@@ -150,7 +155,6 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        self.require_boolean(&merge.join_condition, input, subqueries, "JOIN/ON")?;
         if let Some(predicate) = &merge.target_predicate {
             self.require_boolean(predicate, input, subqueries, "WHERE")?;
         }
@@ -195,12 +199,7 @@ impl Preparation<'_> {
             match clause {
                 MergeWhenPlan::UpdateMatched { assignments, .. }
                 | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                    validate_target_columns(
-                        &merge.target,
-                        assignments.iter().map(|assignment| &assignment.target),
-                        target,
-                    )?;
-                    self.assignments(assignments, target, input, subqueries)?;
+                    self.assignments(&merge.target, assignments, target, input, subqueries)?;
                 }
                 MergeWhenPlan::InsertNotMatched {
                     columns, values, ..
@@ -216,19 +215,25 @@ impl Preparation<'_> {
 
     fn assignments(
         &mut self,
+        table: &str,
         assignments: &[AssignmentPlan],
         target: &RowSchema,
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        targets::validate_repeated_targets(
-            assignments.iter().map(|assignment| &assignment.target),
-            false,
-        )?;
         let mut values = assignments
             .iter()
             .map(|assignment| self.expression(&assignment.value, input, subqueries))
             .collect::<Result<Vec<_>, _>>()?;
+        validate_target_columns(
+            table,
+            assignments.iter().map(|assignment| &assignment.target),
+            target,
+        )?;
+        targets::validate_repeated_targets(
+            assignments.iter().map(|assignment| &assignment.target),
+            false,
+        )?;
         for (assignment, value) in assignments.iter().zip(&mut values) {
             if matches!(assignment.value, ScalarExpr::Default) {
                 targets::validate_assignment_default(&assignment.target)?;

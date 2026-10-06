@@ -139,6 +139,7 @@ impl Engine {
             analysis: uqa_sql::binding::statements::StatementAnalysisContext {
                 scopes: self,
                 routines: self,
+                aliases: self,
             },
             aggregates: self,
             optimization: self,

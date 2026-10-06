@@ -81,7 +81,10 @@ pub(super) fn validate_qualified_column(
         }
         return Err(SQLError::unknown_qualified_column(qualifier, column));
     }
-    Err(SQLError::UnknownTable(qualifier.to_string()))
+    Err(SQLError::Routine {
+        sqlstate: "42P01".into(),
+        message: format!("missing FROM-clause entry for table \"{qualifier}\""),
+    })
 }
 
 pub(super) fn single_pseudo_column_qualifier(schema: &RowSchema) -> Option<String> {
