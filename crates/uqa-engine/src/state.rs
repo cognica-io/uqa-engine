@@ -175,10 +175,7 @@ impl DurableCatalogState {
             views: CatalogCell::new(BTreeMap::new()),
             catalog_indexes: CatalogCell::new(BTreeMap::new()),
             database_security: CatalogCell::new(BoundDatabaseSecurity::bootstrap()),
-            schemas: CatalogCell::new(BTreeMap::from([(
-                "public".to_string(),
-                BoundSchemaSecurity::bootstrap("public"),
-            )])),
+            schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),
             path_indexes: CatalogCell::new(BTreeMap::new()),
             sequences: CatalogCell::new(BTreeMap::new()),
             sequence_object_ids: CatalogCell::new(BTreeMap::new()),

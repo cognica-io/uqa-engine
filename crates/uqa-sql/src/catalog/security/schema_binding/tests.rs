@@ -94,3 +94,41 @@ fn schema_defaults_and_public_access_retain_the_bootstrap_incarnation() {
     roles.get_mut("renamed_owner").unwrap().object_id = [9; 16];
     assert!(bound.validate(&roles).is_err());
 }
+
+#[test]
+fn initial_catalog_preserves_builtin_identities_and_public_privileges() {
+    let roles = roles();
+    let schemas = BoundSchemaSecurity::initial_catalog();
+    assert_eq!(schemas.len(), 4);
+    for name in ["public", "pg_catalog", "information_schema", "ag_catalog"] {
+        let bound = &schemas[name];
+        bound.validate(&roles).unwrap();
+        assert_eq!(
+            bound.namespace_oid(name),
+            crate::catalog::oids::schema_oid(name)
+        );
+        assert_eq!(bound.role_owner, RoleIdentity::BOOTSTRAP);
+        let security = bound.resolve(&roles).unwrap();
+        assert_eq!(
+            role_has_schema_privilege(
+                &security,
+                "reader",
+                SchemaAclPrivilege::Usage,
+                &roles,
+                &BTreeMap::new()
+            ),
+            name != "ag_catalog"
+        );
+        assert!(!role_has_schema_privilege(
+            &security,
+            "reader",
+            SchemaAclPrivilege::Create,
+            &roles,
+            &BTreeMap::new()
+        ));
+        if name != "public" {
+            assert_eq!(BoundSchemaSecurity::builtin(name).as_ref(), Some(bound));
+        }
+    }
+    assert!(BoundSchemaSecurity::builtin("user_schema").is_none());
+}

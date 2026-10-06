@@ -26,6 +26,28 @@ pub struct BoundSchemaSecurity {
 }
 
 impl BoundSchemaSecurity {
+    pub const BUILTIN_NAMES: [&'static str; 3] = ["pg_catalog", "information_schema", "ag_catalog"];
+
+    /// The initial namespace authority shared by memory and durable catalogs.
+    pub fn initial_catalog() -> BTreeMap<String, Self> {
+        std::iter::once(("public".into(), Self::bootstrap("public")))
+            .chain(
+                Self::BUILTIN_NAMES
+                    .map(|name| (name.into(), Self::builtin(name).expect("built-in schema"))),
+            )
+            .collect()
+    }
+
+    pub fn builtin(name: &str) -> Option<Self> {
+        let mut security = match name {
+            "pg_catalog" | "information_schema" => Self::with_public_privileges(false),
+            "ag_catalog" => Self::bootstrap(name),
+            _ => return None,
+        };
+        security.tuple = Self::bootstrap(name).tuple;
+        Some(security)
+    }
+
     pub fn namespace_oid(&self, name: &str) -> i64 {
         self.tuple
             .map_or_else(|| crate::catalog::oids::schema_oid(name), |tuple| tuple.oid)

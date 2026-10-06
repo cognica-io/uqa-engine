@@ -20,7 +20,13 @@ fn empty_schema_and_public_are_durable_catalog_objects() {
         let reopened = Engine::open(Path::new(&path)).unwrap();
         assert_eq!(
             reopened.list_schemas().unwrap(),
-            vec!["empty_app".to_string(), "public".to_string()]
+            [
+                "ag_catalog",
+                "empty_app",
+                "information_schema",
+                "pg_catalog",
+                "public"
+            ]
         );
         assert!(reopened.tables_in_schema("empty_app").unwrap().is_empty());
     }

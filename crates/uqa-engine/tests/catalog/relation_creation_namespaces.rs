@@ -8,6 +8,9 @@
 
 use uqa_engine::Engine;
 
+#[path = "relation_creation_namespaces/builtin_storage.rs"]
+mod builtin_storage;
+
 fn verify_relation_creation_namespaces(engine: &Engine) {
     crate::pg18_oracle::verify(
         engine,

@@ -4,6 +4,8 @@ This page separates unreleased changes on `main` from released upgrade requireme
 
 ## Unreleased changes after 0.4.9
 
+Initial open now registers missing builtin namespace records so user relations in `information_schema` and `ag_catalog` can persist in every storage provider. This joins the existing atomic catalog restoration and preserves stored namespace identities, owner changes and grants. Later catalog refreshes and secondary sessions only load the initialized records. Rust `Engine::list_schemas` consequently includes `pg_catalog`, `information_schema` and `ag_catalog` alongside other registered schemas.
+
 The following changes were merged after the 0.4.9 tag and are not present in that release. They do not change its package versions. The first open rewrites the user-defined type names of stored SQL, as the next section describes.
 
 ### Routine privilege declarations

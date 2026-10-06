@@ -88,6 +88,7 @@ fn private_schema_changes_survive_peer_catalog_publication() {
     }
 }
 
+mod builtins;
 mod concurrency;
 mod dependencies;
 mod identity;

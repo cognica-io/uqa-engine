@@ -24,15 +24,11 @@ pub(super) fn schema_security(
         return Some(security.clone());
     }
     match name {
-        "pg_catalog" | "information_schema" => {
-            Some(BoundSchemaSecurity::with_public_privileges(false))
-        }
-        "ag_catalog" => Some(BoundSchemaSecurity::bootstrap("ag_catalog")),
         name if name == temporary_schema => Some(BoundSchemaSecurity::with_public_privileges(true)),
         name if catalog.snapshot().definitions.graphs.contains_key(name) => {
             Some(BoundSchemaSecurity::bootstrap(name))
         }
-        _ => None,
+        _ => BoundSchemaSecurity::builtin(name),
     }
 }
 
