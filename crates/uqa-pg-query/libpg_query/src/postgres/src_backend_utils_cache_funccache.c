@@ -30,6 +30,7 @@
 #include "postgres.h"
 
 #include "catalog/pg_proc.h"
+#include "catalog/pg_type.h"
 #include "commands/event_trigger.h"
 #include "commands/trigger.h"
 #include "common/hashfn.h"
@@ -116,10 +117,10 @@ static int	cfunc_match(const void *key1, const void *key2, Size keysize);
  *    polymorphic arguments are integer, integer-array or integer-range.
  */
 /*
- * libpg_query never has a real fn_expr to consult, and only invokes the
- * plpgsql compile path in validator mode. Implement the validator branch
- * of upstream's cfunc_resolve_polymorphic_argtypes (mapping polymorphic
- * types to INT4OID family) and bail out for anything else.
+ * libpg_query has no call expression from which to resolve polymorphic types.
+ * Runtime compilation therefore requires a declaration specialized by the
+ * caller; concrete and RECORD argument types already carry the available
+ * information. Validator compilation keeps PostgreSQL's representative types.
  */
 void
 cfunc_resolve_polymorphic_argtypes(int numargs, Oid *argtypes, char *argmodes,
@@ -129,7 +130,18 @@ cfunc_resolve_polymorphic_argtypes(int numargs, Oid *argtypes, char *argmodes,
 	int			i;
 
 	if (!forValidator)
-		elog(ERROR, "Not implemented (cfunc_resolve_polymorphic_argtypes outside validator mode)");
+	{
+		for (i = 0; i < numargs; i++)
+		{
+			if (IsPolymorphicType(argtypes[i]))
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("could not determine actual argument "
+								"type for polymorphic function \"%s\"",
+								proname)));
+		}
+		return;
+	}
 
 	for (i = 0; i < numargs; i++)
 	{

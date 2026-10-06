@@ -27,7 +27,7 @@ typedef struct {
 	PgQueryError* error;
 } PgQueryInternalPlpgsqlFuncAndError;
 
-static PgQueryInternalPlpgsqlFuncAndError pg_query_raw_parse_plpgsql(Node* stmt);
+static PgQueryInternalPlpgsqlFuncAndError pg_query_raw_parse_plpgsql(Node* stmt, bool for_validator);
 
 static const PgQueryPlpgsqlCatalog *
 pg_query_current_plpgsql_catalog(void)
@@ -545,7 +545,7 @@ pg_query_create_function(CreateFunctionStmt *stmt,
  * ProcedureCreate.
  */
 static PLpgSQL_function *
-compile_create_function_stmt_via_callback(CreateFunctionStmt *stmt)
+compile_create_function_stmt_via_callback(CreateFunctionStmt *stmt, bool for_validator)
 {
 	PLpgSQL_function *function;
 	ProcTupWithAttrs *wrapper;
@@ -605,12 +605,12 @@ compile_create_function_stmt_via_callback(CreateFunctionStmt *stmt)
 	function = (PLpgSQL_function *) palloc0(sizeof(PLpgSQL_function));
 
 	plpgsql_compile_callback(fcinfo, &wrapper->tup, NULL,
-							 (CachedFunction *) function, true);
+							 (CachedFunction *) function, for_validator);
 
 	return function;
 }
 
-PgQueryInternalPlpgsqlFuncAndError pg_query_raw_parse_plpgsql(Node* stmt)
+PgQueryInternalPlpgsqlFuncAndError pg_query_raw_parse_plpgsql(Node* stmt, bool for_validator)
 {
 	PgQueryInternalPlpgsqlFuncAndError result = {0};
 	MemoryContext cctx = CurrentMemoryContext;
@@ -644,7 +644,7 @@ PgQueryInternalPlpgsqlFuncAndError pg_query_raw_parse_plpgsql(Node* stmt)
 	PG_TRY();
 	{
 		if (IsA(stmt, CreateFunctionStmt)) {
-			result.func = compile_create_function_stmt_via_callback((CreateFunctionStmt *) stmt);
+			result.func = compile_create_function_stmt_via_callback((CreateFunctionStmt *) stmt, for_validator);
 		} else if (IsA(stmt, DoStmt)){
 			result.func = compile_do_stmt((DoStmt *) stmt);
 		} else {
@@ -790,7 +790,8 @@ parse_plpgsql(const char *input, const PgQueryPlpgsqlCatalog *catalog,
 	for (i = 0; i < statements.stmts_count; i++) {
 		PgQueryInternalPlpgsqlFuncAndError func_and_error;
 
-		func_and_error = pg_query_raw_parse_plpgsql(statements.stmts[i]);
+		func_and_error = pg_query_raw_parse_plpgsql(statements.stmts[i],
+			(parser_options & PG_QUERY_PLPGSQL_RUNTIME) == 0);
 
 		// These are all malloc-ed and will survive exiting the memory context, the caller is responsible to free them now
 		result.error = func_and_error.error;
