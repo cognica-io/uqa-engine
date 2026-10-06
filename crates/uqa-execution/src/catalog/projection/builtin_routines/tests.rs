@@ -10,11 +10,28 @@ use super::PG18_BUILTIN_ROUTINE_GROUPS;
 
 #[test]
 fn clock_and_case_metadata_matches_postgresql() {
-    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/parity/pg18/builtin_routine_identities_oracle.expected.json"
-    )))
-    .unwrap();
+    assert_catalog_metadata(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/builtin_routine_identities_oracle.expected.json"
+        )),
+        7,
+    );
+}
+
+#[test]
+fn numeric_metadata_matches_postgresql() {
+    assert_catalog_metadata(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/numeric_routine_identities_oracle.expected.json"
+        )),
+        11,
+    );
+}
+
+fn assert_catalog_metadata(transcript: &str, expected_count: usize) {
+    let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
     let catalog = reference["cases"]
         .as_array()
         .unwrap()
@@ -23,7 +40,7 @@ fn clock_and_case_metadata_matches_postgresql() {
         .unwrap();
     let expected: Vec<Vec<String>> =
         serde_json::from_value(catalog["results"][0]["rows"].clone()).unwrap();
-    assert_eq!(expected.len(), 7);
+    assert_eq!(expected.len(), expected_count);
     let oids: BTreeSet<i64> = expected.iter().map(|row| row[0].parse().unwrap()).collect();
     let mut routines: Vec<_> = PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
