@@ -26,6 +26,19 @@ pub struct StatementPlanningContext<'a> {
 }
 
 impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
+    fn plan_for_statement_cache(
+        &self,
+        mut plan: UnifiedPlan,
+        params: &[SQLParam],
+    ) -> Result<(UnifiedPlan, bool), SQLError> {
+        let (_, reusable) = uqa_sql::binding::statements::analyze_executable_plan_for_cache(
+            &self.analysis,
+            &mut plan,
+            params,
+        )?;
+        Ok((optimize_plan(self, plan)?, reusable))
+    }
+
     fn plan_for_execution(
         &self,
         plan: UnifiedPlan,

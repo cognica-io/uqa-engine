@@ -73,6 +73,24 @@ pub(super) struct ParameterTypes<'a> {
 pub(super) struct InputConstants(BTreeMap<NonNull<ScalarExpr>, ScalarExpr>);
 
 impl InputConstants {
+    /// Ordinary messages must repeat session/catalog-dependent input functions.
+    /// Prepared definitions intentionally retain these same converted constants.
+    pub(super) fn reusable_across_messages(&self) -> bool {
+        self.0.values().all(|expression| {
+            let ScalarExpr::TypedLiteral {
+                bound_type: Some(ty),
+                ..
+            } = expression
+            else {
+                return false;
+            };
+            !crate::expr::requires_domain_array_input(ty)
+                && !matches!(ty, ColumnType::Composite(_))
+                && crate::type_resolution::cast_volatility(&ColumnType::Text, ty)
+                    == crate::ast::FunctionVolatility::Immutable
+        })
+    }
+
     pub(super) fn apply_expression(mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
         crate::plan::rewrite_scalar_expression(expression, &mut |node| {
             if let Some(constant) = self.0.remove(&NonNull::from(&*node)) {

@@ -68,24 +68,51 @@ pub fn analyze_executable_plan(
     plan: &mut UnifiedPlan,
     params: &[SQLParam],
 ) -> Result<AnalyzedResult, SQLError> {
+    analyze_executable_plan_for_cache(context, plan, params).map(|(result, _)| result)
+}
+
+/// Analyze once and report whether the converted inputs can be reused by a later
+/// ordinary message. Prepared definitions use their separate creation lifetime.
+pub fn analyze_executable_plan_for_cache(
+    context: &StatementAnalysisContext<'_>,
+    plan: &mut UnifiedPlan,
+    params: &[SQLParam],
+) -> Result<(AnalyzedResult, bool), SQLError> {
     let mut result = None;
+    let mut reusable = params.is_empty();
     context.scopes.with_scope(&mut |scope| {
         result = Some(match plan {
             UnifiedPlan::Command(command) => match command.as_mut() {
                 // The explained statement retains a scope of its own.
                 CommandPlan::Explain { body, .. } => {
-                    analyze_executable_plan(context, body, params)?;
+                    let (_, body_reusable) =
+                        analyze_executable_plan_for_cache(context, body, params)?;
+                    reusable &= body_reusable;
                     AnalyzedResult::Command
                 }
-                _ => analyze_plan_result(context.routines, context.aliases, plan, params, scope)?,
+                _ => analyze_plan_result_inner(
+                    context.routines,
+                    context.aliases,
+                    plan,
+                    params,
+                    scope,
+                    &mut reusable,
+                )?,
             },
-            UnifiedPlan::Query(_) => {
-                analyze_plan_result(context.routines, context.aliases, plan, params, scope)?
-            }
+            UnifiedPlan::Query(_) => analyze_plan_result_inner(
+                context.routines,
+                context.aliases,
+                plan,
+                params,
+                scope,
+                &mut reusable,
+            )?,
         });
         Ok(())
     })?;
-    result.ok_or_else(|| SQLError::Internal("statement analysis scope did not run".into()))
+    result
+        .map(|result| (result, reusable))
+        .ok_or_else(|| SQLError::Internal("statement analysis scope did not run".into()))
 }
 
 /// Analyze a statement in one binding scope, retain input-function results in its
@@ -97,8 +124,20 @@ pub fn analyze_plan_result(
     params: &[SQLParam],
     scope: &dyn StatementBindingScope,
 ) -> Result<AnalyzedResult, SQLError> {
+    analyze_plan_result_inner(routines, aliases, plan, params, scope, &mut true)
+}
+
+fn analyze_plan_result_inner(
+    routines: &dyn RoutineResolution,
+    aliases: &dyn crate::schema::dependencies::oid_alias::OidAliasInput,
+    plan: &mut UnifiedPlan,
+    params: &[SQLParam],
+    scope: &dyn StatementBindingScope,
+    reusable: &mut bool,
+) -> Result<AnalyzedResult, SQLError> {
     let binding = scope.binding_context()?;
-    super::preparation::read_executable_inputs(routines, plan, params, &binding, aliases)?;
+    *reusable &=
+        super::preparation::read_executable_inputs(routines, plan, params, &binding, aliases)?;
     let rows = AnalyzedResult::Schema;
     match plan {
         UnifiedPlan::Query(query) => {
@@ -106,7 +145,7 @@ pub fn analyze_plan_result(
         }
         UnifiedPlan::Command(command) => match command.as_mut() {
             CommandPlan::Explain { body, .. } => {
-                analyze_plan_result(routines, aliases, body, params, scope)?;
+                analyze_plan_result_inner(routines, aliases, body, params, scope, reusable)?;
                 Ok(AnalyzedResult::Command)
             }
             CommandPlan::CreateView { query, .. }
