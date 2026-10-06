@@ -51,7 +51,15 @@ pub fn optimize_plan(
     constant_evaluator: crate::ConstantEvaluator,
     plan: UnifiedPlan,
 ) -> Result<UnifiedPlan, SQLError> {
-    optimize_plan_authorized(context, rules, aggregates, constant_evaluator, None, plan)
+    optimize_plan_authorized(
+        context,
+        rules,
+        aggregates,
+        constant_evaluator,
+        None,
+        None,
+        plan,
+    )
 }
 
 pub(super) fn optimize_plan_authorized(
@@ -62,6 +70,7 @@ pub(super) fn optimize_plan_authorized(
     permissions: Option<
         std::sync::Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
     >,
+    routines: Option<uqa_sql::routines::inlining::RoutineInliningContext<'_>>,
     mut plan: UnifiedPlan,
 ) -> Result<UnifiedPlan, SQLError> {
     rule_inputs::rewrite_plan(rules, &mut plan)?;
@@ -75,6 +84,7 @@ pub(super) fn optimize_plan_authorized(
         aggregates,
         constant_evaluator,
         permissions,
+        routines,
         plan,
         &statistics,
     );
@@ -90,11 +100,13 @@ fn optimize_plan_with_statistics(
     permissions: Option<
         std::sync::Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
     >,
+    routines: Option<uqa_sql::routines::inlining::RoutineInliningContext<'_>>,
     plan: crate::UnifiedPlan,
     statistics: &dyn crate::SourceStatistics,
 ) -> Result<crate::UnifiedPlan, SQLError> {
     let mut optimizer_config = crate::optimizer::OptimizerConfig::new(constant_evaluator);
     optimizer_config.builtin_permissions = permissions;
+    optimizer_config.routine_inlining = routines;
     if uqa_sql::semantics::volatility::unified_plan_contains_volatile_function(
         volatility_catalog,
         &plan,

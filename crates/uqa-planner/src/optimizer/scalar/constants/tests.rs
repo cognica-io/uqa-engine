@@ -284,3 +284,54 @@ fn unreachable_scalar_subqueries_keep_types_without_constant_evaluation() {
         assert_eq!(result.is_err(), denied, "{sql}: {result:?}");
     }
 }
+
+#[test]
+fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
+    let mood = ColumnType::Enum(uqa_sql::ast::EnumTypeReference {
+        schema: "public".into(),
+        name: "mood".into(),
+        oid: 20_000,
+        array_oid: 20_001,
+    });
+    let values = [
+        (
+            mood,
+            Value::Enum(uqa_core::EnumValue::new(
+                20_000,
+                uqa_core::EnumLabelKey::from_bytes(vec![1]).unwrap(),
+            )),
+        ),
+        (
+            ColumnType::TimestampTz,
+            Value::Temporal(uqa_core::TemporalValue::TimestampTz { micros: 0 }),
+        ),
+    ];
+    for (ty, value) in values {
+        let expression = ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::TypedLiteral {
+                value,
+                ty: ty.catalog_name(),
+                bound_type: Some(ty),
+                parameter_index: None,
+            }),
+            ty: "text".into(),
+        };
+        let retained = fold_literal_expression(expression.clone(), |_| {
+            panic!("a stable output function cannot run in the catalog-free constant evaluator")
+        })
+        .unwrap();
+        assert_eq!(retained, expression);
+    }
+    let integer = ScalarExpr::Cast {
+        expr: Box::new(ScalarExpr::TypedLiteral {
+            value: Value::Int(7),
+            ty: "integer".into(),
+            bound_type: Some(ColumnType::Integer),
+            parameter_index: None,
+        }),
+        ty: "text".into(),
+    };
+    let folded =
+        fold_literal_expression(integer, uqa_execution::scalar::eval_constant_scalar).unwrap();
+    assert_eq!(literal_value(&folded), Some(&Value::Str("7".into())));
+}

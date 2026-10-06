@@ -22,6 +22,27 @@ pub(crate) fn analyze_routine_body_inputs(
     aliases: &dyn OidAliasInput,
     parameters: Option<&crate::binding::RoutineParameterScope>,
 ) -> Result<crate::binding::statements::AnalyzedResult, SQLError> {
+    prepare_routine_body_inputs(
+        routines,
+        &mut plan.clone(),
+        params,
+        binding,
+        aliases,
+        parameters,
+    )
+}
+
+/// Analyze and retain a SQL body's input constants in a fresh caller-owned plan.
+/// This is the same ordered analysis used by creation validation; it does not
+/// compile or replace the session's execution-time routine body cache.
+pub(crate) fn prepare_routine_body_inputs(
+    routines: &dyn RoutineResolution,
+    plan: &mut UnifiedPlan,
+    params: &[crate::SQLParam],
+    binding: &BindingContext<'_>,
+    aliases: &dyn OidAliasInput,
+    parameters: Option<&crate::binding::RoutineParameterScope>,
+) -> Result<crate::binding::statements::AnalyzedResult, SQLError> {
     let declared = params
         .iter()
         .map(|parameter| parameter.declared_scalar_type().cloned())
@@ -45,7 +66,10 @@ pub(crate) fn analyze_routine_body_inputs(
         )?),
         UnifiedPlan::Command(command) => analysis.command(command)?,
     };
+    let constants = analysis.parameters.take_input_constants();
     analysis.parameters.finish()?;
+    constants.apply(plan)?;
+    plan.normalize_window_definitions()?;
     Ok(result.map_or(
         crate::binding::statements::AnalyzedResult::Command,
         |schema| crate::binding::statements::AnalyzedResult::Schema(schema),

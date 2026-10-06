@@ -36,6 +36,7 @@ pub use commands::analyze_prepared_command_schema;
 pub use preparation::{analyze_column_type_transform, infer_prepared_parameter_types};
 pub(crate) use preparation::{
     analyze_default_inputs, analyze_routine_body_argument, analyze_routine_body_inputs,
+    prepare_routine_body_inputs,
 };
 pub(crate) use preparation::{
     analyze_domain_check, analyze_stored_expression_inputs, read_prepared_inputs,

@@ -163,12 +163,12 @@ impl<'a> ParameterTypes<'a> {
 
     /// Keep the declaration selected by analysis on the original call, without
     /// copying its arguments or repeating type inference before optimization.
-    pub(super) fn retain_fixed_builtin(
+    pub(super) fn retain_call(
         &mut self,
         expression: &ScalarExpr,
         selected: &crate::ast::FunctionBinding,
     ) {
-        if crate::fixed_builtin_return_type(selected).is_some() {
+        if !selected.builtin || crate::fixed_builtin_return_type(selected).is_some() {
             if let Some(constants) = &mut self.input_constants {
                 constants
                     .1

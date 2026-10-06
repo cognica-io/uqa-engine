@@ -46,10 +46,11 @@ fn pg18_routine_owner_acl_context_and_catalog_move_together() {
 
     assert_eq!(sqlstate(&engine, "SELECT secured_probe()"), "42501");
     assert_eq!(
-        sqlstate(&engine, "SELECT strict_secured(NULL)"),
-        "42501",
-        "STRICT must not bypass EXECUTE privilege checks"
+        scalar(&engine, "SELECT strict_secured(NULL) AS v"),
+        Value::Null,
+        "PostgreSQL removes a strict constant-NULL call before checking EXECUTE"
     );
+    assert_eq!(sqlstate(&engine, "SELECT strict_secured(1)"), "42501");
     engine.sql("RESET ROLE", &[]).unwrap();
     engine
         .sql(

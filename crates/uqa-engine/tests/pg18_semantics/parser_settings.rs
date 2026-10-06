@@ -9,6 +9,9 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "parser_settings/sql_routine_lifetimes.rs"]
+mod sql_routine_lifetimes;
+
 fn open(provider: usize, path: &std::path::Path) -> Engine {
     match provider {
         0 => Engine::new(),

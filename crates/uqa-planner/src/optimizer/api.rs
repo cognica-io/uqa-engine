@@ -35,7 +35,7 @@ pub fn optimize_scalar_expression(
 }
 
 #[derive(Debug, Clone)]
-pub struct OptimizerConfig {
+pub struct OptimizerConfig<'a> {
     pub enable_filter_pushdown: bool,
     pub enable_boolean_simplify: bool,
     pub enable_vector_threshold_merge: bool,
@@ -46,9 +46,12 @@ pub struct OptimizerConfig {
     pub builtin_permissions: Option<
         std::sync::Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
     >,
+    /// Selected SQL functions expanded in the caller's plan, never in stored syntax.
+    pub routine_inlining: Option<uqa_sql::routines::inlining::RoutineInliningContext<'a>>,
+    pub(super) active_inline_routines: Vec<[u8; 16]>,
 }
 
-impl OptimizerConfig {
+impl OptimizerConfig<'_> {
     #[must_use]
     pub const fn new(constant_evaluator: ConstantEvaluator) -> Self {
         Self {
@@ -58,6 +61,8 @@ impl OptimizerConfig {
             enable_join_reordering: true,
             constant_evaluator,
             builtin_permissions: None,
+            routine_inlining: None,
+            active_inline_routines: Vec::new(),
         }
     }
 }

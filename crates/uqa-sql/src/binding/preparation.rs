@@ -14,7 +14,9 @@ mod function_calls;
 mod parameters;
 mod queries;
 mod routines;
-pub(crate) use routines::{analyze_routine_body_argument, analyze_routine_body_inputs};
+pub(crate) use routines::{
+    analyze_routine_body_argument, analyze_routine_body_inputs, prepare_routine_body_inputs,
+};
 mod schema_expressions;
 mod sources;
 #[cfg(test)]

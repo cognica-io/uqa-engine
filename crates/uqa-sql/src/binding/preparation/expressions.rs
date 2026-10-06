@@ -368,8 +368,7 @@ impl Preparation<'_> {
             None => self.known_type(expression, input, subqueries)?,
         };
         if let Some(selected) = &selected {
-            self.parameters
-                .retain_fixed_builtin(expression, &selected.binding);
+            self.parameters.retain_call(expression, &selected.binding);
         }
         self.check_schema_function(
             expression,
