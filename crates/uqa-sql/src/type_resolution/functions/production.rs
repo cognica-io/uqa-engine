@@ -687,6 +687,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             control,
         );
     }
+    super::signatures::validate_array_call(name, args, &effective_types)?;
     match name {
         "pg_typeof" => inline(ColumnType::Regtype, control),
         "typeof"
@@ -884,7 +885,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "to_timestamp" => inline(ColumnType::TimestampTz, control),
         "current_time" => inline(ColumnType::TimeTz, control),
         "localtime" => inline(ColumnType::Time, control),
-        "localtimestamp" | "make_timestamp" => inline(ColumnType::Timestamp, control),
+        "localtimestamp" => inline(ColumnType::Timestamp, control),
         "current_date" | "make_date" | "to_date" => inline(ColumnType::Date, control),
         "age" | "make_interval" => inline(ColumnType::Interval, control),
         "date_trunc" => optional_inline(

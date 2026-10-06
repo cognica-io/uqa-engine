@@ -12,6 +12,7 @@ use crate::{scalar_call_argument, schema::ScalarTypeSchema, ScalarExpr};
 
 use super::{fixed_builtin, scalar_type_inner, FunctionTypeResolver};
 mod production;
+mod signatures;
 pub(super) use production::builtin_function_type_with_control;
 
 #[derive(Clone, Copy)]

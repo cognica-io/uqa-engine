@@ -153,6 +153,10 @@ declarations! { fn lookup_local(local);
         "uuid_extract_version" => &[Signature::new(&[ColumnType::Uuid],
             ColumnType::SmallInteger,
         )],
+        "make_timestamp" => &[Signature::named(
+            &[ColumnType::Integer, ColumnType::Integer, ColumnType::Integer, ColumnType::Integer, ColumnType::Integer, ColumnType::DoublePrecision],
+            &["year", "month", "mday", "hour", "min", "sec"], ColumnType::Timestamp,
+        )],
         "justify_days" | "justify_hours" | "justify_interval" => &[Signature::new(&[ColumnType::Interval],
             ColumnType::Interval,
         )],
