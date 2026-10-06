@@ -11,7 +11,7 @@ use super::{
     Expr, NodeEnum, OrderBy, Result, SQLError, Value, WindowReference, WindowReferenceKind,
     WindowSpec,
 };
-use crate::ast::FunctionBinding;
+use crate::ast::{FunctionBinding, FunctionOrderSyntax};
 
 pub(in crate::compiler) fn compile_const(c: &pg_query::protobuf::AConst) -> Result<Expr> {
     if c.isnull {
@@ -196,6 +196,11 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
         args,
         distinct: f.agg_distinct,
         order_by: agg_order,
+        order_syntax: if f.agg_within_group {
+            FunctionOrderSyntax::WithinGroup
+        } else {
+            FunctionOrderSyntax::Ordinary
+        },
         filter: agg_filter,
     })
 }

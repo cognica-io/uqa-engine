@@ -473,6 +473,7 @@ impl Deparser<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
         let ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -504,9 +505,14 @@ impl Deparser<'_> {
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            rendered.pop();
-            write!(rendered, " ORDER BY {})", order.join(", "))
-                .expect("writing to a String cannot fail");
+            if *order_syntax == uqa_sql::ast::FunctionOrderSyntax::WithinGroup {
+                write!(rendered, " WITHIN GROUP (ORDER BY {})", order.join(", "))
+                    .expect("writing to a String cannot fail");
+            } else {
+                rendered.pop();
+                write!(rendered, " ORDER BY {})", order.join(", "))
+                    .expect("writing to a String cannot fail");
+            }
         }
         if let Some(filter) = filter {
             write!(

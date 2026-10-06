@@ -1,0 +1,142 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Bound function syntax returns to the exact stored expression site.
+
+use super::{bind_stored_expression_sites, bind_stored_statement_sites};
+use crate::ast::{Expr, FunctionOrderSyntax, Statement};
+use crate::binding::syntax_sites::{expression_syntax_sites, query_syntax_sites};
+use crate::catalog::stored_ast::{visit_stored_expression, visit_stored_statement_expressions};
+use crate::plan::{ExpressionPlan, QueryPlan};
+use crate::{SQLError, ScalarExpr};
+use uqa_core::Value;
+
+fn expression(sql: &str) -> Expr {
+    let Statement::Select(mut statement) =
+        crate::compile(&format!("SELECT {sql}")).unwrap().remove(0)
+    else {
+        panic!("SELECT expected");
+    };
+    statement.projections.remove(0).expr
+}
+
+fn legacy(node: &mut Expr) -> Result<(), SQLError> {
+    if let Expr::Func { order_syntax, .. } = node {
+        *order_syntax = FunctionOrderSyntax::Legacy;
+    }
+    Ok(())
+}
+
+fn resolved_order(node: &mut ScalarExpr) {
+    if let ScalarExpr::Func {
+        name, order_syntax, ..
+    } = node
+    {
+        *order_syntax = if matches!(name.as_str(), "mode" | "percentile_disc") {
+            FunctionOrderSyntax::WithinGroup
+        } else {
+            FunctionOrderSyntax::Ordinary
+        };
+    }
+}
+
+#[test]
+fn stored_expression_receives_function_order_and_typed_inputs_at_their_own_sites() {
+    let mut syntax = expression(
+        "coalesce(percentile_disc('0.5') WITHIN GROUP (ORDER BY 'ordered'::text), 'fallback')",
+    );
+    visit_stored_expression(&mut syntax, &mut legacy).unwrap();
+    let original = ExpressionPlan::lower(syntax.clone());
+    let mut bound = original.clone();
+    bound.scalar.visit_mut(&mut |node| {
+        resolved_order(node);
+        if matches!(node, ScalarExpr::Literal(Value::Str(text)) if text == "0.5") {
+            *node = ScalarExpr::TypedLiteral {
+                value: Value::Float(0.5),
+                ty: "double precision".into(),
+                bound_type: None,
+                parameter_index: None,
+            };
+        }
+    });
+    let sites = expression_syntax_sites(&original, &bound).unwrap();
+    assert!(bind_stored_expression_sites(&mut syntax, &sites).unwrap());
+    let restored = ExpressionPlan::lower(syntax.clone());
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap(),
+        serde_json::to_value(&bound).unwrap()
+    );
+    let sites = expression_syntax_sites(&restored, &restored).unwrap();
+    assert!(!bind_stored_expression_sites(&mut syntax, &sites).unwrap());
+    let encoded = serde_json::to_string(&syntax).unwrap();
+    assert!(encoded.contains("\"order_syntax\":\"WithinGroup\""));
+    assert_eq!(serde_json::from_str::<Expr>(&encoded).unwrap(), syntax);
+}
+
+#[test]
+fn stored_query_order_sites_follow_ctes_and_scalar_subqueries() {
+    let mut syntax = crate::compile(
+        "WITH input AS (SELECT mode() WITHIN GROUP (ORDER BY lower('X')) AS value) SELECT value, (SELECT array_agg(1 ORDER BY 1)) FROM input",
+    )
+    .unwrap()
+    .remove(0);
+    visit_stored_statement_expressions(&mut syntax, &mut legacy).unwrap();
+    let Statement::Select(statement) = &syntax else {
+        panic!("SELECT expected");
+    };
+    let original = QueryPlan::lower(statement.as_ref().clone());
+    let mut bound = original.clone();
+    bound.rewrite_scalar_expressions(&mut resolved_order);
+    let sites = query_syntax_sites(&original, &bound).unwrap();
+    assert!(bind_stored_statement_sites(&mut syntax, &sites).unwrap());
+    let Statement::Select(statement) = &syntax else {
+        panic!("SELECT expected");
+    };
+    let restored = QueryPlan::lower(statement.as_ref().clone());
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap(),
+        serde_json::to_value(&bound).unwrap()
+    );
+    let sites = query_syntax_sites(&restored, &restored).unwrap();
+    assert!(!bind_stored_statement_sites(&mut syntax, &sites).unwrap());
+}
+
+#[test]
+fn function_order_sites_do_not_reinterpret_explicit_syntax() {
+    let syntax = expression("f(a ORDER BY b)");
+    let original = ExpressionPlan::lower(syntax.clone());
+    let mut bound = original.clone();
+    let ScalarExpr::Func { order_syntax, .. } = &mut bound.scalar else {
+        panic!("function expected");
+    };
+    *order_syntax = FunctionOrderSyntax::WithinGroup;
+    assert!(expression_syntax_sites(&original, &bound)
+        .unwrap_err()
+        .to_string()
+        .contains("function ordering"));
+
+    let mut legacy_syntax = syntax.clone();
+    visit_stored_expression(&mut legacy_syntax, &mut legacy).unwrap();
+    let legacy_plan = ExpressionPlan::lower(legacy_syntax);
+    let sites = expression_syntax_sites(&legacy_plan, &bound).unwrap();
+    let mut explicit_syntax = syntax;
+    assert!(bind_stored_expression_sites(&mut explicit_syntax, &sites)
+        .unwrap_err()
+        .to_string()
+        .contains("function ordering"));
+}
+
+#[test]
+fn unresolved_legacy_function_order_is_preserved_without_serialized_metadata() {
+    let mut syntax = expression("f(a ORDER BY b)");
+    visit_stored_expression(&mut syntax, &mut legacy).unwrap();
+    let lowered = ExpressionPlan::lower(syntax.clone());
+    let sites = expression_syntax_sites(&lowered, &lowered).unwrap();
+    assert!(!bind_stored_expression_sites(&mut syntax, &sites).unwrap());
+    assert!(!serde_json::to_string(&syntax)
+        .unwrap()
+        .contains("order_syntax"));
+}

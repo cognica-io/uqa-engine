@@ -610,6 +610,7 @@ fn rewrite_aggregate_dependencies(
             capture_aggregate_dependency(expression, dependencies)
         }
         ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -617,6 +618,7 @@ fn rewrite_aggregate_dependencies(
             order_by,
             filter,
         } => ScalarExpr::Func {
+            order_syntax: *order_syntax,
             name: name.clone(),
             binding: binding.clone(),
             args: args

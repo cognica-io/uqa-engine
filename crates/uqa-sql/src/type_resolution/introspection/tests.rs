@@ -14,6 +14,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 fn call(name: &str, args: Vec<Expr>) -> Expr {
     Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: name.into(),
         binding: None,
         args,

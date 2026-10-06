@@ -33,6 +33,7 @@ impl RowLookup for TestRow {
 
 fn aggregate(name: &str, argument: ScalarExpr) -> ScalarExpr {
     ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: name.into(),
         binding: None,
         args: vec![argument],

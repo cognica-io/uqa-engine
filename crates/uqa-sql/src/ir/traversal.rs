@@ -737,6 +737,7 @@ mod tests {
     #[test]
     fn owned_walkers_preserve_column_and_aggregate_policy() {
         let expression = ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: "sum".into(),
             binding: None,
             args: vec![ScalarExpr::QualifiedColumn {

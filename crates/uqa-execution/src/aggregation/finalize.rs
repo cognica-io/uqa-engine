@@ -259,9 +259,27 @@ pub fn aggregate_value_with_args(
 
 pub fn percentile_fraction(args: &[ScalarExpr]) -> Result<f64, SQLError> {
     let fraction = match args.first() {
-        Some(ScalarExpr::Literal(Value::Float(f))) => *f,
-        Some(ScalarExpr::Literal(Value::Int(n))) => *n as f64,
-        Some(ScalarExpr::Literal(Value::Decimal(d))) => d.to_f64().ok_or_else(|| {
+        Some(
+            ScalarExpr::Literal(Value::Float(f))
+            | ScalarExpr::TypedLiteral {
+                value: Value::Float(f),
+                ..
+            },
+        ) => *f,
+        Some(
+            ScalarExpr::Literal(Value::Int(n))
+            | ScalarExpr::TypedLiteral {
+                value: Value::Int(n),
+                ..
+            },
+        ) => *n as f64,
+        Some(
+            ScalarExpr::Literal(Value::Decimal(d))
+            | ScalarExpr::TypedLiteral {
+                value: Value::Decimal(d),
+                ..
+            },
+        ) => d.to_f64().ok_or_else(|| {
             SQLError::TypeMismatch("percentile fraction is outside floating-point range".into())
         })?,
         Some(value) => {

@@ -123,6 +123,7 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             .unwrap_or_else(|| expr.clone()),
         Expr::Default | Expr::Literal(_) | Expr::TypedLiteral { .. } | Expr::Star => expr.clone(),
         Expr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -130,6 +131,7 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             order_by,
             filter,
         } => Expr::Func {
+            order_syntax: *order_syntax,
             name: name.clone(),
             binding: binding.clone(),
             args: bind_exprs(args, r)?,

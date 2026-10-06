@@ -449,6 +449,7 @@ fn window_function(
         },
         _ => {
             let call = ScalarExpr::Func {
+                order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
                 name: slot.name.clone(),
                 binding: None,
                 args: slot.args.clone(),

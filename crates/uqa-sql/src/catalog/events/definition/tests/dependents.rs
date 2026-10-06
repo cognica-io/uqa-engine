@@ -48,6 +48,7 @@ fn binding(id: Option<[u8; 16]>, name: &str) -> FunctionBinding {
 }
 fn call(binding: FunctionBinding) -> Expr {
     Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: binding.name.clone(),
         binding: Some(binding),
         args: Vec::new(),

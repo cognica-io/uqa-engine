@@ -116,6 +116,7 @@ fn optimize_scalar(
             negated,
         },
         ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -132,6 +133,7 @@ fn optimize_scalar(
                 optimize_list(args, config)?
             };
             ScalarExpr::Func {
+                order_syntax,
                 name,
                 binding,
                 args,

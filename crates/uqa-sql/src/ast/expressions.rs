@@ -150,6 +150,22 @@ pub enum FrameMode {
     Groups,
 }
 
+/// The written location of a function's ordering expressions. Older stored expressions did not retain this distinction and require binding to recover it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FunctionOrderSyntax {
+    #[default]
+    Legacy,
+    Ordinary,
+    WithinGroup,
+}
+
+impl FunctionOrderSyntax {
+    #[must_use]
+    pub const fn is_legacy(&self) -> bool {
+        matches!(self, Self::Legacy)
+    }
+}
+
 /// The aggregate modifiers written on a window call, which `ParseFuncOrColumn` rejects after it has resolved the function. The arguments of a call written with `WITHIN GROUP` include its ordering expressions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowCallModifiers {
@@ -245,9 +261,10 @@ pub enum Expr {
         /// `func(DISTINCT expr)` - only meaningful for aggregate
         /// functions. Mirrors `PostgreSQL`'s `agg_distinct`.
         distinct: bool,
-        /// `func(expr ORDER BY ...)` - only meaningful for ordered
-        /// aggregates (`STRING_AGG`, `ARRAY_AGG`, `PERCENTILE_*`).
+        /// Ordering expressions from either `func(expr ORDER BY ...)` or `func(expr) WITHIN GROUP (ORDER BY ...)`; `order_syntax` preserves their written location.
         order_by: Vec<OrderBy>,
+        #[serde(default, skip_serializing_if = "FunctionOrderSyntax::is_legacy")]
+        order_syntax: FunctionOrderSyntax,
         /// `func(...) FILTER (WHERE expr)` - aggregate-level row filter.
         filter: Option<Box<Expr>>,
     },

@@ -131,6 +131,7 @@ pub fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> Scalar
             negated: *negated,
         },
         ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -138,6 +139,7 @@ pub fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> Scalar
             order_by,
             filter,
         } => ScalarExpr::Func {
+            order_syntax: *order_syntax,
             name: name.clone(),
             binding: binding.clone(),
             args: args

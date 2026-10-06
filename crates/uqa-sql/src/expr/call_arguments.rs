@@ -97,6 +97,7 @@ pub fn wrap_variadic_argument(mut argument: Expr) -> Expr {
 fn variadic_argument_marker(value: Expr) -> Expr {
     let binding = FunctionBinding::dispatched(FunctionDispatch::VariadicArgument);
     Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: binding.name.clone(),
         binding: Some(binding),
         args: vec![value],

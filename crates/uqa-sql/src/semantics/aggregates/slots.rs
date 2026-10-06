@@ -131,6 +131,7 @@ fn rewrite_selected(
     }
     match expr {
         ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -138,6 +139,7 @@ fn rewrite_selected(
             order_by,
             filter,
         } => Ok(ScalarExpr::Func {
+            order_syntax: *order_syntax,
             name: name.clone(),
             binding: binding.clone(),
             args: args

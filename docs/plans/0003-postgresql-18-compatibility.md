@@ -140,7 +140,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | Milestone | Name | Status | Exit gate |
 | --- | --- | --- | --- |
 | `M0` | PG18 baseline | `in_progress` | PG18 parser pinned; all AST deltas audited; unsupported shapes fail explicitly; active names and fixtures use pg18; 22/22 TPC-H-derived results match PostgreSQL 18 |
-| `M1` | Discovered semantic fixes | `complete` | Bounded DML row-image, constraint-metadata, identified-function, and independently verified semantic slices pass their PostgreSQL 18.4 evidence |
+| `M1` | Discovered semantic fixes | `in_progress` | Bounded DML row-image, constraint-metadata, identified-function, and independently verified semantic slices pass their PostgreSQL 18.4 evidence |
 | `M2` | Protocol 3.2 | `complete` | Byte-exact codec tests and live PostgreSQL 18 libpq 3.0/3.2/latest negotiation and cancellation tests pass |
 | `M3` | PG18 DDL and types | `in_progress` | Generated columns, range/multirange, temporal constraints, catalogs, dump/restore, and reopen tests pass |
 | `M4` | Core regression parity | `in_progress` | PostgreSQL 18 core regression and isolation suites pass with every remaining failure recorded and reduced to zero |
@@ -176,7 +176,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.ctas-column-names` | `M1` | `verified` |
 | `ddl.ctas-with-no-data` | `M1` | `verified` |
 | `ddl.select-into` | `M1` | `verified` |
-| `ddl.view-column-aliases` | `M1` | `verified` |
+| `ddl.view-column-aliases` | `M1` | `partial` |
 | `functions.identified-pg18-additions` | `M1` | `verified` |
 | `functions.full-pg18-matrix` | `M4` | `partial` |
 | `functions.fixed-builtin-overload-resolution` | `M1` | `verified` |
@@ -279,6 +279,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `catalog.creation-ordered-oids` | `M3` | `partial` |
 | `ddl.relation-creation-namespaces` | `M3` | `partial` |
 | `ddl.rule-and-trigger-definitions` | `M3` | `partial` |
+| `aggregates.within-group-call-analysis` | `M1` | `verified` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -802,15 +803,16 @@ The ordinary 32-message and stored-expression 35-message references pass on memo
 
 ## Ordinary WITHIN GROUP call analysis
 
-This bounded successor to PR #429 addresses the inherited task requiring ordinary calls with WITHIN GROUP to resolve their ordering expressions as function arguments before modifier rejection. SQL currently discards the syntax distinction for non-window calls and resolves only direct arguments. The independent 35-message PostgreSQL 18.4 reference records exact values, command tags, SQLSTATE, message, DETAIL and HINT, including implicit input effects, FILTER order, selected user overloads, valid ordered aggregates and stored/prepared calls. Its compact fixture is `tests/parity/pg18/within_group_calls_oracle.expected.json`.
+This bounded successor to PR #429 addresses the inherited task requiring ordinary calls with WITHIN GROUP to resolve their ordering expressions as function arguments before modifier rejection. SQL previously discarded the syntax distinction for non-window calls and resolved only direct arguments; the implementation now retains the syntax and selects the combined signature. The independent 46-message PostgreSQL 18.4 reference records exact values, command tags, SQLSTATE, message, DETAIL and HINT, including implicit input effects, FILTER order, selected user overloads, valid ordered aggregates and stored/prepared calls. Its compact fixture is `tests/parity/pg18/within_group_calls_oracle.expected.json`.
 
 - [x] Inspect SQL, Planner, Execution and Engine manifests/features, dependency policy, existing aggregate execution and stored-expression restoration; capture the independent PostgreSQL reference.
-- [ ] Preserve the syntax distinction in SQL AST/IR and rendering, retaining separate direct and ordered argument vectors and legacy stored-expression behavior.
-- [ ] Resolve ordinary calls with the correct borrowed argument sequence and selected function kind; reject invalid modifiers before implicit input coercion while preserving child and FILTER diagnostic order.
-- [ ] Verify owner and four-provider/reopen behavior, update public documentation and all inherited task records, merge and clean the completed branch before starting the following unit.
+- [x] Preserve the syntax distinction in SQL AST/IR and rendering, retaining separate direct and ordered argument vectors and legacy stored-expression behavior.
+- [x] Resolve ordinary calls with the correct borrowed argument sequence and selected function kind; reject invalid modifiers before implicit input coercion while preserving child and FILTER diagnostic order.
+- [x] Verify owner and four-provider/reopen behavior and update public documentation and the compatibility manifest.
+- [ ] Merge, update all inherited task records and clean the completed branch before starting the following unit.
 
 ### Preservation obligations
 
 Let $A$ be a call's direct arguments and $O$ its ordered arguments. For explicit WITHIN GROUP, signature selection receives $A \mathbin{+\!+} O$ in that order, while execution retains the existing separate $(A,O)$ representation. Analysis evaluates each child input once, checks FILTER, selects the routine, validates its kind and argument split, and only then applies implicit input coercions for an accepted call. A rejected modifier therefore performs no implicit domain-array input effects. An accepted ordered aggregate receives the same direct values, ordered population, NULLs, ordering direction and filtering as before; ordinary aggregate ORDER BY remains distinct. These equalities preserve existing aggregate carriers and all surrounding relational/ranked compositions. No operator or carrier is introduced. Stored legacy expressions must retain their selected aggregate identity without interpreting missing syntax metadata as newly written ordinary ORDER BY.
 
-The PostgreSQL reference is captured; UQA implementation and comparison are pending. All 75 inherited checklist records and 44 original open work items remain unchanged until this unit is verified and merged.
+PR #431 passes all 46 PostgreSQL messages on all four providers, eighteen persistent-reopen observations and native legacy-view migration across two reopenings. SQL owner tests (1,265), Planner tests (129), Execution aggregation tests (42), prepared statements (67), window comparisons (2), aggregate integrations (68), domain-array integrations (8) and existing restoration/rollback tests (4) pass. Strict Clippy, Rustfmt, dependency/capability, integration-harness, file-header and file-size checks pass. The related prepared percentile fraction defect (#432) is corrected. The broader view suite passes 59 tests and reproduces the existing main-branch input-versus-alias error-order defect (#433); its manifest item is reopened and its separate correction follows immediately. All 75 inherited checklist records and 44 original open work items remain preserved until merge.

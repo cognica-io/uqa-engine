@@ -103,6 +103,7 @@ impl StoredSequenceNames for References {
 }
 fn sequence_expression(argument: Expr) -> Expr {
     Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "nextval".into(),
         binding: None,
         args: vec![argument],

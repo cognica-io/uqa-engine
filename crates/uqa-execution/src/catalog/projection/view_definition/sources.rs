@@ -416,6 +416,7 @@ fn merged_columns(
         if kind == JoinKind::Full {
             column.merged = Some(quote_ident(name));
             column.merged_expression = Some(uqa_sql::ir::ScalarExpr::Func {
+                order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
                 name: "coalesce".into(),
                 binding: None,
                 args: vec![

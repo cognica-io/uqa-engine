@@ -89,6 +89,7 @@ impl Lowering<'_> {
                 args,
                 distinct,
                 order_by,
+                order_syntax,
                 filter,
             } => ScalarExpr::Func {
                 name: self.text(name)?,
@@ -100,6 +101,7 @@ impl Lowering<'_> {
                 order_by: self.map(order_by, |this, order| {
                     this.order(order, aggregates, subqueries)
                 })?,
+                order_syntax,
                 filter: filter
                     .map(|filter| self.child(filter, aggregates, subqueries))
                     .transpose()?,

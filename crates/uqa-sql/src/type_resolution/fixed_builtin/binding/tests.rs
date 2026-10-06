@@ -11,6 +11,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 fn input(name: &str, value: Value, budget: &MemoryBudget) -> call::CallOwner {
     let token = CancellationToken::new();
     let expression = Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: name.into(),
         binding: None,
         args: vec![Expr::Literal(value)],
@@ -22,6 +23,7 @@ fn input(name: &str, value: Value, budget: &MemoryBudget) -> call::CallOwner {
         ExpressionPlan::lower_column_budgeted(&expression, budget, &token, &token).unwrap();
     let (expression, memory) = lowered.into_parts();
     let ScalarExpr::Func {
+        order_syntax,
         name,
         binding,
         args,
@@ -34,6 +36,7 @@ fn input(name: &str, value: Value, budget: &MemoryBudget) -> call::CallOwner {
     };
     call::CallOwner {
         call: BindingCall {
+            order_syntax,
             name,
             binding,
             arguments: args,

@@ -35,6 +35,7 @@ fn explicit_variadic_marker_reaches_catalog_type_resolver() {
     let variadic = dispatched(FunctionDispatch::VariadicArgument, vec![array]);
     let named = named_argument("items", variadic);
     let expression = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "application.collect".into(),
         binding: None,
         args: vec![named],
@@ -60,6 +61,7 @@ fn explicit_variadic_marker_is_transparent_and_validates_call_position() {
     );
 
     let call = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "concat".into(),
         binding: None,
         args: vec![
@@ -93,6 +95,7 @@ fn explicit_variadic_marker_is_transparent_and_validates_call_position() {
 fn null_only_transcendental_calls_resolve_to_double_precision() {
     for function in ["sqrt", "ln", "log", "log10"] {
         let expression = ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: function.into(),
             binding: None,
             args: vec![ScalarExpr::Literal(Value::Null)],

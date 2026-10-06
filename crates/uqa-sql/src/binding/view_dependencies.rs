@@ -391,11 +391,25 @@ pub fn query_plan_has_legacy_routine_identity(plan: &QueryPlan) -> bool {
     let mut legacy = false;
     scalar_plan.rewrite_scalar_expressions(&mut |expression| {
         if let ScalarExpr::Func {
-            binding: Some(binding),
+            name,
+            binding,
+            order_syntax,
+            order_by,
             ..
         } = expression
         {
-            legacy |= function_binding_needs_object_identity(binding);
+            legacy |= binding
+                .as_ref()
+                .is_some_and(function_binding_needs_object_identity);
+            // Legacy ordered-set nodes lack the selected combined signature and
+            // written syntax; restore both in the existing initial-open transaction.
+            legacy |= *order_syntax == crate::ast::FunctionOrderSyntax::Legacy
+                && super::ordered_calls::uses_ordered_arguments(
+                    *order_syntax,
+                    name,
+                    binding.as_ref(),
+                    order_by.len(),
+                );
         }
     });
     legacy || query_plan_sources_have_legacy_routine_identity(plan)

@@ -9,6 +9,7 @@ use uqa_core::Value;
 
 fn call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
     ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: name.into(),
         binding: None,
         args,

@@ -103,6 +103,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 // skips NULL arguments.
                 "||" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "concat_op".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -113,6 +114,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "@@" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "fts_match".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -123,6 +125,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "@?" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "jsonpath_exists".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -145,6 +148,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 // POSIX regex operators: `~` match, `~*` case-insensitive match, `!~` / `!~*` their negations, lowered under names no PostgreSQL function has so that they label and print as operators while `regexp_like(...)` stays a call.
                 "~" | "~*" | "!~" | "!~*" => {
                     let call = Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: if op_name.ends_with('*') {
                             "regex_imatch_op"
@@ -166,6 +170,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 // Array overlap.
                 "&&" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "array_overlap".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -176,6 +181,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "-|-" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "range_adjacent".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -186,6 +192,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "~~" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "like".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -196,6 +203,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "~~*" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "ilike".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -206,6 +214,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "!~~" => {
                     return Ok(Expr::Not(Box::new(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "like".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -216,6 +225,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "!~~*" => {
                     return Ok(Expr::Not(Box::new(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "ilike".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -244,6 +254,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "#-" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "json_delete_path".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -254,6 +265,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "@>" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "contains_op".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -264,6 +276,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "<@" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "contained_by_op".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -274,6 +287,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "?" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "json_has_key".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -284,6 +298,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "?|" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "json_has_any_key".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -294,6 +309,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "?&" => {
                     return Ok(Expr::Func {
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                         binding: None,
                         name: "json_has_all_keys".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -399,6 +415,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 "SIMILAR TO",
             )?);
             let call = Expr::Func {
+                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                 binding: None,
                 name: "similar_to".into(),
                 args,
@@ -469,6 +486,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
             let mut args = vec![compile_expr(lhs)?];
             args.extend(compile_pattern_operands(rhs, "like_escape", "LIKE")?);
             let func = Expr::Func {
+                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                 binding: None,
                 name: "like".into(),
                 args,
@@ -498,6 +516,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
             let mut args = vec![compile_expr(lhs)?];
             args.extend(compile_pattern_operands(rhs, "like_escape", "ILIKE")?);
             let func = Expr::Func {
+                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                 binding: None,
                 name: "ilike".into(),
                 args,

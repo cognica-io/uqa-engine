@@ -20,6 +20,9 @@ use uqa_core::{
 
 pub(in crate::type_resolution) trait SignatureParameters {
     fn parameter_count(&self) -> usize;
+    fn accepts_polymorphic_types(&self) -> bool {
+        false
+    }
     fn name(&self, index: usize) -> Option<&str>;
     fn has_default(&self, index: usize) -> bool;
     fn canonical_type(
@@ -175,6 +178,28 @@ pub(in crate::type_resolution) fn match_signature_with_control<
             continue;
         };
         let declared = parameters.canonical_type(index, control)?;
+        if parameters.accepts_polymorphic_types() {
+            let compatible = match declared.as_str() {
+                "any" | "anyelement" | "anycompatible" => Some(true),
+                "anyarray" => Some(matches!(
+                    base_type(actual_type),
+                    ColumnType::Array(_) | ColumnType::AnyArray
+                )),
+                "anynonarray" => Some(!matches!(
+                    base_type(actual_type),
+                    ColumnType::Array(_) | ColumnType::AnyArray
+                )),
+                "anyenum" => Some(matches!(base_type(actual_type), ColumnType::Enum(_))),
+                _ => None,
+            };
+            if let Some(compatible) = compatible {
+                if !compatible {
+                    return Ok(None);
+                }
+                // A polymorphic declaration is compatible, never an exact concrete overload.
+                continue;
+            }
+        }
         let raw_actual = canonical_column_type_name_with_control(actual_type, control)?;
         let actual = canonical_column_type_name_with_control(base_type(actual_type), control)?;
         if *raw_actual == *declared {

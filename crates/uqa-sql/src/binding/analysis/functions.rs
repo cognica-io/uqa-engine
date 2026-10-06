@@ -200,6 +200,97 @@ pub(super) fn validate_scalar_function(
     Err(undefined_function(name, args, schema, params, resolver))
 }
 
+pub(super) fn validate_ordered_function(
+    routines: &dyn RoutineResolution,
+    validation: ScalarFunctionValidation<'_>,
+    within_group: bool,
+    distinct: bool,
+    filtered: bool,
+) -> Result<(), SQLError> {
+    let ScalarFunctionValidation {
+        name,
+        binding,
+        args,
+        order_by,
+        schema,
+        params,
+        resolver,
+        ..
+    } = &validation;
+    let (mut names, mut types, variadic) =
+        crate::function_call_argument_signature(args, *schema, params, Some(*resolver))?;
+    if within_group {
+        for order in *order_by {
+            names.push(None);
+            types.push(
+                crate::common_context_expression_type(
+                    &order.expr,
+                    *schema,
+                    params,
+                    Some(*resolver),
+                )?
+                .and_then(|ty| {
+                    crate::effective_overload_argument_type_with_params(
+                        &order.expr,
+                        Some(ty),
+                        params,
+                    )
+                }),
+            );
+        }
+    }
+    let selected =
+        super::super::ordered_calls::resolve(name, *binding, &names, &types, variadic, *resolver)?;
+    let kind = if let Some((_, kind)) = selected {
+        kind
+    } else if crate::resolve_fixed_builtin_call(
+        name,
+        *binding,
+        &names,
+        &types,
+        variadic,
+        Some(*resolver),
+    )?
+    .is_some()
+        || resolver
+            .resolve_function_overload(name, *binding, &names, &types, variadic)?
+            .is_some()
+    {
+        super::super::ordered_calls::Kind::Ordinary
+    } else {
+        let lower = crate::semantics::builtin_function_dispatch_name(name);
+        if routines.has_registered_aggregate_function(name) {
+            super::super::ordered_calls::Kind::Aggregate
+        } else if routines.has_registered_scalar_function(name)
+            || crate::registry::is_registered(&lower)
+            || builtin_scalar_function(&lower, types.len())
+        {
+            super::super::ordered_calls::Kind::Ordinary
+        } else {
+            return Err(crate::type_resolution::function_resolution_error(
+                "42883",
+                name,
+                &names,
+                &types,
+                "does not exist",
+            ));
+        }
+    };
+    super::super::ordered_calls::validate(
+        name,
+        kind,
+        super::super::ordered_calls::Modifiers {
+            direct: args.len(),
+            ordered: order_by.len(),
+            within_group,
+            distinct,
+            filtered,
+        },
+        &names,
+        &types,
+    )
+}
+
 fn validate_fixed_builtin(
     name: &str,
     binding: Option<&FunctionBinding>,
@@ -445,6 +536,7 @@ fn window_call_kind(
         );
     }
     let call = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: name.to_string(),
         binding: None,
         args: args.to_vec(),

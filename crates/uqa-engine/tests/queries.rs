@@ -126,3 +126,5 @@ mod sql_window;
 mod sql_window_frame;
 #[path = "queries/sql_window_frames.rs"]
 mod sql_window_frames;
+#[path = "queries/within_group_calls_oracle.rs"]
+mod within_group_calls_oracle;

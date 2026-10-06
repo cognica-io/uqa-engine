@@ -311,6 +311,7 @@ fn bind_rule_function_expression(
     context: &RuleBindingContext<'_>,
 ) -> Result<Expr, SQLError> {
     let Expr::Func {
+        order_syntax,
         name,
         binding,
         args,
@@ -322,6 +323,7 @@ fn bind_rule_function_expression(
         unreachable!("function binder received a non-function expression")
     };
     Ok(Expr::Func {
+        order_syntax: *order_syntax,
         name: name.clone(),
         binding: binding.clone(),
         args: bind_exprs(args, resolver, scope, context)?,

@@ -355,6 +355,7 @@ pub(super) fn scalar_type_inner_with_control(
             }
         }
         ScalarExpr::Func {
+            order_syntax: _,
             name,
             binding,
             args,

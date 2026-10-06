@@ -333,6 +333,7 @@ pub(super) fn bind_call(
                 binding: binding.take(),
                 arguments: std::mem::take(args),
                 distinct: false,
+                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
                 order_by: Vec::new(),
                 filter: None,
             },

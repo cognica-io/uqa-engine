@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Carry what binding recorded for stored syntax back into that syntax: exact routine identities, the OID identities of user-defined cast types, and the enum constants that binding converted from `unknown` literals.
+//! Carry what binding recorded for stored syntax back into that syntax: exact routine identities and ordering, the OID identities of user-defined cast types, and the enum constants that binding converted from `unknown` literals.
 
 use super::{
     routines::apply_routine_reference, BTreeSet, Expr, SQLError, Statement, StoredAstVisitor,
@@ -35,7 +35,7 @@ enum Syntax<'a> {
 }
 
 fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError> {
-    // A stored expression's sites name every node, a statement's only its casts and literals.
+    // A stored expression's sites name every node, a statement's only its casts, literals and function ordering.
     let aligned = matches!(syntax, Syntax::Expression(_));
     let mut routines = sites.routines.iter();
     let mut values = sites.values.iter().peekable();
@@ -78,7 +78,7 @@ fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError
     }
     if values.next().is_some() {
         return Err(SQLError::Internal(
-            "stored catalog binding has a cast or literal without matching syntax".into(),
+            "stored catalog binding has an expression site without matching syntax".into(),
         ));
     }
     Ok(routines_changed || values_changed)
@@ -128,6 +128,19 @@ fn apply_value_site<'a>(
             }
             _ => Err(mismatch("literal")),
         },
+        Expr::Func { order_syntax, .. } => {
+            let Some(ValueSite::FunctionOrder(bound)) = sites.next() else {
+                return Err(mismatch("function ordering"));
+            };
+            if order_syntax == bound {
+                return Ok(false);
+            }
+            if !order_syntax.is_legacy() {
+                return Err(mismatch("function ordering"));
+            }
+            *order_syntax = *bound;
+            Ok(true)
+        }
         _ if aligned => match sites.next() {
             Some(ValueSite::Node) => Ok(false),
             _ => Err(mismatch("expression")),
@@ -135,6 +148,9 @@ fn apply_value_site<'a>(
         _ => Ok(false),
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 /// Assignment of a stored `unknown` literal to `target`, as `coerce_to_target_type` converts an untyped constant with the target type's input function when a default, generation expression or result is analyzed: the literal becomes a constant of the enum or enum-array type, or of that base type of a domain, whose own check applies when the value is assigned. Any other expression is coerced when it is evaluated.
 pub fn fold_assigned_stored_literal(

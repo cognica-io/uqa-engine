@@ -36,6 +36,7 @@ pub(super) fn rewrite_window_expr(
             (ScalarExpr::InternalColumn(column), true)
         }
         ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -54,6 +55,7 @@ pub(super) fn rewrite_window_expr(
             };
             (
                 ScalarExpr::Func {
+                    order_syntax: *order_syntax,
                     name: name.clone(),
                     binding: binding.clone(),
                     args,

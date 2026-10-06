@@ -12,7 +12,7 @@ use crate::plan::{CtePlanBody, ExpressionPlan, QueryPlan, RelationalPlan, Source
 use crate::{SQLError, ScalarExpr, ScalarFrameBound};
 use uqa_core::Value;
 
-/// A cast or `unknown` literal of stored syntax and what binding recorded for it.
+/// An expression site of stored syntax and what binding recorded for it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueSite {
     /// A cast, with the type name binding gave it.
@@ -23,6 +23,8 @@ pub enum ValueSite {
     Constant { value: Value, ty: String },
     /// A cast binding wrapped around the syntax, coercing an operand to the type its operator declares, as a `RelabelType` or an implicit coercion does.
     Relabel(String),
+    /// A function's written ordering syntax, including a legacy call whose selected binding recovered the distinction.
+    FunctionOrder(crate::ast::FunctionOrderSyntax),
     /// Any other node of a stored expression, which keeps the sites in step with the syntax so that a relabel reaches the node it wraps.
     Node,
 }
@@ -43,7 +45,7 @@ fn cast_depth(expression: &ScalarExpr) -> usize {
 pub struct SyntaxSites {
     /// Routine calls, each reported after its arguments as the syntax visitor reports calls.
     pub routines: Vec<BoundRoutineReference>,
-    /// Casts and `unknown` literals in pre-order.
+    /// Casts, `unknown` literals and function ordering syntax in pre-order.
     pub values: Vec<ValueSite>,
 }
 
@@ -389,6 +391,19 @@ impl Walk {
                     return Err(shape_error("cast"));
                 };
                 self.sites.values.push(ValueSite::Cast(ty.clone()));
+            }
+            ScalarExpr::Func { order_syntax, .. } => {
+                let ScalarExpr::Func {
+                    order_syntax: bound,
+                    ..
+                } = bound
+                else {
+                    return Err(shape_error("function ordering"));
+                };
+                if !order_syntax.is_legacy() && order_syntax != bound {
+                    return Err(shape_error("function ordering"));
+                }
+                self.sites.values.push(ValueSite::FunctionOrder(*bound));
             }
             _ => {
                 if self.aligned {

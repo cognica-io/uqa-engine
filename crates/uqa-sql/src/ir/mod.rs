@@ -14,8 +14,8 @@ pub use call_arguments::{
 };
 
 use crate::ast::{
-    BinaryOp, ColumnType, FrameExclusion, FrameMode, FunctionBinding, InternalColumnRef,
-    NullsOrder, WindowCallModifiers,
+    BinaryOp, ColumnType, FrameExclusion, FrameMode, FunctionBinding, FunctionOrderSyntax,
+    InternalColumnRef, NullsOrder, WindowCallModifiers,
 };
 use uqa_core::Value;
 
@@ -56,6 +56,8 @@ pub enum ScalarExpr {
         args: Vec<Self>,
         distinct: bool,
         order_by: Vec<ScalarOrder>,
+        #[serde(default, skip_serializing_if = "FunctionOrderSyntax::is_legacy")]
+        order_syntax: FunctionOrderSyntax,
         filter: Option<Box<Self>>,
     },
     Array(Vec<Self>),

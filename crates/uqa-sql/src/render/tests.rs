@@ -7,7 +7,7 @@
 use uqa_core::{EnumLabelKey, EnumValue, Value};
 
 use super::{expression_sql, statement_sql};
-use crate::ast::{BinaryOp, Expr, FromClause, Statement};
+use crate::ast::{BinaryOp, Expr, FromClause, FunctionOrderSyntax, Statement};
 use crate::SQLError;
 
 #[test]
@@ -66,4 +66,48 @@ fn rendered_rule_action_shapes_round_trip_stably() {
             .unwrap_or_else(|error| panic!("rerender `{rendered}`: {error}"));
         assert_eq!(rerendered, rendered, "unstable SQL rendering for `{sql}`");
     }
+}
+
+#[test]
+fn rendered_function_ordering_preserves_written_syntax_and_legacy_output() {
+    for sql in [
+        "f(a ORDER BY b DESC NULLS LAST) FILTER (WHERE keep)",
+        "f(a) WITHIN GROUP (ORDER BY b DESC NULLS LAST) FILTER (WHERE keep)",
+        "mode() WITHIN GROUP (ORDER BY b)",
+    ] {
+        let Statement::Select(mut statement) =
+            crate::compile(&format!("SELECT {sql}")).unwrap().remove(0)
+        else {
+            panic!("SELECT expected");
+        };
+        let expression = statement.projections.remove(0).expr;
+        assert_eq!(expression_sql(&expression).unwrap(), sql);
+        assert_eq!(
+            crate::catalog::expression_text::schema_expr_text(&expression).unwrap(),
+            sql
+        );
+        let Statement::Select(mut reparsed) =
+            crate::compile(&format!("SELECT {}", expression_sql(&expression).unwrap()))
+                .unwrap()
+                .remove(0)
+        else {
+            panic!("SELECT expected");
+        };
+        assert_eq!(reparsed.projections.remove(0).expr, expression);
+    }
+    let Statement::Select(mut statement) =
+        crate::compile("SELECT f(a ORDER BY b)").unwrap().remove(0)
+    else {
+        panic!("SELECT expected");
+    };
+    let mut expression = statement.projections.remove(0).expr;
+    let Expr::Func { order_syntax, .. } = &mut expression else {
+        unreachable!();
+    };
+    *order_syntax = FunctionOrderSyntax::Legacy;
+    assert_eq!(expression_sql(&expression).unwrap(), "f(a ORDER BY b)");
+    assert_eq!(
+        crate::catalog::expression_text::schema_expr_text(&expression).unwrap(),
+        "f(a ORDER BY b)"
+    );
 }

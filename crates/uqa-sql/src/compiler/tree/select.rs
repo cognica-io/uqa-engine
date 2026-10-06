@@ -360,6 +360,7 @@ fn expression_is_null_with_side(
         }
         Expr::InList { expr, .. } => expression_is_null_with_side(expr, qualifiers),
         Expr::Func {
+            order_syntax: _,
             name,
             args,
             distinct: _,

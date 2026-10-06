@@ -283,6 +283,7 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<Option<ColumnType>, SQLError> {
         let ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -293,27 +294,77 @@ impl Preparation<'_> {
         else {
             unreachable!("function expression");
         };
-        let selected = self.call_binding(name, binding.as_ref(), args, input, subqueries)?;
-        for order in order_by {
-            self.expression(&order.expr, input, subqueries)?;
+        let within_group = super::super::ordered_calls::uses_ordered_arguments(
+            *order_syntax,
+            name,
+            binding.as_ref(),
+            order_by.len(),
+        );
+        let ordered = if within_group {
+            order_by.as_slice()
+        } else {
+            &[]
+        };
+        let mut arguments =
+            self.observe_function_arguments(name, args, ordered, input, subqueries)?;
+        if !within_group {
+            for order in order_by {
+                self.expression(&order.expr, input, subqueries)?;
+            }
         }
         if let Some(filter) = filter {
             self.require_boolean(filter, input, subqueries, "FILTER")?;
         }
+        let selected = if within_group || super::super::ordered_calls::is_ordered_set(name) {
+            self.select_ordered_function_arguments(name, binding.as_ref(), &arguments)?
+        } else {
+            self.select_function_arguments(name, binding.as_ref(), &arguments)?
+        };
+        if let Some(kind) = selected.kind.or_else(|| {
+            selected
+                .overload
+                .as_ref()
+                .map(|_| super::super::ordered_calls::Kind::Ordinary)
+        }) {
+            super::super::ordered_calls::validate(
+                name,
+                kind,
+                super::super::ordered_calls::Modifiers {
+                    direct: args.len(),
+                    ordered: order_by.len(),
+                    within_group,
+                    distinct: *distinct,
+                    filtered: filter.is_some(),
+                },
+                &arguments.names,
+                &arguments.types(),
+            )?;
+        }
+        // Pure name/signature validation must finish before implicit input
+        // conversion: a rejected scalar call cannot run a domain CHECK.
+        if within_group && selected.overload.is_none() {
+            self.known_type(expression, input, subqueries)?;
+        }
+        if let Some(selected) = selected
+            .overload
+            .as_ref()
+            .filter(|selected| !selected.binding.builtin)
+        {
+            self.check_selected_scalar_modifiers(
+                name,
+                &selected.binding,
+                *distinct,
+                order_by,
+                filter.is_some(),
+            )?;
+        }
+        self.coerce_function_arguments(name, binding.as_ref(), &mut arguments, &selected)?;
+        let selected = selected.overload;
         let ty = match selected
             .as_ref()
             .filter(|selected| !selected.binding.builtin)
         {
-            Some(selected) => {
-                self.check_selected_scalar_modifiers(
-                    name,
-                    &selected.binding,
-                    *distinct,
-                    order_by,
-                    filter.is_some(),
-                )?;
-                Some(selected.return_type.clone())
-            }
+            Some(selected) => Some(selected.return_type.clone()),
             None => self.known_type(expression, input, subqueries)?,
         };
         self.check_schema_function(
@@ -375,101 +426,9 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<Option<crate::type_resolution::ResolvedFunctionOverload>, SQLError> {
-        let arguments = crate::scalar_call_arguments(args)?;
-        let mut observed = arguments
-            .iter()
-            .enumerate()
-            .map(|(index, argument)| {
-                if crate::semantics::is_semantic_field_argument(name, args, index)? {
-                    Ok(ExpressionType::resolved(Some(ColumnType::Text)))
-                } else {
-                    self.expression(argument.value, input, subqueries)
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let types = observed
-            .iter()
-            .map(|value| value.ty.clone())
-            .collect::<Vec<_>>();
-        let names = arguments
-            .iter()
-            .map(|argument| argument.name.map(str::to_string))
-            .collect::<Vec<_>>();
-        let variadic = arguments.iter().any(|argument| argument.explicit_variadic);
-        if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
-            binding.and_then(|binding| binding.dispatch)
-        {
-            let selected = crate::type_resolution::numeric_operator_types(operator, &types)?;
-            for (value, target) in observed.iter_mut().zip(&selected.arguments) {
-                self.parameters.coerce_unknown(value, target)?;
-            }
-            return Ok(None);
-        }
-        if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
-            if name == "nullif" {
-                if let [left, right] = observed.as_mut_slice() {
-                    self.binary(BinaryOp::Equal, left, right)?;
-                }
-            } else {
-                self.common(
-                    crate::type_resolution::CommonTypeContext::function(name)
-                        .unwrap_or(crate::type_resolution::CommonTypeContext::Coalesce),
-                    &mut observed,
-                )?;
-            }
-            return Ok(None);
-        }
-        let (selected, positions) = if let Some(fixed) = crate::resolve_fixed_builtin_call(
-            name,
-            binding,
-            &names,
-            &types,
-            variadic,
-            Some(self.routines),
-        )? {
-            (Some(fixed.selected), fixed.builtin_argument_positions)
-        } else {
-            (
-                self.routines
-                    .resolve_function_overload(name, binding, &names, &types, variadic)?,
-                None,
-            )
-        };
-        let targets = if let Some(selected) = &selected {
-            self.scope.record_routine_dependency(&selected.binding);
-            let types = selected
-                .binding
-                .invocation
-                .as_ref()
-                .map_or(&selected.binding.argument_types, |invocation| {
-                    &invocation.argument_targets
-                });
-            types
-                .iter()
-                .map(|name| self.type_name(name).map(Some))
-                .collect::<Result<Vec<_>, _>>()?
-        } else if matches!(name, "cypher" | "ag_catalog.cypher") {
-            [
-                ColumnType::Name,
-                ColumnType::Text,
-                self.type_name("ag_catalog.agtype")?,
-            ]
-            .into_iter()
-            .take(types.len())
-            .map(Some)
-            .collect()
-        } else {
-            crate::type_resolution::builtin_function_argument_targets(name, &types)
-        };
-        for (index, value) in observed.iter_mut().enumerate() {
-            let position = positions
-                .as_ref()
-                .map_or(index, |positions| positions[index]);
-            let target = targets.get(position).and_then(Option::as_ref);
-            if let Some(target) = target {
-                self.parameters.coerce_unknown(value, target)?;
-            }
-        }
-        Ok(selected)
+        let mut arguments = self.observe_function_arguments(name, args, &[], input, subqueries)?;
+        let selected = self.select_function_arguments(name, binding, &arguments)?;
+        self.coerce_function_arguments(name, binding, &mut arguments, &selected)?;
+        Ok(selected.overload)
     }
 }

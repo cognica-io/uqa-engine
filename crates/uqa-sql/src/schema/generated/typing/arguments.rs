@@ -47,6 +47,7 @@ pub(in crate::schema) fn generated_call_arguments(
 
 fn generated_call_argument(expression: &Expr) -> Result<GeneratedCallArgument<'_>, SQLError> {
     let Expr::Func {
+        order_syntax,
         name,
         args,
         binding,
@@ -69,6 +70,7 @@ fn generated_call_argument(expression: &Expr) -> Result<GeneratedCallArgument<'_
             crate::ast::FunctionDispatch::NamedArgument,
             *distinct,
             order_by,
+            *order_syntax,
             filter.as_deref(),
             name,
         )?;
@@ -106,6 +108,7 @@ fn generated_call_argument(expression: &Expr) -> Result<GeneratedCallArgument<'_
 
 fn generated_variadic_argument(expression: &Expr) -> Result<(&Expr, bool), SQLError> {
     let Expr::Func {
+        order_syntax,
         name,
         args,
         binding,
@@ -126,6 +129,7 @@ fn generated_variadic_argument(expression: &Expr) -> Result<(&Expr, bool), SQLEr
         crate::ast::FunctionDispatch::VariadicArgument,
         *distinct,
         order_by,
+        *order_syntax,
         filter.as_deref(),
         name,
     )?;
@@ -157,6 +161,7 @@ fn validate_generated_marker(
     expected_dispatch: crate::ast::FunctionDispatch,
     distinct: bool,
     order_by: &[crate::ast::OrderBy],
+    order_syntax: crate::ast::FunctionOrderSyntax,
     filter: Option<&Expr>,
     name: &str,
 ) -> Result<(), SQLError> {
@@ -168,6 +173,7 @@ fn validate_generated_marker(
             || binding.resolution_error.is_some()
     }) || distinct
         || !order_by.is_empty()
+        || order_syntax == crate::ast::FunctionOrderSyntax::WithinGroup
         || filter.is_some()
     {
         return Err(malformed_generated_argument(&format!(

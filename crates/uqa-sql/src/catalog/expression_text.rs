@@ -43,6 +43,7 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
             args,
             distinct,
             order_by,
+            order_syntax,
             filter,
             ..
         } => {
@@ -76,6 +77,7 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
             if *distinct {
                 rendered_args = format!("DISTINCT {rendered_args}");
             }
+            let mut rendered = format!("{name}({rendered_args})");
             if !order_by.is_empty() {
                 let order = order_by
                     .iter()
@@ -93,13 +95,18 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
                     })
                     .collect::<Result<Vec<_>, SQLError>>()?
                     .join(", ");
-                if !rendered_args.is_empty() {
-                    rendered_args.push(' ');
+                if *order_syntax == crate::ast::FunctionOrderSyntax::WithinGroup {
+                    write!(&mut rendered, " WITHIN GROUP (ORDER BY {order})")
+                        .expect("writing to a String cannot fail");
+                } else {
+                    rendered.pop();
+                    if !rendered_args.is_empty() {
+                        rendered.push(' ');
+                    }
+                    write!(&mut rendered, "ORDER BY {order})")
+                        .expect("writing to a String cannot fail");
                 }
-                rendered_args.push_str("ORDER BY ");
-                rendered_args.push_str(&order);
             }
-            let mut rendered = format!("{name}({rendered_args})");
             if let Some(filter) = filter {
                 write!(
                     &mut rendered,

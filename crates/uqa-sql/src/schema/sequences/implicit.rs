@@ -117,6 +117,7 @@ pub fn apply_implicit_sequence_metadata(
 #[must_use]
 pub fn sequence_next_value(sequence: &str) -> crate::ast::Expr {
     crate::ast::Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "nextval".into(),
         binding: None,
         args: vec![crate::ast::Expr::Literal(Value::Str(sequence.to_string()))],

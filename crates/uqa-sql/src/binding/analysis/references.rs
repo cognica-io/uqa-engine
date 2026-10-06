@@ -8,8 +8,8 @@
 
 use super::super::{SQLError, SQLParam, ScalarExpr};
 use super::functions::{
-    validate_qualified_column, validate_scalar_function, validate_unqualified_column,
-    validate_window_function, ScalarFunctionValidation,
+    validate_ordered_function, validate_qualified_column, validate_scalar_function,
+    validate_unqualified_column, validate_window_function, ScalarFunctionValidation,
 };
 use crate::routines::RoutineResolution;
 use crate::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
@@ -59,6 +59,7 @@ pub(super) fn validate_expression(
             }
         }
         ScalarExpr::Func {
+            order_syntax,
             name,
             binding,
             args,
@@ -78,6 +79,30 @@ pub(super) fn validate_expression(
             if let Some(filter) = filter.as_deref() {
                 validate_expression(routines, filter, schema, None, params, resolver)?;
                 require_boolean_condition(filter, "FILTER", schema, params, resolver)?;
+            }
+            let within_group = super::super::ordered_calls::uses_ordered_arguments(
+                *order_syntax,
+                name,
+                binding.as_ref(),
+                order_by.len(),
+            );
+            if within_group || super::super::ordered_calls::is_ordered_set(name) {
+                return validate_ordered_function(
+                    routines,
+                    ScalarFunctionValidation {
+                        name,
+                        binding: binding.as_ref(),
+                        args,
+                        order_by,
+                        expression,
+                        schema,
+                        params,
+                        resolver,
+                    },
+                    within_group,
+                    *distinct,
+                    filter.is_some(),
+                );
             }
             validate_scalar_function(
                 routines,

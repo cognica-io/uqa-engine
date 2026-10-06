@@ -11,6 +11,7 @@ use super::*;
 #[test]
 fn builtin_aggregate_identity_distinguishes_qualification_and_scalar_overloads() {
     let call = |name: &str, binding| ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: name.into(),
         binding,
         args: vec![ScalarExpr::Literal(Value::Int(1))],
@@ -36,6 +37,27 @@ fn builtin_aggregate_identity_distinguishes_qualification_and_scalar_overloads()
     binding.name = "pg_catalog.sum".into();
     binding.builtin = true;
     assert!(is_builtin_aggregate(&call("sum", Some(binding))));
+}
+
+#[test]
+fn grouped_expression_identity_includes_the_written_ordering_syntax() {
+    let call = |syntax| ScalarExpr::Func {
+        name: "sum".into(),
+        binding: None,
+        args: vec![ScalarExpr::Column("value".into())],
+        distinct: false,
+        order_by: Vec::new(),
+        order_syntax: syntax,
+        filter: None,
+    };
+    let ordinary = call(crate::ast::FunctionOrderSyntax::Ordinary);
+    assert!(exprs_match(&ordinary, &ordinary));
+    for syntax in [
+        crate::ast::FunctionOrderSyntax::WithinGroup,
+        crate::ast::FunctionOrderSyntax::Legacy,
+    ] {
+        assert!(!exprs_match(&ordinary, &call(syntax)));
+    }
 }
 
 fn decimal(text: &str) -> Value {

@@ -139,7 +139,8 @@
       "aggregates.null-and-enum-inputs",
       "expressions.boolean-conditions",
       "expressions.interval-arithmetic",
-      "routines.sql-standard-body-deparse"
+      "routines.sql-standard-body-deparse",
+      "aggregates.within-group-call-analysis"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -463,8 +464,8 @@
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live CREATE VIEW column-name list results, catalogs, replacement checks, side-effect probes, and SQLSTATEs plus CREATE VIEW documentation",
       "uqa_test": "cargo test -p uqa-sql --lib create_view_preserves_positional_column_names; cargo test -p uqa-engine --test integration catalog::sql_views::",
       "supported_version": "PostgreSQL 18.4 positional and partial view column-name lists, quoted identifier case, fixed typed output schemas, duplicate and alias-count validation order, nonexecuting static analysis, CREATE OR REPLACE compatibility and trailing-column extension, transactionality, nested views, and durable legacy-compatible reopen behavior",
-      "status": "verified",
-      "open_issue": null
+      "status": "partial",
+      "open_issue": "Issue #433: ordinary CREATE VIEW omits literal input analysis before output-alias and target validation. The existing regression expects PostgreSQL 22P02 for an invalid integer literal before duplicate aliases, but current main reports 42701. A separate correction follows PR #431."
     },
     {
       "id": "functions.identified-pg18-additions",
@@ -1281,6 +1282,14 @@
       "supported_version": "Unreleased: 43 PostgreSQL 18.4 cases on memory and SQLite engines cover pg_get_ruledef in both forms and pg_rules for every rule event, INSTEAD and ALSO, NOTHING, several actions, INSERT ... SELECT, UPDATE, DELETE and NOTIFY actions and conditions with subqueries, CASE and enum constants, and pg_get_triggerdef WHEN conditions with IS DISTINCT FROM, ANY and ALL, casts, CASE and enum constants, after RENAME VALUE and RENAME COLUMN, with the rules and triggers firing",
       "status": "partial",
       "open_issue": "Implicit domain-to-base coercions of operator and routine arguments are not printed, as get_rule_expr prints ((a)::positive)::integer, and after column renames rule and view definitions keep the alias lists stored with them instead of naming columns as set_relation_column_names, set_join_column_names and set_using_names do, which print an alias list only where a name changed and push USING names into the join inputs; PR 259 tracks both."
+    },
+    {
+      "id": "aggregates.within-group-call-analysis",
+      "postgresql_reference": "PostgreSQL 18.4 ParseFuncOrColumn and transformFuncCall; tests/parity/pg18/within_group_calls_oracle.expected.json",
+      "uqa_test": "cargo test -p uqa-sql --lib binding::preparation::tests::ordered_calls; cargo test -p uqa-engine --test integration queries::within_group_calls_oracle; cargo test -p uqa-execution --lib percentile_fraction",
+      "supported_version": "Unreleased: ordinary WITHIN GROUP syntax, combined signature selection, scalar/aggregate/window modifier diagnostics, direct/ordered argument split HINTs, polymorphic unknowns, FILTER and implicit input ordering, stored binding identity and prepared percentile fractions. All 46 independent PostgreSQL 18.4 messages match memory, native SQLite, SQLite K/V and redb, with 18 persistent-reopen observations and native legacy-view migration across two reopenings.",
+      "status": "verified",
+      "open_issue": null
     }
   ]
 }

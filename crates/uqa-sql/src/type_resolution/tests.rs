@@ -13,6 +13,7 @@ mod variadic;
 fn dispatched(dispatch: FunctionDispatch, args: Vec<ScalarExpr>) -> ScalarExpr {
     let binding = FunctionBinding::dispatched(dispatch);
     ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: binding.name.clone(),
         binding: Some(binding),
         args,
@@ -239,6 +240,7 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
 
     let named = named_argument;
     let expression = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "jsonb_strip_nulls".into(),
         binding: None,
         args: vec![
@@ -279,6 +281,7 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
     ));
 
     let defaulted = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "json_strip_nulls".into(),
         binding: None,
         args: vec![ScalarExpr::Literal(Value::Str("{}".into()))],
@@ -295,6 +298,7 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
     assert_eq!(args[1], ScalarExpr::Literal(Value::Bool(false)));
 
     let invalid = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "json_strip_nulls".into(),
         binding: None,
         args: vec![ScalarExpr::Cast {
@@ -320,6 +324,7 @@ fn uuid_extraction_binding_rejects_non_uuid_declared_types() {
         vec![Some(ColumnType::Uuid), Some(ColumnType::Text)],
     );
     let call = |column: &str| ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "uuid_extract_version".into(),
         binding: None,
         args: vec![ScalarExpr::Column(column.into())],
@@ -378,6 +383,7 @@ fn uuid_extraction_binding_uses_declared_scalar_subquery_types() {
     }
 
     let call = |subquery| ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "uuid_extract_version".into(),
         binding: None,
         args: vec![ScalarExpr::ScalarSubquery(subquery)],
@@ -515,6 +521,7 @@ fn values_type_resolution_uses_declared_casts_instead_of_runtime_values() {
 fn type_introspection_binds_before_integer_width_is_erased() {
     let schema = RowSchema::with_types(vec!["v".into()], vec![Some(ColumnType::SmallInteger)]);
     let expression = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "pg_typeof".into(),
         binding: None,
         args: vec![ScalarExpr::Column("v".into())],
@@ -546,6 +553,7 @@ fn integer_base_functions_bind_the_declared_overload_before_width_is_erased() {
         ("to_oct", "i8", FunctionDispatch::ToOctInt8),
     ] {
         let expression = ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: function.into(),
             binding: None,
             args: vec![ScalarExpr::Column(column.into())],
@@ -588,6 +596,7 @@ fn random_range_functions_bind_the_promoted_overload_before_width_is_erased() {
         ("i8", "n", FunctionDispatch::RandomNumericRange),
     ] {
         let expression = ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: "random".into(),
             binding: None,
             args: vec![
@@ -612,6 +621,7 @@ fn random_range_functions_bind_the_promoted_overload_before_width_is_erased() {
 
     let named_max = named_argument("max", ScalarExpr::Column("i4".into()));
     let invalid_order = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "random".into(),
         binding: None,
         args: vec![named_max, ScalarExpr::Column("i4".into())],
@@ -649,6 +659,7 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
     );
     let named = named_argument;
     let call = |name: &str, args| ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: name.into(),
         binding: None,
         args,
@@ -745,6 +756,7 @@ fn qualified_type_introspection_binds_inside_an_expression() {
     let schema = RowSchema::with_types(vec!["v".into()], vec![Some(ColumnType::Real)]);
     let expression = ScalarExpr::IsNull {
         expr: Box::new(ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: "PG_CATALOG.PG_TYPEOF".into(),
             binding: None,
             args: vec![ScalarExpr::Column("v".into())],
@@ -867,6 +879,7 @@ fn common_type_binding_coerces_selector_results_before_runtime_evaluation() {
         ],
     );
     let expression = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "coalesce".into(),
         binding: None,
         args: vec![
@@ -916,6 +929,7 @@ fn nested_builtin_type_resolution_visits_each_argument_once() {
     }
 
     let mut expression = ScalarExpr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "application.identity".into(),
         binding: None,
         args: vec![ScalarExpr::Literal(Value::Int(1))],
@@ -925,6 +939,7 @@ fn nested_builtin_type_resolution_visits_each_argument_once() {
     };
     for _ in 0..16 {
         expression = ScalarExpr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             name: "round".into(),
             binding: None,
             args: vec![expression],

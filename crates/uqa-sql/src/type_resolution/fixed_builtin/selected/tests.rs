@@ -10,6 +10,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 fn source() -> Expr {
     Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "jsonb_strip_nulls".into(),
         binding: Some(FunctionBinding {
             object_id: None,

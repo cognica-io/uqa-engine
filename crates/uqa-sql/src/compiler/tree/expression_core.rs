@@ -16,6 +16,7 @@ use crate::ast::{FunctionBinding, FunctionDispatch};
 /// Mark a dedicated `PostgreSQL` syntax expression as a polymorphic built-in call; the empty argument signature is inferred from the expression operands instead of representing a fixed overload.
 pub(super) fn builtin_syntax_call(name: &str, args: Vec<Expr>) -> Expr {
     Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         binding: Some(FunctionBinding::polymorphic_builtin_syntax(name)),
         name: name.into(),
         args,
@@ -29,6 +30,7 @@ pub(super) fn builtin_syntax_call(name: &str, args: Vec<Expr>) -> Expr {
 pub(super) fn dispatched_call(dispatch: FunctionDispatch, args: Vec<Expr>) -> Expr {
     let binding = FunctionBinding::dispatched(dispatch);
     Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: binding.name.clone(),
         binding: Some(binding),
         args,
@@ -94,6 +96,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
         NodeEnum::AExpr(a) => compile_a_expr(a),
         NodeEnum::SqlvalueFunction(svf) => compile_sql_value_function(svf),
         NodeEnum::MergeSupportFunc(_) => Ok(Expr::Func {
+            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
             binding: None,
             name: "merge_action".into(),
             args: Vec::new(),
@@ -296,6 +299,7 @@ pub(in crate::compiler) fn compile_sql_value_function(
         }
     };
     let call = Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         binding: Some(crate::ast::FunctionBinding {
             object_id: None,
             name: name.into(),

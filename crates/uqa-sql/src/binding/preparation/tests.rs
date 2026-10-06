@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod body_inputs;
 mod defaults;
 mod dependencies;
+mod ordered_calls;
 
 struct NoRoutines;
 impl FunctionTypeResolver for NoRoutines {

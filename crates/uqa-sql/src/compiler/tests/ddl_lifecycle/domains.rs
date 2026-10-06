@@ -74,6 +74,7 @@ fn domain_check_ast_retains_legacy_dispatch_upgrade() {
         panic!("CHECK");
     };
     constraint.expression = Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         name: "__is_distinct".into(),
         binding: None,
         args: vec![Expr::Literal(Value::Null), Expr::Literal(Value::Int(1))],

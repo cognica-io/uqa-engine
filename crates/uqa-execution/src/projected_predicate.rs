@@ -294,6 +294,7 @@ mod tests {
             ("ilike", "%GREEN%"),
         ] {
             let expression = ScalarExpr::Func {
+                order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
                 name: name.into(),
                 binding: None,
                 args: vec![
@@ -323,6 +324,7 @@ mod tests {
     #[test]
     fn qualified_like_runs_directly_on_a_composite_physical_row() {
         let expression = ScalarExpr::Not(Box::new(ScalarExpr::Func {
+            order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
             name: "like".into(),
             binding: None,
             args: vec![

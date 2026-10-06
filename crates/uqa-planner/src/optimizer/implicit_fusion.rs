@@ -212,6 +212,7 @@ fn rewrite_conjunction(parts: Vec<ScalarExpr>, allow_unqualified_signals: bool) 
     }
 
     let fusion = ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: "fuse_bayesian_evidence".to_string(),
         binding: None,
         args: fusion_signals,

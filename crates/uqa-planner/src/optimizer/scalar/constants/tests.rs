@@ -8,6 +8,7 @@ use super::*;
 
 fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
     ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: name.into(),
         binding: Some(FunctionBinding {
             name: name.into(),

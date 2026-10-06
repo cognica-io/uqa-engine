@@ -25,7 +25,7 @@ The [official regression inventory](../internals/09-verification.md#compatibilit
 
 <!-- pg18-milestone-snapshot:start -->
 
-Current milestone snapshot: complete — `M1` (Discovered semantic fixes), `M2` (Protocol 3.2); in progress — `M0` (PG18 baseline), `M3` (PG18 DDL and types), `M4` (Core regression parity), `M5` (Client parity); not started — `M6` (Complete compatibility). Each milestone status is derived from its owned evidence items and remains bounded by its exit gate.
+Current milestone snapshot: complete — `M2` (Protocol 3.2); in progress — `M0` (PG18 baseline), `M1` (Discovered semantic fixes), `M3` (PG18 DDL and types), `M4` (Core regression parity), `M5` (Client parity); not started — `M6` (Complete compatibility). Each milestone status is derived from its owned evidence items and remains bounded by its exit gate.
 
 <!-- pg18-milestone-snapshot:end -->
 

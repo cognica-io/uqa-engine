@@ -78,6 +78,7 @@ fn cancelled_support_retention_releases_its_workspace() {
 fn retrieval_qualification_keeps_lazy_boolean_evaluation_and_field_arguments() {
     let calls = std::cell::Cell::new(0);
     let expression = ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: "text_match".into(),
         binding: None,
         args: vec![

@@ -407,6 +407,8 @@ FROM employees
 GROUP BY department;
 ```
 
+`WITHIN GROUP` calls resolve the function using the direct arguments followed by the ordering expressions. A missing signature is `42883`; a selected scalar function or ordinary aggregate rejects `WITHIN GROUP` with `42809`. Direct and ordered children and the FILTER condition are analyzed before function selection, while implicit input conversions occur only after the selected call passes its modifier checks. Stored definitions preserve this syntax and the selected aggregate identity, and prepared percentile calls accept a typed fraction parameter.
+
 Ordered-set examples use `WITHIN GROUP`:
 
 ```sql
