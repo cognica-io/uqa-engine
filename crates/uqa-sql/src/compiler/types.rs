@@ -14,6 +14,10 @@ use crate::error::{Result, SQLError};
 
 use super::tree::extract_string;
 
+mod declarations;
+pub(crate) use declarations::compile_retained_type_declaration;
+pub(super) use declarations::preserve_alter_type_declaration;
+
 /// Parser-normalized type identity used by `PostgreSQL`'s `regtype` and `regprocedure` input functions. Components retain the parser's distinction between aliases such as unquoted `integer` (normalized to `pg_catalog.int4`) and a quoted type named `"integer"`. Modifier values do not participate in OID lookup; their presence is retained for declaration validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedRegtypeName {

@@ -76,7 +76,7 @@ fn check_added_column_declaration<S: Clone + 'static>(
         return Ok(false);
     }
     check_serial_array(declaration)?;
-    column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
+    column.ty = uqa_sql::type_resolution::resolve_alter_column_type(
         context.hierarchy.partitions.types,
         &column.ty,
     )?;

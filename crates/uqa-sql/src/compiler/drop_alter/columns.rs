@@ -21,7 +21,12 @@ pub(super) fn add_column(command: &AlterTableCmd) -> Result<AlterTableAction, SQ
         )));
     };
     let declaration = crate::compiler::tree::compile_column_declaration(column)?;
-    let (definition, checks) = crate::compiler::tree::compile_column_def(column)?;
+    let ty = column
+        .type_name
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal(format!("column `{}` has no type", column.colname)))?;
+    let ty = crate::compiler::types::preserve_alter_type_declaration(ty, &column.colname)?;
+    let (definition, checks) = crate::compiler::tree::compile_column_def_with_type(column, ty)?;
     Ok(AlterTableAction::AddColumn {
         column: definition,
         checks,

@@ -104,3 +104,49 @@ fn historical_table_owner_syntax_lowers_to_both_view_kinds() {
         );
     }
 }
+
+#[test]
+fn forbidden_view_actions_match_independent_postgresql_diagnostics() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/alter_view_actions_oracle.expected.json"
+    )))
+    .unwrap();
+    let mut verified = 0;
+    for case in reference["cases"].as_array().unwrap() {
+        let expected = &case["error"];
+        if expected["sqlstate"] != "42809" {
+            continue;
+        }
+        let statement = statement(case["sql"].as_str().unwrap());
+        let kind = if expected["detail"] == "This operation is not supported for views." {
+            "view"
+        } else {
+            "materialized view"
+        };
+        let target = RelationAlterTarget::from_name(statement.table.clone(), kind).unwrap();
+        let Err(SQLError::Diagnostic {
+            sqlstate,
+            message,
+            detail,
+            hint,
+        }) = bind_table_alteration(target, statement)
+        else {
+            panic!("expected a diagnostic: {}", case["id"]);
+        };
+        assert_eq!(sqlstate, expected["sqlstate"], "{}", case["id"]);
+        assert_eq!(message, expected["message"], "{}", case["id"]);
+        assert_eq!(
+            serde_json::json!(detail),
+            expected["detail"],
+            "{}",
+            case["id"]
+        );
+        assert_eq!(serde_json::json!(hint), expected["hint"], "{}", case["id"]);
+        verified += 1;
+    }
+    assert!(
+        verified >= 70,
+        "the captured view action cases must be retained"
+    );
+}

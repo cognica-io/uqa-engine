@@ -283,21 +283,28 @@ pub(in crate::compiler) fn compile_column_key_constraints(
     Ok(keys)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
-)]
 pub(in crate::compiler) fn compile_column_def(
     col: &pg_query::protobuf::ColumnDef,
 ) -> Result<(ColumnDef, Vec<TableCheck>)> {
-    let name = col.colname.clone();
-    let raw_type = raw_type_name(col)?;
     // A column option of `PARTITION OF` has no type; it takes the parent column's when the columns merge.
     let ty = if col.type_name.is_some() {
         compile_type_name(col)?
     } else {
         ColumnType::Named(String::new())
     };
+    compile_column_def_with_type(col, ty)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
+pub(in crate::compiler) fn compile_column_def_with_type(
+    col: &pg_query::protobuf::ColumnDef,
+    ty: ColumnType,
+) -> Result<(ColumnDef, Vec<TableCheck>)> {
+    let name = col.colname.clone();
+    let raw_type = raw_type_name(col)?;
     let mut auto_increment = matches!(
         raw_type.as_deref(),
         Some("smallserial" | "serial2" | "serial" | "serial4" | "bigserial" | "serial8")

@@ -49,6 +49,7 @@ pub use dispatch::{
     compile, parse_statements, plan_only_for_test, resolve_deferred_create_table, ParsedStatement,
 };
 pub use foreign_tables::resolve_deferred_create_foreign_table;
+pub(crate) use types::compile_retained_type_declaration;
 pub use types::{
     parse_regobject_name, parse_regprocedure_name, parse_regtype_name, ParsedRegprocedureName,
     ParsedRegtypeName,
@@ -77,9 +78,8 @@ pub(crate) use names::{render_relation_component, write_relation_component};
 pub(in crate::compiler) use returning::compile_returning_clause;
 
 use tree::{
-    compile_column_def, compile_create_index, compile_create_table, compile_expr,
-    compile_from_node, compile_insert, compile_projections, compile_select, compile_values_lists,
-    compile_with_clause, extract_string,
+    compile_create_index, compile_create_table, compile_expr, compile_from_node, compile_insert,
+    compile_projections, compile_select, compile_values_lists, compile_with_clause, extract_string,
 };
 
 #[cfg(test)]
