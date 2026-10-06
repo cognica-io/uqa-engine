@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve PostgreSQL relation attribute numbers and dropped slots across column deletion, addition, rename, type changes, rollback and persistent reopening. Keep catalog constraints, indexes, column privileges and stored definitions bound to the surviving columns.
+
 - Preserve PostgreSQL grouped subquery assignments in UPDATE, ON CONFLICT and MERGE, including positional values, original-row correlation, statement-scoped volatile evaluation, NULLs, constraints, stored bodies and second-row cardinality errors.
 
 - Initialize builtin namespace records consistently in memory and persistent catalogs, allowing user relations in `information_schema` and `ag_catalog` to survive creation, rename and reopen while preserving existing schema grants and identities.

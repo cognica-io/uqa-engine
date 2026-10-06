@@ -96,6 +96,7 @@ pub fn restore(
                 &relation_name,
                 &mut table.columns,
                 &mut table.checks,
+                &table.dropped_attributes,
                 &mut crate::catalog::identity::allocate_catalog_object_id,
             )
             .map_err(|error| {

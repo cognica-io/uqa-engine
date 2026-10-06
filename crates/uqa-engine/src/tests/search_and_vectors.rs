@@ -137,6 +137,7 @@ fn run_analyze_populates_column_stats() {
             name: "title".into(),
             ty: uqa_sql::ast::ColumnType::Text,
             object_id: None,
+            attribute_number: None,
             missing_value: None,
             primary_key: false,
             not_null: false,

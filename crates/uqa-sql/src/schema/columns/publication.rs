@@ -7,6 +7,40 @@
 //! Mutate a declared column candidate before its catalog publication.
 use crate::ast::{ColumnDef, ColumnType, Expr, GeneratedColumn};
 
+/// Rename the declaration without changing its durable column identity or attribute number.
+pub fn rename_column(columns: &mut [ColumnDef], from: &str, to: &str) {
+    for column in columns {
+        if column.name == from {
+            column.name = to.to_string();
+        }
+    }
+}
+
+/// Record a newly declared local column; recursively added parent columns retain their inherited origin.
+pub fn register_local_column(
+    hierarchy: &mut crate::ast::TableHierarchy,
+    name: &str,
+    inherited: bool,
+) {
+    if !inherited && !hierarchy.local_columns.iter().any(|column| column == name) {
+        hierarchy.local_columns.push(name.to_string());
+    }
+}
+
+/// A rename changes the spelling of the local declaration, not its origin.
+pub fn rename_local_column(hierarchy: &mut crate::ast::TableHierarchy, from: &str, to: &str) {
+    for name in &mut hierarchy.local_columns {
+        if name == from {
+            *name = to.to_string();
+        }
+    }
+}
+
+/// Removing a local declaration lets a later same-named inherited column have its own origin.
+pub fn remove_local_column(hierarchy: &mut crate::ast::TableHierarchy, name: &str) {
+    hierarchy.local_columns.retain(|column| column != name);
+}
+
 #[derive(Clone)]
 pub enum ColumnProperty<'a> {
     Default(Option<Expr>),

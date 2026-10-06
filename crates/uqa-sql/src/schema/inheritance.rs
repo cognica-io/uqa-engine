@@ -166,6 +166,7 @@ pub fn merge_create_table_hierarchy(
             .map_err(|error| SQLError::Internal(format!("read inherited row type: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
         for column in &mut columns {
+            column.attribute_number = None;
             column.not_null_identity = None;
             // The child stores its own copy of an inherited default.
             column.default_catalog_oid = None;
@@ -366,6 +367,9 @@ pub fn merge_same_column(
             ),
         });
     }
+    // Recursive ADD merges into the child's existing column. It cannot adopt the parent's identity or attribute number.
+    inherited.object_id = declared.object_id;
+    inherited.attribute_number = declared.attribute_number;
     let not_null_is_local = (inherited.not_null && inherited.not_null_is_local)
         || (declared.not_null && declared.not_null_is_local);
     if declared.not_null && (!inherited.not_null || declared.not_null_is_local) {

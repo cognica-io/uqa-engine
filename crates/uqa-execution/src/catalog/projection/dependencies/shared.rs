@@ -20,7 +20,7 @@ impl DependencyBuilder<'_> {
     pub(super) fn record_shared(&mut self) -> Result<(), SQLError> {
         let database = super::catalog_oid(uqa_sql::catalog::DATABASE_OID)?;
         self.record_shared_namespaces(database);
-        self.record_shared_relations(database);
+        self.record_shared_relations(database)?;
         self.record_shared_objects(database)?;
         self.record_shared_memberships()
     }
@@ -56,7 +56,7 @@ impl DependencyBuilder<'_> {
     }
 
     /// Tables, views, materialized views and foreign tables with their columns' privileges, and privileges granted on the system catalogs, which the bootstrap superuser owns.
-    fn record_shared_relations(&mut self, database: u32) {
+    fn record_shared_relations(&mut self, database: u32) -> Result<(), SQLError> {
         let snapshot = self.catalog.snapshot();
         let definitions = &snapshot.definitions;
         let relations = snapshot
@@ -90,12 +90,9 @@ impl DependencyBuilder<'_> {
                 .objects
                 .relation(oid)
                 .map(|relation| {
-                    relation
-                        .columns
-                        .iter()
-                        .map(|column| column.name.clone())
-                        .collect::<Vec<_>>()
+                    uqa_sql::catalog::relation_attributes::column_names(&relation.columns)
                 })
+                .transpose()?
                 .unwrap_or_default();
             self.record_relation_privileges(database, oid, &security, &columns);
         }
@@ -109,8 +106,14 @@ impl DependencyBuilder<'_> {
                 continue;
             };
             let security = entry.security(relation);
-            self.record_relation_privileges(database, oid, &security, &relation.column_names());
+            self.record_relation_privileges(
+                database,
+                oid,
+                &security,
+                &uqa_sql::catalog::relation_attributes::consecutive_names(relation.column_names())?,
+            );
         }
+        Ok(())
     }
 
     /// The privileges of a relation and of each of its columns, named in `columns` in column-number order.
@@ -119,7 +122,7 @@ impl DependencyBuilder<'_> {
         database: u32,
         oid: u32,
         security: &uqa_sql::catalog::security::BoundTableSecurity,
-        columns: &[String],
+        columns: &[(i16, String)],
     ) {
         self.record_privileges(
             (database, ObjectAddress::whole(RELATION_CLASS, oid)),
@@ -133,8 +136,8 @@ impl DependencyBuilder<'_> {
         for (column, acl) in &security.column_acls {
             let Some(number) = columns
                 .iter()
-                .position(|name| name == column)
-                .and_then(|index| i32::try_from(index + 1).ok())
+                .find(|(_, name)| name == column)
+                .map(|(number, _)| i32::from(*number))
             else {
                 continue;
             };

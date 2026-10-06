@@ -167,7 +167,10 @@ pub fn materialize_constraint_metadata_with_names(
         allocate.include_catalog_identity(relation, CatalogOidClass::Constraint, identity)?;
     }
     // Releases predating typed table-key persistence stored column-level PRIMARY KEY and UNIQUE declarations only as ColumnDef flags. Promote those legacy flags before assigning names so catalog publication always sees named constraints.
-    let mut changed = materialize_column_key_constraints(columns, constraints);
+    let mut changed =
+        crate::catalog::relation_attributes::materialize(columns, &constraints.dropped_attributes)
+            .map_err(|error| ConstraintMetadataError::Execution(Box::new(error)))?;
+    changed |= materialize_column_key_constraints(columns, constraints);
     let mut used = constraint_names_for_assignment(relation, columns, constraints, names)?;
 
     let mut column_object_ids = BTreeSet::new();

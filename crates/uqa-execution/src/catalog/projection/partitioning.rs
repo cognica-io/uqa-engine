@@ -47,10 +47,7 @@ pub fn build_pg_partitioned_table(
                     .iter()
                     .position(|column| column.name == *name)
                     .map_or(Ok(0), |position| {
-                        let ordinal = position.checked_add(1).ok_or_else(|| {
-                            SQLError::Internal("partition key ordinal overflow".into())
-                        })?;
-                        catalog_usize(ordinal, "pg_partitioned_table.partattrs")
+                        super::helpers::rows::column_ordinal(position, &columns[position])
                     }),
                 _ => Ok(0),
             })

@@ -186,7 +186,7 @@ impl TablePrivilegeCatalog for Catalog {
         Ok(ColumnPrivilegeRelation {
             relation: RelationIdentity::new("public", "items"),
             security: self.table_security.clone(),
-            columns: vec!["a".into(), "b".into()],
+            columns: vec![(1, "a".into()), (2, "b".into())],
             has_system_columns: true,
         })
     }

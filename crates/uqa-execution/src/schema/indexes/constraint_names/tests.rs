@@ -89,6 +89,7 @@ fn candidate_names_follow_catalog_identity_without_replacing_key_structure() {
     candidate.key_constraints.push(added.clone());
     candidate.key_constraints[0].columns = vec!["new_column".into()];
     let current = crate::catalog::CatalogTableSnapshot {
+        dropped_attributes: std::sync::Arc::new(Vec::new()),
         row_type_array_name: None,
         object_id: [1; 16],
         catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(

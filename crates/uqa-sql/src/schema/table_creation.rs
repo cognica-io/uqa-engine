@@ -99,6 +99,7 @@ pub fn create_table_as_columns(
                 .cloned()
                 .unwrap_or(ColumnType::Text),
             object_id: None,
+            attribute_number: None,
             missing_value: None,
             primary_key: false,
             not_null: false,

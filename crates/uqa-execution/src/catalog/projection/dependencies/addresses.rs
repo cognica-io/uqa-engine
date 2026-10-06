@@ -106,11 +106,19 @@ impl CatalogObjects {
                         table: relation.table.clone(),
                     });
                 }
-                let index = usize::try_from(address.sub_id).ok()?.checked_sub(1)?;
+                let column = relation
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .find(|(index, column)| {
+                        uqa_sql::catalog::relation_attributes::column_number(column, *index)
+                            .is_ok_and(|number| i32::from(number) == address.sub_id)
+                    })?
+                    .1;
                 Some(CatalogObject::Column {
                     relation: relation.identity.clone(),
                     kind: relation.kind,
-                    name: relation.columns.get(index)?.name.clone(),
+                    name: column.name.clone(),
                 })
             }
             TYPE_CLASS => Some(match self.type_object(address.object_id)? {
@@ -164,11 +172,19 @@ impl CatalogObjects {
                 column,
             } => {
                 let owner = self.relation(*owner)?;
-                let index = usize::try_from(*column).ok()?.checked_sub(1)?;
+                let definition = owner
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .find(|(index, definition)| {
+                        uqa_sql::catalog::relation_attributes::column_number(definition, *index)
+                            .is_ok_and(|number| i32::from(number) == *column)
+                    })?
+                    .1;
                 CatalogObject::ColumnDefault {
                     relation: owner.identity.clone(),
                     kind: owner.kind,
-                    column: owner.columns.get(index)?.name.clone(),
+                    column: definition.name.clone(),
                 }
             }
             MemberObject::Rule {

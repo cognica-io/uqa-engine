@@ -43,6 +43,7 @@ impl Engine {
             hierarchy: table.hierarchy.read().clone(),
             catalog_oids: table.recorded_catalog_oids(),
             row_type_array_name: table.row_type_array_name.read().clone(),
+            dropped_attributes: table.dropped_attributes.read().clone(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }
@@ -312,6 +313,7 @@ impl Engine {
             on_commit,
             catalog_oids: Some(catalog_oids),
             row_type_array_name: crate::state::CatalogCell::new(Some(row_type_array_name)),
+            dropped_attributes: crate::state::CatalogCell::new(Vec::new()),
         };
         let table_arc = Arc::new(table);
         if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {

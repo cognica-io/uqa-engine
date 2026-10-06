@@ -204,7 +204,8 @@
       "catalog.object-dependencies",
       "catalog.creation-ordered-oids",
       "ddl.relation-creation-namespaces",
-      "ddl.rule-and-trigger-definitions"
+      "ddl.rule-and-trigger-definitions",
+      "ddl.relation-attribute-slots"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -1399,6 +1400,14 @@
       "postgresql_reference": "PostgreSQL 18.4 independently captured in tests/parity/pg18/array_element_input_oracle.expected.json (13 Simple Query messages); PostgreSQL parser type and operator selection, lexical scope resolution and ruleutils stored expression output",
       "uqa_test": "cargo test -p uqa-engine --test integration catalog::sql_views::common_coercions::array_element_inputs; cargo test -p uqa-sql --lib type_resolution",
       "supported_version": "Quantified comparisons and polymorphic unnest select scalar elements across multidimensional arrays and int2vector/oidvector inputs while retaining outer catalog-vector values and domain-to-base array conversions. All thirteen PostgreSQL messages pass four providers; definitions and values survive rename and persistent reopen. Existing legacy-vector and prepared-query regressions also pass.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "ddl.relation-attribute-slots",
+      "postgresql_reference": "PostgreSQL 18.4 independently captured in tests/parity/pg18/relation_attribute_slots_oracle.expected.json: 91 initial messages and eleven observations from a fresh connection, with exact rows, types, command tags, errors and notices.",
+      "uqa_test": "cargo test -p uqa-engine --test integration relation_attribute_slots; cargo test -p uqa-engine --lib legacy_attribute_layouts; cargo test -p uqa-sql --lib catalog::relation_attributes; cargo test -p uqa-execution --lib attribute_slots",
+      "supported_version": "Surviving relation attribute numbers and dropped physical slots persist across schema changes, rollback, hierarchy changes, catalog/dependency consumers and reopen. All 102 PostgreSQL observations match memory, SQLite, SQLite Key/Value and redb. Initial legacy migration is atomic; current-format refresh rejects missing or invalid numbering. Foreign slot deletion uses type dependency removal with a provisioned memory_fdw; independent SQL wrapper and direct foreign-column DDL omissions remain tracked in #523.",
       "status": "verified",
       "open_issue": null
     }

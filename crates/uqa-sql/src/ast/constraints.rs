@@ -21,6 +21,9 @@ pub struct ColumnDef {
     /// Durable identity of this catalog column. Logical names can change while a fixed transaction snapshot continues to address the same column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
+    /// Stable relation attribute number. Parsed declarations have no number until publication; renaming and dropping other columns never change it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribute_number: Option<i16>,
     /// Value exposed for physical rows captured before this column was added. This is the catalog equivalent of `PostgreSQL`'s `attmissingval`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub missing_value: Option<uqa_core::Value>,
@@ -107,6 +110,7 @@ impl ColumnDef {
             name: name.into(),
             ty,
             object_id: None,
+            attribute_number: None,
             missing_value: None,
             primary_key: false,
             not_null: false,
@@ -360,6 +364,9 @@ pub struct TableKeyConstraint {
 /// databases written before constraint persistence backward compatible.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TableConstraintSet {
+    /// Physical attribute metadata retained after a column is removed from the live schema.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped_attributes: Vec<crate::catalog::relation_attributes::DroppedAttribute>,
     /// Distinguish a declared zero-column SQL relation from a schema-free document table. Missing legacy metadata retains inference from existing columns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub columns_declared: Option<bool>,

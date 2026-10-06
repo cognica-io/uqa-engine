@@ -126,6 +126,15 @@ impl ForeignDefinitionContext<'_> {
         self.events
             .handle_drop_column_event_dependencies(table_name, column_name, false)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        table.dropped_attributes.push(
+            uqa_sql::catalog::relation_attributes::DroppedAttribute::from_column(
+                &table.columns[column_index],
+                column_index,
+                true,
+                0,
+            )
+            .map_err(|error| StorageBackendError::backend("dropped foreign attribute", error))?,
+        );
         declarations::remove_foreign_column(
             &mut table.columns,
             &mut table.checks,

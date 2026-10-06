@@ -57,6 +57,7 @@ pub(super) struct RelationObject {
     pub kind: RelationKind,
     /// Attributes in column-number order.
     pub columns: Vec<ColumnDef>,
+    pub dropped_columns: Vec<(i16, String)>,
     /// The table an index belongs to.
     pub table: Option<RelationIdentity>,
 }
@@ -65,8 +66,13 @@ impl RelationObject {
     pub(super) fn column_number(&self, name: &str) -> Option<i32> {
         self.columns
             .iter()
-            .position(|column| column.name == name)
-            .and_then(|index| i32::try_from(index + 1).ok())
+            .enumerate()
+            .find(|(_, column)| column.name == name)
+            .and_then(|(index, column)| {
+                uqa_sql::catalog::relation_attributes::column_number(column, index)
+                    .ok()
+                    .map(i32::from)
+            })
     }
 }
 
@@ -221,6 +227,7 @@ impl CatalogObjects {
                 RelationKind::Table,
                 table.columns.as_ref().clone(),
             );
+            self.retain_dropped_columns(table.catalog_oids.relation, &table.dropped_attributes);
             self.unpin_row_type(table.catalog_oids);
         }
         for (identity, view) in snapshot.definitions.views.iter() {
@@ -247,6 +254,7 @@ impl CatalogObjects {
                 RelationKind::ForeignTable,
                 table.columns.clone(),
             );
+            self.retain_dropped_columns(oids.relation, &table.dropped_attributes);
             self.unpin_row_type(oids);
         }
         self.collect_composite_relations(snapshot);
@@ -345,6 +353,20 @@ impl CatalogObjects {
         self.unpin(ObjectAddress::whole(TYPE_CLASS, oid));
     }
 
+    fn retain_dropped_columns(
+        &mut self,
+        oid: u32,
+        attributes: &[uqa_sql::catalog::relation_attributes::DroppedAttribute],
+    ) {
+        self.relations
+            .get_mut(&oid)
+            .expect("registered relation")
+            .dropped_columns = attributes
+            .iter()
+            .map(|attribute| (attribute.number, attribute.name()))
+            .collect();
+    }
+
     fn add_relation(
         &mut self,
         oid: u32,
@@ -359,6 +381,7 @@ impl CatalogObjects {
                 identity,
                 kind,
                 columns,
+                dropped_columns: Vec::new(),
                 table: None,
             },
         );

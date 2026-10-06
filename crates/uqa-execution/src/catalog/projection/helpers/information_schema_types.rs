@@ -167,11 +167,5 @@ pub fn info_data_type(ty: &ColumnType) -> &str {
 }
 
 pub fn array_dimension_count(ty: &ColumnType) -> i64 {
-    let mut dimensions = 0_i64;
-    let mut current = ty;
-    while let ColumnType::Array(element) = current {
-        dimensions += 1;
-        current = element;
-    }
-    dimensions
+    uqa_sql::catalog::relation_attributes::array_dimension_count(ty)
 }

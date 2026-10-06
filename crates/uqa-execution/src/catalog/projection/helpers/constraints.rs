@@ -217,7 +217,7 @@ pub fn constraint_catalog_rows(
         let mut pending = Vec::new();
 
         for (idx, col) in columns.iter().enumerate() {
-            let ordinal = catalog_ordinal(idx, "constraint column")?;
+            let ordinal = super::rows::column_ordinal(idx, col)?;
             if col.not_null {
                 pending.push(PendingConstraintCatalogRow {
                     schema: schema.clone(),
@@ -415,7 +415,7 @@ pub fn constraint_catalog_rows(
         let columns = foreign_table.columns;
         let mut pending = Vec::new();
         for (idx, column) in columns.iter().enumerate() {
-            let ordinal = catalog_ordinal(idx, "foreign-table constraint column")?;
+            let ordinal = super::rows::column_ordinal(idx, column)?;
             if column.not_null {
                 pending.push(PendingConstraintCatalogRow {
                     schema: schema.clone(),

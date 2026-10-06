@@ -209,6 +209,7 @@ fn legacy_boolean_auto_increment_metadata_remains_readable() {
         name: "id".into(),
         ty: ColumnType::Integer,
         object_id: None,
+        attribute_number: None,
         missing_value: None,
         primary_key: false,
         not_null: true,

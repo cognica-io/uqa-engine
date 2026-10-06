@@ -610,6 +610,18 @@ SELECT renamed_amount_reader();
 
 `ALTER TABLE name DROP COLUMN [IF EXISTS] column [RESTRICT | CASCADE]` takes a column identifier and defaults to RESTRICT. It returns the `ALTER TABLE` command tag without rows. SQL-standard function and procedure bodies retain dependencies on columns read by queries and INSERT, UPDATE, DELETE, and MERGE expressions; INSERT and UPDATE destination columns also establish dependencies. A dependent routine blocks RESTRICT with `2BP01`. Missing columns report `42703`, while `IF EXISTS` skips a missing column after relation and owner validation.
 
+A surviving column keeps its positive `pg_attribute.attnum` after DROP, RENAME and ALTER TYPE. DROP retains a slot marked `attisdropped`; a later ADD receives the next number and does not reuse a deleted slot, even when it reuses the old name. `pg_class.relnatts` includes these slots, and `information_schema.columns.ordinal_position` preserves the surviving numbers while omitting deleted columns. Defaults, constraints, indexes, column privileges and stored routine targets use the same numbers. Deleted slots count toward PostgreSQL’s 1600-column table limit.
+
+```sql execute
+CREATE TABLE attribute_slots_example(a integer, b text);
+ALTER TABLE attribute_slots_example DROP COLUMN a;
+ALTER TABLE attribute_slots_example ADD COLUMN c integer;
+SELECT attname, attnum, attisdropped
+FROM pg_attribute
+WHERE attrelid = 'attribute_slots_example'::regclass AND attnum > 0
+ORDER BY attnum;
+```
+
 CASCADE follows stored routine dependencies through generated columns, views, owned sequences, other routines, and domains, and removes dependent defaults, CHECK constraints, indexes, and inbound foreign keys through the corresponding object lifecycle. Unrelated columns, rows, and routines survive. The table owner's authority permits removal of a dependent routine in an inaccessible schema. Statement and savepoint failures roll back the column and dependent objects together, committed changes refresh sibling engines, and stored definitions survive SQLite reopen. The Rust `Engine::drop_column` API also protects stored readers with RESTRICT behavior.
 
 Removing dependent columns, defaults or CHECK constraints through `DROP FUNCTION`, `DROP SCHEMA`, `DROP DOMAIN` or `DROP SEQUENCE ... CASCADE` retains an `ACCESS EXCLUSIVE` lock on each affected table until transaction end or rollback to a preceding savepoint. These changes wait for concurrent `ANALYZE` and prepare their storage writes after the lock is acquired.

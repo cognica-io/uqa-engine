@@ -250,7 +250,7 @@ fn information_schema_column_row(
         ("column_name", str_value(column.name.clone())),
         (
             "ordinal_position",
-            int_value(catalog_ordinal(index, "information_schema column")?),
+            int_value(super::helpers::rows::column_ordinal(index, column)?),
         ),
         (
             "column_default",

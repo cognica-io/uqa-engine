@@ -248,6 +248,7 @@ fn occupied(oid: i64) -> CatalogReadView {
     snapshot.definitions.foreign_tables = std::collections::BTreeMap::from([(
         uqa_core::RelationIdentity::new("hidden_schema", "peer"),
         crate::catalog::foreign::StoredForeignTable {
+            dropped_attributes: Vec::new(),
             name: "hidden_schema.peer".into(),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
             object_id: [90; 16],

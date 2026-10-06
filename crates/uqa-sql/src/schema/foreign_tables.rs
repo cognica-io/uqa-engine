@@ -78,7 +78,7 @@ impl ForeignSchemaContext<'_> {
             }
         }
         self.prepare_foreign_table_schema_inner(
-            table_name, columns, checks, false, allocate, names,
+            table_name, columns, checks, None, allocate, names,
         )?;
         if let Some(not_nulls) = not_nulls {
             let relation =
@@ -102,6 +102,7 @@ impl ForeignSchemaContext<'_> {
         table_name: &str,
         columns: &mut [ColumnDef],
         checks: &mut Vec<TableCheck>,
+        dropped_attributes: &[crate::catalog::relation_attributes::DroppedAttribute],
         allocate: &mut CatalogIdentityAllocator<'_>,
     ) -> Result<(), SQLError> {
         validate_foreign_table_schema_envelope(columns)?;
@@ -109,7 +110,7 @@ impl ForeignSchemaContext<'_> {
             table_name,
             columns,
             checks,
-            true,
+            Some(dropped_attributes),
             allocate,
             &crate::schema::constraint_metadata::ConstraintNameScope::default(),
         )
@@ -119,13 +120,14 @@ impl ForeignSchemaContext<'_> {
         table_name: &str,
         columns: &mut [ColumnDef],
         checks: &mut Vec<TableCheck>,
-        stored: bool,
+        stored_attributes: Option<&[crate::catalog::relation_attributes::DroppedAttribute]>,
         allocate: &mut CatalogIdentityAllocator<'_>,
         names: &crate::schema::constraint_metadata::ConstraintNameScope,
     ) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(table_name).map_err(|error| {
             SQLError::Internal(format!("decode foreign table `{table_name}`: {error}"))
         })?;
+        let stored = stored_attributes.is_some();
         let qualifier = relation.name.clone();
         let check_columns = columns.to_vec();
         for column in columns.iter_mut() {
@@ -201,6 +203,7 @@ impl ForeignSchemaContext<'_> {
         )?;
         let mut constraints = crate::ast::TableConstraintSet {
             checks: std::mem::take(checks),
+            dropped_attributes: stored_attributes.unwrap_or_default().to_vec(),
             ..crate::ast::TableConstraintSet::default()
         };
         crate::schema::constraint_metadata::materialize_constraint_metadata_with_names(

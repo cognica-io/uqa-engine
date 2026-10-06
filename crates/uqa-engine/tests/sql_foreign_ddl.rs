@@ -38,6 +38,7 @@ fn integer_column(name: &str) -> ColumnDef {
         name: name.to_string(),
         ty: ColumnType::Integer,
         object_id: None,
+        attribute_number: None,
         missing_value: None,
         primary_key: false,
         not_null: false,

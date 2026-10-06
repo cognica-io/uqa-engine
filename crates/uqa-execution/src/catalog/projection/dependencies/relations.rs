@@ -89,7 +89,9 @@ impl DependencyBuilder<'_> {
         let relation = ObjectAddress::whole(RELATION_CLASS, oid);
         self.record_namespace(relation, &identity.schema);
         for (index, column) in columns.iter().enumerate() {
-            let Ok(number) = i32::try_from(index + 1) else {
+            let Ok(number) =
+                uqa_sql::catalog::relation_attributes::column_number(column, index).map(i32::from)
+            else {
                 continue;
             };
             let mut references = References::default();
@@ -215,7 +217,13 @@ impl DependencyBuilder<'_> {
         let index = columns
             .iter()
             .position(|candidate| candidate.object_id == Some(column))?;
-        Some(ObjectAddress::column(oid, i32::try_from(index + 1).ok()?))
+        Some(ObjectAddress::column(
+            oid,
+            i32::from(
+                uqa_sql::catalog::relation_attributes::column_number(&columns[index], index)
+                    .ok()?,
+            ),
+        ))
     }
 
     pub(super) fn relation_object(&self, oid: u32) -> Result<&RelationObject, SQLError> {

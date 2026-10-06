@@ -28,6 +28,7 @@ pub struct StoredForeignTable {
     /// Captured server identity; absent only while converting a legacy definition at initial open.
     pub server_reference: Option<ForeignServerReference>,
     pub columns: Vec<ColumnDef>,
+    pub dropped_attributes: Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
     pub checks: Vec<TableCheck>,
     pub options: BTreeMap<String, String>,
 }
@@ -44,6 +45,8 @@ struct PersistedForeignTableSchema {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     server_reference: Option<ForeignServerReference>,
     columns: Vec<ColumnDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dropped_attributes: Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     checks: Vec<TableCheck>,
 }
@@ -95,6 +98,7 @@ impl StoredForeignTable {
                     row_type_array_name: None,
                     server_reference: None,
                     columns,
+                    dropped_attributes: Vec::new(),
                     checks: Vec::new(),
                 },
                 true,
@@ -110,6 +114,7 @@ impl StoredForeignTable {
                 server_name,
                 server_reference: schema.server_reference,
                 columns: schema.columns,
+                dropped_attributes: schema.dropped_attributes,
                 checks: schema.checks,
                 options,
             },
@@ -139,6 +144,7 @@ impl StoredForeignTable {
             row_type_array_name: self.row_type_array_name.clone(),
             server_reference: self.server_reference,
             columns: self.columns.clone(),
+            dropped_attributes: self.dropped_attributes.clone(),
             checks: self.checks.clone(),
         })
         .map_err(StorageBackendError::from)

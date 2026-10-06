@@ -83,11 +83,11 @@ pub fn bind_stored_merge_target_columns(
                         .entry(name)
                         .or_insert(MergeTargetColumnBinding {
                             object_id,
-                            attribute_number: Some(i16::try_from(position + 1).map_err(|_| {
-                                SQLError::Internal(
-                                    "MERGE target attribute number is out of range".into(),
-                                )
-                            })?),
+                            attribute_number: Some(
+                                crate::catalog::relation_attributes::column_number(
+                                    column, position,
+                                )?,
+                            ),
                             domain_dependencies,
                         });
                 }

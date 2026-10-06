@@ -276,6 +276,7 @@ impl Engine {
             .into_iter()
             .map(|(relation, table)| {
                 let snapshot = CatalogTableSnapshot {
+                    dropped_attributes: table.dropped_attributes.snapshot(),
                     object_id: table.object_id(),
                     catalog_oids: table.relation_oids(),
                     row_type_array_name: table.row_type_array_name.read().clone(),

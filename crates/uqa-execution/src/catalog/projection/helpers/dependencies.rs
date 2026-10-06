@@ -10,7 +10,7 @@ use uqa_sql::ast::{ColumnDef as SQLColumnDef, Expr, WindowFrame, WindowSpec};
 use uqa_sql::SQLError;
 
 use super::constraints::ConstraintCatalogColumn;
-use super::rows::catalog_ordinal;
+use super::rows::column_ordinal;
 
 pub fn named_constraint_columns(
     names: &[String],
@@ -30,7 +30,7 @@ pub fn named_constraint_columns(
                 })?;
             Ok(ConstraintCatalogColumn {
                 name: name.clone(),
-                table_ordinal: catalog_ordinal(index, "constraint column")?,
+                table_ordinal: column_ordinal(index, &columns[index])?,
             })
         })
         .collect()

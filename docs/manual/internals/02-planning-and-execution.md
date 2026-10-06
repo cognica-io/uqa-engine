@@ -509,6 +509,8 @@ Prepared statements retain original syntax separately from the analyzed definiti
 
 Custom planning substitutes already-coerced parameters while retaining resolved domain identities and bare-parameter provenance. The first five parameterized executions use custom plans in auto mode; subsequent selections compare generic execution cost with average custom execution plus planning cost. Relational costing uses shared operator coefficients, live row counts, MCV statistics, and eligible index access. A newly built generic plan is costed before deciding whether to execute it. Reanalysis starts from original syntax and validates the original result descriptor before publishing against the captured definition identity; it retains cost history and counters. Stored views remain logical until invocation. A cache hit is never authority to ignore a changed schema, index, routine, model, or analyzer.
 
+SQL owns durable relation attribute numbers, dropped-slot physical metadata and layout validation in `catalog::relation_attributes`. Execution publishes those layouts with schema changes, projects catalog and dependency references using the retained numbers, and migrates legacy metadata only inside initial catalog restoration. Engine retains and snapshots the live columns and dropped attributes through existing catalog adapters. Query row shapes contain only live columns; catalog attribute numbers can have gaps and must not be interpreted as row-vector positions.
+
 ## Result boundaries
 
 | API | Boundary behavior |

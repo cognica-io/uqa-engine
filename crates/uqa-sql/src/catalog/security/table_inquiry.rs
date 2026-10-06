@@ -69,19 +69,19 @@ const POSTGRES_SYSTEM_COLUMNS: [&str; 6] = ["ctid", "xmin", "cmin", "xmax", "cma
 pub struct ColumnPrivilegeRelation {
     pub relation: RelationIdentity,
     pub security: TableSecurity,
-    pub columns: Vec<String>,
+    pub columns: Vec<(i16, String)>,
     pub has_system_columns: bool,
 }
 
 fn resolve_column_privilege_target(
     relation: &RelationIdentity,
-    columns: &[String],
+    columns: &[(i16, String)],
     has_system_columns: bool,
     value: &Value,
 ) -> Result<Option<ResolvedColumnPrivilegeTarget>, SQLError> {
     match value {
         Value::Str(column) | Value::FixedChar(column) => {
-            if columns.iter().any(|definition| definition == column) {
+            if columns.iter().any(|(_, definition)| definition == column) {
                 Ok(Some(ResolvedColumnPrivilegeTarget::User(column.clone())))
             } else if has_system_columns && POSTGRES_SYSTEM_COLUMNS.contains(&column.as_str()) {
                 Ok(Some(ResolvedColumnPrivilegeTarget::System))
@@ -95,10 +95,10 @@ fn resolve_column_privilege_target(
                 })
             }
         }
-        Value::Int(attnum) if *attnum > 0 => Ok(usize::try_from(*attnum - 1)
-            .ok()
-            .and_then(|index| columns.get(index))
-            .map(|column| ResolvedColumnPrivilegeTarget::User(column.clone()))),
+        Value::Int(attnum) if *attnum > 0 => Ok(columns
+            .iter()
+            .find(|(number, _)| i64::from(*number) == *attnum)
+            .map(|(_, column)| ResolvedColumnPrivilegeTarget::User(column.clone()))),
         Value::Int(attnum) if has_system_columns && (-6..=-1).contains(attnum) => {
             Ok(Some(ResolvedColumnPrivilegeTarget::System))
         }

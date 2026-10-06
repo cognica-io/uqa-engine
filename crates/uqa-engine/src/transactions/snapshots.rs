@@ -72,6 +72,7 @@ impl Engine {
                     key_constraints: table.key_constraints.read().clone(),
                     hierarchy: table.hierarchy.read().clone(),
                     row_type_array_name: table.row_type_array_name.read().clone(),
+                    dropped_attributes: table.dropped_attributes.read().clone(),
                     doc_count_cache: table
                         .doc_count_cache
                         .load(std::sync::atomic::Ordering::Acquire),
@@ -176,6 +177,10 @@ impl Engine {
                 .row_type_array_name
                 .write()
                 .clone_from(&table_snapshot.row_type_array_name);
+            table
+                .dropped_attributes
+                .write()
+                .clone_from(&table_snapshot.dropped_attributes);
             table
                 .value_indexes
                 .write()

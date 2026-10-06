@@ -13,6 +13,7 @@ fn table(object_id: [u8; 16], name: Option<&str>, array_oid: Option<u32>) -> Cat
     let mut oids = RelationCatalogOids::legacy(RelationOidKind::Table, &object_id);
     oids.array_type = array_oid;
     CatalogTableSnapshot {
+        dropped_attributes: std::sync::Arc::new(Vec::new()),
         object_id,
         catalog_oids: oids,
         row_type_array_name: name.map(str::to_owned),

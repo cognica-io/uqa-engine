@@ -16,7 +16,7 @@ use uqa_core::RelationIdentity;
 use super::super::helpers::index_definitions::{index_columns, indexdef};
 use super::super::helpers::oids::{relation_oid, split_schema_name};
 use super::super::helpers::rows::{
-    bool_value, catalog_int2vector, catalog_ordinal, catalog_usize, int_value, row, str_value,
+    bool_value, catalog_int2vector, catalog_usize, int_value, row, str_value,
 };
 use super::table_relation_oid_from;
 
@@ -162,7 +162,9 @@ fn index_key_ordinals(
         .map(|column| {
             column
                 .and_then(|name| table_cols.iter().position(|item| item.name == name))
-                .map(|position| catalog_ordinal(position, "pg_index key column"))
+                .map(|position| {
+                    super::super::helpers::rows::column_ordinal(position, &table_cols[position])
+                })
                 .transpose()
                 .map(|ordinal| ordinal.unwrap_or(0))
         })
