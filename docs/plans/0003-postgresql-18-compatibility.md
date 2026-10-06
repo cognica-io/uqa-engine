@@ -265,6 +265,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `functions.temporal-extraction` | `M1` | `partial` |
 | `expressions.interval-arithmetic` | `M1` | `verified` |
 | `routines.sql-standard-body-deparse` | `M1` | `verified` |
+| `routines.definition-output` | `M3` | `verified` |
 | `routines.attribute-checks` | `M3` | `partial` |
 | `types.common-type-selection` | `M4` | `partial` |
 | `ddl.default-cooking` | `M3` | `partial` |
@@ -1001,7 +1002,7 @@ The independent PostgreSQL 18.4 reference in `tests/parity/pg18/user_routine_sch
 
 Preservation argument: schema expansion produces an ordered sequence of existing routine identities and applies the same ACL transition used by explicit targets. Candidate construction does not publish any prefix; an error leaves the original catalog, while success publishes the complete candidate in the existing transaction. Thus each following relational or ranked operator observes exactly one catalog state and unchanged carriers, operators and value/score semantics. Repeated targets preserve PostgreSQL warning and grant ordering rather than changing result algebra.
 
-The builtin routine ACL foundation and execution checks are verified in PR #468 with the unit below. The original 75 inherited records, including 40 open work items, are unchanged; #461 closes when this PR merges.
+The builtin routine ACL foundation and execution checks merged in PR #468 as `5915147da`; #461 is closed and the completed branch is removed. This unit left the original 75 inherited records and 40 open work items unchanged.
 
 ### Builtin identity, authority and executable preservation
 
@@ -1017,12 +1018,19 @@ Mutation initialization reuses SQL-owned expression ownership and column provena
 
 ## Routine definition reconstruction
 
-[Issue #457](https://github.com/cognica-io/uqa-engine/issues/457) tracks the inherited pg_get_functiondef task: even NULL input currently reports a missing function. Execution can reconstruct the declaration from existing stored identities, arguments, results, attributes and bodies without a new AST, storage format or Engine algorithm. Independent inspection also reproduces [#458](https://github.com/cognica-io/uqa-engine/issues/458): existing builtin declaration helpers omit OUT/VARIADIC argument modes and SETOF results even though their catalog metadata is already available. Fixing those shared helpers keeps the new declaration output and existing inquiry functions consistent.
+PR #459 implements #457 `pg_get_functiondef` and fixes #458 shared builtin argument/result output. SQL owns source quoting, saved configuration, float4 formatting and effective result identity; Execution observes the existing routine catalog and name visibility. No dependency, Cargo feature, AST or persisted format is added, and Engine gains no algorithm.
 
-- [x] Inspect crate manifests, enabled features, dependency direction and existing owners; reproduce both defects and capture 39 independent PostgreSQL 18.4 messages.
-- [ ] Add SQL-owned declaration quoting, configuration-list rendering and float4 estimate formatting with independent owner evidence.
-- [ ] Implement the Execution catalog projection and register the strict, stable oid-to-text inquiry; correct the shared builtin argument/result helpers.
-- [ ] Verify exact source and SQL-standard definitions, signatures, attributes, shadows, renames, non-owner observation, no execution side effects, four providers and durable reopening.
-- [ ] Synchronize the manual, HISTORY, compatibility manifest and preserved PR checklist, review, merge and remove the completed branch.
+- [x] Inspect ownership/features/dependencies and capture independent PostgreSQL 18.4 references.
+- [x] Implement source/configuration/estimate rendering, complete declaration output, typed builtin defaults and shared OUT/VARIADIC/SETOF helpers.
+- [x] Verify 44 definition messages, including 293 builtin declarations, on all four providers; verify eleven observations after durable reopen and reapply all seventeen user declarations without changing their output or sequence state.
+- [x] Fix #469 effective return identity and #470 host callback precedence; verify the 33-message replacement reference on all four providers and the existing callback regression.
+- [x] Verify 1,372 SQL owner tests, twelve affected Execution tests and 171 affected Engine integration tests, including the manual SQL harness; complete strict Clippy and repository policy checks.
+- [ ] Complete final review, merge, close #457/#458/#469/#470 and remove the completed branch.
 
-The preservation condition is read-only reconstruction of the selected stored identity: rendering observes the current catalog and invoking name visibility but does not execute a routine, reanalyze or rebind its stored body, change privileges or mutate transaction state. Existing typed SQL rendering supplies expression semantics; existing parameter/result helpers supply declared identity. Source bodies keep every byte within a collision-free dollar delimiter. SQL owns the lexical configuration-list and numeric formatting rules, while Execution supplies catalog values. Engine remains an adapter. The full builtin catalog inventory remains a separate inherited task, and all 75 records with 41 open work items are retained until this unit is verified and merged.
+The first acceptance run exposed the ordinary scanner and schema-privilege prerequisites. Their corrections merged in #462 and #468; the separate SQL/PL first-use task remains in #465. Round-trip validation then reproduced #469: raw `RETURNS` AST spelling incorrectly rejected equivalent inferred OUT, explicit record, TABLE and SETOF declarations. Replacement now compares the effective catalog type, set cardinality and record output descriptor; single-output procedures retain a record descriptor, and unnamed record columns use PostgreSQL's generated names. Rejection SQLSTATE, DETAIL and DROP hint match the independent reference. The same SQL-owned type helper drives pg_proc and declaration output. #470 preserves host callbacks during fixed-call selection and argument coercion, while explicit and retained builtin identities still bypass callback lookup. The original `pg_get_functiondef` task is complete; all 75 inherited records remain, with 39 original work items open.
+
+For catalog $C$ and stored routine identity $o$, define the inquiry as $D_C(o)=(d,C)$: it returns declaration text $d$ and the identical catalog, session and transaction state. No routine body, argument expression or sequence operation is evaluated. Therefore composition with an existing relational or ranked operator retains its original state input and carrier operations. The renderer reads the stored signature and attributes, using current selected-object names for already bound SQL expressions. For source bytes $s$, the dollar delimiter is chosen so its prefix occurs nowhere in $s$; parsing the emitted source clause therefore recovers exactly $s$, including quotes, backslashes and trailing newlines. Saved configuration retains entry and list-element order, with escaping selected by the current scanner setting. Float4 estimates use PostgreSQL's six-significant-digit rendering. The existing SQL renderer supplies the supported SQL-standard expression/body reconstruction; no new algebraic law is assumed for payloads or ranked carriers.
+
+Let $T(R)$ be the effective result type of a validated routine declaration, $S(R)$ its set-returning flag and $O(R)$ its record output descriptor when one exists. Replacement accepts equivalent result declarations exactly when $T(R)=T(R')$, $S(R)=S(R')$ and the applicable $O(R)=O(R')$. Thus writing an inferred result explicitly, or changing TABLE spelling to equivalent OUT plus SETOF, does not change the function's codomain or cardinality. Existing replacement publication preserves the routine identity, owner and ACL; a rejected change publishes nothing. Catalog projection and reconstruction use the same $T$, so their declarations cannot disagree merely because `RETURNS` was omitted. The remaining full builtin catalog inventory and other inherited routine features stay open.
+
+Pure rendering owner tests use 43 independent PostgreSQL observations for dollar-prefix collisions, float4 estimates and saved configuration lists. Malformed catalog values are confined to a disposable PostgreSQL database. The provider references retain expected rows, types, diagnostics and compact capture provenance; no machine timing report is committed.

@@ -278,6 +278,12 @@ IMMUTABLE;
 SELECT add_tax(100.00, 0.10);
 ```
 
+`pg_get_functiondef(oid)` reconstructs a schema-qualified `CREATE OR REPLACE FUNCTION` or `CREATE OR REPLACE PROCEDURE` declaration from the stored catalog identity. It includes argument modes and defaults, the result declaration, language, nondefault attributes, ordered routine-local settings and the source or SQL-standard body. Source bytes are preserved inside a collision-free dollar delimiter; SQL-standard bodies and default expressions use current catalog names and invoking search-path visibility. The operation neither executes nor rebinds the body, and it does not require ownership or EXECUTE privilege. Unknown OIDs and NULL input return NULL; aggregates report `42809`. The shared argument and result inquiry functions preserve builtin `OUT`, `VARIADIC` and `SETOF` declarations. `CREATE OR REPLACE` compares effective result identity and set cardinality, so equivalent inferred OUT, explicit record, TABLE and SETOF declarations can replace one another. Record output names and types must still match; procedures retain this check even for a single output column. A changed result reports `42P13` with PostgreSQL's DETAIL and DROP hint.
+
+```sql execute
+SELECT pg_get_functiondef('pg_catalog.bit_length(text)'::regprocedure) AS definition;
+```
+
 SQL functions can return scalar, `SETOF`, or `TABLE` results according to their declaration. SQL-standard `RETURN expression` and `BEGIN ATOMIC ... END` bodies are also implemented for supported statement shapes. `pg_get_function_sqlbody(oid)` returns the stored SQL-standard body as text for user routines and built-ins that have one. A `RETURN` expression prints on one line, and each `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, or `WITH` statement of a `BEGIN ATOMIC` body uses PostgreSQL's layout, with column references qualified by their relation and parameters by name, qualified by the routine's name whenever the statement has a range table. Source-string and internal bodies, unknown OIDs and NULL input return NULL. Reconstruction is read-only and qualifies a selected routine whenever the invoking search path contains an earlier routine with the same name and argument types; a different overload does not hide it. Stored views, defaults and generated expressions use the same selected-identity rule.
 
 ```sql execute
