@@ -6,6 +6,8 @@
 
 //! `TimeZone` settings use SQL signs for numeric hours and POSIX signs for named rules.
 
+use std::fmt::Write as _;
+
 use super::definition::ParameterDefinition;
 use super::units::c_strtod;
 use super::value::invalid_value_message;
@@ -69,10 +71,10 @@ pub(super) fn parse_setting(
 fn fixed_setting(seconds_east: i64) -> Option<String> {
     let seconds = seconds_east.unsigned_abs();
     let mut offset = format!("{:02}", seconds / 3_600);
-    if seconds % 3_600 != 0 {
-        offset.push_str(&format!(":{:02}", seconds / 60 % 60));
-        if seconds % 60 != 0 {
-            offset.push_str(&format!(":{:02}", seconds % 60));
+    if !seconds.is_multiple_of(3_600) {
+        write!(offset, ":{:02}", seconds / 60 % 60).expect("writing to a String cannot fail");
+        if !seconds.is_multiple_of(60) {
+            write!(offset, ":{:02}", seconds % 60).expect("writing to a String cannot fail");
         }
     }
     let (sql_sign, posix_sign) = if seconds_east < 0 {

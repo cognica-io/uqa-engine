@@ -107,6 +107,16 @@ Text reaches a temporal type through PostgreSQL's input functions. `DATE`, `TIME
 
 Timestamp input also checks PostgreSQL's minimum Julian instant, `4714-11-24 00:00:00 BC`. Earlier `timestamp` values report `22008`; `timestamptz` applies its UTC offset before checking that boundary, so `4714-11-23 12:00:00-12 BC` is accepted as exactly the minimum instant.
 
+Date-only timestamp inputs can carry an adjacent positive offset or `Z`, such as `2024-01-01+05:30` or `2024-01-01Z`. A negative offset after a hyphenated date requires a separating space (`2024-01-01 -05:30`). Compact numeric offsets use hours and minutes; seconds require the colon form. Zone displacement validation precedes calendar validity, and BC leap-day validation uses the final calendar year.
+
+Casting a typed `DATE` or `TIMESTAMP` to `TIMESTAMPTZ` interprets the local date or time in the invoking session's `TimeZone`; a date supplies midnight. Gaps use the pre-transition offset and folds use the post-transition offset. Implicit argument and assignment casts use the same conversion, including prepared statements and stored defaults evaluated after a timezone change. This conversion is stable, so an immutable generated expression cannot acquire it implicitly.
+
+```sql execute
+SET TIME ZONE 'Asia/Seoul';
+SELECT extract(epoch FROM timestamp '2024-01-02 03:04:05'::timestamptz) AS utc_seconds;
+RESET TimeZone;
+```
+
 When an input is read, temporal coercion, comparison and date or timestamp range bounds use the same transaction clock as an explicit cast. Simple Query batches refresh that clock after `COMMIT`, `ROLLBACK` and their `AND CHAIN` forms; previously read constants retain their values.
 
 `TIME(p)`, `TIMESTAMP(p)`, and their timezone variants retain a fractional-second precision from 0 through 6 in column declarations, casts, function-source column definitions, array elements, result metadata, and persistent catalogs. Values are rounded when a cast or assignment applies the declaration. Rounding at the end of a day can produce `24:00:00`, which remains distinct from `00:00:00` as a time value. `pg_attribute.atttypmod` and `information_schema.columns.datetime_precision` expose the declared modifier after reopen.
