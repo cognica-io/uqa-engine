@@ -71,14 +71,14 @@ impl StatementAnalysisScopes for Scopes {
     }
 }
 fn analyze(scopes: &Scopes, sql: &str) -> Result<(), SQLError> {
-    let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+    let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
     analyze_executable_plan(
         &StatementAnalysisContext {
             scopes,
             routines: &NoRoutines,
             aliases: &NoRoutines,
         },
-        &plan,
+        &mut plan,
         &[],
     )
     .map(|_| ())
@@ -172,4 +172,141 @@ fn input_analysis_leaves_runtime_casts_and_expressions_unevaluated() {
     ] {
         analyze(&Scopes::default(), sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
     }
+}
+
+struct DomainInputs(std::sync::atomic::AtomicUsize);
+
+fn positive_type() -> ColumnType {
+    ColumnType::Domain {
+        schema: "public".into(),
+        name: "positive".into(),
+        oid: 16_384,
+        array_oid: Some(16_385),
+        base: Box::new(ColumnType::Integer),
+    }
+}
+
+impl FunctionTypeResolver for DomainInputs {
+    fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+        Ok(match name.replace('"', "").as_str() {
+            "positive" | "domain#16384" => Some(positive_type()),
+            "positive[]" | "domain#16384[]" => Some(ColumnType::Array(Box::new(positive_type()))),
+            _ => None,
+        })
+    }
+
+    fn catalog_input_functions(&self) -> Option<&dyn crate::expr::CatalogInputFunctions> {
+        Some(self)
+    }
+
+    fn resolve_function_type(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+        _: &[Option<String>],
+        _: &[Option<ColumnType>],
+        _: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+}
+impl RoutineResolution for DomainInputs {}
+impl crate::expr::CatalogInputFunctions for DomainInputs {
+    fn read_unknown_input(&self, text: &str, target: &ColumnType) -> Result<Value, SQLError> {
+        assert_eq!(text, "{1,2}");
+        assert_eq!(*target, ColumnType::Array(Box::new(positive_type())));
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        crate::expr::cast_value(&Value::Str(text.into()), "integer[]")
+    }
+}
+
+#[test]
+fn executable_input_constants_survive_query_and_command_analysis_once() {
+    for sql in [
+        "SELECT '{1,2}'::positive[]",
+        "SELECT '{1,2}'::positive[] WHERE false",
+        "SELECT CASE WHEN false THEN '{1,2}'::positive[] ELSE NULL END",
+        "WITH input AS (SELECT '{1,2}'::positive[] AS value) SELECT value FROM input",
+        "CREATE TABLE saved AS SELECT '{1,2}'::positive[]",
+        "CREATE MATERIALIZED VIEW saved AS SELECT '{1,2}'::positive[]",
+        "DECLARE input CURSOR FOR SELECT '{1,2}'::positive[]",
+        "EXPLAIN SELECT '{1,2}'::positive[]",
+    ] {
+        let inputs = DomainInputs(std::sync::atomic::AtomicUsize::new(0));
+        let scopes = Scopes::default();
+        let context = StatementAnalysisContext {
+            scopes: &scopes,
+            routines: &inputs,
+            aliases: &NoRoutines,
+        };
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        analyze_executable_plan(&context, &mut plan, &[]).unwrap();
+        assert_eq!(
+            inputs.0.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "{sql}"
+        );
+        let mut retained = 0;
+        let mut observe = |root: &ScalarExpr| {
+            root.visit(&mut |expression| {
+                if let ScalarExpr::TypedLiteral {
+                    value: Value::Array(_),
+                    bound_type,
+                    ..
+                } = expression
+                {
+                    assert_eq!(
+                        bound_type.as_ref(),
+                        Some(&ColumnType::Array(Box::new(positive_type())))
+                    );
+                    retained += 1;
+                }
+            });
+        };
+        match &plan {
+            UnifiedPlan::Command(command) => match command.as_ref() {
+                CommandPlan::CreateTableAs { query, .. }
+                | CommandPlan::CreateMaterializedView { query, .. }
+                | CommandPlan::DeclareCursor { query, .. } => {
+                    query.visit_scalar_expressions(&mut observe);
+                }
+                CommandPlan::Explain { body, .. } => {
+                    body.visit_scalar_expressions(&mut observe);
+                }
+                _ => plan.visit_scalar_expressions(&mut observe),
+            },
+            UnifiedPlan::Query(_) => plan.visit_scalar_expressions(&mut observe),
+        }
+        assert_eq!(retained, 1, "{sql}");
+        // Consumers may derive the result again; the admitted input is no longer text.
+        analyze_executable_plan(&context, &mut plan, &[]).unwrap();
+        assert_eq!(
+            inputs.0.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "{sql}"
+        );
+    }
+}
+
+#[test]
+fn scalar_domains_and_explicit_text_do_not_call_array_input_during_analysis() {
+    let inputs = DomainInputs(std::sync::atomic::AtomicUsize::new(0));
+    let scopes = Scopes::default();
+    for sql in [
+        "SELECT '0'::positive WHERE false",
+        "SELECT '{0}'::text::positive[] WHERE false",
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        analyze_executable_plan(
+            &StatementAnalysisContext {
+                scopes: &scopes,
+                routines: &inputs,
+                aliases: &NoRoutines,
+            },
+            &mut plan,
+            &[],
+        )
+        .unwrap();
+    }
+    assert_eq!(inputs.0.load(std::sync::atomic::Ordering::SeqCst), 0);
 }

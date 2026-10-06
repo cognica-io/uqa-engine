@@ -138,9 +138,13 @@ fn bind_domain_check(
     base: &ColumnType,
     expression: &mut Expr,
 ) -> Result<(), SQLError> {
-    let plan = crate::plan::ExpressionPlan::lower(expression.clone());
+    let original = crate::plan::ExpressionPlan::lower(expression.clone());
+    let mut plan = original.clone();
     let input = RowSchema::with_types(vec!["value".into()], vec![Some(base.clone())]);
-    let ty = crate::binding::analyze_domain_check(context.catalog, &plan, &input, context.binding)?;
+    let ty =
+        crate::binding::analyze_domain_check(context.catalog, &mut plan, &input, context.binding)?;
+    let sites = crate::binding::syntax_sites::expression_syntax_sites(&original, &plan)?;
+    crate::catalog::stored_ast::bind_stored_expression_sites(expression, &sites)?;
     if let Some(mut ty) = ty.as_ref() {
         while let ColumnType::Domain { base, .. } = ty {
             ty = base;
@@ -157,6 +161,7 @@ fn bind_domain_check(
     } else if matches!(expression, Expr::Literal(Value::Null | Value::Str(_))) {
         crate::catalog::stored_ast::read_unknown_stored_literal(
             crate::FunctionTypeResolver::enum_labels(context.catalog),
+            crate::FunctionTypeResolver::catalog_input_functions(context.catalog),
             expression,
             &ColumnType::Boolean,
             false,

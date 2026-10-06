@@ -9,7 +9,7 @@
 use super::super::{backfill::ColumnBackfillContext, rows::RewriteDeferral};
 use std::cell::RefCell;
 use uqa_core::Value;
-use uqa_sql::{assignment::columns::coerce_to_column_type, ast::Expr, SQLError};
+use uqa_sql::{ast::Expr, SQLError};
 
 pub enum AddedValue {
     Constant(Value),
@@ -45,18 +45,11 @@ impl AddedColumnRows {
             {
                 AddedValue::Expression(expression)
             }
-            expression => {
-                let value = expression.as_ref().map_or(Ok(Value::Null), |expression| {
-                    context.rewrite.expressions.evaluate_bound(expression, &[])
-                })?;
-                AddedValue::Constant(coerce_to_column_type(
-                    context.rewrite.types,
-                    context.rewrite.columns,
-                    table,
-                    column,
-                    value,
-                )?)
-            }
+            expression => AddedValue::Constant(context.evaluate_default(
+                table,
+                column,
+                expression.as_ref(),
+            )?),
         };
         self.pending.borrow_mut().push(AddedColumnValue {
             table: table.to_string(),
@@ -75,16 +68,9 @@ impl AddedColumnValue {
     pub fn evaluate(&self, context: &ColumnBackfillContext<'_>) -> Result<Value, SQLError> {
         match &self.value {
             AddedValue::Constant(value) => Ok(value.clone()),
-            AddedValue::Expression(expression) => coerce_to_column_type(
-                context.rewrite.types,
-                context.rewrite.columns,
-                &self.table,
-                &self.column,
-                context
-                    .rewrite
-                    .expressions
-                    .evaluate_bound(expression, &[])?,
-            ),
+            AddedValue::Expression(expression) => {
+                context.evaluate_default(&self.table, &self.column, Some(expression))
+            }
         }
     }
 }

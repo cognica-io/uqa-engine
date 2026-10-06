@@ -202,6 +202,8 @@ SELECT * FROM unnest(ARRAY['sql', 'graph']) AS item(value);
 
 Array values are homogeneous under SQL coercion. A SQL `NULL` element remains distinct from an empty array.
 
+An unknown string cast to an array of domains is read by the array and element-domain input functions during analysis. Element CHECK and NOT NULL constraints therefore apply even under `WHERE false`, in an unselected CASE arm, or when a statement is prepared. The converted array retains its domain identity, dimensions and lower bounds, and execution does not repeat those input checks. A prepared array constant keeps its accepted value after domain constraints change; an explicitly typed text expression or parameter is converted against the current domain when it executes. A NULL array differs from an array containing a NULL domain element. Column and routine defaults, stored CHECK expressions and ALTER TABLE USING retain the same typed input values; default assignment and column backfill preserve their source type. A scalar domain cast retains its outer domain checks for execution after its base input is read, including a NULL cast in a default.
+
 ## VECTOR and TENSOR
 
 The dimension must be a positive integer:

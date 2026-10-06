@@ -68,7 +68,7 @@ fn convert_domain_value(
         crate::expr::cast_value_with_type_resolution(
             value,
             source,
-            &base.sql_name(),
+            &base.catalog_name(),
             Some(context),
         )?
     };

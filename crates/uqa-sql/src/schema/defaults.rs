@@ -125,32 +125,42 @@ pub fn cook_constant(
         Expr::TypedLiteral {
             value: Value::Null, ..
         } => return Ok(false),
-        Expr::Cast { expr, .. } if matches!(expr.as_ref(), Expr::Literal(Value::Null)) => {
-            return Ok(false);
-        }
         Expr::Literal(Value::Str(_)) => {
             crate::catalog::stored_ast::read_unknown_stored_literal(
                 crate::FunctionTypeResolver::enum_labels(context.catalog),
+                crate::FunctionTypeResolver::catalog_input_functions(context.catalog),
                 expression,
                 target,
                 false,
             )?;
         }
-        Expr::Cast { expr, ty } if matches!(expr.as_ref(), Expr::Literal(Value::Str(_))) => {
+        Expr::Cast { expr, ty }
+            if matches!(expr.as_ref(), Expr::Literal(Value::Str(_) | Value::Null)) =>
+        {
             // A cast of a literal is read by the cast's type and keeps the modifier the cast writes.
             let cast_type = crate::expr::EngineHook::resolve_type_name(context.catalog, ty)
                 .map_err(SQLError::Internal)?
                 .map_or_else(|| ColumnType::from_sql_name(ty), Ok)?;
+            let domain_cast = matches!(cast_type, ColumnType::Domain { .. });
+            if matches!(expr.as_ref(), Expr::Literal(Value::Null)) && !domain_cast {
+                return Ok(false);
+            }
             if crate::type_resolution::catalog_input_type(&cast_type) {
                 // The cast is already the form the catalog binding of a stored expression resolves.
                 return Ok(true);
             }
             crate::catalog::stored_ast::read_unknown_stored_literal(
                 crate::FunctionTypeResolver::enum_labels(context.catalog),
+                crate::FunctionTypeResolver::catalog_input_functions(context.catalog),
                 expr,
                 &cast_type,
                 true,
             )?;
+            if domain_cast {
+                // The base input is frozen, but the outer domain still checks
+                // its constraints when the default is evaluated, including NULL.
+                return Ok(true);
+            }
             let cooked = std::mem::replace(expr.as_mut(), Expr::Literal(Value::Null));
             *expression = cooked;
         }
@@ -169,6 +179,7 @@ pub fn bind_stored_schema_expression(
         context.catalog.has_registered_aggregate_function(name)
     });
     let mut plan = lowered.clone();
+    crate::binding::analyze_stored_expression_inputs(context.catalog, &mut plan, context.binding)?;
     crate::binding::bind_expression_plan_routines_for_storage(
         context.catalog,
         &mut plan,

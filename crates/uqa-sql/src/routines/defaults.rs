@@ -78,6 +78,7 @@ pub(super) fn analyze_parameter_default(
         if matches!(expression, Expr::Literal(Value::Str(_) | Value::Null)) {
             stored_ast::read_unknown_stored_literal(
                 context.routines.enum_labels(),
+                context.routines.catalog_input_functions(),
                 expression,
                 target,
                 false,

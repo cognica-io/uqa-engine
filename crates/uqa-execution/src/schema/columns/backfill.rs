@@ -10,10 +10,10 @@ use crate::mutation::publication::DocumentVectors as RowUpdateVectors;
 use std::collections::BTreeMap;
 use uqa_core::Value;
 use uqa_sql::{
-    assignment::{columns::coerce_to_column_type, vectors::index_vectors_for_type},
-    ast::ColumnType,
+    assignment::{columns::coerce_to_column_type_from, vectors::index_vectors_for_type},
+    ast::{ColumnType, Expr},
     semantics::volatility::VolatilityCatalog,
-    SQLError,
+    FunctionTypeResolver, RowSchema, SQLError,
 };
 use uqa_storage::StorageBackendResult;
 pub trait ColumnBackfillState {
@@ -24,6 +24,40 @@ pub struct ColumnBackfillContext<'a> {
     pub rewrite: ColumnRewriteContext<'a>,
     pub state: &'a dyn ColumnBackfillState,
     pub volatility: &'a dyn VolatilityCatalog,
+    pub input_types: &'a dyn FunctionTypeResolver,
+}
+impl ColumnBackfillContext<'_> {
+    /// Retain the source identity before assigning an added-column default, for
+    /// both immediate backfill and a deferred type-rewrite publication.
+    pub(crate) fn evaluate_default(
+        &self,
+        table: &str,
+        column: &str,
+        expression: Option<&Expr>,
+    ) -> Result<Value, SQLError> {
+        let (value, source) = expression.map_or(
+            Ok((Value::Null, None)),
+            |expression| -> Result<_, SQLError> {
+                let lowered = uqa_sql::plan::ExpressionPlan::lower(expression.clone());
+                let source = uqa_sql::type_resolution::assignment_source_type(
+                    &lowered.scalar,
+                    &RowSchema::default(),
+                    &[],
+                    self.input_types,
+                )?;
+                let value = self.rewrite.expressions.evaluate_bound(expression, &[])?;
+                Ok((value, source))
+            },
+        )?;
+        coerce_to_column_type_from(
+            self.rewrite.types,
+            self.rewrite.columns,
+            table,
+            column,
+            value,
+            source.as_ref(),
+        )
+    }
 }
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
@@ -63,17 +97,7 @@ pub fn backfill_added_column(
     );
     if volatile {
         for doc_id in doc_ids {
-            let value = context
-                .rewrite
-                .expressions
-                .evaluate_bound(default_expr, &[])?;
-            let value = coerce_to_column_type(
-                context.rewrite.types,
-                context.rewrite.columns,
-                table,
-                column,
-                value,
-            )?;
+            let value = context.evaluate_default(table, column, Some(default_expr))?;
             if not_null && value == Value::Null {
                 return Err(null_values(table, column));
             }
@@ -94,16 +118,7 @@ pub fn backfill_added_column(
         context.state.clear_missing_values(table)?;
         return Ok(None);
     }
-    let default_value = coerce_to_column_type(
-        context.rewrite.types,
-        context.rewrite.columns,
-        table,
-        column,
-        context
-            .rewrite
-            .expressions
-            .evaluate_bound(default_expr, &[])?,
-    )?;
+    let default_value = context.evaluate_default(table, column, Some(default_expr))?;
     if not_null && default_value == Value::Null && !doc_ids.is_empty() {
         return Err(null_values(table, column));
     }
@@ -127,3 +142,6 @@ pub fn backfill_added_column(
     }
     Ok((default_value != Value::Null).then_some(default_value))
 }
+
+#[cfg(test)]
+mod tests;

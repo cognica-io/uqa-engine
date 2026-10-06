@@ -51,7 +51,8 @@ fn retained_enum_inputs_keep_label_identity_and_array_bounds_after_rename() {
         ),
     ] {
         let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
-        let mut parameters = ParameterTypes::with_input_constants(&[], None, Some(&Labels("old")));
+        let mut parameters =
+            ParameterTypes::with_input_constants(&[], None, Some(&Labels("old")), None);
         plan.visit_scalar_expressions(&mut |expression| {
             let ScalarExpr::Literal(Value::Str(text)) = expression else {
                 panic!("literal");
@@ -80,4 +81,121 @@ fn retained_enum_inputs_keep_label_identity_and_array_bounds_after_rename() {
             }
         });
     }
+}
+
+fn domain_array() -> ColumnType {
+    ColumnType::Array(Box::new(ColumnType::Domain {
+        schema: "public".into(),
+        name: "positive".into(),
+        oid: 16_384,
+        array_oid: Some(16_385),
+        base: Box::new(ColumnType::Integer),
+    }))
+}
+
+#[derive(Default)]
+struct Inputs(std::cell::Cell<usize>);
+
+impl crate::expr::CatalogInputFunctions for Inputs {
+    fn read_unknown_input(&self, text: &str, target: &ColumnType) -> Result<Value, SQLError> {
+        assert_eq!(*target, domain_array());
+        self.0.set(self.0.get() + 1);
+        crate::expr::cast_value_from(&Value::Str(text.into()), "integer[]", None)
+    }
+}
+
+#[test]
+fn domain_array_input_is_read_once_and_retains_element_identity_and_bounds() {
+    let inputs = Inputs::default();
+    let mut parameters = ParameterTypes::with_input_constants(&[], None, None, Some(&inputs));
+    let mut plan = UnifiedPlan::lower(crate::compile("SELECT '[-1:0]={1,2}'").unwrap().remove(0));
+    plan.visit_scalar_expressions(&mut |expression| {
+        let ScalarExpr::Literal(Value::Str(text)) = expression else {
+            panic!("unknown literal")
+        };
+        // An alias can revisit the same source leaf; its input effects belong to
+        // the original leaf, not to the number of metadata consumers.
+        for _ in 0..2 {
+            let mut inferred = ExpressionType::unknown_literal(expression, text.clone());
+            parameters
+                .coerce_unknown(&mut inferred, &domain_array())
+                .unwrap();
+            assert_eq!(inferred.ty, Some(domain_array()));
+        }
+    });
+    assert_eq!(inputs.0.get(), 1);
+    parameters.take_input_constants().apply(&mut plan).unwrap();
+    plan.visit_scalar_expressions(&mut |expression| {
+        let ScalarExpr::TypedLiteral {
+            value: Value::Array(array),
+            bound_type,
+            ..
+        } = expression
+        else {
+            panic!("retained domain array")
+        };
+        assert_eq!(bound_type.as_ref(), Some(&domain_array()));
+        assert_eq!(array.elements(), [Value::Int(1), Value::Int(2)]);
+        assert_eq!(array.lower_bounds(), [-1]);
+    });
+}
+
+#[test]
+fn domain_array_metadata_inference_does_not_invoke_or_require_input_functions() {
+    let inputs = Inputs::default();
+    let mut parameters = ParameterTypes::new(&[]);
+    parameters.catalog_inputs = Some(&inputs);
+    let expression = ScalarExpr::Literal(Value::Str("{not read}".into()));
+    let mut inferred = ExpressionType::unknown_literal(&expression, "{not read}".into());
+    parameters
+        .coerce_unknown(&mut inferred, &domain_array())
+        .unwrap();
+    assert_eq!(inferred.ty, Some(domain_array()));
+    assert_eq!(inputs.0.get(), 0);
+    assert!(parameters.take_input_constants().0.is_empty());
+}
+
+#[test]
+fn retaining_domain_array_input_requires_the_catalog_capability() {
+    let mut parameters = ParameterTypes::with_input_constants(&[], None, None, None);
+    let expression = ScalarExpr::Literal(Value::Str("{1}".into()));
+    let mut inferred = ExpressionType::unknown_literal(&expression, "{1}".into());
+    let failure = parameters
+        .coerce_unknown(&mut inferred, &domain_array())
+        .unwrap_err();
+    assert!(failure
+        .to_string()
+        .contains("catalog input functions are unavailable"));
+    assert!(parameters.take_input_constants().0.is_empty());
+}
+
+#[test]
+fn scalar_domain_base_input_and_explicit_text_do_not_invoke_array_input() {
+    let inputs = Inputs::default();
+    let mut parameters = ParameterTypes::with_input_constants(&[], None, None, Some(&inputs));
+    let mut expression = ScalarExpr::Literal(Value::Str("0".into()));
+    let ColumnType::Array(domain) = domain_array() else {
+        unreachable!()
+    };
+    let mut inferred = ExpressionType::unknown_literal(&expression, "0".into());
+    parameters.coerce_unknown(&mut inferred, &domain).unwrap();
+    assert_eq!(inferred.ty.as_ref(), Some(domain.as_ref()));
+    parameters
+        .take_input_constants()
+        .apply_expression(&mut expression)
+        .unwrap();
+    assert!(matches!(
+        expression,
+        ScalarExpr::TypedLiteral {
+            value: Value::Int(0),
+            bound_type: Some(ColumnType::Integer),
+            ..
+        }
+    ));
+    let mut typed_text = ExpressionType::resolved(Some(ColumnType::Text));
+    parameters
+        .coerce_unknown(&mut typed_text, &domain_array())
+        .unwrap();
+    assert_eq!(typed_text.ty, Some(ColumnType::Text));
+    assert_eq!(inputs.0.get(), 0);
 }

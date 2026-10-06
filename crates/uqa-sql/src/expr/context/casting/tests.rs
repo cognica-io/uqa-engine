@@ -7,6 +7,7 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod domain_inputs;
 mod enum_arrays;
 
 #[test]

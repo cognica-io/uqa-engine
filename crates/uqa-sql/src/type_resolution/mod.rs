@@ -146,6 +146,11 @@ pub trait FunctionTypeResolver: Send + Sync {
         None
     }
 
+    /// Input functions whose catalog constraints must run when an unknown literal is analyzed. Callers retain the returned constant; metadata-only inference does not invoke this capability.
+    fn catalog_input_functions(&self) -> Option<&dyn crate::expr::CatalogInputFunctions> {
+        None
+    }
+
     /// Composite type attributes of the binding catalog, which type field selections and row coercions.
     fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
         None

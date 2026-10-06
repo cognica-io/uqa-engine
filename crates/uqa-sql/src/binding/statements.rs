@@ -65,13 +65,13 @@ impl StatementBindingScope for super::snapshot::BindingSnapshot {
 
 pub fn analyze_executable_plan(
     context: &StatementAnalysisContext<'_>,
-    plan: &UnifiedPlan,
+    plan: &mut UnifiedPlan,
     params: &[SQLParam],
 ) -> Result<AnalyzedResult, SQLError> {
     let mut result = None;
     context.scopes.with_scope(&mut |scope| {
         result = Some(match plan {
-            UnifiedPlan::Command(command) => match command.as_ref() {
+            UnifiedPlan::Command(command) => match command.as_mut() {
                 // The explained statement retains a scope of its own.
                 CommandPlan::Explain { body, .. } => {
                     analyze_executable_plan(context, body, params)?;
@@ -88,22 +88,23 @@ pub fn analyze_executable_plan(
     result.ok_or_else(|| SQLError::Internal("statement analysis scope did not run".into()))
 }
 
-/// Analyze every catalog and scalar reference of a statement within one binding scope, and derive its result without running it.
+/// Analyze a statement in one binding scope, retain input-function results in its
+/// executable tree and derive its result without running statement expressions.
 pub fn analyze_plan_result(
     routines: &dyn RoutineResolution,
     aliases: &dyn crate::schema::dependencies::oid_alias::OidAliasInput,
-    plan: &UnifiedPlan,
+    plan: &mut UnifiedPlan,
     params: &[SQLParam],
     scope: &dyn StatementBindingScope,
 ) -> Result<AnalyzedResult, SQLError> {
     let binding = scope.binding_context()?;
-    super::preparation::check_executable_inputs(routines, plan, params, &binding, aliases)?;
+    super::preparation::read_executable_inputs(routines, plan, params, &binding, aliases)?;
     let rows = AnalyzedResult::Schema;
     match plan {
         UnifiedPlan::Query(query) => {
             super::analyze_query_plan_schema(routines, query, params, &binding, None).map(rows)
         }
-        UnifiedPlan::Command(command) => match command.as_ref() {
+        UnifiedPlan::Command(command) => match command.as_mut() {
             CommandPlan::Explain { body, .. } => {
                 analyze_plan_result(routines, aliases, body, params, scope)?;
                 Ok(AnalyzedResult::Command)

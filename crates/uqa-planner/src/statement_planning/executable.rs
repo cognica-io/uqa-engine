@@ -36,20 +36,20 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
 
     fn plan_with_result(
         &self,
-        plan: UnifiedPlan,
+        mut plan: UnifiedPlan,
         params: &[SQLParam],
     ) -> Result<(UnifiedPlan, AnalyzedResult), SQLError> {
-        let result = analyze_executable_plan(&self.analysis, &plan, params)?;
+        let result = analyze_executable_plan(&self.analysis, &mut plan, params)?;
         Ok((optimize_plan(self, plan)?, result))
     }
 }
 
 pub fn plan_for_execution(
     context: &StatementPlanningContext<'_>,
-    plan: UnifiedPlan,
+    mut plan: UnifiedPlan,
     params: &[SQLParam],
 ) -> Result<UnifiedPlan, SQLError> {
-    analyze_executable_plan(&context.analysis, &plan, params)?;
+    analyze_executable_plan(&context.analysis, &mut plan, params)?;
     optimize_plan(context, plan)
 }
 pub fn optimize_query(

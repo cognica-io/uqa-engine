@@ -28,6 +28,10 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
         Some(self.engine)
     }
 
+    fn catalog_input_functions(&self) -> Option<&dyn uqa_sql::expr::CatalogInputFunctions> {
+        self.engine.catalog_input_functions()
+    }
+
     fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
         Some(self.engine)
     }

@@ -31,6 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Read unknown domain-array literals through catalog-aware input functions and retain their converted values before optimization. Preserve element constraints, array bounds, prepared input lifetime and single evaluation of input-function effects through DEFAULT, CHECK and USING. Retain default source types during assignment and preserve scalar-domain runtime checks, including NULL.
 - Store sequence-function column defaults as regclass OID constants and retain selected argument coercions. Preserve sequence identity through rename and reopen, explicit text late binding, user-defined overloads and PostgreSQL's definition-time versus execution-time errors for ordinary and foreign tables.
 - Analyze ordinary SQL literal inputs before optimization in PostgreSQL's relation, expression and clause order, including UPDATE RETURNING and window specifications. Retain catalog-only cursor references without capturing unscanned table rows.
 - Validate SQL source-body literal inputs and return layouts in PostgreSQL order without executing the body. Preserve failed replacements and typed row descriptors through CASE, materialization, spill and routine returns; resolve relation row types for routine signatures.

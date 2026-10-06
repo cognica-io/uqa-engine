@@ -36,7 +36,9 @@ pub use preparation::{analyze_column_type_transform, infer_prepared_parameter_ty
 pub(crate) use preparation::{
     analyze_default_inputs, analyze_routine_body_argument, analyze_routine_body_inputs,
 };
-pub(crate) use preparation::{analyze_domain_check, read_prepared_inputs};
+pub(crate) use preparation::{
+    analyze_domain_check, analyze_stored_expression_inputs, read_prepared_inputs,
+};
 
 #[cfg(test)]
 mod tests;
