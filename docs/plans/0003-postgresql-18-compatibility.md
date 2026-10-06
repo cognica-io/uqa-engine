@@ -1208,8 +1208,22 @@ SQL owns parameter-scope binding, retained syntax sites and type coercions. Its 
 - [x] Reproduce the failures with the existing independent PostgreSQL references and keep their assertions intact.
 - [x] Preserve stored syntax shape while resolving routine parameters; retain actual SQL coercions without carrier-only parameter casts.
 - [x] Add SQL owner regressions and pass the original body, rename, alias-drop, persistence and affected coercion tests.
-- [ ] Synchronize the manual, HISTORY, plan and all 75 inherited records; review, merge, close #500 and clean its branch before #499 and #501.
+- [x] Synchronize the manual, HISTORY, plan and all 75 inherited records; review, merge, close #500 and clean its branch before #499 and #501. PR #502 merged as `9163d32c3`; #500 is closed, its branches are removed, and main is updated with the unrelated README edit preserved.
 
 For each written scalar site, parameter resolution must preserve the site's structural position while replacing a resolved name by its positional parameter identity. Executable binding may expand a wildcard after stored syntax correspondence is established. Omitting an identity annotation from stored output changes neither the declared operand type nor its value; required conversions remain explicit. This correction introduces no algebraic carrier or operator and preserves existing query, dependency and transaction semantics. All 34 original open work items remain; #500 is an additional reproduced defect.
 
 All ten original failures now pass with the original PostgreSQL expectations unchanged. All 1,424 SQL owner tests and 152 affected Engine integration tests pass, including stored body output, column rename/alias deletion, rollback, migration, persistent reopening, function input/result validation, DateStyle and common coercions. Stored parameter lookup preserves wildcard sites and GROUP BY output aliases before parameter names; genuine argument conversions remain stored. A separate four-message PostgreSQL 18.4 Docker check confirms the quoted-body, SQL-standard-body and GROUPING SETS cases each return two groups, and the same check passes UQA (input SHA-256 `641a3bf8e87ffd492d998a54526a32cf7b8e05e705ba4c7cfe268a128a1cfa66`, expected SHA-256 `091690fa9884f25e01adf4970345faa25f9f3e073870d3a0358da7b58fb6c62c`). Strict Clippy, Rustfmt and repository policy checks pass. No timing measurements or manual CI actions were used.
+
+
+## Named array transforms beside user overloads
+
+Issue [#499](https://github.com/cognica-io/uqa-engine/issues/499) reproduces on the preserved pre-DateStyle engine and the merged stored-body correction: `array_sort("array" => ARRAY[2,1], descending => true)` reports undefined function when visible user overloads have a differently named input. PostgreSQL 18.4 selects the builtin and returns `{2,1}`. The existing overload regression and independent four-message reference retain this evidence.
+
+SQL owns both preparation-time selection and the existing array-transform candidate resolver. Preparation must reuse that resolver, including the written named-argument mapping, before converting unknown inputs. Exact user overloads, ambiguity, qualified calls, Boolean option typing and the established JSON-array behavior remain part of acceptance. The SQL manifest has no optional feature for this behavior and only depends on Core and the parser within the workspace; no dependency or feature change is needed.
+
+- [x] Preserve the reproduced failure, independent PostgreSQL reference and all 75 inherited records, including 34 open original tasks.
+- [ ] Reuse SQL's array-transform selection during preparation and preserve argument-position coercion.
+- [ ] Verify owning-crate selection regressions and PostgreSQL values, errors, stored calls and durable reopening with the existing provider harness.
+- [ ] Synchronize the manual, HISTORY, manifest and inherited tasks; review, merge, close #499 and clean its branch before #501.
+
+This corrects selection for an existing function family without introducing an algebraic operator. The chosen invocation must have the same argument positions, input types and result type as the existing array-transform binder; applying those conversions preserves the binder's value, NULL, error and effect semantics. User overloads continue to retain their selected identities, and no Engine algorithm is added.
