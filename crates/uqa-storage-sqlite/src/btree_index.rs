@@ -63,6 +63,7 @@ enum StoredValue {
     LegacyVector(LegacyVectorValue),
     List(Vec<StoredValue>),
     Row(Vec<StoredValue>),
+    TypedRow(uqa_core::RowValue),
     Record(Vec<(String, StoredValue)>),
     Map(BTreeMap<String, StoredValue>),
     Enum(EnumValue),
@@ -86,6 +87,7 @@ impl From<&Value> for StoredValue {
             Value::Array(value) => Self::Array(value.clone()),
             Value::LegacyVector(value) => Self::LegacyVector(value.clone()),
             Value::List(values) => Self::List(values.iter().map(Self::from).collect()),
+            Value::Row(values) if values.field_types().is_some() => Self::TypedRow(values.clone()),
             Value::Row(values) => Self::Row(values.iter().map(Self::from).collect()),
             Value::Record(fields) => Self::Record(
                 fields
@@ -123,6 +125,7 @@ impl StoredValue {
             Self::LegacyVector(value) => Value::LegacyVector(value),
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
             Self::Row(values) => Value::Row(values.into_iter().map(Self::into_value).collect()),
+            Self::TypedRow(value) => Value::Row(value),
             Self::Record(fields) => Value::Record(
                 fields
                     .into_iter()
@@ -603,7 +606,11 @@ mod tests {
             .replace("messages", &column, &[(1, Value::Null)])
             .unwrap();
         store
-            .replace("messages", &named, &[(1, Value::Row(vec![Value::Int(5)]))])
+            .replace(
+                "messages",
+                &named,
+                &[(1, Value::Row(vec![Value::Int(5)].into()))],
+            )
             .unwrap();
         assert_eq!(
             store.read_entry("messages", &column, 1).unwrap(),
@@ -615,7 +622,7 @@ mod tests {
         );
         assert_eq!(
             store.read_entry("messages", &named, 1).unwrap(),
-            ValueIndexEntry::Present(Value::Row(vec![Value::Int(5)]))
+            ValueIndexEntry::Present(Value::Row(vec![Value::Int(5)].into()))
         );
         store.clear_table("messages").unwrap();
         assert_eq!(

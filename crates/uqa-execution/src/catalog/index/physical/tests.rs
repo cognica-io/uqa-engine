@@ -102,7 +102,7 @@ fn opaque_bindings_follow_registry_replacement_and_rollback_without_name_lookup(
     );
     assert_eq!(
         values(&first, &original_key).unwrap(),
-        Value::Row(vec![Value::Int(7)])
+        Value::Row(vec![Value::Int(7)].into())
     );
     let replacement = cache.bind(rows(3, false)).unwrap();
     assert!(values(&replacement, &original_key).is_err());
@@ -111,11 +111,11 @@ fn opaque_bindings_follow_registry_replacement_and_rollback_without_name_lookup(
     // Existing retained consumers and restored consumers see the same original definition.
     assert_eq!(
         values(&first, &original_key).unwrap(),
-        Value::Row(vec![Value::Int(7)])
+        Value::Row(vec![Value::Int(7)].into())
     );
     assert_eq!(
         values(&cache.bind(original).unwrap(), &original_key).unwrap(),
-        Value::Row(vec![Value::Int(7)])
+        Value::Row(vec![Value::Int(7)].into())
     );
 }
 
@@ -165,7 +165,7 @@ fn legacy_partition_namespaces_are_scoped_to_their_physical_tables() {
     let key = ValueIndexKey::Index("opaque:2".into());
     assert_eq!(
         values(&prepared, &key).unwrap(),
-        Value::Row(vec![Value::Int(7)])
+        Value::Row(vec![Value::Int(7)].into())
     );
     let child = prepared
         .document_values(
@@ -178,7 +178,7 @@ fn legacy_partition_namespaces_are_scoped_to_their_physical_tables() {
             &Document::new(),
         )
         .unwrap();
-    assert_eq!(child[&key], Value::Row(vec![Value::Int(9)]));
+    assert_eq!(child[&key], Value::Row(vec![Value::Int(9)].into()));
 }
 
 fn btree(name: &str, key: u8, keys: Vec<IndexKey>, included: &[&str]) -> CatalogIndexRow {

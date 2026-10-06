@@ -37,7 +37,7 @@ fn controlled_comparison_preserves_native_numeric_jsonb_and_container_order() {
         array(vec![Value::Int(1), Value::Null]),
         array(vec![Value::Int(2)]),
         Value::List(vec![Value::Null]),
-        Value::Row(vec![Value::Int(1), Value::Null]),
+        Value::Row(vec![Value::Int(1), Value::Null].into()),
         Value::Record(vec![("ignored".into(), Value::Int(1))]),
         Value::Map([("key".into(), Value::JsonB("[1,2]".into()))].into()),
     ];

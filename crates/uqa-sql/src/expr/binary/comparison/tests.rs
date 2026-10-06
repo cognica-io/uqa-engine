@@ -117,12 +117,12 @@ fn row_unknowns_and_total_container_equality_keep_distinct_semantics() {
     let budget = MemoryBudget::new(4096);
     let cancellation = CancellationToken::new();
     let control = ProductionControl::new(&budget, &cancellation, &cancellation);
-    let row = Value::Row(vec![Value::Null, Value::Int(1)]);
+    let row = Value::Row(vec![Value::Null, Value::Int(1)].into());
     assert_eq!(
         values_equal_nullable_with_control(&row, &row, &control).unwrap(),
         None
     );
-    let mismatch = Value::Row(vec![Value::Null, Value::Int(2)]);
+    let mismatch = Value::Row(vec![Value::Null, Value::Int(2)].into());
     assert_eq!(
         values_equal_nullable_with_control(&row, &mismatch, &control).unwrap(),
         Some(false)
@@ -154,8 +154,8 @@ fn scalar_fast_paths_and_row_short_circuit_do_not_allocate() {
     let cancellation = CancellationToken::new();
     let control = ProductionControl::new(&budget, &cancellation, &cancellation);
     let decimal = Value::Decimal(DecimalValue::parse("123.45").unwrap());
-    let left = Value::Row(vec![Value::Int(1), decimal.clone()]);
-    let right = Value::Row(vec![Value::Int(2), decimal]);
+    let left = Value::Row(vec![Value::Int(1), decimal.clone()].into());
+    let right = Value::Row(vec![Value::Int(2), decimal].into());
     assert_eq!(
         values_equal_nullable_with_control(&left, &right, &control).unwrap(),
         Some(false)
@@ -184,8 +184,8 @@ fn comparison_resource_errors_are_not_converted_to_false_or_unknown() {
     for (left, right) in [
         (Value::Int(1), decimal.clone()),
         (
-            Value::Row(vec![Value::Int(1), Value::Null]),
-            Value::Row(vec![decimal, Value::Null]),
+            Value::Row(vec![Value::Int(1), Value::Null].into()),
+            Value::Row(vec![decimal, Value::Null].into()),
         ),
         (
             Value::Temporal(TemporalValue::parse_interval("1 mon").unwrap()),

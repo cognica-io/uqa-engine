@@ -404,6 +404,10 @@ fn record_value(
     let Value::Row(source) = &*value else {
         unreachable!();
     };
+    // A record identity conversion must retain the producing expression's descriptor.
+    if source.field_types().is_some() {
+        return Ok(value);
+    }
     let mut records = ProductionVec::new(*control);
     records.reserve(source.len())?;
     for index in 0..source.len() {
@@ -414,9 +418,10 @@ fn record_value(
     let (Value::Row(source), source_memory) = value.into_parts() else {
         unreachable!();
     };
-    let old_buffer_bytes = source.capacity() * size_of::<Value>();
+    let old_buffer_bytes =
+        source.capacity() * size_of::<Value>() + uqa_core::RowValue::retained_header_bytes();
     let mut parts = RecordParts {
-        source,
+        source: source.into_values(),
         records,
         memory: control.combine(source_memory, records_memory),
     };

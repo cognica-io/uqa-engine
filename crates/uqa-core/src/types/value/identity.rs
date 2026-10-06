@@ -28,8 +28,9 @@ impl Value {
             (Self::LegacyVector(left), Self::LegacyVector(right)) => {
                 left.kind() == right.kind() && same_array(left.as_array(), right.as_array())
             }
-            (Self::List(left), Self::List(right)) | (Self::Row(left), Self::Row(right)) => {
-                same_elements(left, right)
+            (Self::List(left), Self::List(right)) => same_elements(left, right),
+            (Self::Row(left), Self::Row(right)) => {
+                left.field_types() == right.field_types() && same_elements(left, right)
             }
             (Self::Record(left), Self::Record(right)) => {
                 left.len() == right.len()
@@ -146,7 +147,7 @@ mod tests {
             assert!(!right.has_same_representation(&left));
             let wrappers: [fn(Value) -> Value; 4] = [
                 |value| Value::Array(ArrayValue::try_new(vec![value]).unwrap()),
-                |value| Value::Row(vec![value]),
+                |value| Value::Row(vec![value].into()),
                 |value| Value::Record(vec![("key".into(), value)]),
                 |value| Value::Map(std::collections::BTreeMap::from([("key".into(), value)])),
             ];

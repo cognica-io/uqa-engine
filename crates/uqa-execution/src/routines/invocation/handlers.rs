@@ -366,7 +366,7 @@ fn shape_anonymous_record_outcome(
     for row in source_rows {
         let mut values = match row.as_slice() {
             [Value::Record(fields)] => fields.iter().map(|(_, value)| value.clone()).collect(),
-            [Value::Row(values)] => values.clone(),
+            [Value::Row(values)] => values.values().to_vec(),
             [Value::Null] => vec![Value::Null; columns.len()],
             _ if row.len() == columns.len() => row,
             _ => return Err(anonymous_record_shape_error()),

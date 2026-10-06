@@ -111,7 +111,7 @@ fn typed_blob_round_trips_every_persisted_variant() {
     }
     for value in [
         Value::List(scalars.clone()),
-        Value::Row(scalars),
+        Value::Row(scalars.into()),
         Value::Record(vec![
             ("duplicate".into(), Value::Int(1)),
             ("duplicate".into(), Value::Int(2)),

@@ -119,9 +119,13 @@ impl Value {
                     Self::LegacyVector(vector) => {
                         (vector.as_array().retained_buffer_bytes()?, None)
                     }
-                    Self::List(values) | Self::Row(values) => (
+                    Self::List(values) => (
                         buffer_bytes::<Value>(values.capacity())?,
                         (!values.is_empty()).then(|| Children::Values(values.iter())),
+                    ),
+                    Self::Row(row) => (
+                        row.retained_buffer_bytes()?,
+                        (!row.is_empty()).then(|| Children::Values(row.iter())),
                     ),
                     Self::Record(fields) => (
                         buffer_bytes::<(String, Value)>(fields.capacity())?,

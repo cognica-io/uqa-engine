@@ -36,7 +36,7 @@ fn controlled_keys_keep_all_canonical_domains_and_only_retain_the_output_buffer(
             ArrayValue::with_lower_bounds(vec![Value::Int(1), Value::Null], vec![-2]).unwrap(),
         ),
         Value::List(vec![Value::Bool(true)]),
-        Value::Row(vec![Value::Int(2)]),
+        Value::Row(vec![Value::Int(2)].into()),
         Value::Record(vec![("ignored name".into(), Value::Int(3))]),
         Value::Map(std::collections::BTreeMap::from([(
             "name".into(),
@@ -144,8 +144,8 @@ fn canonical_numeric_keys_match_value_equality_at_precision_boundaries() {
                     hash_canonical_row(&hash_state, std::iter::once(Some(right))).unwrap()
                 );
             }
-            let left_row = Value::Row(vec![left.clone(), Value::Null]);
-            let right_row = Value::Row(vec![right.clone(), Value::Null]);
+            let left_row = Value::Row(vec![left.clone(), Value::Null].into());
+            let right_row = Value::Row(vec![right.clone(), Value::Null].into());
             assert_eq!(
                 canonical_row_key(std::slice::from_ref(&left_row)).unwrap()
                     == canonical_row_key(std::slice::from_ref(&right_row)).unwrap(),

@@ -120,10 +120,33 @@ pub(super) fn eval_scalar_inner(
                 .map_err(Into::into)
         }
         ScalarExpr::Row(items) => {
-            let (items, memory) = evaluate_items(items, context, control)?.into_parts();
-            control
-                .finish(Value::Row(items), memory)
-                .map_err(Into::into)
+            let mut fields = ProductionVec::new(*control);
+            fields.reserve(items.len())?;
+            let mut complete = true;
+            for item in items {
+                let field = context.with_type_schema(|schema| {
+                    uqa_sql::type_resolution::scalar_record_field_type_with_control(
+                        item,
+                        schema,
+                        context.params(),
+                        context.function_hook(),
+                        control,
+                    )
+                })?;
+                if let Some(field) = field {
+                    fields.push_copy(field)?;
+                } else {
+                    complete = false;
+                }
+            }
+            let values = evaluate_items(items, context, control)?;
+            let row = if complete {
+                uqa_core::RowValue::typed_with_control(values, fields.finish()?, control)?
+            } else {
+                uqa_core::RowValue::new_with_control(values, control)?
+            };
+            let (row, memory) = row.into_parts();
+            control.finish(Value::Row(row), memory).map_err(Into::into)
         }
         ScalarExpr::Binary { op, lhs, rhs } => {
             let left = eval_scalar_inner(lhs, context, control)?;

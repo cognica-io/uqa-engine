@@ -44,7 +44,7 @@ impl PhysicalIndexDefinitions {
             let (key, probe) = if index.keys.iter().any(|key| key.column().is_none()) {
                 (
                     ValueIndexKey::Index(physical_key.clone()),
-                    Predicate::Equals(Value::Row(values.clone())),
+                    Predicate::Equals(Value::Row(values.clone().into())),
                 )
             } else {
                 let Some(IndexKey::Column(first)) = index.keys.first() else {

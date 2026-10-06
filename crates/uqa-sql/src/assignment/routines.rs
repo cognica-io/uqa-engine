@@ -28,6 +28,7 @@ pub fn coerce_routine_value_from(
     match canonical_routine_type_name(type_name).as_str() {
         "record" => match value {
             Value::Record(_) | Value::Null => Ok(value.clone()),
+            Value::Row(row) if row.field_types().is_some() => Ok(value.clone()),
             Value::Row(values) => Ok(Value::Record(
                 values
                     .iter()

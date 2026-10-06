@@ -79,7 +79,7 @@ mod tests {
         let tag_text = r#"{"$uqa_type":"float_bits","hex":"7ff0000000000000"}"#;
         for value in [
             Value::List(elements.clone()),
-            Value::Row(elements.clone()),
+            Value::Row(elements.clone().into()),
             Value::Record(vec![("floats".into(), Value::List(elements.clone()))]),
             Value::Array(ArrayValue::with_lower_bounds(elements.clone(), vec![-2]).unwrap()),
             Value::Map([("floats".into(), Value::List(elements))].into()),

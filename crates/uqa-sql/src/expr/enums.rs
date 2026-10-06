@@ -222,10 +222,12 @@ pub fn render_enum_labels(catalog: Option<&dyn EnumLabelCatalog>, value: &Value)
                 .collect::<Result<_>>()?,
         ),
         Value::Row(values) => Value::Row(
-            values
-                .iter()
-                .map(|element| render_enum_labels(catalog, element))
-                .collect::<Result<_>>()?,
+            values.clone().with_values(
+                values
+                    .iter()
+                    .map(|element| render_enum_labels(catalog, element))
+                    .collect::<Result<_>>()?,
+            )?,
         ),
         Value::Record(fields) => Value::Record(
             fields
@@ -271,7 +273,8 @@ pub fn contains_enum_carrier(value: &Value) -> bool {
     match value {
         Value::Enum(_) => true,
         Value::Array(array) => array.elements().iter().any(contains_enum_carrier),
-        Value::List(values) | Value::Row(values) => values.iter().any(contains_enum_carrier),
+        Value::List(values) => values.iter().any(contains_enum_carrier),
+        Value::Row(values) => values.iter().any(contains_enum_carrier),
         Value::Record(fields) => fields.iter().any(|(_, value)| contains_enum_carrier(value)),
         Value::Map(fields) => fields.values().any(contains_enum_carrier),
         _ => false,

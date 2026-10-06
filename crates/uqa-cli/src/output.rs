@@ -384,7 +384,14 @@ pub(super) fn json_value_display(v: &Value) -> Result<String, SQLError> {
                 .collect::<Result<Vec<_>, SQLError>>()?;
             format!("[{}]", inner.join(", "))
         }
-        Value::List(items) | Value::Row(items) => {
+        Value::List(items) => {
+            let inner = items
+                .iter()
+                .map(json_value_display)
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            format!("[{}]", inner.join(", "))
+        }
+        Value::Row(items) => {
             let inner = items
                 .iter()
                 .map(json_value_display)

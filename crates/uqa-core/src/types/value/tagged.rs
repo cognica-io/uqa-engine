@@ -14,6 +14,7 @@ use crate::{
 
 mod allocation;
 use allocation::Workspace;
+mod row;
 
 fn int_field<T: TryFrom<i64>>(map: &BTreeMap<String, Value>, key: &str) -> Option<T> {
     match map.get(key)? {
@@ -131,9 +132,9 @@ fn convert(
         "enum" if map.len() == 3 && map.contains_key("type_oid") && map.contains_key("key") => {
             return decoded_enum(&map, workspace).map(Value::Enum);
         }
-        "row" if map.len() == 2 => {
-            if matches!(map.get("values"), Some(Value::List(_))) {
-                return Ok(Value::Row(take_list(&mut map, "values")));
+        "row" if map.len() == 2 || (map.len() == 3 && map.contains_key("field_types")) => {
+            if let Some(row) = row::decoded(&mut map, workspace)? {
+                return Ok(Value::Row(row));
             }
         }
         "record" if map.len() == 2 => {

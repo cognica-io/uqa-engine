@@ -149,7 +149,7 @@ fn seed_predecessor_carriers(engine: &Engine, duplicates: bool) {
                 let row = documents.get_stored(*id).unwrap().unwrap();
                 let value = match &key {
                     ValueIndexKey::Column(column) => row.fields()[column].clone(),
-                    ValueIndexKey::Index(_) => Value::Row(vec![row.fields()["k"].clone()]),
+                    ValueIndexKey::Index(_) => Value::Row(vec![row.fields()["k"].clone()].into()),
                 };
                 (*id, value)
             })

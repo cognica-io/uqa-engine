@@ -63,7 +63,10 @@ impl Value {
             (Self::JsonB(left), Self::JsonB(right)) => {
                 super::super::jsonb::compare_jsonb_text_with_control(left, right, control)?
             }
-            (Self::List(left), Self::List(right)) | (Self::Row(left), Self::Row(right)) => {
+            (Self::List(left), Self::List(right)) => {
+                compare_sequence(left.iter(), right.iter(), control)?
+            }
+            (Self::Row(left), Self::Row(right)) => {
                 compare_sequence(left.iter(), right.iter(), control)?
             }
             (Self::Record(left), Self::Record(right)) => compare_sequence(

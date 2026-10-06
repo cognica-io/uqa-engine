@@ -32,7 +32,7 @@ fn values(n: i64) -> BTreeMap<ValueIndexKey, Value> {
         (keys()[0].clone(), Value::Int(n)),
         (
             keys()[1].clone(),
-            Value::Row(vec![Value::Int(n), Value::Str("expression".into())]),
+            Value::Row(vec![Value::Int(n), Value::Str("expression".into())].into()),
         ),
     ])
 }
@@ -206,7 +206,7 @@ fn native_btree_replacement_repair_delete_clear_and_namespaces_follow_one_snapsh
             "docs",
             &[
                 (field, &[(1, Value::Null), (2, Value::Float(-0.0))]),
-                (named, &[(3, Value::Row(vec![Value::Int(3)]))]),
+                (named, &[(3, Value::Row(vec![Value::Int(3)].into()))]),
             ],
         )
         .unwrap();

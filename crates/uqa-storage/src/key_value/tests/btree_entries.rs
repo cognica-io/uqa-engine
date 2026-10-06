@@ -66,7 +66,7 @@ fn point_entries_keep_namespaces_and_do_not_decode_other_documents() {
     backend
         .replace_btree_index("items", &column, &[(1, Value::Int(10))])
         .unwrap();
-    let evaluated = Value::Row(vec![Value::Int(20)]);
+    let evaluated = Value::Row(vec![Value::Int(20)].into());
     backend
         .replace_btree_index("items", &named, &[(1, evaluated.clone())])
         .unwrap();

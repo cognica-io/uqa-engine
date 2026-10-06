@@ -980,10 +980,10 @@ fn min_and_max_compare_composite_values_lexicographically() {
         .unwrap();
     assert_eq!(
         result.rows[0].get("minimum"),
-        Some(&Value::Row(vec![Value::Int(0), Value::Int(9)]))
+        Some(&Value::Row(vec![Value::Int(0), Value::Int(9)].into()))
     );
     assert_eq!(
         result.rows[0].get("maximum"),
-        Some(&Value::Row(vec![Value::Int(1), Value::Int(2)]))
+        Some(&Value::Row(vec![Value::Int(1), Value::Int(2)].into()))
     );
 }

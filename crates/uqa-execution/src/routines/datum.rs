@@ -143,7 +143,7 @@ impl Interpreter<'_> {
                 .into_iter()
                 .map(|(_, field_value)| field_value)
                 .collect::<Vec<_>>(),
-            Value::Row(values) => values,
+            Value::Row(values) => values.into_values(),
             Value::Null => Vec::new(),
             _ => {
                 return Err(SQLError::Routine {

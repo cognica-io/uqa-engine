@@ -28,7 +28,7 @@ fn row_constructors_are_records_and_keep_postgresql_null_comparison_semantics() 
 
     assert_eq!(
         scalar(&eng, "SELECT ROW(1, 2)"),
-        Value::Row(vec![Value::Int(1), Value::Int(2)])
+        Value::Row(vec![Value::Int(1), Value::Int(2)].into())
     );
     assert_eq!(
         scalar(&eng, "SELECT pg_typeof(ROW(1, 2))"),

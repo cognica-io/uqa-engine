@@ -140,7 +140,8 @@ fn payload(
                 if kind == "list" {
                     Value::List(values)
                 } else {
-                    Value::Row(values)
+                    memory.grow(uqa_core::RowValue::retained_header_bytes())?;
+                    Value::Row(values.into())
                 },
                 memory,
             ));
@@ -148,9 +149,11 @@ fn payload(
         "record" => return structured::record(content, control, depth, buffered),
         "map" => return structured::map(content, control, depth, buffered),
         "array" => return structured::sql_array(content, control, depth, buffered),
-        "legacy_vector" => {
+        "legacy_vector" | "typed_row" => {
             let value = modern(content, control, depth - 1)?;
-            return if matches!(&*value, Value::LegacyVector(_)) {
+            return if (kind == "legacy_vector" && matches!(&*value, Value::LegacyVector(_)))
+                || (kind == "typed_row" && matches!(&*value, Value::Row(_)))
+            {
                 Ok(value)
             } else {
                 Err(JsonReadError::InvalidJson)

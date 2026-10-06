@@ -29,6 +29,25 @@ mod presence;
 fn document() -> StoredDocument {
     StoredDocument::with_metadata(
         [
+            (
+                "typed_row".into(),
+                Value::Row(
+                    uqa_core::RowValue::typed(
+                        vec![Value::Int(1), Value::Null],
+                        vec![
+                            uqa_core::RecordFieldType {
+                                oid: 20,
+                                type_modifier: -1,
+                            },
+                            uqa_core::RecordFieldType {
+                                oid: 23,
+                                type_modifier: -1,
+                            },
+                        ],
+                    )
+                    .unwrap(),
+                ),
+            ),
             ("text".into(), Value::Str("한글🙂".repeat(2048))),
             ("bytes".into(), Value::Bytes(vec![3; 32 << 10])),
             (
@@ -51,7 +70,7 @@ fn document() -> StoredDocument {
             ),
             (
                 "row".into(),
-                Value::Row(vec![Value::FixedChar("a  ".into()), Value::Void]),
+                Value::Row(vec![Value::FixedChar("a  ".into()), Value::Void].into()),
             ),
             (
                 "floats".into(),
@@ -110,6 +129,8 @@ fn verify(connection: &ManagedConnection, provider: Provider) {
         assert_eq!(live[index].as_ref().unwrap().metadata(), changed.metadata());
     }
     assert_eq!(live[3].as_ref().unwrap().fields(), expected.fields());
+    assert!(live[3].as_ref().unwrap().fields()["typed_row"]
+        .has_same_representation(&expected.fields()["typed_row"]));
     assert_eq!(live[3].as_ref().unwrap().metadata(), expected.metadata());
     drop(live);
     assert_eq!(control.memory().used(), 0);

@@ -231,7 +231,9 @@ impl PhysicalIndexDefinitions {
                             index.definition.predicate.as_deref(),
                             document,
                         )? {
-                            Value::Row(index_key_values(expressions, table, &index.keys, document)?)
+                            Value::Row(
+                                index_key_values(expressions, table, &index.keys, document)?.into(),
+                            )
                         } else {
                             Value::Null
                         }

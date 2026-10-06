@@ -279,6 +279,17 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
         }
         Value::Row(values) => {
             add_size(total, 8, "row length")?;
+            if let Some(fields) = values.field_types() {
+                add_size(total, 8, "row descriptor length")?;
+                add_size(
+                    total,
+                    fields
+                        .len()
+                        .checked_mul(8)
+                        .ok_or_else(|| spill_error("row descriptor size overflow"))?,
+                    "row descriptor",
+                )?;
+            }
             for value in values {
                 add_value_size(total, value, depth + 1)?;
             }
@@ -536,10 +547,7 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             write_tag(writer, 8)?;
             encode_values(writer, values, depth)
         }
-        Value::Row(values) => {
-            write_tag(writer, 13)?;
-            encode_values(writer, values, depth)
-        }
+        Value::Row(values) => encode_row(writer, values, depth),
         Value::Record(fields) => {
             write_tag(writer, 14)?;
             write_u64(writer, fields.len())?;
@@ -559,6 +567,28 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             Ok(())
         }
     }
+}
+
+fn encode_row(
+    writer: &mut impl Write,
+    values: &uqa_core::RowValue,
+    depth: usize,
+) -> ExecResult<()> {
+    if let Some(fields) = values.field_types() {
+        write_tag(writer, 19)?;
+        write_u64(writer, fields.len())?;
+        for field in fields {
+            write_raw(writer, &field.oid.to_le_bytes(), "row field type OID")?;
+            write_raw(
+                writer,
+                &field.type_modifier.to_le_bytes(),
+                "row field type modifier",
+            )?;
+        }
+    } else {
+        write_tag(writer, 13)?;
+    }
+    encode_values(writer, values, depth)
 }
 
 /// Write the count and nested values of a list-shaped value after its tag.

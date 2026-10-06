@@ -529,11 +529,11 @@ fn indexed_raw_field_probes_preserve_typed_enum_errors_and_record_row_equality()
         .contains("enum comparison reached operands of different types"));
     }
     let record = Value::Record(vec![("x".into(), Value::Int(1))]);
-    let row = Value::Row(vec![Value::Int(1)]);
+    let row = Value::Row(vec![Value::Int(1)].into());
     for wrap in [
         (|value| value) as fn(Value) -> Value,
         |value| Value::List(vec![value]),
-        |value| Value::Row(vec![value]),
+        |value| Value::Row(vec![value].into()),
         |value| {
             Value::Array(uqa_core::ArrayValue::with_lower_bounds(vec![value], vec![1]).unwrap())
         },

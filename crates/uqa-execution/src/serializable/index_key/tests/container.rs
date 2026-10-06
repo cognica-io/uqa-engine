@@ -51,7 +51,7 @@ fn array_ranges_preserve_elements_dimensions_lower_bounds_and_fractional_cuts() 
         Value::Str("{}".into()),
         Value::JsonB("[]".into()),
         Value::List(vec![]),
-        Value::Row(vec![]),
+        Value::Row(vec![].into()),
         Value::Record(vec![]),
         Value::Map(std::collections::BTreeMap::new()),
     ]);
@@ -119,7 +119,7 @@ fn legacy_vector_domains_preserve_kind_order_and_atomic_array_elements() {
             array(vec![Value::Int(1)]),
             Value::List(vec![Value::Int(1)]),
             Value::Int(1),
-            Value::Row(vec![]),
+            Value::Row(vec![].into()),
             Value::LegacyVector(
                 LegacyVectorValue::try_new(
                     if kind == LegacyVectorKind::SmallInteger {
@@ -237,7 +237,7 @@ fn vector_and_tensor_keys_preserve_list_boundaries_and_native_leaf_comparison() 
         Value::List(vec![Value::Int(0), Value::Int(1)]),
         Value::List(vec![decimal("0.000000000000000001")]),
         array(vec![]),
-        Value::Row(vec![]),
+        Value::Row(vec![].into()),
     ]);
     verify(
         IndexDomain::List(ScalarIndexDomain::Float),
@@ -259,9 +259,9 @@ fn vector_and_tensor_keys_preserve_list_boundaries_and_native_leaf_comparison() 
     targets.extend([
         Value::List(vec![Value::List(vec![Value::Int(0), Value::Int(1)])]),
         Value::List(vec![Value::List(vec![decimal("0.5"), Value::Null])]),
-        Value::List(vec![Value::Row(vec![])]),
+        Value::List(vec![Value::Row(vec![].into())]),
         array(vec![]),
-        Value::Row(vec![]),
+        Value::Row(vec![].into()),
     ]);
     verify(IndexDomain::Tensor, &tensors, &targets);
 }

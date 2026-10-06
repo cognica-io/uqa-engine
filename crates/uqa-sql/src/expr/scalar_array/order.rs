@@ -71,9 +71,8 @@ fn compare_values(
         (Value::Null, _) => Ok(Ordering::Greater),
         (_, Value::Null) => Ok(Ordering::Less),
         (Value::Json(_), Value::Json(_)) => Err(comparison_error("42883")),
-        (Value::List(left), Value::List(right)) | (Value::Row(left), Value::Row(right)) => {
-            compare_slices(left, right, control)
-        }
+        (Value::List(left), Value::List(right)) => compare_slices(left, right, control),
+        (Value::Row(left), Value::Row(right)) => compare_slices(left, right, control),
         (Value::Record(left), Value::Record(right)) => compare_records(left, right, control),
         (Value::Array(left), Value::Array(right)) => compare_arrays(left, right, control),
         _ => Ok(left.cmp_with_control(right, control)?),

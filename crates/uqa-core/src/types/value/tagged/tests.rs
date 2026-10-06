@@ -206,12 +206,15 @@ fn nested_tagged_documents_round_trip_with_bounds_names_and_bytes() {
     let value = Value::Record(vec![
         (
             "mixed".into(),
-            Value::Row(vec![
-                Value::FixedChar("a  ".into()),
-                Value::Json(" {\"a\": 1} ".into()),
-                Value::JsonB("{\"a\":1}".into()),
-                Value::Bytes(vec![0, 255]),
-            ]),
+            Value::Row(
+                vec![
+                    Value::FixedChar("a  ".into()),
+                    Value::Json(" {\"a\": 1} ".into()),
+                    Value::JsonB("{\"a\":1}".into()),
+                    Value::Bytes(vec![0, 255]),
+                ]
+                .into(),
+            ),
         ),
         (
             "mixed".into(),
@@ -285,7 +288,7 @@ fn rejected_array_tags_do_not_normalize_the_original_nested_values() {
 fn array_normalization_preserves_arrays_inside_composite_values() {
     let inner = Value::Array(ArrayValue::with_lower_bounds(vec![Value::Int(7)], vec![-5]).unwrap());
     let composites = vec![
-        Value::Row(vec![inner.clone()]),
+        Value::Row(vec![inner.clone()].into()),
         Value::Record(vec![("array".into(), inner.clone())]),
         Value::Map(BTreeMap::from([("array".into(), inner)])),
     ];

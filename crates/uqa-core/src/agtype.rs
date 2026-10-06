@@ -283,7 +283,8 @@ fn render_plain_into(value: &Value, out: &mut String) {
         Value::Json(text) | Value::JsonB(text) => out.push_str(text),
         Value::Array(array) => render_sequence(array.elements(), out),
         Value::LegacyVector(vector) => render_sequence(vector.elements(), out),
-        Value::List(items) | Value::Row(items) => render_sequence(items, out),
+        Value::List(items) => render_sequence(items, out),
+        Value::Row(items) => render_sequence(items.values(), out),
         Value::Record(fields) => {
             out.push('{');
             for (index, (name, value)) in fields.iter().enumerate() {

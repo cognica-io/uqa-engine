@@ -68,7 +68,29 @@ fn current_records_preserve_user_fields_metadata_and_sequence_envelopes() {
     }
     let fields = [
         ("bytes".into(), Value::Bytes(vec![1, 2, 3])),
-        ("row".into(), Value::Row(vec![Value::Int(1), Value::Null])),
+        (
+            "row".into(),
+            Value::Row(vec![Value::Int(1), Value::Null].into()),
+        ),
+        (
+            "typed_row".into(),
+            Value::Row(
+                uqa_core::RowValue::typed(
+                    vec![Value::Int(1), Value::Null],
+                    vec![
+                        uqa_core::RecordFieldType {
+                            oid: 20,
+                            type_modifier: -1,
+                        },
+                        uqa_core::RecordFieldType {
+                            oid: 23,
+                            type_modifier: -1,
+                        },
+                    ],
+                )
+                .unwrap(),
+            ),
+        ),
         (
             "list".into(),
             Value::List(vec![Value::Int(1), Value::Int(2)]),
@@ -90,7 +112,7 @@ fn document_records_retain_nonfinite_float_bits_and_tuple_metadata() {
         let source = StoredDocument::with_metadata(
             [
                 ("scalar".into(), value.clone()),
-                ("nested".into(), Value::Row(vec![value])),
+                ("nested".into(), Value::Row(vec![value].into())),
             ]
             .into(),
             DocumentMetadata::with_tuple_xmin(37),

@@ -85,7 +85,9 @@ fn record_assignment_moves_existing_payloads_and_drops_the_source_buffer() {
     let cancellation = CancellationToken::new();
     let control = ProductionControl::new(&budget, &cancellation, &cancellation);
     let source = control
-        .copy_value(&Value::Row(vec![Value::Str("moved".into()), Value::Int(7)]))
+        .copy_value(&Value::Row(
+            vec![Value::Str("moved".into()), Value::Int(7)].into(),
+        ))
         .unwrap();
     let Value::Row(source_values) = &*source else {
         unreachable!();

@@ -79,7 +79,10 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
                 env,
                 array.into_elements().into_iter().map(JSValue).collect(),
             ),
-            Value::List(values) | Value::Row(values) => {
+            Value::List(values) => {
+                Vec::<JSValue>::to_napi_value(env, values.into_iter().map(JSValue).collect())
+            }
+            Value::Row(values) => {
                 Vec::<JSValue>::to_napi_value(env, values.into_iter().map(JSValue).collect())
             }
             Value::Record(values) => BTreeMap::<String, JSValue>::to_napi_value(

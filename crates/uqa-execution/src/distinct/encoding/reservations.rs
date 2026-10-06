@@ -62,12 +62,12 @@ mod tests {
             (0.1, "0.1"),
             (9_223_372_036_854_774_784_i64 as f64, "9223372036854775000"),
         ] {
-            let values = [Value::Row(vec![Value::Float(value)])];
+            let values = [Value::Row(vec![Value::Float(value)].into())];
             let [exact, previous, legacy] = canonical_row_lock_keys(&values).unwrap();
             assert_eq!(exact, previous);
-            let predecessor = canonical_row_key(&[Value::Row(vec![Value::Decimal(
-                DecimalValue::parse(displayed).unwrap(),
-            )])])
+            let predecessor = canonical_row_key(&[Value::Row(
+                vec![Value::Decimal(DecimalValue::parse(displayed).unwrap())].into(),
+            )])
             .unwrap();
             assert_eq!(legacy, predecessor);
             assert_eq!(exact, canonical_row_key(&values).unwrap());
@@ -87,13 +87,16 @@ mod tests {
 
     #[test]
     fn composite_lock_aliases_retain_both_numeric_and_temporal_predecessors() {
-        let row = [Value::Row(vec![
-            Value::Float(0.1),
-            Value::Temporal(uqa_core::TemporalValue::TimeTz {
-                micros: 46_800_000_000,
-                offset_minutes: 60,
-            }),
-        ])];
+        let row = [Value::Row(
+            vec![
+                Value::Float(0.1),
+                Value::Temporal(uqa_core::TemporalValue::TimeTz {
+                    micros: 46_800_000_000,
+                    offset_minutes: 60,
+                }),
+            ]
+            .into(),
+        )];
         let [current, previous, legacy] = canonical_row_lock_keys(&row).unwrap();
         let predecessor = |decimal: &[u8]| {
             // Frozen predecessor layout: one row, two fields, finite numeric text and day-wrapped TIMETZ.
