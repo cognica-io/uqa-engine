@@ -54,6 +54,7 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
         .diagnostics
         .bind_current()
         .map_err(|error| crate::storage_errors::storage_error("bind query diagnostics", &error))?;
+    crate::query::privileges::routine_calls::query(&context.source, plan, params, ctes)?;
     let mut running_statement = None;
     if plan.ctes.iter().any(|cte| cte.body.modifies_data()) {
         analyze_query_plan_schema(context.source.ctes.routines, plan, params, ctes, None)?;
@@ -326,6 +327,7 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
             );
             if !order_by.is_empty() || limit.is_some() || offset.is_some() {
                 let synthetic = QueryBlockPlan {
+                    privilege_columns: std::collections::BTreeSet::default(),
                     projections: Vec::new(),
                     from: None,
                     r#where: None,

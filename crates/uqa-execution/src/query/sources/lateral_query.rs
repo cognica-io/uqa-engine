@@ -84,6 +84,7 @@ fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
             let order_plan =
                 (!order_by.is_empty() || limit.is_some() || offset.is_some()).then(|| {
                     QueryBlockPlan {
+                        privilege_columns: std::collections::BTreeSet::default(),
                         projections: Vec::new(),
                         from: None,
                         r#where: None,

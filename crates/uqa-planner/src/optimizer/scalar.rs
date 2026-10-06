@@ -12,10 +12,10 @@ use super::{
 use uqa_sql::SQLError;
 
 mod conditional;
-mod constants;
+pub(super) mod constants;
 
 use conditional::{optimize_boolean, optimize_case, optimize_coalesce};
-use constants::fold_literal_expression;
+use constants::fold_authorized_literal;
 
 pub(super) fn optimize_assignments(
     assignments: &mut [AssignmentPlan],
@@ -32,6 +32,14 @@ pub(super) fn optimize_projections(
     config: &OptimizerConfig,
 ) -> Result<(), SQLError> {
     for projection in projections {
+        if projection.alias.is_none()
+            && !matches!(
+                projection.expr,
+                ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
+            )
+        {
+            projection.alias = Some(uqa_sql::semantics::projection_label_at(projection));
+        }
         optimize_scalar_slot(&mut projection.expr, config)?;
     }
     Ok(())
@@ -185,7 +193,11 @@ fn optimize_scalar(
         },
         other => other,
     };
-    fold_literal_expression(optimized, config.constant_evaluator)
+    fold_authorized_literal(
+        optimized,
+        config.constant_evaluator,
+        config.builtin_permissions.as_deref(),
+    )
 }
 
 fn optimize_frame_bound(

@@ -203,6 +203,9 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         && !insert_rules
             .iter()
             .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    if insert_original_query {
+        crate::mutation::routine_calls::insert(context, stmt, params, inherited_ctes)?;
+    }
     let has_before_insert_statement_trigger = insert_original_query
         && !triggers
             .catalog

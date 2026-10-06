@@ -62,6 +62,13 @@ impl<'a> ScopedExpressionEvaluator<'a> {
             .with_function_hook(hook)
             .with_subquery_runner(hook)
             .with_physical_outer_row(schema, row);
+        if let ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } = expression
+        {
+            hook.require_builtin_execute(binding)?;
+        }
         if let Some((name, args)) = intercepted_call(expression, self) {
             let mut evaluate = |expr: &ScalarExpr| {
                 eval_physical_scalar(expr, self.context.subquery_plans(), &context)
@@ -88,6 +95,13 @@ impl ExpressionEvaluator for ScopedExpressionEvaluator<'_> {
         let context = PhysicalEvalContext::from_row_lookup(row, self.params)
             .with_function_hook(hook)
             .with_subquery_runner(hook);
+        if let ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } = expression
+        {
+            hook.require_builtin_execute(binding)?;
+        }
         if let Some((name, args)) = intercepted_call(expression, self) {
             let mut evaluate = |expr: &ScalarExpr| {
                 eval_physical_scalar(expr, self.context.subquery_plans(), &context)

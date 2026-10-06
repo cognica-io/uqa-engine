@@ -288,6 +288,7 @@ impl QueryBlockPlan {
         Self {
             windows,
             projections,
+            privilege_columns: std::collections::BTreeSet::default(),
             from: statement
                 .from
                 .map(|source| SourcePlan::lower_with(source, aggregates, &mut subqueries)),
@@ -536,7 +537,8 @@ impl SourcePlan {
         }
     }
 
-    fn push_expressions<'a>(&'a self, output: &mut Vec<&'a ScalarExpr>) {
+    /// Append scalar inputs owned by this source, including JOIN predicates; nested query bodies retain their own expression scope.
+    pub fn push_expressions<'a>(&'a self, output: &mut Vec<&'a ScalarExpr>) {
         match self {
             Self::Table { .. } | Self::Subquery { .. } => {}
             Self::Join {

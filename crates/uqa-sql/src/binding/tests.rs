@@ -120,6 +120,7 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
         relations_bound: false,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
+            privilege_columns: std::collections::BTreeSet::default(),
             windows: Vec::new(),
             projections: vec![
                 ProjectionPlan {

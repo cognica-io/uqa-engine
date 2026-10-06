@@ -22,6 +22,9 @@ pub(super) fn evaluate_function(
     if let Some(error) = binding.and_then(|binding| binding.resolution_error.as_ref()) {
         return Err(error.sql_error());
     }
+    if let (Some(binding), Some(hook)) = (binding, context.function_hook()) {
+        hook.require_builtin_execute(binding)?;
+    }
     if let Some((binding, FunctionDispatch::NumericOperator(operator))) =
         binding.and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
     {

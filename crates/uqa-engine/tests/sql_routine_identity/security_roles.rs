@@ -6,6 +6,8 @@
 
 use super::*;
 
+#[path = "security_roles/builtin_grants.rs"]
+mod builtin_grants;
 #[path = "security_roles/membership.rs"]
 mod membership;
 #[path = "security_roles/privilege_inquiry.rs"]

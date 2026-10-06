@@ -6,6 +6,7 @@
 
 //! Semantic base-column privilege analysis for query sources.
 
+pub mod columns;
 mod enforcement;
 
 use crate::catalog::roles::RoleReference;
@@ -618,6 +619,17 @@ fn analyze_query_block(
     universe.include_tables(&lineage);
     let mut scopes = vec![lineage];
     scopes.extend_from_slice(outer_scopes);
+    for column in block
+        .privilege_columns
+        .iter()
+        .filter(|_| ctes.include_authorization_only_columns)
+    {
+        let expression = column.qualifier().map_or_else(
+            || ScalarExpr::Column(column.column().to_string()),
+            |qualifier| ScalarExpr::qualified_column(qualifier, column.column()),
+        );
+        collect_expression_columns(&expression, &scopes, false, required);
+    }
     for projection in &block.projections {
         collect_expression_and_subqueries(
             &projection.expr,
@@ -758,6 +770,15 @@ pub fn ensure_select_privileges_for_source_expressions(
     expressions: &[&ScalarExpr],
     ctes: &CteScope<'_>,
 ) -> Result<(), SQLError> {
+    let (universe, required) = source_expression_dependencies(source, expressions, ctes)?;
+    ensure_required_select(&universe, &required, ctes)
+}
+
+fn source_expression_dependencies(
+    source: &SourcePlan,
+    expressions: &[&ScalarExpr],
+    ctes: &CteScope<'_>,
+) -> Result<(SourceLineage, BTreeSet<BaseColumn>), SQLError> {
     let mut universe = SourceLineage::default();
     let mut required = BTreeSet::new();
     let lineage = analyze_source_lineage(
@@ -781,7 +802,7 @@ pub fn ensure_select_privileges_for_source_expressions(
             &mut required,
         )?;
     }
-    ensure_required_select(&universe, &required, ctes)
+    Ok((universe, required))
 }
 
 pub fn ensure_select_privileges_for_table_expressions(
@@ -792,6 +813,25 @@ pub fn ensure_select_privileges_for_table_expressions(
     required_columns: &[String],
     ctes: &CteScope<'_>,
 ) -> Result<(), SQLError> {
+    let (universe, required) = table_expression_dependencies(
+        table,
+        qualifiers,
+        expressions,
+        subqueries,
+        required_columns,
+        ctes,
+    )?;
+    ensure_required_select(&universe, &required, ctes)
+}
+
+fn table_expression_dependencies(
+    table: &str,
+    qualifiers: &BTreeSet<String>,
+    expressions: &[&ScalarExpr],
+    subqueries: &[QueryPlan],
+    required_columns: &[String],
+    ctes: &CteScope<'_>,
+) -> Result<(SourceLineage, BTreeSet<BaseColumn>), SQLError> {
     let catalog = ctes.catalog;
     let mut resolution = ctes.resolution.clone();
     resolution.set_lookup_mode(crate::catalog::resolution::RelationLookupMode::Bound);
@@ -851,7 +891,7 @@ pub fn ensure_select_privileges_for_table_expressions(
     if required.iter().any(|column| column.table == canonical) {
         universe.include_tables(&lineage);
     }
-    ensure_required_select(&universe, &required, ctes)
+    Ok((universe, required))
 }
 
 pub struct TargetSelectPrivilegeRequest<'a, 'expr> {

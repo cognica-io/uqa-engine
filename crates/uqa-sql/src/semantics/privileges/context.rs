@@ -71,6 +71,7 @@ pub struct PrivilegeScope<'a> {
     pub inherited: &'a dyn PrivilegeCteCatalog,
     pub scalar_subqueries: Vec<QueryPlan>,
     local_ctes: BTreeMap<String, CtePlan>,
+    pub(super) include_authorization_only_columns: bool,
 }
 impl<'a> PrivilegeScope<'a> {
     pub fn new(
@@ -85,6 +86,7 @@ impl<'a> PrivilegeScope<'a> {
             inherited,
             scalar_subqueries,
             local_ctes: BTreeMap::new(),
+            include_authorization_only_columns: true,
         }
     }
     pub fn insert_deferred(&mut self, plan: CtePlan) {

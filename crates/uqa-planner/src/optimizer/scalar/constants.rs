@@ -23,7 +23,7 @@ pub(super) fn is_coalesce(name: &str, binding: Option<&FunctionBinding>) -> bool
     name.eq_ignore_ascii_case("coalesce") && binding.is_none_or(|binding| binding.builtin)
 }
 
-fn immutable_cast_type(ty: &ColumnType) -> bool {
+pub(in crate::optimizer) fn immutable_cast_type(ty: &ColumnType) -> bool {
     match ty {
         ColumnType::Array(element) => immutable_cast_type(element),
         ColumnType::SmallInteger
@@ -114,9 +114,18 @@ fn is_constant(expression: &ScalarExpr) -> bool {
     }
 }
 
+#[cfg(test)]
 pub(super) fn fold_literal_expression(
     expression: ScalarExpr,
     evaluate: crate::optimizer::ConstantEvaluator,
+) -> Result<ScalarExpr, SQLError> {
+    fold_authorized_literal(expression, evaluate, None)
+}
+
+pub(super) fn fold_authorized_literal(
+    expression: ScalarExpr,
+    evaluate: crate::optimizer::ConstantEvaluator,
+    permissions: Option<&dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
 ) -> Result<ScalarExpr, SQLError> {
     if matches!(&expression, ScalarExpr::Func { binding: Some(binding), .. }
         if matches!(binding.dispatch, Some(uqa_sql::ast::FunctionDispatch::NamedArgument | uqa_sql::ast::FunctionDispatch::VariadicArgument)))
@@ -124,14 +133,32 @@ pub(super) fn fold_literal_expression(
         // Argument markers carry syntax for their enclosing call; only that call evaluates them as arguments.
         return Ok(expression);
     }
-    if literal_value(&expression).is_some() || !is_constant(&expression) {
+    let strict_null = matches!(&expression, ScalarExpr::Func { name, binding, args, .. }
+        if uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len()) == Some(true)
+            && args.iter().any(|argument| literal_value(argument).is_some_and(|value| matches!(value, Value::Null))));
+    if literal_value(&expression).is_some() || (!strict_null && !is_constant(&expression)) {
         return Ok(expression);
     }
     let schema = RowSchema::default();
     let ty = scalar_type(&expression, &schema, &[])?;
     // Keep operator-selected casts before evaluation can replace the expression with a literal, including PostgreSQL unknown string inputs.
     let expression = uqa_sql::bind_type_introspection(expression, &schema, &[]);
-    let value = evaluate(&expression)?;
+    let value = if strict_null {
+        // PostgreSQL simplifies a strict NULL call without looking up its function execution permission.
+        Value::Null
+    } else {
+        if let (
+            Some(permissions),
+            ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            },
+        ) = (permissions, &expression)
+        {
+            permissions.require_execute(binding)?;
+        }
+        evaluate(&expression)?
+    };
     let literal = ScalarExpr::Literal(value.clone());
     if !matches!(expression, ScalarExpr::Cast { .. }) && scalar_type(&literal, &schema, &[])? == ty
     {

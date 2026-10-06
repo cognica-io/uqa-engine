@@ -31,7 +31,9 @@ pub struct SchemaLayoutError(pub String);
 type SchemaLayoutResult<T> = Result<T, SchemaLayoutError>;
 
 /// Structured SQL column identity. A qualifier is metadata, never a prefix encoded into the column name, so quoted names containing `.` remain intact.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ColumnIdentity {
     qualifier: Option<Box<str>>,
     column: Box<str>,
