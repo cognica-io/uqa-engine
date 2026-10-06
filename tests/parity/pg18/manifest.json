@@ -461,11 +461,11 @@
     },
     {
       "id": "ddl.view-column-aliases",
-      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live CREATE VIEW column-name list results, catalogs, replacement checks, side-effect probes, and SQLSTATEs plus CREATE VIEW documentation",
-      "uqa_test": "cargo test -p uqa-sql --lib create_view_preserves_positional_column_names; cargo test -p uqa-engine --test integration catalog::sql_views::",
-      "supported_version": "PostgreSQL 18.4 positional and partial view column-name lists, quoted identifier case, fixed typed output schemas, duplicate and alias-count validation order, nonexecuting static analysis, CREATE OR REPLACE compatibility and trailing-column extension, transactionality, nested views, and durable legacy-compatible reopen behavior",
-      "status": "partial",
-      "open_issue": "Issue #433: ordinary CREATE VIEW omits literal input analysis before output-alias and target validation. The existing regression expects PostgreSQL 22P02 for an invalid integer literal before duplicate aliases, but current main reports 42701. A separate correction follows PR #431."
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live CREATE VIEW column-name list results, catalogs, replacement checks, side-effect probes, and SQLSTATEs plus CREATE VIEW documentation; tests/parity/pg18/view_input_order_oracle.expected.json",
+      "uqa_test": "cargo test -p uqa-sql --lib create_view_preserves_positional_column_names; cargo test -p uqa-sql --lib binding::statements::tests; cargo test -p uqa-engine --test integration catalog::sql_views::",
+      "supported_version": "PostgreSQL 18.4 positional and partial view column-name lists, quoted identifier case, fixed typed output schemas, duplicate and alias-count validation order, nonexecuting static analysis, CREATE OR REPLACE compatibility and trailing-column extension, transactionality, nested views, and durable legacy-compatible reopen behavior; eighteen independent definition-input messages pass all four storage providers, with twelve persistent-reopen observations preserving input effects, deferred runtime casts and failed replacement",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "functions.identified-pg18-additions",

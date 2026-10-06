@@ -104,6 +104,7 @@ fn explain_retains_its_scope_and_borrows_metadata_only_for_its_body() {
 #[test]
 fn query_bearing_commands_validate_their_query_schema() {
     for sql in [
+        "CREATE VIEW copied AS SELECT missing, 1 / 0",
         "CREATE TABLE copied AS SELECT missing, 1 / 0",
         "CREATE MATERIALIZED VIEW saved AS SELECT missing, 1 / 0",
         "DECLARE c CURSOR FOR SELECT missing, 1 / 0",
@@ -117,6 +118,52 @@ fn query_bearing_commands_validate_their_query_schema() {
         assert_eq!(*scopes.events.borrow(), ["scope", "binding", "release"]);
     }
 }
+#[test]
+fn view_input_analysis_precedes_aliases_and_target_validation() {
+    for (sql, state, message) in [
+        (
+            "CREATE VIEW items(same,same) AS SELECT 'bad'::integer,2",
+            "22P02",
+            "invalid input syntax for type integer: \"bad\"",
+        ),
+        (
+            "CREATE VIEW items(same,same) AS SELECT 'bad'::integer,2 FROM absent_view_source",
+            "42P01",
+            "relation \"absent_view_source\" does not exist",
+        ),
+        (
+            "CREATE VIEW items(same,same) AS SELECT missing_column,'bad'::integer",
+            "42703",
+            "column \"missing_column\" does not exist",
+        ),
+        (
+            "CREATE VIEW items(same,same) AS SELECT 'bad'::integer,missing_column",
+            "22P02",
+            "invalid input syntax for type integer: \"bad\"",
+        ),
+        (
+            "CREATE OR REPLACE VIEW items(same,same) AS SELECT 'bad'::integer,2",
+            "22P02",
+            "invalid input syntax for type integer: \"bad\"",
+        ),
+        (
+            "CREATE VIEW items(same,same) AS SELECT CASE WHEN false THEN 'bad'::integer ELSE 1 END,2",
+            "22P02",
+            "invalid input syntax for type integer: \"bad\"",
+        ),
+    ] {
+        let error = analyze(&Scopes::default(), sql).unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
+        assert_eq!(error.to_string(), message, "{sql}");
+    }
+    for sql in [
+        "CREATE VIEW saved AS SELECT 'bad'::text::integer AS value",
+        "CREATE VIEW saved AS SELECT 1 / 0 AS value",
+    ] {
+        analyze(&Scopes::default(), sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+}
+
 #[test]
 fn mutation_parameter_analysis_precedes_result_schema_binding_in_one_retained_scope() {
     let scopes = Scopes::default();
@@ -227,6 +274,8 @@ fn executable_input_constants_survive_query_and_command_analysis_once() {
         "SELECT '{1,2}'::positive[] WHERE false",
         "SELECT CASE WHEN false THEN '{1,2}'::positive[] ELSE NULL END",
         "WITH input AS (SELECT '{1,2}'::positive[] AS value) SELECT value FROM input",
+        "CREATE VIEW saved AS SELECT '{1,2}'::positive[]",
+        "CREATE OR REPLACE VIEW saved AS SELECT '{1,2}'::positive[]",
         "CREATE TABLE saved AS SELECT '{1,2}'::positive[]",
         "CREATE MATERIALIZED VIEW saved AS SELECT '{1,2}'::positive[]",
         "DECLARE input CURSOR FOR SELECT '{1,2}'::positive[]",
@@ -265,7 +314,8 @@ fn executable_input_constants_survive_query_and_command_analysis_once() {
         };
         match &plan {
             UnifiedPlan::Command(command) => match command.as_ref() {
-                CommandPlan::CreateTableAs { query, .. }
+                CommandPlan::CreateView { query, .. }
+                | CommandPlan::CreateTableAs { query, .. }
                 | CommandPlan::CreateMaterializedView { query, .. }
                 | CommandPlan::DeclareCursor { query, .. } => {
                     query.visit_scalar_expressions(&mut observe);

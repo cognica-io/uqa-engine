@@ -24,6 +24,8 @@ mod catalog_function_dispatch;
 mod column_aliases;
 #[path = "sql_views/definitions.rs"]
 mod definitions;
+#[path = "sql_views/input_analysis_order.rs"]
+mod input_analysis_order;
 #[path = "sql_views/materialized_creation_order.rs"]
 mod materialized_creation_order;
 #[path = "sql_views/updatability_diagnostics.rs"]
