@@ -103,6 +103,35 @@ fn stored_operators_keep_selected_inputs_without_result_type_or_carrier_casts() 
 }
 
 #[test]
+fn declared_parameter_identity_annotations_do_not_become_stored_argument_casts() {
+    for (sql, ty) in [
+        ("octet_length($1)", ColumnType::Text),
+        ("abs($1)", ColumnType::Integer),
+        ("GREATEST($1, $1)", ColumnType::BigInteger),
+    ] {
+        let params = [SQLParam::typed_scalar(Value::Null, ty)];
+        let original = expression(sql);
+        let mut stored = original.clone();
+        assert!(!store_operand_coercions(&mut stored, &schema(), &params, &Catalog).unwrap());
+        assert_eq!(stored, original, "{sql}");
+    }
+
+    let params = [SQLParam::typed_scalar(Value::Null, ColumnType::Integer)];
+    let mut stored = expression("GREATEST($1, 2::bigint)");
+    assert!(store_operand_coercions(&mut stored, &schema(), &params, &Catalog).unwrap());
+    let ScalarExpr::Func { args, .. } = &stored else {
+        panic!("selected call")
+    };
+    assert!(
+        matches!(&args[0], ScalarExpr::Cast { expr, ty, implicit: true }
+        if matches!(**expr, ScalarExpr::Param(1)) && ty == "bigint")
+    );
+    let once = stored.clone();
+    assert!(!store_operand_coercions(&mut stored, &schema(), &params, &Catalog).unwrap());
+    assert_eq!(stored, once);
+}
+
+#[test]
 fn stored_operators_preserve_explicit_cast_origin() {
     for sql in ["n + i::numeric", "f::double precision + d", "i::bigint + b"] {
         let original = expression(sql);

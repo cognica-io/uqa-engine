@@ -338,7 +338,21 @@ impl SchemaScope {
                         params,
                     )?;
                 }
-                for expression in &mut block.group_by {
+                let output_names = self.output_names(&block.projections);
+                for expression in block
+                    .group_by
+                    .iter_mut()
+                    .chain(block.grouping_sets.iter_mut().flatten())
+                {
+                    // A preserved GROUP BY output name wins over a routine parameter when no local input column takes it. Its expression was already validated in the expanded copy.
+                    if self.preserve_syntax_shape
+                        && matches!(expression, ScalarExpr::Column(name)
+                            if !source_schema.has_unqualified_column(name)
+                                && !source_schema.column_is_ambiguous(name)
+                                && output_names.contains(name))
+                    {
+                        continue;
+                    }
                     self.bind_scalar_routines_for_storage(
                         routines,
                         expression,
@@ -346,17 +360,6 @@ impl SchemaScope {
                         &block.subqueries,
                         params,
                     )?;
-                }
-                for set in &mut block.grouping_sets {
-                    for expression in set {
-                        self.bind_scalar_routines_for_storage(
-                            routines,
-                            expression,
-                            &expression_schema,
-                            &block.subqueries,
-                            params,
-                        )?;
-                    }
                 }
                 if let Some(having) = block.having.as_mut() {
                     self.bind_scalar_routines_for_storage(
@@ -368,7 +371,6 @@ impl SchemaScope {
                     )?;
                 }
                 // A bare name in ORDER BY or DISTINCT ON names an output column before any input column or parameter, as `findTargetlistEntrySQL92` resolves it.
-                let output_names = self.output_names(&block.projections);
                 let names_output = |expression: &ScalarExpr| match expression {
                     ScalarExpr::Column(name) => output_names.contains(name),
                     _ => false,

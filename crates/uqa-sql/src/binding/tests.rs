@@ -36,6 +36,84 @@ impl FunctionTypeResolver for EmptyRoutineResolution {
 impl RoutineResolution for EmptyRoutineResolution {}
 
 #[test]
+fn routine_parameter_lookup_preserves_wildcard_syntax_sites() {
+    let context = super::BindingContext {
+        catalog: super::fixture::catalog(BTreeMap::new()),
+        resolution: super::fixture::resolution(vec!["public".into()], "pg_temp_fixture".into()),
+        ctes: BTreeMap::new(),
+        deferred_ctes: BTreeMap::new(),
+        non_returning_ctes: std::collections::BTreeSet::new(),
+        scalar_subqueries: &[],
+    };
+    let params = [crate::SQLParam::typed_scalar(
+        uqa_core::Value::Null,
+        ColumnType::Text,
+    )];
+    let parameters =
+        super::RoutineParameterScope::new("f", vec!["input".into()], vec![Some(ColumnType::Text)]);
+    for star in ["*", "src.*"] {
+        let statement = crate::compile(&format!(
+            "SELECT {star}, input FROM (VALUES (1, 2)) AS src(a, b)"
+        ))
+        .unwrap()
+        .remove(0);
+        let mut plan = crate::plan::UnifiedPlan::lower(statement);
+        let original = plan.clone();
+        super::bind_routine_parameter_references(
+            &EmptyRoutineResolution,
+            &mut plan,
+            &params,
+            &context,
+            &parameters,
+        )
+        .unwrap();
+        let crate::plan::UnifiedPlan::Query(query) = plan else {
+            panic!("SELECT")
+        };
+        let crate::plan::UnifiedPlan::Query(original) = original else {
+            panic!("SELECT")
+        };
+        let RelationalPlan::QueryBlock(block) = query.root else {
+            panic!("query block")
+        };
+        let RelationalPlan::QueryBlock(original) = original.root else {
+            panic!("query block")
+        };
+        assert_eq!(block.projections.len(), 2, "{star}");
+        assert_eq!(block.projections[0].expr, original.projections[0].expr);
+        assert_eq!(block.projections[0].alias, original.projections[0].alias);
+        assert_eq!(block.projections[1].expr, crate::ScalarExpr::Param(1));
+    }
+    for grouping in ["GROUP BY input", "GROUP BY GROUPING SETS (input)"] {
+        let statement = crate::compile(&format!(
+            "SELECT a AS input FROM (VALUES (1, 2)) AS src(a, b) {grouping}"
+        ))
+        .unwrap()
+        .remove(0);
+        let mut plan = crate::plan::UnifiedPlan::lower(statement);
+        super::bind_routine_parameter_references(
+            &EmptyRoutineResolution,
+            &mut plan,
+            &params,
+            &context,
+            &parameters,
+        )
+        .unwrap();
+        let crate::plan::UnifiedPlan::Query(query) = plan else {
+            panic!("SELECT")
+        };
+        let RelationalPlan::QueryBlock(block) = query.root else {
+            panic!("query block")
+        };
+        assert!(block
+            .group_by
+            .iter()
+            .chain(block.grouping_sets.iter().flatten())
+            .all(|item| matches!(item, crate::ScalarExpr::Column(name) if name == "input")));
+    }
+}
+
+#[test]
 fn result_schema_keeps_correlated_columns_without_reference_validation() {
     let context = super::BindingContext {
         catalog: super::fixture::catalog(BTreeMap::new()),
