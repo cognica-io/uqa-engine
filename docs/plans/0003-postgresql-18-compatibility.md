@@ -287,6 +287,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `expressions.stored-common-type-coercions` | `M1` | `verified` |
 | `expressions.stored-operator-coercions` | `M1` | `verified` |
 | `types.multidimensional-array-input` | `M1` | `verified` |
+| `expressions.array-concatenation-coercions` | `M1` | `verified` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -1137,14 +1138,20 @@ All 25 operator and ten array PostgreSQL 18.4 messages match memory, native SQLi
 
 ## Array concatenation analysis and stored coercions
 
-Issue [#487](https://github.com/cognica-io/uqa-engine/issues/487) completes the remaining array-concatenation portion of the original stored unknown/common-type record inherited from #396. The ten-message PostgreSQL 18.4 capture reproduces five differences on main `0f8b2f82b`: incompatible array operands report the wrong SQLSTATE/message/HINT, and selected integer-to-bigint array conversions disappear from stored definitions, renames and reopen. The same capture verifies the already corrected unknown scalar constants and all-NULL COALESCE definitions. All 75 inherited records remain, with 36 original tasks open until acceptance completes.
+[PR #488](https://github.com/cognica-io/uqa-engine/pull/488) for [#487](https://github.com/cognica-io/uqa-engine/issues/487) completes the remaining array-concatenation portion of the original stored unknown/common-type record inherited from #396. The ten-message PostgreSQL 18.4 capture reproduces five differences on main `0f8b2f82b`: incompatible array operands report the wrong SQLSTATE/message/HINT, and selected integer-to-bigint array conversions disappear from stored definitions, renames and reopen. The same capture verifies the already corrected unknown scalar constants and all-NULL COALESCE definitions. All 75 inherited records remain; this accepted unit completes the bundled unknown/common-type record, leaving 35 original tasks open.
 
 SQL owns operator analysis, common element selection, diagnostics and retained casts. Reuse its existing array-type and controlled common-type interfaces to give inference and binding the same array-concatenation result and selected inputs. Preserve array/array versus array/element and unknown-operand resolution, domains, dimensions, NULL values, resource errors and existing text/bytea/JSONB concatenation behavior. Execution continues to reconstruct retained syntax; Engine receives no analysis algorithms. Crate features and dependency directions remain unchanged.
 
 - [x] Capture the independent PostgreSQL reference and reproduce the remaining main defects as #487.
-- [ ] Share selected array-concatenation types between inference and binding, preserve their stored conversions, and report operator-resolution diagnostics.
-- [ ] Verify exact definitions, values, types, errors, unknown literals and all-provider/reopen behavior with relevant owner regressions and controlled resource checks.
-- [ ] Update the manual, HISTORY, compatibility manifest and full inherited checklist; review and run affected ownership/dependency checks.
-- [ ] Merge the fixing PR, close #487 and remove the completed branch before continuing.
+- [x] Share selected array-concatenation types between inference and binding, preserve their stored conversions, and report operator-resolution diagnostics.
+- [x] Verify exact definitions, values, types, errors, unknown literals and all-provider/reopen behavior with relevant owner regressions and controlled resource checks.
+- [x] Update the manual, HISTORY, compatibility manifest and full inherited checklist; review and run affected ownership/dependency checks.
+- [ ] Merge the fixing PR, close #487/#489/#490 and remove the completed branch before continuing.
 
 For a selected array concatenation, let $T$ be the common element type accepted by PostgreSQL and let each input conversion map its declared array or scalar domain to the corresponding $T[]$ or $T$ operand. Retaining those same conversions must preserve element order, dimensions, lower bounds, NULL elements, input diagnostics and the selected operator's result type. An incompatible pair fails during operator selection; resource and cancellation errors remain their original errors. Persisting and reconstructing the analyzed tree must commute with rename and reload without evaluating any input. This corrects existing SQL behavior and introduces no new UQA carrier or algebraic operator.
+
+The expanded 35-message capture includes array/scalar promotion, typed NULL elements versus NULL arrays, unknown input, domains, differing ranks, lower bounds, legacy vectors, SQL-standard routines and generated columns. It independently reproduces further input/append diagnostic defects [#489](https://github.com/cognica-io/uqa-engine/issues/489) and stored array-domain conversion/operator-label defects [#490](https://github.com/cognica-io/uqa-engine/issues/490). PR #488 fixes those producers; the complete reference and owner checks pass and the manifest is verified.
+
+A domain over an array retains the required conversion to its base array separately from the domain check. If the constructor already has that base type, no element casts are added. The independent reference covers widening, identical and empty constructors, plus a sequence-backed volatile element-domain check: definition capture performs no calls and reading two rows performs exactly two calls, as PostgreSQL does. Runtime NULL roles use structural dispatch, preserving array concatenation versus append/prepend even after binding, serialization and evaluation erase value types.
+
+Acceptance: all 35 PostgreSQL 18.4 messages pass memory, native SQLite, SQLite Key/Value and redb, with two replay messages for each persistent provider. All 1,406 SQL owner tests, fifty SQL integration tests, 139 Planner tests and 66 focused Execution tests pass. Engine verification covers 421 distinct affected integration cases; the final 28-case run confirms the expanded reference, stored coercions, domain behavior and manual examples after completing dimension diagnostics. Strict Clippy covers all four owners and their tests. Formatting, dependency/ownership checks, harness registration, source policies and manifest validation pass. The shared target remains below the 100 GB limit, primary main and its unrelated parity README edit are preserved, and no performance measurement or manual CI action was run. Merge and branch cleanup remain.

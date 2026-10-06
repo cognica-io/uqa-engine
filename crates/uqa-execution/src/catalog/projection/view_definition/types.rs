@@ -198,7 +198,7 @@ impl Deparser<'_> {
             base = inner;
         }
         if let (ScalarExpr::Array(items), ColumnType::Array(element)) = (expr, base) {
-            if implicit {
+            if implicit || matches!(target, ColumnType::Domain { .. }) {
                 return Ok(None);
             }
             let display = self.type_display(ty);
@@ -211,12 +211,7 @@ impl Deparser<'_> {
             }
             let elements = self.array_elements(items, &leaf.catalog_name(), scope, subqueries)?;
             let array = format!("ARRAY[{elements}]");
-            // A domain over the array type coerces the converted array.
-            return Ok(Some(if matches!(target, ColumnType::Domain { .. }) {
-                format!("({array})::{display}")
-            } else {
-                array
-            }));
+            return Ok(Some(array));
         }
         if let ColumnType::Domain { base, .. } = &target {
             if matches!(expr, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {

@@ -291,8 +291,11 @@ fn render_column(column: &Column, qualified: bool) -> String {
 fn expression_name(expression: &ScalarExpr) -> String {
     match expression {
         ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. } => name.clone(),
-        ScalarExpr::Func { name, .. } | ScalarExpr::WindowCall { name, .. } => {
-            name.rsplit('.').next().unwrap_or(name).to_string()
+        ScalarExpr::Func { name, binding, .. } => {
+            uqa_sql::semantics::function_projection_label(name, binding.as_ref())
+        }
+        ScalarExpr::WindowCall { name, .. } => {
+            uqa_sql::semantics::function_projection_label(name, None)
         }
         ScalarExpr::Cast { expr, ty, .. } => {
             let name = expression_name(expr);
