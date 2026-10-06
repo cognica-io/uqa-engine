@@ -87,7 +87,7 @@ impl<'a> Walker<'a> {
                 }
                 self.optional_boxed_expr(else_branch.as_deref())?;
             }
-            Expr::Cast { expr, ty } => {
+            Expr::Cast { expr, ty, .. } => {
                 self.boxed(expr.as_ref(), Node::Expr)?;
                 self.text(ty)?;
             }

@@ -13,9 +13,7 @@ use super::{
     CTE,
 };
 
-/// Query-local identity for an executor-only row source. Parser-produced SQL
-/// never contains this identity, so internal row carriers cannot collide with
-/// user relation aliases.
+/// Query-local identity for an executor-only row source. Parser-produced SQL never contains this identity, so internal row carriers cannot collide with user relation aliases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[doc(hidden)]
 pub struct InternalRelationId(u64);
@@ -53,9 +51,7 @@ impl InternalRelationId {
     }
 }
 
-/// Structural reference to an executor-only relation attribute. This is the
-/// UQA analogue of PostgreSQL's `Var(varno, varattno)` identity: it is never
-/// resolved through SQL text names.
+/// Structural reference to an executor-only relation attribute. This is the UQA analogue of PostgreSQL's `Var(varno, varattno)` identity: it is never resolved through SQL text names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[doc(hidden)]
 pub struct InternalColumnRef {
@@ -369,6 +365,9 @@ pub enum Expr {
     /// `CAST(expr AS type)`. The type name is preserved verbatim so
     /// the evaluator can apply the correct coercion.
     Cast {
+        /// Set by analysis for an implicit coercion retained in stored syntax.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        implicit: bool,
         expr: Box<Expr>,
         ty: String,
     },

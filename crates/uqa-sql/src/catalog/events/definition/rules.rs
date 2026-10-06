@@ -329,6 +329,7 @@ impl EventAnalysisContext<'_> {
                     *value = crate::expr::cast_value(value, "boolean")?;
                 } else {
                     *condition = Expr::Cast {
+                        implicit: true,
                         expr: Box::new(condition.clone()),
                         ty: "boolean".into(),
                     };

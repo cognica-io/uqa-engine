@@ -40,6 +40,7 @@ fn controlled_binding_preserves_cast_common_type_and_selected_call_semantics() {
     let expressions = [
         call("pg_typeof", vec![Expr::Column("small".into())]),
         Expr::Cast {
+            implicit: false,
             expr: Box::new(Expr::Column("real".into())),
             ty: "text".into(),
         },
@@ -199,6 +200,7 @@ fn array_common_type_preserves_coercion_origin_through_controlled_binding() {
     for explicit in [false, true] {
         let source = if explicit {
             Expr::Cast {
+                implicit: false,
                 expr: Box::new(array("small")),
                 ty: "bigint[]".into(),
             }

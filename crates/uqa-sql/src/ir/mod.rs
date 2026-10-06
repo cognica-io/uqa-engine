@@ -223,6 +223,40 @@ mod tests {
     use super::ScalarExpr;
 
     #[test]
+    fn syntax_cast_origin_survives_owned_and_borrowed_lowering() {
+        use crate::{ast::Expr, plan::ExpressionPlan};
+        use uqa_core::{memory::MemoryBudget, CancellationToken};
+
+        let legacy = r#"{"Cast":{"expr":{"Column":"value"},"ty":"bigint[]"}}"#;
+        let explicit: Expr = serde_json::from_str(legacy).unwrap();
+        assert!(matches!(
+            explicit,
+            Expr::Cast {
+                implicit: false,
+                ..
+            }
+        ));
+        assert_eq!(serde_json::to_string(&explicit).unwrap(), legacy);
+        let mut implicit = explicit;
+        let Expr::Cast {
+            implicit: origin, ..
+        } = &mut implicit
+        else {
+            unreachable!()
+        };
+        *origin = true;
+        let stored = serde_json::to_string(&implicit).unwrap();
+        let restored: Expr = serde_json::from_str(&stored).unwrap();
+        let expected = ExpressionPlan::lower(restored.clone()).scalar;
+        assert!(matches!(expected, ScalarExpr::Cast { implicit: true, .. }));
+        let budget = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let borrowed =
+            ExpressionPlan::lower_column_budgeted(&restored, &budget, &token, &token).unwrap();
+        assert_eq!(*borrowed, expected);
+    }
+
+    #[test]
     fn cast_origin_survives_storage_and_legacy_casts_remain_explicit() {
         let legacy = r#"{"Cast":{"expr":{"Column":"value"},"ty":"bigint[]"}}"#;
         let explicit: ScalarExpr = serde_json::from_str(legacy).unwrap();

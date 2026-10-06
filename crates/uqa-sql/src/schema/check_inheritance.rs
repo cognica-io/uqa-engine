@@ -25,7 +25,7 @@ pub(super) fn remove_identity_casts(
     columns: &[ColumnDef],
 ) -> Result<(), SQLError> {
     crate::catalog::stored_ast::visit_stored_expression(expression, &mut |node| {
-        while let Expr::Cast { expr, ty } = node {
+        while let Expr::Cast { expr, ty, .. } = node {
             let Ok(target) = ColumnType::from_sql_name(ty) else {
                 break;
             };
@@ -76,9 +76,11 @@ pub fn same_check_expression(
                 }
                 return;
             }
-            let ScalarExpr::Cast { expr, ty, .. } = node else {
+            let ScalarExpr::Cast { expr, ty, implicit } = node else {
                 return;
             };
+            // PostgreSQL expression equality ignores the display form of a coercion.
+            *implicit = false;
             let Ok(target) = ColumnType::from_sql_name(ty) else {
                 return;
             };
@@ -193,6 +195,7 @@ mod tests {
             assert!(same_check_expression(&untyped, &cooked, &[]).unwrap());
             assert!(same_check_expression(&cooked, &untyped, &[]).unwrap());
             let mut cast = Expr::Cast {
+                implicit: false,
                 expr: Box::new(cooked.clone()),
                 ty: "integer".into(),
             };
@@ -207,5 +210,22 @@ mod tests {
             };
             assert!(!same_check_expression(&untyped, &cooked, &[]).unwrap());
         }
+    }
+    #[test]
+    fn inherited_check_equality_ignores_coercion_display_origin() {
+        let implicit = Expr::Cast {
+            implicit: true,
+            expr: Box::new(Expr::Column("value".into())),
+            ty: "bigint".into(),
+        };
+        let mut explicit = implicit.clone();
+        let Expr::Cast {
+            implicit: origin, ..
+        } = &mut explicit
+        else {
+            unreachable!()
+        };
+        *origin = false;
+        assert!(same_check_expression(&implicit, &explicit, &[]).unwrap());
     }
 }

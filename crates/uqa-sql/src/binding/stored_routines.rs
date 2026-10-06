@@ -75,7 +75,11 @@ pub fn bind_catalog_statement_routines(
         context.binding,
         outer.as_ref(),
     )?;
-    let sites = super::syntax_sites::query_syntax_sites(&lowered, &query)?;
+    let sites = if matches!(plan, UnifiedPlan::Command(_)) {
+        super::syntax_sites::command_query_syntax_sites(&lowered, &query)?
+    } else {
+        super::syntax_sites::query_syntax_sites(&lowered, &query)?
+    };
     Ok(BoundStatementRoutines {
         query: Some(query),
         sites,
@@ -154,8 +158,15 @@ fn command_statement_query(
     let projections = inputs
         .expressions
         .into_iter()
-        .filter(|expression| !matches!(expression, ScalarExpr::Default))
-        .map(|expr| ProjectionPlan { expr, alias: None })
+        .map(|expr| ProjectionPlan {
+            // DEFAULT has a syntax position but no independently bound value in this analysis query.
+            expr: if matches!(expr, ScalarExpr::Default) {
+                ScalarExpr::Literal(Value::Int(1))
+            } else {
+                expr
+            },
+            alias: None,
+        })
         .chain(std::iter::once(ProjectionPlan {
             expr: ScalarExpr::Literal(Value::Int(1)),
             alias: None,

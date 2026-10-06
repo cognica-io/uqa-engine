@@ -109,6 +109,7 @@ pub fn validate_check_expression(
                 *value = crate::expr::cast_value(value, "boolean")?;
             } else {
                 *expression = Expr::Cast {
+                    implicit: true,
                     expr: Box::new(expression.clone()),
                     ty: "boolean".into(),
                 };

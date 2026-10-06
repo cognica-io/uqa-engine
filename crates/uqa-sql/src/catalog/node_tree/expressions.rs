@@ -134,7 +134,7 @@ impl ExpressionContext<'_> {
                     self.function(name, binding.as_ref(), args, *order_syntax)?
                 }
             }
-            Expr::Cast { expr, ty } => {
+            Expr::Cast { expr, ty, .. } => {
                 let ty = self.resolve_type(ty)?;
                 let unknown = self.expression_type(expr)?.is_none();
                 let mut input_type = &ty;

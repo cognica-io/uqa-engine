@@ -88,7 +88,7 @@ pub(super) fn is_sequence_function(
 fn regclass_literal_mut(expression: &mut crate::ast::Expr) -> Option<&mut String> {
     match expression {
         crate::ast::Expr::Literal(Value::Str(reference)) => Some(reference),
-        crate::ast::Expr::Cast { expr, ty }
+        crate::ast::Expr::Cast { expr, ty, .. }
             if ty.eq_ignore_ascii_case("regclass")
                 || ty.eq_ignore_ascii_case("pg_catalog.regclass") =>
         {

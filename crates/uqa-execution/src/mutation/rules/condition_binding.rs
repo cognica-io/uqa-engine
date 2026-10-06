@@ -182,7 +182,8 @@ where
             list: bind_rule_condition_expressions(context, list, resolver)?,
             negated: *negated,
         },
-        Expr::Cast { expr, ty } => Expr::Cast {
+        Expr::Cast { expr, ty, implicit } => Expr::Cast {
+            implicit: *implicit,
             expr: Box::new(bind_rule_condition_expression(context, expr, resolver)?),
             ty: ty.clone(),
         },

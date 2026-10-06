@@ -632,6 +632,7 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
     // Input conversion belongs to ordered semantic analysis, after the owning
     // declaration's target, authority and preceding expressions are checked.
     Ok(Expr::Cast {
+        implicit: false,
         expr: Box::new(inner),
         ty,
     })

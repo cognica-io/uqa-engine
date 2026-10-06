@@ -305,6 +305,7 @@ fn backfill_preserves_input_identity_without_skipping_new_domain_coercion() {
 fn text_default_cast_checks_elements_once_before_backfill_assignment() {
     let fixture = Fixture::new();
     let expression = Expr::Cast {
+        implicit: false,
         expr: Box::new(Expr::TypedLiteral {
             value: Value::Str("[-1:0]={1,2}".into()),
             ty: "text".into(),

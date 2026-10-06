@@ -195,8 +195,8 @@ impl Lowering<'_> {
                     .map(|branch| self.child(branch, aggregates, subqueries))
                     .transpose()?,
             },
-            Node::Cast { expr, ty } => ScalarExpr::Cast {
-                implicit: false,
+            Node::Cast { expr, ty, implicit } => ScalarExpr::Cast {
+                implicit,
                 expr: self.child(expr, aggregates, subqueries)?,
                 ty: self.text(ty)?,
             },

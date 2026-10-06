@@ -242,7 +242,7 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
             rendered.push_str(" END");
             rendered
         }
-        Expr::Cast { expr, ty } => format!("({})::{ty}", schema_expr_text(expr)?),
+        Expr::Cast { expr, ty, .. } => format!("({})::{ty}", schema_expr_text(expr)?),
         Expr::ScalarSubquery(body) => format!("({body:?})"),
         Expr::Exists { body, negated } => {
             format!("{}EXISTS ({body:?})", if *negated { "NOT " } else { "" })

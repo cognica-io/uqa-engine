@@ -27,7 +27,7 @@ pub fn regclass_oid(expression: &Expr) -> Option<i64> {
             value: Value::Int(oid),
             ty,
         } if is_regclass(ty) => Some(*oid),
-        Expr::Cast { expr, ty } if is_regclass(ty) => regclass_oid(expr),
+        Expr::Cast { expr, ty, .. } if is_regclass(ty) => regclass_oid(expr),
         _ => None,
     }
 }

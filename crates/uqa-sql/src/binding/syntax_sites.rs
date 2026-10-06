@@ -25,7 +25,7 @@ pub enum ValueSite {
     Relabel(String),
     /// A function's written ordering syntax, including a legacy call whose selected binding recovered the distinction.
     FunctionOrder(crate::ast::FunctionOrderSyntax),
-    /// Any other node of a stored expression, which keeps the sites in step with the syntax so that a relabel reaches the node it wraps.
+    /// Any other node of stored syntax, which keeps the sites in step with the syntax so that a relabel reaches the node it wraps.
     Node,
 }
 
@@ -54,10 +54,7 @@ pub fn expression_syntax_sites(
     lowered: &ExpressionPlan,
     bound: &ExpressionPlan,
 ) -> Result<SyntaxSites, SQLError> {
-    let mut walk = Walk {
-        aligned: true,
-        ..Walk::default()
-    };
+    let mut walk = Walk::default();
     walk.scalar(
         &lowered.scalar,
         &bound.scalar,
@@ -69,8 +66,32 @@ pub fn expression_syntax_sites(
 /// Sites of a stored statement lowered to a query.
 pub fn query_syntax_sites(lowered: &QueryPlan, bound: &QueryPlan) -> Result<SyntaxSites, SQLError> {
     let mut walk = Walk::default();
-    walk.query(lowered, bound)?;
+    walk.query(lowered, bound, false)?;
     Ok(walk.sites)
+}
+
+/// Sites from the query adapter for a stored command; its final output is synthetic and has no syntax node.
+pub(super) fn command_query_syntax_sites(
+    lowered: &QueryPlan,
+    bound: &QueryPlan,
+) -> Result<SyntaxSites, SQLError> {
+    let mut walk = Walk::default();
+    walk.query(lowered, bound, true)?;
+    Ok(walk.sites)
+}
+
+fn syntax_projections(
+    projections: &[crate::plan::ProjectionPlan],
+    command_root: bool,
+) -> Result<&[crate::plan::ProjectionPlan], SQLError> {
+    if command_root {
+        projections
+            .split_last()
+            .map(|(_, syntax)| syntax)
+            .ok_or_else(|| shape_error("command output"))
+    } else {
+        Ok(projections)
+    }
 }
 
 type Subqueries<'a> = (&'a [QueryPlan], &'a [QueryPlan]);
@@ -105,12 +126,15 @@ fn optional_pair<'a, T>(
 #[derive(Default)]
 struct Walk {
     sites: SyntaxSites,
-    /// Whether every node records a site. The expression visitor keeps in step with the walk node by node, so a relabel can name the node it wraps; the statement visitor pairs casts and literals only, so the casts binding adds are left to binding at execution and recorded for no node.
-    aligned: bool,
 }
 
 impl Walk {
-    fn query(&mut self, lowered: &QueryPlan, bound: &QueryPlan) -> Result<(), SQLError> {
+    fn query(
+        &mut self,
+        lowered: &QueryPlan,
+        bound: &QueryPlan,
+        command_root: bool,
+    ) -> Result<(), SQLError> {
         for (lowered, bound) in pairs(&lowered.ctes, &bound.ctes, "common table expressions")? {
             self.cte_body(&lowered.body, &bound.body)?;
             if let Some((lowered, bound)) =
@@ -128,9 +152,11 @@ impl Walk {
                 {
                     self.source(lowered, bound, subqueries)?;
                 }
-                for (lowered, bound) in
-                    pairs(&lowered.projections, &bound.projections, "select list")?
-                {
+                for (lowered, bound) in pairs(
+                    syntax_projections(&lowered.projections, command_root)?,
+                    syntax_projections(&bound.projections, command_root)?,
+                    "select list",
+                )? {
                     self.scalar(&lowered.expr, &bound.expr, subqueries)?;
                 }
                 self.optional(lowered.r#where.as_ref(), bound.r#where.as_ref(), subqueries)?;
@@ -182,8 +208,8 @@ impl Walk {
                     ..
                 },
             ) => {
-                self.query(left, bound_left)?;
-                self.query(right, bound_right)?;
+                self.query(left, bound_left, false)?;
+                self.query(right, bound_right, false)?;
                 let subqueries = (&subqueries[..], &bound_subqueries[..]);
                 for (lowered, bound) in pairs(order_by, bound_order, "ORDER BY")? {
                     self.scalar(&lowered.expr, &bound.expr, subqueries)?;
@@ -211,7 +237,9 @@ impl Walk {
     /// A data-modifying `WITH` query, in the order the syntax visitor walks the statement.
     fn cte_body(&mut self, lowered: &CtePlanBody, bound: &CtePlanBody) -> Result<(), SQLError> {
         match (lowered, bound) {
-            (CtePlanBody::Query(lowered), CtePlanBody::Query(bound)) => self.query(lowered, bound),
+            (CtePlanBody::Query(lowered), CtePlanBody::Query(bound)) => {
+                self.query(lowered, bound, false)
+            }
             (CtePlanBody::Command(lowered), CtePlanBody::Command(bound)) => {
                 self.command(lowered, bound)
             }
@@ -237,7 +265,7 @@ impl Walk {
                     bound.source.as_deref(),
                     "INSERT source",
                 )? {
-                    self.query(lowered, bound)?;
+                    self.query(lowered, bound, false)?;
                 }
             }
             (CommandPlan::Update(_), CommandPlan::Update(_))
@@ -327,7 +355,7 @@ impl Walk {
                 Ok(())
             }
             (SourcePlan::Subquery { body, .. }, SourcePlan::Subquery { body: bound, .. }) => {
-                self.query(body, bound)
+                self.query(body, bound, false)
             }
             _ => Err(shape_error("FROM item")),
         }
@@ -359,7 +387,7 @@ impl Walk {
 
     fn subquery(&mut self, index: usize, subqueries: Subqueries<'_>) -> Result<(), SQLError> {
         match (subqueries.0.get(index), subqueries.1.get(index)) {
-            (Some(lowered), Some(bound)) => self.query(lowered, bound),
+            (Some(lowered), Some(bound)) => self.query(lowered, bound, false),
             _ => Err(SQLError::Internal(format!(
                 "stored syntax cannot resolve subquery slot {index}"
             ))),
@@ -382,9 +410,7 @@ impl Walk {
             let ScalarExpr::Cast { expr, ty, .. } = bound else {
                 return Err(shape_error("relabel"));
             };
-            if self.aligned {
-                self.sites.values.push(ValueSite::Relabel(ty.clone()));
-            }
+            self.sites.values.push(ValueSite::Relabel(ty.clone()));
             bound = expr;
         }
         match lowered {
@@ -418,11 +444,7 @@ impl Walk {
                 }
                 self.sites.values.push(ValueSite::FunctionOrder(*bound));
             }
-            _ => {
-                if self.aligned {
-                    self.sites.values.push(ValueSite::Node);
-                }
-            }
+            _ => self.sites.values.push(ValueSite::Node),
         }
         match (lowered, bound) {
             (

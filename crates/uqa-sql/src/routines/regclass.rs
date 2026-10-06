@@ -67,7 +67,7 @@ impl RegclassBinding<'_> {
 
     fn bind_regclass_expression(&self, expression: &mut Expr) -> Result<bool, SQLError> {
         match expression {
-            Expr::Cast { expr, ty } if is_regclass(ty) => self.bind_regclass_literal(expr),
+            Expr::Cast { expr, ty, .. } if is_regclass(ty) => self.bind_regclass_literal(expr),
             Expr::Func {
                 name,
                 binding,

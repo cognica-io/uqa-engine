@@ -103,6 +103,7 @@ fn legacy_sequence_conversion_preserves_explicit_text_and_user_or_unbound_calls(
         call(
             "nextval",
             Expr::Cast {
+                implicit: false,
                 expr: Box::new(Expr::Literal(Value::Str("ids".into()))),
                 ty: "text".into(),
             },

@@ -31,7 +31,7 @@ pub fn bind_schema_regclass_constants(
 ) -> Result<bool, String> {
     let mut changed = false;
     walk_schema_expr_mut(expression, &mut |node| {
-        let Expr::Cast { expr, ty } = node else {
+        let Expr::Cast { expr, ty, .. } = node else {
             return Ok(());
         };
         if !is_regclass(ty) {

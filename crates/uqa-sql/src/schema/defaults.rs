@@ -134,7 +134,7 @@ pub fn cook_constant(
                 false,
             )?;
         }
-        Expr::Cast { expr, ty }
+        Expr::Cast { expr, ty, .. }
             if matches!(expr.as_ref(), Expr::Literal(Value::Str(_) | Value::Null)) =>
         {
             // A cast of a literal is read by the cast's type and keeps the modifier the cast writes.

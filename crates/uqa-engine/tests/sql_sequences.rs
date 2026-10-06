@@ -31,7 +31,7 @@ mod security;
 fn regclass_reference(engine: &Engine, expression: &Expr) -> Option<String> {
     match expression {
         Expr::Literal(Value::Str(reference)) => Some(reference.clone()),
-        Expr::Cast { expr, ty } if ty.ends_with("regclass") => regclass_reference(engine, expr),
+        Expr::Cast { expr, ty, .. } if ty.ends_with("regclass") => regclass_reference(engine, expr),
         Expr::TypedLiteral {
             value: Value::Int(oid),
             ty,
