@@ -267,11 +267,14 @@ pub fn merge_supplied_columns(stmt: &MergePlan, target_columns: &[String]) -> Ve
                 columns, values, ..
             } => supplied.extend(merge_insert_columns(target_columns, columns, values)),
             MergeWhenPlan::UpdateMatched { assignments, .. }
-            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => supplied.extend(
-                assignments
-                    .iter()
-                    .map(|assignment| assignment.target.column.clone()),
-            ),
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
+                supplied.extend(
+                    assignments
+                        .iter()
+                        .flat_map(|assignment| assignment.target.column_names())
+                        .map(str::to_owned),
+                );
+            }
             _ => {}
         }
     }
@@ -322,12 +325,17 @@ pub fn ensure_merge_mutation_privileges(
             }
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                column_privileges.extend(assignments.iter().map(|assignment| {
-                    (
-                        crate::catalog::security::table::TableAclPrivilege::Update,
-                        assignment.target.column.clone(),
-                    )
-                }));
+                column_privileges.extend(
+                    assignments
+                        .iter()
+                        .flat_map(|assignment| assignment.target.targets())
+                        .map(|target| {
+                            (
+                                crate::catalog::security::table::TableAclPrivilege::Update,
+                                target.column.clone(),
+                            )
+                        }),
+                );
             }
             MergeWhenPlan::DeleteMatched { .. }
             | MergeWhenPlan::DeleteNotMatchedBySource { .. } => requires_delete = true,
@@ -436,7 +444,9 @@ pub fn validate_merge_target_columns(
                 validate_mutation_targets(
                     catalog,
                     &stmt.target,
-                    assignments.iter().map(|assignment| &assignment.target),
+                    assignments
+                        .iter()
+                        .flat_map(|assignment| assignment.target.targets()),
                     "MERGE UPDATE",
                     false,
                 )?;
@@ -464,11 +474,13 @@ fn validate_merge_identity_targets(
         match clause {
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                identity.validate_update(assignments.iter().map(|assignment| {
-                    (
-                        assignment.target.column.as_str(),
-                        matches!(assignment.value, crate::ScalarExpr::Default),
-                    )
+                identity.validate_update(assignments.iter().flat_map(|assignment| {
+                    assignment.target.targets().iter().map(move |target| {
+                        (
+                            target.column.as_str(),
+                            matches!(assignment.value, crate::ScalarExpr::Default),
+                        )
+                    })
                 }))?;
             }
             MergeWhenPlan::InsertNotMatched {

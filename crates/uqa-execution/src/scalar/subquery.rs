@@ -121,6 +121,16 @@ impl SubqueryResult {
         }
     }
 
+    pub fn into_single_row(mut self) -> Result<Option<crate::OwnedPhysicalRow>, SQLError> {
+        let Some(first) = self.rows.next().transpose()? else {
+            return Ok(None);
+        };
+        if self.rows.next().transpose()?.is_some() {
+            return Err(single_row_cardinality_error());
+        }
+        Ok(Some(first))
+    }
+
     pub fn into_scalar_value(mut self) -> Result<Value, SQLError> {
         let Some(first_row) = self.rows.next().transpose()? else {
             return Ok(Value::Null);
@@ -170,5 +180,12 @@ impl SubqueryResult {
         } else {
             Some(false)
         })
+    }
+}
+
+pub(crate) fn single_row_cardinality_error() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "21000".into(),
+        message: "more than one row returned by a subquery used as an expression".into(),
     }
 }

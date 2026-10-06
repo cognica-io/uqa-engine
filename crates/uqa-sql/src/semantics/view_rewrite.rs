@@ -54,7 +54,7 @@ use returning::{
 pub use rewrite_insert::rewrite_insert_to_base;
 pub use rewrite_merge::rewrite_merge_to_base;
 pub use rewrite_update_delete::{rewrite_delete_to_base, rewrite_update_to_base};
-pub use rule_inputs::rule_input_requirements;
+pub use rule_inputs::{rule_input_requirements, validate_grouped_rule_inputs};
 pub use updatability::NotUpdatableReason;
 use updatability::{view_not_updatable, ColumnRestriction, ColumnWrite, ViewCommand};
 use validation::{

@@ -65,6 +65,16 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         self.subquery_context()
             .execute_subquery(subquery, plan, outer_row, params)
     }
+    fn row_subquery_value(
+        &self,
+        subquery: usize,
+        plan: &QueryPlan,
+        outer_row: PhysicalOuterRow<'_>,
+        params: &[SQLParam],
+    ) -> Result<Option<uqa_execution::OwnedPhysicalRow>, SQLError> {
+        self.subquery_context()
+            .row_subquery_value(subquery, plan, outer_row, params)
+    }
     fn scalar_subquery_value(
         &self,
         subquery: usize,

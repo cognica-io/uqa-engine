@@ -84,7 +84,7 @@ pub(super) fn lower_ctes(ctes: &[CTE], aggregates: &dyn AggregateClassifier) -> 
 }
 
 pub(super) fn lower_assignments(
-    assignments: Vec<(crate::ast::AssignmentTarget, Expr)>,
+    assignments: Vec<(crate::ast::AssignmentTargets, Expr)>,
     aggregates: &dyn AggregateClassifier,
     subqueries: &mut Vec<QueryPlan>,
 ) -> Vec<AssignmentPlan> {

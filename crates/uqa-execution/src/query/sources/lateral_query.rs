@@ -11,6 +11,7 @@ use super::{
     QueryOutput, QueryOutputMode, QueryPlan, RelationalPlan, SQLError, SQLParam, SourceContext,
 };
 use crate::query::projection::expand_from_star_columns;
+mod streaming_sets;
 use uqa_sql::{plan::QueryBlockPlan, semantics::projection_columns};
 
 /// Execute a correlated query using the physical outer row and its lexical scope.
@@ -21,7 +22,25 @@ pub fn execute_lateral_subquery_output<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<QueryOutput, SQLError> {
-    execute_lateral_subquery_output_inner(context, plan, outer_row, params, ctes)
+    execute_lateral_subquery_with_output(
+        context,
+        plan,
+        outer_row,
+        params,
+        ctes,
+        QueryOutputMode::SharedSpill,
+    )
+}
+
+pub(crate) fn execute_lateral_subquery_with_output<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    plan: &QueryPlan,
+    outer_row: &crate::OwnedPhysicalRow,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    output_mode: QueryOutputMode<'_>,
+) -> Result<QueryOutput, SQLError> {
+    execute_lateral_subquery_output_inner(context, plan, outer_row, params, ctes, output_mode)
 }
 
 fn execute_lateral_subquery_output_inner<S: Clone + Send + Sync + 'static>(
@@ -30,27 +49,37 @@ fn execute_lateral_subquery_output_inner<S: Clone + Send + Sync + 'static>(
     outer_row: &crate::OwnedPhysicalRow,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
     let mut scoped_ctes = ctes.clone();
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
     crate::query::cte::materialize_plan_ctes(context.ctes, &plan.ctes, params, &mut scoped_ctes)?;
-    execute_lateral_relational_root_output(context, &plan.root, outer_row, params, &mut scoped_ctes)
+    execute_lateral_relational_root_output(
+        context,
+        plan,
+        outer_row,
+        params,
+        &mut scoped_ctes,
+        output_mode,
+    )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves source schema and row identity"
-)]
 fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
-    root: &RelationalPlan,
+    plan: &QueryPlan,
     outer_row: &crate::OwnedPhysicalRow,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
+    output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
-    match root {
+    if let Some(output) =
+        streaming_sets::try_stream_union(context, plan, outer_row, params, ctes, &output_mode)?
+    {
+        return Ok(output);
+    }
+    match &plan.root {
         RelationalPlan::QueryBlock(block) => {
-            execute_lateral_query_block_output(context, block, outer_row, params, ctes)
+            execute_lateral_query_block_output(context, block, outer_row, params, ctes, output_mode)
         }
         RelationalPlan::SetOp {
             kind,
@@ -70,6 +99,7 @@ fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
                 outer_row,
                 params,
                 &scoped_ctes,
+                QueryOutputMode::SharedSpill,
             )?;
             let columns = lhs.columns.clone();
             let lhs = query_output_shared(lhs, "lateral set left")?;
@@ -79,6 +109,7 @@ fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
                 outer_row,
                 params,
                 &scoped_ctes,
+                QueryOutputMode::SharedSpill,
             )?;
             let rhs = query_output_shared(rhs, "lateral set right")?;
             let order_plan =
@@ -112,7 +143,7 @@ fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
                 lhs,
                 rhs,
                 order_plan.as_ref(),
-                QueryOutputMode::SharedSpill,
+                output_mode,
             );
             crate::query::relational::sets::combine_set_spills_with_order_output(
                 context.relational,
@@ -122,44 +153,13 @@ fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
             )
         }
         RelationalPlan::Values { rows, subqueries } => {
-            let columns: Vec<String> = rows
-                .first()
-                .map(|row| {
-                    (0..row.len())
-                        .map(|index| format!("column{}", index + 1))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let hook = context.relational.expression_scope(ctes.clone());
-            let scalar_context =
-                crate::scalar::plan::PhysicalEvalContext::from_row_lookup(outer_row, params)
-                    .with_function_hook(hook.as_ref())
-                    .with_subquery_runner(hook.as_ref())
-                    .with_physical_outer_row(&outer_row.schema, &outer_row.row);
-            let rows = rows
-                .iter()
-                .map(|values| {
-                    values
-                        .iter()
-                        .map(|expression| {
-                            crate::scalar::plan::eval_physical_scalar(
-                                expression,
-                                subqueries,
-                                &scalar_context,
-                            )
-                        })
-                        .collect::<Result<Vec<_>, SQLError>>()
-                        .map(crate::PhysicalRow::from_values)
-                })
-                .collect::<Result<Vec<_>, SQLError>>()?;
-            let operator: Box<dyn crate::PhysicalOperator + '_> = Box::new(
-                crate::TableScan::from_physical_rows(crate::RowSchema::new(columns.clone()), rows),
-            );
-            crate::query::collection::collect_query_operator(
-                context.relational.runtime,
-                columns,
-                operator,
-                QueryOutputMode::SharedSpill,
+            crate::query::relational::values::execute_plan_values_output(
+                context.relational,
+                rows,
+                subqueries,
+                params,
+                ctes,
+                output_mode,
             )
         }
     }
@@ -171,6 +171,7 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     outer_row: &crate::OwnedPhysicalRow,
     params: &[SQLParam],
     scoped_ctes: &mut CteScope<S>,
+    output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
     let mut stmt = stmt.clone();
     let inherited_lock_identities = scoped_ctes.lock_identities.emit;
@@ -264,7 +265,7 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         params,
         &scoped_ctes,
         columns,
-        QueryOutputMode::SharedSpill,
+        output_mode,
     )
 }
 

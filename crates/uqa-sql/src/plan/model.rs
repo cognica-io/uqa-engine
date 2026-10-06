@@ -333,7 +333,7 @@ pub struct ExpressionPlan {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignmentPlan {
     #[serde(rename = "column")]
-    pub target: crate::ast::AssignmentTarget<ScalarExpr>,
+    pub target: crate::ast::AssignmentTargets<ScalarExpr>,
     pub value: ScalarExpr,
 }
 

@@ -371,8 +371,8 @@ pub enum Expr {
         expr: Box<Expr>,
         ty: String,
     },
-    /// `(SELECT ...)` scalar subquery: yields a single row / single
-    /// column value at evaluation time.
+    /// `(SELECT ...)` query expression: ordinary scalar consumers select one
+    /// column; a multiple-column SET target consumes the positional result.
     ScalarSubquery(Box<SelectStmt>),
     /// `EXISTS (SELECT ...)` -- truthy when the body produces at
     /// least one row.
@@ -652,11 +652,11 @@ fn upgrade_targets(targets: &mut [super::AssignmentTarget]) -> bool {
         })
 }
 
-fn upgrade_assignments(assignments: &mut [(super::AssignmentTarget, Expr)]) -> bool {
+fn upgrade_assignments(assignments: &mut [(super::AssignmentTargets, Expr)]) -> bool {
     assignments
         .iter_mut()
         .fold(false, |changed, (target, expression)| {
-            upgrade_targets(std::slice::from_mut(target))
+            upgrade_targets(target.targets_mut())
                 | expression.upgrade_legacy_serialized_dispatches()
                 | changed
         })

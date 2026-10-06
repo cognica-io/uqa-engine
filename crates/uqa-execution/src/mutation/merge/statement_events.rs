@@ -49,7 +49,8 @@ impl MergeStatementEvents {
                 _ => None,
             })
             .flatten()
-            .map(|assignment| assignment.target.column.clone())
+            .flat_map(|assignment| assignment.target.column_names())
+            .map(str::to_owned)
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();

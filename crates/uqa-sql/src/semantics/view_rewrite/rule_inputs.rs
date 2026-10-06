@@ -82,3 +82,57 @@ fn collect_requirements(
     }
     Ok(Some(required))
 }
+
+/// `PostgreSQL` cannot substitute a `MultiAssignRef` for a rule's NEW variable.
+pub fn validate_grouped_rule_inputs(
+    services: ViewRewriteContext<'_>,
+    table: &str,
+    assignments: &[crate::plan::AssignmentPlan],
+) -> Result<(), SQLError> {
+    let mut columns = assignments
+        .iter()
+        .filter(|assignment| {
+            matches!(
+                assignment.target,
+                crate::ast::AssignmentTargets::Multiple(_)
+            )
+        })
+        .flat_map(|assignment| assignment.target.column_names())
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    let mut table = table.to_owned();
+    let mut visited = BTreeSet::new();
+    while !columns.is_empty() && visited.insert(table.clone()) {
+        let rules = services.catalog.rules_for(&table, RuleEvent::Update)?;
+        for rule in &rules {
+            if services
+                .catalog
+                .rule_new_row_columns(rule)?
+                .is_none_or(|new| !new.is_disjoint(&columns))
+            {
+                return Err(SQLError::Routine {
+                    sqlstate: "0A000".into(),
+                    message: "NEW variables in ON UPDATE rules cannot reference columns that are part of a multiple assignment in the subject UPDATE command".into(),
+                });
+            }
+        }
+        if rules
+            .iter()
+            .any(|rule| rule.definition.instead && rule.definition.condition.is_none())
+            || has_instead_of_trigger(services, &table, TriggerEvent::Update)?
+        {
+            break;
+        }
+        let Some(layer) = automatic_view_layer(services, &table)? else {
+            break;
+        };
+        columns = layer
+            .columns
+            .into_iter()
+            .filter(|column| columns.contains(&column.name))
+            .filter_map(|column| column.writable_source_column)
+            .collect();
+        table = layer.source_name;
+    }
+    Ok(())
+}

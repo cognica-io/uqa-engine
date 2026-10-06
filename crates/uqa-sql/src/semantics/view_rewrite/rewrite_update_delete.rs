@@ -36,7 +36,7 @@ pub fn rewrite_update_to_base(
         statement
             .assignments
             .iter()
-            .map(|assignment| assignment.target.column.as_str()),
+            .flat_map(|assignment| assignment.target.column_names()),
     )?;
     let source_schema = dml_source_schema(
         services,
@@ -154,7 +154,8 @@ pub fn rewrite_update_to_base(
                 assigned_columns: plan
                     .assignments
                     .iter()
-                    .map(|assignment| assignment.target.column.clone())
+                    .flat_map(|assignment| assignment.target.column_names())
+                    .map(str::to_owned)
                     .collect(),
                 input_columns: Vec::new(),
             });
@@ -213,7 +214,7 @@ pub fn rewrite_update_to_base(
                 &layer,
                 plan.assignments
                     .iter()
-                    .map(|assignment| assignment.target.column.as_str()),
+                    .flat_map(|assignment| assignment.target.column_names()),
                 ColumnWrite::Update,
             )?;
         }
@@ -235,13 +236,15 @@ pub fn rewrite_update_to_base(
                 &mut plan.subqueries,
             )?;
             if !layer_suppresses && !rewrite_suppressed {
-                target.column = writable_column(&layer, &target.column, ColumnWrite::Update)?;
+                for target in target.targets_mut() {
+                    target.column = writable_column(&layer, &target.column, ColumnWrite::Update)?;
+                }
             }
         }
         let mapped = plan
             .assignments
             .iter()
-            .map(|assignment| assignment.target.clone())
+            .flat_map(|assignment| assignment.target.targets().iter().cloned())
             .collect::<Vec<_>>();
         validate_mapped_columns(&mapped, duplicate_assignment)?;
         if let Some(predicate) = &mut plan.predicate {
@@ -298,7 +301,8 @@ pub fn rewrite_update_to_base(
     let input_columns = plan
         .assignments
         .iter()
-        .map(|assignment| assignment.target.column.clone())
+        .flat_map(|assignment| assignment.target.column_names())
+        .map(str::to_owned)
         .collect::<Vec<_>>();
     for update_plan in &mut plan.view_rule_update_plans {
         update_plan.input_columns.clone_from(&input_columns);

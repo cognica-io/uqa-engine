@@ -559,14 +559,18 @@ fn assignment_targets_sql(targets: &[crate::ast::AssignmentTarget]) -> Result<St
 }
 
 fn assignments_sql(
-    assignments: &[(crate::ast::AssignmentTarget, Expr)],
+    assignments: &[(crate::ast::AssignmentTargets, Expr)],
 ) -> Result<String, SQLError> {
     Ok(assignments
         .iter()
         .map(|(target, expression)| {
             Ok(format!(
                 "{} = {}",
-                assignment_target_sql(target)?,
+                match target {
+                    crate::ast::AssignmentTargets::Single(target) => assignment_target_sql(target)?,
+                    crate::ast::AssignmentTargets::Multiple(targets) =>
+                        format!("({})", assignment_targets_sql(&targets.targets)?),
+                },
                 render_expr(expression)?
             ))
         })

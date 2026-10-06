@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve PostgreSQL grouped subquery assignments in UPDATE, ON CONFLICT and MERGE, including positional values, original-row correlation, statement-scoped volatile evaluation, NULLs, constraints, stored bodies and second-row cardinality errors.
+
 - Initialize builtin namespace records consistently in memory and persistent catalogs, allowing user relations in `information_schema` and `ag_catalog` to survive creation, rename and reopen while preserving existing schema grants and identities.
 
 - Preserve temporary foreign definitions, generated sequences and privileges through creation, catalog refresh, rename and rollback; keep their metadata and dependent temporary-view reference rewrites out of durable storage, retain role dependencies across sessions, and remove session-owned memory rows on `DISCARD TEMP`.

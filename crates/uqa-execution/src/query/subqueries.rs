@@ -18,6 +18,7 @@ mod analysis;
 pub mod context;
 mod execution;
 mod probe;
+mod single_row;
 pub use context::{SubqueryContext, SubqueryServices};
 pub use probe::prepare_correlated_exists_predicate;
 
@@ -42,6 +43,7 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
                 }
                 ScalarSubqueryCacheEntry::Materialized(result) => return result.result(),
                 ScalarSubqueryCacheEntry::Scalar(_)
+                | ScalarSubqueryCacheEntry::Row(_)
                 | ScalarSubqueryCacheEntry::Exists(_)
                 | ScalarSubqueryCacheEntry::Membership(_)
                 | ScalarSubqueryCacheEntry::CorrelatedExists(_) => {
@@ -66,6 +68,38 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
         result.result()
     }
 
+    fn row_subquery_value(
+        &self,
+        subquery: usize,
+        plan: &QueryPlan,
+        outer_row: PhysicalOuterRow<'_>,
+        params: &[SQLParam],
+    ) -> Result<Option<crate::OwnedPhysicalRow>, SQLError> {
+        if let Some(entry) = self.ctes.cached_subquery(subquery) {
+            return match entry {
+                ScalarSubqueryCacheEntry::Correlated => {
+                    self.execute_correlated_single_row(plan, outer_row, params)
+                }
+                ScalarSubqueryCacheEntry::Row(row) => Ok(row),
+                ScalarSubqueryCacheEntry::Materialized(result) => {
+                    result.result()?.into_single_row()
+                }
+                _ => Err(SQLError::Internal(
+                    "scalar subquery slot changed result consumer during execution".into(),
+                )),
+            };
+        }
+        if analysis::query_depends_on_outer_row(&self.services, plan)? {
+            self.ctes
+                .cache_subquery(subquery, ScalarSubqueryCacheEntry::Correlated);
+            return self.execute_correlated_single_row(plan, outer_row, params);
+        }
+        let row = self.execute_single_row_subquery(plan, PhysicalOuterRow::Absent, params)?;
+        self.ctes
+            .cache_subquery(subquery, ScalarSubqueryCacheEntry::Row(row.clone()));
+        Ok(row)
+    }
+
     fn scalar_subquery_value(
         &self,
         subquery: usize,
@@ -77,13 +111,14 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
         if let Some(entry) = cached {
             return match entry {
                 ScalarSubqueryCacheEntry::Correlated => self
-                    .execute_correlated_subquery(plan, outer_row, params)?
-                    .into_scalar_value(),
+                    .execute_correlated_single_row(plan, outer_row, params)
+                    .map(single_row::scalar_value),
                 ScalarSubqueryCacheEntry::Scalar(value) => Ok(value),
                 ScalarSubqueryCacheEntry::Materialized(result) => {
                     result.result()?.into_scalar_value()
                 }
-                ScalarSubqueryCacheEntry::Exists(_)
+                ScalarSubqueryCacheEntry::Row(_)
+                | ScalarSubqueryCacheEntry::Exists(_)
                 | ScalarSubqueryCacheEntry::Membership(_)
                 | ScalarSubqueryCacheEntry::CorrelatedExists(_) => Err(SQLError::Internal(
                     "scalar subquery slot changed result consumer during execution".into(),
@@ -94,13 +129,14 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
             self.ctes
                 .cache_subquery(subquery, ScalarSubqueryCacheEntry::Correlated);
             return self
-                .execute_correlated_subquery(plan, outer_row, params)?
-                .into_scalar_value();
+                .execute_correlated_single_row(plan, outer_row, params)
+                .map(single_row::scalar_value);
         }
-        let value = self
-            .execute_uncorrelated_subquery(plan, params)?
-            .result()?
-            .into_scalar_value()?;
+        let value = single_row::scalar_value(self.execute_single_row_subquery(
+            plan,
+            PhysicalOuterRow::Absent,
+            params,
+        )?);
         self.ctes
             .cache_subquery(subquery, ScalarSubqueryCacheEntry::Scalar(value.clone()));
         Ok(value)
@@ -124,11 +160,11 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
                 }
                 ScalarSubqueryCacheEntry::Exists(exists) => Ok(exists),
                 ScalarSubqueryCacheEntry::Materialized(result) => Ok(result.rows.rows() != 0),
-                ScalarSubqueryCacheEntry::Scalar(_) | ScalarSubqueryCacheEntry::Membership(_) => {
-                    Err(SQLError::Internal(
-                        "scalar subquery slot changed result consumer during execution".into(),
-                    ))
-                }
+                ScalarSubqueryCacheEntry::Scalar(_)
+                | ScalarSubqueryCacheEntry::Row(_)
+                | ScalarSubqueryCacheEntry::Membership(_) => Err(SQLError::Internal(
+                    "scalar subquery slot changed result consumer during execution".into(),
+                )),
             };
         }
         if analysis::query_depends_on_outer_row(&self.services, plan)? {
@@ -183,6 +219,7 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
                     Ok(found)
                 }
                 ScalarSubqueryCacheEntry::Scalar(_)
+                | ScalarSubqueryCacheEntry::Row(_)
                 | ScalarSubqueryCacheEntry::Exists(_)
                 | ScalarSubqueryCacheEntry::CorrelatedExists(_) => Err(SQLError::Internal(
                     "scalar subquery slot changed result consumer during execution".into(),

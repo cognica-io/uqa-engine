@@ -70,7 +70,7 @@ pub(super) fn bind_insert(
                             .iter()
                             .map(|(column, expr)| {
                                 Ok((
-                                    super::bind_assignment_target(
+                                    super::bind_assignment_targets(
                                         column,
                                         resolver,
                                         &conflict_scope,

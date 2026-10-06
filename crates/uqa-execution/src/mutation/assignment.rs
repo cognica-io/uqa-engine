@@ -5,7 +5,12 @@
 //
 
 //! Evaluate mutation defaults, typed assignments and view check options.
+mod grouped;
 mod subscripts;
+pub use grouped::{
+    eval_mutation_assignment_input, eval_typed_assignment_input, final_column_write,
+    AssignmentInput, AssignmentSource, ViewRuleAssignment,
+};
 
 use super::{
     errors::dml_storage_error,
@@ -243,14 +248,12 @@ pub fn eval_view_rule_update_assignment<S: Clone + 'static>(
     services: MutationAssignmentContext<'_, S>,
     ctes: &CteScope<S>,
     stmt: &UpdatePlan,
-    assignment_position: usize,
-    current: Option<&Value>,
+    input: ViewRuleAssignment<'_>,
     row: Option<&OwnedPhysicalRow>,
     params: &[SQLParam],
 ) -> Result<Option<Value>, SQLError> {
-    let assignment = &stmt.assignments[assignment_position];
     for plan in &stmt.view_rule_update_plans {
-        let Some(column) = plan.assigned_columns.get(assignment_position) else {
+        let Some(column) = plan.assigned_columns.get(input.position) else {
             continue;
         };
         let schema = services.rows.relations.view_schema(&plan.relation)?;
@@ -269,37 +272,20 @@ pub fn eval_view_rule_update_assignment<S: Clone + 'static>(
                 plan.relation, column
             )));
         };
-        return eval_typed_assignment(
+        return eval_typed_assignment_input(
             services,
             ctes,
             TypedAssignmentTarget {
-                target: &assignment.target,
                 ty: schema.column_type(position),
-                current,
-                final_column_write: !stmt.assignments[assignment_position + 1..]
-                    .iter()
-                    .any(|next| next.target.column == assignment.target.column),
+                ..input.target
             },
-            &assignment.value,
+            input.input,
             row,
             params,
         )
         .map(Some);
     }
-    eval_typed_assignment(
-        services,
-        ctes,
-        TypedAssignmentTarget {
-            target: &assignment.target,
-            ty: None,
-            current,
-            final_column_write: true,
-        },
-        &assignment.value,
-        row,
-        params,
-    )
-    .map(Some)
+    eval_typed_assignment_input(services, ctes, input.target, input.input, row, params).map(Some)
 }
 
 pub struct ViewCheckContext<'a, S: Clone + 'static> {

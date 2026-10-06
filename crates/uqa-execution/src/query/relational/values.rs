@@ -53,11 +53,26 @@ pub fn execute_plan_values_output<S: Clone + 'static>(
     let columns: Vec<String> = (0..rows[0].len())
         .map(|index| format!("column{}", index + 1))
         .collect();
-    let column_types =
-        values_types_in_scope(context.catalog, rows, subqueries, None, params, ctes)?;
+    let outer = ctes.row_lock_outer_row();
+    let column_types = values_types_in_scope(
+        context.catalog,
+        rows,
+        subqueries,
+        outer.map(|row| &row.schema),
+        params,
+        ctes,
+    )?;
     let empty_schema = crate::RowSchema::default();
+    let input_schema = outer.map_or(&empty_schema, |row| &row.schema);
     let hook = context.expression_scope(ctes.clone());
-    let evaluation = PhysicalEvalContext::new(None, params)
+    let evaluation = outer
+        .map_or_else(
+            || PhysicalEvalContext::new(None, params),
+            |row| {
+                PhysicalEvalContext::from_row_lookup(row, params)
+                    .with_physical_outer_row(&row.schema, &row.row)
+            },
+        )
         .with_function_hook(hook.as_ref())
         .with_subquery_runner(hook.as_ref());
     let schema = crate::RowSchema::with_types(columns.clone(), column_types.clone());
@@ -83,7 +98,7 @@ pub fn execute_plan_values_output<S: Clone + 'static>(
         for (index, expression) in source.iter().enumerate() {
             let source_type = crate::common_context_expression_type(
                 expression,
-                &empty_schema,
+                input_schema,
                 params,
                 Some(context.catalog),
             )?;
@@ -107,16 +122,7 @@ pub fn execute_plan_values_output<S: Clone + 'static>(
         }
     }
     if consumer.is_some() {
-        return Ok(QueryOutput {
-            columns,
-            column_types,
-            internal_columns: schema.columns().to_vec(),
-            internal_types: schema.column_types().to_vec(),
-            rows: QueryRows::Rows {
-                named: Vec::new(),
-                positional: None,
-            },
-        });
+        return Ok(consumed_values_output(schema));
     }
     let scan: Box<dyn crate::PhysicalOperator + '_> = Box::new(
         crate::TableScan::from_physical_rows(schema, output.unwrap_or_default()),
@@ -301,5 +307,18 @@ impl crate::PhysicalOperator for DirectionalValuesScan<'_> {
     fn close(&mut self) -> crate::ExecResult<()> {
         self.position = ValuesScanPosition::AfterLast;
         Ok(())
+    }
+}
+
+fn consumed_values_output(schema: crate::RowSchema) -> QueryOutput {
+    QueryOutput {
+        columns: schema.columns().to_vec(),
+        column_types: schema.column_types().to_vec(),
+        internal_columns: schema.columns().to_vec(),
+        internal_types: schema.column_types().to_vec(),
+        rows: QueryRows::Rows {
+            named: Vec::new(),
+            positional: None,
+        },
     }
 }

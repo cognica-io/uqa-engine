@@ -53,7 +53,7 @@ fn merge_modified_columns<'a>(layer: &'a AutomaticViewLayer, plan: &'a MergePlan
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => modified.extend(
                 assignments
                     .iter()
-                    .map(|assignment| assignment.target.column.as_str()),
+                    .flat_map(|assignment| assignment.target.column_names()),
             ),
             _ => {}
         }
@@ -247,13 +247,15 @@ pub fn rewrite_merge_to_base(
                                 &mut plan.subqueries,
                             )?;
                         }
-                        assignment.target.column =
-                            writable_column(&layer, &assignment.target.column, ColumnWrite::Merge)?;
+                        for target in assignment.target.targets_mut() {
+                            target.column =
+                                writable_column(&layer, &target.column, ColumnWrite::Merge)?;
+                        }
                     }
                     validate_mapped_columns(
                         &assignments
                             .iter()
-                            .map(|assignment| assignment.target.clone())
+                            .flat_map(|assignment| assignment.target.targets().iter().cloned())
                             .collect::<Vec<_>>(),
                         duplicate_assignment,
                     )?;
@@ -293,13 +295,15 @@ pub fn rewrite_merge_to_base(
                                 &mut plan.subqueries,
                             )?;
                         }
-                        assignment.target.column =
-                            writable_column(&layer, &assignment.target.column, ColumnWrite::Merge)?;
+                        for target in assignment.target.targets_mut() {
+                            target.column =
+                                writable_column(&layer, &target.column, ColumnWrite::Merge)?;
+                        }
                     }
                     validate_mapped_columns(
                         &assignments
                             .iter()
-                            .map(|assignment| assignment.target.clone())
+                            .flat_map(|assignment| assignment.target.targets().iter().cloned())
                             .collect::<Vec<_>>(),
                         duplicate_assignment,
                     )?;

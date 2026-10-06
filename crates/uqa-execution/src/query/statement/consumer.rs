@@ -22,7 +22,7 @@ pub trait QueryConsumerFactory<'consumer, S: Clone + 'static> {
     }
 }
 
-pub(super) struct SetOperationConsumerFactory<'consumer, S: Clone + 'static> {
+pub(crate) struct SetOperationConsumerFactory<'consumer, S: Clone + 'static> {
     downstream: Rc<dyn QueryConsumerFactory<'consumer, S> + 'consumer>,
     state: Rc<SetOperationState>,
 }
@@ -35,7 +35,7 @@ struct SetOperationState {
     stopped: Cell<bool>,
 }
 impl<'consumer, S: Clone + 'static> SetOperationConsumerFactory<'consumer, S> {
-    pub(super) fn new(
+    pub(crate) fn new(
         downstream: Rc<dyn QueryConsumerFactory<'consumer, S> + 'consumer>,
         schema: crate::RowSchema,
         offset: u64,
@@ -53,7 +53,7 @@ impl<'consumer, S: Clone + 'static> SetOperationConsumerFactory<'consumer, S> {
             }),
         }
     }
-    pub(super) fn stopped(&self) -> bool {
+    pub(crate) fn stopped(&self) -> bool {
         self.state.stopped.get()
     }
 }

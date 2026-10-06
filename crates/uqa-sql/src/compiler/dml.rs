@@ -54,36 +54,82 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
     })
 }
 
-/// The `SET` list of `UPDATE`, `INSERT ... ON CONFLICT DO UPDATE` and `MERGE ... UPDATE`, as `transformUpdateTargetList` reads it: an item `(a, b) = ROW(...)` assigns each column the row's element at its position.
+/// Preserve one query source for a multiple-column SET item; row constructors retain their independent element expressions.
 pub(super) fn compile_set_clause(
     targets: &[pg_query::protobuf::Node],
     statement: &str,
-) -> Result<Vec<(crate::ast::AssignmentTarget, crate::ast::Expr)>> {
-    targets
-        .iter()
-        .map(|node| {
-            let Some(NodeEnum::ResTarget(target)) = node.node.as_ref() else {
-                return Err(SQLError::Internal(format!(
-                    "{statement} contains a malformed assignment"
-                )));
-            };
-            let value = target.val.as_ref().ok_or_else(|| {
-                SQLError::Internal(format!("{statement} assignment without value"))
-            })?;
-            let value = match value.node.as_ref() {
-                Some(NodeEnum::MultiAssignRef(reference)) => multiple_column_value(reference)?,
-                _ => compile_expr(value)?,
-            };
-            Ok((compile_assignment_target(target)?, value))
-        })
-        .collect()
+) -> Result<Vec<(crate::ast::AssignmentTargets, crate::ast::Expr)>> {
+    let mut assignments = Vec::new();
+    let mut position = 0;
+    while let Some(node) = targets.get(position) {
+        let Some(NodeEnum::ResTarget(target)) = node.node.as_ref() else {
+            return Err(SQLError::Internal(format!(
+                "{statement} contains a malformed assignment"
+            )));
+        };
+        let value = target
+            .val
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal(format!("{statement} assignment without value")))?;
+        if let Some(NodeEnum::MultiAssignRef(reference)) = value.node.as_ref() {
+            if reference.source.as_ref().is_some_and(|source| {
+                matches!(
+                    source.node.as_ref(), Some(NodeEnum::SubLink(link))
+                        if link.sub_link_type() == pg_query::protobuf::SubLinkType::ExprSublink
+                )
+            }) {
+                let width = usize::try_from(reference.ncolumns)
+                    .ok()
+                    .filter(|n| *n != 0)
+                    .ok_or_else(|| SQLError::Internal("empty multiple-column assignment".into()))?;
+                let mut group = Vec::with_capacity(width);
+                for offset in 0..width {
+                    let Some(NodeEnum::ResTarget(member)) = targets
+                        .get(position + offset)
+                        .and_then(|node| node.node.as_ref())
+                    else {
+                        return Err(SQLError::Internal(
+                            "incomplete multiple-column assignment".into(),
+                        ));
+                    };
+                    let Some(NodeEnum::MultiAssignRef(part)) =
+                        member.val.as_ref().and_then(|node| node.node.as_ref())
+                    else {
+                        return Err(SQLError::Internal(
+                            "invalid multiple-column assignment member".into(),
+                        ));
+                    };
+                    if usize::try_from(part.colno).ok() != Some(offset + 1)
+                        || part.ncolumns != reference.ncolumns
+                    {
+                        return Err(SQLError::Internal(
+                            "unordered multiple-column assignment".into(),
+                        ));
+                    }
+                    group.push(compile_assignment_target(member)?);
+                }
+                assignments.push((
+                    crate::ast::AssignmentTargets::Multiple(group.into()),
+                    compile_expr(reference.source.as_ref().expect("subquery source"))?,
+                ));
+                position += width;
+                continue;
+            }
+        }
+        let value = match value.node.as_ref() {
+            Some(NodeEnum::MultiAssignRef(reference)) => multiple_column_value(reference)?,
+            _ => compile_expr(value)?,
+        };
+        assignments.push((compile_assignment_target(target)?.into(), value));
+        position += 1;
+    }
+    Ok(assignments)
 }
 
 /// `transformMultiAssignRef`: the value one column of a multiple-column `SET` item takes.
 fn multiple_column_value(
     reference: &pg_query::protobuf::MultiAssignRef,
 ) -> Result<crate::ast::Expr> {
-    use pg_query::protobuf::SubLinkType;
     match reference
         .source
         .as_ref()
@@ -105,9 +151,6 @@ fn multiple_column_value(
                 })?;
             compile_expr(element)
         }
-        Some(NodeEnum::SubLink(link)) if link.sub_link_type() == SubLinkType::ExprSublink => Err(
-            SQLError::Unsupported("multiple-column assignment from a sub-SELECT".into()),
-        ),
         _ => Err(SQLError::Routine {
             sqlstate: "0A000".into(),
             message:

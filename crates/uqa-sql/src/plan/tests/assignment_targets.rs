@@ -68,7 +68,7 @@ fn omitted_bounds_and_composite_fields_remain_distinct_from_element_indexes() {
     let CommandPlan::Update(update) = command.as_ref() else {
         panic!("expected UPDATE");
     };
-    let steps = &update.assignments[0].target.indirection;
+    let steps = &update.assignments[0].target.targets()[0].indirection;
     assert!(matches!(&steps[0], AssignmentStep::Field(name) if name == "items"));
     assert!(matches!(
         &steps[1],
@@ -85,7 +85,7 @@ fn omitted_bounds_and_composite_fields_remain_distinct_from_element_indexes() {
         }
     ));
     assert!(matches!(
-        &update.assignments[1].target.indirection[0],
+        &update.assignments[1].target.targets()[0].indirection[0],
         AssignmentStep::Index(_)
     ));
 }
@@ -103,4 +103,71 @@ fn subqueries_owned_by_assignment_bounds_remain_query_children() {
         };
         assert_eq!(command.query_inputs().len(), 2, "{sql}");
     }
+}
+
+#[test]
+fn grouped_assignments_keep_one_source_through_rendering_serialization_and_visitors() {
+    for sql in [
+        "UPDATE t SET (a,b) = (SELECT $1,$2)",
+        "INSERT INTO t(id) VALUES(1) ON CONFLICT(id) DO UPDATE SET (a,b)=(SELECT $1,$2)",
+        "MERGE INTO t USING s ON true WHEN MATCHED THEN UPDATE SET (a,b)=(SELECT $1,$2)",
+    ] {
+        let mut statement = crate::compile(sql).unwrap().remove(0);
+        let encoded = serde_json::to_value(&statement).unwrap();
+        let rendered = crate::render::statement_sql(&statement).unwrap();
+        assert_eq!(
+            serde_json::to_value(crate::compile(&rendered).unwrap().remove(0)).unwrap(),
+            encoded,
+            "{sql}"
+        );
+        let mut seen = Vec::new();
+        crate::catalog::stored_ast::visit_stored_statement_expressions(
+            &mut statement,
+            &mut |expr| {
+                if let Expr::Param(index) = expr {
+                    seen.push(*index);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(seen, [1, 2], "{sql}");
+        let mut plan = UnifiedPlan::lower(statement);
+        let mut seen = Vec::new();
+        plan.rewrite_scalar_expressions(&mut |expr| {
+            if let ScalarExpr::Param(index) = expr {
+                seen.push(*index);
+            }
+        });
+        assert_eq!(seen, [1, 2], "{sql}");
+        let UnifiedPlan::Command(command) = plan else {
+            panic!("mutation command")
+        };
+        assert_eq!(command.query_inputs().len(), 1, "{sql}");
+        let encoded = serde_json::to_value(&command).unwrap();
+        let restored: Box<CommandPlan> = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), encoded);
+    }
+}
+
+#[test]
+fn separate_query_assignment_groups_keep_distinct_source_identities() {
+    let UnifiedPlan::Command(command) = one("UPDATE t SET (a,b)=(SELECT 1,2), (c,d)=(SELECT 1,2)")
+    else {
+        panic!("command")
+    };
+    let CommandPlan::Update(update) = command.as_ref() else {
+        panic!("UPDATE")
+    };
+    assert_eq!(update.assignments.len(), 2);
+    assert_eq!(update.subqueries.len(), 2);
+    assert!(matches!(
+        update.assignments[0].value,
+        ScalarExpr::ScalarSubquery(0)
+    ));
+    assert!(matches!(
+        update.assignments[1].value,
+        ScalarExpr::ScalarSubquery(1)
+    ));
+    assert_eq!(update.assignments[0].target.targets().len(), 2);
 }

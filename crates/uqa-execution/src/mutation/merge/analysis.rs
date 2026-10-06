@@ -91,7 +91,8 @@ pub(super) fn merge_target_lock_strength(
             _ => None,
         })
         .flatten()
-        .map(|assignment| assignment.target.column.clone())
+        .flat_map(|assignment| assignment.target.column_names())
+        .map(str::to_owned)
         .collect::<Vec<_>>();
     if columns.is_empty() {
         uqa_sql::ast::LockStrength::ForUpdate

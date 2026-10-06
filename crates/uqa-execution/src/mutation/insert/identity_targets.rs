@@ -68,11 +68,13 @@ pub(super) fn validate_insert_identity_targets(
         ..
     }) = &stmt.on_conflict
     {
-        identity.validate_update(assignments.iter().map(|assignment| {
-            (
-                assignment.target.column.as_str(),
-                matches!(assignment.value, ScalarExpr::Default),
-            )
+        identity.validate_update(assignments.iter().flat_map(|assignment| {
+            assignment.target.targets().iter().map(move |target| {
+                (
+                    target.column.as_str(),
+                    matches!(assignment.value, ScalarExpr::Default),
+                )
+            })
         }))?;
     }
     Ok(())
