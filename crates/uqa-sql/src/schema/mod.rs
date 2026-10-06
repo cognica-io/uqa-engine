@@ -184,6 +184,7 @@ impl RowSchema {
 pub mod join_output;
 
 mod declarations;
+pub mod expressions;
 pub use declarations::{SchemaBindingContext, SchemaExpressionCatalog};
 pub mod generated;
 pub mod indexes;

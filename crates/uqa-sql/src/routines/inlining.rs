@@ -67,6 +67,15 @@ pub struct InlineRoutineExpression {
 }
 
 impl RoutineInliningContext<'_> {
+    /// Classify an analyzed/planned expression in its own row scope, including casts and selected operators.
+    pub fn expression_volatility(
+        &self,
+        expression: &ScalarExpr,
+        schema: &crate::RowSchema,
+    ) -> Result<crate::ast::FunctionVolatility, SQLError> {
+        properties::volatility(self, expression, schema)
+    }
+
     /// Try the selected routine only; a same-named overload cannot replace it.
     /// Argument simplification and lazy branches belong to the caller's planner.
     pub fn prepare(

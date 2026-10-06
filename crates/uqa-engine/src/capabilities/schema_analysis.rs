@@ -30,6 +30,19 @@ impl uqa_sql::assignment::AssignmentContext for Engine {
 }
 
 impl uqa_sql::schema::SchemaExpressionCatalog for Engine {
+    fn plan_schema_expression(
+        &self,
+        expression: &Expr,
+        columns: &[ColumnDef],
+    ) -> Result<uqa_sql::schema::expressions::PlannedSchemaExpression, SQLError> {
+        uqa_planner::statement_planning::schema_expressions::plan_schema_expression(
+            &self.statement_planning_context(),
+            self,
+            expression,
+            columns,
+        )
+    }
+
     fn registered_runtime_function_volatility(&self, name: &str) -> Option<FunctionVolatility> {
         Engine::registered_runtime_function_volatility(self, name)
     }

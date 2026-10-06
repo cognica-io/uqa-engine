@@ -43,6 +43,15 @@ impl crate::expr::EngineHook for Catalog {
 }
 
 impl SchemaExpressionCatalog for Catalog {
+    fn plan_schema_expression(
+        &self,
+        _: &crate::ast::Expr,
+        _: &[crate::ast::ColumnDef],
+    ) -> std::result::Result<crate::schema::expressions::PlannedSchemaExpression, crate::SQLError>
+    {
+        unreachable!("this fixture does not plan stored expressions")
+    }
+
     fn registered_runtime_function_volatility(&self, name: &str) -> Option<FunctionVolatility> {
         (name == "generated_twice").then_some(FunctionVolatility::Immutable)
     }

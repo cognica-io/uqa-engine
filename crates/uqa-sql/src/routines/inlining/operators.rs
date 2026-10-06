@@ -18,10 +18,10 @@ pub(super) fn volatility(
     left: &ScalarExpr,
     right: &ScalarExpr,
     parameters: &[SQLParam],
+    schema: &RowSchema,
 ) -> FunctionVolatility {
-    let schema = RowSchema::default();
     let sources = [left, right].map(|expression| {
-        crate::scalar_type_with_resolver(expression, &schema, parameters, context.routines)
+        crate::scalar_type_with_resolver(expression, schema, parameters, context.routines)
             .ok()
             .flatten()
     });
@@ -62,9 +62,10 @@ pub(super) fn comparisons<'a>(
     op: BinaryOp,
     expressions: impl IntoIterator<Item = (&'a ScalarExpr, &'a ScalarExpr)>,
     parameters: &[SQLParam],
+    schema: &RowSchema,
 ) -> FunctionVolatility {
     if expressions.into_iter().any(|(left, right)| {
-        volatility(context, op, left, right, parameters) != FunctionVolatility::Immutable
+        volatility(context, op, left, right, parameters, schema) != FunctionVolatility::Immutable
     }) {
         FunctionVolatility::Stable
     } else {

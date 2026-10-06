@@ -6,10 +6,7 @@
 
 //! Immutable index-expression binding in the indexed table's declared row type.
 
-use super::{
-    generated::{bind_schema_column_references, typing},
-    SchemaExpressionCatalog,
-};
+use super::{generated::bind_schema_column_references, SchemaExpressionCatalog};
 use crate::plan::ExpressionPlan;
 use crate::RowSchema;
 use crate::{ast::Expr, binding::context::BindingContext, ColumnType, SQLError};
@@ -142,19 +139,16 @@ pub(super) fn validate_index_expression_immutability(
     let columns = engine
         .schema_expression_columns(table)?
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
-    typing::infer_generation_expression(engine, &columns, expression)
-        .map(|_| ())
-        .map_err(|error| {
-            if error.sqlstate() == Some("42P17") {
-                let context = if predicate { "predicate" } else { "expression" };
-                index_error(
-                    "42P17",
-                    format!("functions in index {context} must be marked IMMUTABLE"),
-                )
-            } else {
-                error
-            }
-        })
+    let planned = engine.plan_schema_expression(expression, &columns)?;
+    if !planned.immutable {
+        let context = if predicate { "predicate" } else { "expression" };
+        return Err(index_error(
+            "42P17",
+            format!("functions in index {context} must be marked IMMUTABLE"),
+        ));
+    }
+    *expression = planned.expression;
+    Ok(())
 }
 
 fn index_error(sqlstate: &str, message: String) -> SQLError {

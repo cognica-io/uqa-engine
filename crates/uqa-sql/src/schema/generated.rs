@@ -11,7 +11,6 @@ use crate::ast::{ColumnDef, Expr, GeneratedColumnKind};
 use crate::{semantics::aggregates, ColumnType, SQLError};
 
 pub(crate) mod eligibility;
-pub(super) mod typing;
 mod virtual_security;
 
 pub fn prepare_generated_columns(
@@ -66,8 +65,11 @@ pub fn prepare_generated_column(
         .as_mut()
         .ok_or_else(|| SQLError::Internal("generated column disappeared".into()))?;
     bind_schema_column_references(&mut prepared.expression, qualifier);
-    let (expression_type, function_dependencies) =
-        typing::infer_generation_expression(engine, snapshot, &mut prepared.expression)?;
+    let planned = engine.plan_schema_expression(&prepared.expression, snapshot)?;
+    if !planned.immutable {
+        return Err(eligibility::non_immutable_function());
+    }
+    *prepared.expression = planned.expression;
     if generated.kind == GeneratedColumnKind::Virtual {
         virtual_security::check_virtual_generated_security(engine, snapshot, &prepared.expression)?;
     }
@@ -76,30 +78,34 @@ pub fn prepare_generated_column(
         &prepared.expression,
         Some(&column.ty),
     )?;
-    if matches!(expression_type, typing::GenerationType::UnknownLiteral(_)) {
-        // The literal is read by the column type's input function and stored as a constant, as `cookDefault` coerces it.
+    if let Some(source) = &planned.ty {
+        super::defaults::check_assignable(source, &column.ty, &column.name, "default expression")?;
+    } else if matches!(
+        prepared.expression.as_ref(),
+        Expr::Literal(uqa_core::Value::Str(_) | uqa_core::Value::Null)
+    ) {
         crate::catalog::stored_ast::read_unknown_stored_literal(
-            crate::FunctionTypeResolver::enum_labels(context.catalog),
-            crate::FunctionTypeResolver::catalog_input_functions(context.catalog),
+            crate::FunctionTypeResolver::enum_labels(engine),
+            crate::FunctionTypeResolver::catalog_input_functions(engine),
             &mut prepared.expression,
             &column.ty,
             false,
         )?;
-    } else if !typing::generation_type_assignable_to(&expression_type, &column.ty) {
-        // `cookDefault` names a generation expression a default expression.
-        return Err(SQLError::Diagnostic {
-            sqlstate: "42804".into(),
-            message: format!(
-                "column \"{}\" is of type {} but default expression is of type {}",
-                column.name,
-                column.ty.regtype_name(),
-                typing::generation_type_name(&expression_type)
-            ),
-            detail: None,
-            hint: Some("You will need to rewrite or cast the expression.".into()),
-        });
     }
-    prepared.function_dependencies = function_dependencies;
+    let mut dependencies = Vec::new();
+    crate::catalog::stored_ast::visit_stored_expression(&mut prepared.expression, &mut |node| {
+        if let Expr::Func {
+            binding: Some(binding),
+            ..
+        } = node
+        {
+            if !binding.builtin && !dependencies.contains(binding) {
+                dependencies.push(binding.clone());
+            }
+        }
+        Ok(())
+    })?;
+    prepared.function_dependencies = dependencies;
     // The `reg*` input functions read the objects a generation expression names when the column is defined, so the stored constants follow renames.
     super::dependencies::oid_alias::read_oid_alias_constants(engine, &mut prepared.expression)?;
     // The generation result is assigned to the column; its routines, user-defined types and enum constants are stored by identity as parse analysis stores them.

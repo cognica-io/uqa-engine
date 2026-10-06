@@ -36,6 +36,8 @@ pub fn optimize_scalar_expression(
 
 #[derive(Debug, Clone)]
 pub struct OptimizerConfig<'a> {
+    /// CASE/COALESCE result types and arm coercions have already been retained by the caller. Unreachable arms can be discarded without changing subsequent type inference.
+    pub coerced_conditionals: bool,
     pub enable_filter_pushdown: bool,
     pub enable_boolean_simplify: bool,
     pub enable_vector_threshold_merge: bool,
@@ -55,6 +57,7 @@ impl OptimizerConfig<'_> {
     #[must_use]
     pub const fn new(constant_evaluator: ConstantEvaluator) -> Self {
         Self {
+            coerced_conditionals: false,
             enable_filter_pushdown: true,
             enable_boolean_simplify: true,
             enable_vector_threshold_merge: true,
