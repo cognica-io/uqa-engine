@@ -34,6 +34,8 @@ mod input_analysis_order;
 mod materialized_creation_order;
 #[path = "sql_views/named_window_definitions.rs"]
 mod named_window_definitions;
+#[path = "sql_views/temporary_materialized.rs"]
+mod temporary_materialized;
 #[path = "sql_views/updatability_diagnostics.rs"]
 mod updatability_diagnostics;
 

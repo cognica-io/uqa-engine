@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Create session-local materialized views in `pg_temp`, including names resolved through `search_path`, and preserve their private rows and population state through refresh, rollback and rename without writing them to the durable catalog.
+
 - Restore generated-column rejection of host callbacks without declared SQL return types, including nested calls, explicit casts and branches eliminated by planning. Explicitly qualified builtin calls remain valid.
 
 - Register the PostgreSQL builtin identities and catalog attributes of array dimension, bound and cardinality functions. Bind their polymorphic array and integer dimension signatures consistently, preserving concrete array types and PostgreSQL input diagnostics while enforcing EXECUTE privileges on direct and stored calls.

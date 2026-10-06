@@ -214,6 +214,39 @@ fn temporary_and_memory_views_publish_without_durable_writes() {
     }
 }
 
+#[test]
+fn temporary_materialized_rows_never_enter_durable_publication() {
+    let publication = Publication::new(true, true);
+    let relation = RelationIdentity::new("pg_temp_1", "temporary_snapshot");
+    let mut view = definition(StoredViewKind::Materialized, RelationPersistence::Temporary);
+    for populated in [true, false, true] {
+        view.populated = populated;
+        view.materialized_rows = if populated {
+            vec![[("value".into(), uqa_core::Value::Int(7))].into()]
+        } else {
+            Vec::new()
+        };
+        publish_materialized_view(
+            &publication,
+            &publication,
+            relation.clone(),
+            view.clone(),
+            "pg_temp_1.temporary_snapshot",
+        )
+        .unwrap();
+        assert_eq!(publication.views.borrow()[&relation].populated, populated);
+        assert_eq!(
+            publication.views.borrow()[&relation].materialized_rows,
+            view.materialized_rows
+        );
+        assert!(publication.saved.borrow().is_empty());
+    }
+    assert_eq!(
+        *publication.events.borrow(),
+        ["lock", "unlock", "publish"].repeat(3)
+    );
+}
+
 impl ViewRegistryState for Publication {
     fn views_read(&self) -> ViewRegistryRead<'_> {
         Box::new(self.views.borrow())
