@@ -433,15 +433,11 @@ fn transfer_call_arguments(
             .iter()
             .map(|arg| arg.name.map(str::to_string))
             .collect::<Vec<_>>();
-        super::fixed_builtin::resolve_fixed_builtin_call(
-            &binding.name,
-            Some(binding),
+        super::fixed_builtin::bound_argument_positions(
+            binding,
             &names,
-            &vec![None; stored.len()],
             arguments.iter().any(|arg| arg.explicit_variadic),
-            None,
         )?
-        .and_then(|selected| selected.builtin_argument_positions)
     } else {
         None
     };

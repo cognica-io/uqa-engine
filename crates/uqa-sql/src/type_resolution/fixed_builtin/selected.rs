@@ -122,6 +122,11 @@ pub(super) fn bind_call_in_place_with_control(
     else {
         return Ok(false);
     };
+    super::validate_polymorphic_arguments(
+        signature.argument_types,
+        effective_types,
+        &matched.argument_positions,
+    )?;
     if construction.call.arguments.len() != original_types.len()
         || !valid_positions(
             &matched.argument_positions,
@@ -206,6 +211,9 @@ fn requires_cast(
     declared: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
+    if *declared == ColumnType::AnyArray {
+        return Ok(false);
+    }
     if matches!(
         argument,
         ScalarExpr::Literal(Value::Str(_) | Value::Null) | ScalarExpr::Param(_)

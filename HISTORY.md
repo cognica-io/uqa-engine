@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Register the PostgreSQL builtin identities and catalog attributes of array dimension, bound and cardinality functions. Bind their polymorphic array and integer dimension signatures consistently, preserving concrete array types and PostgreSQL input diagnostics while enforcing EXECUTE privileges on direct and stored calls.
+
 - Validate CREATE TABLE foreign keys in written order, preserving repeated column REFERENCES, constraint naming and catalog order. Match PostgreSQL key diagnostics and defer generated sequence ownership until after table constraints; retain the correct owner for explicitly named cross-schema identity sequences and require an owned sequence for identity DEFAULT values.
 
 - Preserve stored role-constant dependency checks after input conversion and partition-key optimization, and match PostgreSQL routine declaration error ordering and CHECK diagnostics.

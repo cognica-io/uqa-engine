@@ -213,6 +213,23 @@ pub(super) fn resolve_overload(
             explicit_variadic,
             &builtins,
         )? {
+            if let Some(overload) = builtins.iter().find(|overload| {
+                selected.binding.builtin
+                    && overload.argument_types.contains(&ColumnType::AnyArray)
+                    && builtin_binding_matches(overload, &selected.binding)
+            }) {
+                if let Some(matched) = match_builtin_function_overload(
+                    overload.clone(),
+                    argument_names,
+                    argument_types,
+                ) {
+                    validate_polymorphic_arguments(
+                        &overload.argument_types,
+                        argument_types,
+                        &matched.argument_positions,
+                    )?;
+                }
+            }
             return Ok(selected);
         }
     }
@@ -231,6 +248,55 @@ pub(super) fn resolve_overload(
     })
 }
 
+fn validate_polymorphic_arguments(
+    declared: &[ColumnType],
+    actual: &[Option<ColumnType>],
+    positions: &[usize],
+) -> Result<(), SQLError> {
+    if actual
+        .iter()
+        .zip(positions)
+        .any(|(actual, &position)| declared[position] == ColumnType::AnyArray && actual.is_none())
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42804".into(),
+            message: "could not determine polymorphic type because input has type unknown".into(),
+        });
+    }
+    Ok(())
+}
+
+/// Recover the written-to-declared argument layout of an already selected call without repeating input type resolution. Stored coercion transfer has no input schema and needs only this structural mapping.
+pub(super) fn bound_argument_positions(
+    binding: &FunctionBinding,
+    argument_names: &[Option<String>],
+    explicit_variadic: bool,
+) -> Result<Option<Vec<usize>>, SQLError> {
+    use super::overload_resolution::{
+        bound_function_resolution_error, match_signature_with_control,
+    };
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let Some(signature) = registry::bound_signature(binding, &control)? else {
+        return Ok(None);
+    };
+    if explicit_variadic && argument_names.iter().any(Option::is_some) {
+        return Err(bound_function_resolution_error(binding));
+    }
+    let matched = match_signature_with_control(
+        signature,
+        argument_names,
+        &vec![None; argument_names.len()],
+        &control,
+    )?
+    .ok_or_else(|| bound_function_resolution_error(binding))?;
+    Ok(Some(
+        matched
+            .into_uncontrolled()
+            .expect("ordinary argument mapping has no reservation")
+            .argument_positions,
+    ))
+}
+
 pub(super) fn selected_argument_targets(
     name: &str,
     argument_types: &[Option<ColumnType>],
@@ -242,8 +308,11 @@ pub(super) fn selected_argument_targets(
         .binding
         .argument_types
         .iter()
-        .map(|ty| ColumnType::from_sql_name(ty).ok())
-        .take(argument_types.len())
+        .zip(argument_types)
+        .map(|(ty, actual)| match ColumnType::from_sql_name(ty).ok() {
+            Some(ColumnType::AnyArray) => actual.clone(),
+            declared => declared,
+        })
         .collect::<Vec<_>>();
     (declared.len() == argument_types.len()).then_some(declared)
 }
@@ -360,6 +429,9 @@ fn requires_cast(
     actual: Option<&ColumnType>,
     declared: &ColumnType,
 ) -> bool {
+    if *declared == ColumnType::AnyArray {
+        return false;
+    }
     if matches!(
         argument,
         ScalarExpr::Literal(Value::Str(_) | Value::Null) | ScalarExpr::Param(_)
@@ -531,6 +603,9 @@ pub(crate) fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
 
 #[cfg(test)]
 mod privilege_tests;
+
+#[cfg(test)]
+mod array_tests;
 
 #[cfg(test)]
 mod tests {

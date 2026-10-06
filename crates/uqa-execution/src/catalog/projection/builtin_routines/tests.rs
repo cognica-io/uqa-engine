@@ -218,3 +218,14 @@ fn builtin_routine_oids_and_signatures_are_unique() {
         );
     }
 }
+
+#[test]
+fn array_inspection_metadata_matches_postgresql() {
+    assert_catalog_metadata(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/array_inspection_routine_identities_oracle.expected.json"
+        )),
+        6,
+    );
+}

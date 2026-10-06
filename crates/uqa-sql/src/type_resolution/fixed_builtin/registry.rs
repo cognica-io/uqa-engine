@@ -405,6 +405,9 @@ pub(super) const fn numeric_type() -> ColumnType {
 }
 
 impl super::super::overload_resolution::SignatureParameters for Signature {
+    fn accepts_polymorphic_types(&self) -> bool {
+        true
+    }
     fn parameter_count(&self) -> usize {
         self.argument_types.len()
     }
