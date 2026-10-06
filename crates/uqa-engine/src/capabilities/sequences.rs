@@ -157,6 +157,7 @@ impl Engine {
         &self,
     ) -> uqa_execution::schema::sequences::ownership::ImplicitOwnershipContext<'_> {
         uqa_execution::schema::sequences::ownership::ImplicitOwnershipContext {
+            owners: self,
             names: self,
             tables: self,
             publication: self,

@@ -984,3 +984,6 @@ mod table_creation_order;
 
 #[path = "pg18_constraint_lifecycle/domain_constraints.rs"]
 mod domain_constraints;
+
+#[path = "pg18_constraint_lifecycle/foreign_key_order.rs"]
+mod foreign_key_order;

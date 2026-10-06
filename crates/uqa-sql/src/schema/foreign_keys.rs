@@ -82,7 +82,7 @@ pub fn validate_bound_foreign_key_definition_with_local_state(
     };
     for column in &foreign_key.local_columns {
         if !columns.iter().any(|definition| definition.name == *column) {
-            return Err(SQLError::UnknownColumn(format!("{table}.{column}")));
+            return Err(missing_foreign_key_column(column));
         }
     }
     let referenced = context
@@ -120,6 +120,9 @@ pub fn validate_bound_foreign_key_definition_with_local_state(
             .referenceable_keys(&referenced)
             .map_err(|error| ddl_storage_error("FOREIGN KEY referenced key", error))?
     };
+    let referenced_name = uqa_core::RelationIdentity::from_legacy_name(&referenced)
+        .map_err(SQLError::Internal)?
+        .name;
     if foreign_key.ref_columns.is_empty() {
         let primary_key = referenced_keys
             .iter()
@@ -127,7 +130,7 @@ pub fn validate_bound_foreign_key_definition_with_local_state(
             .ok_or_else(|| {
                 constraint_error(
                     "42704",
-                    format!("there is no primary key for referenced table \"{referenced}\""),
+                    format!("there is no primary key for referenced table \"{referenced_name}\""),
                 )
             })?;
         foreign_key.ref_columns.clone_from(&primary_key.columns);
@@ -146,11 +149,11 @@ pub fn validate_bound_foreign_key_definition_with_local_state(
         let local_definition = columns
             .iter()
             .find(|definition| definition.name == *local_column)
-            .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{local_column}")))?;
+            .ok_or_else(|| missing_foreign_key_column(local_column))?;
         let referenced_definition = referenced_columns
             .iter()
             .find(|definition| definition.name == *referenced_column)
-            .ok_or_else(|| SQLError::UnknownColumn(format!("{referenced}.{referenced_column}")))?;
+            .ok_or_else(|| missing_foreign_key_column(referenced_column))?;
         if crate::type_resolution::foreign_key_operand_type(
             &local_definition.ty,
             &referenced_definition.ty,
@@ -194,7 +197,7 @@ pub fn validate_bound_foreign_key_definition_with_local_state(
             return Err(constraint_error(
                 "42830",
                 format!(
-                    "there is no unique constraint matching given keys for referenced table \"{referenced}\""
+                    "there is no unique constraint matching given keys for referenced table \"{referenced_name}\""
                 ),
             ));
         }
@@ -286,4 +289,11 @@ pub fn validate_period_foreign_key_actions(
         }
     }
     Ok(())
+}
+
+fn missing_foreign_key_column(column: &str) -> SQLError {
+    constraint_error(
+        "42703",
+        format!("column \"{column}\" referenced in foreign key constraint does not exist"),
+    )
 }

@@ -5,13 +5,12 @@
 //
 
 //! Bind complete table declarations around their sequence and catalog publication boundaries.
-use crate::ast::{ColumnDef, CreateTable, Expr, ForeignKey, NotNullDeclaration};
+use crate::ast::{ColumnDef, CreateTable, Expr, NotNullDeclaration};
 use crate::schema::constraint_metadata::{
-    identity::materialize_default_oid, materialize_check_identity,
-    materialize_foreign_key_identity, CatalogIdentityAllocator, ConstraintMetadataError,
+    identity::materialize_default_oid, materialize_check_identity, CatalogIdentityAllocator,
+    ConstraintMetadataError,
 };
-use crate::schema::constraints::validate_foreign_key_definition;
-use crate::schema::foreign_keys::{resolve_foreign_key_parent, ForeignKeyDefinitionContext};
+use crate::schema::foreign_keys::ForeignKeyDefinitionContext;
 use crate::schema::indexes::names::{ConstraintIndexNamer, IndexNameCatalog};
 use crate::schema::inheritance::InheritanceContext;
 pub use crate::schema::table_creation::keys::InheritedDefinitions;
@@ -196,35 +195,6 @@ fn allocate_expression_identity(
     Ok(())
 }
 
-/// `ATAddForeignKeyConstraint` creates each foreign key's constraint row once the key it references is found: the column foreign keys, then the table's, after the ones a partition cloned.
-pub fn define_foreign_key_identities(
-    columns: &mut [ColumnDef],
-    foreign_keys: &mut [ForeignKey],
-    cloned: usize,
-    allocate: &mut CatalogIdentityAllocator<'_>,
-) -> Result<(), SQLError> {
-    for reference in columns
-        .iter_mut()
-        .filter_map(|column| column.references.as_mut())
-    {
-        materialize_foreign_key_identity(
-            &mut reference.object_id,
-            &mut reference.catalog_identity,
-            allocate,
-        )
-        .map_err(ConstraintMetadataError::into_sql_error)?;
-    }
-    for foreign_key in &mut foreign_keys[cloned..] {
-        materialize_foreign_key_identity(
-            &mut foreign_key.object_id,
-            &mut foreign_key.catalog_identity,
-            allocate,
-        )
-        .map_err(ConstraintMetadataError::into_sql_error)?;
-    }
-    Ok(())
-}
-
 /// Bind the partition bound and key of the created relation, which `DefineRelation` computes once the relation exists.
 pub fn bind_create_table_partitioning(
     context: &CreateTableAnalysisContext<'_>,
@@ -296,89 +266,14 @@ pub fn cloned_constraint_names(
         .collect()
 }
 
-/// Define the declared keys and then bind the foreign keys, which `PostgreSQL` creates after the keys so that a foreign key can reference a key of its own table.
+/// Define every declared key before foreign-key binding so a foreign key can reference its own table's keys.
 pub fn define_create_table_constraints(
-    context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
     indexes: ConstraintIndexNamer<'_>,
     inherited: &InheritedDefinitions,
     allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> Result<(), SQLError> {
-    super::keys::define_declared_keys(indexes, c, inherited, allocate)?;
-    bind_create_table_relation_references(context.foreign_keys.catalog, c, inherited)?;
-    for foreign_key in &mut c.foreign_keys {
-        if !foreign_key.period {
-            continue;
-        }
-        if foreign_key.ref_table == c.name {
-            validate_foreign_key_definition(
-                &c.name,
-                &c.columns,
-                &c.name,
-                &c.columns,
-                &c.key_constraints,
-                foreign_key,
-            )?;
-        } else {
-            let (canonical, parent_columns, parent_keys) =
-                resolve_foreign_key_parent(&context.foreign_keys, &foreign_key.ref_table)?;
-            validate_foreign_key_definition(
-                &c.name,
-                &c.columns,
-                &canonical,
-                &parent_columns,
-                &parent_keys,
-                foreign_key,
-            )?;
-            foreign_key.ref_table = canonical;
-        }
-    }
-    Ok(())
-}
-
-pub fn bind_created_table_foreign_keys(
-    context: &ForeignKeyDefinitionContext<'_>,
-    c: &mut CreateTable,
-    registered_columns: &mut [ColumnDef],
-) -> Result<(), SQLError> {
-    let local_columns = registered_columns.to_vec();
-    for column in registered_columns {
-        let Some(reference) = column.references.clone() else {
-            continue;
-        };
-        let mut foreign_key = super::super::foreign_keys::column_foreign_key(column, &reference);
-        super::super::foreign_keys::validate_bound_foreign_key_definition_with_local_state(
-            context,
-            &c.name,
-            Some(&local_columns),
-            Some(&c.key_constraints),
-            &mut foreign_key,
-        )?;
-        let [referenced_column] = foreign_key.ref_columns.as_slice() else {
-            return Err(SQLError::Internal(
-                "column FOREIGN KEY did not resolve exactly one referenced column".into(),
-            ));
-        };
-        let Some(reference) = column.references.as_mut() else {
-            return Err(SQLError::Internal(
-                "column FOREIGN KEY disappeared during validation".into(),
-            ));
-        };
-        reference.referenced_key = foreign_key.referenced_key;
-        reference.referenced_index = foreign_key.referenced_index;
-        reference.table = foreign_key.ref_table;
-        reference.column = Some(referenced_column.clone());
-    }
-    for foreign_key in &mut c.foreign_keys {
-        super::super::foreign_keys::validate_bound_foreign_key_definition_with_local_state(
-            context,
-            &c.name,
-            Some(&local_columns),
-            Some(&c.key_constraints),
-            foreign_key,
-        )?;
-    }
-    Ok(())
+    super::keys::define_declared_keys(indexes, c, inherited, allocate)
 }
 
 pub(super) fn validate_check_expression(
@@ -399,72 +294,4 @@ pub(super) fn validate_check_expression(
         columns,
         expression,
     )
-}
-
-/// `ATExecAddConstraint` for each foreign key the statement declares: its name cannot be one a constraint of the table already holds, and then its referenced table is looked up.
-fn bind_create_table_relation_references(
-    catalog: &dyn super::super::foreign_keys::ForeignKeyDefinitionCatalog,
-    table: &mut CreateTable,
-    inherited: &InheritedDefinitions,
-) -> Result<(), SQLError> {
-    let table_name = table.name.clone();
-    let qualifier = table.qualifier.clone();
-    let relation =
-        uqa_core::RelationIdentity::from_legacy_name(&table_name).map_err(SQLError::Internal)?;
-    let mut held = table
-        .columns
-        .iter()
-        .flat_map(|column| {
-            [
-                column.not_null_name.clone().filter(|_| column.not_null),
-                column.check_name.clone().filter(|_| column.check.is_some()),
-            ]
-        })
-        .chain(table.checks.iter().map(|check| check.name.clone()))
-        .chain(table.key_constraints.iter().map(|key| key.name.clone()))
-        .chain(
-            table.foreign_keys[..inherited.foreign_keys]
-                .iter()
-                .map(|foreign_key| foreign_key.name.clone()),
-        )
-        .flatten()
-        .collect::<BTreeSet<_>>();
-    let mut claim = |name: Option<&String>| match name {
-        Some(name) if !held.insert(name.clone()) => Err(
-            super::super::check_inheritance::duplicate_check(&relation.name, name),
-        ),
-        _ => Ok(()),
-    };
-    for column in &mut table.columns {
-        if let Some(reference) = column.references.as_mut() {
-            claim(reference.name.as_ref())?;
-            bind_create_table_reference(catalog, &table_name, &qualifier, &mut reference.table)?;
-        }
-    }
-    for (position, foreign_key) in table.foreign_keys.iter_mut().enumerate() {
-        if position >= inherited.foreign_keys {
-            claim(foreign_key.name.as_ref())?;
-        }
-        bind_create_table_reference(catalog, &table_name, &qualifier, &mut foreign_key.ref_table)?;
-    }
-    Ok(())
-}
-
-fn bind_create_table_reference(
-    catalog: &dyn super::super::foreign_keys::ForeignKeyDefinitionCatalog,
-    table: &str,
-    qualifier: &str,
-    reference: &mut String,
-) -> Result<(), SQLError> {
-    let self_reference = reference == table
-        || reference == qualifier
-        || table
-            .rsplit_once('.')
-            .is_some_and(|(_, local_name)| local_name == reference);
-    if self_reference {
-        table.clone_into(reference);
-        return Ok(());
-    }
-    *reference = catalog.resolve_table_reference(reference)?;
-    Ok(())
 }

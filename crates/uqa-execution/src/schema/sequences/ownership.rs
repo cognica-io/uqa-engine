@@ -22,6 +22,7 @@ pub trait ImplicitOwnerPublication {
     fn attach_owner(&self, sequence: &str, owner: SequenceOwner) -> Result<(), SQLError>;
 }
 pub struct ImplicitOwnershipContext<'a> {
+    pub owners: &'a dyn uqa_sql::schema::sequences::ownership::SequenceOwnerCatalog,
     pub names: &'a dyn StoredSequenceNames,
     pub tables: &'a dyn ImplicitOwnerTables,
     pub publication: &'a dyn ImplicitOwnerPublication,
@@ -62,11 +63,14 @@ pub fn implicit_owner_bindings(
 pub fn attach_table_owners(
     context: &ImplicitOwnershipContext<'_>,
     table: &str,
-) -> StorageBackendResult<()> {
+) -> Result<(), SQLError> {
     let (object_id, columns) = context
         .tables
-        .table_owner_columns(table)?
-        .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` disappeared")))?;
+        .table_owner_columns(table)
+        .map_err(|error| {
+            uqa_sql::catalog::errors::storage_error("read sequence owner table", &error)
+        })?
+        .ok_or_else(|| SQLError::Internal(format!("table `{table}` disappeared")))?;
     attach_column_owners(context, table, object_id, &columns)
 }
 pub fn attach_column_owners(
@@ -74,12 +78,26 @@ pub fn attach_column_owners(
     table: &str,
     object_id: [u8; 16],
     columns: &[ColumnDef],
-) -> StorageBackendResult<()> {
-    for (sequence, owner) in implicit_owner_bindings(context.names, table, object_id, columns)? {
-        context
-            .publication
-            .attach_owner(&sequence, owner)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+) -> Result<(), SQLError> {
+    for binding in uqa_sql::schema::sequences::implicit_ownership::bind_declared_sequence_owners(
+        context.names,
+        context.owners,
+        table,
+        object_id,
+        columns,
+    )? {
+        context.publication.attach_owner(
+            &binding.sequence,
+            SequenceOwner {
+                table_object_id: binding.table_object_id,
+                column_object_id: binding.column_object_id,
+                dependency: if binding.identity {
+                    SequenceOwnerDependency::Internal
+                } else {
+                    SequenceOwnerDependency::Automatic
+                },
+            },
+        )?;
     }
     Ok(())
 }

@@ -103,8 +103,10 @@ pub fn apply_implicit_sequence_metadata(
         )
     })?;
     auto_increment.sequence = Some(sequence.clone());
+    let table = RelationIdentity::from_legacy_name(table_name)?;
+    let sequence_relation = RelationIdentity::from_legacy_name(&sequence)?;
     auto_increment.owner = Some(crate::ast::AutoIncrementOwner {
-        table: table_name.to_string(),
+        table: RelationIdentity::new(sequence_relation.schema, table.name).qualified_name(),
         column: column.name.clone(),
     });
     if auto_increment.kind == crate::ast::AutoIncrementKind::Serial {

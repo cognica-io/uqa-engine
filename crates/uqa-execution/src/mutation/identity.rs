@@ -193,12 +193,13 @@ pub fn prepare_auto_increment_identity(
             }
             continue;
         }
-        let sequence = provenance.sequence.as_deref().ok_or_else(|| {
-            SQLError::Internal(format!(
-                "identity column `{table}.{column}` has no durable sequence binding"
-            ))
-        })?;
-        let value = context.sequences.nextval_sql(sequence)?;
+        let sequence =
+            uqa_sql::assignment::columns::identity_column_sequence(context.columns, table, column)?
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "XX000".into(),
+                    message: "no owned sequence found".into(),
+                })?;
+        let value = context.sequences.nextval_sql(&sequence)?;
         document.insert(
             column.clone(),
             uqa_sql::assignment::columns::coerce_to_column_type(

@@ -52,6 +52,8 @@ pub enum AlterTableAction {
         #[serde(default)]
         checks: Vec<TableCheck>,
         #[serde(default)]
+        foreign_keys: Vec<ForeignKey>,
+        #[serde(default)]
         key_constraints: Vec<TableKeyConstraint>,
         if_not_exists: bool,
         /// The clauses the column writes, which `transformColumnDefinition` checks once the relation is found.
