@@ -7,7 +7,7 @@
 //! Routine declarations as `ruleutils.c` prints them: `pg_get_function_arguments`, `pg_get_function_identity_arguments`, `pg_get_function_result` and `pg_get_function_sqlbody`. Types print as `format_type_be` spells them in the current search path.
 
 use uqa_core::Value;
-use uqa_sql::ast::{FunctionBody, FunctionParamMode, FunctionReturns, SQLBodyForm, Statement};
+use uqa_sql::ast::{FunctionBody, FunctionParamMode, SQLBodyForm, Statement};
 use uqa_sql::expr::quote_ident;
 use uqa_sql::routines::SQLUserFunction;
 use uqa_sql::SQLError;
@@ -18,6 +18,8 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use super::builtin_routines::{BuiltinRoutineCatalogEntry, PG18_BUILTIN_ROUTINE_GROUPS};
 
 mod builtin_body;
+mod definition;
+pub use definition::pg_get_functiondef_value;
 
 enum Routine {
     User(std::sync::Arc<SQLUserFunction>),
@@ -122,10 +124,6 @@ fn user_arguments(
         if table_arguments != (parameter.mode == FunctionParamMode::Table) {
             continue;
         }
-        // The identity list names only the arguments that select the routine; procedures include their output arguments.
-        if !defaults && !input && !def.is_procedure && !table_arguments {
-            continue;
-        }
         let mut argument = mode.to_string();
         if !parameter.name.is_empty() {
             argument.push_str(&quote_ident(&parameter.name));
@@ -153,13 +151,36 @@ fn builtin_arguments(
         .argument_types
         .len()
         .saturating_sub(entry.default_arguments);
-    let default_texts = entry
-        .argument_defaults
-        .map(|defaults| defaults.split(", ").collect::<Vec<_>>())
-        .unwrap_or_default();
-    let mut printed = Vec::with_capacity(entry.argument_types.len());
-    for (index, oid) in entry.argument_types.iter().enumerate() {
-        let mut argument = String::new();
+    let default_texts = if defaults {
+        builtin_body::argument_defaults(context, entry)?
+    } else {
+        Vec::new()
+    };
+    let types = entry.all_argument_types().unwrap_or(entry.argument_types);
+    let mut printed = Vec::with_capacity(types.len());
+    let mut input_index = 0;
+    for (index, oid) in types.iter().enumerate() {
+        let mode = entry
+            .argument_modes()
+            .and_then(|modes| modes.get(index))
+            .copied()
+            .unwrap_or(if entry.variadic_type() != 0 && index + 1 == types.len() {
+                "v"
+            } else {
+                "i"
+            });
+        if mode == "t" {
+            continue;
+        }
+        let input = mode != "o";
+        let mut argument = match mode {
+            "o" => "OUT ",
+            "b" => "INOUT ",
+            "v" => "VARIADIC ",
+            _ if entry.kind == "p" => "IN ",
+            _ => "",
+        }
+        .to_owned();
         if let Some(name) = entry
             .argument_names
             .get(index)
@@ -169,12 +190,13 @@ fn builtin_arguments(
             argument.push(' ');
         }
         argument.push_str(&type_display(context, *oid)?);
-        if defaults && index >= first_default {
-            if let Some(text) = default_texts.get(index - first_default) {
+        if defaults && input && input_index >= first_default {
+            if let Some(text) = default_texts.get(input_index - first_default) {
                 argument.push_str(" DEFAULT ");
                 argument.push_str(text);
             }
         }
+        input_index += usize::from(input);
         printed.push(argument);
     }
     Ok(printed.join(", "))
@@ -228,12 +250,22 @@ pub fn pg_get_function_result_value(
     let Some(routine) = find_routine(context, oid)? else {
         return Ok(Value::Null);
     };
+    routine_result(context, &routine)
+}
+
+fn routine_result(context: &CatalogContext<'_>, routine: &Routine) -> Result<Value, SQLError> {
     let function = match routine {
         Routine::Builtin(entry) => {
             return if entry.kind == "p" {
                 Ok(Value::Null)
             } else {
-                type_display(context, entry.return_type).map(Value::Str)
+                type_display(context, entry.return_type).map(|name| {
+                    Value::Str(if entry.returns_set() {
+                        format!("SETOF {name}")
+                    } else {
+                        name
+                    })
+                })
             };
         }
         Routine::User(function) => function,
@@ -243,21 +275,15 @@ pub fn pg_get_function_result_value(
         return Ok(Value::Null);
     }
     if def.returns_set() {
-        let (columns, count) = user_arguments(context, &function, true, false)?;
+        let (columns, count) = user_arguments(context, function, true, false)?;
         if count > 0 {
             return Ok(Value::Str(format!("TABLE({columns})")));
         }
     }
-    let result = match &def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            declared_type_display(context, type_name)?
-        }
-        FunctionReturns::None | FunctionReturns::Table => match def.output_params().as_slice() {
-            [output] => declared_type_display(context, &output.type_name)?,
-            [] => "void".into(),
-            _ => "record".into(),
-        },
-    };
+    let result = declared_type_display(
+        context,
+        uqa_sql::routines::declaration::result_type_name(def),
+    )?;
     Ok(Value::Str(if def.returns_set() {
         format!("SETOF {result}")
     } else {
@@ -273,10 +299,16 @@ pub fn pg_get_function_sqlbody_value(
     let Some(oid) = routine_oid_argument("pg_get_function_sqlbody", arguments)? else {
         return Ok(Value::Null);
     };
-    let function = match find_routine(context, oid)? {
-        Some(Routine::User(function)) => function,
-        Some(Routine::Builtin(routine)) => return builtin_body::definition(context, routine),
-        None => return Ok(Value::Null),
+    let Some(routine) = find_routine(context, oid)? else {
+        return Ok(Value::Null);
+    };
+    routine_sqlbody(context, &routine)
+}
+
+fn routine_sqlbody(context: &CatalogContext<'_>, routine: &Routine) -> Result<Value, SQLError> {
+    let function = match routine {
+        Routine::User(function) => function,
+        Routine::Builtin(routine) => return builtin_body::definition(context, routine),
     };
     let FunctionBody::Statements(statements) = &function.def.body else {
         return Ok(Value::Null);

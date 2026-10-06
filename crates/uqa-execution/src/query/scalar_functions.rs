@@ -171,6 +171,7 @@ fn is_catalog_scalar(name: &str) -> bool {
             | "pg_get_function_arguments"
             | "pg_get_function_identity_arguments"
             | "pg_get_function_result"
+            | "pg_get_functiondef"
             | "pg_get_function_sqlbody"
             | "format_type"
             | "pg_describe_object"
@@ -251,6 +252,9 @@ pub fn catalog_scalar_value(
         }
         "pg_get_function_result" => {
             crate::catalog::projection::pg_get_function_result_value(&context.catalog, arguments)
+        }
+        "pg_get_functiondef" => {
+            crate::catalog::projection::pg_get_functiondef_value(&context.catalog, arguments)
         }
         "pg_get_function_sqlbody" => {
             crate::catalog::projection::pg_get_function_sqlbody_value(&context.catalog, arguments)

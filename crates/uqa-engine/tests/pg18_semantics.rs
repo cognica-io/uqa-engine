@@ -161,3 +161,6 @@ mod builtin_sqlbody;
 
 #[path = "pg18_semantics/parser_settings.rs"]
 mod parser_settings;
+
+#[path = "pg18_semantics/function_definition.rs"]
+mod function_definition;

@@ -124,6 +124,7 @@ fn is_pg_catalog_function(local: &str) -> bool {
             | "pg_get_function_arguments"
             | "pg_get_function_identity_arguments"
             | "pg_get_function_result"
+            | "pg_get_functiondef"
             | "pg_get_function_sqlbody"
             | "format_type"
             | "pg_describe_object"

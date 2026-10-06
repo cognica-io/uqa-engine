@@ -8,7 +8,7 @@
 
 use uqa_core::Value;
 use uqa_sql::{
-    catalog::node_tree::{deparse, parse},
+    catalog::node_tree::{deparse, parse, Field},
     expr::quote_ident,
     SQLError,
 };
@@ -26,6 +26,29 @@ pub(super) fn definition(
     };
     let body = parse(&body)?;
     deparse::return_body(&body, &Names { context, routine }).map(Value::Str)
+}
+
+pub(super) fn argument_defaults(
+    context: &CatalogContext<'_>,
+    routine: &BuiltinRoutineCatalogEntry,
+) -> Result<Vec<String>, SQLError> {
+    let Some(defaults) = routine.argument_defaults else {
+        return Ok(Vec::new());
+    };
+    let Field::List(defaults) = parse(defaults)? else {
+        return Err(SQLError::Internal(
+            "built-in defaults are not an expression list".into(),
+        ));
+    };
+    if defaults.len() != routine.default_arguments {
+        return Err(SQLError::Internal(
+            "built-in default expression count differs from its declaration".into(),
+        ));
+    }
+    defaults
+        .iter()
+        .map(|value| deparse::expression(value, &Names { context, routine }, false))
+        .collect()
 }
 
 struct Names<'a, 'b> {
