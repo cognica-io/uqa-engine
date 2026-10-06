@@ -25,11 +25,41 @@ pub struct GeneratedRewriteContext<'a, S: Clone + 'static> {
     pub state: &'a dyn GeneratedRewriteState,
     pub identifiers: &'a dyn crate::mutation::identity::MutationIdentifiers,
 }
-/// Recompute the stored generated columns of every row of `table` and, when `rewrite_physical_rows`, rewrite the table with them, as adding a stored generated column or changing its expression does.
+/// Publish an already assigned backfill field through the prepared storage path. A schema rewrite must preserve all unrelated stored generated values instead of invoking ordinary DML generation.
+pub fn update_rewritten_fields<S: Clone + 'static>(
+    context: &GeneratedRewriteContext<'_, S>,
+    table: &str,
+    id: DocId,
+    values: std::collections::BTreeMap<String, uqa_core::Value>,
+    vectors: crate::mutation::publication::DocumentVectors,
+) -> Result<bool, SQLError> {
+    context.cancellation.check()?;
+    let Some(mut document) = context.keys.constraints.reads.get_document(table, id)? else {
+        return Ok(false);
+    };
+    document.extend(values);
+    let mut replacement_vectors = crate::mutation::vectors::document_vectors(
+        context.keys.constraints.catalog,
+        table,
+        &document,
+    )?;
+    replacement_vectors.extend(vectors);
+    context.storage.insert_document(
+        table,
+        id,
+        document,
+        replacement_vectors,
+        crate::mutation::publication::InsertedIdentity::Unknown,
+    )?;
+    Ok(true)
+}
+
+/// Recompute the requested stored generated columns of every row of `table` and, when `rewrite_physical_rows`, rewrite the table with them, as adding a stored generated column or changing its expression does.
 pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
     context: &GeneratedRewriteContext<'_, S>,
     table: &str,
     rewrite_physical_rows: bool,
+    changed: &[String],
 ) -> Result<(), SQLError> {
     let allowance = context.keys.constraints.memory.work_mem_bytes()?;
     let memory = uqa_core::memory::MemoryBudget::new(allowance / 2);
@@ -46,16 +76,16 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
             mut document,
             ..
         } = original.get(position)?;
-        crate::mutation::assignment::refresh_stored_generated_columns(
+        crate::mutation::assignment::refresh_selected_stored_generated_columns(
             context.assignment,
             table,
             &mut document,
+            Some(changed),
         )?;
         rows.push(doc_id, document)?;
     }
     drop(original);
-    let changed = stored_generated_columns(context.keys.constraints, table)?;
-    rewrite_table_rows(context, table, rows, rewrite_physical_rows, &changed)
+    rewrite_table_rows(context, table, rows, rewrite_physical_rows, changed)
 }
 
 /// Replace the rows of `table` with the rows a rewrite produced, as `ATRewriteTable` does. Each new row is checked against the table's validated NOT NULL and CHECK constraints, then the key constraints are checked across all of them, as rebuilding their indexes does; when `write`, the rows replace the old ones, a row whose integer primary key changed moving to the identity that key names. The foreign keys that involve a `changed` column are validated against the result.

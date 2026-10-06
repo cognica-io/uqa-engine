@@ -233,15 +233,9 @@ pub(crate) fn analyze_stored_expression_inputs(
     catalog: &dyn crate::schema::SchemaExpressionCatalog,
     expression: &mut crate::plan::ExpressionPlan,
     binding: &BindingContext<'_>,
+    input: &RowSchema,
 ) -> Result<Option<ColumnType>, SQLError> {
-    analyze_expression_inputs(
-        catalog,
-        catalog,
-        expression,
-        &RowSchema::default(),
-        binding,
-        None,
-    )
+    analyze_expression_inputs(catalog, catalog, expression, input, binding, None)
 }
 
 /// Analyze and freeze input literals in a DEFAULT with no parameter or row namespace. Expression restrictions apply in `PostgreSQL`'s traversal order.

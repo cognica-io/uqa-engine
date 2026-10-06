@@ -404,6 +404,20 @@ impl Deparser<'_> {
         name: &str,
         binding: Option<&FunctionBinding>,
     ) -> Result<String, SQLError> {
+        // Stored calls retain object identity across routine and schema renames.
+        let name = binding
+            .filter(|binding| !binding.builtin)
+            .and_then(|binding| binding.object_id)
+            .and_then(|identity| {
+                self.catalog
+                    .snapshot()
+                    .definitions
+                    .sql_user_functions
+                    .values()
+                    .flatten()
+                    .find(|function| function.def.object_id == Some(identity))
+            })
+            .map_or(name, |function| function.def.name.as_str());
         let (schema, local) =
             super::RelationIdentity::parse_reference(name).map_err(SQLError::Internal)?;
         if matches!(local.as_str(), "coalesce" | "nullif" | "greatest" | "least")

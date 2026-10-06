@@ -107,7 +107,7 @@ fn generated_fixed_builtin_resolution_reports_signatures_before_volatility() {
 }
 
 #[test]
-fn generated_fixed_builtin_binding_rejects_invalid_names_and_user_volatility() {
+fn generated_fixed_builtin_binding_checks_names_and_planned_user_volatility() {
     let engine = Engine::new();
     for (index, expression, columns) in [
         (0, "to_bin(value => source)", "source INTEGER"),
@@ -131,17 +131,16 @@ fn generated_fixed_builtin_binding_rejects_invalid_names_and_user_volatility() {
     ] {
         engine.sql(sql, &[]).unwrap();
     }
-    let error = engine
+    engine.sql(
+        "CREATE TABLE volatile_fixed.generated_values (source INTEGER, value TEXT GENERATED ALWAYS AS (to_oct(source)) STORED)", &[],
+    ).unwrap();
+    let result = engine
         .sql(
-            "CREATE TABLE volatile_fixed.generated_values (
-                 source INTEGER,
-                 value TEXT GENERATED ALWAYS AS (to_oct(source)) STORED
-             )",
+            "INSERT INTO volatile_fixed.generated_values(source) VALUES(1) RETURNING value",
             &[],
         )
-        .unwrap_err();
-    assert_eq!(error.sqlstate(), Some("42P17"));
-    assert!(error.to_string().contains("not immutable"), "{error}");
+        .unwrap();
+    assert_eq!(result.rows[0]["value"], Value::Str("user".into()));
 }
 
 #[test]

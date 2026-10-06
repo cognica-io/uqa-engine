@@ -141,6 +141,20 @@ pub(super) fn fold_authorized_literal(
         // Argument markers carry syntax for their enclosing call; only that call evaluates them as arguments.
         return Ok(expression);
     }
+    if let ScalarExpr::Cast { expr, ty } = &expression {
+        if literal_value(expr).is_some_and(|value| matches!(value, Value::Null)) {
+            if let Ok(target) = ColumnType::from_sql_name(ty) {
+                if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
+                    return Ok(ScalarExpr::TypedLiteral {
+                        value: Value::Null,
+                        ty: ty.clone(),
+                        bound_type: Some(target),
+                        parameter_index: None,
+                    });
+                }
+            }
+        }
+    }
     let strict_null = matches!(&expression, ScalarExpr::Func { name, binding, args, .. }
         if uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len()) == Some(true)
             && args.iter().any(|argument| literal_value(argument).is_some_and(|value| matches!(value, Value::Null))));

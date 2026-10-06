@@ -19,9 +19,9 @@ const PARTITION_MAX_KEYS: usize = 32;
 
 pub(super) fn validate_partition_keys(
     context: &InheritanceContext<'_>,
-    table: &CreateTable,
+    table: &mut CreateTable,
 ) -> Result<(), SQLError> {
-    let Some(spec) = table.hierarchy.partition_spec.as_ref() else {
+    let Some(spec) = table.hierarchy.partition_spec.as_mut() else {
         return Ok(());
     };
     if spec.keys.len() > PARTITION_MAX_KEYS {
@@ -43,10 +43,10 @@ pub(super) fn validate_partition_keys(
             analyze_key_expression(context, &plan.scalar, &table.columns)?;
         }
     }
-    for key in &spec.keys {
+    for key in &mut spec.keys {
         match key {
             Expr::Column(name) => check_column_key(&table.columns, name)?,
-            expression => check_expression_key(context, &table.columns, expression)?,
+            expression => *expression = check_expression_key(context, &table.columns, expression)?,
         }
     }
     validate_hash_partition_spec(&context.partitions, spec, &table.columns)?;
@@ -149,7 +149,7 @@ fn check_expression_key(
     context: &InheritanceContext<'_>,
     columns: &[ColumnDef],
     expression: &Expr,
-) -> Result<(), SQLError> {
+) -> Result<Expr, SQLError> {
     let scalar = crate::plan::ExpressionPlan::lower(expression.clone()).scalar;
     let mut referenced = BTreeSet::new();
     scalar.collect_columns(&mut referenced);
@@ -170,30 +170,23 @@ fn check_expression_key(
             return Err(generated_column_key(name));
         }
     }
-    let mut typed = expression.clone();
-    crate::schema::generated::typing::infer_generation_expression(
-        context.partitions.schema,
-        columns,
-        &mut typed,
-    )
-    .map_err(|error| {
-        if error.sqlstate() == Some("42P17") {
-            self::error(
-                "42P17",
-                "functions in partition key expression must be marked IMMUTABLE",
-            )
-        } else {
-            error
-        }
-    })?;
-    // An immutable expression over no column folds to a constant, which PostgreSQL rejects as a key.
-    if referenced.is_empty() {
+    let planned = context
+        .partitions
+        .schema
+        .plan_schema_expression(expression, columns)?;
+    if !planned.immutable {
+        return Err(error(
+            "42P17",
+            "functions in partition key expression must be marked IMMUTABLE",
+        ));
+    }
+    if planned.constant {
         return Err(error(
             "42P17",
             "cannot use constant expression as partition key",
         ));
     }
-    Ok(())
+    Ok(planned.expression)
 }
 
 fn generated_column_key(name: &str) -> SQLError {

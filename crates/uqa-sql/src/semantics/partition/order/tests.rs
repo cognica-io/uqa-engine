@@ -159,6 +159,15 @@ impl crate::plan::AggregateClassifier for Unused {
 }
 
 impl crate::schema::SchemaExpressionCatalog for Unused {
+    fn plan_schema_expression(
+        &self,
+        _: &crate::ast::Expr,
+        _: &[crate::ast::ColumnDef],
+    ) -> std::result::Result<crate::schema::expressions::PlannedSchemaExpression, crate::SQLError>
+    {
+        unreachable!("this fixture does not plan stored expressions")
+    }
+
     fn registered_runtime_function_volatility(
         &self,
         _: &str,

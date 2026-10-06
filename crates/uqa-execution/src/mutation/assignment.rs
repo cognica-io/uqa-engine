@@ -371,6 +371,16 @@ pub fn refresh_stored_generated_columns<S: Clone + 'static>(
     table: &str,
     document: &mut Document,
 ) -> Result<(), SQLError> {
+    refresh_selected_stored_generated_columns(services, table, document, None)
+}
+
+/// Recompute only the requested generated columns for a schema rewrite, retaining unrelated stored values.
+pub fn refresh_selected_stored_generated_columns<S: Clone + 'static>(
+    services: MutationAssignmentContext<'_, S>,
+    table: &str,
+    document: &mut Document,
+    selected: Option<&[String]>,
+) -> Result<(), SQLError> {
     let columns = services
         .columns
         .try_describe_table(table)
@@ -379,6 +389,7 @@ pub fn refresh_stored_generated_columns<S: Clone + 'static>(
     super::generated::refresh_stored_generated_columns(
         services.assignment,
         &columns,
+        selected,
         document,
         &mut |expression, row, schema| {
             crate::query::catalog_expression::eval_lowered_expression_with_schema(

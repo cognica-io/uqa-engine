@@ -302,6 +302,7 @@ fn initialize_column_rows<S: Clone + 'static>(
             &context.generated,
             table,
             kind == GeneratedColumnKind::Stored,
+            &[col_name.to_string()],
         )?;
     } else {
         let default_expr = match identity_sequence {

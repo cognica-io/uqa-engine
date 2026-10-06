@@ -122,7 +122,7 @@ pub fn validate_check_expression(
     super::generated::bind_schema_column_references(expression, table);
     let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
     super::generated::bind_schema_column_references(expression, &relation.name);
-    Ok(())
+    super::check_inheritance::remove_identity_casts(expression, columns)
 }
 
 pub fn bind_stored_check_expression(

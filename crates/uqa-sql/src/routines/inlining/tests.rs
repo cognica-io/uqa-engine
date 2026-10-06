@@ -359,3 +359,49 @@ fn stable_operator_and_output_casts_prevent_immutable_body_expansion() {
         .unwrap()
         .is_some());
 }
+
+#[test]
+fn expression_mutability_uses_its_own_column_types() {
+    use crate::ast::FunctionVolatility::{Immutable, Stable};
+    let catalog = Catalog::new("");
+    for (ty, second, expression, expected) in [
+        ("integer", "integer", "v + 1", Immutable),
+        ("integer", "integer", "v::text", Immutable),
+        ("timestamp", "integer", "v::timestamptz", Stable),
+        ("timestamptz", "integer", "v::timestamp", Stable),
+        ("timestamp", "interval", "v + w", Immutable),
+        ("timestamptz", "interval", "v + w", Stable),
+        ("timestamptz", "timestamp", "v < w", Stable),
+        ("timestamptz", "timestamp", "v IN (w)", Stable),
+        ("timestamptz", "timestamp", "v BETWEEN w AND w", Stable),
+    ] {
+        let Statement::Select(query) = crate::compile(&format!("SELECT {expression}"))
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("scalar query");
+        };
+        let scalar = crate::plan::ExpressionPlan::lower(query.projections[0].expr.clone()).scalar;
+        let schema = crate::RowSchema::with_types(
+            vec!["v".into(), "w".into()],
+            vec![
+                Some(ColumnType::from_sql_name(ty).unwrap()),
+                Some(ColumnType::from_sql_name(second).unwrap()),
+            ],
+        );
+        let scalar = crate::type_resolution::bind_type_introspection_with_resolver(
+            scalar,
+            &schema,
+            &[],
+            &catalog,
+        );
+        assert_eq!(
+            catalog
+                .context()
+                .expression_volatility(&scalar, &schema)
+                .unwrap(),
+            expected,
+            "{ty}: {expression}"
+        );
+    }
+}

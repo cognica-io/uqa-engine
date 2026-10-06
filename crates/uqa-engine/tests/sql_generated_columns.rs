@@ -55,3 +55,6 @@ fn int(row: &uqa_sql::ResultRow, column: &str) -> i64 {
         other => panic!("expected integer column `{column}`, got {other:?}"),
     }
 }
+
+#[path = "sql_generated_columns/planned_immutability.rs"]
+mod planned_immutability;

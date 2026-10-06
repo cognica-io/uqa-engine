@@ -52,6 +52,23 @@ pub(super) fn inspect(
     expression: &ScalarExpr,
     parameters: &[SQLParam],
 ) -> Result<Properties, SQLError> {
+    inspect_with_schema(context, expression, parameters, &RowSchema::default())
+}
+
+pub(super) fn volatility(
+    context: &RoutineInliningContext<'_>,
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+) -> Result<FunctionVolatility, SQLError> {
+    Ok(inspect_with_schema(context, expression, &[], schema)?.volatility)
+}
+
+fn inspect_with_schema(
+    context: &RoutineInliningContext<'_>,
+    expression: &ScalarExpr,
+    parameters: &[SQLParam],
+    schema: &RowSchema,
+) -> Result<Properties, SQLError> {
     let mut properties = Properties {
         volatility: FunctionVolatility::Immutable,
         nonstrict: false,
@@ -64,7 +81,7 @@ pub(super) fn inspect(
         if failure.is_some() {
             return;
         }
-        if let Err(error) = inspect_node(context, node, parameters, &mut properties) {
+        if let Err(error) = inspect_node(context, node, parameters, schema, &mut properties) {
             failure = Some(error);
         }
     });
@@ -75,6 +92,7 @@ fn inspect_node(
     context: &RoutineInliningContext<'_>,
     expression: &ScalarExpr,
     parameters: &[SQLParam],
+    schema: &RowSchema,
     properties: &mut Properties,
 ) -> Result<(), SQLError> {
     let mut volatility = FunctionVolatility::Immutable;
@@ -89,14 +107,10 @@ fn inspect_node(
         }
         ScalarExpr::Cast { expr, ty } => {
             let target = context.types.resolve_catalog_column_type_name(ty)?;
-            let source = crate::scalar_type_with_resolver(
-                expr,
-                &RowSchema::default(),
-                parameters,
-                context.routines,
-            )
-            .ok()
-            .flatten();
+            let source =
+                crate::scalar_type_with_resolver(expr, schema, parameters, context.routines)
+                    .ok()
+                    .flatten();
             // A caller column is not in the body's row scope. Its cast is
             // nevertheless at most stable; casts do not invoke volatile calls.
             volatility = source
@@ -126,7 +140,7 @@ fn inspect_node(
         | ScalarExpr::IsNull { .. }
         | ScalarExpr::Case { .. } => properties.nonstrict = true,
         ScalarExpr::Binary { op, lhs, rhs } => {
-            volatility = super::operators::volatility(context, *op, lhs, rhs, parameters);
+            volatility = super::operators::volatility(context, *op, lhs, rhs, parameters, schema);
             properties.cost += 1.0;
         }
         ScalarExpr::Between { expr, low, high } => {
@@ -139,6 +153,7 @@ fn inspect_node(
                     (expr.as_ref(), high.as_ref()),
                 ],
                 parameters,
+                schema,
             );
             properties.cost += 2.0;
         }
@@ -151,6 +166,7 @@ fn inspect_node(
                 crate::ast::BinaryOp::Equal,
                 list.iter().map(|item| (expr.as_ref(), item)),
                 parameters,
+                schema,
             );
             properties.cost += if list.len() > 1 {
                 list.len() as f64 * 0.5

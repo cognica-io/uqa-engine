@@ -14,6 +14,7 @@ pub use statistics::{
 use uqa_sql::SQLError;
 mod parameterized;
 pub mod rule_inputs;
+pub mod schema_expressions;
 mod statistics;
 
 #[cfg(test)]

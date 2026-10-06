@@ -6,7 +6,6 @@
 
 //! `PostgreSQL` 18 restricts virtual generated columns to built-in functions and types (`check_virtual_generated_security`), because reading such a column evaluates its expression with the reader's privileges. The walk is pre-order: a node's own function is checked, then its result type, then its children.
 
-use super::typing::{infer_generation_expression, GenerationType};
 use crate::ast::{ColumnDef, ColumnType, Expr};
 use crate::schema::SchemaExpressionCatalog;
 use crate::SQLError;
@@ -112,17 +111,15 @@ fn node_has_user_defined_type(
             .find(|column| column.name == *name)
             .is_some_and(|column| is_user_defined_type(&column.ty)));
     }
-    let mut analyzed = expression.clone();
-    let (ty, _) = infer_generation_expression(engine, columns, &mut analyzed)?;
-    Ok(generation_type_is_user_defined(&ty))
-}
-
-fn generation_type_is_user_defined(ty: &GenerationType) -> bool {
-    match ty {
-        GenerationType::Enum(_) | GenerationType::Composite(_) => true,
-        GenerationType::Array(element) => generation_type_is_user_defined(element),
-        _ => false,
-    }
+    let scalar = crate::plan::ExpressionPlan::lower(expression.clone()).scalar;
+    Ok(crate::scalar_type_with_resolver(
+        &scalar,
+        &super::super::expressions::row_schema(columns),
+        &[],
+        engine,
+    )?
+    .as_ref()
+    .is_some_and(is_user_defined_type))
 }
 
 fn children(expression: &Expr) -> Vec<&Expr> {

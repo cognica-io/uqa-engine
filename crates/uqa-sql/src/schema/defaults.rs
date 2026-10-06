@@ -179,7 +179,12 @@ pub fn bind_stored_schema_expression(
         context.catalog.has_registered_aggregate_function(name)
     });
     let mut plan = lowered.clone();
-    crate::binding::analyze_stored_expression_inputs(context.catalog, &mut plan, context.binding)?;
+    crate::binding::analyze_stored_expression_inputs(
+        context.catalog,
+        &mut plan,
+        context.binding,
+        &RowSchema::default(),
+    )?;
     crate::binding::bind_expression_plan_routines_for_storage(
         context.catalog,
         &mut plan,

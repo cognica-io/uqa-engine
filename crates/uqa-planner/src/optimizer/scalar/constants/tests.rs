@@ -335,3 +335,45 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
         fold_literal_expression(integer, uqa_execution::scalar::eval_constant_scalar).unwrap();
     assert_eq!(literal_value(&folded), Some(&Value::Str("7".into())));
 }
+
+#[test]
+fn analyzed_conditionals_discard_unreachable_mutable_calls() {
+    let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    config.coerced_conditionals = true;
+    for sql in [
+        "SELECT CASE WHEN true THEN v ELSE random() END",
+        "SELECT CASE WHEN false THEN random() ELSE v END",
+        "SELECT CASE WHEN false THEN random() END",
+        "SELECT coalesce(1.0,random())",
+    ] {
+        let uqa_sql::Statement::Select(query) = uqa_sql::compile(sql).unwrap().remove(0) else {
+            panic!("SELECT")
+        };
+        let mut expression =
+            uqa_sql::plan::ExpressionPlan::lower(query.projections[0].expr.clone()).scalar;
+        crate::optimizer::optimize_scalar_expression(&mut expression, &config).unwrap();
+        expression.visit(&mut |node| {
+            assert!(
+                !matches!(node, ScalarExpr::Func {name, ..} if name == "random"),
+                "{sql}: {expression:?}"
+            );
+        });
+    }
+}
+
+#[test]
+fn null_casts_to_temporal_types_fold_without_calling_input_functions() {
+    for ty in ["date", "time", "timestamp", "timestamptz", "interval"] {
+        let expression = ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Literal(Value::Null)),
+            ty: ty.into(),
+        };
+        let result =
+            fold_authorized_literal(expression, |_| panic!("a NULL cast evaluated"), None).unwrap();
+        assert_eq!(literal_value(&result), Some(&Value::Null));
+        assert_eq!(
+            uqa_sql::scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
+            Some(ColumnType::from_sql_name(ty).unwrap())
+        );
+    }
+}

@@ -95,6 +95,25 @@ pub(super) fn optimize_case(
                 .map(|value| matches!(value, Value::Bool(true))),
             _ => None,
         };
+        if config.coerced_conditionals {
+            if matched == Some(false) {
+                continue;
+            }
+            let result = optimize_scalar(result, config)?;
+            if matched == Some(true) {
+                return Ok(if kept.is_empty() {
+                    result
+                } else {
+                    ScalarExpr::Case {
+                        base,
+                        when: kept,
+                        else_branch: Some(Box::new(result)),
+                    }
+                });
+            }
+            kept.push((condition, result));
+            continue;
+        }
         // Retain unreachable arms for schema binding: their types still
         // participate in CASE's common result type, but their values do not.
         let result = if matched == Some(false) {
@@ -111,6 +130,10 @@ pub(super) fn optimize_case(
                 else_branch,
             });
         }
+    }
+    if config.coerced_conditionals && kept.is_empty() {
+        return Ok(optimize_optional(else_branch, config)?
+            .map_or(ScalarExpr::Literal(Value::Null), |value| *value));
     }
     Ok(ScalarExpr::Case {
         base,
@@ -130,7 +153,9 @@ pub(super) fn optimize_coalesce(
         let stops = literal_value(&argument).is_some_and(|value| !matches!(value, Value::Null));
         kept.push(argument);
         if stops {
-            kept.extend(remaining);
+            if !config.coerced_conditionals {
+                kept.extend(remaining);
+            }
             break;
         }
     }

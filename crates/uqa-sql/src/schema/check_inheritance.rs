@@ -19,15 +19,63 @@ pub fn bind_parent_check_columns(parent: &str, expr: &mut Expr) -> Result<(), SQ
     Ok(())
 }
 
+/// Remove casts that parse analysis treats as an identity before storing or comparing CHECK syntax.
+pub(super) fn remove_identity_casts(
+    expression: &mut Expr,
+    columns: &[ColumnDef],
+) -> Result<(), SQLError> {
+    crate::catalog::stored_ast::visit_stored_expression(expression, &mut |node| {
+        while let Expr::Cast { expr, ty } = node {
+            let Ok(target) = ColumnType::from_sql_name(ty) else {
+                break;
+            };
+            let source = match expr.as_ref() {
+                Expr::Column(name) => columns
+                    .iter()
+                    .find(|column| column.name == *name)
+                    .map(|column| column.ty.clone()),
+                Expr::TypedLiteral { ty, .. } => ColumnType::from_sql_name(ty).ok(),
+                Expr::Literal(_) => crate::scalar_type(
+                    &crate::plan::ExpressionPlan::lower(*expr.clone()).scalar,
+                    &crate::RowSchema::default(),
+                    &[],
+                )?,
+                _ => None,
+            };
+            if source.as_ref() != Some(&target) {
+                break;
+            }
+            *node = *expr.clone();
+        }
+        Ok(())
+    })
+}
+
 pub fn same_check_expression(
     left: &Expr,
     right: &Expr,
     columns: &[ColumnDef],
 ) -> Result<bool, SQLError> {
     fn canonical(expression: &Expr, columns: &[ColumnDef]) -> Result<ScalarExpr, SQLError> {
-        let mut scalar = crate::plan::ExpressionPlan::lower(expression.clone()).scalar;
+        let mut expression = expression.clone();
+        remove_identity_casts(&mut expression, columns)?;
+        let mut scalar = crate::plan::ExpressionPlan::lower(expression).scalar;
         let mut failure = None;
         crate::plan::rewrite_scalar_expression(&mut scalar, &mut |node| {
+            if let ScalarExpr::TypedLiteral {
+                value: Value::Int(value),
+                ty,
+                parameter_index: None,
+                ..
+            } = node
+            {
+                if matches!(ColumnType::from_sql_name(ty), Ok(ColumnType::Integer))
+                    && i32::try_from(*value).is_ok()
+                {
+                    *node = ScalarExpr::Literal(Value::Int(*value));
+                }
+                return;
+            }
             let ScalarExpr::Cast { expr, ty } = node else {
                 return;
             };
@@ -128,4 +176,36 @@ pub fn merge_inherited_check(
     existing.enforced |= check.enforced;
     existing.validated = existing.enforced;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inherited_checks_compare_cooked_int4_constants_without_erasing_other_types() {
+        let untyped = Expr::Literal(Value::Int(0));
+        for ty in ["integer", "int4"] {
+            let cooked = Expr::TypedLiteral {
+                value: Value::Int(0),
+                ty: ty.into(),
+            };
+            assert!(same_check_expression(&untyped, &cooked, &[]).unwrap());
+            assert!(same_check_expression(&cooked, &untyped, &[]).unwrap());
+            let mut cast = Expr::Cast {
+                expr: Box::new(cooked.clone()),
+                ty: "integer".into(),
+            };
+            assert!(same_check_expression(&cast, &untyped, &[]).unwrap());
+            remove_identity_casts(&mut cast, &[]).unwrap();
+            assert_eq!(cast, cooked);
+        }
+        for ty in ["smallint", "bigint", "oid"] {
+            let cooked = Expr::TypedLiteral {
+                value: Value::Int(0),
+                ty: ty.into(),
+            };
+            assert!(!same_check_expression(&untyped, &cooked, &[]).unwrap());
+        }
+    }
 }
