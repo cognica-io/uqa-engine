@@ -58,13 +58,18 @@ pub fn merge_private_views(
     Ok(latest)
 }
 
+pub struct ForeignAuthoritySnapshot {
+    pub definitions: Arc<BTreeMap<RelationIdentity, StoredForeignTable>>,
+    pub security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+}
+
 pub fn merge_private_foreign(
     catalog: Option<&dyn CatalogFacade>,
     current_definitions: &BTreeMap<RelationIdentity, StoredForeignTable>,
     current: &BTreeMap<RelationIdentity, BoundTableSecurity>,
-    latest_definitions: &BTreeMap<RelationIdentity, StoredForeignTable>,
+    mut latest_definitions: Arc<BTreeMap<RelationIdentity, StoredForeignTable>>,
     mut latest: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
-) -> StorageBackendResult<Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>> {
+) -> StorageBackendResult<ForeignAuthoritySnapshot> {
     for (relation, security) in Arc::make_mut(&mut latest) {
         if current_definitions
             .get(relation)
@@ -76,5 +81,14 @@ pub fn merge_private_foreign(
             }
         }
     }
-    Ok(latest)
+    crate::catalog::foreign::restoration::merge_temporary(
+        current_definitions,
+        current,
+        Arc::make_mut(&mut latest_definitions),
+        Arc::make_mut(&mut latest),
+    )?;
+    Ok(ForeignAuthoritySnapshot {
+        definitions: latest_definitions,
+        security: latest,
+    })
 }

@@ -44,7 +44,7 @@ impl ForeignDefinitionContext<'_> {
                     relation.qualified_name()
                 ))
             })?;
-        catalog.save_foreign_table(&table.catalog_row(relation, &security)?)
+        table.persist(Some(catalog), relation, &security)
     }
 
     fn update_foreign_table_definition(
@@ -143,9 +143,7 @@ impl ForeignDefinitionContext<'_> {
                 ))
             })?;
         security.remove_column_acl(column_name);
-        if let Some(catalog) = self.catalog {
-            catalog.save_foreign_table(&table.catalog_row(&relation, &security)?)?;
-        }
+        table.persist(self.catalog, &relation, &security)?;
         self.publication
             .tables_write()
             .insert(relation.clone(), table);

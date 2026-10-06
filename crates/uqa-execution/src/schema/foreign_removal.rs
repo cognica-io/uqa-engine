@@ -33,9 +33,13 @@ impl ForeignTableRemovalContext<'_> {
             return Ok(false);
         };
         let relation = RelationIdentity::from_legacy_name(&name)?;
-        if !self.lookup.registry.tables().contains_key(&relation) {
-            return Err(format!("Foreign table `{name}` disappeared before drop"));
-        }
+        let persistence = self
+            .lookup
+            .registry
+            .tables()
+            .get(&relation)
+            .map(|table| table.persistence)
+            .ok_or_else(|| format!("Foreign table `{name}` disappeared before drop"))?;
         if !self.lookup.registry.security().contains_key(&relation) {
             return Err(format!(
                 "Foreign table `{name}` has no loaded security metadata"
@@ -44,7 +48,10 @@ impl ForeignTableRemovalContext<'_> {
         self.events
             .drop_relation_events_inner(&relation)
             .map_err(|error| format!("drop foreign table `{name}` events: {error}"))?;
-        if let Some(catalog) = self.catalog {
+        if let Some(catalog) = self
+            .catalog
+            .filter(|_| persistence != uqa_sql::ast::RelationPersistence::Temporary)
+        {
             catalog
                 .drop_foreign_table(&relation)
                 .map_err(|err| format!("drop foreign table `{name}`: {err}"))?;
@@ -66,4 +73,20 @@ impl ForeignTableRemovalContext<'_> {
         }
         Ok(removed.is_some())
     }
+}
+
+/// Remove a session's temporary foreign definitions, security and in-memory FDW rows.
+pub fn discard_temporary_foreign_tables(
+    publication: &dyn ForeignTableAlterPublication,
+    schema: &str,
+) {
+    publication
+        .tables_write()
+        .retain(|relation, _| relation.schema != schema);
+    publication
+        .security_write()
+        .retain(|relation, _| relation.schema != schema);
+    publication
+        .memory_tables_write()
+        .retain(|relation, _| relation.schema != schema);
 }

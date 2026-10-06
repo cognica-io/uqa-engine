@@ -40,6 +40,21 @@ pub fn role_dependencies(
         }
     }
     {
+        let persistence = catalog.foreign_table_persistence();
+        let security = catalog.foreign_tables();
+        for (relation, persistence) in persistence.iter() {
+            if persistence == RelationPersistence::Temporary {
+                let security = security.get(relation).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "temporary foreign table `{}` has no security metadata",
+                        relation.qualified_name()
+                    ))
+                })?;
+                table_dependencies(security, roles, limit, &mut referenced)?;
+            }
+        }
+    }
+    {
         let sequences = catalog.sequences();
         let persistence = catalog.sequence_persistence();
         for (name, security) in sequences.iter() {

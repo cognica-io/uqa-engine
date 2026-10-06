@@ -48,7 +48,14 @@ pub trait RoleDependencyCatalog:
     ) -> RoleDependencyRead<'_, BTreeMap<String, crate::catalog::domain::StoredDomain>>;
 }
 
+pub trait RoleForeignPersistenceRead {
+    fn iter(
+        &self,
+    ) -> Box<dyn Iterator<Item = (&RelationIdentity, crate::ast::RelationPersistence)> + '_>;
+}
+
 pub trait TemporaryRoleDependencyCatalog: RoleDependencyCatalog {
+    fn foreign_table_persistence(&self) -> Box<dyn RoleForeignPersistenceRead + '_>;
     fn temporary_namespace_allocated(&self) -> bool;
     fn sequence_persistence(
         &self,

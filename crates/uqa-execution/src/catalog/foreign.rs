@@ -18,6 +18,8 @@ pub use reference::ForeignServerReference;
 #[derive(Debug, Clone)]
 pub struct StoredForeignTable {
     pub name: String,
+    /// Session-local lifetime; durable definitions always restore as permanent.
+    pub persistence: uqa_sql::ast::RelationPersistence,
     pub object_id: [u8; 16],
     /// The public OIDs allocated when the foreign table was created; `None` for one created before OIDs were recorded.
     pub catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
@@ -101,6 +103,7 @@ impl StoredForeignTable {
         Ok((
             Self {
                 name,
+                persistence: uqa_sql::ast::RelationPersistence::Permanent,
                 object_id: schema.object_id,
                 catalog_oids: schema.catalog_oids,
                 row_type_array_name: schema.row_type_array_name,
@@ -155,6 +158,20 @@ impl StoredForeignTable {
                 .collect(),
             options: self.options.clone(),
         }
+    }
+
+    pub fn persist(
+        &self,
+        catalog: Option<&dyn uqa_storage::CatalogFacade>,
+        relation: &RelationIdentity,
+        security: &super::security::BoundTableSecurity,
+    ) -> StorageBackendResult<()> {
+        if self.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+            if let Some(catalog) = catalog {
+                catalog.save_foreign_table(&self.catalog_row(relation, security)?)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn catalog_row(

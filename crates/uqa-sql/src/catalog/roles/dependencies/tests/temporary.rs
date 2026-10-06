@@ -156,6 +156,10 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
             "release tables",
             "read views",
             "release views",
+            "read foreign persistence",
+            "read foreign",
+            "release foreign",
+            "release foreign persistence",
             "read sequences",
             "read sequence persistence",
             "release sequence persistence",
@@ -219,4 +223,47 @@ fn named_public_temporary_owners_grantees_and_grantors_retain_dependencies() {
         table.security = BoundTableSecurity::bind(&named, &roles).unwrap();
         assert_eq!(role_dependencies(&catalog, &roles, 10).unwrap(), expected);
     }
+}
+
+#[test]
+fn temporary_foreign_dependencies_retain_owner_and_column_acl_roles() {
+    let mut catalog = Catalog::new();
+    let temporary = RelationIdentity::new("pg_temp_1", "remote");
+    let mut security = TableSecurity::owner("owner");
+    security.column_acls.insert(
+        "value".into(),
+        vec![entry("column_reader", Some("grantor"))],
+    );
+    catalog
+        .foreign_persistence
+        .insert(temporary.clone(), RelationPersistence::Temporary);
+    catalog.foreign_tables.insert(
+        temporary.clone(),
+        BoundTableSecurity::bind(&security, &roles()).unwrap(),
+    );
+    let permanent = RelationIdentity::new("public", "durable");
+    catalog
+        .foreign_persistence
+        .insert(permanent.clone(), RelationPersistence::Permanent);
+    catalog.foreign_tables.insert(
+        permanent,
+        BoundTableSecurity::owner(roles()["reader"].identity()),
+    );
+    assert_eq!(
+        role_dependencies(&catalog, &roles(), 3).unwrap(),
+        BTreeSet::from([11, 13, 14])
+    );
+    assert_eq!(
+        role_dependencies(&catalog, &roles(), 2)
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    catalog.foreign_tables.remove(&temporary);
+    assert_eq!(
+        role_dependencies(&catalog, &roles(), 3)
+            .unwrap_err()
+            .sqlstate(),
+        Some("XX000")
+    );
 }

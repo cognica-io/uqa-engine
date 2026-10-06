@@ -16,6 +16,7 @@ use uqa_sql::{
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 pub struct ForeignRestoreContext<'a> {
+    pub registry: &'a dyn super::reads::ForeignRegistryReads,
     pub schema: ForeignSchemaContext<'a>,
     pub sequences: SequenceOwnerPublicationContext<'a>,
     pub roles: &'a dyn RoleCatalogGuards,
@@ -25,6 +26,35 @@ pub struct RestoredForeignCatalog {
     pub servers: BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
     pub tables: BTreeMap<RelationIdentity, super::StoredForeignTable>,
     pub security: BTreeMap<RelationIdentity, BoundTableSecurity>,
+}
+
+/// Keep session-owned definitions available while the durable registries are rebound.
+pub fn retain_temporary_registry(
+    publication: &dyn crate::schema::foreign_table_alteration::ForeignTableAlterPublication,
+) {
+    retain_registry(publication, |table| {
+        table.persistence == uqa_sql::ast::RelationPersistence::Temporary
+    });
+}
+
+/// An independent session starts from durable foreign definitions, never another session's objects.
+pub fn retain_durable_registry(
+    publication: &dyn crate::schema::foreign_table_alteration::ForeignTableAlterPublication,
+) {
+    retain_registry(publication, |table| {
+        table.persistence != uqa_sql::ast::RelationPersistence::Temporary
+    });
+}
+
+fn retain_registry(
+    publication: &dyn crate::schema::foreign_table_alteration::ForeignTableAlterPublication,
+    mut keep: impl FnMut(&super::StoredForeignTable) -> bool,
+) {
+    let mut tables = publication.tables_write();
+    tables.retain(|_, table| keep(table));
+    publication
+        .security_write()
+        .retain(|relation, _| tables.contains_key(relation));
 }
 
 pub fn restore(
@@ -114,9 +144,48 @@ pub fn restore(
     if !current_references && allow_migration {
         super::reference::initialize_format(catalog)?;
     }
-    Ok(RestoredForeignCatalog {
+    let mut restored = RestoredForeignCatalog {
         servers: restored_servers.definitions,
         tables,
         security: securities,
-    })
+    };
+    restored.retain_temporary(context.registry)?;
+    Ok(restored)
 }
+
+impl RestoredForeignCatalog {
+    fn retain_temporary(
+        &mut self,
+        registry: &dyn super::reads::ForeignRegistryReads,
+    ) -> StorageBackendResult<()> {
+        let tables = registry.tables();
+        let security = registry.security();
+        merge_temporary(&tables, &security, &mut self.tables, &mut self.security)
+    }
+}
+
+/// Preserve the session's complete temporary definitions and security over a fresh durable snapshot.
+pub fn merge_temporary(
+    current: &BTreeMap<RelationIdentity, super::StoredForeignTable>,
+    current_security: &BTreeMap<RelationIdentity, BoundTableSecurity>,
+    tables: &mut BTreeMap<RelationIdentity, super::StoredForeignTable>,
+    security: &mut BTreeMap<RelationIdentity, BoundTableSecurity>,
+) -> StorageBackendResult<()> {
+    for (relation, table) in current
+        .iter()
+        .filter(|(_, table)| table.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+    {
+        let retained = current_security.get(relation).ok_or_else(|| {
+            StorageBackendError::Other(format!(
+                "temporary foreign table `{}` has no security metadata",
+                relation.qualified_name()
+            ))
+        })?;
+        tables.insert(relation.clone(), table.clone());
+        security.insert(relation.clone(), retained.clone());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

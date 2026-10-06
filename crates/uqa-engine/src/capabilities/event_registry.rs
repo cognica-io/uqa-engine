@@ -157,6 +157,12 @@ impl EventRelationPersistence for Engine {
                 .read()
                 .get(relation)
                 .is_some_and(|view| view.persistence == RelationPersistence::Temporary)
+            || self
+                .durable
+                .foreign_tables
+                .read()
+                .get(relation)
+                .is_some_and(|table| table.persistence == RelationPersistence::Temporary)
     }
     fn trigger_relation_persistence(
         &self,
@@ -178,8 +184,8 @@ impl EventRelationPersistence for Engine {
                 self.durable
                     .foreign_tables
                     .read()
-                    .contains_key(relation)
-                    .then_some(RelationPersistence::Permanent)
+                    .get(relation)
+                    .map(|table| table.persistence)
             })
     }
 }

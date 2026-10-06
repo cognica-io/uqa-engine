@@ -47,6 +47,7 @@ impl Engine {
             Some(Arc::clone(provider)),
         );
         session.durable.restore(&self.durable.snapshot());
+        uqa_execution::catalog::foreign::restoration::retain_durable_registry(&session);
         session.rebind_graph_stores()?;
         for (relation, source) in self.storage.tables.read().iter() {
             if source.persistence == uqa_sql::ast::RelationPersistence::Temporary {

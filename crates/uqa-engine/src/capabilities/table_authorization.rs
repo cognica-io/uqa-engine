@@ -156,6 +156,7 @@ impl Engine {
         security: &uqa_sql::catalog::security::BoundTableSecurity,
     ) -> Result<(), SQLError> {
         uqa_execution::catalog::security::foreign_authorization::persist_foreign_table_security(
+            self,
             self.storage.catalog.as_deref(),
             relation,
             security,
