@@ -146,6 +146,7 @@ const BIT_LENGTH_SQL_BODY_SUFFIX: &str = concat!(
 const FALSE_NODE: &str = "({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]})";
 
 mod arrays;
+mod clock_and_case;
 mod definitions;
 mod enums;
 mod namespaces;
@@ -177,6 +178,7 @@ const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalo
 
 pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     scalar::ROUTINES,
+    clock_and_case::ROUTINES,
     arrays::ROUTINES,
     enums::ROUTINES,
     definitions::ROUTINES,
@@ -192,3 +194,6 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
         subscript_handler(6180, "raw_array_subscript_handler"),
     ],
 ];
+
+#[cfg(test)]
+mod tests;
