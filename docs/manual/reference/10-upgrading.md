@@ -4,6 +4,8 @@ This page separates unreleased changes on `main` from released upgrade requireme
 
 ## Unreleased changes after 0.4.9
 
+Custom Execution `MutationIndexRead` adapters must implement `staged_expression_matches`, returning cached command matches and the same command-only changes that mask older stored keys. Adapters retaining command rows with UNIQUE expression indexes construct them through `CommandStoredDocument::indexed` before borrowing their frame stack, and use `stage_evaluated` and `published_evaluated` to retain keys with the row version and original read allowance. Mutation stored-index reads already include transaction-private rows; do not mask them with fixed-snapshot changes. This interface correction changes only command-local temporary records and requires no durable storage migration.
+
 Custom `uqa_sql::semantics::partition::PartitionExpressions` adapters must implement `expression_text` using the current catalog and the stored expression's retained type and routine identities. Native adapters delegate to Execution's partition-key deparser; context-free value rendering cannot reconstruct enum or composite constants. This interface correction changes no persistent format.
 
 Custom Execution `ReferentialReadSnapshot` adapters must implement `value_index_scan_key` against the same retained generation as their document reads, returning `None` when no compatible index can answer the predicate. SQL's `foreign_key_comparison_types` now also supplies `ForeignKeyComparison::exact_local_lookup`; manually constructed comparisons must set it only when the comparison preserves the child key's declared operand types. These interface changes require no storage migration.

@@ -135,6 +135,22 @@ impl MutationIndexRead for Engine {
     ) -> Result<Vec<DocId>, SQLError> {
         Engine::command_overlay_matches(self, table, columns, values)
     }
+    fn staged_expression_matches(
+        &self,
+        table: &str,
+        physical_key: &str,
+        values: &[Value],
+    ) -> Result<uqa_execution::mutation::overlay::CommandIndexProbe, SQLError> {
+        let table = self.command_overlay_table_name(table)?;
+        let control = self.query_retention_control()?;
+        uqa_execution::mutation::overlay::CommandMutationOverlay::expression_matches(
+            &mut self.session.command_mutation_overlays.lock(),
+            &table,
+            physical_key,
+            values,
+            &control,
+        )
+    }
     fn value_index_scan_key(
         &self,
         table: &str,

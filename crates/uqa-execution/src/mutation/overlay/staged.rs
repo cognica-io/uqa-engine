@@ -77,8 +77,17 @@ impl StagedRows {
     /// Stage `row` for `id` in the memory tier. Failure leaves both tiers unchanged.
     pub(super) fn insert(&mut self, id: DocId, row: StagedRow) -> StorageBackendResult<()> {
         let bytes = row.as_ref().map_or(Ok(0), |row| {
-            crate::spill::encoded_document_size(row.fields.as_ref())
-                .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))
+            let size = |fields: &uqa_storage::document_store::Document| {
+                crate::spill::encoded_document_size(fields)
+                    .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))
+            };
+            Ok::<_, uqa_storage::StorageBackendError>(
+                size(row.fields.as_ref())?.saturating_add(
+                    row.index_values
+                        .as_ref()
+                        .map_or(Ok(0), |values| size(values.as_ref()))?,
+                ),
+            )
         })?;
         self.memory.try_insert(id, row)?;
         self.resident = self

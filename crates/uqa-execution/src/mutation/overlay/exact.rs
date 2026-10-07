@@ -7,7 +7,7 @@
 //! Exact cache changes reserve complete key and identity nodes before publishing a staged row.
 
 use super::{
-    keys::{document_key, ExactKey, FieldSet},
+    keys::{document_key, ExactKey, KeyFields},
     resource_error,
     staged::MemoryRows,
     CommandStoredDocument, DocId, SQLError, StorageReadControl,
@@ -40,7 +40,7 @@ enum Replacement {
 impl CommandExactIndex {
     pub(super) fn build(
         documents: &MemoryRows,
-        fields: &FieldSet,
+        fields: KeyFields<'_>,
         ordinal: u32,
         control: &StorageReadControl,
     ) -> Result<Self, SQLError> {
@@ -75,14 +75,14 @@ impl CommandExactIndex {
         id: DocId,
         previous: Option<&CommandStoredDocument>,
         replacement: Option<&CommandStoredDocument>,
-        fields: &FieldSet,
+        fields: KeyFields<'_>,
         control: &StorageReadControl,
     ) -> Result<Option<PreparedChange>, SQLError> {
         let previous = previous
-            .map(|document| document_key(document.fields.as_ref(), fields, control))
+            .map(|document| document_key(document, fields, control))
             .transpose()?;
         let replacement = replacement
-            .map(|document| document_key(document.fields.as_ref(), fields, control))
+            .map(|document| document_key(document, fields, control))
             .transpose()?;
         if previous == replacement {
             return Ok(None);

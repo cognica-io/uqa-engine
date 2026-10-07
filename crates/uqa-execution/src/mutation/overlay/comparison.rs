@@ -58,6 +58,7 @@ pub(super) fn matches(
     table: &str,
     fields: &[String],
     values: &[Value],
+    kind: super::KeyKind,
     control: &StorageReadControl,
 ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
     let mut found = uqa_core::memory::BudgetedVec::new(control.memory());
@@ -80,7 +81,7 @@ pub(super) fn matches(
                 continue;
             }
             if matches_fields_with_control(
-                document.fields.as_ref(),
+                kind.document(&document)?,
                 fields,
                 values,
                 FieldPresence::MissingIsNull,

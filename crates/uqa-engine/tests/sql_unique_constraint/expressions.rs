@@ -116,7 +116,7 @@ fn expression_keys_reopen_with_column_and_routine_identity() {
     );
 }
 
-fn open_expression_engine(path: &std::path::Path, backend: u8) -> Engine {
+pub(super) fn open_expression_engine(path: &std::path::Path, backend: u8) -> Engine {
     let provider: std::sync::Arc<dyn uqa_storage::PersistentStorageProvider> = match backend {
         0 => return Engine::open(path).unwrap(),
         1 => std::sync::Arc::new(uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap()),

@@ -100,6 +100,10 @@ pub(super) fn encode_row(row: &CommandStoredDocument) -> StorageBackendResult<Ve
     let fields = row.fields.as_ref();
     let bytes = crate::spill::encoded_document_size(fields)
         .map_err(exec_error)?
+        .checked_add(row.index_values.as_ref().map_or(Ok(0), |values| {
+            crate::spill::encoded_document_size(values.as_ref()).map_err(exec_error)
+        })?)
+        .ok_or_else(|| invalid("spilled command key size overflow"))?
         .checked_add(1 + size_of::<u32>())
         .ok_or_else(|| invalid("spilled command row size overflow"))?;
     let mut value = Vec::new();
@@ -114,7 +118,11 @@ pub(super) fn encode_row(row: &CommandStoredDocument) -> StorageBackendResult<Ve
         None => value.extend_from_slice(&[0; 1 + size_of::<u32>()]),
     }
     value[0] |= u8::from(row.published) << 1;
+    value[0] |= u8::from(row.index_values.is_some()) << 2;
     crate::spill::encode_document(&mut value, fields).map_err(exec_error)?;
+    if let Some(keys) = &row.index_values {
+        crate::spill::encode_document(&mut value, keys.as_ref()).map_err(exec_error)?;
+    }
     Ok(value)
 }
 
@@ -126,7 +134,7 @@ fn decode_row(
     let (header, document) = value
         .split_at_checked(1 + size_of::<u32>())
         .ok_or_else(|| invalid("a spilled command row lacks its header"))?;
-    if header[0] > 3 {
+    if header[0] > 7 {
         return Err(invalid("a spilled command row has invalid flags"));
     }
     let metadata = match header[0] & 1 {
@@ -137,10 +145,19 @@ fn decode_row(
         _ => return Err(invalid("a spilled command row has an invalid xmin flag")),
     };
     let (fields, rest) = crate::spill::decode_document(document).map_err(exec_error)?;
+    let (keys, rest) = if header[0] & 4 == 0 {
+        (None, rest)
+    } else {
+        let (keys, rest) = crate::spill::decode_document(rest).map_err(exec_error)?;
+        (Some(keys), rest)
+    };
     if !rest.is_empty() {
         return Err(invalid("a spilled command row has trailing bytes"));
     }
     let mut row = CommandStoredDocument::new(Arc::new(fields), metadata, control)?;
+    if let Some(keys) = keys {
+        row = row.with_index_values(keys, control)?;
+    }
     row.published = header[0] & 2 != 0;
     Ok(row)
 }

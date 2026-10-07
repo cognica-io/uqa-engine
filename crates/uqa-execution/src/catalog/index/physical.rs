@@ -225,23 +225,50 @@ impl PhysicalIndexDefinitions {
                                     "missing physical index definition {key}"
                                 ))
                             })?;
-                        if index_predicate_accepts(
-                            expressions,
-                            table,
-                            index.definition.predicate.as_deref(),
-                            document,
-                        )? {
-                            Value::Row(
-                                index_key_values(expressions, table, &index.keys, document)?.into(),
-                            )
-                        } else {
-                            Value::Null
-                        }
+                        expression_value(index, expressions, table, document)?
                     }
                 };
                 Ok((field.clone(), value))
             })
             .collect()
+    }
+
+    /// UNIQUE expression keys of a command-visible row. A rejected partial-index predicate keeps a NULL marker distinct from every row-valued key.
+    pub fn command_expression_values(
+        &self,
+        expressions: IndexExpressionContext<'_>,
+        table: &str,
+        document: &Document,
+    ) -> Result<Document, SQLError> {
+        self.btree_indexes(table)
+            .filter(|(_, index)| {
+                index.definition.unique && index.keys.iter().any(|key| key.column().is_none())
+            })
+            .map(|(key, index)| {
+                expression_value(index, expressions, table, document)
+                    .map(|value| (key.clone(), value))
+            })
+            .collect()
+    }
+}
+
+fn expression_value(
+    index: &PreparedIndex,
+    expressions: IndexExpressionContext<'_>,
+    table: &str,
+    document: &Document,
+) -> Result<Value, SQLError> {
+    if index_predicate_accepts(
+        expressions,
+        table,
+        index.definition.predicate.as_deref(),
+        document,
+    )? {
+        Ok(Value::Row(
+            index_key_values(expressions, table, &index.keys, document)?.into(),
+        ))
+    } else {
+        Ok(Value::Null)
     }
 }
 

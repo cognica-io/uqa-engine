@@ -53,6 +53,13 @@ pub trait MutationIndexRead {
         columns: &[String],
         values: &[Value],
     ) -> Result<Vec<DocId>, SQLError>;
+    /// Probe already evaluated expression keys and retain only the command rows that mask the mutation-visible stored index.
+    fn staged_expression_matches(
+        &self,
+        table: &str,
+        physical_key: &str,
+        values: &[Value],
+    ) -> Result<crate::mutation::overlay::CommandIndexProbe, SQLError>;
     fn value_index_scan_key(
         &self,
         table: &str,
