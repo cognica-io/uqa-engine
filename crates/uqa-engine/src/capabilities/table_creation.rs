@@ -118,16 +118,16 @@ impl TableAsPublication for Engine {
             .map_err(|error| storage_error("CREATE TABLE AS vector field", &error))
     }
     fn publish_columns(&self, name: &str, columns: &[ColumnDef]) -> Result<(), SQLError> {
-        let table = self
-            .try_table(name)
-            .map_err(|error| storage_error("CREATE TABLE AS schema", &error))?
-            .ok_or_else(|| {
-                SQLError::Internal(format!("new CREATE TABLE AS relation `{name}` disappeared"))
-            })?;
-        *table.columns.write() = columns.to_vec();
-        self.try_persist_table_schema(name)
+        let constraints = self
+            .try_declared_table_constraints(name)
             .map_err(|error| storage_error("CREATE TABLE AS schema", &error))?;
-        Ok(())
+        uqa_execution::schema::publication::replace_constraint_state(
+            &self.schema_publication_context(),
+            name,
+            columns.to_vec(),
+            constraints,
+        )
+        .map_err(|error| storage_error("CREATE TABLE AS schema", &error))
     }
     fn insert_document(
         &self,
