@@ -122,7 +122,7 @@ fn relation_lock_peer() {
         .ok()
         .filter(|key| !key.is_empty())
         .map(|key| uqa_storage::StorageEncryptionKey::new(&key));
-    let coordinator = FileLockCoordinator::open_with_key(std::path::Path::new(&path), key).unwrap();
+    let opened = FileLockCoordinator::open_with_key(std::path::Path::new(&path), key);
     let encoded = std::env::var("UQA_RELATION_LOCK_TEST_IDENTITY").unwrap();
     let relation = (0..encoded.len())
         .step_by(2)
@@ -132,6 +132,13 @@ fn relation_lock_peer() {
     let mut waiting = None;
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
+        let coordinator = match &opened {
+            Ok(coordinator) => coordinator,
+            Err(error) => {
+                respond(format!("error {error}"));
+                continue;
+            }
+        };
         let mut command = line.split_whitespace();
         let operation = command.next().unwrap();
         let mode = command

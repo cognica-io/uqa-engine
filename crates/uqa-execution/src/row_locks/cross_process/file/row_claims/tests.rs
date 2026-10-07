@@ -62,7 +62,13 @@ fn a_truncated_claim_file_returns_an_error_without_using_the_old_extent() {
 }
 
 fn claims(doc_id: u64, strength: LockStrength) -> Vec<ByteClaim> {
-    row_byte_claims(RELATION, doc_id, strength)
+    row_byte_claims(
+        RowIdentity::Relation {
+            generation: 1,
+            doc_id,
+        },
+        strength,
+    )
 }
 
 fn claim(coordinator: &FileLockCoordinator, session: u64, doc_id: u64, strength: LockStrength) {
@@ -148,12 +154,21 @@ fn row_claims_address_a_row_byte_and_never_a_record_lock() {
     );
     assert_ne!(
         row_claim_address(claims(42, LockStrength::ForUpdate)[0]),
-        row_claim_address(row_byte_claims(b"public.other", 42, LockStrength::ForUpdate)[0])
+        row_claim_address(
+            row_byte_claims(
+                RowIdentity::Relation {
+                    generation: 2,
+                    doc_id: 42
+                },
+                LockStrength::ForUpdate
+            )[0]
+        )
     );
     assert_eq!(
         row_claim_address(ByteClaim {
             offset: 10_000,
-            write: true
+            write: true,
+            row: None,
         }),
         None
     );
@@ -304,7 +319,10 @@ fn a_bulk_claim_grows_the_table_and_its_release_returns_it() {
     drop(state);
     let mut sidecar = path.into_os_string();
     sidecar.push(".uqa-row-claims");
-    assert!(std::fs::metadata(sidecar).unwrap().len() < 256 * 1024);
+    assert_eq!(
+        std::fs::metadata(sidecar).unwrap().len(),
+        64 * 1024 + ((1 << table::INITIAL_CAPACITY_LOG2) + 256) * table::ENTRY_SIZE
+    );
 }
 
 #[test]

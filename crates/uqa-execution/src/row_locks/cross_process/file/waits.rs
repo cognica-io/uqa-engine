@@ -222,6 +222,7 @@ impl FileLockCoordinator {
             offset: claim.offset,
             write: claim.write,
             generation: Self::local_relation_generation(&state, claim.offset),
+            row: claim.row,
         };
         self.acquire_slot_metadata_lock();
         self.publish_pending_holders(&mut state);
@@ -364,6 +365,7 @@ impl FileLockCoordinator {
                         ByteClaim {
                             offset: slot.offset,
                             write: slot.write,
+                            row: slot.row,
                         },
                         slot.generation,
                     ));
@@ -375,6 +377,7 @@ impl FileLockCoordinator {
 }
 
 struct WaitSlot {
+    row: Option<super::super::RowIdentity>,
     pid: u32,
     session: u64,
     offset: u64,
@@ -426,7 +429,7 @@ impl HolderSlot {
 }
 
 impl WaitSlot {
-    const MAGIC: u32 = 0x5551_4c4c;
+    const MAGIC: u32 = 0x5551_4c4d;
 
     fn encode(&self) -> [u8; WAIT_SLOT_SIZE as usize] {
         let mut bytes = [0_u8; WAIT_SLOT_SIZE as usize];
@@ -436,6 +439,9 @@ impl WaitSlot {
         bytes[16..24]
             .copy_from_slice(&((self.generation << 1) | u64::from(self.write)).to_be_bytes());
         bytes[24..32].copy_from_slice(&self.session.to_be_bytes());
+        if let Some(row) = self.row {
+            bytes[32..80].copy_from_slice(&row.encode());
+        }
         bytes
     }
 
@@ -447,7 +453,13 @@ impl WaitSlot {
         if pid == 0 {
             return None;
         }
+        let row = if bytes[8] & 0x80 != 0 {
+            Some(super::super::RowIdentity::decode(&bytes[32..80])?)
+        } else {
+            None
+        };
         Some(Self {
+            row,
             pid,
             session: u64::from_be_bytes(bytes[24..32].try_into().ok()?),
             offset: u64::from_be_bytes(bytes[8..16].try_into().ok()?),

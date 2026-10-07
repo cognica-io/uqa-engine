@@ -14,7 +14,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::CancellationToken;
 use uqa_sql::SQLError;
 
-const ADMISSION_BYTE: u64 = 15;
+// Relation-registry attachments retain byte 15 for their entire lifetime.
+const ADMISSION_BYTE: u64 = 5;
 const HEADER_BASE: u64 = HOLDER_SLOT_BASE + HOLDER_SLOT_COUNT * HOLDER_SLOT_SIZE;
 const HEADER_SIZE: u64 = 16;
 const SLOT_BASE: u64 = HEADER_BASE + HEADER_SIZE;

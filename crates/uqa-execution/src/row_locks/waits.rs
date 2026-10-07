@@ -20,9 +20,14 @@ impl RowLockManager {
             let mut claims = Vec::with_capacity(rows.len() * 2);
             for (key, strength) in rows {
                 let relation = self.relation_bytes(key.table);
-                claims.extend(row_byte_claims(&relation, key.doc_id, *strength));
+                if let Some(identity) = coordinator.retained_row_identity(&relation, key.doc_id) {
+                    claims.extend(row_byte_claims(identity, *strength));
+                }
             }
             coordinator.release(session_id, &claims);
+            for (key, _) in rows {
+                coordinator.release_row_identity(&self.relation_bytes(key.table));
+            }
         }
     }
 
@@ -48,8 +53,12 @@ impl RowLockManager {
     pub fn acquire(&self, request: &LockRequest<'_>) -> Result<LockAcquire, SQLError> {
         let coordinator = self.coordinator()?;
         let relation = self.relation_bytes(request.key.table);
-        let claims = coordinator
-            .map(|_| row_byte_claims(&relation, request.key.doc_id, request.strength))
+        let mut identity = coordinator
+            .map(|coordinator| coordinator.pin_row(&relation, request.key.doc_id, request.cancel))
+            .transpose()?;
+        let claims = identity
+            .as_ref()
+            .map(|identity| row_byte_claims(identity.identity(), request.strength))
             .unwrap_or_default();
         let cross_wait = CrossWaitGuard::new(self, coordinator, request.session_id);
         let mut waited = false;
@@ -79,6 +88,11 @@ impl RowLockManager {
                         Ok(None) => {
                             state.waiting.remove(&request.session_id);
                             remove_inactive_versions(&mut state);
+                            if acquisition.is_some() {
+                                if let Some(identity) = &mut identity {
+                                    identity.retain();
+                                }
+                            }
                             return Ok(LockAcquire::Granted {
                                 waited,
                                 foreign_waited,
@@ -96,13 +110,7 @@ impl RowLockManager {
                     }
                 }
                 GrantAttempt::Conflict => coordinator.and_then(|_| {
-                    locally_contended_row_claim(
-                        &state,
-                        request.session_id,
-                        request.key,
-                        &relation,
-                        &claims,
-                    )
+                    locally_contended_row_claim(&state, request.session_id, request.key, &claims)
                 }),
             };
             match request.wait {
@@ -235,14 +243,13 @@ fn locally_contended_row_claim(
     state: &LockTable,
     session_id: u64,
     key: RowLockKey,
-    relation: &[u8],
     wanted_claims: &[ByteClaim],
 ) -> Option<ByteClaim> {
     state.rows.get(&key)?.iter().find_map(|grant| {
         if grant.session_id == session_id {
             return None;
         }
-        row_byte_claims(relation, key.doc_id, grant.effective_strength())
+        row_byte_claims(wanted_claims.first()?.row?, grant.effective_strength())
             .into_iter()
             .find_map(|held| {
                 wanted_claims
@@ -254,7 +261,7 @@ fn locally_contended_row_claim(
 }
 
 fn byte_claims_conflict(wanted: ByteClaim, held: ByteClaim) -> bool {
-    wanted.offset == held.offset && (wanted.write || held.write)
+    wanted.row == held.row && wanted.offset == held.offset && (wanted.write || held.write)
 }
 
 pub(super) fn deadlock_exists(

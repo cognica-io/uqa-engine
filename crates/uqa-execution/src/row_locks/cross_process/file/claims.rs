@@ -117,7 +117,7 @@ impl FileLockCoordinator {
     /// Release claims that were successfully applied earlier by `session`. Every holder slot is cleared before any byte is unlocked, so no waiter can acquire a byte while a slot still attributes it to `session`. The kernel keeps each process's record locks sorted by offset, so unlocking in ascending order finds each lock at the front of this process's locks. Row claims, whose addresses follow every record-lock offset, leave the claim table under one hold of its lock byte.
     pub(in crate::row_locks) fn release(&self, session: u64, claims: &[ByteClaim]) {
         let mut ordered = claims.to_vec();
-        ordered.sort_unstable_by_key(|claim| (claim.offset, claim.write));
+        ordered.sort_unstable_by_key(|claim| (claim.row, claim.offset, claim.write));
         let (records, rows) =
             ordered.split_at(ordered.partition_point(|claim| row_claim_address(*claim).is_none()));
         let mut state = self.state.lock();

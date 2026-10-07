@@ -15,7 +15,7 @@ use std::sync::atomic::{fence, Ordering};
 
 use uqa_storage::native_file::{lock_byte, try_lock_byte, unlock_byte};
 
-use super::super::{row_claim, row_claim_address, RowByte, PROCESS_LIVENESS_BASE};
+use super::super::{row_claim, row_claim_address, RowByte, RowIdentity, PROCESS_LIVENESS_BASE};
 use super::waits::HolderSlot;
 use super::{lock_would_block, ByteClaim, CoordinatorState, FileLockCoordinator};
 
@@ -91,7 +91,7 @@ struct SessionClaim {
 
 /// One session's claims of one row before and after a claim or release.
 struct Change {
-    identity: u64,
+    identity: RowIdentity,
     before: Counts,
     after: Counts,
 }
@@ -116,7 +116,7 @@ struct Placement {
 #[derive(Default)]
 pub(super) struct RowClaims {
     owner: Option<Owner>,
-    identities: HashMap<u64, Vec<SessionClaim>>,
+    identities: HashMap<RowIdentity, Vec<SessionClaim>>,
     /// Entries of this process in the claim table.
     entries: u64,
     /// Owners found dead. An owner is never named twice, so a dead owner stays dead.
@@ -124,7 +124,7 @@ pub(super) struct RowClaims {
 }
 
 impl RowClaims {
-    fn counts(&self, session: u64, identity: u64) -> Counts {
+    fn counts(&self, session: u64, identity: RowIdentity) -> Counts {
         self.identities
             .get(&identity)
             .and_then(|claims| claims.iter().find(|claim| claim.session == session))
@@ -132,7 +132,7 @@ impl RowClaims {
             .unwrap_or_default()
     }
 
-    fn set_counts(&mut self, session: u64, identity: u64, counts: Counts) {
+    fn set_counts(&mut self, session: u64, identity: RowIdentity, counts: Counts) {
         if counts == Counts::default() {
             if let Some(claims) = self.identities.get_mut(&identity) {
                 claims.retain(|claim| claim.session != session);
@@ -521,8 +521,10 @@ impl FileLockCoordinator {
     ) -> Result<Result<(), ByteClaim>, String> {
         let rows = &mut state.rows;
         let mut ordered = std::borrow::Cow::Borrowed(claims);
-        if !claims.is_sorted_by_key(|claim| claim.offset) {
-            ordered.to_mut().sort_unstable_by_key(|claim| claim.offset);
+        if !claims.is_sorted_by_key(|claim| (claim.row, claim.offset)) {
+            ordered
+                .to_mut()
+                .sort_unstable_by_key(|claim| (claim.row, claim.offset));
         }
         let changes = changes(rows, session, &ordered, |count| *count += 1);
         let stored = changes

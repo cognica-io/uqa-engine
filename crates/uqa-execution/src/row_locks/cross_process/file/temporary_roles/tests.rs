@@ -12,6 +12,9 @@ fn native_temporary_dependency_admission_honors_cancellation_and_process_exit() 
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("references.db");
     let coordinator = FileLockCoordinator::open(&path).unwrap();
+    let _relation = coordinator
+        .pin_relation(b"public.retained_relation", &CancellationToken::new())
+        .unwrap();
     let mut peer = peer::Peer::start(&path);
     assert_eq!(peer.request("admission 0 0"), "admitted");
     let cancelled = CancellationToken::new();

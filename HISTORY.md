@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Compare complete cross-process row and key identities, including wait edges, instead of conflating hash collisions. Retain native pins by relation and keep temporary dependency admission separate from relation-registry lifetime locks.
+
 - Retain successfully staged HNSW graphs across own writes on memory, SQLite and redb instead of reconstructing every generation. Certify private and uncontended autocommit boundaries, while preserving refresh after concurrent commits, undo, canonical validation and the original memory allowance.
 
 - Batch already evaluated UNIQUE and PRIMARY KEY reservations under one shared claim-table arbitration per bounded group. Keep single-key acquisition, contention order, snapshot refresh and savepoint release semantics.

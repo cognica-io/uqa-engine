@@ -39,22 +39,26 @@ impl RowLockManager {
             return Ok(None);
         }
         let coordinator = self.coordinator()?;
-        let mut byte_claims = Vec::with_capacity(requests.len());
-        for request in requests {
+        let relations = requests
+            .iter()
+            .map(|request| self.relation_bytes(request.key.table))
+            .collect::<Vec<_>>();
+        let mut identities = Vec::with_capacity(requests.len());
+        for (request, relation) in requests.iter().zip(&relations) {
             request.cancel.check()?;
-            byte_claims.push(coordinator.map(|_| {
-                row_byte_claims(
-                    &self.relation_bytes(request.key.table),
-                    request.key.doc_id,
-                    request.strength,
-                )
-            }));
+            identities.push(
+                coordinator
+                    .map(|coordinator| {
+                        coordinator.pin_row(relation, request.key.doc_id, request.cancel)
+                    })
+                    .transpose()?,
+            );
         }
         let mut state = self.state.lock();
         let mut acquisitions = Vec::with_capacity(requests.len());
         let mut claims = Vec::with_capacity(requests.len() * 2);
         let attempt = (|| {
-            for (request, bytes) in requests.iter().zip(byte_claims) {
+            for (request, identity) in requests.iter().zip(&identities) {
                 request.cancel.check()?;
                 match try_grant(
                     &mut state,
@@ -67,7 +71,10 @@ impl RowLockManager {
                     GrantAttempt::Conflict => return Ok(false),
                     GrantAttempt::Granted(acquisition) => {
                         if acquisition.is_some() {
-                            claims.extend(bytes.into_iter().flatten());
+                            if let Some(identity) = identity {
+                                claims
+                                    .extend(row_byte_claims(identity.identity(), request.strength));
+                            }
                         }
                         acquisitions.push(acquisition);
                     }
@@ -86,6 +93,13 @@ impl RowLockManager {
                 rollback_grant(&mut state, acquisition);
             }
             return attempt.map(|_| None);
+        }
+        for (identity, acquisition) in identities.iter_mut().zip(&acquisitions) {
+            if acquisition.is_some() {
+                if let Some(identity) = identity {
+                    identity.retain();
+                }
+            }
         }
         state.waiting.remove(&session);
         remove_inactive_versions(&mut state);
