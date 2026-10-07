@@ -223,7 +223,7 @@ fn get_field_null_returns_none() {
 #[test]
 fn doc_ids_empty_store() {
     let (_dir, _conn, store) = make_store("t1");
-    assert!(store.doc_ids().unwrap().is_empty());
+    assert_eq!(store.doc_ids().unwrap().len(), 0);
 }
 
 #[test]

@@ -149,7 +149,7 @@ fn system_identities_are_unique_and_reference_graph_is_closed_and_acyclic() {
         assert!(ids.insert(relation.object_id()));
         assert_ne!(relation.object_id(), [0; 16]);
         if relation.kind() == "table" {
-            assert!(relation.view_sources().is_empty());
+            assert_eq!(relation.view_sources().len(), 0);
         }
         visit(relation, &mut Vec::new());
     }

@@ -98,7 +98,7 @@ fn scan(projection: &[&str]) -> LocalTableRowSource {
 #[test]
 fn command_scan_merges_selected_sources_in_identity_order_across_small_batches() {
     let mut scan = scan(&["a"]);
-    assert!(scan.next_command_physical_rows_batch(0).unwrap().is_empty());
+    assert_eq!(scan.next_command_physical_rows_batch(0).unwrap().len(), 0);
     let mut observed = Vec::new();
     loop {
         let batch = scan.next_command_physical_rows_batch(1).unwrap();
@@ -121,7 +121,7 @@ fn command_scan_merges_selected_sources_in_identity_order_across_small_batches()
             (u64::MAX, Value::Int(90))
         ]
     );
-    assert!(scan.next_command_physical_rows_batch(2).unwrap().is_empty());
+    assert_eq!(scan.next_command_physical_rows_batch(2).unwrap().len(), 0);
 }
 
 #[test]

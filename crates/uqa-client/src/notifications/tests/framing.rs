@@ -114,7 +114,7 @@ fn complete_event_limit_includes_fields_delimiters_and_crlf() {
         let mut output = Vec::new();
         feed(&mut decoder, &wire, &mut output).unwrap();
         if ending == "\r" {
-            assert!(output.is_empty());
+            assert_eq!(output.len(), 0);
             output.extend(decoder.finish().unwrap());
             assert_eq!(decoder.finish(), Err(ProtocolError::UnexpectedEnd));
         }
@@ -224,7 +224,7 @@ fn malformed_utf8_is_rejected_in_fields_data_and_comments() {
             let result = feed(&mut decoder, &input[..split], &mut output)
                 .and_then(|()| feed(&mut decoder, &input[split..], &mut output));
             assert_eq!(result, Err(ProtocolError::InvalidUTF8));
-            assert!(output.is_empty());
+            assert_eq!(output.len(), 0);
         }
     }
     fail_frame(

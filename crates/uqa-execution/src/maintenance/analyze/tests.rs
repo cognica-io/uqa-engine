@@ -165,7 +165,7 @@ fn replacement_after_binding_is_skipped_instead_of_analyzing_the_new_object() {
         .borrow_mut()
         .extend([None, Some(vec![target("t", 2)])]);
     let selected = prepare_targets(&fixture.context(), Some("t"), false).unwrap();
-    assert!(selected.is_empty());
+    assert_eq!(selected.len(), 0);
     run_locked_targets(&selected, |_| panic!("a replacement must not be analyzed")).unwrap();
     assert_eq!(
         *fixture.notices.borrow(),

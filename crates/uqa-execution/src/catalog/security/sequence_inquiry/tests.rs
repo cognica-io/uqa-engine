@@ -180,16 +180,19 @@ fn inquiry_oid_authority_is_current_without_touching_live_resolution() {
         assert_eq!(catalog.value(&arguments).unwrap(), Value::Bool(false));
     }
     assert_eq!(catalog.resolutions.get(), 0);
-    assert!(!catalog
-        .retained
-        .security
-        .values()
-        .next()
-        .unwrap()
-        .acl
-        .as_ref()
-        .unwrap()
-        .is_empty());
+    assert_ne!(
+        catalog
+            .retained
+            .security
+            .values()
+            .next()
+            .unwrap()
+            .acl
+            .as_ref()
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]

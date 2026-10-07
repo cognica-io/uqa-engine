@@ -148,7 +148,7 @@ fn projections_preserve_order_duplicates_presence_reentry_and_early_stop() {
     store
         .for_each_fields_multi_ref_with_presence(&[99, 2, 7], &[], &mut |id, present, values| {
             assert_eq!((id, present), (99, false));
-            assert!(values.is_empty());
+            assert_eq!(values.len(), 0);
             calls += 1;
             false
         })
@@ -241,7 +241,7 @@ fn read_only_access_preserves_missing_null_and_identity_boundaries() {
         Some(0)
     );
     assert_eq!(store.next_doc_id(Some(u64::MAX)).unwrap(), None);
-    assert!(store.next_doc_ids(None, 0).unwrap().is_empty());
+    assert_eq!(store.next_doc_ids(None, 0).unwrap().len(), 0);
     assert_eq!(store.max_doc_id().unwrap(), u64::MAX);
     assert_eq!(store.iter_all().unwrap().count(), 2);
     assert!(store.put(2, Document::new()).is_err());

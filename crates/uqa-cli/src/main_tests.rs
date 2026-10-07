@@ -285,12 +285,12 @@ fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
         )
         .unwrap_err();
     assert!(duplicate.starts_with("23505:"), "{duplicate}");
-    assert!(session
+    let rows = session
         .engine
         .sql("SELECT id FROM parent WHERE id = 303", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
 
     session
         .execute_command_text_with_history(
@@ -299,12 +299,12 @@ fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
             false,
         )
         .unwrap();
-    assert!(session
+    let rows = session
         .engine
         .sql("SELECT id FROM parent WHERE id = 404", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
 
     let savepoint = session
         .execute_command_text_with_history(
@@ -314,12 +314,12 @@ fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
         )
         .unwrap_err();
     assert!(savepoint.starts_with("25P01:"), "{savepoint}");
-    assert!(session
+    let rows = session
         .engine
         .sql("SELECT id FROM parent WHERE id = 405", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
 
     session
         .execute_command_text_with_history(
@@ -328,12 +328,12 @@ fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
             false,
         )
         .unwrap();
-    assert!(session
+    let rows = session
         .engine
         .sql("SELECT id FROM parent WHERE id IN (406, 407)", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
 }
 
 #[test]

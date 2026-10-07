@@ -61,7 +61,7 @@ fn test_top_k_larger_than_docs() {
 #[test]
 fn test_empty_signals() {
     let scorer = ConfidenceScaledPoolWANDScorer::new(Vec::new(), Vec::new(), 0.5, 5).unwrap();
-    assert!(scorer.score_top_k().unwrap().is_empty());
+    assert_eq!(scorer.score_top_k().unwrap().len(), 0);
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn test_wand_gating_relu() {
         5,
     )
     .unwrap();
-    assert!(!scorer.score_top_k().unwrap().is_empty());
+    assert_ne!(scorer.score_top_k().unwrap().len(), 0);
 }
 
 #[test]

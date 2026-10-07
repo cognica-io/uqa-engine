@@ -193,7 +193,7 @@ fn native_sequence_value_upgrade_mirrors_every_retained_definition_revision() {
     let (connection, namespace, dropped, kept) = previous_format_history();
     let (dropped, kept) = (&dropped, &kept);
     let definition_history = versions(&connection, Family::Sequences);
-    assert!(versions(&connection, Family::SequenceValues).is_empty());
+    assert_eq!(versions(&connection, Family::SequenceValues).len(), 0);
 
     // A failed upgrade leaves the previous format and history.
     with(&connection, |sqlite| {
@@ -205,7 +205,7 @@ fn native_sequence_value_upgrade_mirrors_every_retained_definition_revision() {
         validate_format(sqlite, 13)?;
         Ok(())
     });
-    assert!(versions(&connection, Family::SequenceValues).is_empty());
+    assert_eq!(versions(&connection, Family::SequenceValues).len(), 0);
 
     let upgraded = SQLiteRecordStore::for_native(&connection, &control).unwrap();
     assert_eq!(upgraded.native_namespace(), Some(namespace));

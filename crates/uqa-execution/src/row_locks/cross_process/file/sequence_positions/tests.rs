@@ -145,7 +145,7 @@ fn a_removed_slot_keeps_the_positions_after_it_reachable() {
     assert_eq!(positions.recorded(run[0]), Some((1, true)));
     positions.remove(run[0]);
     assert_eq!(positions.header().unwrap().used, 0);
-    assert!(coordinator.read_sequence_positions().unwrap().is_empty());
+    assert_eq!(coordinator.read_sequence_positions().unwrap().len(), 0);
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn a_full_table_offers_no_slot_until_missing_sequences_are_dropped() {
     assert!(positions.record(1, 10));
     // Every slot holds the position of some other sequence.
     let mut table = vec![0_u8; SLOT_SIZE * SLOT_COUNT as usize];
-    for (sequence, slot) in (1_000_000_000..).zip(table.chunks_exact_mut(SLOT_SIZE)) {
+    for (sequence, slot) in (1_000_000_000..).zip(table.as_chunks_mut::<SLOT_SIZE>().0) {
         slot.copy_from_slice(&encode(&key(sequence), &position(1), 1));
     }
     write_all_at(&coordinator.sequence_file, &table, slot_offset(0)).unwrap();
@@ -265,7 +265,7 @@ fn a_table_mostly_taken_by_existing_sequences_is_not_rewritten_again() {
     let positions = Locked::new(&coordinator);
     assert!(positions.record(1, 10));
     let mut table = vec![0_u8; SLOT_SIZE * SLOT_COUNT as usize];
-    for (sequence, slot) in (1_000_000_000..).zip(table.chunks_exact_mut(SLOT_SIZE)) {
+    for (sequence, slot) in (1_000_000_000..).zip(table.as_chunks_mut::<SLOT_SIZE>().0) {
         slot.copy_from_slice(&encode(&key(sequence), &position(1), 1));
     }
     write_all_at(&coordinator.sequence_file, &table, slot_offset(0)).unwrap();
@@ -304,7 +304,7 @@ fn a_file_without_a_header_holds_no_position() {
     table[..SLOT_SIZE].fill(0xff);
     write_all_at(&coordinator.sequence_file, &table, 0).unwrap();
     assert_eq!(positions.recorded(1), None);
-    assert!(coordinator.read_sequence_positions().unwrap().is_empty());
+    assert_eq!(coordinator.read_sequence_positions().unwrap().len(), 0);
     assert!(positions.record(1, 10));
     assert_eq!(positions.recorded(1), Some((10, true)));
     assert_eq!(coordinator.read_sequence_positions().unwrap().len(), 1);

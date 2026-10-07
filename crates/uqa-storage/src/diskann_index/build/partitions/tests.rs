@@ -245,7 +245,7 @@ fn empty_numeric_side_and_singleton_inputs_keep_their_canonical_coverage() {
         assert_eq!(runs.summary.coverage, input.coverage());
         assert_eq!(runs.summary.partitions, input.node_count());
         assert_eq!(runs.summary.memberships, input.node_count());
-        assert!(edges(&runs).is_empty());
+        assert_eq!(edges(&runs).len(), 0);
         drop((runs, input));
         assert_eq!(temporary.used(), 0);
         assert_eq!(control.memory().used(), 0);

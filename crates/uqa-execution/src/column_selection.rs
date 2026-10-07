@@ -458,7 +458,7 @@ mod tests {
         }];
         let remapped = remap_ordering(&ordering, &[Some(2), Some(0)]);
         assert_eq!(remapped[0].position, 0);
-        assert!(remap_ordering(&ordering, &[Some(0), Some(1)]).is_empty());
+        assert_eq!(remap_ordering(&ordering, &[Some(0), Some(1)]).len(), 0);
     }
 
     #[test]
@@ -471,7 +471,7 @@ mod tests {
             .discarding_lock_origins();
 
         let batches = crate::physical::run_to_batches(&mut barrier).unwrap();
-        assert!(batches[0].rows[0].lock_origins().is_empty());
+        assert_eq!(batches[0].rows[0].lock_origins().len(), 0);
     }
 
     #[test]

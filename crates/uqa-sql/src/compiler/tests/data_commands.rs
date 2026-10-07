@@ -147,7 +147,7 @@ fn insert_default_values_preserves_one_input_row() {
     let Statement::Insert(insert) = first("INSERT INTO docs DEFAULT VALUES RETURNING id") else {
         panic!("not INSERT");
     };
-    assert!(insert.columns.is_empty());
+    assert_eq!(insert.columns.len(), 0);
     assert_eq!(insert.rows, vec![Vec::new()]);
     assert!(insert.select_source.is_none());
     assert_eq!(insert.returning.len(), 1);
@@ -207,7 +207,7 @@ fn insert_set_operation_is_compiled_as_one_select_source() {
     else {
         panic!("not INSERT");
     };
-    assert!(insert.rows.is_empty());
+    assert_eq!(insert.rows.len(), 0);
     let source = insert
         .select_source
         .expect("INSERT must retain its SELECT source");

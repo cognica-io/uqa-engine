@@ -83,7 +83,7 @@ fn moved_transaction_commit_wait_cancels_and_rolls_back_its_prepared_changes() {
     notify_waiter(&control, &observed, &receive, worker);
     reader.execute_batch("COMMIT").unwrap();
     let transaction = registry.begin().unwrap();
-    assert!(transaction.entries_from(0).unwrap().is_empty());
+    assert_eq!(transaction.entries_from(0).unwrap().len(), 0);
     transaction.commit().unwrap();
 }
 

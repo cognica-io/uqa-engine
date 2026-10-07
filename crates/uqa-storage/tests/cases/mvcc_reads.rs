@@ -110,10 +110,9 @@ fn greatest_key_selection_preserves_private_tombstones_bounds_and_retained_comma
         ] {
             let wanted = expected
                 .iter()
-                .filter(|(key, _)| {
+                .rfind(|(key, _)| {
                     key.starts_with(prefix) && before.is_none_or(|before| **key < before)
                 })
-                .next_back()
                 .map(|(key, live)| (key.to_vec(), *live));
             let mut actual = None;
             retained

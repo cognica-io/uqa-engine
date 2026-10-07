@@ -126,10 +126,13 @@ fn independent_acl_records_follow_renames_and_compact_with_definitions() {
             _ => unreachable!(),
         }
         assert_eq!(load(&renamed), expected);
-        assert!(catalog
-            .metadata_with_prefix(&prefix(&relation))
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            catalog
+                .metadata_with_prefix(&prefix(&relation))
+                .unwrap()
+                .len(),
+            0
+        );
         match kind {
             RelationKind::Table => {
                 let row = catalog.load_tables().unwrap().remove(0);
@@ -145,10 +148,13 @@ fn independent_acl_records_follow_renames_and_compact_with_definitions() {
             }
             _ => unreachable!(),
         }
-        assert!(catalog
-            .metadata_with_prefix(&prefix(&renamed))
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            catalog
+                .metadata_with_prefix(&prefix(&renamed))
+                .unwrap()
+                .len(),
+            0
+        );
         let RelationSecurityRow::Bound(restored) = load(&renamed) else {
             panic!("missing bound security");
         };
@@ -167,10 +173,13 @@ fn independent_acl_records_follow_renames_and_compact_with_definitions() {
             RelationKind::ForeignTable => catalog.drop_foreign_table(&renamed).unwrap(),
             _ => unreachable!(),
         }
-        assert!(catalog
-            .metadata_with_prefix(&prefix(&renamed))
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            catalog
+                .metadata_with_prefix(&prefix(&renamed))
+                .unwrap()
+                .len(),
+            0
+        );
     }
 }
 
@@ -195,8 +204,11 @@ fn serialized_catalogs_keep_acl_changes_in_their_definition_format() {
         panic!("missing security");
     };
     assert_eq!(security.column_acls["a"], entry.acl.unwrap());
-    assert!(catalog
-        .metadata_with_prefix(&prefix(&relation))
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        catalog
+            .metadata_with_prefix(&prefix(&relation))
+            .unwrap()
+            .len(),
+        0
+    );
 }

@@ -206,7 +206,7 @@ fn logical_attention_binds_callbacks_once_before_physical_model_construction() {
     assert_eq!(attention.head_count(), 3);
     assert_eq!(attention.alpha(), 0.4);
     assert!(attention.normalize());
-    assert!(query_features.is_empty());
+    assert_eq!(query_features.len(), 0);
     assert!(matches!(&signals[1], OperatorTree::CosineProbability(_)));
     assert!(attention
         .fuse(&[0.8, 0.6], &[0.0; uqa_fusion::N_QUERY_FEATURES])

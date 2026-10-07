@@ -43,7 +43,7 @@ fn borrowed_identity_pages_retain_the_allowance_and_allow_reentrant_writes() {
     assert_eq!(
         snapshot
             .for_each_next_fields(None, 3, &[], &mut |id, values| {
-                assert!(values.is_empty());
+                assert_eq!(values.len(), 0);
                 assert!(
                     control.memory().used() > retained,
                     "provider IDs must remain charged through the callback"
@@ -129,7 +129,7 @@ fn identity_pages_share_the_fixed_read_allowance_and_preserve_the_selected_view(
             Err(StorageBackendError::Memory(_))
         ));
         assert_eq!(control.memory().used(), control.memory().limit());
-        assert!(view.next_doc_ids(None, 0).unwrap().is_empty());
+        assert_eq!(view.next_doc_ids(None, 0).unwrap().len(), 0);
     }
     drop(full);
     assert_eq!(control.memory().used(), retained);

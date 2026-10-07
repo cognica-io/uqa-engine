@@ -219,7 +219,7 @@ fn the_tuple_lock_matrix_holds_between_processes() {
             "released"
         );
     }
-    assert!(stored(&coordinator).1.is_empty());
+    assert_eq!(stored(&coordinator).1.len(), 0);
 }
 
 #[test]
@@ -346,5 +346,5 @@ fn growing_the_table_keeps_the_claims_of_every_process() {
     assert_eq!(entries.len(), 3010);
     assert_eq!(peer.request("release 0 6100 3000"), "released");
     assert_eq!(peer.request("release 3 1 10"), "released");
-    assert!(stored(&coordinator).1.is_empty());
+    assert_eq!(stored(&coordinator).1.len(), 0);
 }

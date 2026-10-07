@@ -56,7 +56,7 @@ fn duplicate_function_clauses_are_checked_after_earlier_lookups() {
     let mut visited = Vec::new();
     let error = bind_functions(&definition.functions, |name, args, _| {
         visited.push(name.to_owned());
-        assert!(args.is_empty());
+        assert_eq!(args.len(), 0);
         Err(SQLError::Routine {
             sqlstate: "42883".into(),
             message: "missing handler".into(),

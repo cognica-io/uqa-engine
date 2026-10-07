@@ -78,8 +78,8 @@ fn key_value_drop_cleans_only_its_legacy_public_alias() {
 
     catalog.drop_table_and_data("public.docs").unwrap();
 
-    assert!(catalog.load_column_stats("public.docs").unwrap().is_empty());
-    assert!(catalog.load_column_stats("docs").unwrap().is_empty());
+    assert_eq!(catalog.load_column_stats("public.docs").unwrap().len(), 0);
+    assert_eq!(catalog.load_column_stats("docs").unwrap().len(), 0);
     assert_eq!(catalog.load_column_stats("app.docs").unwrap().len(), 1);
     assert_eq!(
         catalog.load_tables().unwrap()[0].relation.qualified_name(),
@@ -174,4 +174,18 @@ fn key_value_catalog_indexes_enforce_schema_parent_and_shared_namespace_identity
     catalog.drop_catalog_index(&index).unwrap();
     catalog.migrate_relation_namespace().unwrap();
     assert!(catalog.load_catalog_indexes().unwrap().is_empty());
+}
+
+#[test]
+fn key_value_vector_reader_rejects_corrupt_ordinal() {
+    let store = store();
+    let mut key = vector_doc_prefix("articles", "embedding", 1).unwrap();
+    push_u64(&mut key, u64::MAX);
+    store
+        .put(&key, &vector_to_blob(&[1.0, 0.0]).unwrap())
+        .unwrap();
+    let index = KeyValueVectorIndex::new(store, "articles", "embedding", 2);
+
+    let error = index.search_knn(&[1.0, 0.0], 1).unwrap_err();
+    assert!(error.to_string().contains("persisted vector ordinal"));
 }

@@ -57,27 +57,27 @@ fn versioned_overwrites_restore_global_records_and_exact_memberships() {
                         .unwrap(),
                     vec![1]
                 );
-                assert!(versioned
-                    .base()
-                    .neighbors(1, None, Direction::Out, graph)
-                    .unwrap()
-                    .is_empty());
+                assert_eq!(
+                    versioned
+                        .base()
+                        .neighbors(1, None, Direction::Out, graph)
+                        .unwrap()
+                        .len(),
+                    0
+                );
             }
             versioned.rollback(0).unwrap();
         }
         assert_eq!(store.vertices().unwrap(), vertices);
         assert_eq!(store.edges().unwrap(), edges);
         assert!(store.vertex_ids_in_graph("target").unwrap().is_empty());
-        assert!(store.edge_id_page("target", None, 256).unwrap().is_empty());
+        assert_eq!(store.edge_id_page("target", None, 256).unwrap().len(), 0);
         for graph in ["primary", "secondary"] {
             assert_eq!(
                 store.vertex_ids_by_label("Before", graph).unwrap(),
                 vec![1, 2, 3]
             );
-            assert!(store
-                .vertex_ids_by_label("After", graph)
-                .unwrap()
-                .is_empty());
+            assert_eq!(store.vertex_ids_by_label("After", graph).unwrap().len(), 0);
             assert_eq!(
                 store
                     .neighbors(1, Some("before"), Direction::Out, graph)
@@ -168,10 +168,13 @@ fn overlay_pages_merge_only_own_changes_and_rollback_conflicts() {
             overlay.vertex_ids_by_label("Own", "items").unwrap(),
             vec![300, 900]
         );
-        assert!(overlay
-            .vertex_ids_by_label("Concurrent", "items")
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            overlay
+                .vertex_ids_by_label("Concurrent", "items")
+                .unwrap()
+                .len(),
+            0
+        );
         assert_eq!(
             overlay
                 .neighbors(1, Some("link"), Direction::Out, "items")
@@ -288,10 +291,13 @@ fn durable_path_index_pages_invalidate_with_shared_graph_writes_and_rollback() {
         backend.rollback_transaction().unwrap();
         catalog.drop_path_index("first::paths").unwrap();
         assert!(first.lookup(&sequences[0]).is_err());
-        assert!(catalog
-            .path_index_pairs("first::paths", &sequence, None, 256)
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            catalog
+                .path_index_pairs("first::paths", &sequence, None, 256)
+                .unwrap()
+                .len(),
+            0
+        );
         assert!(second.lookup(&sequences[0]).unwrap().is_some());
     }
 }
@@ -347,10 +353,13 @@ fn failed_durable_path_index_rebuild_restores_previous_pages_and_definition() {
                 .len(),
             259
         );
-        assert!(catalog
-            .path_index_pairs("items::paths", "[]", None, 4096)
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            catalog
+                .path_index_pairs("items::paths", "[]", None, 4096)
+                .unwrap()
+                .len(),
+            0
+        );
         assert!(!backend.in_transaction());
     }
 }
@@ -646,7 +655,7 @@ fn allocated_ids_and_age_label_tombstones_survive_handle_reconstruction() {
             second + 1
         );
         reopened.drop_label("test_graph", "Item").unwrap();
-        assert!(reopened.vertices_in_graph("test_graph").unwrap().is_empty());
+        assert_eq!(reopened.vertices_in_graph("test_graph").unwrap().len(), 0);
         assert_eq!(reopened.edges_in_graph("test_graph").unwrap().len(), 1);
         assert_eq!(graph.edges_in_graph("test_graph").unwrap().len(), 1);
     }

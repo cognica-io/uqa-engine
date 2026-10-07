@@ -125,10 +125,11 @@ fn removed_dependency_releases_only_the_provisional_upgrade_and_keeps_its_descen
         .unwrap()
         .unwrap()
         .retain();
-    assert!(
+    assert_eq!(
         lock_dependent_views(&session, &session, &["public.root".into()])
             .unwrap()
-            .is_empty()
+            .len(),
+        0
     );
     assert!(!session.peer_acquires("public.dependent", RelationLockMode::AccessExclusive));
     assert!(session.peer_acquires("public.dependent", RelationLockMode::AccessShare));

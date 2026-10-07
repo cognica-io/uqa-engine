@@ -121,8 +121,8 @@ fn empty_left() {
         |r| r.get("id").map(JoinKey::new),
         |r| r.get("id").map(JoinKey::new),
     );
-    assert!(semi.is_empty());
-    assert!(anti.is_empty());
+    assert_eq!(semi.len(), 0);
+    assert_eq!(anti.len(), 0);
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn empty_right() {
         |r| r.get("id").map(JoinKey::new),
         |r| r.get("id").map(JoinKey::new),
     );
-    assert!(semi.is_empty());
+    assert_eq!(semi.len(), 0);
     assert_eq!(ids(&anti), vec![1, 2, 3]);
 }
 
@@ -161,7 +161,7 @@ fn no_overlap() {
         |r| r.get("id").map(JoinKey::new),
         |r| r.get("id").map(JoinKey::new),
     );
-    assert!(semi.is_empty());
+    assert_eq!(semi.len(), 0);
     assert_eq!(ids(&anti), vec![1, 2, 3]);
 }
 
@@ -271,5 +271,5 @@ fn full_overlap() {
         |r| r.get("id").map(JoinKey::new),
     );
     assert_eq!(ids(&semi), vec![1, 2, 3]);
-    assert!(anti.is_empty());
+    assert_eq!(anti.len(), 0);
 }

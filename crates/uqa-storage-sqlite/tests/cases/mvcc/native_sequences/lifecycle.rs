@@ -78,7 +78,7 @@ fn sequence_catalog_lifecycle_preserves_security_and_names_in_legacy_and_native_
                 std::slice::from_ref(&row)
             );
             assert!(catalog.drop_sequence_row(&to).unwrap());
-            assert!(catalog.load_sequence_rows().unwrap().is_empty());
+            assert_eq!(catalog.load_sequence_rows().unwrap().len(), 0);
             connection.rollback_to_savepoint("keep").unwrap();
             assert_eq!(
                 catalog.load_sequence_rows().unwrap()[0]
@@ -279,7 +279,7 @@ fn native_sequence_budget_failure_does_not_stage_a_name_or_retire_a_definition()
     let mut huge = sequence("s", 1);
     huge.security = large_sequence_security();
     assert!(catalog.create_sequence_row(&huge).is_err());
-    assert!(catalog.load_sequence_rows().unwrap().is_empty());
+    assert_eq!(catalog.load_sequence_rows().unwrap().len(), 0);
     let original = sequence("s", 1);
     assert!(catalog.create_sequence_row(&original).unwrap());
     huge.definition_generation = [9; 16];

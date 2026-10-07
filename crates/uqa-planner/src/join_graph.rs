@@ -232,7 +232,7 @@ mod tests {
             graph.add_edge(0, 64, 1.0),
             Err(JoinGraphError::UnknownRelation { index: 64, .. })
         ));
-        assert!(graph.neighbors(64).is_empty());
+        assert_eq!(graph.neighbors(64).len(), 0);
     }
 
     #[test]

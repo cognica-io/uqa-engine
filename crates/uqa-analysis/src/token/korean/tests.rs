@@ -96,7 +96,7 @@ fn budgeted_conversion_retains_hidden_terminal_attributes_and_releases_native_bo
         AnalyzedText::from_nori_budgeted(Budgeted::new(raw, memory), &input, &mut || Ok(()))
             .unwrap();
     assert_eq!(*actual, expected);
-    assert!(actual.tokens().is_empty());
+    assert_eq!(actual.tokens().len(), 0);
     let terminal = actual.batch.terminal.as_ref().unwrap();
     assert_eq!(terminal.term(), "韓國");
     assert_eq!(

@@ -247,11 +247,13 @@ fn standalone_graph_selectors_and_algebra_retain_the_original_participant() {
         sa.establish_serializable_snapshot().unwrap();
         let reader = sb.establish_serializable_snapshot().unwrap();
         match route {
-            "label" | "clear" => assert!(a.vertex_ids_by_label("Q", "g").unwrap().is_empty()),
-            "adjacency" => assert!(a
-                .neighbors(1, Some("likes"), uqa_graph::Direction::Out, "g")
-                .unwrap()
-                .is_empty()),
+            "label" | "clear" => assert_eq!(a.vertex_ids_by_label("Q", "g").unwrap().len(), 0),
+            "adjacency" => assert_eq!(
+                a.neighbors(1, Some("likes"), uqa_graph::Direction::Out, "g")
+                    .unwrap()
+                    .len(),
+                0
+            ),
             "membership" => assert!(a.vertex_graphs(99).unwrap().is_empty()),
             "copy" => a.copy_graph("empty", "copy").unwrap(),
             _ => unreachable!(),

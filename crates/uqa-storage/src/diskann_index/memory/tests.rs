@@ -83,7 +83,7 @@ fn diskann_memory_writes_merge_with_sealed_pages_and_preserve_old_snapshots() {
     let control = StorageReadControl::with_limit(1 << 20);
     let mut index = new(&control);
     assert_eq!(index.index_kind(), "diskann");
-    assert!(scores(&index).is_empty());
+    assert_eq!(scores(&index).len(), 0);
     index
         .add_many(1, vec![vec![0.0, 1.0], vec![1.0, 0.0]])
         .unwrap();
@@ -163,7 +163,7 @@ fn diskann_memory_writable_forks_keep_independent_roots_and_nonreused_origins_af
     );
     let mut writable = live.writable_snapshot().unwrap();
     writable.clear().unwrap();
-    assert!(scores(&*writable).is_empty());
+    assert_eq!(scores(&*writable).len(), 0);
     assert_eq!(scores(&live), [(1, 1.0)]);
     assert_eq!(scores(&branch), [(1, -1.0)]);
 }
@@ -254,7 +254,7 @@ fn diskann_memory_clear_publishes_empty_pages_without_invalidating_retained_read
     assert_eq!(index.count().unwrap(), 0);
     assert_eq!(index.manifest().input().nodes, 0);
     assert_ne!(index.manifest().input().generation, generation);
-    assert!(scores(&index).is_empty());
+    assert_eq!(scores(&index).len(), 0);
     index.add(2, vec![0.0, 1.0]).unwrap();
     assert_eq!(scores(&index), [(2, 0.0)]);
     assert_eq!(scores(&*held), [(1, 1.0)]);

@@ -48,7 +48,7 @@ fn foreign_server_metadata_round_trips_undo_and_reopens_in_both_catalog_modes() 
                 .save_foreign_server_row(&server(Some("private")))
                 .unwrap();
             catalog.drop_foreign_server("remote").unwrap();
-            assert!(catalog.load_foreign_server_rows().unwrap().is_empty());
+            assert_eq!(catalog.load_foreign_server_rows().unwrap().len(), 0);
             connection.rollback_to_savepoint("server").unwrap();
             assert_eq!(
                 catalog.load_foreign_server_rows().unwrap(),
@@ -112,7 +112,7 @@ fn native_server_metadata_and_body_share_retained_snapshots() {
     writer.drop_foreign_server("remote").unwrap();
     assert_eq!(catalog.load_foreign_server_rows().unwrap(), [second]);
     reader.commit_transaction().unwrap();
-    assert!(catalog.load_foreign_server_rows().unwrap().is_empty());
+    assert_eq!(catalog.load_foreign_server_rows().unwrap().len(), 0);
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn physical_server_row_write_and_delete_are_atomic_on_metadata_failure() {
     assert!(catalog
         .save_foreign_server_row(&server(Some("identity")))
         .is_err());
-    assert!(catalog.load_foreign_server_rows().unwrap().is_empty());
+    assert_eq!(catalog.load_foreign_server_rows().unwrap().len(), 0);
     connection
         .with(|sqlite| {
             sqlite.execute_batch("DROP TRIGGER reject_metadata")?;

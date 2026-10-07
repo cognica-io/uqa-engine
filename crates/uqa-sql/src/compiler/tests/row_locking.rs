@@ -39,7 +39,7 @@ fn for_update_compiles_with_postgresql_lock_options() {
         select.locking[0].strength,
         crate::ast::LockStrength::ForNoKeyUpdate
     );
-    assert!(select.locking[0].relations.is_empty());
+    assert_eq!(select.locking[0].relations.len(), 0);
 
     let Statement::Select(select) = first("SELECT * FROM employees FOR KEY SHARE") else {
         panic!("expected SELECT");

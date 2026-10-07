@@ -62,8 +62,11 @@ fn incremental_insert_remove_tracks_nulls() {
     assert_eq!(ids(&index.scan(&Predicate::IsNull).unwrap()), vec![8]);
     index.remove(7, &Value::Int(1));
     index.remove(8, &Value::Null);
-    assert!(ids(&index.scan(&Predicate::Equals(Value::Int(1))).unwrap()).is_empty());
-    assert!(ids(&index.scan(&Predicate::IsNull).unwrap()).is_empty());
+    assert_eq!(
+        ids(&index.scan(&Predicate::Equals(Value::Int(1))).unwrap()).len(),
+        0
+    );
+    assert_eq!(ids(&index.scan(&Predicate::IsNull).unwrap()).len(), 0);
 }
 
 #[test]

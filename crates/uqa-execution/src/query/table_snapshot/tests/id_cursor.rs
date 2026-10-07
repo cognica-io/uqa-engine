@@ -86,7 +86,7 @@ impl DocumentStore for BorrowedSource {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
     ) -> StorageBackendResult<Option<usize>> {
-        assert!(fields.is_empty());
+        assert_eq!(fields.len(), 0);
         self.control.check()?;
         self.requests.lock().push((after, limit));
         let mut ids = BudgetedVec::new(self.control.memory());
@@ -162,7 +162,7 @@ fn borrowed_identity_cursors_preserve_private_masks_and_ordered_advancement() {
     assert_eq!(view.documents.next_doc_ids(None, 2).unwrap(), [1, 2]);
     assert_eq!(view.documents.next_doc_ids(Some(2), 2).unwrap(), [5, 7]);
     assert_eq!(view.documents.next_doc_ids(Some(7), 2).unwrap(), [9]);
-    assert!(view.documents.next_doc_ids(Some(9), 2).unwrap().is_empty());
+    assert_eq!(view.documents.next_doc_ids(Some(9), 2).unwrap().len(), 0);
     assert!(source.requests.lock().iter().all(|(_, limit)| *limit <= 2));
     let nested = view.documents.snapshot().unwrap();
     assert_eq!(nested.doc_ids().unwrap(), [1, 2, 5, 7, 9]);

@@ -286,7 +286,7 @@ fn diskann_population_rebuild_and_late_writers_reclassify_both_commit_orders() {
         let prefix = Layout
             .witness_prefix(&original.header, &original.control)
             .unwrap();
-        assert!(a.scan_prefix(&prefix).unwrap().is_empty());
+        assert_eq!(a.scan_prefix(&prefix).unwrap().len(), 0);
     }
 }
 
@@ -346,7 +346,7 @@ fn diskann_population_retirement_removes_witnesses_after_an_explicit_header_writ
         .witness_prefix(&built.header, &built.control)
         .unwrap();
     assert!(a.get(&built.header).unwrap().is_none());
-    assert!(a.scan_prefix(&prefix).unwrap().is_empty());
+    assert_eq!(a.scan_prefix(&prefix).unwrap().len(), 0);
 }
 
 #[test]

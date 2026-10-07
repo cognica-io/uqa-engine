@@ -62,12 +62,12 @@ fn legacy_view_source_binding_requires_one_catalog_identity() {
         ]),
     )
     .unwrap_err();
-    assert!(error.to_string().contains("ambiguous stored view source"));
+    assert!(error.contains("ambiguous stored view source"));
 
     let mut missing = lower_query("SELECT * FROM items");
     let error =
         bind_stored_view_relations(&mut missing, &std::collections::BTreeSet::new()).unwrap_err();
-    assert!(error.to_string().contains("does not exist"));
+    assert!(error.contains("does not exist"));
 }
 
 #[test]

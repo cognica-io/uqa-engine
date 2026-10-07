@@ -141,7 +141,7 @@ fn declaration_errors_follow_postgresql_check_order() {
         initial_enum_labels(1, &[long.clone(), "a".into(), "a".into()], &[2, 3, 4]).unwrap_err();
     assert_eq!(error.sqlstate(), Some("42602"));
     assert_eq!(error.to_string(), format!("invalid enum label \"{long}\""));
-    assert!(initial_enum_labels(1, &[], &[]).unwrap().is_empty());
+    assert_eq!(initial_enum_labels(1, &[], &[]).unwrap().len(), 0);
     let blank = initial_enum_labels(1, &[String::new(), " ".into()], &[2, 3]).unwrap();
     assert_eq!(blank[0].label, "");
 

@@ -132,7 +132,7 @@ mod tests {
             .unwrap();
         let payload = graph.get_graph_payload(1).unwrap();
         assert_eq!(payload.subgraph_vertices, vec![1, 2]);
-        assert!(payload.subgraph_edges.is_empty());
+        assert_eq!(payload.subgraph_edges.len(), 0);
         assert_eq!(payload.score_override, Some(0.5));
     }
 

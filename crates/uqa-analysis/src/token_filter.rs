@@ -379,7 +379,7 @@ mod tests {
             max_gram: 4,
             keep_short: false,
         };
-        assert!(f_drop.filter(v(&["ab"])).unwrap().is_empty());
+        assert_eq!(f_drop.filter(v(&["ab"])).unwrap().len(), 0);
 
         let f_keep = TokenFilter::Ngram {
             min_gram: 3,

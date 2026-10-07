@@ -267,10 +267,13 @@ fn every_plain_key_column_is_searched_and_included_columns_are_carried() {
             ValueIndexKey::Index("opaque:2".into()),
         ]
     );
-    assert!(definitions
-        .indexable_fields("public.other", &[], &[])
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        definitions
+            .indexable_fields("public.other", &[], &[])
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]

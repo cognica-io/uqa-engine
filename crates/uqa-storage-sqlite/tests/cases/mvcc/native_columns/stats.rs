@@ -49,7 +49,7 @@ fn native_statistics_replace_preserves_snapshots_and_rejects_incomplete_batches(
             ..oversized
         })
         .is_err());
-    assert!(catalog.load_column_stats("failed").unwrap().is_empty());
+    assert_eq!(catalog.load_column_stats("failed").unwrap().len(), 0);
     let mut z = statistic(TABLE, "z", 4);
     z.min_value = Some("{\"typed\":true}");
     z.max_value = None;
@@ -72,7 +72,7 @@ fn native_statistics_replace_preserves_snapshots_and_rejects_incomplete_batches(
     assert_eq!(expected[0].mcv_frequencies_json, "[0.25]");
     connection.savepoint("keep").unwrap();
     catalog.replace_column_stats(TABLE, &[]).unwrap();
-    assert!(catalog.load_column_stats(TABLE).unwrap().is_empty());
+    assert_eq!(catalog.load_column_stats(TABLE).unwrap().len(), 0);
     connection.rollback_to_savepoint("keep").unwrap();
     connection.commit_transaction().unwrap();
     assert_eq!(old.load_column_stats(TABLE).unwrap()[0].column_name, "old");
@@ -83,7 +83,7 @@ fn native_statistics_replace_preserves_snapshots_and_rejects_incomplete_batches(
         "raw"
     );
     catalog.delete_column_stats(TABLE).unwrap();
-    assert!(catalog.load_column_stats(TABLE).unwrap().is_empty());
+    assert_eq!(catalog.load_column_stats(TABLE).unwrap().len(), 0);
     assert_eq!(catalog.load_column_stats("docs").unwrap().len(), 1);
     catalog.delete_column_stats("absent").unwrap();
     catalog.replace_column_stats("absent", &[]).unwrap();

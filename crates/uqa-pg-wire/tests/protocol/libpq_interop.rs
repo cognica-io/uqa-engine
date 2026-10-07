@@ -393,7 +393,7 @@ fn postgresql_18_libpq_negotiates_30_32_latest_and_downgrade() {
             observation.startup.version.minor,
             requested_version(requested).minor
         );
-        assert!(observation.pre_startup.is_empty());
+        assert_eq!(observation.pre_startup.len(), 0);
         assert_eq!(observation.query.trim().trim_end_matches(';'), "SELECT 1");
     }
 }
@@ -738,7 +738,7 @@ fn postgresql_18_libpq_cancels_with_legacy_and_256_byte_keys() {
         );
         assert_eq!(observation.process_id, BACKEND_PROCESS_ID);
         assert_eq!(observation.secret_key.as_bytes().len(), expected_key_length);
-        assert!(observation.connection.pre_startup.is_empty());
-        assert!(observation.cancel_pre_startup.is_empty());
+        assert_eq!(observation.connection.pre_startup.len(), 0);
+        assert_eq!(observation.cancel_pre_startup.len(), 0);
     }
 }

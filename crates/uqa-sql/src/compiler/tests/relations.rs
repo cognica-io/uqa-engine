@@ -53,8 +53,8 @@ fn rows_from_preserves_members_column_definitions_aliases_and_ordinality() {
     assert_eq!(functions[0].column_types, ["int4", "text"]);
     assert_eq!(functions[0].args.len(), 1);
     assert_eq!(functions[1].name, "g");
-    assert!(functions[1].column_aliases.is_empty());
-    assert!(functions[1].column_types.is_empty());
+    assert_eq!(functions[1].column_aliases.len(), 0);
+    assert_eq!(functions[1].column_types.len(), 0);
 }
 
 #[test]
@@ -113,8 +113,8 @@ fn multi_argument_from_unnest_expands_to_canonical_unary_group_members() {
         assert_eq!(function.name, "pg_catalog.unnest");
         assert_eq!(function.output_name, "unnest");
         assert_eq!(function.args.len(), 1);
-        assert!(function.column_aliases.is_empty());
-        assert!(function.column_types.is_empty());
+        assert_eq!(function.column_aliases.len(), 0);
+        assert_eq!(function.column_types.len(), 0);
     }
 }
 
@@ -435,7 +435,7 @@ fn cte_values_body_is_preserved() {
     let cte = &select.with[0];
     assert_eq!(cte.columns, ["id", "label"]);
     assert_eq!(cte.body.query().unwrap().values.len(), 2);
-    assert!(cte.body.query().unwrap().projections.is_empty());
+    assert_eq!(cte.body.query().unwrap().projections.len(), 0);
 }
 
 #[test]

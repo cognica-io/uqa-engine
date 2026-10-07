@@ -88,7 +88,7 @@ fn metadata_private_provenance_and_literal_prefixes_follow_savepoints_and_refres
         a.metadata_with_prefix("acl:%_\0").unwrap(),
         vec![("acl:%_\0日本語".into(), "literal".into())]
     );
-    assert!(a.metadata_with_prefix("absent").unwrap().is_empty());
+    assert_eq!(a.metadata_with_prefix("absent").unwrap().len(), 0);
 }
 
 #[test]

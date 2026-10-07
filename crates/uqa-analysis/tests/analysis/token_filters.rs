@@ -65,7 +65,7 @@ fn stopword_filter_roundtrip() {
     let json = serde_json::to_string(&f).unwrap();
     let back: TokenFilter = serde_json::from_str(&json).unwrap();
     let result = back.filter(vec!["extra".into()]).unwrap();
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 0);
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn ngram_filter_short_token_dropped() {
         max_gram: 3,
         keep_short: false,
     };
-    assert!(f.filter(vec!["a".into()]).unwrap().is_empty());
+    assert_eq!(f.filter(vec!["a".into()]).unwrap().len(), 0);
 }
 
 #[test]

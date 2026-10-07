@@ -125,7 +125,7 @@ fn alter_function_compiles_exact_identity_and_supported_attributes() {
     assert_eq!(alter.kind, AlterRoutineKind::Function);
     assert_eq!(alter.name, "app.f");
     assert_eq!(alter.arg_types.as_deref().unwrap(), ["int4", "int8"]);
-    assert!(alter.arg_type_references.is_empty());
+    assert_eq!(alter.arg_type_references.len(), 0);
     assert_eq!(alter.volatility, Some(FunctionVolatility::Immutable));
     assert_eq!(alter.strict, Some(true));
 }
@@ -181,7 +181,7 @@ fn alter_function_preserves_percent_type_identity_and_serde_defaults() {
     let Statement::AlterRoutine(legacy) = legacy else {
         panic!("expected ALTER FUNCTION");
     };
-    assert!(legacy.arg_type_references.is_empty());
+    assert_eq!(legacy.arg_type_references.len(), 0);
     assert_eq!(legacy.volatility, None);
     assert_eq!(legacy.strict, None);
 }
@@ -300,7 +300,7 @@ fn alter_function_preserves_an_omitted_signature_for_unique_resolution() {
         panic!("expected ALTER FUNCTION");
     };
     assert_eq!(alter.arg_types, None);
-    assert!(alter.arg_type_references.is_empty());
+    assert_eq!(alter.arg_type_references.len(), 0);
 
     let Statement::AlterRoutine(zero_arity) = first("ALTER FUNCTION app.f() IMMUTABLE") else {
         panic!("expected ALTER FUNCTION");

@@ -35,7 +35,7 @@ fn training_features_preserve_numeric_values_and_array_storage_order() {
         Value::List(Vec::new()),
         Value::Array(ArrayValue::try_new(Vec::new()).unwrap()),
     ] {
-        assert!(value_to_f64_vec(&empty).unwrap().is_empty());
+        assert_eq!(value_to_f64_vec(&empty).unwrap().len(), 0);
     }
 }
 

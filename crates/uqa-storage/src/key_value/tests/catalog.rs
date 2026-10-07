@@ -100,7 +100,7 @@ fn key_value_catalog_rejects_a_table_without_its_parent_schema() {
     assert!(error
         .to_string()
         .contains("schema `missing` does not exist for relation `missing.docs`"));
-    assert!(catalog.load_schemas().unwrap().is_empty());
+    assert_eq!(catalog.load_schemas().unwrap().len(), 0);
     assert!(catalog.load_tables().unwrap().is_empty());
 }
 

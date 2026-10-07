@@ -89,10 +89,7 @@ fn vertex_ids_by_label_uses_label_membership() {
         vec![1, 2]
     );
     assert_eq!(store.vertex_ids_by_label("company", "g").unwrap(), vec![3]);
-    assert!(store
-        .vertex_ids_by_label("missing", "g")
-        .unwrap()
-        .is_empty());
+    assert_eq!(store.vertex_ids_by_label("missing", "g").unwrap().len(), 0);
 }
 
 #[test]

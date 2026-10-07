@@ -459,7 +459,7 @@ mod tests {
     fn table_scan_empty_source_returns_no_batch() {
         let mut scan = TableScan::from_rows(vec!["id".into()], Vec::new());
         let (_cols, rows) = run_to_rows(&mut scan).unwrap();
-        assert!(rows.is_empty());
+        assert_eq!(rows.len(), 0);
     }
 
     #[test]

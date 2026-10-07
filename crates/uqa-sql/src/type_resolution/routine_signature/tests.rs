@@ -594,7 +594,7 @@ fn omitted_polymorphic_defaults_supply_types_without_changing_explicit_inputs() 
         omitted.substitute_type("anyelement"),
         Some(ColumnType::Integer)
     );
-    assert!(omitted.argument_positions.is_empty());
+    assert_eq!(omitted.argument_positions.len(), 0);
     let explicit = match_types(&[input], &[Some(ColumnType::Text)])
         .unwrap()
         .unwrap();

@@ -92,7 +92,7 @@ fn removal_compacts_existing_capacity_and_preserves_upstream_terminal_precedence
     let vector = input.batch.tokens.as_ptr();
     let capacity = input.batch.tokens.capacity();
     let term = input.batch.tokens[2].term.as_str().unwrap().as_ptr();
-    let terminal = input.batch.terminal.as_deref().unwrap() as *const AnalysisToken;
+    let terminal = std::ptr::from_ref(input.batch.terminal.as_deref().unwrap());
     let old_bytes = input.reserved_bytes();
     let blocker = budget.reserve(budget.limit() - budget.used()).unwrap();
     let output = apply(
@@ -124,7 +124,7 @@ fn removing_every_token_releases_vector_before_allocating_the_terminal_box() {
     let input = original.clone_budgeted(&budget, || Ok(())).unwrap();
     let blocker = budget.reserve(budget.limit() - budget.used()).unwrap();
     let output = apply(&stop(&["a", "b", "c"]), input, &mut || Ok(())).unwrap();
-    assert!(output.tokens().is_empty());
+    assert_eq!(output.tokens().len(), 0);
     assert_eq!(output.batch.tokens.capacity(), 0);
     assert_eq!(output.batch.terminal.as_deref(), Some(&expected_terminal));
     assert_eq!(output.final_position_increment(), 2);
@@ -236,7 +236,7 @@ fn consuming_input_releases_exhausted_capacity_while_moved_tokens_keep_their_lea
     let input = original.clone_budgeted(&budget, || Ok(())).unwrap();
     let bytes = input.reserved_bytes();
     let vector_bytes = input.batch.tokens.capacity() * size_of::<AnalysisToken>();
-    let terminal = input.batch.terminal.as_deref().unwrap() as *const AnalysisToken;
+    let terminal = std::ptr::from_ref(input.batch.terminal.as_deref().unwrap());
     let (input, memory) = input.into_parts();
     let input =
         TokenBatchAllocation::from_budgeted(Budgeted::new(input.batch, memory)).into_input();

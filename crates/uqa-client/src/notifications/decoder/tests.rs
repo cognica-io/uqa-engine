@@ -43,6 +43,6 @@ fn rejected_envelopes_do_not_advance_sequence_or_publish_readiness() {
         ProtocolError::InvalidChannels
     );
     assert_eq!(decoder.sequence, 0);
-    assert!(decoder.framer.frame().is_empty());
+    assert_eq!(decoder.framer.frame().len(), 0);
     assert!(decoder.failure.is_some());
 }

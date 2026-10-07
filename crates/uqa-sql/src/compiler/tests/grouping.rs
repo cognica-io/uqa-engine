@@ -23,7 +23,7 @@ fn explicit_grouping_sets_preserve_every_key_expression() {
     );
     assert_eq!(select.grouping_sets[0].len(), 1);
     assert_eq!(select.grouping_sets[1].len(), 1);
-    assert!(select.grouping_sets[2].is_empty());
+    assert_eq!(select.grouping_sets[2].len(), 0);
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn group_by_distinct_is_preserved_for_post_binding_deduplication() {
     };
     assert!(plain.group_distinct);
     assert_eq!(plain.group_by.len(), 1);
-    assert!(plain.grouping_sets.is_empty());
+    assert_eq!(plain.grouping_sets.len(), 0);
 
     let Statement::Select(repeated) = first(
         "SELECT g, v, count(*) FROM t \

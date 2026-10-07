@@ -230,11 +230,7 @@ fn empty_all_side_and_singleton_generations_seal_without_fabricated_graphs() {
         let reader = reader(source, 2, &control);
         assert_eq!(reader.codebook().is_some(), nodes != 0);
         if nodes != 0 {
-            assert!(reader
-                .read_node(0, &control)
-                .unwrap()
-                .neighbors()
-                .is_empty());
+            assert_eq!(reader.read_node(0, &control).unwrap().neighbors().len(), 0);
         }
         let mut visited = 0;
         reader

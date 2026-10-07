@@ -155,7 +155,7 @@ fn unresolved_publication_releases_the_registry_writer_and_resumes_its_original_
 
         let consumer = registry.begin_recovered(store, &control()).unwrap();
         assert_eq!(consumer.queue_state().unwrap().next_sequence, 0);
-        assert!(consumer.entries_from(0).unwrap().is_empty());
+        assert_eq!(consumer.entries_from(0).unwrap().len(), 0);
         consumer.allocate_backend_process_id().unwrap();
         consumer.commit().unwrap();
 
@@ -266,7 +266,7 @@ fn abandoned_reservation_is_discarded_only_after_committed_recovery() {
         .begin_publishing(store, &control(), None, &mut |_| Ok(false))
         .unwrap();
     assert_eq!(next.queue_state().unwrap().next_sequence, 0);
-    assert!(next.entries_from(0).unwrap().is_empty());
+    assert_eq!(next.entries_from(0).unwrap().len(), 0);
     next.commit().unwrap();
 }
 
@@ -385,7 +385,7 @@ fn read_only_subscription_commits_recover_without_messages_and_rollback_stays_in
             )
             .unwrap();
         assert_eq!(recovered.listeners().unwrap().len(), usize::from(listening));
-        assert!(recovered.entries_from(0).unwrap().is_empty());
+        assert_eq!(recovered.entries_from(0).unwrap().len(), 0);
         recovered.commit().unwrap();
     }
     sender.backend.begin_read_transaction().unwrap();
@@ -407,7 +407,7 @@ fn read_only_subscription_commits_recover_without_messages_and_rollback_stays_in
             &control(),
         )
         .unwrap();
-    assert!(recovered.listeners().unwrap().is_empty());
+    assert_eq!(recovered.listeners().unwrap().len(), 0);
     assert!(!is_pending(&sender));
     recovered.commit().unwrap();
 }
@@ -465,8 +465,8 @@ fn failed_queue_append_rolls_back_its_subscription_and_acknowledgement() {
     assert!(transaction
         .prepare_publication(42, &pending(), Some(&listener()), &control())
         .is_err());
-    assert!(transaction.listeners().unwrap().is_empty());
-    assert!(transaction.entries_from(0).unwrap().is_empty());
+    assert_eq!(transaction.listeners().unwrap().len(), 0);
+    assert_eq!(transaction.entries_from(0).unwrap().len(), 0);
     assert_eq!(
         transaction.queue_state().unwrap(),
         NotificationQueueState::default()
@@ -501,8 +501,8 @@ fn failed_publication_rollback_prevents_registry_commit() {
         .to_string()
         .contains("cannot commit"));
     let transaction = registry.begin().unwrap();
-    assert!(transaction.listeners().unwrap().is_empty());
-    assert!(transaction.entries_from(0).unwrap().is_empty());
+    assert_eq!(transaction.listeners().unwrap().len(), 0);
+    assert_eq!(transaction.entries_from(0).unwrap().len(), 0);
     assert_eq!(
         transaction.queue_state().unwrap(),
         NotificationQueueState::default()
@@ -546,8 +546,8 @@ fn native_write_cancellation_preserves_its_error_after_sqlite_rolls_back() {
         .to_string()
         .contains("cannot commit"));
     let transaction = registry.begin().unwrap();
-    assert!(transaction.listeners().unwrap().is_empty());
-    assert!(transaction.entries_from(0).unwrap().is_empty());
+    assert_eq!(transaction.listeners().unwrap().len(), 0);
+    assert_eq!(transaction.entries_from(0).unwrap().len(), 0);
     assert_eq!(
         transaction.queue_state().unwrap(),
         NotificationQueueState::default()

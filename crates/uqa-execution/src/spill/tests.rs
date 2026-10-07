@@ -6,7 +6,7 @@
 
 use crate::RowSchemaExecution;
 use std::collections::BTreeMap;
-use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
+use std::io::{Read as _, Seek as _, SeekFrom};
 
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 use uqa_sql::expr::RowLookup as _;
@@ -240,7 +240,7 @@ fn spill_buffer_rejects_counter_overflow_before_writing() {
     let error = total_overflow.push(dummy_batch(0, 1)).unwrap_err();
     assert!(error.to_string().contains("row count overflow"));
     assert!(total_overflow.spill_path().is_none());
-    assert!(total_overflow.batches.is_empty());
+    assert_eq!(total_overflow.batches.len(), 0);
 
     let mut spill_stats_overflow = SpillBuffer::unbounded();
     spill_stats_overflow.push(dummy_batch(0, 1)).unwrap();
@@ -556,7 +556,7 @@ fn spill_round_trips_optional_lock_origins() {
             .as_ref(),
         "accounts"
     );
-    assert!(restored[0].rows[1].lock_origins().is_empty());
+    assert_eq!(restored[0].rows[1].lock_origins().len(), 0);
 }
 
 #[test]

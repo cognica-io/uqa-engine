@@ -5,7 +5,7 @@
 //
 
 use crate::RowSchemaExecution;
-use std::io::{Seek as _, SeekFrom, Write as _};
+use std::io::SeekFrom;
 
 use uqa_core::Value;
 use uqa_sql::expr::RowLookup as _;
@@ -123,7 +123,7 @@ fn indexed_spill_preserves_structural_internal_attributes() {
         .unwrap();
 
     let restored = spill.get(0).unwrap();
-    assert!(spill.row_schema().columns().is_empty());
+    assert_eq!(spill.row_schema().columns().len(), 0);
     assert_eq!(spill.row_schema().physical_width(), 1);
     let slot = spill.row_schema().internal_slot(internal).unwrap();
     assert_eq!(restored.value(slot), Some(&Value::Int(7)));

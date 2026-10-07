@@ -28,7 +28,7 @@ fn alter_routine_lowers_as_an_exact_identity_command() {
     assert_eq!(alter.kind, crate::ast::AlterRoutineKind::Function);
     assert_eq!(alter.name, "app.f");
     assert_eq!(alter.arg_types.as_deref().unwrap(), ["int4", "text"]);
-    assert!(alter.arg_type_references.is_empty());
+    assert_eq!(alter.arg_type_references.len(), 0);
     assert_eq!(
         alter.volatility,
         Some(crate::ast::FunctionVolatility::Immutable)

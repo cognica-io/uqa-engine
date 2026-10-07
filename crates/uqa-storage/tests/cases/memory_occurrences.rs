@@ -130,7 +130,7 @@ fn actual_memory_postings_retain_gaps_multiplicity_offsets_and_both_length_polic
             .indexed_field_metadata(7, "missing")
             .unwrap()
             .is_none());
-        assert!(index.get_occurrences(9, "body", &key).unwrap().is_empty());
+        assert_eq!(index.get_occurrences(9, "body", &key).unwrap().len(), 0);
     }
 }
 
@@ -256,7 +256,7 @@ fn replacement_removal_and_repeated_batch_ids_publish_complete_graph_state() {
     assert_eq!(metadata(snapshot.as_ref(), 1).final_offsets, offsets(1, 1));
     index.remove_document(u64::MAX).unwrap();
     assert_eq!(index.total_field_length("body").unwrap(), 0);
-    assert!(index.vocabulary_keys("body").unwrap().is_empty());
+    assert_eq!(index.vocabulary_keys("body").unwrap().len(), 0);
     index.clear().unwrap();
     assert!(index.indexed_field_metadata(1, "body").unwrap().is_none());
     assert_eq!(index.doc_count().unwrap(), 0);

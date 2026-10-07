@@ -452,7 +452,7 @@ fn empty_smaller_inner_build_does_not_read_the_probe_input() {
     assert!(join.builds_left_input());
 
     let (_, rows) = run_to_rows(&mut join).unwrap();
-    assert!(rows.is_empty());
+    assert_eq!(rows.len(), 0);
 }
 
 #[test]

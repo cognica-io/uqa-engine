@@ -49,7 +49,7 @@ fn legacy_sequence_conversion_is_prepared_without_catalog_access_and_rejected_by
     );
     let (_, repeated) =
         prepare_sequence_rows_with_migration(empty(), conversions, &roles(), true).unwrap();
-    assert!(repeated.is_empty());
+    assert_eq!(repeated.len(), 0);
 }
 
 #[test]

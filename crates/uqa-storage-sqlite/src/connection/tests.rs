@@ -615,7 +615,7 @@ fn sqlcipher_build_reports_cipher_version() {
     let version: String = mc
         .with(|c| Ok(c.query_row("PRAGMA cipher_version", [], |r| r.get(0))?))
         .unwrap();
-    assert!(!version.is_empty());
+    assert_ne!(version, "");
 }
 
 #[test]
@@ -864,7 +864,7 @@ fn compressed_encrypted_anchor_rejects_whole_file_rollback() {
     let Err(error) = ManagedConnection::open_compressed_encrypted(&path, key, options) else {
         panic!("stale registered anchor unexpectedly accepted a newer state");
     };
-    assert!(!error.to_string().is_empty());
+    assert_ne!(error.to_string(), "");
     let advanced_anchor = compressed_vfs::read_authenticated_anchor(&path, key).unwrap();
     assert!(advanced_anchor.generation > current_anchor.generation);
     ManagedConnection::open_compressed_encrypted_with_anchor(&path, key, options, advanced_anchor)
@@ -886,7 +886,7 @@ fn compressed_encrypted_anchor_rejects_whole_file_rollback() {
     let Err(error) = ManagedConnection::open_compressed_encrypted(&path, key, options) else {
         panic!("unanchored re-registration weakened an existing trusted anchor");
     };
-    assert!(!error.to_string().is_empty());
+    assert_ne!(error.to_string(), "");
 }
 
 #[test]

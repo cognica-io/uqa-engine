@@ -27,7 +27,7 @@ fn routine_schema_targets_preserve_kind_written_order_and_acl_options() {
             statement.schemas.as_deref().unwrap(),
             ["app", "Mixed.Schema", "app"]
         );
-        assert!(statement.items.is_empty());
+        assert_eq!(statement.items.len(), 0);
         assert!(!statement.is_grant);
         assert!(statement.grant_option_only);
         assert_eq!(statement.revoke_behavior, RoutineRevokeBehavior::Cascade);
@@ -48,7 +48,7 @@ fn routine_grants_read_legacy_explicit_targets_without_new_fields() {
     legacy.as_object_mut().unwrap().remove("privileges");
     let restored: GrantRoutineStmt = serde_json::from_value(legacy).unwrap();
     assert!(restored.schemas.is_none());
-    assert!(restored.privileges.is_empty());
+    assert_eq!(restored.privileges.len(), 0);
     assert_eq!(restored.items, statement.items);
     assert_eq!(restored.grantees, statement.grantees);
 }

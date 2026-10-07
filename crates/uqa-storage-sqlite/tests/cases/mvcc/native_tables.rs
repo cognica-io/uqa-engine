@@ -238,7 +238,7 @@ fn native_table_rename_generation_rotation_and_recreation_preserve_retained_view
         catalog.drop_table_and_data("public.renamed").unwrap();
         assert!(catalog.load_tables().unwrap().is_empty());
         assert!(catalog.load_catalog_indexes().unwrap().is_empty());
-        assert!(catalog.load_table_field_analyzers().unwrap().is_empty());
+        assert_eq!(catalog.load_table_field_analyzers().unwrap().len(), 0);
         let replacement = schema("renamed", 9, 9);
         catalog.save_table(&replacement).unwrap();
         assert!(
@@ -291,10 +291,13 @@ fn native_definition_only_drop_keeps_data_and_purge_preserves_analyzer_configura
         .get(1)
         .unwrap()
         .is_none());
-    assert!(SQLiteBTreeIndexStore::new(connection.clone())
-        .fields("public.docs")
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        SQLiteBTreeIndexStore::new(connection.clone())
+            .fields("public.docs")
+            .unwrap()
+            .len(),
+        0
+    );
     catalog.save_table(&schema("new_zero", 0, 0)).unwrap();
     let rows = catalog.load_tables().unwrap();
     assert_eq!(rows[0].relation.name, "docs");

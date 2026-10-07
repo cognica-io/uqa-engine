@@ -86,10 +86,13 @@ fn published_definitions_restore_with_every_oid_claim() {
     );
     publish(&publication, &renamed, EnumRegistry::new()).unwrap();
     assert!(restore(&catalog, &roles()).unwrap().is_empty());
-    assert!(catalog
-        .metadata_with_prefix("uqa.sql.enum_oid.v1:")
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        catalog
+            .metadata_with_prefix("uqa.sql.enum_oid.v1:")
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]

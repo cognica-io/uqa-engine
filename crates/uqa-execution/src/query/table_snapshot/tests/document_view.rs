@@ -70,7 +70,7 @@ fn document_view_workspace_rejects_exhaustion_without_changing_retained_rows() {
         );
     }
     assert!(!visited);
-    assert!(view.documents.next_doc_ids(None, 0).unwrap().is_empty());
+    assert_eq!(view.documents.next_doc_ids(None, 0).unwrap().len(), 0);
     view.documents
         .for_each_fields_multi_ref_with_presence(&[], &["key"], &mut |_, _, _| {
             panic!("an empty request must not visit rows")

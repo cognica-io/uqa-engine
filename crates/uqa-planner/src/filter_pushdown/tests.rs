@@ -200,15 +200,18 @@ fn disjunction_does_not_push_a_projection_missing_from_any_branch() {
         qualified_literal_equality("n2", "name", "GERMANY"),
     ]);
 
-    assert!(derived_disjunctive_qualifier_filters(
-        context,
-        &predicate,
-        &qualifiers,
-        None,
-        &BTreeMap::new(),
-        &[],
-    )
-    .is_empty());
+    assert_eq!(
+        derived_disjunctive_qualifier_filters(
+            context,
+            &predicate,
+            &qualifiers,
+            None,
+            &BTreeMap::new(),
+            &[],
+        )
+        .len(),
+        0
+    );
 }
 
 #[test]

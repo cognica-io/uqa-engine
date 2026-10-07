@@ -111,14 +111,14 @@ fn definition_write_observations_roll_back_with_their_storage_savepoint() {
         b.catalog.save_path_index("g::missing", "[]").unwrap();
         b.backend.rollback_to_savepoint(checkpoint).unwrap();
         b.backend.release_savepoint(checkpoint).unwrap();
-        assert!(b.catalog.load_path_indexes().unwrap().is_empty());
+        assert_eq!(b.catalog.load_path_indexes().unwrap().len(), 0);
         if !read_before_rollback {
             read.observe_definition(GraphDefinitionKind::PathIndex, Some("g::missing"))
                 .unwrap();
         }
         b.catalog.set_metadata("unrelated", "1").unwrap();
         finish(&a, &b, read_before_rollback);
-        assert!(b.catalog.load_path_indexes().unwrap().is_empty());
+        assert_eq!(b.catalog.load_path_indexes().unwrap().len(), 0);
     }
 }
 

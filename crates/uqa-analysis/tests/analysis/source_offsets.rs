@@ -179,7 +179,7 @@ fn removing_every_character_retains_the_final_original_offset() {
     }
     .filter_with_offsets("한🙂")
     .unwrap();
-    assert!(filtered.as_str().is_empty());
+    assert_eq!(filtered.as_str().len(), 0);
     assert_eq!(filtered.source_offsets(0..0).unwrap(), offsets(7..7, 3..3));
     assert_eq!(filtered.final_offsets(), offsets(7..7, 3..3));
     assert_eq!(FilteredText::new("").final_offsets(), offsets(0..0, 0..0));

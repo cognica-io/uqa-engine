@@ -868,10 +868,13 @@ fn relation_namespace_migration_rejects_catalog_index_collisions_atomically() {
     let error = catalog.migrate_relation_namespace().unwrap_err();
     assert!(error.to_string().contains("migration collision"));
     assert!(error.to_string().contains("app.taken"));
-    assert!(store
-        .scan_prefix(&key_with_tag(TAG_RELATION))
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix(&key_with_tag(TAG_RELATION))
+            .unwrap()
+            .len(),
+        0
+    );
     assert!(store.get(&legacy_index_key).unwrap().is_some());
 }
 
@@ -919,10 +922,13 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
         let error = catalog.migrate_relation_namespace().unwrap_err();
         assert!(error.to_string().contains("migration collision"));
         assert!(error.to_string().contains("public.docs"));
-        assert!(store
-            .scan_prefix(&key_with_tag(TAG_RELATION))
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            store
+                .scan_prefix(&key_with_tag(TAG_RELATION))
+                .unwrap()
+                .len(),
+            0
+        );
         assert!(store
             .get(&single_str_key(TAG_TABLE, "docs").unwrap())
             .unwrap()

@@ -196,7 +196,7 @@ mod tests {
     fn keyword_emits_whole_input() {
         let t = Tokenizer::Keyword;
         assert_eq!(t.tokenize("a b c").unwrap(), vec!["a b c"]);
-        assert!(t.tokenize("").unwrap().is_empty());
+        assert_eq!(t.tokenize("").unwrap().len(), 0);
     }
 
     #[test]

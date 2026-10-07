@@ -118,7 +118,7 @@ fn partition_copies_share_enforcement_but_receive_distinct_catalog_identities() 
         object_id,
     )
     .unwrap();
-    assert!(child.foreign_keys.is_empty());
+    assert_eq!(child.foreign_keys.len(), 0);
 }
 
 #[test]

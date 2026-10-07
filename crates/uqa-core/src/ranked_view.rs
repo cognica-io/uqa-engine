@@ -142,7 +142,7 @@ mod tests {
         let posting =
             PostingList::from_unsorted(vec![PostingEntry::new(1, Payload::with_score(0.2))]);
 
-        assert!(posting.ranked().top_k(0).is_empty());
+        assert_eq!(posting.ranked().top_k(0).len(), 0);
         assert!(posting.ranked().select_top_k(0).is_empty());
     }
 

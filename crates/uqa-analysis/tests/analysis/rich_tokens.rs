@@ -255,7 +255,7 @@ fn all_removed_tokens_preserve_trailing_positions_through_later_filters() {
         vec![],
     );
     let result = analyzer.analyze_tokens("the and").unwrap();
-    assert!(result.tokens().is_empty());
+    assert_eq!(result.tokens().len(), 0);
     assert_eq!(result.final_position_increment(), 2);
     assert_eq!(result.final_offsets().utf8, 7..7);
 }

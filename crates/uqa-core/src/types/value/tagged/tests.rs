@@ -240,8 +240,8 @@ fn empty_dimensions_and_mixed_nested_empty_arrays_keep_their_shape() {
     let Value::Array(empty) = empty else {
         panic!("expected an empty array")
     };
-    assert!(empty.dimensions().is_empty());
-    assert!(empty.lower_bounds().is_empty());
+    assert_eq!(empty.dimensions().len(), 0);
+    assert_eq!(empty.lower_bounds().len(), 0);
 
     let nested = ArrayValue::with_lower_bounds(
         vec![Value::Array(empty), Value::List(Vec::new())],

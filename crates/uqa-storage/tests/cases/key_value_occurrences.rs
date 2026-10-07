@@ -439,12 +439,12 @@ fn binary_nori_terms_and_source_metadata_follow_column_and_table_lifecycles() {
         .unwrap();
     catalog.purge_table_data("public.renamed").unwrap();
     assert_eq!(renamed.doc_count().unwrap(), 0);
-    assert!(store.scan_prefix(b"e").unwrap().is_empty());
+    assert_eq!(store.scan_prefix(b"e").unwrap().len(), 0);
     renamed
         .add_document(4, BTreeMap::from([("caption".into(), "🙂a".into())]))
         .unwrap();
     catalog.drop_table_and_data("public.renamed").unwrap();
-    assert!(store.scan_prefix(b"e").unwrap().is_empty());
+    assert_eq!(store.scan_prefix(b"e").unwrap().len(), 0);
 }
 
 struct CancellingStore {

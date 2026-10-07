@@ -74,7 +74,7 @@ fn diskann_mapping_cleanup_preserves_original_controls_and_accepts_guardless_pre
     }
     KeyValueDiskANNMappingMaintenance::run(&store, &control).unwrap();
     for prefix in [b"\0uqa-diskann-v1\0\x02", b"\0uqa-diskann-v1\0\x03"] {
-        assert!(store.scan_prefix(prefix).unwrap().is_empty());
+        assert_eq!(store.scan_prefix(prefix).unwrap().len(), 0);
     }
 }
 
@@ -99,6 +99,6 @@ fn diskann_bound_stage_outlives_private_catalog_undo_but_cannot_restart_after_di
     KeyValueDiskANNMaintenance::run(&store, &control).unwrap();
     assert!(stage.start(&control).is_err());
     for prefix in [b"\0uqa-diskann-v1\0\x02", b"\0uqa-diskann-v1\0\x03"] {
-        assert!(store.scan_prefix(prefix).unwrap().is_empty());
+        assert_eq!(store.scan_prefix(prefix).unwrap().len(), 0);
     }
 }
