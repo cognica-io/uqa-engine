@@ -26,6 +26,55 @@ pub(super) fn execute_routine(
     allow_nonatomic: bool,
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
 ) -> Result<RoutineOutcome, SQLError> {
+    execute_entry(
+        context,
+        function,
+        bound,
+        invocation,
+        RoutineEntry::Invocation {
+            allow_nonatomic,
+            record_target,
+        },
+    )
+}
+
+enum RoutineEntry<'a> {
+    Invocation {
+        allow_nonatomic: bool,
+        record_target: Option<&'a [uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
+    },
+    CatalogCallback,
+}
+
+pub(super) fn execute_catalog_routine(
+    context: &RoutineInvocationContext<'_>,
+    function: &SQLUserFunction,
+    bound: Vec<Value>,
+    invocation: &RoutineInvocationBinding,
+) -> Result<RoutineOutcome, SQLError> {
+    execute_entry(
+        context,
+        function,
+        bound,
+        invocation,
+        RoutineEntry::CatalogCallback,
+    )
+}
+
+fn execute_entry(
+    context: &RoutineInvocationContext<'_>,
+    function: &SQLUserFunction,
+    bound: Vec<Value>,
+    invocation: &RoutineInvocationBinding,
+    entry: RoutineEntry<'_>,
+) -> Result<RoutineOutcome, SQLError> {
+    let (allow_nonatomic, record_target, require_execute) = match entry {
+        RoutineEntry::Invocation {
+            allow_nonatomic,
+            record_target,
+        } => (allow_nonatomic, record_target, true),
+        RoutineEntry::CatalogCallback => (false, None, false),
+    };
     if matches!(
         &function.def.returns,
         FunctionReturns::Scalar { type_name }
@@ -45,7 +94,12 @@ pub(super) fn execute_routine(
         && !definition.security.security_definer
         && definition.config.is_empty();
     let _transaction_context = RoutineTransactionGuard::enter(context.runtime.session, nonatomic);
-    uqa_sql::routines::security::ensure_routine_execute_privilege(context.authority, definition)?;
+    if require_execute {
+        uqa_sql::routines::security::ensure_routine_execute_privilege(
+            context.authority,
+            definition,
+        )?;
+    }
     super::scopes::with_routine_context(context.session, definition, || {
         let body = if definition.language == "plpgsql" {
             context.session.plpgsql_body(function, definition, None)?

@@ -29,7 +29,11 @@ impl ForeignCreationContext<'_> {
             &CreateForeignServer {
                 name,
                 fdw_type: fdw_type.to_owned(),
-                options,
+                options: options
+                    .into_iter()
+                    .collect::<std::collections::BTreeMap<_, _>>()
+                    .into_iter()
+                    .collect(),
                 if_not_exists,
                 server_type: None,
                 version: None,
@@ -71,7 +75,7 @@ impl ForeignCreationContext<'_> {
             }
             return Err(diagnostic("42710", message));
         }
-        let wrapper_reference = self.bind_server_wrapper(&statement.fdw_type)?;
+        let wrapper = self.bind_server_wrapper(&statement.fdw_type)?;
         self.creation.retain_owner(&owner)?;
         let oid = crate::catalog::identity::reserve_new_catalog_oid(
             self.creation.locks,
@@ -86,6 +90,9 @@ impl ForeignCreationContext<'_> {
             },
         )?;
         let options = options(&statement.options)?;
+        if let Some(validator) = &wrapper.validator {
+            self.invoke_foreign_validator(validator, &statement.options, FOREIGN_SERVER_CLASS)?;
+        }
         let guard = self.creation.locks.acquire_shared_catalog(
             SharedCatalogLock::Name {
                 class_id: FOREIGN_SERVER_CLASS,
@@ -112,7 +119,14 @@ impl ForeignCreationContext<'_> {
             fdw_type: statement.fdw_type.clone(),
             options,
             metadata: ForeignServerMetadata {
-                wrapper_reference: Some(wrapper_reference),
+                option_order: Some(
+                    statement
+                        .options
+                        .iter()
+                        .map(|(name, _)| name.clone())
+                        .collect(),
+                ),
+                wrapper_reference: Some(wrapper.identity),
                 oid: u32::try_from(oid).map_err(|error| SQLError::Internal(error.to_string()))?,
                 object_id: crate::catalog::identity::new_nonzero_catalog_identity(
                     &statement.name,
@@ -138,33 +152,20 @@ impl ForeignCreationContext<'_> {
     fn bind_server_wrapper(
         &self,
         name: &str,
-    ) -> Result<uqa_sql::catalog::foreign_wrapper::ForeignWrapperReference, SQLError> {
-        let reference = self
-            .registry
-            .wrappers()
-            .get(name)
-            .map(|wrapper| wrapper.identity)
-            .ok_or_else(|| {
-                diagnostic(
-                    "42704",
-                    format!("foreign-data wrapper \"{name}\" does not exist"),
-                )
-            })?;
-        let guard = self.creation.locks.acquire_shared_catalog(
-            SharedCatalogLock::Object {
-                class_id: uqa_sql::catalog::dependencies::FOREIGN_WRAPPER_CLASS,
-                oid: reference.oid,
-            },
-            RelationLockMode::AccessShare,
+    ) -> Result<uqa_sql::catalog::foreign_wrapper::ForeignWrapperDefinition, SQLError> {
+        let wrapper = self.registry.wrappers().get(name).cloned().ok_or_else(|| {
+            diagnostic(
+                "42704",
+                format!("foreign-data wrapper \"{name}\" does not exist"),
+            )
+        })?;
+        uqa_sql::schema::foreign_wrappers::ensure_wrapper_usage(
+            &wrapper,
+            &self.creation.names.current_role(),
+            self.creation.roles,
         )?;
-        self.creation.locks.refresh_shared_catalog()?;
-        uqa_sql::catalog::foreign_wrapper::bound_wrapper(
-            &self.registry.wrappers(),
-            name,
-            reference,
-        )?;
-        guard.retain();
-        Ok(reference)
+        // GetForeignDataWrapperByName captures the reference without retaining an object lock.
+        Ok(wrapper)
     }
 }
 

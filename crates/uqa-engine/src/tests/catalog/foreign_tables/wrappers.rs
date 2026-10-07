@@ -19,6 +19,109 @@ pub(super) fn remove_wrapper_format(catalog: &dyn uqa_storage::CatalogFacade) {
 }
 
 #[test]
+fn server_options_keep_declaration_order_after_reopen() {
+    for provider in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ordered-options.db");
+        let engine = open(provider, &path);
+        engine.sql("CREATE SERVER ordered_options FOREIGN DATA WRAPPER memory_fdw OPTIONS (second '2', first '1')", &[]).unwrap();
+        let engine = if provider == 0 {
+            engine
+        } else {
+            drop(engine);
+            open(provider, &path)
+        };
+        assert_eq!(
+            engine.durable.foreign_servers.read()["ordered_options"]
+                .metadata
+                .option_order
+                .as_deref(),
+            Some(["second".to_owned(), "first".to_owned()].as_slice())
+        );
+    }
+}
+
+#[test]
+fn server_validator_can_remove_its_wrapper_without_rebinding_the_published_reference() {
+    for provider in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("orphaned-server.db");
+        let engine = open(provider, &path);
+        engine.sql("CREATE FUNCTION server_removes_wrapper(text[],oid) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN IF $2=1417 THEN EXECUTE 'DROP FUNCTION server_removes_wrapper(text[],oid) CASCADE'; END IF; RETURN 1; END $$; CREATE FOREIGN DATA WRAPPER orphaned_fdw VALIDATOR server_removes_wrapper", &[]).unwrap();
+        let original = engine.durable.foreign_wrappers.read()["orphaned_fdw"].identity;
+        engine.sql("CREATE SERVER orphaned_server FOREIGN DATA WRAPPER orphaned_fdw; CREATE FOREIGN DATA WRAPPER orphaned_fdw", &[]).unwrap();
+        let engine = if provider == 0 {
+            engine
+        } else {
+            drop(engine);
+            open(provider, &path)
+        };
+        assert_eq!(
+            engine.durable.foreign_servers.read()["orphaned_server"]
+                .metadata
+                .wrapper_reference,
+            Some(original)
+        );
+        assert_ne!(
+            engine.durable.foreign_wrappers.read()["orphaned_fdw"].identity,
+            original
+        );
+        let error = engine
+            .sql(
+                "CREATE FOREIGN TABLE orphaned_rows(id integer) SERVER orphaned_server",
+                &[],
+            )
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("XX000"));
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "cache lookup failed for foreign-data wrapper {}",
+                original.oid
+            )
+        );
+    }
+}
+
+#[test]
+fn a_self_removing_validator_keeps_its_original_oid_after_name_reuse_and_reopen() {
+    for provider in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("orphan-validator.db");
+        let engine = open(provider, &path);
+        engine.sql("CREATE FUNCTION orphan_validator(text[],oid) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'DROP FUNCTION orphan_validator(text[],oid)'; RETURN 1; END $$; CREATE FOREIGN DATA WRAPPER orphan_fdw VALIDATOR orphan_validator", &[]).unwrap();
+        let original = engine.durable.foreign_wrappers.read()["orphan_fdw"]
+            .validator
+            .clone()
+            .unwrap();
+        engine.sql("CREATE FUNCTION orphan_validator(text[],oid) RETURNS integer LANGUAGE SQL RETURN 7", &[]).unwrap();
+        let engine = if provider == 0 {
+            engine
+        } else {
+            drop(engine);
+            open(provider, &path)
+        };
+        assert_eq!(
+            engine.durable.foreign_wrappers.read()["orphan_fdw"]
+                .validator
+                .as_ref(),
+            Some(&original)
+        );
+        let error = engine
+            .sql(
+                "CREATE SERVER orphan_server FOREIGN DATA WRAPPER orphan_fdw",
+                &[],
+            )
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("XX000"));
+        assert_eq!(
+            error.to_string(),
+            format!("cache lookup failed for function {}", original.oid)
+        );
+    }
+}
+
+#[test]
 fn native_wrapper_references_survive_sessions_snapshots_and_reopen() {
     for provider in 0..4 {
         let directory = tempfile::tempdir().unwrap();

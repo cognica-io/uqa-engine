@@ -19,6 +19,9 @@ pub struct ForeignServerMetadata {
     pub owner: RoleIdentity,
     pub server_type: Option<String>,
     pub version: Option<String>,
+    /// Written option names, absent only in preceding map-only records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_order: Option<Vec<String>>,
     /// Missing only while restoring a catalog that predates wrapper identities.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrapper_reference: Option<super::foreign_wrapper::ForeignWrapperReference>,
@@ -65,6 +68,15 @@ pub fn validate_foreign_servers(
         }
         if metadata.object_id == [0; 16] || !identities.insert(metadata.object_id) {
             return Err(invalid(name, "invalid or duplicate object identity"));
+        }
+        if let Some(order) = &metadata.option_order {
+            let names = order.iter().collect::<BTreeSet<_>>();
+            if names.len() != order.len()
+                || order.len() != server.options.len()
+                || order.iter().any(|name| !server.options.contains_key(name))
+            {
+                return Err(invalid(name, "option order disagrees with stored options"));
+            }
         }
         if !metadata.owner.is_valid() || metadata.owner.role_definition(roles).is_none() {
             return Err(invalid(name, "owner references a missing or replaced role"));

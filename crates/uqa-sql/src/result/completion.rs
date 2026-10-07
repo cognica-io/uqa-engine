@@ -160,6 +160,7 @@ pub fn command_tag_name(command: &CommandPlan) -> &'static str {
                 "DEALLOCATE ALL"
             }
         }
+        CommandPlan::CreateForeignWrapper(_) => "CREATE FOREIGN DATA WRAPPER",
         CommandPlan::CreateForeignServer(_) => "CREATE SERVER",
         CommandPlan::CreateForeignTable(_) | CommandPlan::CreateForeignTableDefinition(_) => {
             "CREATE FOREIGN TABLE"

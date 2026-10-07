@@ -105,6 +105,9 @@ impl DeletionPlan {
                 CatalogObject::ForeignServer { name, object_id } => {
                     context.foreign_servers.remove(name, *object_id)?;
                 }
+                CatalogObject::ForeignWrapper { name, object_id } => {
+                    context.foreign_wrappers.remove(name, *object_id)?;
+                }
                 CatalogObject::ArrayType { .. } | CatalogObject::RowType { .. } => {}
             }
             if Some(position) == last_column {

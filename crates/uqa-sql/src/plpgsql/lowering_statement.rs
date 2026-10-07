@@ -345,8 +345,26 @@ pub(super) fn lower_stmt(
         return Err(SQLError::Internal("RETURN QUERY without a query".into()));
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_raise") {
-        if stmt.get("options").is_some() {
-            return Err(SQLError::Unsupported("RAISE ... USING options".into()));
+        let mut options = Vec::new();
+        if let Some(raw_options) = optional_array(stmt, "options")? {
+            for raw in raw_options {
+                let option = expect_tag(raw, "PLpgSQL_raise_option", "RAISE option")?;
+                let kind = match require_i64(option, "opt_type", "RAISE option")? {
+                    0 => super::RaiseOptionKind::ErrorCode,
+                    1 => super::RaiseOptionKind::Message,
+                    2 => super::RaiseOptionKind::Detail,
+                    3 => super::RaiseOptionKind::Hint,
+                    _ => {
+                        return Err(SQLError::Unsupported(
+                            "RAISE ... USING object diagnostic fields".into(),
+                        ))
+                    }
+                };
+                options.push(super::RaiseOption {
+                    kind,
+                    value: lower_expr(require(option, "expr")?, mode)?,
+                });
+            }
         }
         let raw_level = require_i64(stmt, "elog_level", "RAISE statement")?;
         let level = match raw_level {
@@ -370,6 +388,7 @@ pub(super) fn lower_stmt(
             condition,
             message: json_optional_str(stmt, "message")?,
             params: lower_expr_list(stmt.get("params"), mode)?,
+            options,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_assert") {

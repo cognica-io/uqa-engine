@@ -27,6 +27,8 @@ mod server_deletion;
 mod servers;
 #[path = "sql_foreign_ddl/temporary.rs"]
 mod temporary;
+#[path = "sql_foreign_ddl/wrappers.rs"]
+mod wrappers;
 
 fn row(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
     pairs

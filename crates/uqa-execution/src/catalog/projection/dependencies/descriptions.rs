@@ -11,16 +11,16 @@ use crate::catalog::context::CatalogContext;
 use uqa_sql::ast::ColumnType;
 use uqa_sql::catalog::dependencies::{
     ObjectAddress, ATTRIBUTE_DEFAULT_CLASS, CONSTRAINT_CLASS, DATABASE_CLASS, FOREIGN_SERVER_CLASS,
-    LANGUAGE_CLASS, NAMESPACE_CLASS, PROCEDURE_CLASS, RELATION_CLASS, REWRITE_CLASS, ROLE_CLASS,
-    ROLE_MEMBERSHIP_CLASS, TRIGGER_CLASS, TYPE_CLASS,
+    FOREIGN_WRAPPER_CLASS, LANGUAGE_CLASS, NAMESPACE_CLASS, PROCEDURE_CLASS, RELATION_CLASS,
+    REWRITE_CLASS, ROLE_CLASS, ROLE_MEMBERSHIP_CLASS, TRIGGER_CLASS, TYPE_CLASS,
 };
 use uqa_sql::catalog::languages::language_name;
 use uqa_sql::SQLError;
 
 /// Catalogs whose objects `getObjectDescription` can name and that hold no objects in this catalog.
-const EMPTY_CLASSES: [u32; 28] = [
-    826, 1213, 1418, 2328, 2601, 2602, 2603, 2605, 2607, 2613, 2616, 2617, 2753, 3079, 3256, 3381,
-    3456, 3466, 3576, 3600, 3601, 3602, 3764, 6100, 6104, 6106, 6237, 6243,
+const EMPTY_CLASSES: [u32; 27] = [
+    826, 1213, 1418, 2601, 2602, 2603, 2605, 2607, 2613, 2616, 2617, 2753, 3079, 3256, 3381, 3456,
+    3466, 3576, 3600, 3601, 3602, 3764, 6100, 6104, 6106, 6237, 6243,
 ];
 
 pub(super) fn describe(
@@ -51,6 +51,9 @@ pub(super) fn describe(
         FOREIGN_SERVER_CLASS => objects
             .foreign_server_name(object.object_id)
             .map(|name| format!("server {name}")),
+        FOREIGN_WRAPPER_CLASS => objects
+            .foreign_wrapper_object(object.object_id)
+            .map(|(name, _)| format!("foreign-data wrapper {name}")),
         ROLE_CLASS => objects
             .role_name(object.object_id)
             .map(|name| format!("role {name}")),

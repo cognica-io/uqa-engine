@@ -158,6 +158,7 @@ pub(super) fn restore(
             &mut definitions,
             row,
             ForeignServerMetadata {
+                option_order: None,
                 wrapper_reference: None,
                 oid,
                 object_id,

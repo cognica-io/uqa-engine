@@ -29,12 +29,15 @@ use uqa_sql::{SQLError, SQLNotice};
 pub struct CatalogRemovalContext<'a> {
     pub catalog: CatalogContext<'a>,
     pub locks: &'a dyn RelationDefinitionSession,
+    pub shared_locks: &'a dyn crate::row_locks::shared_objects::SharedObjectLockSession,
     /// The object identities of relations, which the deletion locks by.
     pub identities: &'a dyn crate::row_locks::binding::RelationLockCatalog,
     /// Tables, and through it views, sequences, routines, triggers, rules, columns, defaults and constraints.
     pub tables: TableRemovalContext<'a>,
     pub foreign_tables: ForeignTableRemovalContext<'a>,
     pub foreign_servers: crate::schema::foreign_server_removal::ForeignServerRemovalPublication<'a>,
+    pub foreign_wrappers:
+        crate::schema::foreign_wrapper_removal::ForeignWrapperRemovalPublication<'a>,
     pub indexes: IndexRemovalContext<'a>,
     pub domains: DomainDependencyContext<'a>,
     /// Attributes of standalone composite types, whose removal rewrites the stored values of the type.
@@ -73,6 +76,7 @@ fn delete_objects(
     quiet: bool,
 ) -> Result<(), SQLError> {
     let mut locked = std::collections::BTreeSet::new();
+    let mut locked_foreign = std::collections::BTreeSet::new();
     loop {
         let dependencies = catalog_dependencies(&context.catalog)?;
         let originals = originals(&dependencies)?;
@@ -85,6 +89,9 @@ fn delete_objects(
         };
         let describe = |object| dependencies.describe(&context.catalog, object);
         let targets = DeletionTargets::collect(dependencies.graph(), &originals, &describe)?;
+        if locking::lock_foreign_definitions(context, &targets, &mut locked_foreign)? {
+            continue;
+        }
         let plan = DeletionPlan::new(&dependencies, &targets)?;
         if locking::lock_relations(context, &plan, &mut locked)? {
             // Waiting for a lock may have let other sessions change what depends on the objects.

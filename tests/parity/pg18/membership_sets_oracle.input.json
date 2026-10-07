@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "single_rhs",
+      "sql": "SELECT 1 IN (generate_series(1,2)) AS present"
+    },
+    {
+      "id": "single_lhs",
+      "sql": "SELECT generate_series(1,2) IN (1) AS present"
+    },
+    {
+      "id": "single_not_in",
+      "sql": "SELECT 1 NOT IN (generate_series(1,2)) AS present"
+    },
+    {
+      "id": "empty_set",
+      "sql": "SELECT 1 IN (generate_series(2,1)) AS present"
+    },
+    {
+      "id": "array_rhs",
+      "sql": "SELECT 1 IN (generate_series(1,2),3) AS present"
+    },
+    {
+      "id": "array_lhs",
+      "sql": "SELECT generate_series(1,2) IN (1,2) AS present"
+    },
+    {
+      "id": "row_rhs",
+      "sql": "SELECT 1 IN (generate_series(1,id)) AS present FROM (VALUES(2)) AS source(id)"
+    },
+    {
+      "id": "mixed_array_row",
+      "sql": "SELECT 1 IN (1,2,generate_series(1,id)) AS present FROM (VALUES(2)) AS source(id)"
+    },
+    {
+      "id": "operator_before_set",
+      "sql": "SELECT true IN (generate_series(1,2))"
+    },
+    {
+      "id": "inputs_before_set",
+      "sql": "SELECT 1 IN (generate_series(1,2), no_such_function())"
+    },
+    {
+      "id": "input_error_before_set",
+      "sql": "SELECT 1 IN (generate_series(1,2), CAST('bad' AS integer))"
+    },
+    {
+      "id": "prepared_rejection",
+      "sql": "PREPARE scalar_membership(int) AS SELECT 1 IN (generate_series(1,$1)) AS present"
+    },
+    {
+      "id": "prepared_array",
+      "sql": "PREPARE array_membership(int) AS SELECT 1 IN (generate_series(1,$1),3) AS present"
+    },
+    {
+      "id": "prepared_execution",
+      "sql": "EXECUTE array_membership(2)"
+    },
+    {
+      "id": "scalar_definition",
+      "sql": "CREATE FUNCTION membership_scalar(integer) RETURNS integer LANGUAGE SQL RETURN $1"
+    },
+    {
+      "id": "scalar_result",
+      "sql": "SELECT 1 IN (membership_scalar(1)) AS present"
+    },
+    {
+      "id": "set_definition",
+      "sql": "CREATE FUNCTION membership_set(integer) RETURNS SETOF integer LANGUAGE SQL AS $$SELECT generate_series(1,$1)$$"
+    },
+    {
+      "id": "user_set_rejection",
+      "sql": "SELECT 1 IN (membership_set(2)) AS present"
+    },
+    {
+      "id": "user_array",
+      "sql": "SELECT 1 IN (membership_set(2),3) AS present"
+    }
+  ]
+}

@@ -21,6 +21,7 @@ mod enum_functions;
 mod enums;
 mod events;
 mod expressions;
+mod foreign_wrappers;
 mod from;
 mod function_binding;
 mod identity_sequence;
@@ -55,6 +56,7 @@ pub use enum_functions::EnumFunctionOperation;
 pub use enums::*;
 pub use events::*;
 pub use expressions::*;
+pub use foreign_wrappers::*;
 pub use from::*;
 pub use function_binding::*;
 pub use identity_sequence::{DeferredSQLError, IdentitySequenceDeclaration, IdentitySequenceName};
@@ -625,6 +627,8 @@ pub enum Statement {
     Values {
         rows: Vec<Vec<Expr>>,
     },
+    /// `CREATE FOREIGN DATA WRAPPER name [HANDLER ...] [VALIDATOR ...] [OPTIONS ...]`.
+    CreateForeignWrapper(CreateForeignWrapper),
     /// `CREATE SERVER name FOREIGN DATA WRAPPER type OPTIONS (...)`.
     CreateForeignServer(CreateForeignServer),
     /// `CREATE FOREIGN TABLE name (...) SERVER server OPTIONS (...)`.

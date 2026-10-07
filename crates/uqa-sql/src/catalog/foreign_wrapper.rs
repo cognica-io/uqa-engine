@@ -47,7 +47,15 @@ impl NativeForeignWrapper {
 pub enum ForeignWrapperHandler {
     None,
     Native(NativeForeignWrapper),
-    Function(FunctionBinding),
+    Function(ForeignWrapperFunction),
+}
+
+/// Keep `PostgreSQL`'s routine OID even when a validator removes itself during creation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForeignWrapperFunction {
+    pub oid: u32,
+    pub binding: FunctionBinding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,7 +72,7 @@ pub struct ForeignWrapperDefinition {
     pub identity: ForeignWrapperReference,
     pub owner: RoleIdentity,
     pub handler: ForeignWrapperHandler,
-    pub validator: Option<FunctionBinding>,
+    pub validator: Option<ForeignWrapperFunction>,
     /// Catalog option arrays retain declaration order, even when execution later needs a map.
     pub options: Vec<(String, String)>,
 }
@@ -79,43 +87,6 @@ impl ForeignWrapperDefinition {
         }
         Ok(())
     }
-}
-
-/// Rebind recorded routine identities after definition placeholders have been restored, without invoking any handler or validator.
-pub fn validate_functions(
-    wrappers: &ForeignWrappers,
-    types: &dyn crate::FunctionTypeResolver,
-) -> Result<(), SQLError> {
-    for wrapper in wrappers.values() {
-        if let ForeignWrapperHandler::Function(function) = &wrapper.handler {
-            let result = types
-                .resolve_function_type(&function.name, Some(function), &[], &[], false)?
-                .ok_or_else(|| invalid(&wrapper.name, "missing handler function"))?;
-            // FDW_HANDLEROID from PostgreSQL's pg_type catalog.
-            if super::type_metadata::pg_type_oid(&result) != 3115 {
-                return Err(invalid(
-                    &wrapper.name,
-                    "handler does not return fdw_handler",
-                ));
-            }
-        }
-        if let Some(function) = &wrapper.validator {
-            let arguments = [
-                Some(crate::ColumnType::Array(Box::new(crate::ColumnType::Text))),
-                Some(crate::ColumnType::Oid),
-            ];
-            types
-                .resolve_function_type(
-                    &function.name,
-                    Some(function),
-                    &[None, None],
-                    &arguments,
-                    false,
-                )?
-                .ok_or_else(|| invalid(&wrapper.name, "missing validator function"))?;
-        }
-    }
-    Ok(())
 }
 
 pub fn native_wrappers() -> ForeignWrappers {
@@ -140,6 +111,42 @@ pub fn native_wrappers() -> ForeignWrappers {
         )
     })
     .collect()
+}
+
+/// A missing callback is a valid retained reference; a live callback must agree with its saved OID and incarnation.
+pub fn validate_functions(
+    wrappers: &ForeignWrappers,
+    routines: &crate::routines::lifecycle::RoutineRegistry,
+) -> Result<(), SQLError> {
+    for wrapper in wrappers.values() {
+        let handler = match &wrapper.handler {
+            ForeignWrapperHandler::Function(function) => Some(function),
+            _ => None,
+        };
+        for reference in handler.into_iter().chain(wrapper.validator.as_ref()) {
+            if reference.binding.builtin {
+                continue;
+            }
+            let Some(function) = routines
+                .values()
+                .flatten()
+                .find(|function| function.def.object_id == reference.binding.object_id)
+            else {
+                continue;
+            };
+            if function.def.catalog_oid != Some(reference.oid)
+                || function.def.is_procedure
+                || crate::routines::routine_signature_types(&function.def)
+                    != reference.binding.argument_types
+            {
+                return Err(invalid(
+                    &wrapper.name,
+                    "live function disagrees with its retained identity",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A stored reference must keep its selected incarnation when a wrapper name is reused.
@@ -196,8 +203,11 @@ pub fn validate_wrappers(
             ForeignWrapperHandler::Function(function) => Some(function),
             _ => None,
         };
-        for function in handler.into_iter().chain(wrapper.validator.as_ref()) {
-            if function.name.is_empty()
+        for reference in handler.into_iter().chain(wrapper.validator.as_ref()) {
+            let function = &reference.binding;
+            if reference.oid == 0
+                || (!function.builtin && reference.oid < super::oids::FIRST_NORMAL_OBJECT_ID)
+                || function.name.is_empty()
                 || function.resolution_error.is_some()
                 || function.dispatch.is_some()
                 || (!function.builtin && function.object_id.is_none_or(|id| id == [0; 16]))

@@ -338,6 +338,11 @@ pub(super) fn validate_sql_standard_statement(statement: &Statement) -> Result<(
             "DROP SERVER is not yet supported in unquoted SQL function body".into(),
         ));
     }
+    if matches!(statement, Statement::CreateForeignWrapper(_)) {
+        return Err(SQLError::Unsupported(
+            "CREATE FOREIGN DATA WRAPPER is not yet supported in unquoted SQL function body".into(),
+        ));
+    }
     if matches!(statement, Statement::CreateForeignServer(_)) {
         return Err(SQLError::Unsupported(
             "CREATE SERVER is not yet supported in unquoted SQL function body".into(),

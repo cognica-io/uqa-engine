@@ -352,6 +352,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::GrantType(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }
+        | CommandPlan::CreateForeignWrapper(_)
         | CommandPlan::CreateForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
         | CommandPlan::CreateForeignTableDefinition(_)

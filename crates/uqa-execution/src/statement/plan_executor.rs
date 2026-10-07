@@ -927,6 +927,13 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             } => self.execute_prepare(name, parameter_types, body),
             CommandPlan::Execute { name, params } => self.execute_prepared(name, params),
             CommandPlan::Deallocate { name } => self.execute_deallocate(name.as_deref()),
+            CommandPlan::CreateForeignWrapper(statement) => {
+                crate::schema::foreign_creation::entry::register_foreign_wrapper_statement(
+                    self.context.foreign,
+                    statement.clone(),
+                )?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::CreateForeignServer(statement) => {
                 self.execute_create_foreign_server(statement)
             }

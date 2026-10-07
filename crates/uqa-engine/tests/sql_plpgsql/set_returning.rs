@@ -458,6 +458,14 @@ fn group_and_order_set_functions_use_postgresql_18_project_set_phases() {
 }
 
 #[test]
+fn membership_set_context_matches_postgresql() {
+    crate::pg18_oracle::verify(
+        &engine(),
+        include_str!("../../../../tests/parity/pg18/membership_sets_oracle.expected.json"),
+    );
+}
+
+#[test]
 fn select_list_set_functions_reject_pg18_forbidden_contexts() {
     let eng = engine();
     for (sql, expected) in [

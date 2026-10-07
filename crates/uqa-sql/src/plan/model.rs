@@ -682,6 +682,7 @@ pub enum CommandPlan {
     Deallocate {
         name: Option<String>,
     },
+    CreateForeignWrapper(crate::ast::CreateForeignWrapper),
     CreateForeignServer(crate::ast::CreateForeignServer),
     CreateForeignTable(crate::ast::CreateForeignTable),
     #[serde(alias = "CreateForeignTableIfNotExists")]

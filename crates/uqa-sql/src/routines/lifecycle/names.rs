@@ -10,6 +10,14 @@ use crate::catalog::roles::RoleReference;
 use crate::{catalog::security::BoundSchemaSecurity, SQLError};
 use uqa_core::RelationIdentity;
 
+/// Immutable routine address and declared input types, independent of invocation coercions.
+pub struct RoutineCatalogIdentity {
+    pub oid: u32,
+    pub relation: RelationIdentity,
+    pub argument_types: Vec<i64>,
+    pub kind: char,
+}
+
 pub trait RoutineNameCatalog {
     fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity>;
     fn current_role(&self) -> RoleReference;
@@ -55,6 +63,55 @@ pub fn routine_lookup_keys(
         .collect())
 }
 
+/// Catalog command lookup includes implicit `pg_catalog` in `PostgreSQL`'s search-path position.
+pub fn routine_lookup_keys_with_builtins(
+    catalog: &dyn RoutineNameCatalog,
+    name: &str,
+) -> Result<Vec<String>, SQLError> {
+    let mut keys = routine_lookup_keys(catalog, name)?;
+    let (schema, local) = RelationIdentity::parse_reference(name)
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    if schema.is_none()
+        && catalog.schema_has_usage("pg_catalog", &catalog.current_role())
+        && !catalog
+            .search_path()
+            .iter()
+            .any(|schema| schema == "pg_catalog")
+    {
+        keys.insert(
+            0,
+            RelationIdentity::new("pg_catalog", local).qualified_name(),
+        );
+    }
+    Ok(keys)
+}
+
+/// `LookupFuncName` matches declared input OIDs exactly, ignores procedures, and does not expand defaults or variadics.
+pub fn exact_function(
+    catalog: &dyn RoutineNameCatalog,
+    identities: &[RoutineCatalogIdentity],
+    name: &str,
+    argument_types: &[i64],
+    display_types: &[String],
+) -> Result<usize, SQLError> {
+    for key in routine_lookup_keys_with_builtins(catalog, name)? {
+        if let Some(index) = identities.iter().position(|identity| {
+            identity.relation.qualified_name() == key
+                && identity.kind != 'p'
+                && identity.argument_types == argument_types
+        }) {
+            return Ok(index);
+        }
+    }
+    Err(SQLError::Routine {
+        sqlstate: "42883".into(),
+        message: format!(
+            "function {} does not exist",
+            super::routine_signature_display(catalog, name, display_types)
+        ),
+    })
+}
+
 /// Defer namespace errors during recursive argument analysis; definitive binding checks again.
 pub fn routine_lookup_keys_for_analysis(
     catalog: &dyn RoutineNameCatalog,
@@ -65,3 +122,6 @@ pub fn routine_lookup_keys_for_analysis(
         result => result.map(Some),
     }
 }
+
+#[cfg(test)]
+mod tests;

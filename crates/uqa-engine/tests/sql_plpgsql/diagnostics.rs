@@ -7,6 +7,14 @@
 use super::*;
 
 #[test]
+fn raise_diagnostic_options_match_postgresql() {
+    crate::pg18_oracle::verify(
+        &engine(),
+        include_str!("../../../../tests/parity/pg18/raise_options_oracle.expected.json"),
+    );
+}
+
+#[test]
 fn select_into_strict_errors() {
     let eng = engine();
     exec(&eng, "CREATE TABLE si (v INTEGER)");

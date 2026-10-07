@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "exception_fields",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION USING ERRCODE='22023', MESSAGE='rejected options', DETAIL='why', HINT='correct it'; END $$"
+    },
+    {
+      "id": "notice_fields",
+      "sql": "DO $$ BEGIN RAISE NOTICE USING MESSAGE='notice', DETAIL='why', HINT='hint', ERRCODE='01001'; END $$"
+    },
+    {
+      "id": "warning_default",
+      "sql": "DO $$ BEGIN RAISE WARNING USING HINT='hint only'; END $$"
+    },
+    {
+      "id": "duplicate_state",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION USING ERRCODE='22023', ERRCODE='22012'; END $$"
+    },
+    {
+      "id": "duplicate_message",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION 'primary' USING MESSAGE='second'; END $$"
+    },
+    {
+      "id": "duplicate_detail",
+      "sql": "DO $$ BEGIN RAISE NOTICE USING DETAIL='first',DETAIL='second'; END $$"
+    },
+    {
+      "id": "null_value",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION USING MESSAGE=NULL; END $$"
+    },
+    {
+      "id": "null_before_duplicate",
+      "sql": "DO $$ BEGIN RAISE NOTICE USING MESSAGE='first',MESSAGE=NULL; END $$"
+    },
+    {
+      "id": "unknown_state",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION USING ERRCODE='not_a_condition'; END $$"
+    },
+    {
+      "id": "lowercase_state",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION USING ERRCODE='22p02'; END $$"
+    },
+    {
+      "id": "zero_state",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION USING ERRCODE='00000'; END $$"
+    },
+    {
+      "id": "zero_repeated",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION USING ERRCODE='00000',ERRCODE='22023'; END $$"
+    },
+    {
+      "id": "named_state",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION USING ERRCODE='division_by_zero'; END $$"
+    },
+    {
+      "id": "boolean_output",
+      "sql": "DO $$ BEGIN RAISE NOTICE USING MESSAGE=true; END $$"
+    },
+    {
+      "id": "character_output",
+      "sql": "DO $$ BEGIN RAISE NOTICE USING MESSAGE='a '::char(3); END $$"
+    },
+    {
+      "id": "option_sequence",
+      "sql": "CREATE SEQUENCE raise_option_order"
+    },
+    {
+      "id": "option_effect_order",
+      "sql": "DO $$ BEGIN RAISE NOTICE USING MESSAGE=nextval('raise_option_order'),MESSAGE=nextval('raise_option_order'); END $$"
+    },
+    {
+      "id": "option_effect_result",
+      "sql": "SELECT currval('raise_option_order')"
+    },
+    {
+      "id": "rethrow_fields",
+      "sql": "DO $$ BEGIN BEGIN RAISE EXCEPTION USING ERRCODE='22023', MESSAGE='kept', DETAIL='kept detail', HINT='kept hint'; EXCEPTION WHEN OTHERS THEN RAISE; END; END $$"
+    }
+  ]
+}

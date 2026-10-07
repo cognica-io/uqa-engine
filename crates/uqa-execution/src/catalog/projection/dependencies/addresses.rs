@@ -10,7 +10,8 @@ use super::objects::{CatalogObjects, ConstraintOwner, MemberObject, RelationKind
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::dependencies::{
     ObjectAddress, ATTRIBUTE_DEFAULT_CLASS, CONSTRAINT_CLASS, FOREIGN_SERVER_CLASS,
-    NAMESPACE_CLASS, PROCEDURE_CLASS, RELATION_CLASS, REWRITE_CLASS, TRIGGER_CLASS, TYPE_CLASS,
+    FOREIGN_WRAPPER_CLASS, NAMESPACE_CLASS, PROCEDURE_CLASS, RELATION_CLASS, REWRITE_CLASS,
+    TRIGGER_CLASS, TYPE_CLASS,
 };
 
 /// A user object of the catalog.
@@ -72,6 +73,10 @@ pub enum CatalogObject {
         name: String,
         object_id: [u8; 16],
     },
+    ForeignWrapper {
+        name: String,
+        object_id: [u8; 16],
+    },
 }
 
 /// A type the catalog defines, by the object it belongs to.
@@ -91,6 +96,12 @@ impl CatalogObjects {
     /// The object `address` names; `None` for one that does not exist or is not a user object.
     pub(super) fn catalog_object(&self, address: ObjectAddress) -> Option<CatalogObject> {
         match address.class_id {
+            FOREIGN_WRAPPER_CLASS if address.sub_id == 0 => self
+                .foreign_wrapper_object(address.object_id)
+                .map(|(name, object_id)| CatalogObject::ForeignWrapper {
+                    name: name.to_owned(),
+                    object_id,
+                }),
             FOREIGN_SERVER_CLASS if address.sub_id == 0 => self
                 .foreign_server_object(address.object_id)
                 .map(|(name, object_id)| CatalogObject::ForeignServer {

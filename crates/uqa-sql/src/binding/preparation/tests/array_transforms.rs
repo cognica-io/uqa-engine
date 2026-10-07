@@ -6,6 +6,28 @@
 
 use super::*;
 
+#[test]
+fn membership_checks_sets_only_in_boolean_comparisons_after_input_typing() {
+    for sql in [
+        "SELECT 1 IN (generate_series(1,2))",
+        "SELECT generate_series(1,2) NOT IN (1)",
+        "SELECT 1 IN (1,2,generate_series(1,id)) FROM assignment_target",
+    ] {
+        let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let error = infer_prepared_parameter_types(&NoRoutines, &plan, &[], &assignment_context())
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42804"), "{sql}: {error}");
+        assert_eq!(error.to_string(), "argument of IN must not return a set");
+    }
+    for sql in [
+        "SELECT 1 IN (generate_series(1,2),3)",
+        "SELECT generate_series(1,2) IN (1,2)",
+    ] {
+        let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        infer_prepared_parameter_types(&NoRoutines, &plan, &[], &assignment_context()).unwrap();
+    }
+}
+
 struct InapplicableUserOverload;
 
 impl FunctionTypeResolver for InapplicableUserOverload {

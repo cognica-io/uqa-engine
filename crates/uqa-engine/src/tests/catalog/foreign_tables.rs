@@ -70,6 +70,9 @@ impl ForeignRegistryReads for Publication<'_> {
     }
 }
 impl ForeignCreationRegistry for Publication<'_> {
+    fn wrappers_write(&self) -> uqa_execution::schema::foreign_creation::ForeignWrappersWrite<'_> {
+        Box::new(self.engine.durable.foreign_wrappers.write())
+    }
     fn servers_write(&self) -> ForeignServersWrite<'_> {
         let guard = self.engine.durable.foreign_servers.write();
         assert!(!self.held.replace(true));

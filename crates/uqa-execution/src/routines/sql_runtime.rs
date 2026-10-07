@@ -52,9 +52,10 @@ impl Interpreter<'_> {
         condition: Option<&str>,
         message: Option<&str>,
         params: &[PLpgSQLExpression],
+        options: &[uqa_sql::plpgsql::RaiseOption],
     ) -> Result<Flow, SQLError> {
         // Bare RAISE re-throws the error being handled.
-        if condition.is_none() && message.is_none() {
+        if condition.is_none() && message.is_none() && options.is_empty() {
             return match self.err_stack.last() {
                 Some(error) => Err(error.cause.clone()),
                 None => Err(SQLError::Routine {
@@ -70,15 +71,9 @@ impl Interpreter<'_> {
                 for param in params {
                     values.push(self.eval_expr(param)?);
                 }
-                format_raise_message(format, &values)?
+                Some(format_raise_message(format, &values)?)
             }
-            None => condition
-                .ok_or_else(|| {
-                    SQLError::Internal(
-                        "non-bare PL/pgSQL RAISE has neither condition nor message".into(),
-                    )
-                })?
-                .to_string(),
+            None => None,
         };
         let sqlstate = match condition {
             Some(name) => Some(if let Some(state) = condition_sqlstate(name) {
@@ -92,17 +87,66 @@ impl Interpreter<'_> {
             }),
             None => None,
         };
-        let Some(level) = level.notice_level() else {
-            return Err(SQLError::Routine {
+        let mut diagnostic = uqa_sql::plpgsql::RaiseDiagnostic {
+            sqlstate,
+            condition: condition.map(str::to_owned),
+            message: text,
+            ..Default::default()
+        };
+        for option in options {
+            let (value, ty) = self.eval_expr_with_type(&option.value)?;
+            if matches!(value, Value::Null) {
+                return Err(SQLError::Routine {
+                    sqlstate: "22004".into(),
+                    message: "RAISE statement option cannot be null".into(),
+                });
+            }
+            let text = match ty.as_ref() {
+                Some(ty) => uqa_sql::result::format_postgres_text(
+                    &value,
+                    ty,
+                    Some(self.services.expressions),
+                )?,
+                None => uqa_sql::plpgsql::runtime_diagnostics::raise_text(&value)?,
+            };
+            diagnostic.option(option.kind, text)?;
+        }
+        let sqlstate = diagnostic.sqlstate.filter(|state| state != "00000");
+        let notice_level = level.notice_level();
+        let text = diagnostic
+            .message
+            .or(diagnostic.condition)
+            .unwrap_or_else(|| {
+                sqlstate
+                    .as_deref()
+                    .unwrap_or(if notice_level.is_some() {
+                        "00000"
+                    } else {
+                        "P0001"
+                    })
+                    .to_owned()
+            });
+        let Some(level) = notice_level else {
+            if diagnostic.detail.is_none() && diagnostic.hint.is_none() {
+                return Err(SQLError::Routine {
+                    sqlstate: sqlstate.unwrap_or_else(|| "P0001".to_string()),
+                    message: text,
+                });
+            }
+            return Err(SQLError::Diagnostic {
                 sqlstate: sqlstate.unwrap_or_else(|| "P0001".to_string()),
                 message: text,
+                detail: diagnostic.detail,
+                hint: diagnostic.hint,
             });
         };
-        let notice = uqa_sql::SQLNotice::new(level, text);
-        self.services.runtime.push_notice(match sqlstate {
-            Some(sqlstate) => notice.with_sqlstate(sqlstate),
-            None => notice,
-        });
+        let mut notice = uqa_sql::SQLNotice::new(level, text);
+        if let Some(sqlstate) = sqlstate {
+            notice = notice.with_sqlstate(sqlstate);
+        }
+        notice.detail = diagnostic.detail;
+        notice.hint = diagnostic.hint;
+        self.services.runtime.push_notice(notice);
         Ok(Flow::Normal)
     }
 

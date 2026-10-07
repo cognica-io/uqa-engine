@@ -26,6 +26,8 @@ use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 pub mod entry;
 mod servers;
+mod wrapper_functions;
+mod wrappers;
 pub use crate::catalog::foreign::reads::{
     ForeignRegistryReads, ForeignSecurityRead, ForeignServersRead, ForeignTablesRead,
 };
@@ -34,7 +36,10 @@ pub type ForeignServersWrite<'a> = Box<
             Target = BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
         > + 'a,
 >;
+pub type ForeignWrappersWrite<'a> =
+    Box<dyn DerefMut<Target = uqa_sql::catalog::foreign_wrapper::ForeignWrappers> + 'a>;
 pub trait ForeignCreationRegistry: ForeignRegistryReads {
+    fn wrappers_write(&self) -> ForeignWrappersWrite<'_>;
     fn servers_write(&self) -> ForeignServersWrite<'_>;
 }
 pub trait ForeignCreationNamespace {
@@ -43,6 +48,8 @@ pub trait ForeignCreationNamespace {
 }
 pub struct ForeignCreationContext<'a> {
     pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
+    pub routine_names: &'a dyn uqa_sql::routines::lifecycle::names::RoutineNameCatalog,
+    pub invocation: crate::routines::invocation::context::RoutineInvocationContext<'a>,
     pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub schema: ForeignSchemaContext<'a>,
     pub namespace: &'a dyn ForeignCreationNamespace,
@@ -59,6 +66,7 @@ struct ForeignTableCreationTarget {
     relation: RelationIdentity,
     owner: crate::catalog::security::roles::locking::RoleBinding,
     if_not_exists: bool,
+    sql_options: bool,
 }
 impl ForeignCreationContext<'_> {
     /// Resolve the new foreign table's name. `IF NOT EXISTS` skips an existing relation before the columns are described, but `heap_create_with_catalog` reports the collision only after `BuildDescForRelation` accepted them, so an early preflight passes it on.
@@ -135,19 +143,29 @@ impl ForeignCreationContext<'_> {
         options: Vec<(String, String)>,
         if_not_exists: bool,
     ) -> Result<(), uqa_sql::SQLError> {
-        self.register_foreign_table_statement(uqa_sql::ast::CreateForeignTable {
-            name: name.to_string(),
-            server_name,
-            columns,
-            checks,
-            not_null_declarations: None,
-            options,
-            if_not_exists,
-        })
+        self.register_foreign_table(
+            uqa_sql::ast::CreateForeignTable {
+                name: name.to_string(),
+                server_name,
+                columns,
+                checks,
+                not_null_declarations: None,
+                options,
+                if_not_exists,
+            },
+            false,
+        )
     }
     pub fn register_foreign_table_statement(
         &self,
         statement: uqa_sql::ast::CreateForeignTable,
+    ) -> Result<(), SQLError> {
+        self.register_foreign_table(statement, true)
+    }
+    fn register_foreign_table(
+        &self,
+        statement: uqa_sql::ast::CreateForeignTable,
+        sql_options: bool,
     ) -> Result<(), SQLError> {
         if !statement.if_not_exists {
             validate_foreign_table_schema_envelope(&statement.columns)?;
@@ -166,6 +184,7 @@ impl ForeignCreationContext<'_> {
                 relation,
                 owner,
                 if_not_exists: statement.if_not_exists,
+                sql_options,
             },
             statement,
         )
@@ -211,6 +230,7 @@ impl ForeignCreationContext<'_> {
             .ok_or_else(|| {
                 uqa_sql::schema::foreign_servers::missing_server(&statement.server_name)
             })?;
+        self.validate_foreign_table_options(&statement, target.sql_options)?;
         self.creation.reserve_row_type_name(name)?;
         let object_id = (self.allocate_identity)().map_err(|error| {
             uqa_sql::SQLError::Internal(format!(
@@ -310,6 +330,7 @@ impl ForeignCreationContext<'_> {
                 relation,
                 owner,
                 if_not_exists: deferred.if_not_exists,
+                sql_options: true,
             },
             statement,
         )
