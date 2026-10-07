@@ -110,7 +110,12 @@ fn respond(value: impl std::fmt::Display) {
 #[ignore = "subprocess entry point for the row claim tests"]
 fn row_claim_peer() {
     let path = std::env::var_os("UQA_ROW_CLAIM_TEST_PATH").unwrap();
-    let coordinator = FileLockCoordinator::open(std::path::Path::new(&path)).unwrap();
+    let opened = FileLockCoordinator::open(std::path::Path::new(&path));
+    if let Ok(expected) = std::env::var("UQA_ROW_CLAIM_EXPECT_OPEN_ERROR") {
+        assert!(opened.is_err_and(|error| error.contains(&expected)));
+        return;
+    }
+    let coordinator = opened.unwrap();
     if std::env::var("UQA_ROW_CLAIM_TEST_MAPPING").as_deref() == Ok("0") {
         coordinator.claim_mapping.lock().disable();
     }

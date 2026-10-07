@@ -103,6 +103,8 @@ A rollback, of a transaction, a savepoint or a failed statement, rebuilds the st
 
 ## Locking rules
 
+Cross-process row entries compare an exact leased relation generation and the full document ID; key reservations retain their complete supplied 32-byte identity in a separate namespace. Hashes choose table probe positions only. Wait records carry the same full identity, and release retains individual acquisition/savepoint ownership. Native identity pins grow with relations rather than rows; key reservations add no per-key registry entry. Coordinator open validates both shared metadata formats before admitting operations. Temporary dependency admission uses an independent byte from the relation registry attachment. See the [identity preservation argument](../../design/exact-row-reservations.md).
+
 Avoid holding a registry lock across provider I/O, callback execution, or another subsystem's unbounded work. Prepare data outside the lock, acquire locks in the documented canonical order, publish quickly, and release before calling external code.
 
 One logical operation that needs several registries should use the domain snapshot or publication method rather than acquiring individual locks in an ad hoc order.

@@ -30,10 +30,10 @@ const TRANSACTION_XID_CURSOR_OFFSET: u64 = 32;
 const TRANSACTION_XID_CURSOR_SIZE: usize = 24;
 const TRANSACTION_XID_CURSOR_MAGIC: u32 = 0x5551_5843;
 const TRANSACTION_XID_CURSOR_VERSION: u32 = 1;
-const WAIT_SLOT_BASE: u64 = 64;
-const WAIT_SLOT_SIZE: u64 = 32;
+const WAIT_SLOT_BASE: u64 = 1 << 19;
+const WAIT_SLOT_SIZE: u64 = 80;
 const WAIT_SLOT_COUNT: u64 = 256;
-const HOLDER_SLOT_BASE: u64 = WAIT_SLOT_BASE + WAIT_SLOT_SIZE * WAIT_SLOT_COUNT;
+const HOLDER_SLOT_BASE: u64 = 64 + 32 * WAIT_SLOT_COUNT;
 const HOLDER_SLOT_SIZE: u64 = 32;
 const HOLDER_SLOT_COUNT: u64 = 8192;
 const CHANGE_ENTRY_SIZE: u64 = 48;
@@ -105,6 +105,7 @@ pub(super) mod journal;
 mod platform;
 mod relations;
 mod row_claims;
+mod row_identities;
 mod sequence_positions;
 mod temporary_roles;
 mod waits;
@@ -209,6 +210,8 @@ impl FileLockCoordinator {
                 relation_identities: relations::identities::Identities::default(),
             }),
         };
+        coordinator.attach_row_claims_process()?;
+        coordinator.attach_relation_registry()?;
         Ok(coordinator)
     }
 }
@@ -242,6 +245,7 @@ mod tests {
             .map(|ordinal| ByteClaim {
                 offset: 10_000 + ordinal,
                 write: true,
+                row: None,
             })
             .collect::<Vec<_>>();
         let session = 17;
@@ -291,6 +295,7 @@ mod tests {
                 .map(|ordinal| ByteClaim {
                     offset: 10_000 + transaction * 128 + ordinal,
                     write: true,
+                    row: None,
                 })
                 .collect::<Vec<_>>();
             assert!(matches!(coordinator.try_claim(17, &claims), Ok(Ok(()))));
@@ -315,10 +320,12 @@ mod tests {
         let held = [10_000, 10_001].map(|offset| ByteClaim {
             offset,
             write: true,
+            row: None,
         });
         let released = ByteClaim {
             offset: 10_002,
             write: false,
+            row: None,
         };
         assert!(matches!(coordinator.try_claim(17, &held), Ok(Ok(()))));
         assert!(matches!(coordinator.try_claim(17, &[released]), Ok(Ok(()))));
@@ -336,6 +343,7 @@ mod tests {
             ByteClaim {
                 offset: 20_000,
                 write: true,
+                row: None,
             },
         );
         let state = coordinator.state.lock();
@@ -359,6 +367,7 @@ mod tests {
             .map(|ordinal| ByteClaim {
                 offset: 10_000 + ordinal,
                 write: true,
+                row: None,
             })
             .collect::<Vec<_>>();
         assert!(matches!(coordinator.try_claim(17, &first), Ok(Ok(()))));
@@ -370,6 +379,7 @@ mod tests {
             .map(|ordinal| ByteClaim {
                 offset: 20_000 + ordinal,
                 write: true,
+                row: None,
             })
             .collect::<Vec<_>>();
         assert!(matches!(coordinator.try_claim(23, &second), Ok(Ok(()))));

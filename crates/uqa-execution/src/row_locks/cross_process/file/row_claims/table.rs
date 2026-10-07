@@ -20,8 +20,8 @@ pub(super) const PROCESS_SLOT_COUNT: u16 = 4096;
 const PROCESS_SLOT_BASE: u64 = 64;
 const PROCESS_SLOT_SIZE: u64 = 8;
 const TABLE_BASE: u64 = 64 * 1024;
-pub(super) const ENTRY_SIZE: u64 = 32;
-pub(super) const STATE_OFFSET: usize = 22;
+pub(super) const ENTRY_SIZE: u64 = 80;
+pub(super) const STATE_OFFSET: usize = 62;
 pub(super) const INITIAL_CAPACITY_LOG2: u32 = 12;
 const MAXIMUM_CAPACITY_LOG2: u32 = 40;
 /// Slots after the last home slot, which end a run of claims near the end of the table without wrapping.
@@ -32,7 +32,7 @@ const WINDOW: u64 = 16;
 const CHUNK: u64 = 32 * 1024;
 const HEADER_SIZE: usize = 64;
 const HEADER_MAGIC: u32 = 0x5551_5243;
-const HEADER_VERSION: u32 = 1;
+const HEADER_VERSION: u32 = 2;
 const STATE_EMPTY: u8 = 0;
 const STATE_LIVE: u8 = 1;
 pub(super) const STATE_TOMBSTONE: u8 = 2;
@@ -103,7 +103,7 @@ impl Mode {
 /// The claims one session of one process holds on the two bytes of a row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Entry {
-    pub(super) identity: u64,
+    pub(super) identity: super::RowIdentity,
     pub(super) session: u64,
     pub(super) owner: Owner,
     pub(super) key: Mode,
@@ -124,19 +124,20 @@ impl Slot {
             STATE_EMPTY => Ok(Self::Empty),
             STATE_TOMBSTONE => Ok(Self::Tombstone),
             STATE_LIVE => {
-                let key = Mode::decode(bytes[23])?;
-                let row = Mode::decode(bytes[24])?;
+                let key = Mode::decode(bytes[63])?;
+                let row = Mode::decode(bytes[64])?;
                 if key == Mode::None && row == Mode::None {
                     return Err(invalid("row claim without a mode"));
                 }
                 Ok(Self::Live(Entry {
-                    identity: u64::from_be_bytes(bytes[0..8].try_into().expect("identity")),
-                    session: u64::from_be_bytes(bytes[8..16].try_into().expect("session")),
+                    identity: super::RowIdentity::decode(&bytes[0..48])
+                        .ok_or_else(|| invalid("row identity"))?,
+                    session: u64::from_be_bytes(bytes[48..56].try_into().expect("session")),
                     owner: Owner {
                         generation: u32::from_be_bytes(
-                            bytes[16..20].try_into().expect("generation"),
+                            bytes[56..60].try_into().expect("generation"),
                         ),
-                        slot: u16::from_be_bytes(bytes[20..22].try_into().expect("slot")),
+                        slot: u16::from_be_bytes(bytes[60..62].try_into().expect("slot")),
                     },
                     key,
                     row,
@@ -152,13 +153,13 @@ impl Slot {
             Self::Empty => {}
             Self::Tombstone => bytes[STATE_OFFSET] = STATE_TOMBSTONE,
             Self::Live(entry) => {
-                bytes[0..8].copy_from_slice(&entry.identity.to_be_bytes());
-                bytes[8..16].copy_from_slice(&entry.session.to_be_bytes());
-                bytes[16..20].copy_from_slice(&entry.owner.generation.to_be_bytes());
-                bytes[20..22].copy_from_slice(&entry.owner.slot.to_be_bytes());
+                bytes[0..48].copy_from_slice(&entry.identity.encode());
+                bytes[48..56].copy_from_slice(&entry.session.to_be_bytes());
+                bytes[56..60].copy_from_slice(&entry.owner.generation.to_be_bytes());
+                bytes[60..62].copy_from_slice(&entry.owner.slot.to_be_bytes());
                 bytes[STATE_OFFSET] = STATE_LIVE;
-                bytes[23] = entry.key as u8;
-                bytes[24] = entry.row as u8;
+                bytes[63] = entry.key as u8;
+                bytes[64] = entry.row as u8;
             }
         }
         bytes
@@ -235,8 +236,8 @@ fn slots(capacity_log2: u32) -> u64 {
     (1 << capacity_log2) + MARGIN
 }
 
-fn home(identity: u64, capacity_log2: u32) -> u64 {
-    identity.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> (64 - capacity_log2)
+fn home(identity: super::RowIdentity, capacity_log2: u32) -> u64 {
+    identity.hash().wrapping_mul(0x9e37_79b9_7f4a_7c15) >> (64 - capacity_log2)
 }
 
 fn slot_offset(index: u64) -> u64 {
@@ -404,7 +405,7 @@ impl<'a> Table<'a> {
     /// Visit every occupied slot of the run that starts at the home slot of `identity`. Every claim of `identity` is in that run.
     pub(super) fn probe(
         &self,
-        identity: u64,
+        identity: super::RowIdentity,
         visit: &mut dyn FnMut(u64, Slot) -> Result<()>,
     ) -> Result<Probe> {
         let end = slots(self.capacity_log2);

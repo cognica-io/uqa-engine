@@ -394,6 +394,45 @@
         "explicit_1_false",
         "explicit_2_true"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "row_identity_pins_follow_relations_and_savepoint_acquisitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/cross_process/file/row_identities/tests.rs",
+      "capability": "Exact row reservation ownership",
+      "workload": "128 rows of one relation, repeated acquisition, savepoint upgrade and final release.",
+      "invariant": "One registry identity and native relation pin cover all rows; earlier claims survive savepoint undo; final release permits exact generation reuse.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "key_reservations_preserve_every_byte_without_per_key_registry_entries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/cross_process/file/row_identities/tests.rs",
+      "capability": "Exact key reservation identity",
+      "workload": "128 distinct 32-byte keys sharing their leading 24 bytes and the maximum document ID.",
+      "invariant": "All 128 exact grants coexist with zero per-key registry rows or native relation pins, and final release removes every grant.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_temporary_dependency_admission_honors_cancellation_and_process_exit",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/cross_process/file/temporary_roles/tests.rs",
+      "capability": "Independent temporary dependency admission",
+      "workload": "One process retains a relation registry while a peer owns temporary dependency admission.",
+      "invariant": "Unrelated relation lifetime does not block peer admission; cancellation and process-loss release preserve temporary reference ownership.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

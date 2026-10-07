@@ -25,9 +25,16 @@ fn open(directory: &tempfile::TempDir) -> (File, Header) {
     (file, header)
 }
 
+fn row(identity: u64) -> super::super::RowIdentity {
+    super::super::RowIdentity::Relation {
+        generation: 1,
+        doc_id: identity,
+    }
+}
+
 fn entry(identity: u64) -> Entry {
     Entry {
-        identity,
+        identity: row(identity),
         session: identity + 1,
         owner: OWNER,
         key: Mode::Shared,
@@ -38,7 +45,7 @@ fn entry(identity: u64) -> Entry {
 /// The first `count` identities whose home slot in a table of `capacity_log2` is `slot`.
 fn identities_at(slot: u64, capacity_log2: u32, count: usize) -> Vec<u64> {
     (1_u64..)
-        .filter(|identity| home(*identity, capacity_log2) == slot)
+        .filter(|identity| home(row(*identity), capacity_log2) == slot)
         .take(count)
         .collect()
 }
@@ -47,8 +54,8 @@ fn identities_at(slot: u64, capacity_log2: u32, count: usize) -> Vec<u64> {
 fn find(table: &Table<'_>, identity: u64) -> (Option<u64>, Probe) {
     let mut found = None;
     let probe = table
-        .probe(identity, &mut |index, slot| {
-            if matches!(slot, Slot::Live(entry) if entry.identity == identity) {
+        .probe(row(identity), &mut |index, slot| {
+            if matches!(slot, Slot::Live(entry) if entry.identity == row(identity)) {
                 found = Some(index);
             }
             Ok(())
@@ -78,7 +85,7 @@ fn live(table: &Table<'_>) -> Vec<Entry> {
 #[test]
 fn an_entry_and_a_header_survive_their_encoding() {
     let stored = Slot::Live(Entry {
-        identity: 0x3fff_ffff_ffff_fffe,
+        identity: row(u64::MAX),
         session: u64::MAX,
         owner: Owner {
             slot: 4095,
@@ -100,7 +107,7 @@ fn an_entry_and_a_header_survive_their_encoding() {
         Slot::Empty
     );
     let mut without_mode = stored.encode();
-    without_mode[24] = 0;
+    without_mode[64] = 0;
     assert!(Slot::decode(&without_mode).is_err());
 
     let header = Header {
@@ -114,7 +121,7 @@ fn an_entry_and_a_header_survive_their_encoding() {
     };
     assert_eq!(Header::decode(&header.encode()).unwrap(), header);
     let mut unknown = header.encode();
-    unknown[7] = 2;
+    unknown[7] = 3;
     assert!(Header::decode(&unknown).is_err());
 }
 
@@ -198,7 +205,7 @@ fn a_tombstone_is_reused_without_hiding_the_claims_after_it() {
     table.remove(8).unwrap();
     let mut tombstone = None;
     table
-        .probe(identities[3], &mut |index, slot| {
+        .probe(row(identities[3]), &mut |index, slot| {
             if slot == Slot::Tombstone {
                 tombstone.get_or_insert(index);
             }
@@ -272,7 +279,7 @@ fn a_rebuild_keeps_exactly_its_entries_at_a_quarter_full() {
     let mut tombstones = 0;
     for identity in 1..=1500 {
         table
-            .probe(identity, &mut |_, slot| {
+            .probe(row(identity), &mut |_, slot| {
                 tombstones += u64::from(slot == Slot::Tombstone);
                 Ok(())
             })

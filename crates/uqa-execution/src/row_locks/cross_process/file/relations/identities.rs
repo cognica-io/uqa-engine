@@ -32,10 +32,15 @@ pub(in crate::row_locks) struct RelationIdentityLease<'a> {
     coordinator: &'a FileLockCoordinator,
     relation: &'a [u8],
     slot: u64,
+    generation: u64,
     retained: bool,
 }
 
 impl RelationIdentityLease<'_> {
+    pub(in crate::row_locks) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub(in crate::row_locks) fn slot(&self) -> u64 {
         self.slot
     }
@@ -58,6 +63,20 @@ fn sql(error: rusqlite::Error) -> String {
 }
 
 impl FileLockCoordinator {
+    pub(in crate::row_locks::cross_process::file) fn attach_relation_registry(
+        &self,
+    ) -> Result<(), String> {
+        let mut state = self.state.lock();
+        uqa_storage::native_file::lock_byte(&self.file, RELATION_ADMISSION_BYTE, true)
+            .map_err(|error| format!("admit relation registry: {error}"))?;
+        let mut admission = Admission {
+            coordinator: self,
+            active: true,
+        };
+        self.open_relation_identities(&mut state)?;
+        admission.release()
+    }
+
     pub(in crate::row_locks) fn pin_relation<'a>(
         &'a self,
         relation: &'a [u8],
@@ -73,6 +92,7 @@ impl FileLockCoordinator {
                     coordinator: self,
                     relation,
                     slot,
+                    generation: self.state.lock().relation_identities.slots[&slot],
                     retained: false,
                 });
             }
@@ -222,6 +242,30 @@ impl FileLockCoordinator {
         }
     }
 
+    pub(in crate::row_locks) fn retained_row_identity(
+        &self,
+        relation: &[u8],
+        doc_id: u64,
+    ) -> Option<super::super::super::RowIdentity> {
+        use super::super::super::RowIdentity;
+        if let Some(identity) = RowIdentity::key(relation, doc_id) {
+            return Some(identity);
+        }
+        let state = self.state.lock();
+        let identities = &state.relation_identities;
+        let slot = identities.pins.get(relation)?.slot;
+        Some(RowIdentity::Relation {
+            generation: *identities.slots.get(&slot)?,
+            doc_id,
+        })
+    }
+
+    pub(in crate::row_locks) fn release_row_identity(&self, relation: &[u8]) {
+        if super::super::super::RowIdentity::key(relation, 0).is_none() {
+            self.unpin_relation(&mut self.state.lock(), relation);
+        }
+    }
+
     fn open_relation_identities(&self, state: &mut CoordinatorState) -> Result<(), String> {
         if state.relation_identities.connection.is_some() {
             return Ok(());
@@ -284,12 +328,12 @@ impl FileLockCoordinator {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(sql)?;
-        if (!first && version != 1) || (first && version != 0) {
+        if (!first && version != 2) || (first && version != 0) {
             return Err("invalid relation registry version".into());
         }
         connection.execute_batch("PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-64; PRAGMA secure_delete=ON;").map_err(sql)?;
         if first {
-            connection.execute_batch("CREATE TABLE generation(value INTEGER NOT NULL); INSERT INTO generation VALUES(0); CREATE TABLE identities(slot INTEGER PRIMARY KEY CHECK(slot>=0 AND slot<1048576), identity BLOB NOT NULL UNIQUE, generation INTEGER NOT NULL CHECK(generation>0)); PRAGMA user_version=1;").map_err(sql)?;
+            connection.execute_batch("CREATE TABLE generation(value INTEGER NOT NULL); INSERT INTO generation VALUES(0); CREATE TABLE identities(slot INTEGER PRIMARY KEY CHECK(slot>=0 AND slot<1048576), identity BLOB NOT NULL UNIQUE, generation INTEGER NOT NULL CHECK(generation>0)); PRAGMA user_version=2;").map_err(sql)?;
         }
         Ok(connection)
     }

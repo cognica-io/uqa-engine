@@ -39,6 +39,9 @@ fn batches_bound_claim_table_arbitration_and_preserve_every_grant() {
         let coordinator = manager.coordinator().unwrap().unwrap();
         let cancel = CancellationToken::new();
         let wanted = requests(&manager, &cancel, 1, count);
+        let initial_locks = coordinator
+            .row_claim_table_locks
+            .load(std::sync::atomic::Ordering::Relaxed);
         let granted = manager.acquire_batch(&wanted).unwrap();
         assert_eq!(granted.len(), count as usize);
         assert!(granted.iter().all(|grant| matches!(
@@ -52,7 +55,7 @@ fn batches_bound_claim_table_arbitration_and_preserve_every_grant() {
         let locks = coordinator
             .row_claim_table_locks
             .load(std::sync::atomic::Ordering::Relaxed);
-        assert_eq!(locks, count.div_ceil(64) as usize);
+        assert_eq!(locks - initial_locks, count.div_ceil(64) as usize);
         assert_eq!(manager.state.lock().rows.len(), count as usize);
         let again = manager.acquire_batch(&wanted).unwrap();
         assert!(again.iter().all(|grant| matches!(

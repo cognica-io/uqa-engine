@@ -11,6 +11,43 @@ use crate::row_locks::cross_process::{relation_mode_claim, relation_wait_claim};
 use crate::row_locks::RelationLockMode;
 
 #[test]
+fn row_waits_with_identical_descriptors_follow_only_the_exact_identity() {
+    use crate::row_locks::cross_process::{row_claim, RowByte, RowIdentity};
+    let directory = tempfile::tempdir().unwrap();
+    let coordinator = FileLockCoordinator::open(&directory.path().join("row_waits.db")).unwrap();
+    let first = row_claim(
+        RowIdentity::Relation {
+            generation: 1,
+            doc_id: 1,
+        },
+        RowByte::Row,
+        true,
+    );
+    let second = row_claim(
+        RowIdentity::Relation {
+            generation: 1,
+            doc_id: 2,
+        },
+        RowByte::Row,
+        true,
+    );
+    assert_eq!(first.offset, second.offset);
+    assert_ne!(first.row, second.row);
+    coordinator.try_claim(1, &[first]).unwrap().unwrap();
+    coordinator.try_claim(2, &[second]).unwrap().unwrap();
+    coordinator.register_wait(2, first);
+    assert_eq!(coordinator.wait_of(std::process::id(), 2), Some((first, 0)));
+    assert!(!coordinator.wait_cycle_reaches_session(1, second, &|_| None));
+    assert!(coordinator
+        .wait_cycle_reaches_session(1, second, &|session| (session == 2).then_some(first)));
+    coordinator.release(1, &[first]);
+    assert!(!coordinator
+        .wait_cycle_reaches_session(1, second, &|session| (session == 2).then_some(first)));
+    coordinator.clear_wait(2);
+    coordinator.release(2, &[second]);
+}
+
+#[test]
 fn holder_and_wait_metadata_preserve_the_full_generation_and_access_mode() {
     for generation in [0, 1, 256, i64::MAX as u64] {
         for write in [false, true] {
@@ -33,6 +70,7 @@ fn holder_and_wait_metadata_preserve_the_full_generation_and_access_mode() {
                 (23, 51, 1024, write, generation)
             );
             let wait = WaitSlot {
+                row: None,
                 pid: 23,
                 session: 51,
                 offset: 1024,
@@ -75,6 +113,7 @@ fn reused_identity_slots_exclude_stale_holders_and_waiters_even_with_a_live_pid(
     coordinator.write_slot(
         0,
         Some(&WaitSlot {
+            row: None,
             pid: holder.pid,
             session: holder.session,
             offset: wait.offset,
@@ -146,6 +185,7 @@ fn a_cold_registry_epoch_recovers_corruption_and_clears_only_relation_metadata()
         coordinator.write_slot(
             index,
             Some(&WaitSlot {
+                row: None,
                 pid: holder.pid,
                 session: holder.session,
                 offset,

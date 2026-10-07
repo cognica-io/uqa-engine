@@ -21,6 +21,13 @@
 
 use uqa_sql::ast::LockStrength;
 
+#[cfg_attr(
+    not(any(windows, all(unix, not(target_os = "emscripten")))),
+    allow(dead_code)
+)]
+mod row_identity;
+pub(super) use row_identity::RowIdentity;
+
 use super::{PhysicalRowChangeTarget, RelationLockMode, RowChangeTarget};
 
 #[derive(Clone, Copy, Debug)]
@@ -69,7 +76,7 @@ const RELATION_WAIT_BASE: u64 = RELATION_MODE_BASE + 8 * RELATION_SPAN;
 /// One liveness byte for each process attached to the row claim table, which only the file coordinator keeps.
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 const PROCESS_LIVENESS_BASE: u64 = RELATION_WAIT_BASE + 8 * RELATION_SPAN;
-/// Row claim addresses set the top bit, which no record-lock offset uses, so the two address spaces never alias. The bits below it are the row identity followed by the byte of the row.
+/// Row descriptors set the top bit, which no record-lock offset uses. The low bit selects the key/row mode; complete identity travels separately and never depends on this descriptor.
 const ROW_CLAIM: u64 = 1 << 63;
 
 #[cfg(all(unix, not(target_os = "emscripten")))]
@@ -91,6 +98,7 @@ const fn row_span_for_offset_width(bytes: usize) -> u64 {
 pub(super) struct ByteClaim {
     pub offset: u64,
     pub write: bool,
+    pub row: Option<RowIdentity>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +115,7 @@ pub(super) const fn change_gate_claim(write: bool) -> ByteClaim {
     ByteClaim {
         offset: CHANGE_GATE_BYTE,
         write,
+        row: None,
     }
 }
 
@@ -126,68 +135,35 @@ pub(super) enum RowByte {
     not(any(windows, all(unix, not(target_os = "emscripten")))),
     allow(dead_code)
 )]
-pub(super) fn row_claim_address(claim: ByteClaim) -> Option<(u64, RowByte)> {
-    (claim.offset & ROW_CLAIM != 0).then(|| {
-        let byte = if claim.offset & 1 == 0 {
-            RowByte::Key
-        } else {
-            RowByte::Row
-        };
-        ((claim.offset & !ROW_CLAIM) >> 1, byte)
+pub(super) fn row_claim_address(claim: ByteClaim) -> Option<(RowIdentity, RowByte)> {
+    claim.row.map(|identity| {
+        (
+            identity,
+            if claim.offset & 1 == 0 {
+                RowByte::Key
+            } else {
+                RowByte::Row
+            },
+        )
     })
 }
 
-#[cfg_attr(
-    not(any(windows, all(unix, not(target_os = "emscripten")))),
-    allow(dead_code)
-)]
-pub(super) fn row_claim(identity: u64, byte: RowByte, write: bool) -> ByteClaim {
+pub(super) fn row_claim(identity: RowIdentity, byte: RowByte, write: bool) -> ByteClaim {
     ByteClaim {
-        offset: ROW_CLAIM | (identity << 1) | u64::from(byte == RowByte::Row),
+        offset: ROW_CLAIM | u64::from(byte == RowByte::Row),
         write,
+        row: Some(identity),
     }
 }
 
-/// The 62 bits that identify one row to every process. Two rows share them with probability 2^-62, in which case their claims conflict as one row's would.
-fn row_identity(relation: &[u8], doc_id: uqa_core::DocId) -> u64 {
-    let mut hash = stable_hash(&[relation, &doc_id.to_be_bytes()]);
-    // The low bits of FNV-1a depend only on the low bits of its input bytes; this finalizer makes every bit depend on all of them.
-    hash ^= hash >> 33;
-    hash = hash.wrapping_mul(0xff51_afd7_ed55_8ccd);
-    hash ^= hash >> 33;
-    hash = hash.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
-    hash ^= hash >> 33;
-    hash >> 2
-}
-
-pub(super) fn row_byte_claims(
-    relation: &[u8],
-    doc_id: uqa_core::DocId,
-    strength: LockStrength,
-) -> Vec<ByteClaim> {
-    let base = ROW_CLAIM | (row_identity(relation, doc_id) << 1);
+pub(super) fn row_byte_claims(identity: RowIdentity, strength: LockStrength) -> Vec<ByteClaim> {
     match strength {
-        LockStrength::ForKeyShare => vec![ByteClaim {
-            offset: base,
-            write: false,
-        }],
-        LockStrength::ForShare => vec![ByteClaim {
-            offset: base + 1,
-            write: false,
-        }],
-        LockStrength::ForNoKeyUpdate => vec![ByteClaim {
-            offset: base + 1,
-            write: true,
-        }],
+        LockStrength::ForKeyShare => vec![row_claim(identity, RowByte::Key, false)],
+        LockStrength::ForShare => vec![row_claim(identity, RowByte::Row, false)],
+        LockStrength::ForNoKeyUpdate => vec![row_claim(identity, RowByte::Row, true)],
         LockStrength::ForUpdate => vec![
-            ByteClaim {
-                offset: base,
-                write: true,
-            },
-            ByteClaim {
-                offset: base + 1,
-                write: true,
-            },
+            row_claim(identity, RowByte::Key, true),
+            row_claim(identity, RowByte::Row, true),
         ],
     }
 }
@@ -203,6 +179,7 @@ pub(super) fn relation_mode_claim(relation: u64, mode: RelationLockMode, write: 
     ByteClaim {
         offset: RELATION_MODE_BASE + relation * 8 + mode as u64,
         write,
+        row: None,
     }
 }
 
@@ -211,6 +188,7 @@ pub(super) fn relation_wait_claim(relation: u64, mode: RelationLockMode) -> Byte
     ByteClaim {
         offset: RELATION_WAIT_BASE + relation * 8 + mode as u64,
         write: true,
+        row: None,
     }
 }
 
@@ -237,6 +215,7 @@ pub(super) fn wait_blocking_claims(wanted: ByteClaim) -> impl Iterator<Item = By
                 claims[index] = Some(ByteClaim {
                     offset: RELATION_MODE_BASE + relation * 8 + index as u64,
                     write: true,
+                    row: None,
                 });
             }
         }
@@ -292,7 +271,7 @@ mod fallback {
     use super::super::sequence_positions::{
         RecordedSequencePosition, SequencePosition, SequencePositionKey, SequenceSlot,
     };
-    use super::{ByteClaim, RelationClaimWait, RelationLockMode};
+    use super::{ByteClaim, RelationClaimWait, RelationLockMode, RowIdentity};
 
     /// Sandboxed targets without native processes retain process-local lock semantics instead of rejecting every persistent mutation.
     pub(in crate::row_locks) struct FileLockCoordinator {}
@@ -305,6 +284,17 @@ mod fallback {
         pub(in crate::row_locks) fn retain(&mut self) {}
     }
 
+    pub(in crate::row_locks) struct RowIdentityLease;
+    impl RowIdentityLease {
+        pub(in crate::row_locks) fn identity(&self) -> RowIdentity {
+            RowIdentity::Relation {
+                generation: 1,
+                doc_id: 0,
+            }
+        }
+        pub(in crate::row_locks) fn retain(&mut self) {}
+    }
+
     impl FileLockCoordinator {
         pub(in crate::row_locks) fn open_with_key(
             _database_path: &Path,
@@ -312,6 +302,24 @@ mod fallback {
         ) -> Result<Self, String> {
             Ok(Self {})
         }
+
+        pub(in crate::row_locks) fn pin_row<'a>(
+            &'a self,
+            _relation: &'a [u8],
+            _doc_id: u64,
+            cancel: &uqa_core::CancellationToken,
+        ) -> Result<RowIdentityLease, uqa_sql::SQLError> {
+            cancel.check()?;
+            Ok(RowIdentityLease)
+        }
+        pub(in crate::row_locks) fn retained_row_identity(
+            &self,
+            _relation: &[u8],
+            _doc_id: u64,
+        ) -> Option<RowIdentity> {
+            None
+        }
+        pub(in crate::row_locks) fn release_row_identity(&self, _relation: &[u8]) {}
 
         pub(in crate::row_locks) fn pin_relation<'a>(
             &'a self,
