@@ -236,6 +236,9 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::PrepareStmt(stmt) => compile_prepare(stmt),
         NodeEnum::ExecuteStmt(stmt) => compile_execute(stmt),
         NodeEnum::DeallocateStmt(stmt) => compile_deallocate(stmt),
+        NodeEnum::CreateFdwStmt(stmt) => {
+            super::foreign_wrappers::compile(stmt).map(Statement::CreateForeignWrapper)
+        }
         NodeEnum::CreateForeignServerStmt(stmt) => {
             compile_create_foreign_server(stmt).map(Statement::CreateForeignServer)
         }

@@ -6,6 +6,8 @@
 
 //! Routine invocation, scoped state, interpreter entry, and physical result shaping.
 mod anonymous;
+mod catalog;
+pub use catalog::call_catalog_validator;
 pub mod bodies;
 pub mod context;
 mod depth;

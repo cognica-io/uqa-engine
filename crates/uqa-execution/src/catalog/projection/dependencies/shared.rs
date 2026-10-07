@@ -218,6 +218,17 @@ impl DependencyBuilder<'_> {
                 SharedDependencyKind::Owner,
             );
         }
+        for wrapper in snapshot.definitions.foreign_wrappers.values() {
+            self.record_role(
+                database,
+                ObjectAddress::whole(
+                    uqa_sql::catalog::dependencies::FOREIGN_WRAPPER_CLASS,
+                    wrapper.identity.oid,
+                ),
+                wrapper.owner.oid,
+                SharedDependencyKind::Owner,
+            );
+        }
         for function in catalog.all_sql_functions() {
             let oid = super::catalog_oid(super::super::user_routine_catalog_oid(&function)?)?;
             let owner = uqa_sql::routines::security::bound_routine_owner(&function.def)?;

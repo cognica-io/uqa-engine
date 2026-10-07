@@ -20,6 +20,7 @@ fn definition() -> ForeignServerDefinition {
         fdw_type: "memory_fdw".into(),
         options: BTreeMap::from([("metadata_json".into(), "user option".into())]),
         metadata: ForeignServerMetadata {
+            option_order: None,
             wrapper_reference: None,
             oid: 16_384,
             object_id: [1; 16],

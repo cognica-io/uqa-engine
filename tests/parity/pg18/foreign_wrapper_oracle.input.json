@@ -1,1 +1,346 @@
-{"cases":[{"id":"version","sql":"SELECT version()"},{"id":"plain","sql":"CREATE FOREIGN DATA WRAPPER wrapper_plain"},{"id":"plain_catalog","sql":"SELECT fdwname,pg_get_userbyid(fdwowner)=current_user AS current_owner,fdwhandler,fdwvalidator::regproc::text AS validator,fdwacl IS NULL AS default_acl,fdwoptions FROM pg_foreign_data_wrapper WHERE fdwname LIKE 'wrapper_%' ORDER BY fdwname"},{"id":"duplicate","sql":"CREATE FOREIGN DATA WRAPPER wrapper_plain"},{"id":"duplicate_before_function","sql":"CREATE FOREIGN DATA WRAPPER wrapper_plain HANDLER missing_handler"},{"id":"explicit_none","sql":"CREATE FOREIGN DATA WRAPPER wrapper_none NO HANDLER NO VALIDATOR OPTIONS (arbitrary 'value',second 'entry')"},{"id":"options_catalog","sql":"SELECT fdwname,pg_get_userbyid(fdwowner)=current_user AS current_owner,fdwhandler,fdwvalidator::regproc::text AS validator,fdwacl IS NULL AS default_acl,fdwoptions FROM pg_foreign_data_wrapper WHERE fdwname LIKE 'wrapper_%' ORDER BY fdwname"},{"id":"duplicate_option","sql":"CREATE FOREIGN DATA WRAPPER wrapper_bad OPTIONS (same 'first',same 'second')"},{"id":"equals_option","sql":"CREATE FOREIGN DATA WRAPPER wrapper_bad OPTIONS (\"has=equals\" 'value')"},{"id":"handler_missing","sql":"CREATE FOREIGN DATA WRAPPER wrapper_bad HANDLER missing_handler"},{"id":"handler_function","sql":"CREATE FUNCTION wrong_wrapper_handler() RETURNS integer LANGUAGE SQL RETURN 1"},{"id":"handler_type","sql":"CREATE FOREIGN DATA WRAPPER wrapper_bad HANDLER wrong_wrapper_handler"},{"id":"validator_missing","sql":"CREATE FOREIGN DATA WRAPPER wrapper_bad VALIDATOR missing_validator"},{"id":"duplicate_handler","sql":"CREATE FOREIGN DATA WRAPPER wrapper_bad NO HANDLER NO HANDLER"},{"id":"duplicate_validator","sql":"CREATE FOREIGN DATA WRAPPER wrapper_bad NO VALIDATOR NO VALIDATOR"},{"id":"server","sql":"CREATE SERVER wrapper_server TYPE 'kind' VERSION 'one' FOREIGN DATA WRAPPER wrapper_none OPTIONS (arbitrary 'server')"},{"id":"server_reference","sql":"SELECT s.srvname,w.fdwname,s.srvtype,s.srvversion,s.srvoptions FROM pg_foreign_server s JOIN pg_foreign_data_wrapper w ON w.oid=s.srvfdw WHERE s.srvname='wrapper_server'"},{"id":"table","sql":"CREATE FOREIGN TABLE wrapper_rows(a integer,b text) SERVER wrapper_server OPTIONS (arbitrary 'table')"},{"id":"scan","sql":"SELECT * FROM wrapper_rows"},{"id":"limit_zero","sql":"SELECT * FROM wrapper_rows LIMIT 0"},{"id":"create_view","sql":"CREATE VIEW wrapper_view AS SELECT b FROM wrapper_rows"},{"id":"view_scan","sql":"SELECT * FROM wrapper_view"},{"id":"begin","sql":"BEGIN; SAVEPOINT before_wrapper"},{"id":"rolled_back","sql":"CREATE FOREIGN DATA WRAPPER wrapper_rollback; ROLLBACK TO before_wrapper"},{"id":"rollback_catalog","sql":"SELECT count(*) FROM pg_foreign_data_wrapper WHERE fdwname='wrapper_rollback'"},{"id":"commit","sql":"COMMIT"},{"id":"other_role","sql":"CREATE ROLE wrapper_other; SET ROLE wrapper_other"},{"id":"denied","sql":"CREATE FOREIGN DATA WRAPPER wrapper_denied"},{"id":"denied_existing","sql":"CREATE FOREIGN DATA WRAPPER wrapper_plain HANDLER missing_handler"},{"id":"reset","sql":"RESET ROLE"},{"id":"validation_log","sql":"CREATE TABLE wrapper_validation_calls(options text[], scope oid)"},{"id":"validator_function","sql":"CREATE FUNCTION wrapper_validator(options text[], scope oid) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN INSERT INTO wrapper_validation_calls VALUES (options, scope); RETURN 7; END $$"},{"id":"validated_wrapper","sql":"CREATE FOREIGN DATA WRAPPER wrapper_valid VALIDATOR wrapper_validator OPTIONS (z 'last',a 'first')"},{"id":"validated_server","sql":"CREATE SERVER wrapper_valid_server FOREIGN DATA WRAPPER wrapper_valid OPTIONS (z 'server-last',a 'server-first')"},{"id":"validated_table","sql":"CREATE FOREIGN TABLE wrapper_valid_rows (a integer) SERVER wrapper_valid_server OPTIONS (z 'table-last',a 'table-first')"},{"id":"validated_server_options","sql":"SELECT srvoptions FROM pg_foreign_server WHERE srvname='wrapper_valid_server'"},{"id":"validator_calls","sql":"SELECT scope::integer, options FROM wrapper_validation_calls ORDER BY scope"},{"id":"validator_coercion_function","sql":"CREATE FUNCTION wrapper_coercion_validator(text[],bigint) RETURNS integer LANGUAGE SQL RETURN 1"},{"id":"validator_no_coercion","sql":"CREATE FOREIGN DATA WRAPPER wrapper_invalid VALIDATOR wrapper_coercion_validator"},{"id":"validator_default_function","sql":"CREATE FUNCTION wrapper_default_validator(text[],oid,integer DEFAULT 1) RETURNS integer LANGUAGE SQL RETURN 1"},{"id":"validator_no_defaults","sql":"CREATE FOREIGN DATA WRAPPER wrapper_invalid VALIDATOR wrapper_default_validator"},{"id":"validator_procedure","sql":"CREATE PROCEDURE wrapper_validator_proc(text[],oid) LANGUAGE SQL AS $$ SELECT 1 $$"},{"id":"validator_not_procedure","sql":"CREATE FOREIGN DATA WRAPPER wrapper_invalid VALIDATOR wrapper_validator_proc"},{"id":"validator_reject_function","sql":"CREATE FUNCTION wrapper_reject_validator(options text[], scope oid) RETURNS void LANGUAGE plpgsql AS $$ BEGIN INSERT INTO wrapper_validation_calls VALUES (options,scope); RAISE EXCEPTION USING ERRCODE='22023', MESSAGE='rejected wrapper options'; END $$"},{"id":"validator_reject","sql":"CREATE FOREIGN DATA WRAPPER wrapper_rejected VALIDATOR wrapper_reject_validator OPTIONS (a 'rejected')"},{"id":"validator_rollback","sql":"SELECT scope::integer, options FROM wrapper_validation_calls ORDER BY scope"},{"id":"validator_dependency","sql":"DROP FUNCTION wrapper_validator(text[],oid)"},{"id":"stored_catalog","sql":"SELECT fdwname,pg_get_userbyid(fdwowner)=current_user AS current_owner,fdwhandler,fdwvalidator::regproc::text AS validator,fdwacl IS NULL AS default_acl,fdwoptions FROM pg_foreign_data_wrapper WHERE fdwname LIKE 'wrapper_%' ORDER BY fdwname","reopen":true},{"id":"stored_reference","sql":"SELECT s.srvname,w.fdwname,s.srvtype,s.srvversion,s.srvoptions FROM pg_foreign_server s JOIN pg_foreign_data_wrapper w ON w.oid=s.srvfdw WHERE s.srvname='wrapper_server'","reopen":true},{"id":"stored_scan","sql":"SELECT * FROM wrapper_rows","reopen":true},{"id":"stored_view","sql":"SELECT * FROM wrapper_view","reopen":true}]}
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "plain",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_plain"
+    },
+    {
+      "id": "plain_catalog",
+      "sql": "SELECT fdwname,pg_get_userbyid(fdwowner)=current_user AS current_owner,fdwhandler,fdwvalidator::regproc::text AS validator,fdwacl IS NULL AS default_acl,fdwoptions FROM pg_foreign_data_wrapper WHERE fdwname LIKE 'wrapper_%' ORDER BY fdwname"
+    },
+    {
+      "id": "duplicate",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_plain"
+    },
+    {
+      "id": "duplicate_before_function",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_plain HANDLER missing_handler"
+    },
+    {
+      "id": "explicit_none",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_none NO HANDLER NO VALIDATOR OPTIONS (arbitrary 'value',second 'entry')"
+    },
+    {
+      "id": "options_catalog",
+      "sql": "SELECT fdwname,pg_get_userbyid(fdwowner)=current_user AS current_owner,fdwhandler,fdwvalidator::regproc::text AS validator,fdwacl IS NULL AS default_acl,fdwoptions FROM pg_foreign_data_wrapper WHERE fdwname LIKE 'wrapper_%' ORDER BY fdwname"
+    },
+    {
+      "id": "duplicate_option",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad OPTIONS (same 'first',same 'second')"
+    },
+    {
+      "id": "equals_option",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad OPTIONS (\"has=equals\" 'value')"
+    },
+    {
+      "id": "handler_missing",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad HANDLER missing_handler"
+    },
+    {
+      "id": "handler_function",
+      "sql": "CREATE FUNCTION wrong_wrapper_handler() RETURNS integer LANGUAGE SQL RETURN 1"
+    },
+    {
+      "id": "handler_type",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad HANDLER wrong_wrapper_handler"
+    },
+    {
+      "id": "validator_missing",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad VALIDATOR missing_validator"
+    },
+    {
+      "id": "duplicate_handler",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad NO HANDLER NO HANDLER"
+    },
+    {
+      "id": "duplicate_validator",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad NO VALIDATOR NO VALIDATOR"
+    },
+    {
+      "id": "handler_builtin_type",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad HANDLER version"
+    },
+    {
+      "id": "handler_quoted_function",
+      "sql": "CREATE FUNCTION \"odd.wrapper\"() RETURNS integer LANGUAGE SQL RETURN 1"
+    },
+    {
+      "id": "handler_quoted_type",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad HANDLER \"odd.wrapper\""
+    },
+    {
+      "id": "handler_cross_database",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad HANDLER other_database.public.fn"
+    },
+    {
+      "id": "handler_too_many_parts",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad HANDLER a.b.c.d"
+    },
+    {
+      "id": "handler_missing_before_duplicate",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_bad HANDLER missing_handler NO HANDLER"
+    },
+    {
+      "id": "server",
+      "sql": "CREATE SERVER wrapper_server TYPE 'kind' VERSION 'one' FOREIGN DATA WRAPPER wrapper_none OPTIONS (arbitrary 'server')"
+    },
+    {
+      "id": "server_reference",
+      "sql": "SELECT s.srvname,w.fdwname,s.srvtype,s.srvversion,s.srvoptions FROM pg_foreign_server s JOIN pg_foreign_data_wrapper w ON w.oid=s.srvfdw WHERE s.srvname='wrapper_server'"
+    },
+    {
+      "id": "table",
+      "sql": "CREATE FOREIGN TABLE wrapper_rows(a integer,b text) SERVER wrapper_server OPTIONS (arbitrary 'table')"
+    },
+    {
+      "id": "scan",
+      "sql": "SELECT * FROM wrapper_rows"
+    },
+    {
+      "id": "limit_zero",
+      "sql": "SELECT * FROM wrapper_rows LIMIT 0"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW wrapper_view AS SELECT b FROM wrapper_rows"
+    },
+    {
+      "id": "view_scan",
+      "sql": "SELECT * FROM wrapper_view"
+    },
+    {
+      "id": "duplicate_table_option",
+      "sql": "CREATE FOREIGN TABLE wrapper_bad_options(a integer) SERVER wrapper_server OPTIONS (same 'first', same 'second')"
+    },
+    {
+      "id": "equals_table_option",
+      "sql": "CREATE FOREIGN TABLE wrapper_bad_options(a integer) SERVER wrapper_server OPTIONS (\"has=equals\" 'value')"
+    },
+    {
+      "id": "begin",
+      "sql": "BEGIN; SAVEPOINT before_wrapper"
+    },
+    {
+      "id": "rolled_back",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_rollback; ROLLBACK TO before_wrapper"
+    },
+    {
+      "id": "rollback_catalog",
+      "sql": "SELECT count(*) FROM pg_foreign_data_wrapper WHERE fdwname='wrapper_rollback'"
+    },
+    {
+      "id": "commit",
+      "sql": "COMMIT"
+    },
+    {
+      "id": "other_role",
+      "sql": "CREATE ROLE wrapper_other; SET ROLE wrapper_other"
+    },
+    {
+      "id": "denied",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_denied"
+    },
+    {
+      "id": "denied_existing",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_plain HANDLER missing_handler"
+    },
+    {
+      "id": "denied_server_usage",
+      "sql": "CREATE SERVER wrapper_denied_source FOREIGN DATA WRAPPER wrapper_none"
+    },
+    {
+      "id": "denied_qualified_function",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_plain HANDLER a.b.c.d"
+    },
+    {
+      "id": "reset",
+      "sql": "RESET ROLE"
+    },
+    {
+      "id": "validation_log",
+      "sql": "CREATE TABLE wrapper_validation_calls(options text[], scope oid)"
+    },
+    {
+      "id": "validator_function",
+      "sql": "CREATE FUNCTION wrapper_validator(options text[], scope oid) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN INSERT INTO wrapper_validation_calls VALUES (options, scope); RETURN 7; END $$"
+    },
+    {
+      "id": "validated_wrapper",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_valid VALIDATOR wrapper_validator OPTIONS (z 'last',a 'first')"
+    },
+    {
+      "id": "validated_server",
+      "sql": "CREATE SERVER wrapper_valid_server FOREIGN DATA WRAPPER wrapper_valid OPTIONS (z 'server-last',a 'server-first')"
+    },
+    {
+      "id": "validated_table",
+      "sql": "CREATE FOREIGN TABLE wrapper_valid_rows (a integer) SERVER wrapper_valid_server OPTIONS (z 'table-last',a 'table-first')"
+    },
+    {
+      "id": "validated_server_options",
+      "sql": "SELECT srvoptions FROM pg_foreign_server WHERE srvname='wrapper_valid_server'"
+    },
+    {
+      "id": "validated_empty_options",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_empty VALIDATOR wrapper_validator"
+    },
+    {
+      "id": "validator_calls",
+      "sql": "SELECT scope::integer, options FROM wrapper_validation_calls ORDER BY scope, options"
+    },
+    {
+      "id": "validator_coercion_function",
+      "sql": "CREATE FUNCTION wrapper_coercion_validator(text[],bigint) RETURNS integer LANGUAGE SQL RETURN 1"
+    },
+    {
+      "id": "validator_no_coercion",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_invalid VALIDATOR wrapper_coercion_validator"
+    },
+    {
+      "id": "validator_default_function",
+      "sql": "CREATE FUNCTION wrapper_default_validator(text[],oid,integer DEFAULT 1) RETURNS integer LANGUAGE SQL RETURN 1"
+    },
+    {
+      "id": "validator_no_defaults",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_invalid VALIDATOR wrapper_default_validator"
+    },
+    {
+      "id": "validator_procedure",
+      "sql": "CREATE PROCEDURE wrapper_validator_proc(text[],oid) LANGUAGE SQL AS $$ SELECT 1 $$"
+    },
+    {
+      "id": "validator_not_procedure",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_invalid VALIDATOR wrapper_validator_proc"
+    },
+    {
+      "id": "validator_reject_function",
+      "sql": "CREATE FUNCTION wrapper_reject_validator(options text[], scope oid) RETURNS void LANGUAGE plpgsql AS $$ BEGIN INSERT INTO wrapper_validation_calls VALUES (options,scope); RAISE EXCEPTION USING ERRCODE='22023', MESSAGE='rejected wrapper options'; END $$"
+    },
+    {
+      "id": "validator_reject",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_rejected VALIDATOR wrapper_reject_validator OPTIONS (a 'rejected')"
+    },
+    {
+      "id": "validator_rollback",
+      "sql": "SELECT scope::integer, options FROM wrapper_validation_calls ORDER BY scope, options"
+    },
+    {
+      "id": "validator_dependency",
+      "sql": "DROP FUNCTION wrapper_validator(text[],oid)"
+    },
+    {
+      "id": "owner_create",
+      "sql": "CREATE ROLE wrapper_owner SUPERUSER; SET ROLE wrapper_owner; CREATE FOREIGN DATA WRAPPER wrapper_owned VALIDATOR wrapper_validator"
+    },
+    {
+      "id": "owner_demote",
+      "sql": "RESET ROLE; ALTER ROLE wrapper_owner NOSUPERUSER; GRANT INSERT ON wrapper_validation_calls TO wrapper_owner; REVOKE EXECUTE ON FUNCTION wrapper_validator(text[],oid) FROM PUBLIC; SET ROLE wrapper_owner"
+    },
+    {
+      "id": "validator_internal_acl",
+      "sql": "CREATE SERVER wrapper_owned_server FOREIGN DATA WRAPPER wrapper_owned"
+    },
+    {
+      "id": "owner_restrict",
+      "sql": "RESET ROLE; DROP ROLE wrapper_owner"
+    },
+    {
+      "id": "owner_reset",
+      "sql": "RESET ROLE"
+    },
+    {
+      "id": "cascade_begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "cascade_validator",
+      "sql": "DROP FUNCTION wrapper_validator(text[],oid) CASCADE"
+    },
+    {
+      "id": "cascade_rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "self_removing_validator",
+      "sql": "CREATE FUNCTION orphan_validator(text[],oid) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'DROP FUNCTION orphan_validator(text[],oid)'; RETURN 1; END $$"
+    },
+    {
+      "id": "self_removing_wrapper",
+      "sql": "CREATE FOREIGN DATA WRAPPER orphan_fdw VALIDATOR orphan_validator"
+    },
+    {
+      "id": "self_removing_access",
+      "sql": "DO $$ BEGIN CREATE SERVER orphan_server FOREIGN DATA WRAPPER orphan_fdw; EXCEPTION WHEN OTHERS THEN RAISE NOTICE '%', SQLSTATE; END $$"
+    },
+    {
+      "id": "self_removing_replacement",
+      "sql": "CREATE FUNCTION orphan_validator(text[],oid) RETURNS integer LANGUAGE SQL RETURN 7"
+    },
+    {
+      "id": "self_removing_reuse",
+      "sql": "DO $$ BEGIN CREATE SERVER orphan_server FOREIGN DATA WRAPPER orphan_fdw; EXCEPTION WHEN OTHERS THEN RAISE NOTICE '%', SQLSTATE; END $$"
+    },
+    {
+      "id": "readonly_begin",
+      "sql": "BEGIN READ ONLY"
+    },
+    {
+      "id": "readonly_create",
+      "sql": "CREATE FOREIGN DATA WRAPPER wrapper_readonly"
+    },
+    {
+      "id": "readonly_rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "server_callback_removes_wrapper",
+      "sql": "CREATE FUNCTION server_removes_wrapper(text[],oid) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN IF $2=1417 THEN EXECUTE 'DROP FUNCTION server_removes_wrapper(text[],oid) CASCADE'; END IF; RETURN 1; END $$; CREATE FOREIGN DATA WRAPPER orphaned_fdw VALIDATOR server_removes_wrapper; CREATE SERVER orphaned_server FOREIGN DATA WRAPPER orphaned_fdw"
+    },
+    {
+      "id": "orphaned_server_access",
+      "sql": "DO $$ BEGIN EXECUTE 'CREATE FOREIGN TABLE orphaned_rows(id integer) SERVER orphaned_server'; EXCEPTION WHEN OTHERS THEN RAISE NOTICE '%',SQLSTATE; END $$"
+    },
+    {
+      "id": "orphaned_wrapper_recreated",
+      "sql": "CREATE FOREIGN DATA WRAPPER orphaned_fdw"
+    },
+    {
+      "id": "orphaned_server_name_reuse",
+      "sql": "DO $$ BEGIN EXECUTE 'CREATE FOREIGN TABLE orphaned_rows(id integer) SERVER orphaned_server'; EXCEPTION WHEN OTHERS THEN RAISE NOTICE '%',SQLSTATE; END $$"
+    },
+    {
+      "id": "stored_catalog",
+      "sql": "SELECT fdwname,pg_get_userbyid(fdwowner)=current_user AS current_owner,fdwhandler,fdwvalidator::regproc::text AS validator,fdwacl IS NULL AS default_acl,fdwoptions FROM pg_foreign_data_wrapper WHERE fdwname LIKE 'wrapper_%' ORDER BY fdwname",
+      "reopen": true
+    },
+    {
+      "id": "stored_reference",
+      "sql": "SELECT s.srvname,w.fdwname,s.srvtype,s.srvversion,s.srvoptions FROM pg_foreign_server s JOIN pg_foreign_data_wrapper w ON w.oid=s.srvfdw WHERE s.srvname='wrapper_server'",
+      "reopen": true
+    },
+    {
+      "id": "stored_scan",
+      "sql": "SELECT * FROM wrapper_rows",
+      "reopen": true
+    },
+    {
+      "id": "stored_view",
+      "sql": "SELECT * FROM wrapper_view",
+      "reopen": true
+    },
+    {
+      "id": "stored_orphan_reference",
+      "sql": "DO $$ BEGIN CREATE SERVER orphan_server FOREIGN DATA WRAPPER orphan_fdw; EXCEPTION WHEN OTHERS THEN RAISE NOTICE '%', SQLSTATE; END $$",
+      "reopen": true
+    },
+    {
+      "id": "stored_orphaned_server",
+      "reopen": true,
+      "sql": "DO $$ BEGIN EXECUTE 'CREATE FOREIGN TABLE orphaned_rows(id integer) SERVER orphaned_server'; EXCEPTION WHEN OTHERS THEN RAISE NOTICE '%',SQLSTATE; END $$"
+    }
+  ]
+}

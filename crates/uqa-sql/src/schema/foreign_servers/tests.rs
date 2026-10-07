@@ -59,6 +59,7 @@ impl Catalog {
             fdw_type: "memory_fdw".into(),
             options: BTreeMap::new(),
             metadata: ForeignServerMetadata {
+                option_order: None,
                 wrapper_reference: None,
                 oid: 30_001,
                 object_id: [9; 16],

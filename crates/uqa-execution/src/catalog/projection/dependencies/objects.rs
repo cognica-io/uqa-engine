@@ -122,6 +122,7 @@ pub(super) struct CatalogObjects {
     members: BTreeMap<(u32, u32), MemberObject>,
     roles: BTreeMap<u32, String>,
     foreign_servers: BTreeMap<u32, (String, [u8; 16])>,
+    foreign_wrappers: BTreeMap<u32, (String, [u8; 16])>,
     unpinned: BTreeSet<(u32, u32)>,
 }
 
@@ -136,6 +137,21 @@ impl CatalogObjects {
         objects.collect_namespaces(catalog);
         objects.collect_relations(context, catalog, resolution)?;
         objects.collect_types(catalog);
+        for wrapper in catalog.snapshot().definitions.foreign_wrappers.values() {
+            objects.foreign_wrappers.insert(
+                wrapper.identity.oid,
+                (wrapper.name.clone(), wrapper.identity.object_id),
+            );
+            if !matches!(
+                wrapper.handler,
+                uqa_sql::catalog::foreign_wrapper::ForeignWrapperHandler::Native(_)
+            ) {
+                objects.unpin(ObjectAddress::whole(
+                    uqa_sql::catalog::dependencies::FOREIGN_WRAPPER_CLASS,
+                    wrapper.identity.oid,
+                ));
+            }
+        }
         for server in catalog.snapshot().definitions.foreign_servers.values() {
             objects.foreign_servers.insert(
                 server.metadata.oid,
@@ -478,6 +494,12 @@ impl CatalogObjects {
         self.foreign_servers
             .get(&oid)
             .map(|(name, _)| name.as_str())
+    }
+
+    pub(super) fn foreign_wrapper_object(&self, oid: u32) -> Option<(&str, [u8; 16])> {
+        self.foreign_wrappers
+            .get(&oid)
+            .map(|(name, object_id)| (name.as_str(), *object_id))
     }
 
     pub(super) fn foreign_server_object(&self, oid: u32) -> Option<(&str, [u8; 16])> {

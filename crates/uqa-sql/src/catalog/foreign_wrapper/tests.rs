@@ -88,3 +88,48 @@ fn restoration_rejects_aliases_invalid_options_and_replaced_owners() {
     native.get_mut("memory_fdw").unwrap().identity.object_id[0] ^= 1;
     assert!(validate_wrappers(&native, &roles()).is_err());
 }
+
+#[test]
+fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
+    let crate::ast::Statement::CreateFunction(mut definition) = crate::compile(
+        "CREATE FUNCTION callback(text[],oid) RETURNS integer LANGUAGE SQL RETURN 1",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("function");
+    };
+    definition.object_id = Some([5; 16]);
+    definition.catalog_oid = Some(20_000);
+    let binding = crate::ast::FunctionBinding {
+        name: definition.name.clone(),
+        object_id: definition.object_id,
+        argument_types: crate::routines::routine_signature_types(&definition),
+        builtin: false,
+        dispatch: None,
+        invocation: None,
+        resolution_error: None,
+    };
+    let routines = BTreeMap::from([(
+        definition.name.clone(),
+        vec![std::sync::Arc::new(crate::routines::SQLUserFunction::new(
+            *definition,
+            crate::routines::RoutineBody::Source,
+        ))],
+    )]);
+    let mut wrapper = custom();
+    wrapper.validator = Some(ForeignWrapperFunction {
+        oid: 20_000,
+        binding,
+    });
+    let mut wrappers = BTreeMap::from([("custom".into(), wrapper)]);
+    validate_functions(&wrappers, &routines).unwrap();
+    validate_functions(&wrappers, &BTreeMap::new()).unwrap();
+    wrappers
+        .get_mut("custom")
+        .unwrap()
+        .validator
+        .as_mut()
+        .unwrap()
+        .oid += 1;
+    assert!(validate_functions(&wrappers, &routines).is_err());
+}

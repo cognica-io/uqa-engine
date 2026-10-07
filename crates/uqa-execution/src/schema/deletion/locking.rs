@@ -12,6 +12,42 @@ use crate::row_locks::{binding::lock_any_relation_identity, RelationLockMode};
 use std::collections::BTreeSet;
 use uqa_sql::SQLError;
 
+/// Lock the foreign definitions reached by deletion and repeat the dependency search after a wait can change the catalog.
+pub(super) fn lock_foreign_definitions(
+    context: &CatalogRemovalContext<'_>,
+    targets: &uqa_sql::catalog::dependencies::DeletionTargets,
+    locked: &mut BTreeSet<uqa_sql::catalog::dependencies::ObjectAddress>,
+) -> Result<bool, SQLError> {
+    use crate::row_locks::shared_objects::SharedCatalogLock;
+    use uqa_sql::catalog::dependencies::{FOREIGN_SERVER_CLASS, FOREIGN_WRAPPER_CLASS};
+    let mut acquired = false;
+    for target in targets.targets() {
+        let object = target.object;
+        if matches!(
+            object.class_id,
+            FOREIGN_SERVER_CLASS | FOREIGN_WRAPPER_CLASS
+        ) && locked.insert(object)
+        {
+            context
+                .shared_locks
+                .acquire_shared_catalog(
+                    SharedCatalogLock::Object {
+                        class_id: object.class_id,
+                        oid: object.object_id,
+                    },
+                    RelationLockMode::AccessExclusive,
+                )?
+                .retain();
+            acquired = true;
+        }
+    }
+    if acquired {
+        context.shared_locks.refresh_shared_catalog()?;
+        context.locks.prepare_definition_write()?;
+    }
+    Ok(acquired)
+}
+
 /// Lock the plan's relations that are not locked yet. Returns whether any lock was newly taken: waiting for one may have let other sessions change the catalog, so the caller searches again.
 pub(super) fn lock_relations(
     context: &CatalogRemovalContext<'_>,

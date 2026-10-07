@@ -19,7 +19,7 @@ use uqa_storage::{CatalogFacade, ForeignServerRow, StorageBackendError, StorageB
 
 const FORMAT_KEY: &str = "foreign-wrapper-catalog-format";
 const RECORD_PREFIX: &str = "foreign-wrapper/";
-const FORMAT_MARKER: &str = r#"{"version":1}"#;
+const FORMAT_MARKER: &str = r#"{"version":2}"#;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,6 +31,7 @@ struct WrapperEnvelope {
 pub(super) struct RestoredWrappers {
     pub definitions: ForeignWrappers,
     initialize: bool,
+    upgrade: bool,
     server_migrations: Vec<ForeignServerRow>,
 }
 
@@ -40,7 +41,7 @@ impl RestoredWrappers {
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
-        if self.initialize {
+        if self.initialize || self.upgrade {
             for definition in self.definitions.values() {
                 persist_record(catalog, definition)?;
             }
@@ -48,7 +49,7 @@ impl RestoredWrappers {
         for row in &self.server_migrations {
             catalog.save_foreign_server_row(row)?;
         }
-        if self.initialize {
+        if self.initialize || self.upgrade {
             catalog.set_metadata(FORMAT_KEY, FORMAT_MARKER)?;
         }
         Ok(())
@@ -59,7 +60,7 @@ pub fn persist(
     catalog: &dyn CatalogFacade,
     definition: &ForeignWrapperDefinition,
 ) -> StorageBackendResult<()> {
-    if !current_format(catalog)? {
+    if catalog_format(catalog)? != Some(2) {
         return Err(invalid(
             "foreign-wrapper catalog requires initial-open migration",
         ));
@@ -67,12 +68,17 @@ pub fn persist(
     persist_record(catalog, definition)
 }
 
+/// Remove the individual definition without changing the catalog format marker.
+pub fn remove(catalog: &dyn CatalogFacade, name: &str) -> StorageBackendResult<()> {
+    catalog.delete_metadata(&format!("{RECORD_PREFIX}{name}"))
+}
+
 fn persist_record(
     catalog: &dyn CatalogFacade,
     definition: &ForeignWrapperDefinition,
 ) -> StorageBackendResult<()> {
     let record = serde_json::to_string(&WrapperEnvelope {
-        version: 1,
+        version: 2,
         definition: definition.clone(),
     })?;
     catalog.set_metadata(&format!("{RECORD_PREFIX}{}", definition.name), &record)
@@ -84,7 +90,14 @@ pub(super) fn restore(
     servers: &mut BTreeMap<String, ForeignServerDefinition>,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredWrappers> {
-    let current = current_format(catalog)?;
+    let version = catalog_format(catalog)?;
+    let current = version.is_some();
+    let upgrade = version == Some(1);
+    if upgrade && !allow_migration {
+        return Err(invalid(
+            "foreign-wrapper routine OIDs require initial-open migration",
+        ));
+    }
     let rows = catalog.metadata_with_prefix(RECORD_PREFIX)?;
     if !current && !rows.is_empty() {
         return Err(invalid(
@@ -103,7 +116,9 @@ pub(super) fn restore(
     };
     for (key, value) in rows {
         let record: WrapperEnvelope = serde_json::from_str(&value)?;
-        if record.version != 1 || key != format!("{RECORD_PREFIX}{}", record.definition.name) {
+        if Some(record.version) != version
+            || key != format!("{RECORD_PREFIX}{}", record.definition.name)
+        {
             return Err(invalid("invalid foreign-wrapper record version or key"));
         }
         if definitions
@@ -122,10 +137,18 @@ pub(super) fn restore(
                     "foreign-wrapper reference exists without its format marker",
                 ));
             }
-            Some(_) => {
-                server
-                    .bound_wrapper(&definitions)
-                    .map_err(|error| invalid(error.to_string()))?;
+            Some(reference) => {
+                if reference.oid == 0 || reference.object_id == [0; 16] {
+                    return Err(invalid("invalid stored foreign-wrapper reference"));
+                }
+                if reference.oid < uqa_sql::catalog::oids::FIRST_NORMAL_OBJECT_ID {
+                    // Reserved host implementations cannot disappear through SQL callback deletion.
+                    server
+                        .bound_wrapper(&definitions)
+                        .map_err(|error| invalid(error.to_string()))?;
+                }
+                // PostgreSQL permits creation to finish after its callback deletes the wrapper.
+                // Preserve that original reference; access reports its missing OID without repairing it.
             }
             None if current || !allow_migration => {
                 return Err(invalid(format!(
@@ -148,18 +171,22 @@ pub(super) fn restore(
     Ok(RestoredWrappers {
         definitions,
         initialize: !current,
+        upgrade,
         server_migrations,
     })
 }
 
-fn current_format(catalog: &dyn CatalogFacade) -> StorageBackendResult<bool> {
+fn catalog_format(catalog: &dyn CatalogFacade) -> StorageBackendResult<Option<u32>> {
     let Some(marker) = catalog.get_metadata(FORMAT_KEY)? else {
-        return Ok(false);
+        return Ok(None);
     };
-    if serde_json::from_str::<serde_json::Value>(&marker)? != serde_json::json!({"version":1}) {
-        return Err(invalid("unsupported foreign-wrapper catalog format marker"));
+    let marker = serde_json::from_str::<serde_json::Value>(&marker)?;
+    for version in [1, 2] {
+        if marker == serde_json::json!({"version":version}) {
+            return Ok(Some(version));
+        }
     }
-    Ok(true)
+    Err(invalid("unsupported foreign-wrapper catalog format marker"))
 }
 
 fn invalid(message: impl Into<String>) -> StorageBackendError {

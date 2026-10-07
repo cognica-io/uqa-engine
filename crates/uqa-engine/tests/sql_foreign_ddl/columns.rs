@@ -6,7 +6,7 @@
 
 use uqa_engine::Engine;
 
-fn open(provider: usize, path: &std::path::Path) -> Engine {
+pub(super) fn open(provider: usize, path: &std::path::Path) -> Engine {
     match provider {
         0 => Engine::new(),
         1 => Engine::open(path).unwrap(),

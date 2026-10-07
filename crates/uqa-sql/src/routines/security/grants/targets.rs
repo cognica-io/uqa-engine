@@ -6,24 +6,17 @@
 
 //! Routine privilege target selection by immutable `pg_proc` addresses.
 
+pub use crate::routines::lifecycle::names::RoutineCatalogIdentity as RoutinePrivilegeIdentity;
 use crate::{
     ast::AlterRoutineKind,
     routines::lifecycle::{
         alter_routine_kind_name, ambiguous_routine_error,
-        names::{routine_lookup_keys, RoutineNameCatalog},
+        names::{routine_lookup_keys_with_builtins, RoutineNameCatalog},
         routine_signature_display, wrong_routine_kind_error,
     },
     SQLError,
 };
 use std::collections::BTreeSet;
-use uqa_core::RelationIdentity;
-
-pub struct RoutinePrivilegeIdentity {
-    pub oid: u32,
-    pub relation: RelationIdentity,
-    pub argument_types: Vec<i64>,
-    pub kind: char,
-}
 
 pub fn in_schemas(
     catalog: &dyn RoutineNameCatalog,
@@ -68,21 +61,7 @@ pub fn named(
     display_types: Option<&[String]>,
     kind: AlterRoutineKind,
 ) -> Result<usize, SQLError> {
-    let mut keys = routine_lookup_keys(catalog, name)?;
-    let (schema, local) = RelationIdentity::parse_reference(name)
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
-    if schema.is_none()
-        && catalog.schema_has_usage("pg_catalog", &catalog.current_role())
-        && !catalog
-            .search_path()
-            .iter()
-            .any(|schema| schema == "pg_catalog")
-    {
-        keys.insert(
-            0,
-            RelationIdentity::new("pg_catalog", local).qualified_name(),
-        );
-    }
+    let keys = routine_lookup_keys_with_builtins(catalog, name)?;
     let kind_name = alter_routine_kind_name(kind);
     let mut visible = BTreeSet::new();
     let mut selected = Vec::new();

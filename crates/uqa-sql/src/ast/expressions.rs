@@ -926,6 +926,7 @@ impl Statement {
             | Self::CreateSequence(_)
             | Self::AlterSequence(_)
             | Self::Deallocate { .. }
+            | Self::CreateForeignWrapper(_)
             | Self::CreateForeignServer(_)
             | Self::CreateForeignTable(_)
             | Self::CreateForeignTableDefinition(_)

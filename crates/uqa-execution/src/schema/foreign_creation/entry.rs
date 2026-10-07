@@ -15,6 +15,14 @@ pub type ForeignCatalogWrite<'a> =
 pub trait ForeignCreationTransactions {
     fn with_foreign_catalog_write(&self, write: ForeignCatalogWrite<'_>) -> Result<(), SQLError>;
 }
+pub fn register_foreign_wrapper_statement(
+    transactions: &dyn ForeignCreationTransactions,
+    statement: uqa_sql::ast::CreateForeignWrapper,
+) -> Result<(), SQLError> {
+    transactions.with_foreign_catalog_write(Box::new(move |context| {
+        context.register_foreign_wrapper_statement(&statement)
+    }))
+}
 pub fn register_foreign_server_statement(
     transactions: &dyn ForeignCreationTransactions,
     statement: uqa_sql::ast::CreateForeignServer,

@@ -13,6 +13,7 @@ mod defaults;
 mod descriptions;
 mod events;
 mod expressions;
+mod foreign;
 mod indexes;
 mod objects;
 mod queries;
@@ -63,6 +64,7 @@ impl CatalogDependencies {
         };
         builder.record_types()?;
         builder.record_relations()?;
+        builder.record_foreign()?;
         builder.record_constraints()?;
         builder.record_defaults()?;
         builder.record_indexes()?;

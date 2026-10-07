@@ -32,6 +32,7 @@ mod enums;
 mod events;
 mod foreign_servers;
 mod foreign_tables;
+mod foreign_wrappers;
 mod hierarchy;
 mod locking;
 mod merge;

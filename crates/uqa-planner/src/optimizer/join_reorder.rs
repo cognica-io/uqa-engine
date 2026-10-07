@@ -170,6 +170,7 @@ fn reorder_command_joins(
         | CommandPlan::GrantType(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }
+        | CommandPlan::CreateForeignWrapper(_)
         | CommandPlan::CreateForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
         | CommandPlan::CreateForeignTableDefinition(_)

@@ -34,6 +34,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reject set-valued operands in individual IN comparisons before rewriting, while preserving PostgreSQL scalar-array expansion and ordered analysis errors.
+- Preserve PL/pgSQL RAISE diagnostic options for SQLSTATE, message, detail and hint, including typed output, ordered effects, NULL and duplicate diagnostics and bare rethrow.
+
+- Support SQL foreign-data wrapper declarations with exact validator signatures, ordered options, transactional callbacks and dependency-aware validator deletion.
+
 - Retain native foreign-wrapper identities in server definitions, catalog snapshots and persistent restoration. Bind legacy servers only during initial conversion and reject stale wrapper references before accessing a source.
 
 - Support foreign-column DROP through both ALTER FOREIGN TABLE and ALTER TABLE, preserving PostgreSQL notices, dependency checks, CASCADE, atomic multi-column changes, rollback and durable attribute slots.

@@ -231,6 +231,7 @@ pub mod type_objects;
 
 pub mod foreign_servers;
 pub mod foreign_tables;
+pub mod foreign_wrappers;
 
 pub mod retention;
 

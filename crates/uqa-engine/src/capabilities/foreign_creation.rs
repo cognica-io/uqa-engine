@@ -25,6 +25,8 @@ impl Engine {
     }
     pub(crate) fn foreign_creation_context(&self) -> ForeignCreationContext<'_> {
         ForeignCreationContext {
+            routine_names: self,
+            invocation: self.routine_invocation_context(),
             creation: self.relation_creation_context(),
             identities: self.catalog_identity_reservation_context(),
             schema: self.foreign_schema_context(),
@@ -55,6 +57,9 @@ impl ForeignRegistryReads for Engine {
     }
 }
 impl ForeignCreationRegistry for Engine {
+    fn wrappers_write(&self) -> uqa_execution::schema::foreign_creation::ForeignWrappersWrite<'_> {
+        Box::new(self.durable.foreign_wrappers.write())
+    }
     fn servers_write(&self) -> ForeignServersWrite<'_> {
         Box::new(self.durable.foreign_servers.write())
     }

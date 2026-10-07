@@ -20,6 +20,7 @@ pub struct ForeignRestoreContext<'a> {
     pub schema: ForeignSchemaContext<'a>,
     pub sequences: SequenceOwnerPublicationContext<'a>,
     pub roles: &'a dyn RoleCatalogGuards,
+    pub routines: &'a dyn crate::routines::catalog::RoutineRegistryState,
 }
 
 pub struct RestoredForeignCatalog {
@@ -177,7 +178,7 @@ fn restore_wrappers(
     )?;
     uqa_sql::catalog::foreign_wrapper::validate_functions(
         &restored.definitions,
-        context.schema.types,
+        &context.routines.routine_snapshot(),
     )
     .map_err(|error| StorageBackendError::Other(error.to_string()))?;
     Ok(restored)
