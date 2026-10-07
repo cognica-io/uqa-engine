@@ -10,6 +10,9 @@ on:
       - .config/nextest.toml
       - .github/actions/setup-nextest/**
       - .github/workflows/performance-checks.yml
+      - benchmarks/regressions/**
+      - scripts/run-performance-checks.py
+      - scripts/tests/test_performance_checks.py
   push:
     branches: [main]
     paths:
@@ -20,6 +23,9 @@ on:
       - .config/nextest.toml
       - .github/actions/setup-nextest/**
       - .github/workflows/performance-checks.yml
+      - benchmarks/regressions/**
+      - scripts/run-performance-checks.py
+      - scripts/tests/test_performance_checks.py
 
 permissions:
   contents: read
@@ -35,8 +41,8 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
-  temporal-histories:
-    name: Temporal histories (${{ matrix.os }})
+  deterministic-work:
+    name: Deterministic work and memory (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:
@@ -53,16 +59,17 @@ jobs:
           cache-bin: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-nextest
-      - name: Run every temporal equality history independently
-        run: >-
-          cargo nextest run --locked -p uqa-engine --test integration
-          --profile ci
-          -E 'test(absent_temporal_unique_updates_keep_postgresql_equality)'
-      - name: Retain functional results
+      - name: Verify the regression inventory and failure detection
+        run: python3 -m unittest discover -s scripts/tests -p test_performance_checks.py
+      - name: Check bounded work, memory and output correctness
+        run: python3 scripts/run-performance-checks.py
+      - name: Retain regression results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: temporal-histories-${{ matrix.os }}
-          path: target/nextest/ci/junit.xml
+          name: performance-checks-${{ matrix.os }}
+          path: |
+            target/nextest/ci/junit.xml
+            target/performance-checks/
           if-no-files-found: error
           retention-days: 7
