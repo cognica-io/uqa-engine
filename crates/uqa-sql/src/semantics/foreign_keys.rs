@@ -23,6 +23,8 @@ pub struct ForeignKeyLookup {
 pub struct ForeignKeyComparison {
     pub comparison_types: Vec<ColumnType>,
     pub exact_reference_lookup: bool,
+    /// Whether child index equality has the same operand types as the FK comparison.
+    pub exact_local_lookup: bool,
 }
 
 impl ForeignKeyComparison {
@@ -107,6 +109,7 @@ pub fn foreign_key_comparison_types(
         .ok_or_else(|| SQLError::UnknownTable(fk.ref_table.clone()))?;
     let mut comparison_types = Vec::with_capacity(fk.local_columns.len());
     let mut exact_reference_lookup = true;
+    let mut exact_local_lookup = true;
     for (local_column, referenced_column) in fk.local_columns.iter().zip(&fk.ref_columns) {
         let local_type = local_columns
             .iter()
@@ -132,11 +135,13 @@ pub fn foreign_key_comparison_types(
                 }
             })?;
         exact_reference_lookup &= comparison_type == *referenced_type;
+        exact_local_lookup &= comparison_type == *local_type;
         comparison_types.push(comparison_type);
     }
     Ok(ForeignKeyComparison {
         comparison_types,
         exact_reference_lookup,
+        exact_local_lookup,
     })
 }
 

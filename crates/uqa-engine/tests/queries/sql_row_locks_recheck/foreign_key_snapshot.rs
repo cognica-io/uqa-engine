@@ -46,11 +46,52 @@ fn action_after_child_change(
     Result<uqa_sql::SQLResult, uqa_sql::SQLError>,
     tempfile::TempDir,
 ) {
+    action_after_child_change_in_storage(
+        action,
+        foreign_key_action,
+        isolation,
+        child_change,
+        1,
+        false,
+    )
+}
+
+fn action_after_child_change_in_storage(
+    action: &str,
+    foreign_key_action: &str,
+    isolation: Option<&str>,
+    child_change: &str,
+    provider: u8,
+    indexed: bool,
+) -> (
+    Engine,
+    Result<uqa_sql::SQLResult, uqa_sql::SQLError>,
+    tempfile::TempDir,
+) {
     let directory = tempfile::tempdir().unwrap();
-    let root = Engine::open(&directory.path().join("foreign-key-snapshot.db")).unwrap();
+    let path = directory.path().join("foreign-key-snapshot.db");
+    let root = match provider {
+        1 => Engine::open(&path).unwrap(),
+        2 => Engine::from_persistent_provider(Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(Arc::new(
+            uqa_storage_redb::RedbStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    };
     root.sql("CREATE TABLE parents (id INTEGER PRIMARY KEY)", &[])
         .unwrap();
     root.sql(&format!("CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents(id) {foreign_key_action})"), &[]).unwrap();
+    if indexed {
+        root.sql(
+            "CREATE INDEX children_parent_lookup ON children(parent_id)",
+            &[],
+        )
+        .unwrap();
+    }
     root.sql("INSERT INTO parents VALUES (1)", &[]).unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let gate = Arc::new(Barrier::new(2));
@@ -99,6 +140,47 @@ fn action_after_child_change(
     gate.wait();
     let result = action_thread.join().unwrap();
     (root, result, directory)
+}
+
+#[rstest::rstest]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn indexed_foreign_keys_observe_children_committed_before_parent_lock(#[case] provider: u8) {
+    for isolation in [None, Some("REPEATABLE READ"), Some("SERIALIZABLE")] {
+        for cascade in [false, true] {
+            let action = if cascade { "ON DELETE CASCADE" } else { "" };
+            let (root, result, _directory) = action_after_child_change_in_storage(
+                "DELETE FROM parents",
+                action,
+                isolation,
+                "INSERT INTO children VALUES (10, 1)",
+                provider,
+                true,
+            );
+            let expected = if cascade && isolation.is_none() {
+                None
+            } else if cascade {
+                Some("40001")
+            } else {
+                Some("23503")
+            };
+            assert_eq!(
+                result.as_ref().err().and_then(|error| error.sqlstate()),
+                expected,
+                "provider={provider}, isolation={isolation:?}, action={action}: {result:?}"
+            );
+            let remaining = i64::from(expected.is_some());
+            for table in ["parents", "children"] {
+                assert_eq!(
+                    root.sql(&format!("SELECT count(*) AS n FROM {table}"), &[])
+                        .unwrap()
+                        .rows[0]["n"],
+                    Value::Int(remaining)
+                );
+            }
+        }
+    }
 }
 
 #[test]
