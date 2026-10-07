@@ -150,7 +150,7 @@ impl EnumLabelKey {
             _ => None,
         };
         let mut bytes = Vec::with_capacity(digits.len() / 2);
-        for pair in digits.chunks_exact(2) {
+        for pair in digits.as_chunks::<2>().0 {
             let (Some(high), Some(low)) = (nibble(pair[0]), nibble(pair[1])) else {
                 return Err(EnumLabelKeyParseError::Hexadecimal);
             };

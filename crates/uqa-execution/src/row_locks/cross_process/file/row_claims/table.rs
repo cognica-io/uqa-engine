@@ -274,7 +274,9 @@ pub(super) fn read_processes(file: &File) -> Result<Vec<(u32, u32)>> {
     let mut bytes = vec![0_u8; usize::from(PROCESS_SLOT_COUNT) * PROCESS_SLOT_SIZE as usize];
     read_zero_extended(file, &mut bytes, PROCESS_SLOT_BASE)?;
     Ok(bytes
-        .chunks_exact(PROCESS_SLOT_SIZE as usize)
+        .as_chunks::<{ PROCESS_SLOT_SIZE as usize }>()
+        .0
+        .iter()
         .map(|record| {
             (
                 u32::from_be_bytes(record[0..4].try_into().expect("generation")),
@@ -411,7 +413,12 @@ impl<'a> Table<'a> {
         let mut bytes = [0_u8; (WINDOW * ENTRY_SIZE) as usize];
         while index < end {
             let count = self.read_window(index, end - index, &mut bytes)?;
-            for slot in bytes.chunks_exact(ENTRY_SIZE as usize).take(count) {
+            for slot in bytes
+                .as_chunks::<{ ENTRY_SIZE as usize }>()
+                .0
+                .iter()
+                .take(count)
+            {
                 let slot = Slot::decode(slot)?;
                 if slot == Slot::Empty {
                     return Ok(Probe {
@@ -440,7 +447,13 @@ impl<'a> Table<'a> {
         let mut bytes = [0_u8; (WINDOW * ENTRY_SIZE) as usize];
         'tombstones: while first > 0 {
             let count = self.read_window(first - WINDOW.min(first), first, &mut bytes)?;
-            for slot in bytes.chunks_exact(ENTRY_SIZE as usize).take(count).rev() {
+            for slot in bytes
+                .as_chunks::<{ ENTRY_SIZE as usize }>()
+                .0
+                .iter()
+                .take(count)
+                .rev()
+            {
                 if Slot::decode(slot)? != Slot::Tombstone {
                     break 'tombstones;
                 }
@@ -460,7 +473,7 @@ impl<'a> Table<'a> {
             let count = CHUNK.min(end - index);
             bytes.resize((count * ENTRY_SIZE) as usize, 0);
             self.read(&mut bytes, slot_offset(index))?;
-            for slot in bytes.chunks_exact(ENTRY_SIZE as usize) {
+            for slot in bytes.as_chunks::<{ ENTRY_SIZE as usize }>().0 {
                 if let Slot::Live(entry) = Slot::decode(slot)? {
                     visit(entry)?;
                 }
@@ -556,7 +569,7 @@ pub(super) fn recover(file: &File, header: &mut Header) -> Result<()> {
         let count = CHUNK.min(rebuild.entries - read);
         let mut bytes = vec![0_u8; (count * ENTRY_SIZE) as usize];
         read_bytes(file, &mut bytes, rebuild.journal + read * ENTRY_SIZE)?;
-        for slot in bytes.chunks_exact(ENTRY_SIZE as usize) {
+        for slot in bytes.as_chunks::<{ ENTRY_SIZE as usize }>().0 {
             let Slot::Live(entry) = Slot::decode(slot)? else {
                 return Err(invalid("row claim rebuild journal"));
             };

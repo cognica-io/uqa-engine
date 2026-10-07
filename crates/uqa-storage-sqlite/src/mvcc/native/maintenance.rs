@@ -27,8 +27,7 @@ fn row<'a>(
     if identity.family() != NativeRecordFamily::Metadata
         || !values[0]
             .as_str()
-            .ok()
-            .is_some_and(|name| name.starts_with(StatisticsMaintenance::KEY_PREFIX))
+            .is_ok_and(|name| name.starts_with(StatisticsMaintenance::KEY_PREFIX))
     {
         return Err(VersionError::InvalidEncoding(
             "invalid native statistics-maintenance key",

@@ -69,8 +69,7 @@ pub fn routine_lookup_keys_with_builtins(
     name: &str,
 ) -> Result<Vec<String>, SQLError> {
     let mut keys = routine_lookup_keys(catalog, name)?;
-    let (schema, local) = RelationIdentity::parse_reference(name)
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    let (schema, local) = RelationIdentity::parse_reference(name).map_err(SQLError::Internal)?;
     if schema.is_none()
         && catalog.schema_has_usage("pg_catalog", &catalog.current_role())
         && !catalog

@@ -207,7 +207,7 @@ impl FileLockCoordinator {
             let count = WINDOW.min(SLOT_COUNT - index).min(SLOT_COUNT - visited);
             let window = &mut bytes[..SLOT_SIZE * count as usize];
             read_zero_extended_at(&self.sequence_file, window, slot_offset(index))?;
-            for slot in window.chunks_exact(SLOT_SIZE) {
+            for slot in window.as_chunks::<SLOT_SIZE>().0 {
                 match slot[56] {
                     EMPTY => {
                         probe.free.get_or_insert((index, true));
@@ -344,7 +344,9 @@ impl FileLockCoordinator {
             };
             Ok(self
                 .read_sequence_table()?
-                .chunks_exact(SLOT_SIZE)
+                .as_chunks::<SLOT_SIZE>()
+                .0
+                .iter()
                 .filter(|slot| slot[56] == LIVE)
                 .map(|slot| {
                     let (key, position, run) = decode(slot);
@@ -374,7 +376,7 @@ impl FileLockCoordinator {
             let stored = self.read_sequence_table()?;
             let mut table = vec![0_u8; stored.len()];
             let mut kept = 0_u32;
-            for slot in stored.chunks_exact(SLOT_SIZE) {
+            for slot in stored.as_chunks::<SLOT_SIZE>().0 {
                 if slot[56] != LIVE || !keep(&decode(slot).0) {
                     continue;
                 }

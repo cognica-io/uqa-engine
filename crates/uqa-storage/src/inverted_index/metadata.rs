@@ -116,7 +116,7 @@ impl IndexedFieldMetadata {
         let mut bytes = [0; 84];
         bytes[..40].copy_from_slice(&self.revision().to_bytes()?);
         bytes[..4].copy_from_slice(b"UQIM");
-        for (slot, value) in bytes[40..80].chunks_exact_mut(8).zip([
+        for (slot, value) in bytes[40..80].as_chunks_mut::<8>().0.iter_mut().zip([
             self.length,
             self.final_offsets.start_utf8,
             self.final_offsets.end_utf8,

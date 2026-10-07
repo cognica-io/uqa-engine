@@ -55,10 +55,10 @@ impl KeyValueCatalog {
         batch.put(
             &relation_key(TAG_CATALOG_INDEX, relation)?,
             &encode_value(&StoredCatalogIndex {
-                index_type: index_type.to_string(),
+                index_type: index_type.clone(),
                 table_name: table.qualified_name(),
-                columns_json: columns_json.to_string(),
-                parameters_json: parameters_json.to_string(),
+                columns_json: columns_json.clone(),
+                parameters_json: parameters_json.clone(),
                 definition_json: definition_json.clone(),
             })?,
         )?;

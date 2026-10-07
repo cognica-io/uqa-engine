@@ -142,15 +142,14 @@ impl Engine {
                 let cleanup_errors = self.abort_transaction_after_failure();
                 if cleanup_errors.is_empty() {
                     std::panic::resume_unwind(payload)
-                } else {
-                    Err(map_cleanup_error(self.transaction_abort_cleanup_error(
-                        format!(
-                            "transaction abort after panic failed: {}; original panic: {}",
-                            cleanup_errors.join("; "),
-                            panic_description(payload.as_ref())
-                        ),
-                    )))
                 }
+                Err(map_cleanup_error(self.transaction_abort_cleanup_error(
+                    format!(
+                        "transaction abort after panic failed: {}; original panic: {}",
+                        cleanup_errors.join("; "),
+                        panic_description(payload.as_ref())
+                    ),
+                )))
             }
         }
     }

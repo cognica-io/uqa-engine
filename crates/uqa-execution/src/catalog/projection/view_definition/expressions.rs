@@ -433,7 +433,7 @@ impl Deparser<'_> {
                 if matches!(argument, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
                     if let Some(ty) = binding.and_then(|binding| binding.argument_types.get(index))
                     {
-                        return self.cast(argument, &ty.to_string(), scope, subqueries);
+                        return self.cast(argument, ty, scope, subqueries);
                     }
                 }
                 self.expression(argument, scope, subqueries)

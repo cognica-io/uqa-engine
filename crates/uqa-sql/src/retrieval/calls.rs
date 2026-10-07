@@ -103,8 +103,7 @@ pub(super) fn bind_operator_argument(
             order_by,
             filter,
         } if crate::scalar_call_argument(expression)
-            .ok()
-            .is_some_and(|argument| argument.name.is_some())
+            .is_ok_and(|argument| argument.name.is_some())
             || crate::registry::lookup(name).is_some() =>
         {
             if *distinct

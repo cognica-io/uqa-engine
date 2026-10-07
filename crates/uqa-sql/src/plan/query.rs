@@ -242,7 +242,7 @@ pub(super) fn lower_relational_root(
 
 impl QueryBlockPlan {
     fn lower_with(statement: SelectStmt, aggregates: &dyn AggregateClassifier) -> Self {
-        debug_assert!(statement.with.is_empty());
+        debug_assert_eq!(statement.with.len(), 0);
         debug_assert!(statement.set_op.is_none());
         let mut subqueries = Vec::new();
         let projections: Vec<ProjectionPlan> = statement

@@ -429,7 +429,7 @@ fn locks_all_descendants<S: Clone + 'static>(
         .partitions
         .catalog
         .try_table_hierarchy(parent)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .map_err(SQLError::Internal)?
         .partition_spec
         .is_some()
     {
@@ -443,7 +443,7 @@ fn locks_all_descendants<S: Clone + 'static>(
                 .partitions
                 .catalog
                 .try_table_hierarchy(parent)
-                .map_err(|error| SQLError::Internal(error.to_string()))?
+                .map_err(SQLError::Internal)?
                 .partition_spec
                 .is_some());
     }
@@ -468,7 +468,7 @@ fn locks_all_descendants<S: Clone + 'static>(
                 .partitions
                 .catalog
                 .try_table_hierarchy(parent)
-                .map_err(|error| SQLError::Internal(error.to_string()))?
+                .map_err(SQLError::Internal)?
                 .partition_spec
                 .is_some();
         return Ok(validation.requires_descendants() || partition_foreign_key);

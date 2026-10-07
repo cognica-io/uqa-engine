@@ -119,7 +119,7 @@ fn parent_unique_indexes<'a>(
                 })
             });
         indexes.push((
-            position.map_or(usize::MAX, |position| position),
+            position.unwrap_or(usize::MAX),
             ParentIndex {
                 row,
                 object_id: identity.identity.object_id,

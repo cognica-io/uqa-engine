@@ -206,12 +206,15 @@ pub(super) fn normalize_ranges(
     let (input, normalized) = &mut merging.value;
     for (_, range) in input {
         control.check()?;
-        if let Some(previous) = normalized.last() {
-            if joins(previous, &range, control)? {
-                let previous = normalized.pop().expect("previous range");
-                normalized.push(merge_owned(previous, range, control)?);
-                continue;
-            }
+        let joins_previous = normalized
+            .last()
+            .map(|previous| joins(previous, &range, control))
+            .transpose()?
+            .unwrap_or(false);
+        if joins_previous {
+            let previous = normalized.pop().expect("previous range");
+            normalized.push(merge_owned(previous, range, control)?);
+            continue;
         }
         // Capacity was admitted for every input member before normalization.
         normalized.push(range);

@@ -298,7 +298,7 @@ fn decode_hex_bytes(
         }
     }
     let mut bytes = workspace.vector(encoded.len() / 2)?;
-    for (index, pair) in encoded.chunks_exact(2).enumerate() {
+    for (index, pair) in encoded.as_chunks::<2>().0.iter().enumerate() {
         if index.is_multiple_of(4096) {
             workspace.check()?;
         }

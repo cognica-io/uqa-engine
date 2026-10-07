@@ -50,7 +50,7 @@ pub fn prepare_inference_predicate<'a>(
     let columns = context
         .catalog
         .try_describe_table(&statement.table)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .map_err(SQLError::Internal)?
         .ok_or_else(|| SQLError::UnknownTable(statement.table.clone()))?;
     let schema = RowSchema::with_qualified_types(
         &statement.target_qualifier,
@@ -364,10 +364,10 @@ fn constraint_target_index(
     }
     let snapshot = catalog
         .try_declared_table_constraints(table)
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
+        .map_err(SQLError::Internal)?;
     let columns = catalog
         .try_describe_table(table)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .map_err(SQLError::Internal)?
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
     let exists = snapshot
         .checks
@@ -404,7 +404,7 @@ fn validate_conflict_columns(
 ) -> Result<(), SQLError> {
     let columns = catalog
         .try_describe_table(table)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .map_err(SQLError::Internal)?
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
     for name in names {
         if !columns.iter().any(|column| column.name == *name)

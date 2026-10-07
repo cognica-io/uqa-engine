@@ -210,10 +210,7 @@ fn parse_attention_options<'a>(
                 _ => unreachable!("valid attention option was matched above"),
             }
         } else {
-            if crate::scalar_call_argument(argument)
-                .ok()
-                .is_some_and(|argument| argument.name.is_some())
-            {
+            if crate::scalar_call_argument(argument).is_ok_and(|argument| argument.name.is_some()) {
                 return Err(SQLError::TypeMismatch(format!(
                     "malformed named option for {function_name}"
                 )));

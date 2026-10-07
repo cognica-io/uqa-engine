@@ -247,7 +247,7 @@ pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Val
         });
     }
     let mut fields = Vec::with_capacity(args.len() / 2);
-    for (index, pair) in args.chunks_exact(2).enumerate() {
+    for (index, pair) in args.as_chunks::<2>().0.iter().enumerate() {
         if matches!(pair[0], Value::Null) {
             return Err(if jsonb {
                 SQLError::Routine {

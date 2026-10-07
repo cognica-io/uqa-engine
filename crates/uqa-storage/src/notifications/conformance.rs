@@ -78,7 +78,7 @@ fn assert_pending(
                 )
             );
             assert_eq!(messages[1].channel, "other");
-            assert!(messages[1].payload.is_empty());
+            assert_eq!(messages[1].payload, "");
         }
         Ok(())
     })

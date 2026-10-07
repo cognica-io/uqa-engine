@@ -104,7 +104,9 @@ pub(super) fn blob_to_f32_vec(blob: &[u8]) -> Result<Vec<f32>, PythonMigrationEr
             blob.len()
         )));
     }
-    blob.chunks_exact(4)
+    blob.as_chunks::<4>()
+        .0
+        .iter()
         .map(|chunk| {
             let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
             if value.is_finite() {

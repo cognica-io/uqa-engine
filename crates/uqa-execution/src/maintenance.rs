@@ -27,8 +27,7 @@ fn rewrite_full_vacuum_targets(
         tables.extend(
             context
                 .relations
-                .scan_tables(&target.table, target.include_descendants)?
-                .into_iter(),
+                .scan_tables(&target.table, target.include_descendants)?,
         );
     }
     for table in &tables {

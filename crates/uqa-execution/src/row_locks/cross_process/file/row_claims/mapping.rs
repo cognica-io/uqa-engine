@@ -103,7 +103,12 @@ impl Mapping {
                 return false;
             };
             assert!(bytes.len().is_multiple_of(ENTRY_SIZE as usize));
-            for (index, entry) in bytes.chunks_exact(ENTRY_SIZE as usize).enumerate() {
+            for (index, entry) in bytes
+                .as_chunks::<{ ENTRY_SIZE as usize }>()
+                .0
+                .iter()
+                .enumerate()
+            {
                 // SAFETY: TableLock retains the validated extent and exclusion.
                 // A tombstone decodes without inspecting any other byte, so a
                 // killed writer leaves a valid probe chain, never a torn entry.

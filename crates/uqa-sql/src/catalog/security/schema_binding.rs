@@ -146,7 +146,7 @@ impl BoundSchemaSecurity {
                             Ok(SchemaAclEntry {
                                 role: entry
                                     .role
-                                    .map(&name)
+                                    .map(name)
                                     .transpose()?
                                     .map_or(AclGrantee::Public, AclGrantee::Role),
                                 grantor: Some(name(entry.grantor)?),

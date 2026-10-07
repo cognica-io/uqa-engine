@@ -220,7 +220,7 @@ pub(super) fn decode_f64_list_blob(bytes: &[u8]) -> SQLiteResult<Option<Value>> 
     values
         .try_reserve_exact(count)
         .map_err(|error| allocation_error("decoded f64-list", error))?;
-    for chunk in bytes.chunks_exact(std::mem::size_of::<f64>()) {
+    for chunk in bytes.as_chunks::<{ std::mem::size_of::<f64>() }>().0 {
         let mut raw = [0_u8; std::mem::size_of::<f64>()];
         raw.copy_from_slice(chunk);
         values.push(Value::Float(f64::from_le_bytes(raw)));
@@ -263,7 +263,7 @@ pub(super) fn decode_f64_tensor_blob(bytes: &[u8]) -> SQLiteResult<Option<Value>
         values
             .try_reserve_exact(cols)
             .map_err(|error| allocation_error("decoded f64-tensor row", error))?;
-        for chunk in row.chunks_exact(std::mem::size_of::<f64>()) {
+        for chunk in row.as_chunks::<{ std::mem::size_of::<f64>() }>().0 {
             let mut raw = [0_u8; std::mem::size_of::<f64>()];
             raw.copy_from_slice(chunk);
             values.push(Value::Float(f64::from_le_bytes(raw)));

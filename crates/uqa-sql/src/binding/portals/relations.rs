@@ -116,22 +116,18 @@ fn bind_session_portal_relation_reference(
     visible_ctes: &std::collections::BTreeSet<String>,
 ) -> Result<(), SQLError> {
     if uqa_core::RelationIdentity::parse_reference(name)
-        .ok()
-        .is_some_and(|(schema, name)| schema.is_none() && visible_ctes.contains(&name))
+        .is_ok_and(|(schema, name)| schema.is_none() && visible_ctes.contains(&name))
     {
         return Ok(());
     }
     let requested = name.clone();
-    if uqa_core::RelationIdentity::parse_reference(&requested)
-        .ok()
-        .is_some_and(|(schema, relation)| {
-            schema.is_none()
-                && inputs
-                    .transitions
-                    .active_transition_relation_names()
-                    .contains(&relation)
-        })
-    {
+    if uqa_core::RelationIdentity::parse_reference(&requested).is_ok_and(|(schema, relation)| {
+        schema.is_none()
+            && inputs
+                .transitions
+                .active_transition_relation_names()
+                .contains(&relation)
+    }) {
         return Ok(());
     }
     if let Some(canonical) = inputs.catalog.resolve_age_label_relation_name(&requested)? {

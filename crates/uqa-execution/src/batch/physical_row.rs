@@ -238,10 +238,8 @@ impl PhysicalRow {
                 }
                 found
             };
-            let (source, values, stored) = resolved.map_or_else(
-                || (null_source, Arc::clone(&null_values), NULL_SLOT),
-                |(source, values, stored)| (source, values, stored),
-            );
+            let (source, values, stored) =
+                resolved.unwrap_or_else(|| (null_source, Arc::clone(&null_values), NULL_SLOT));
             if current_source != Some(source) {
                 flush(&mut output, &mut current_values, &mut current_projection);
                 current_source = Some(source);

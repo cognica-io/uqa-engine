@@ -54,7 +54,7 @@ impl VectorFieldGuardLayout for SQLiteRecordStore {
                 return Err(invalid("invalid vector field guard encoding"));
             }
             let mut vectors = BudgetedVec::new(control.memory());
-            for pair in hex.as_bytes().chunks_exact(2) {
+            for pair in hex.as_bytes().as_chunks::<2>().0 {
                 control.check()?;
                 let digit = |byte| match byte {
                     b'0'..=b'9' => Ok(byte - b'0'),

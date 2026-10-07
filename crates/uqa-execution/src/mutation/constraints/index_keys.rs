@@ -79,7 +79,7 @@ pub fn index_key_values(
     let columns = context
         .catalog
         .try_describe_table(table)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .map_err(SQLError::Internal)?
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
     let schema = crate::RowSchema::with_types(
         columns.iter().map(|column| column.name.clone()).collect(),

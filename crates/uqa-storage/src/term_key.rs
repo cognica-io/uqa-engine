@@ -66,7 +66,9 @@ impl TokenTermKey {
             0 => TokenTerm::from(std::str::from_utf8(&self.0[1..]).expect("validated UTF-8 key")),
             1 => TokenTerm::from_utf16(
                 self.0[1..]
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
                     .collect(),
             ),
@@ -82,7 +84,9 @@ impl TokenTermKey {
                 .map_err(|_| invalid()),
             Some((1, bytes)) if bytes.len() % 2 == 0 => {
                 let units = bytes
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|pair| u16::from_be_bytes([pair[0], pair[1]]));
                 if !char::decode_utf16(units).any(|unit| unit.is_err()) {
                     return Err(invalid());

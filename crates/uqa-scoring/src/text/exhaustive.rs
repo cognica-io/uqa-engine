@@ -92,14 +92,11 @@ pub(super) fn score_multiple_text_terms(
     let mut term_freqs = vec![0_u64; analyzed_terms.len()];
     let mut per_term = vec![0.0; analyzed_terms.len()];
     let mut entries = Vec::new();
-    loop {
-        let Some(doc_id) = cursors
-            .iter()
-            .filter_map(|cursor| cursor.current().map(|entry| entry.doc_id))
-            .min()
-        else {
-            break;
-        };
+    while let Some(doc_id) = cursors
+        .iter()
+        .filter_map(|cursor| cursor.current().map(|entry| entry.doc_id))
+        .min()
+    {
         term_freqs.fill(0);
         let mut candidate_length = None;
         for (term_index, cursor) in cursors.iter_mut().enumerate() {

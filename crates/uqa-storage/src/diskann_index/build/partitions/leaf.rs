@@ -124,7 +124,7 @@ impl Builder<'_> {
             self.summary.parameters,
             control,
         )?;
-        self.hash.update([b'L']);
+        self.hash.update(b"L");
         self.hash.update((count as u64).to_le_bytes());
         for (source, point) in loaded.iter().enumerate() {
             self.hash.update(point.global.to_le_bytes());

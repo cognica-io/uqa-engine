@@ -18,8 +18,8 @@ pub(crate) fn hash_bytes_extended(bytes: &[u8], seed: u64) -> u64 {
         (a, b, c) = mix(a, b, c);
     }
 
-    let mut chunks = bytes.chunks_exact(12);
-    for chunk in &mut chunks {
+    let (chunks, tail) = bytes.as_chunks::<12>();
+    for chunk in chunks {
         a = a.wrapping_add(u32::from_le_bytes(
             chunk[0..4].try_into().expect("chunk width"),
         ));
@@ -31,7 +31,6 @@ pub(crate) fn hash_bytes_extended(bytes: &[u8], seed: u64) -> u64 {
         ));
         (a, b, c) = mix(a, b, c);
     }
-    let tail = chunks.remainder();
     for (index, byte) in tail.iter().take(4).enumerate() {
         a = a.wrapping_add(u32::from(*byte) << (index * 8));
     }

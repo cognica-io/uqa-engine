@@ -48,7 +48,7 @@ pub fn verify_foreign_server_rows(
     assert_eq!(updated.options_json, "changed options");
     assert_eq!(updated.metadata_json, final_row().metadata_json);
     b.drop_foreign_server(&updated.name)?;
-    assert!(b.load_foreign_server_rows()?.is_empty());
+    assert_eq!(b.load_foreign_server_rows()?.len(), 0);
     assert_eq!(a.load_foreign_server_rows()?, [final_row()]);
     writer.rollback_to_savepoint("before_server_update")?;
     assert_eq!(b.load_foreign_server_rows()?, [final_row()]);

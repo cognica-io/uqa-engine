@@ -554,13 +554,11 @@ fn foreign_key_catalog_row(
     let referenced_key = catalog
         .catalog_indexes()
         .find(|row| {
-            crate::catalog::index::index_definition(row)
-                .ok()
-                .is_some_and(|definition| {
-                    definition.catalog.is_some_and(|identity| {
-                        Some(identity.identity.object_id) == foreign_key.referenced_index
-                    })
+            crate::catalog::index::index_definition(row).is_ok_and(|definition| {
+                definition.catalog.is_some_and(|identity| {
+                    Some(identity.identity.object_id) == foreign_key.referenced_index
                 })
+            })
         })
         .map(|row| serde_json::from_str::<Vec<uqa_sql::ast::IndexKey>>(&row.columns_json))
         .transpose()

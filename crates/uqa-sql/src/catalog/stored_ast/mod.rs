@@ -289,12 +289,9 @@ where
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
         if let FromClause::Table { name, .. } = source {
-            let is_cte =
-                RelationIdentity::parse_reference(name)
-                    .ok()
-                    .is_some_and(|(schema, relation)| {
-                        schema.is_none() && visible_ctes.contains(&relation)
-                    });
+            let is_cte = RelationIdentity::parse_reference(name).is_ok_and(|(schema, relation)| {
+                schema.is_none() && visible_ctes.contains(&relation)
+            });
             if is_cte {
                 return Ok(());
             }

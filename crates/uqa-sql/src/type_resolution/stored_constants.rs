@@ -132,11 +132,11 @@ impl Folding for OperatorCoercions<'_> {
         }
         // A domain coercion wraps an array of its base type. Record a required base conversion separately, so reconstruction never invents casts of already compatible elements.
         let inner = std::mem::replace(expr, Box::new(ScalarExpr::Literal(Value::Null)));
-        *expr = Box::new(ScalarExpr::Cast {
+        **expr = ScalarExpr::Cast {
             expr: inner,
             ty: base.catalog_name(),
             implicit: false,
-        });
+        };
         Ok(true)
     }
     fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError> {
