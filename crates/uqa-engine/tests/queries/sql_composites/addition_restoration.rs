@@ -49,6 +49,7 @@ fn setup(engine: &Engine) {
         CREATE TABLE saved_rows (id integer, p saved_pair DEFAULT ROW(6,'default')::saved_pair,
             g integer GENERATED ALWAYS AS ((ROW(id,'generated')::saved_pair).a) STORED,
             CHECK ((ROW(id,'check')::saved_pair).a >= 0));
+        CREATE VIEW saved_input AS SELECT '(9,legacy)'::saved_pair AS p;
         CREATE VIEW saved_view AS SELECT ROW(1,'view')::saved_pair AS p;
         CREATE VIEW saved_dynamic AS SELECT ROW(id,'dynamic')::saved_pair AS p FROM saved_rows;
         CREATE FUNCTION saved_function() RETURNS saved_pair LANGUAGE SQL RETURN ROW(2,'function')::saved_pair;
@@ -73,6 +74,17 @@ fn downgrade(value: &mut Json) -> usize {
         Json::Array(values) => values.iter_mut().map(downgrade).sum(),
         Json::Object(object) => {
             let mut count = object.values_mut().map(downgrade).sum();
+            if let Some(literal) = object.get("TypedLiteral") {
+                if serde_json::from_value::<Value>(literal["value"].clone()).ok()
+                    == Some(Value::Record(vec![
+                        ("a".into(), Value::Int(9)),
+                        ("b".into(), Value::Str("legacy".into())),
+                    ]))
+                {
+                    *value = json!({"Cast": {"expr": {"Literal": "(9,legacy)"}, "ty": literal["ty"], "implicit": false}});
+                    return count + 1;
+                }
+            }
             if let Some(row) = object.remove("CompositeRow") {
                 *value = json!({"Cast": {"expr": {"Row": row["items"]}, "ty": row["binding"]["ty"], "implicit": false}});
                 count += 1;
@@ -134,6 +146,7 @@ fn verify(engine: &Engine) {
     );
     for (query, a, b) in [
         ("SELECT p FROM saved_view", 1, "view"),
+        ("SELECT p FROM saved_input", 9, "legacy"),
         ("SELECT p FROM saved_dynamic WHERE (p).a = 4", 4, "dynamic"),
         ("SELECT saved_function() AS p", 2, "function"),
         ("SELECT p FROM saved_rows WHERE id = 4", 6, "default"),
@@ -251,6 +264,34 @@ fn failed_constructor_migration_preserves_the_predecessor_catalog(#[case] provid
         catalog.set_metadata("sql_rules_json", &rules).unwrap();
     });
     let engine = super::open(provider, &path);
+    exec(
+        &engine,
+        "ALTER TYPE saved_pair ADD ATTRIBUTE c integer;
+        INSERT INTO saved_domains DEFAULT VALUES; INSERT INTO saved_partitioned VALUES (5)",
+    );
+    verify(&engine);
+}
+
+#[test]
+fn secondary_session_rejects_constructor_migration_without_changing_durable_records() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("load-only-constructors.db");
+    let engine = super::open(1, &path);
+    setup(&engine);
+    let before = catalog(1, &path, |catalog| {
+        downgrade_catalog(catalog);
+        catalog_snapshot(catalog)
+    });
+    let Err(error) = engine.new_session() else {
+        panic!("secondary session must not upgrade stored constructors")
+    };
+    assert!(error.to_string().contains("migration"), "{error}");
+    catalog(1, &path, |catalog| {
+        assert_eq!(catalog_snapshot(catalog), before);
+    });
+
+    drop(engine);
+    let engine = super::open(1, &path);
     exec(
         &engine,
         "ALTER TYPE saved_pair ADD ATTRIBUTE c integer;

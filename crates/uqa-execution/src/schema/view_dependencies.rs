@@ -93,6 +93,7 @@ pub fn rewrite_materialized_composite_values(
     target: u32,
     change: &uqa_sql::expr::composites::AttributeChange,
     types: &dyn uqa_sql::expr::composites::CompositeTypeCatalog,
+    constants: &uqa_sql::expr::composites::constants::CompositeConstantChange<'_>,
 ) -> Result<(), uqa_sql::SQLError> {
     let storage = |error: StorageBackendError| {
         uqa_sql::catalog::errors::storage_error("rewrite materialized view rows", &error)
@@ -103,6 +104,7 @@ pub fn rewrite_materialized_composite_values(
     drop(views);
     let mut changed = Vec::new();
     for (relation, view) in &mut next {
+        let query_changed = constants.query(&mut view.query)?;
         let columns = view
             .output_columns
             .clone()
@@ -117,7 +119,7 @@ pub fn rewrite_materialized_composite_values(
                 affected.push((name, ty));
             }
         }
-        if affected.is_empty() {
+        if affected.is_empty() && !query_changed {
             continue;
         }
         for row in &mut view.materialized_rows {

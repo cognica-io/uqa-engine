@@ -24,7 +24,16 @@ pub fn assign_domain_value(
     value: &Value,
     ty: &ColumnType,
 ) -> Result<Option<Value>, SQLError> {
-    convert_domain_value(context, value, None, ty, true)
+    assign_domain_value_from(context, value, None, ty)
+}
+
+pub(super) fn assign_domain_value_from(
+    context: &dyn AssignmentContext,
+    value: &Value,
+    source: Option<&str>,
+    ty: &ColumnType,
+) -> Result<Option<Value>, SQLError> {
+    convert_domain_value(context, value, source, ty, true)
 }
 
 fn convert_domain_value(
@@ -63,7 +72,15 @@ fn convert_domain_value(
         }
     }
     let value = if assignment {
-        super::conversion::convert_value_to_column_type_with_context(context, value.clone(), &base)?
+        let source = source
+            .map(|source| {
+                context
+                    .resolve_type_name(source)
+                    .map_err(SQLError::Internal)
+            })
+            .transpose()?
+            .flatten();
+        super::conversion::coerce_assignment_value(context, value.clone(), &base, source.as_ref())?
     } else {
         crate::expr::cast_value_with_type_resolution(
             value,

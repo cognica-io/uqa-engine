@@ -30,6 +30,40 @@ pub(crate) fn requires_domain_array_input(target: &ColumnType) -> bool {
     matches!(target, ColumnType::Array(element) if matches!(array_leaf_type(element), ColumnType::Domain { .. }))
 }
 
+/// Input constants containing named composites or domain array elements must be read while the definition's catalog descriptor is available.
+pub(crate) fn requires_catalog_constant_input(target: &ColumnType) -> bool {
+    requires_domain_array_input(target)
+        || match target {
+            ColumnType::Composite(_) => true,
+            ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {
+                requires_catalog_constant_input(element)
+            }
+            _ => false,
+        }
+}
+
+/// Read a catalog-dependent constant once, retaining its typed datum in stored syntax.
+pub fn read_catalog_input(
+    text: &str,
+    target: &ColumnType,
+    engine: &dyn EngineHook,
+) -> Result<Value> {
+    if requires_domain_array_input(target) {
+        return read_catalog_array_input(text, target, engine);
+    }
+    if !requires_catalog_constant_input(target) {
+        return Err(SQLError::Internal(
+            "catalog input requires a composite or domain array".into(),
+        ));
+    }
+    super::cast_value_with_type_resolution(
+        &Value::Str(text.into()),
+        Some("unknown"),
+        &target.catalog_name(),
+        Some(engine),
+    )
+}
+
 /// Read an array whose elements are domains with the same input and constraint path as a catalog-aware cast. The resolved target preserves domain identity; a scalar outer domain remains the surrounding expression's runtime coercion.
 pub fn read_catalog_array_input(
     text: &str,

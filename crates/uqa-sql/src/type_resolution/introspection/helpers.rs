@@ -251,12 +251,15 @@ impl Binder<'_, '_> {
         let ScalarExpr::Literal(value @ Value::Str(text)) = expression else {
             return Ok(None);
         };
-        if crate::type_resolution::catalog_input_type(target) {
+        if crate::type_resolution::catalog_input_type(target)
+            && !(self.literal_binding == LiteralBinding::Stored
+                && crate::expr::requires_catalog_constant_input(target))
+        {
             return Ok(None);
         }
         // Binding reports no semantic errors: a literal the type rejects keeps its cast, which analysis and evaluation report.
         let converted = if self.literal_binding == LiteralBinding::Stored
-            && crate::expr::requires_domain_array_input(target)
+            && crate::expr::requires_catalog_constant_input(target)
         {
             let Some(catalog) = self
                 .resolver

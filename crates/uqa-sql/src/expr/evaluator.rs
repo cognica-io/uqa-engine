@@ -30,7 +30,15 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         Expr::Default => Err(SQLError::Internal(
             "DEFAULT reached scalar expression evaluation without a mutation target".into(),
         )),
-        Expr::Literal(v) | Expr::TypedLiteral { value: v, .. } => Ok(v.clone()),
+        Expr::Literal(v) => Ok(v.clone()),
+        Expr::TypedLiteral { value, ty } => Ok(super::composites::literal::evaluate_with_control(
+            value,
+            ty,
+            ctx.engine,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .into_uncontrolled()
+        .expect("ordinary constant result")),
         Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
             Some(parameter) => parameter.to_value(),
             None => Err(SQLError::MissingParam(*i)),

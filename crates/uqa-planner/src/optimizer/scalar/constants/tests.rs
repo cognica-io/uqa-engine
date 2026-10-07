@@ -399,3 +399,29 @@ fn null_casts_to_temporal_types_fold_without_calling_input_functions() {
         );
     }
 }
+
+#[test]
+fn composites_retained_in_constants_are_not_evaluated_without_the_catalog() {
+    let ty = ColumnType::Composite(uqa_sql::ast::CompositeTypeReference {
+        schema: "public".into(),
+        name: "pair".into(),
+        oid: 20_001,
+        array_oid: 20_002,
+        relation_oid: 20_003,
+    });
+    let literal = ScalarExpr::TypedLiteral {
+        value: Value::Record(vec![("a".into(), Value::Int(4))]),
+        ty: ty.catalog_name(),
+        bound_type: Some(ty),
+        parameter_index: None,
+    };
+    for expression in [literal.clone(), ScalarExpr::Array(vec![literal])] {
+        assert_eq!(
+            fold_literal_expression(expression.clone(), |_| panic!(
+                "catalog-free composite evaluation"
+            ))
+            .unwrap(),
+            expression
+        );
+    }
+}

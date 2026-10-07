@@ -25,6 +25,7 @@ use uqa_sql::{
 
 pub mod addition;
 pub mod attributes;
+pub mod catalog_values;
 pub mod values;
 
 pub struct CompositeTypeContext<'a> {

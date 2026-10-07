@@ -269,6 +269,42 @@
       "sql": "SELECT id,v FROM ca_rows ORDER BY id"
     },
     {
+      "id": "constant_setup",
+      "sql": "CREATE TYPE cv_pair AS(a integer,b text); CREATE DOMAIN cv_added AS integer NOT NULL; CREATE VIEW cv_v AS SELECT '(1,constant)'::cv_pair AS p; CREATE VIEW cv_bound AS SELECT '(4,bound)'::cv_pair AS p; CREATE VIEW cv_arr AS SELECT '[0:1]={\"(1,a)\",\"(2,b)\"}'::cv_pair[] AS p; CREATE FUNCTION cv_function() RETURNS cv_pair LANGUAGE SQL RETURN '(3,function)'::cv_pair; CREATE DOMAIN cv_domain AS cv_pair DEFAULT '(6,domain)'::cv_pair; CREATE TABLE cv_domains(p cv_domain); CREATE TABLE cv_rows(id integer,p cv_pair DEFAULT '(2,default)'::cv_pair); CREATE TABLE cv_list(p cv_pair) PARTITION BY LIST(p); CREATE TABLE cv_child PARTITION OF cv_list FOR VALUES IN (ROW(4,'bound')::cv_pair); CREATE TABLE cv_log(p cv_pair); CREATE RULE cv_rule AS ON INSERT TO cv_rows DO ALSO INSERT INTO cv_log VALUES ('(7,rule)'::cv_pair); CREATE INDEX cv_index ON cv_rows (((('(8,index)'::cv_pair).a) + id)); PREPARE cv_stmt AS SELECT '(5,prepared)'::cv_pair AS p"
+    },
+    {
+      "id": "constant_before",
+      "sql": "SELECT pg_get_viewdef('cv_v'::regclass); SELECT p FROM cv_v; SELECT cv_function(); EXECUTE cv_stmt"
+    },
+    {
+      "id": "constant_rollback",
+      "sql": "BEGIN; ALTER TYPE cv_pair ADD ATTRIBUTE undone integer; SELECT p FROM cv_v; ROLLBACK; SELECT p FROM cv_v"
+    },
+    {
+      "id": "constant_add",
+      "sql": "ALTER TYPE cv_pair ADD ATTRIBUTE c cv_added"
+    },
+    {
+      "id": "constant_reads",
+      "sql": "SELECT p,(p).a,(p).c FROM cv_v; SELECT array_lower(p,1),array_upper(p,1),p FROM cv_arr; SELECT cv_function(); EXECUTE cv_stmt"
+    },
+    {
+      "id": "constant_defaults",
+      "sql": "INSERT INTO cv_rows(id) VALUES (1) RETURNING p; INSERT INTO cv_domains DEFAULT VALUES RETURNING p; SELECT p FROM cv_log"
+    },
+    {
+      "id": "constant_partition",
+      "sql": "INSERT INTO cv_list SELECT p FROM cv_bound RETURNING p"
+    },
+    {
+      "id": "constant_deparse",
+      "sql": "SELECT pg_get_viewdef('cv_v'::regclass); SELECT pg_get_function_sqlbody('cv_function'::regproc); SELECT column_default FROM information_schema.columns WHERE table_name='cv_rows' AND column_name='p'; SELECT pg_get_ruledef(oid) FROM pg_rewrite WHERE rulename='cv_rule'; SELECT pg_get_indexdef('cv_index'::regclass)"
+    },
+    {
+      "id": "relation_constant_output",
+      "sql": "CREATE VIEW cv_relation AS SELECT 1 a,1.2::real b; CREATE VIEW cv_relation_const AS SELECT '(4,1.2)'::cv_relation AS p; SELECT pg_get_viewdef('cv_relation_const'::regclass); SELECT p FROM cv_relation_const"
+    },
+    {
       "id": "reopen_rows",
       "sql": "SELECT id,v FROM ca_rows ORDER BY id",
       "reopen": true
@@ -322,6 +358,11 @@
       "id": "reopen_row_default",
       "sql": "SELECT v FROM ca_defaults",
       "reopen": true
+    },
+    {
+      "id": "constant_reopen",
+      "reopen": true,
+      "sql": "SELECT p FROM cv_v; SELECT p FROM cv_arr; SELECT cv_function(); INSERT INTO cv_rows(id) VALUES (2) RETURNING p; INSERT INTO cv_domains DEFAULT VALUES RETURNING p; SELECT p FROM cv_log ORDER BY p; INSERT INTO cv_list SELECT p FROM cv_bound RETURNING p; SELECT pg_get_viewdef('cv_v'::regclass); SELECT pg_get_viewdef('cv_relation_const'::regclass)"
     }
   ]
 }

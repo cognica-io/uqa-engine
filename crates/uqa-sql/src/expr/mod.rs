@@ -128,12 +128,13 @@ pub use call_arguments::{
 pub use call_dispatch::{
     eval_builtin_function_call, eval_function_call, eval_generated_function_call_with_control,
 };
-pub(crate) use context::requires_domain_array_input;
 pub use context::{
     cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,
     coercion_type_name, format_regtype_value, format_regtype_value_with_control,
-    read_catalog_array_input, CatalogInputFunctions, EngineHook, EvalContext, RowLookup,
+    read_catalog_array_input, read_catalog_input, CatalogInputFunctions, EngineHook, EvalContext,
+    RowLookup,
 };
+pub(crate) use context::{requires_catalog_constant_input, requires_domain_array_input};
 pub use diagnostics::{unknown_function_error, value_type_name};
 pub use evaluator::eval;
 mod numeric_operator;

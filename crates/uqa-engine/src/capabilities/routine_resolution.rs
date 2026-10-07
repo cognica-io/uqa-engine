@@ -266,7 +266,7 @@ impl uqa_sql::expr::CatalogInputFunctions for Engine {
         text: &str,
         target: &ColumnType,
     ) -> Result<uqa_core::Value, SQLError> {
-        uqa_sql::expr::read_catalog_array_input(text, target, self)
+        uqa_sql::expr::read_catalog_input(text, target, self)
     }
 }
 

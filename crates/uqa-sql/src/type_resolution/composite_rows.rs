@@ -11,7 +11,7 @@ use crate::ast::{ColumnType, CompositeRowBinding};
 use crate::schema::ScalarTypeSchema;
 use crate::{SQLError, SQLParam, ScalarExpr};
 
-/// Detect predecessor row casts before a descriptor can acquire additional attributes. Ordinary casts to strings and domains over non-composite types do not need conversion.
+/// Detect predecessor row constructors and unknown input literals before a descriptor can acquire additional attributes. Ordinary casts to strings and domains over non-composite types do not need conversion.
 pub fn expression_requires_binding(
     expression: &crate::ast::Expr,
     resolver: &dyn FunctionTypeResolver,
@@ -20,10 +20,15 @@ pub fn expression_requires_binding(
     let mut found = false;
     crate::catalog::stored_ast::visit_stored_expression(&mut expression, &mut |node| {
         if let crate::ast::Expr::Cast { expr, ty, .. } = node {
-            if !found && matches!(expr.as_ref(), crate::ast::Expr::Row(_)) {
-                found = resolver.resolve_type_name(ty)?.is_some_and(|ty| {
-                    matches!(super::common::base_type(&ty), ColumnType::Composite(_))
-                });
+            if !found
+                && matches!(
+                    expr.as_ref(),
+                    crate::ast::Expr::Row(_) | crate::ast::Expr::Literal(uqa_core::Value::Str(_))
+                )
+            {
+                found = resolver
+                    .resolve_type_name(ty)?
+                    .is_some_and(|ty| crate::expr::requires_catalog_constant_input(&ty));
             }
         }
         Ok(())
@@ -38,10 +43,15 @@ pub fn statement_requires_binding(
     let mut found = false;
     crate::catalog::stored_ast::visit_stored_statement_expressions(statement, &mut |node| {
         if let crate::ast::Expr::Cast { expr, ty, .. } = node {
-            if !found && matches!(expr.as_ref(), crate::ast::Expr::Row(_)) {
-                found = resolver.resolve_type_name(ty)?.is_some_and(|ty| {
-                    matches!(super::common::base_type(&ty), ColumnType::Composite(_))
-                });
+            if !found
+                && matches!(
+                    expr.as_ref(),
+                    crate::ast::Expr::Row(_) | crate::ast::Expr::Literal(uqa_core::Value::Str(_))
+                )
+            {
+                found = resolver
+                    .resolve_type_name(ty)?
+                    .is_some_and(|ty| crate::expr::requires_catalog_constant_input(&ty));
             }
         }
         Ok(())
@@ -69,10 +79,13 @@ fn inspect(
         return;
     }
     if let ScalarExpr::Cast { expr, ty, .. } = node {
-        if matches!(expr.as_ref(), ScalarExpr::Row(_)) {
+        if matches!(
+            expr.as_ref(),
+            ScalarExpr::Row(_) | ScalarExpr::Literal(uqa_core::Value::Str(_))
+        ) {
             match resolver.resolve_type_name(ty) {
                 Ok(Some(ty)) => {
-                    *found = matches!(super::common::base_type(&ty), ColumnType::Composite(_));
+                    *found = crate::expr::requires_catalog_constant_input(&ty);
                 }
                 Ok(None) => {}
                 Err(error) => *failure = Some(error),

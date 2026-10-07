@@ -9,6 +9,8 @@
 pub(crate) mod encoding;
 pub(super) mod publication;
 pub(super) mod revision;
+mod values;
+pub use values::rewrite_composite_constants;
 
 use std::ops::DerefMut;
 use uqa_sql::{routines::lifecycle::RoutineRegistry, SQLError};

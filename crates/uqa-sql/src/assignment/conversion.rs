@@ -23,6 +23,14 @@ pub fn coerce_assignment_value(
     if source.is_some_and(|source| same_catalog_value_type(source, target)) {
         return normalize_existing(value, target);
     }
+    if matches!(target, ColumnType::Domain { .. }) {
+        let source = source.map(ColumnType::catalog_name);
+        if let Some(value) =
+            super::domain::assign_domain_value_from(context, &value, source.as_deref(), target)?
+        {
+            return Ok(value);
+        }
+    }
     let value = if target.is_character_string() {
         source
             .map(|source| crate::expr::format_regtype_value(&value, source, Some(context)))

@@ -33,7 +33,7 @@ pub fn drop_composite_attribute(
             "composite type `{key}` disappeared before its attribute"
         ))
     })?;
-    rewrite_composite_values(
+    let rebuild = rewrite_composite_values(
         &context.values,
         definition.oid,
         &AttributeChange::Drop(name.to_string()),
@@ -55,5 +55,6 @@ pub fn drop_composite_attribute(
     attribute.dropped = true;
     composite_type::publish(context.publication, &before, registry)?;
     context.changes.catalog_registry_changed();
+    super::values::rebuild_indexes(&context.values, rebuild)?;
     Ok(())
 }

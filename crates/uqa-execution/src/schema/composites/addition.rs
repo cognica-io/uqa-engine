@@ -59,7 +59,7 @@ pub fn add_attributes(
             )?;
             serial_columns.push(column);
         }
-        super::values::rewrite_composite_values(
+        let rebuild = super::values::rewrite_composite_values(
             &context.attributes.values,
             definition.oid,
             &AttributeChange::Add(prepared.name.clone()),
@@ -70,6 +70,7 @@ pub fn add_attributes(
         after.insert(definition.identity.qualified_name(), definition.clone());
         composite_type::publish(context.attributes.publication, &before, after)?;
         context.attributes.changes.catalog_registry_changed();
+        super::values::rebuild_indexes(&context.attributes.values, rebuild)?;
     }
     // PostgreSQL attaches implicit ownership only after every ADD has run. Composite relations cannot own a sequence; that error rolls back the whole statement.
     for column in serial_columns {

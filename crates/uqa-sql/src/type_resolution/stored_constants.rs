@@ -148,8 +148,11 @@ impl Folding for OperatorCoercions<'_> {
         else {
             return Ok(false);
         };
-        // Enum constants are stored by label identity, and a catalog input type keeps its cast.
-        if is_enum_bearing(target) || super::catalog_input_type(target) {
+        // Enum constants are stored by label identity. Composite and domain-array input datums retain the definition-time result.
+        if is_enum_bearing(target)
+            || (super::catalog_input_type(target)
+                && !crate::expr::requires_catalog_constant_input(target))
+        {
             return Ok(false);
         }
         *stored = ScalarExpr::TypedLiteral {
