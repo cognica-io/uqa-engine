@@ -1,0 +1,88 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "missing",
+      "sql": "ALTER TYPE ca_missing ADD ATTRIBUTE v integer"
+    },
+    {
+      "id": "scalar",
+      "sql": "ALTER TYPE integer ADD ATTRIBUTE v integer"
+    },
+    {
+      "id": "create",
+      "sql": "CREATE TYPE ca_pair AS (a integer,b text)"
+    },
+    {
+      "id": "rows",
+      "sql": "CREATE TABLE ca_rows(id integer,v ca_pair); INSERT INTO ca_rows VALUES (1,(1,'x')),(2,NULL)"
+    },
+    {
+      "id": "view",
+      "sql": "CREATE VIEW ca_view AS SELECT v,(v).a AS a FROM ca_rows"
+    },
+    {
+      "id": "add",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE c bigint"
+    },
+    {
+      "id": "read_added",
+      "sql": "SELECT id,v,(v).c FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "view_added",
+      "sql": "SELECT * FROM ca_view ORDER BY a"
+    },
+    {
+      "id": "duplicate_missing_type",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE a ca_missing"
+    },
+    {
+      "id": "missing_type",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE d ca_missing"
+    },
+    {
+      "id": "void",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE d void"
+    },
+    {
+      "id": "collation",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE d integer COLLATE \"C\""
+    },
+    {
+      "id": "add_text",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE label text COLLATE \"C\""
+    },
+    {
+      "id": "multiple",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE e integer, ADD ATTRIBUTE f text"
+    },
+    {
+      "id": "multiple_failure",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE g integer, ADD ATTRIBUTE h ca_missing"
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT a.attnum,a.attname,a.atttypid::regtype::text,a.attnotnull,a.attisdropped,a.attcollation FROM pg_attribute a JOIN pg_type t ON t.typrelid=a.attrelid WHERE t.typname='ca_pair' AND a.attnum>0 ORDER BY a.attnum"
+    },
+    {
+      "id": "rollback",
+      "sql": "BEGIN; ALTER TYPE ca_pair ADD ATTRIBUTE temporary integer; ROLLBACK"
+    },
+    {
+      "id": "after_rollback",
+      "sql": "SELECT id,v FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "table_kind",
+      "sql": "ALTER TYPE ca_rows ADD ATTRIBUTE invalid integer"
+    },
+    {
+      "id": "self",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE recursive ca_pair"
+    }
+  ]
+}
