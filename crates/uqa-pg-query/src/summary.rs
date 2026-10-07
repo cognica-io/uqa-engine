@@ -40,10 +40,7 @@ pub fn summary(statement: &str, truncate_limit: i32) -> Result<SummaryResult> {
         Err(Error::Parse(message))
     } else {
         let data = unsafe {
-            std::slice::from_raw_parts(
-                result.summary.data as *const u8,
-                result.summary.len as usize,
-            )
+            std::slice::from_raw_parts(result.summary.data as *const u8, result.summary.len)
         };
         let stderr = unsafe { CStr::from_ptr(result.stderr_buffer) }
             .to_string_lossy()
