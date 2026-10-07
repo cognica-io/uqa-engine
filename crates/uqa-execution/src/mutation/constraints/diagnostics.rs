@@ -84,7 +84,15 @@ fn render_index_key(
         .relation_name_resolution();
     let names = keys
         .iter()
-        .map(|key| projection::index_key_definition(&catalog, &resolution, key, false))
+        .map(|key| {
+            projection::index_key_definition(
+                Some(&crate::catalog::projection::CatalogOutput(catalog_context)),
+                &catalog,
+                &resolution,
+                key,
+                false,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?
         .join(", ");
     if values.len() != key_types.len() {

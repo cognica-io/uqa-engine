@@ -233,8 +233,8 @@ fn describe_column_type(catalog: &CatalogReadView, ty: &ColumnType) -> ColumnTyp
     reason = "preserves catalog column and OID order"
 )]
 fn information_schema_column_row(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    (catalog, resolution): (&CatalogReadView, &RelationNameResolution),
     (schema, table): (String, String),
     index: usize,
     column: &SQLColumnDef,
@@ -256,7 +256,7 @@ fn information_schema_column_row(
             "column_default",
             match column.default.as_ref() {
                 Some(default) => str_value(super::view_definition::stored_expression_text(
-                    catalog, resolution, default,
+                    output, catalog, resolution, default,
                 )?),
                 None => Value::Null,
             },
@@ -369,6 +369,7 @@ fn information_schema_column_row(
             "generation_expression",
             match column.generated.as_ref() {
                 Some(generated) => str_value(super::view_definition::stored_expression_text(
+                    output,
                     catalog,
                     resolution,
                     &generated.expression,
@@ -412,8 +413,8 @@ pub fn build_info_columns(
                 continue;
             }
             out.push(information_schema_column_row(
-                catalog,
-                resolution,
+                Some(&crate::catalog::projection::CatalogOutput(*context)),
+                (catalog, resolution),
                 (schema.clone(), table.clone()),
                 idx,
                 col,
@@ -435,8 +436,8 @@ pub fn build_info_columns(
                 continue;
             }
             out.push(information_schema_column_row(
-                catalog,
-                resolution,
+                Some(&crate::catalog::projection::CatalogOutput(*context)),
+                (catalog, resolution),
                 (schema.clone(), view.clone()),
                 idx,
                 column,
@@ -463,8 +464,8 @@ pub fn build_info_columns(
                 continue;
             }
             out.push(information_schema_column_row(
-                catalog,
-                resolution,
+                Some(&crate::catalog::projection::CatalogOutput(*context)),
+                (catalog, resolution),
                 (schema.clone(), table.clone()),
                 idx,
                 column,
@@ -704,7 +705,12 @@ pub fn build_info_views(
             .role_is_enabled_for(resolution.current_user(), &stored.security.role_owner)
         {
             str_value(super::view_definition::view_definition(
-                catalog, resolution, &stored, false, 0,
+                Some(&crate::catalog::projection::CatalogOutput(*context)),
+                catalog,
+                resolution,
+                &stored,
+                false,
+                0,
             )?)
         } else {
             Value::Null

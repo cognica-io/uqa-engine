@@ -18,7 +18,9 @@ mod roles;
 mod row_types;
 mod sequences;
 mod types;
-pub use attributes::{attrdef_catalog_oid, build_pg_attrdef, build_pg_attribute};
+pub use attributes::{
+    attrdef_catalog_oid, attribute_default_oids, build_pg_attrdef, build_pg_attribute,
+};
 pub use composites::composite_class_rows;
 pub use constraint_definitions::pg_get_constraintdef_value;
 pub use constraints::build_pg_constraint;

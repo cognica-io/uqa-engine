@@ -36,6 +36,7 @@ pub fn query_references(
     let mut bound = resolution.clone();
     bound.set_lookup_mode(RelationLookupMode::Bound);
     let deparser = Deparser {
+        output: None,
         catalog,
         dynamic,
         bound,

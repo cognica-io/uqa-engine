@@ -53,10 +53,11 @@ pub fn routine_oid_in_use(
 }
 
 pub fn build_pg_proc(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    build_pg_proc_rows(catalog, resolution, true)
+    build_pg_proc_rows(output, catalog, resolution, true)
 }
 
 /// The `pg_proc` rows with `proargdefaults` left NULL, for the `reg*` output catalog: printing an argument default may print a `reg*` constant, whose output function reads that catalog.
@@ -64,7 +65,7 @@ pub fn build_pg_proc_without_defaults(
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    build_pg_proc_rows(catalog, resolution, false)
+    build_pg_proc_rows(None, catalog, resolution, false)
 }
 
 #[expect(
@@ -72,6 +73,7 @@ pub fn build_pg_proc_without_defaults(
     reason = "preserves catalog column and OID order"
 )]
 fn build_pg_proc_rows(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
     with_defaults: bool,
@@ -254,7 +256,7 @@ fn build_pg_proc_rows(
             .filter(|_| with_defaults)
             .filter_map(|parameter| {
                 super::routine_definitions::routine_parameter_default_text(
-                    catalog, resolution, parameter,
+                    output, catalog, resolution, parameter,
                 )
                 .transpose()
             })

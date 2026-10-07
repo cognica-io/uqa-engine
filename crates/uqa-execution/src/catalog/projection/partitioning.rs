@@ -206,7 +206,13 @@ pub fn pg_get_partkeydef_value(
             .partition_spec
             .as_ref()
             .map_or(Ok(Value::Null), |spec| {
-                partition_key_definition(&catalog, &resolution, spec).map(str_value)
+                partition_key_definition(
+                    Some(&crate::catalog::projection::CatalogOutput(*context)),
+                    &catalog,
+                    &resolution,
+                    spec,
+                )
+                .map(str_value)
             });
     }
     Ok(Value::Null)
@@ -357,6 +363,7 @@ fn partition_datum_value(
 
 /// The partition key as `pg_get_partkeydef` prints it.
 pub fn partition_key_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     spec: &PartitionSpec,
@@ -366,12 +373,13 @@ pub fn partition_key_definition(
         PartitionStrategy::Range => "RANGE",
         PartitionStrategy::Hash => "HASH",
     };
-    let keys = partition_key_columns(catalog, resolution, spec, false)?;
+    let keys = partition_key_columns(output, catalog, resolution, spec, false)?;
     Ok(format!("{strategy} ({keys})"))
 }
 
 /// The keys of a partition key as `pg_get_partkeydef_columns` prints them: each column by its quoted name, each expression deparsed, in parentheses unless it reads as a function call. `pretty` drops the parentheses that precedence makes redundant, as an error detail prints them.
 pub fn partition_key_columns(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     spec: &PartitionSpec,
@@ -383,7 +391,7 @@ pub fn partition_key_columns(
             Expr::Column(column) => Ok(uqa_sql::expr::quote_ident(column)),
             expression => {
                 let text = super::view_definition::stored_expression_definition(
-                    catalog, resolution, expression, pretty,
+                    output, catalog, resolution, expression, pretty,
                 )?;
                 Ok(
                     if super::view_definition::stored_expression_prints_as_call(expression) {

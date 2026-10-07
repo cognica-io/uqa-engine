@@ -182,7 +182,7 @@ impl Deparser<'_> {
             if bare {
                 return super::expressions::literal(value);
             }
-            let text = uqa_sql::result::format_postgres_text(value, &resolved, None)?;
+            let text = uqa_sql::result::format_postgres_text(value, &resolved, self.output)?;
             return Ok(format!("'{}'::{display}", text.replace('\'', "''")));
         }
         if matches!(value, Value::Null) {
@@ -196,7 +196,7 @@ impl Deparser<'_> {
         let resolved = self
             .resolved_type(ty)
             .ok_or_else(|| SQLError::Internal(format!("stored constant type {ty} disappeared")))?;
-        let text = uqa_sql::result::format_postgres_text(&text, &resolved, None)?;
+        let text = uqa_sql::result::format_postgres_text(&text, &resolved, self.output)?;
         Ok(format!("'{}'::{display}", text.replace('\'', "''")))
     }
 
@@ -329,6 +329,7 @@ mod tests {
             lookup_mode: RelationLookupMode::Dynamic,
         };
         let deparser = Deparser {
+            output: None,
             catalog: &catalog,
             dynamic: resolution.clone(),
             bound: resolution,
@@ -392,6 +393,7 @@ mod tests {
             for pretty in [false, true] {
                 assert_eq!(
                     super::super::stored_expression_definition(
+                        None,
                         &catalog,
                         &resolution,
                         &expression,

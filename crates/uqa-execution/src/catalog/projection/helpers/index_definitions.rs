@@ -15,6 +15,7 @@ pub fn index_columns(columns_json: &str) -> Result<Vec<uqa_sql::ast::IndexKey>, 
 }
 
 pub fn indexdef(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &crate::catalog::CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
     index: &CatalogIndexRelation,
@@ -36,7 +37,7 @@ pub fn indexdef(
         .iter()
         .enumerate()
         .map(|(position, column)| {
-            let mut column = index_key_definition(catalog, resolution, column, pretty)?;
+            let mut column = index_key_definition(output, catalog, resolution, column, pretty)?;
             let order = index
                 .definition
                 .column_order
@@ -79,7 +80,7 @@ pub fn indexdef(
     }
     if let Some(predicate) = index.definition.predicate.as_deref() {
         let predicate = super::super::view_definition::stored_expression_definition(
-            catalog, resolution, predicate, pretty,
+            output, catalog, resolution, predicate, pretty,
         )?;
         sql.push_str(" WHERE ");
         sql.push_str(&predicate);
@@ -88,6 +89,7 @@ pub fn indexdef(
 }
 
 pub fn index_key_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &crate::catalog::CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
     key: &uqa_sql::ast::IndexKey,
@@ -97,7 +99,7 @@ pub fn index_key_definition(
         uqa_sql::ast::IndexKey::Column(name) => Ok(quote_ident(name)),
         uqa_sql::ast::IndexKey::Expression(expression) => {
             let sql = super::super::view_definition::stored_expression_definition(
-                catalog, resolution, expression, pretty,
+                output, catalog, resolution, expression, pretty,
             )?;
             if matches!(expression.as_ref(), uqa_sql::ast::Expr::Func { binding, .. }
                 if !binding.as_ref().is_some_and(|binding| matches!(binding.dispatch,

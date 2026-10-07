@@ -123,7 +123,8 @@ mod tests {
             };
             for (pretty, expected) in [(false, expected), (true, pretty_expected)] {
                 assert_eq!(
-                    index_key_definition(&catalog, &resolution, &index.columns[0], pretty).unwrap(),
+                    index_key_definition(None, &catalog, &resolution, &index.columns[0], pretty)
+                        .unwrap(),
                     expected,
                     "{input}, pretty={pretty}",
                 );

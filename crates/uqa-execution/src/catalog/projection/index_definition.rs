@@ -53,6 +53,7 @@ pub fn pg_get_indexdef_value(
         };
         if let Some(key) = index.columns.get(position) {
             return super::helpers::index_definitions::index_key_definition(
+                Some(&crate::catalog::projection::CatalogOutput(*context)),
                 &catalog,
                 &resolution,
                 key,
@@ -86,5 +87,13 @@ pub fn pg_get_indexdef_value(
     if index.relkind == "I" {
         target = format!("ONLY {target}");
     }
-    indexdef(&catalog, &resolution, &index, &target, pretty).map(Value::Str)
+    indexdef(
+        Some(&crate::catalog::projection::CatalogOutput(*context)),
+        &catalog,
+        &resolution,
+        &index,
+        &target,
+        pretty,
+    )
+    .map(Value::Str)
 }

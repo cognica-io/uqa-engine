@@ -99,7 +99,15 @@ pub fn pg_get_viewdef_value(
         }
     };
     view.map_or(Ok(Value::Null), |view| {
-        view_definition(&catalog, &resolution, &view, pretty, wrap).map(Value::Str)
+        view_definition(
+            Some(&crate::catalog::projection::CatalogOutput(*context)),
+            &catalog,
+            &resolution,
+            &view,
+            pretty,
+            wrap,
+        )
+        .map(Value::Str)
     })
 }
 
@@ -134,6 +142,7 @@ fn view_name_reference(name: &str) -> Result<String, SQLError> {
 }
 
 pub fn view_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     view: &StoredView,
@@ -145,6 +154,7 @@ pub fn view_definition(
     let mut bound = resolution.clone();
     bound.set_lookup_mode(RelationLookupMode::Bound);
     let deparser = Deparser {
+        output,
         catalog,
         dynamic,
         bound,
@@ -168,6 +178,7 @@ pub fn view_definition(
 }
 
 struct Deparser<'a> {
+    output: Option<&'a dyn uqa_sql::expr::EngineHook>,
     catalog: &'a CatalogReadView,
     dynamic: RelationNameResolution,
     bound: RelationNameResolution,
@@ -334,6 +345,7 @@ fn query_columns(query: &QueryPlan) -> Vec<String> {
 
 /// Reconstruct a stored catalog expression with the same literal casts, precedence, and routine visibility as a view definition.
 pub fn stored_expression_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     expression: &uqa_sql::ast::Expr,
@@ -344,6 +356,7 @@ pub fn stored_expression_definition(
     let mut bound = resolution.clone();
     bound.set_lookup_mode(RelationLookupMode::Bound);
     let deparser = Deparser {
+        output,
         catalog,
         dynamic,
         bound,
@@ -364,6 +377,7 @@ pub fn stored_expression_definition(
 
 /// A domain constraint expression, whose value placeholder prints as `VALUE`.
 pub fn stored_domain_expression_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     expression: &uqa_sql::ast::Expr,
@@ -374,6 +388,7 @@ pub fn stored_domain_expression_definition(
     let mut bound = resolution.clone();
     bound.set_lookup_mode(RelationLookupMode::Bound);
     let deparser = Deparser {
+        output,
         catalog,
         dynamic,
         bound,
@@ -403,6 +418,7 @@ pub fn stored_domain_expression_definition(
 
 /// A routine's SQL-standard body as `print_function_sqlbody` prints it: a `RETURN` body's expression without indentation, or each statement of a `BEGIN ATOMIC` body at indentation level one, with the routine's parameters named.
 pub fn routine_body_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     def: &uqa_sql::ast::CreateFunction,
@@ -415,6 +431,7 @@ pub fn routine_body_definition(
     bound.set_lookup_mode(RelationLookupMode::Bound);
     let atomic = form == uqa_sql::ast::SQLBodyForm::Atomic;
     let deparser = Deparser {
+        output,
         catalog,
         dynamic,
         bound,
@@ -470,13 +487,14 @@ pub fn routine_body_definition(
 
 /// A trigger's `WHEN` condition as `pg_get_triggerdef` prints it: `get_rule_expr` over the trigger relation's `old` and `new` entries at the standard indentation, with constants spelled through the catalog.
 pub fn trigger_condition_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     condition: &uqa_sql::ast::Expr,
     pretty: bool,
 ) -> Result<String, SQLError> {
     let expression = uqa_sql::plan::ExpressionPlan::lower(condition.clone());
-    event_deparser(catalog, resolution, pretty).expression(
+    event_deparser(output, catalog, resolution, pretty).expression(
         &expression.scalar,
         &Scope::default(),
         &expression.subqueries,
@@ -485,13 +503,14 @@ pub fn trigger_condition_definition(
 
 /// A rewrite rule as `make_ruledef` prints it, which always indents: the event and the relation, which `relation` names as the caller qualified it, the condition over the rule's `old` and `new` entries, and each action as `get_query_def` prints it, followed by a semicolon.
 pub fn rule_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     definition: &uqa_sql::ast::CreateRule,
     relation: &str,
     pretty: bool,
 ) -> Result<String, SQLError> {
-    let deparser = event_deparser(catalog, resolution, pretty);
+    let deparser = event_deparser(output, catalog, resolution, pretty);
     let event = match definition.event {
         uqa_sql::ast::RuleEvent::Select => "SELECT",
         uqa_sql::ast::RuleEvent::Update => "UPDATE",
@@ -558,6 +577,7 @@ fn append_context_text(rendered: &mut String, text: &str) {
 
 /// The deparser of trigger conditions and rewrite rules, which `ruleutils.c` prints with `PRETTYFLAG_INDENT` whether or not the caller asked for pretty output.
 fn event_deparser<'a>(
+    output: Option<&'a dyn uqa_sql::expr::EngineHook>,
     catalog: &'a CatalogReadView,
     resolution: &RelationNameResolution,
     pretty: bool,
@@ -567,6 +587,7 @@ fn event_deparser<'a>(
     let mut bound = resolution.clone();
     bound.set_lookup_mode(RelationLookupMode::Bound);
     Deparser {
+        output,
         catalog,
         dynamic,
         bound,
@@ -581,11 +602,12 @@ fn event_deparser<'a>(
 
 /// A stored catalog expression as `pg_get_expr` prints it without pretty-printing.
 pub fn stored_expression_text(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     expression: &uqa_sql::ast::Expr,
 ) -> Result<String, SQLError> {
-    stored_expression_definition(catalog, resolution, expression, false)
+    stored_expression_definition(output, catalog, resolution, expression, false)
 }
 
 /// Whether a stored expression prints as a function call, which needs no parentheses of its own where `PostgreSQL` prints an expression in an index or partition key (`looks_like_function`).

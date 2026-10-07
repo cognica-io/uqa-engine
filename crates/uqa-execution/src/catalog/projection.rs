@@ -43,6 +43,8 @@ pub fn build_info_schema_rows(
     let mut catalog_resolution = resolution.clone();
     catalog_resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     let resolution = &catalog_resolution;
+    let output = CatalogOutput(*context);
+    let output = Some(&output as &dyn uqa_sql::expr::EngineHook);
     Ok(Some(match relation {
         VirtualRelation::InformationSchemaCatalogName => build_info_catalog_name(),
         VirtualRelation::InformationSchemata => build_info_schemata(catalog, resolution)?,
@@ -70,19 +72,19 @@ pub fn build_info_schema_rows(
             build_pg_partitioned_table(context, catalog, resolution)?
         }
         VirtualRelation::PgAttribute => build_pg_attribute(context, catalog, resolution)?,
-        VirtualRelation::PgAttrdef => build_pg_attrdef(catalog, resolution)?,
+        VirtualRelation::PgAttrdef => build_pg_attrdef(output, catalog, resolution)?,
         VirtualRelation::PgConstraint => build_pg_constraint(catalog, resolution)?,
-        VirtualRelation::PgIndex => build_pg_index(catalog, resolution)?,
+        VirtualRelation::PgIndex => build_pg_index(output, catalog, resolution)?,
         VirtualRelation::PgTrigger => build_pg_trigger(context, catalog, resolution)?,
-        VirtualRelation::PgRewrite => build_pg_rewrite(catalog, resolution)?,
-        VirtualRelation::PgRules => build_pg_rules(catalog, resolution)?,
+        VirtualRelation::PgRewrite => build_pg_rewrite(output, catalog, resolution)?,
+        VirtualRelation::PgRules => build_pg_rules(output, catalog, resolution)?,
         VirtualRelation::PgTables => build_pg_tables(catalog, resolution)?,
-        VirtualRelation::PgViews => build_pg_views(catalog, resolution)?,
-        VirtualRelation::PgIndexes => build_pg_indexes(catalog, resolution)?,
-        VirtualRelation::PgType => build_pg_type(catalog, resolution)?,
+        VirtualRelation::PgViews => build_pg_views(output, catalog, resolution)?,
+        VirtualRelation::PgIndexes => build_pg_indexes(output, catalog, resolution)?,
+        VirtualRelation::PgType => build_pg_type(output, catalog, resolution)?,
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgEnum => build_pg_enum(catalog),
-        VirtualRelation::PgProc => build_pg_proc(catalog, resolution)?,
+        VirtualRelation::PgProc => build_pg_proc(output, catalog, resolution)?,
         VirtualRelation::PgLanguage => build_pg_language(),
         VirtualRelation::PgForeignDataWrapper => pg_catalog::foreign::wrappers(catalog)?,
         VirtualRelation::PgForeignServer => pg_catalog::foreign::servers(catalog)?,
@@ -102,7 +104,7 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgShdepend => {
             CatalogDependencies::build(context, catalog, resolution)?.shared_depend_rows()
         }
-        VirtualRelation::PgMatviews => build_pg_matviews(catalog, resolution)?,
+        VirtualRelation::PgMatviews => build_pg_matviews(output, catalog, resolution)?,
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
         VirtualRelation::AgGraph => build_ag_graph(catalog)?,
         VirtualRelation::AgLabel => build_ag_label(catalog)?,

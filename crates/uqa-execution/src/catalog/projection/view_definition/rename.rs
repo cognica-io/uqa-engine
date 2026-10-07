@@ -46,7 +46,9 @@ fn change_bound_view_column(
     let dynamic = context.session_execution_view().relation_name_resolution();
     let mut bound = dynamic.clone();
     bound.set_lookup_mode(RelationLookupMode::Bound);
+    let output = crate::catalog::projection::CatalogOutput(*context);
     let deparser = Deparser {
+        output: Some(&output),
         catalog: &catalog,
         dynamic,
         bound,
