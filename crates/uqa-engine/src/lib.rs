@@ -4,14 +4,6 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-#![cfg_attr(
-    test,
-    expect(
-        clippy::large_stack_arrays,
-        reason = "libtest generates more than 2,048 test descriptors in the required single unit-test harness"
-    )
-)]
-
 //! Top-level engine: a per-table [`DocumentStore`] + [`InvertedIndex`]
 //! pair, document mutation entry points, and a minimal `search` API for
 //! text-only round trips. Backed either by in-memory stores
@@ -712,11 +704,13 @@ impl TableState {
 fn next_table_lifecycle_id() -> u64 {
     static NEXT_TABLE_LIFECYCLE_ID: std::sync::atomic::AtomicU64 =
         std::sync::atomic::AtomicU64::new(1);
-    NEXT_TABLE_LIFECYCLE_ID
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            current.checked_add(1)
-        })
-        .expect("table lifecycle id space exhausted")
+    uqa_core::atomic::try_update_u64(
+        &NEXT_TABLE_LIFECYCLE_ID,
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+        |current| current.checked_add(1),
+    )
+    .expect("table lifecycle id space exhausted")
 }
 
 pub(crate) use uqa_execution::catalog::identity::new_nonzero_catalog_identity;

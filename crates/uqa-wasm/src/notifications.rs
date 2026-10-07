@@ -107,11 +107,13 @@ pub(super) fn register(engine: &Engine, args: &JSON) -> Result<JSON, String> {
         Ok(source) => source,
         Err(error) => return Ok(failure(&error)),
     };
-    let id = NEXT_ID
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            current.checked_add(1).filter(|next| *next > 0)
-        })
-        .map_err(|_| Kind::Capacity.code().to_owned())?;
+    let id = uqa_core::atomic::try_update_i32(
+        &NEXT_ID,
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+        |current| current.checked_add(1).filter(|next| *next > 0),
+    )
+    .map_err(|_| Kind::Capacity.code().to_owned())?;
     let identity = source.identity();
     let value = json!({ "id": id, "epoch": identity.epoch.to_string(), "requestId": identity.request_id.as_ref().map(ToString::to_string) });
     LISTENERS.lock().insert(

@@ -36,10 +36,13 @@ impl TableState {
             DocumentCountChange::Removed => count.checked_sub(1),
             DocumentCountChange::Unchanged => Some(count),
         };
-        if self
-            .doc_count_cache
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, update)
-            .is_err()
+        if uqa_core::atomic::try_update_u64(
+            &self.doc_count_cache,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            update,
+        )
+        .is_err()
         {
             self.discard_document_count();
         }
