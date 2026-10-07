@@ -29,7 +29,7 @@ pub(in crate::mvcc::native) fn with<T>(
         .unwrap()
 }
 
-pub(super) fn initialize(connection: &ManagedConnection) {
+pub(in crate::mvcc::native) fn initialize(connection: &ManagedConnection) {
     Catalog::open(connection.clone()).unwrap();
     with(connection, |connection| {
         connection.execute_batch("INSERT INTO _documents(table_name, doc_id, body) VALUES ('public.docs', 1, '{\"n\":1}'), ('public.docs', 2, '{\"n\":2}');")?;

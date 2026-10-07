@@ -16,6 +16,9 @@ use crate::read_control::StorageReadControl;
 use super::metadata::PreparedWriteMetadata;
 use super::PreparedRecordWrite;
 
+#[cfg(test)]
+mod tests;
+
 enum Source<'a> {
     Resident(std::slice::Iter<'a, PreparedRecordWrite>),
     Spilled(RunCursor),
@@ -51,6 +54,47 @@ impl<'a> PreparedWriteCursor<'a> {
         control: &StorageReadControl,
     ) -> VersionResult<Option<PreparedRecordWrite>> {
         self.next_matching(None, control)
+    }
+
+    /// The next selected write, testing metadata before loading its value. Skipped
+    /// spilled values are neither read nor admitted to the caller's allowance.
+    pub fn next_where(
+        &mut self,
+        control: &StorageReadControl,
+        mut select: impl FnMut(&PreparedWriteMetadata) -> VersionResult<bool>,
+    ) -> VersionResult<Option<PreparedRecordWrite>> {
+        match &mut self.source {
+            Source::Resident(writes) => {
+                for write in writes.by_ref() {
+                    control.cancellation().check()?;
+                    let metadata = PreparedWriteMetadata::new(
+                        write.shared_key(),
+                        write.expected(),
+                        write.kind(),
+                        write.value().map(|value| value.len() as u64),
+                    );
+                    if select(&metadata)? {
+                        return Ok(Some(write.clone()));
+                    }
+                }
+                control.cancellation().check()?;
+                Ok(None)
+            }
+            Source::Spilled(cursor) => {
+                while let Some(entry) = cursor.next(control)? {
+                    let metadata = PreparedWriteMetadata::new(
+                        entry.key.clone(),
+                        entry.expected,
+                        entry.kind,
+                        entry.value.map(|location| location.len),
+                    );
+                    if select(&metadata)? {
+                        return spilled_write(cursor.run(), entry, control).map(Some);
+                    }
+                }
+                Ok(None)
+            }
+        }
     }
 
     /// Read only one record family, skipping other payloads without loading them.
