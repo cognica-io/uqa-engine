@@ -99,7 +99,10 @@ impl Engine {
             ..constraints.clone()
         };
         let constraints_json =
-            uqa_execution::schema::indexes::constraint_names::encode(&constraints)?;
+            uqa_execution::schema::indexes::constraint_names::encode_for_catalog(
+                catalog.as_ref(),
+                &constraints,
+            )?;
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,

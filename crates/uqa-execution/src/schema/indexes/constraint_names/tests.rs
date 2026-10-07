@@ -78,6 +78,37 @@ fn a_legacy_declaration_keeps_its_name_until_registry_conversion() {
 }
 
 #[test]
+fn catalog_encoding_keeps_names_until_the_registry_owns_them() {
+    let (_, mut constraints, _) = fixture();
+    constraints.hierarchy.partition_inherited_key_constraints = constraints.key_constraints.clone();
+    let catalog =
+        uqa_storage::KeyValueCatalog::new(Arc::new(uqa_storage::MemoryKeyValueStore::new()));
+    let original = serde_json::to_value(&constraints).unwrap();
+
+    for version in [None, Some("1"), Some("2")] {
+        if let Some(version) = version {
+            catalog.set_metadata(REGISTRY_VERSION, version).unwrap();
+        }
+        let encoded = encode_for_catalog(&catalog, &constraints).unwrap();
+        let stored: TableConstraintSet = serde_json::from_str(&encoded).unwrap();
+        let mut expected = constraints.clone();
+        if version == Some("2") {
+            expected.key_constraints[0].name = None;
+            expected.hierarchy.partition_inherited_key_constraints[0].name = None;
+        }
+        assert_eq!(
+            serde_json::to_value(stored).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(serde_json::to_value(&constraints).unwrap(), original);
+    }
+
+    catalog.set_metadata(REGISTRY_VERSION, "3").unwrap();
+    assert!(encode_for_catalog(&catalog, &constraints).is_err());
+    assert!(KeyConstraintNames::load(&catalog).is_err());
+}
+
+#[test]
 fn candidate_names_follow_catalog_identity_without_replacing_key_structure() {
     let (_, mut candidate, _) = fixture();
     let mut current_key = candidate.key_constraints[0].clone();
