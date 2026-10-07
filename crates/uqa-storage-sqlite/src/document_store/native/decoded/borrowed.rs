@@ -40,7 +40,7 @@ impl NativeDocumentRead<'_> {
         };
         let mut visited = 0;
         while let Some((count, pending)) =
-            self.latest_fields_segment(owner, after, limit - visited, fields, visitor)?
+            self.projected_fields_segment(owner, after, limit - visited, fields, visitor)?
         {
             visited += count;
             let Some((id, row)) = pending else {
@@ -122,6 +122,51 @@ impl NativeDocumentRead<'_> {
         self.snapshot.control.check()?;
         self.control.check()?;
         Ok(visited)
+    }
+
+    fn projected_fields_segment(
+        &self,
+        owner: crate::mvcc::native::NativeRecordOwner,
+        after: Option<i64>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> SQLiteResult<Option<LatestSegment>> {
+        if let Some(segment) = self.latest_fields_segment(owner, after, limit, fields, visitor)? {
+            return Ok(Some(segment));
+        }
+        let mut visited = 0;
+        let mut pending = None;
+        let available = self.snapshot.read_historical_documents(
+            self.table,
+            owner,
+            self.control,
+            &mut |history| {
+                history.visit(after, &mut |row| {
+                    self.snapshot.control.check()?;
+                    self.control.check()?;
+                    let stored_id = row[1].as_i64().map_err(|_| {
+                        VersionError::InvalidEncoding("native document key must be integer")
+                    })?;
+                    let id = document_id_from_sqlite(stored_id)?;
+                    let row = self.decode_body_with_projection(id, row, Some(fields))?;
+                    if fields.iter().any(|field| {
+                        row.fields
+                            .get(*field)
+                            .is_some_and(|value| controlled::marker(value).is_some())
+                    }) {
+                        pending = Some((id, row));
+                        return Ok(false);
+                    }
+                    let more = self.visit_decoded_fields(id, &row.fields, fields, visitor)?;
+                    visited += 1;
+                    self.snapshot.control.check()?;
+                    self.control.check()?;
+                    Ok(more && visited < limit)
+                })
+            },
+        )?;
+        Ok(available.map(|()| (visited, pending)))
     }
 
     /// One physical read of the latest committed rows after `after`, or `None` when they cannot stand in for the snapshot's records. Returns the rows visited and the row that ended the read because its selected fields are stored outside its body.

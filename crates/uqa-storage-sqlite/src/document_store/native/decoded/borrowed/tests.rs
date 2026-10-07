@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use uqa_core::Value;
 use uqa_storage::{mvcc::VersionedSessionOptions, DocumentStore, StorageBackendError};
 
+mod historical;
+
 fn fixture() -> SQLiteDocumentStore {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();
@@ -362,7 +364,7 @@ fn latest_committed_rows_read_the_physical_projection_and_match_the_records() {
                 actual, expected,
                 "after {after:?}, limit {limit}, {fields:?}"
             );
-            assert!(!record_tables.contains("_documents"), "{record_tables:?}");
+            assert!(record_tables.contains("_documents"), "{record_tables:?}");
             // The first complete scan of ["value"] caches its column; byte values are stored outside the body and never cached.
             let cached = fields == ["value"] && (after, limit) != (None, usize::MAX);
             assert_eq!(

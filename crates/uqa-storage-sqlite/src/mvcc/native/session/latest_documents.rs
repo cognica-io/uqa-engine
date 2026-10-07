@@ -19,6 +19,7 @@ use crate::connection::Result;
 use crate::mvcc::PhysicalResult;
 use crate::read_control::{payload_length, reserve_bindings};
 
+mod historical;
 mod points;
 
 /// Bodies of at most this many bytes are read with their row. The selected byte length bounds `SQLite`'s copy before the body is evaluated; a larger body is admitted and then read by itself.
