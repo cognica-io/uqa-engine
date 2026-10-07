@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Batch already evaluated UNIQUE and PRIMARY KEY reservations under one shared claim-table arbitration per bounded group. Keep single-key acquisition, contention order, snapshot refresh and savepoint release semantics.
+
 - Reuse ordinary statement analysis across data-only commits when the selected snapshot, definitions and parameter types still permit it. Re-optimize against current data on every invocation, preserving fresh parameter values, temporal input lifetimes, rollback and schema diagnostics.
 
 - Reuse completed data-commit receipts for session cache adoption on native SQLite, SQLite Key/Value and redb, avoiding an extra read transaction and catalog-generation scan after a data-only commit. Preserve refresh after intervening commits, definition changes, rollback and uncertain completion.

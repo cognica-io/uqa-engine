@@ -157,6 +157,51 @@ fn index(strength: LockStrength) -> usize {
 }
 
 #[test]
+fn conflicting_foreign_batch_restores_attempt_before_ordered_waits() {
+    use crate::row_locks::{LockAcquire, LockRequest, RowLockKey, RowLockManager};
+    use uqa_sql::ast::LockWait;
+
+    for skip in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("batch.db");
+        let manager = RowLockManager::for_database_file(&path);
+        let mut peer = Peer::start(&path);
+        assert_eq!(peer.request("claim 3 2"), "granted");
+        let cancel = uqa_core::CancellationToken::new();
+        let table = manager.table_key(std::str::from_utf8(RELATION).unwrap());
+        let requests = (1..=3)
+            .map(|doc_id| LockRequest {
+                session_id: PARENT_SESSION,
+                key: RowLockKey { table, doc_id },
+                strength: LockStrength::ForUpdate,
+                mark: 0,
+                wait: if skip {
+                    LockWait::SkipLocked
+                } else {
+                    LockWait::NoWait
+                },
+                cancel: &cancel,
+                relation: "row_claim_test",
+            })
+            .collect::<Vec<_>>();
+        let result = manager.acquire_batch(&requests);
+        if skip {
+            let result = result.unwrap();
+            assert!(matches!(result[0], LockAcquire::Granted { .. }));
+            assert_eq!(result[1], LockAcquire::Skipped);
+            assert!(matches!(result[2], LockAcquire::Granted { .. }));
+            assert!(peer.request("claim 3 3").starts_with("conflict "));
+        } else {
+            assert_eq!(result.unwrap_err().sqlstate(), Some("55P03"));
+            assert_eq!(peer.request("claim 3 3"), "granted");
+        }
+        assert!(peer.request("claim 3 1").starts_with("conflict "));
+        manager.release_session(PARENT_SESSION);
+        assert_eq!(peer.request("claim 3 1"), "granted");
+    }
+}
+
+#[test]
 fn mapped_and_positioned_processes_share_claim_publication_and_release() {
     for parent_mapped in [false, true] {
         let directory = tempfile::tempdir().unwrap();

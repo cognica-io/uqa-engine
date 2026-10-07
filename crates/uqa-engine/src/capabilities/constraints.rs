@@ -178,6 +178,13 @@ impl ConstraintTransactions for Engine {
     fn lock_key_reservation(&self, key: [u8; 32], table: &str) -> Result<LockAcquire, SQLError> {
         Engine::lock_key_reservation(self, key, table)
     }
+    fn lock_key_reservations(
+        &self,
+        keys: &[[u8; 32]],
+        table: &str,
+    ) -> Result<Vec<LockAcquire>, SQLError> {
+        Engine::lock_key_reservations(self, keys, table)
+    }
 }
 impl MutationNamespace for Engine {
     fn current_role(&self) -> RoleReference {

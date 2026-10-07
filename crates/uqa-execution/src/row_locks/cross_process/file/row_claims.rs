@@ -231,6 +231,8 @@ impl FileLockCoordinator {
     fn lock_row_claim_table(&self, rows: &mut RowClaims) -> Result<TableLock<'_>, String> {
         lock_byte(&self.file, TABLE_LOCK_BYTE, true)
             .map_err(|error| table_error("lock", &error))?;
+        #[cfg(test)]
+        self.row_claim_table_locks.fetch_add(1, Ordering::Relaxed);
         let byte = TableLockByte(self);
         fence(Ordering::Acquire);
         let mut mapping = self.claim_mapping.lock();

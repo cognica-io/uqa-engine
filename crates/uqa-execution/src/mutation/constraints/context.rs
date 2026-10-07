@@ -78,6 +78,16 @@ pub trait ConstraintTransactions {
     ) -> Result<bool, SQLError>;
     fn refresh_explicit_statement_snapshot(&self) -> Result<(), SQLError>;
     fn lock_key_reservation(&self, key: [u8; 32], table: &str) -> Result<LockAcquire, SQLError>;
+    /// All keys are evaluated before this boundary, with no reads or callbacks between reservations.
+    fn lock_key_reservations(
+        &self,
+        keys: &[[u8; 32]],
+        table: &str,
+    ) -> Result<Vec<LockAcquire>, SQLError> {
+        keys.iter()
+            .map(|key| self.lock_key_reservation(*key, table))
+            .collect()
+    }
 }
 pub trait MutationNamespace {
     fn current_role(&self) -> RoleReference;

@@ -93,6 +93,42 @@ fn open(provider: usize, path: &Path) -> Engine {
     engine
 }
 
+#[rstest::rstest]
+fn multiple_unique_reservations_keep_savepoint_and_conflict_behavior(
+    #[values(0, 1, 2, 3)] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("multiple-keys.db"));
+    sql(&engine, "CREATE TABLE multi_keys(id int PRIMARY KEY, name text UNIQUE, code int UNIQUE); INSERT INTO multi_keys VALUES(1,'first',10)");
+    sql(&engine, "BEGIN; SAVEPOINT added; INSERT INTO multi_keys VALUES(2,'second',20); ROLLBACK TO added; INSERT INTO multi_keys VALUES(2,'second',20); COMMIT");
+    error(
+        &engine,
+        "INSERT INTO multi_keys VALUES(3,'second',30)",
+        "23505",
+    );
+    error(
+        &engine,
+        "INSERT INTO multi_keys VALUES(3,'third',20)",
+        "23505",
+    );
+    sql(&engine, "INSERT INTO multi_keys VALUES(3,'third',30); INSERT INTO multi_keys VALUES(4,'second',40) ON CONFLICT(name) DO NOTHING; INSERT INTO multi_keys VALUES(4,'fourth',40)");
+    sql(&engine, "BEGIN; SAVEPOINT changed; UPDATE multi_keys SET name='replaced',code=50 WHERE id=4; ROLLBACK TO changed; COMMIT");
+    assert_eq!(
+        sql(&engine, "SELECT count(*) AS n FROM multi_keys").rows[0]["n"],
+        Value::Int(4)
+    );
+    assert_eq!(
+        sql(&engine, "SELECT name,code FROM multi_keys WHERE id=4").rows[0]["name"],
+        s("fourth")
+    );
+    error(
+        &engine,
+        "INSERT INTO multi_keys VALUES(5,'fifth',40)",
+        "23505",
+    );
+    sql(&engine, "INSERT INTO multi_keys VALUES(5,'replaced',50)");
+}
+
 // Results and SQLSTATEs independently checked with PostgreSQL 18.4.
 #[rstest::rstest]
 fn composite_unique_keys_preserve_partial_null_and_rollback_semantics(

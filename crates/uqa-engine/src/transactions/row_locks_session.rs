@@ -277,6 +277,30 @@ impl Engine {
         })
     }
 
+    pub(crate) fn lock_key_reservations(
+        &self,
+        keys: &[[u8; 32]],
+        display_name: &str,
+    ) -> Result<Vec<crate::row_locks::LockAcquire>, SQLError> {
+        let mark = self.current_lock_mark();
+        let requests = keys
+            .iter()
+            .map(|key| crate::row_locks::LockRequest {
+                session_id: self.session_id,
+                key: crate::row_locks::RowLockKey {
+                    table: self.row_locks.key_reservation_key(*key),
+                    doc_id: 0,
+                },
+                strength: uqa_sql::ast::LockStrength::ForUpdate,
+                mark,
+                wait: uqa_sql::ast::LockWait::Block,
+                cancel: &self.runtime.cancellation,
+                relation: display_name,
+            })
+            .collect::<Vec<_>>();
+        self.row_locks.acquire_batch(&requests)
+    }
+
     pub(crate) fn lock_relation(
         &self,
         table: &str,

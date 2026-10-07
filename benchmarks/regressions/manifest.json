@@ -354,6 +354,19 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "batches_bound_claim_table_arbitration_and_preserve_every_grant",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/batch/tests.rs",
+      "capability": "Cross-process key reservation arbitration",
+      "workload": "Groups of 2, 64, 65 and 128 pre-evaluated claims, repeated acquisition, competing session and savepoint release.",
+      "invariant": "Exactly ceil(N/64) table arbitrations for fresh claims, zero extra for unchanged grants; all individual claims and release effects remain present.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
