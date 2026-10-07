@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain parsed SQL and structural plans across data-only changes while invalidating executable access paths. Persistent and explicit-transaction statements still lower and optimize under their selected snapshot, preserving live data, rollback and schema checks.
+
 - Share SQLite managed transaction allocation commits through a bounded reserve of already durable receipts, preserving receipt quotas, per-call memory and cancellation checks, process-loss recovery and SERIALIZABLE publication ordering.
 
 - Publish automatic ANALYZE samples while concurrent row writes continue, retaining changes after the sample for the next refresh. Reject obsolete samples after a newer ANALYZE, column changes or relation replacement across native SQLite, SQLite Key/Value and redb.

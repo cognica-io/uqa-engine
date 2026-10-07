@@ -48,7 +48,7 @@ impl Engine {
     /// sessions cannot invalidate and rebuild against uncommitted data.
     pub(crate) fn note_table_data_changed(&self) {
         self.clear_bayesian_params_cache();
-        self.clear_sql_statement_cache();
+        self.invalidate_optimized_sql_plans();
         // Rollback restoration replaces snapshots directly and never enters
         // this ordinary mutation hook. Therefore contention is not evidence
         // of an active transaction: wait for the stack and inspect its state.
@@ -79,7 +79,7 @@ impl Engine {
             .table_data
             .dirty
             .store(false, std::sync::atomic::Ordering::Release);
-        self.clear_sql_statement_cache();
+        self.invalidate_optimized_sql_plans();
     }
 
     /// Refresh every session-local dependency of committed table contents.
@@ -254,7 +254,7 @@ impl Engine {
             }
         }
         self.synchronize_partition_identity_watermarks()?;
-        self.clear_sql_statement_cache();
+        self.invalidate_optimized_sql_plans();
         // Publish the refreshed generation and invalidate dependent executable plans.
         self.epochs
             .table_data

@@ -62,13 +62,6 @@ impl StatementInput<'_> {
             Self::Parsed(statement) => statement.is_notification_listener_command(),
         }
     }
-
-    fn compile(self) -> Result<uqa_sql::Statement, SQLError> {
-        match self {
-            Self::Cached(statement) => Ok(statement.as_ref().clone()),
-            Self::Parsed(statement) => statement.compile(),
-        }
-    }
 }
 
 pub fn execute_simple_query<S: Clone + Send + Sync + 'static>(
@@ -251,10 +244,26 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             ) {
                 display.refresh(&path);
             }
-            let statement = statement
-                .compile()
-                .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
-            let transaction = match &statement {
+            let (parsed_statement, batch_statement) = match statement {
+                StatementInput::Cached(statement) => (Some(statement), None),
+                StatementInput::Parsed(statement) => {
+                    let statement = statement.compile().map_err(|error| {
+                        abort_explicit_statement_error(context.transactions, error)
+                    })?;
+                    if is_single_statement {
+                        (Some(Arc::new(statement)), None)
+                    } else {
+                        (None, Some(statement))
+                    }
+                }
+            };
+            let statement = parsed_statement
+                .as_deref()
+                .or(batch_statement.as_ref())
+                .expect("compiled statement");
+            let shared_statement =
+                || Arc::clone(parsed_statement.as_ref().expect("single statement cache"));
+            let transaction = match statement {
                 uqa_sql::ast::Statement::Transaction(transaction) => Some(transaction.clone()),
                 _ => None,
             };
@@ -315,7 +324,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     ));
                     context.cache.cache_sql_statement(
                         sql.to_string(),
-                        Arc::new(statement.clone()),
+                        shared_statement(),
                         Arc::clone(&plan),
                         parser.clone(),
                     );
@@ -426,7 +435,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 if is_single_statement {
                     context.cache.cache_sql_statement(
                         sql.to_string(),
-                        Arc::new(statement.clone()),
+                        shared_statement(),
                         Arc::new(plan.clone()),
                         parser.clone(),
                     );
@@ -449,7 +458,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     if is_single_statement {
                         context.cache.cache_sql_statement(
                             sql.to_string(),
-                            Arc::new(statement.clone()),
+                            shared_statement(),
                             Arc::new(plan.clone()),
                             parser.clone(),
                         );
@@ -533,7 +542,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 if is_single_statement {
                     context.cache.cache_sql_statement(
                         sql.to_string(),
-                        Arc::new(statement.clone()),
+                        shared_statement(),
                         Arc::new(plan.clone()),
                         parser.clone(),
                     );
@@ -579,7 +588,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     if is_single_statement {
                         context.cache.cache_sql_statement(
                             sql.to_string(),
-                            Arc::new(statement.clone()),
+                            shared_statement(),
                             Arc::new(plan.clone()),
                             parser.clone(),
                         );
@@ -604,7 +613,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                             if is_single_statement {
                                 context.cache.cache_sql_statement(
                                     sql.to_string(),
-                                    Arc::new(statement.clone()),
+                                    shared_statement(),
                                     Arc::new(plan.clone()),
                                     parser.clone(),
                                 );

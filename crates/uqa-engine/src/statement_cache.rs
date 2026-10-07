@@ -18,6 +18,7 @@ const SQL_STATEMENT_CACHE_LIMIT: usize = 256;
 pub(super) struct SQLStatementCache {
     entries: BTreeMap<String, CachedSQLStatement>,
     insertion_order: VecDeque<String>,
+    has_optimized: bool,
 }
 
 #[derive(Clone)]
@@ -73,24 +74,47 @@ impl SQLStatementCache {
         &mut self,
         sql: &str,
         optimized_plan: Arc<uqa_planner::UnifiedPlan>,
+        data_epoch: u64,
     ) {
         if let Some(entry) = self.entries.get_mut(sql) {
             entry.optimized_plan = Some(optimized_plan);
+            entry.catalog_epochs.table_data = data_epoch;
+            self.has_optimized = true;
+        }
+    }
+
+    pub(super) fn invalidate_optimized(&mut self) {
+        if !std::mem::take(&mut self.has_optimized) {
+            return;
+        }
+        for entry in self.entries.values_mut() {
+            entry.optimized_plan = None;
         }
     }
 
     pub(super) fn clear(&mut self) {
         self.entries.clear();
         self.insertion_order.clear();
+        self.has_optimized = false;
     }
 }
 
 impl Engine {
     pub(crate) fn cached_sql_statement(&self, sql: &str) -> Option<CachedSQLStatement> {
-        let cached = self.session.state.read().sql_statement_cache.get(sql)?;
-        (cached.catalog_epochs == self.catalog_epochs()
-            && cached.parser.settings == self.parser_settings())
-        .then_some(cached)
+        let mut cached = self.session.state.read().sql_statement_cache.get(sql)?;
+        let epochs = self.catalog_epochs();
+        if cached.catalog_epochs.table_catalog != epochs.table_catalog
+            || cached.catalog_epochs.catalog_registry != epochs.catalog_registry
+            || cached.parser.settings != self.parser_settings()
+        {
+            return None;
+        }
+        // Structural lowering depends on definitions and parser settings;
+        // data-dependent access paths must be chosen again after a data change.
+        if cached.catalog_epochs.table_data != epochs.table_data {
+            cached.optimized_plan = None;
+        }
+        Some(cached)
     }
 
     #[cfg(test)]
@@ -123,11 +147,12 @@ impl Engine {
         sql: &str,
         optimized_plan: Arc<uqa_planner::UnifiedPlan>,
     ) {
+        let data_epoch = self.catalog_epochs().table_data;
         self.session
             .state
             .write()
             .sql_statement_cache
-            .set_optimized(sql, optimized_plan);
+            .set_optimized(sql, optimized_plan, data_epoch);
     }
 
     #[cfg(test)]
@@ -138,5 +163,13 @@ impl Engine {
 
     pub(crate) fn clear_sql_statement_cache(&self) {
         self.session.state.write().sql_statement_cache.clear();
+    }
+
+    pub(crate) fn invalidate_optimized_sql_plans(&self) {
+        self.session
+            .state
+            .write()
+            .sql_statement_cache
+            .invalidate_optimized();
     }
 }

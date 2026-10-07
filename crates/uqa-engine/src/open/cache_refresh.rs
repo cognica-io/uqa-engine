@@ -194,7 +194,11 @@ impl Engine {
             .seen
             .store(registry_epoch, Ordering::Release);
         if previous.as_ref() != Some(&current) {
-            self.clear_sql_statement_cache();
+            if catalog_changed || registries_changed {
+                self.clear_sql_statement_cache();
+            } else {
+                self.invalidate_optimized_sql_plans();
+            }
             self.clear_bayesian_params_cache();
             self.invalidate_prepared_plans();
         }

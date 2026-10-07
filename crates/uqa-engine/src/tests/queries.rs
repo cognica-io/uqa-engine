@@ -457,9 +457,21 @@ mod unified_plan_tests {
             .sql("INSERT INTO items (id) VALUES (3)", &[])
             .expect("mutate table");
         assert!(
-            engine.cached_sql_statement(query).is_none(),
+            engine
+                .cached_sql_statement(query)
+                .is_some_and(|cached| cached.optimized_plan.is_none()),
             "a committed data change must invalidate the optimized plan"
         );
+        let rows = engine.sql(query, &[]).unwrap().rows;
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[2]["id"], uqa_core::Value::Int(3));
+        let replanned = engine.cached_optimized_sql_plan(query).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&first, &replanned));
+        engine.sql(query, &[]).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &replanned,
+            &engine.cached_optimized_sql_plan(query).unwrap()
+        ));
     }
 
     #[test]
@@ -780,7 +792,9 @@ mod unified_plan_tests {
             .synchronize_table_data()
             .expect("refresh committed generation");
         assert!(
-            observer.cached_sql_plans(query).is_none(),
+            observer
+                .cached_sql_statement(query)
+                .is_some_and(|cached| cached.optimized_plan.is_none()),
             "a sibling commit must invalidate optimized statement plans"
         );
         assert_eq!(
@@ -856,6 +870,7 @@ mod unified_plan_tests {
     }
 }
 
+mod cache;
 mod operators;
 mod retrieval_planning;
 mod scope;
