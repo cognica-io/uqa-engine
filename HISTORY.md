@@ -49,6 +49,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Compile SQLite path watching only on supported native targets, restoring browser WASM builds while preserving direct file-identity checks and replacement rejection on other targets.
+
 - Use scalar index candidates through table aliases, column aliases and join inputs, and reconcile indexed equality reads with cached command keys instead of scanning every staged row. Retain fixed query views, private replacements, tombstones and serializable predicate observations.
 
 - Let point UPDATE modify a row staged by an enclosing command, and honor staged replacements and tombstones in integer-key reads. Preserve nested-trigger effects when the outer batch publishes.

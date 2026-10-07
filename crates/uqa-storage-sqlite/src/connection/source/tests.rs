@@ -18,7 +18,10 @@ fn unchanged_source_reuses_its_identity_but_replacement_fails_on_the_next_call()
     let source = DatabaseSource::capture(&mut spec, &connection)
         .unwrap()
         .unwrap();
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let watched = source.watch.lock().is_some();
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let watched = false;
     let before = source.identity_reads.load(Ordering::Relaxed);
     for _ in 0..256 {
         source.check().unwrap();
@@ -54,7 +57,10 @@ fn direct_source_checks_preserve_replacement_detection_without_a_watch() {
     let source = DatabaseSource::capture(&mut spec, &connection)
         .unwrap()
         .unwrap();
-    *source.watch.lock() = None;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        *source.watch.lock() = None;
+    }
     let before = source.identity_reads.load(Ordering::Relaxed);
     for _ in 0..8 {
         source.check().unwrap();
@@ -138,6 +144,7 @@ fn symlink_to_original_inode_keeps_checking_its_unwatched_target() {
     std::fs::rename(&path, &target).unwrap();
     std::os::unix::fs::symlink(&target, &path).unwrap();
     source.check().unwrap();
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     assert!(source.watch.lock().is_none());
     // Keep the original inode alive so inode reuse cannot mask replacement.
     std::fs::rename(&target, target.with_extension("saved")).unwrap();
