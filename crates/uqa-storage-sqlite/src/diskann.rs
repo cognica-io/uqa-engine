@@ -339,6 +339,10 @@ impl KeyValueStore for Records {
     ) -> StorageBackendResult<Option<uqa_storage::key_value::KeyValueReadRevision>> {
         self.inner.read_view_revision()
     }
+    fn completed_commit(&self) -> Option<uqa_storage::mvcc::CommitReceipt> {
+        self.inner.completed_commit()
+    }
+
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         self.inner.change_version_monitor_is_nonblocking()
     }

@@ -35,7 +35,6 @@ impl Engine {
             return;
         };
         let previous_view = self.epochs.seen_storage_read_view.lock().clone();
-        let previous = self.epochs.storage_cache_revisions.lock().clone();
         let Some(previous_view) = previous_view else {
             return;
         };
@@ -44,6 +43,18 @@ impl Engine {
         }
         // Observed before the view: a sibling that publishes later remains unobserved.
         let data_epoch = self.epochs.table_data.published.load(Ordering::Acquire);
+        if let Ok(Some(committed)) = backend.committed_data_revision() {
+            if committed.revision.follows_by_one_commit(&previous_view) {
+                // The provider certified that this exact commit preserved definitions. Retain the older data-generation baseline: a later foreign commit can then cause an extra refresh, but cannot hide a changed table. The receipt is this session's view, never a claim to have observed a later writer.
+                self.adopt_committed_view(
+                    committed.revision,
+                    Some(committed.change_version),
+                    data_epoch,
+                );
+                return;
+            }
+        }
+        let previous = self.epochs.storage_cache_revisions.lock().clone();
         // A versioned session's pinned view reports its own change version, which costs no further read of the latest commit. Any other session asks the monitor first: inside its read transaction the monitor could wait behind a writer that waits for this reader.
         let pinned_version = backend.transaction_model().is_versioned();
         let before = if pinned_version {
@@ -89,6 +100,15 @@ impl Engine {
             _ => return,
         }
         *self.epochs.storage_cache_revisions.lock() = current;
+        self.adopt_committed_view(view, version, data_epoch);
+    }
+
+    fn adopt_committed_view(
+        &self,
+        view: uqa_storage::key_value::KeyValueReadRevision,
+        version: Option<u64>,
+        data_epoch: u64,
+    ) {
         *self.epochs.seen_storage_read_view.lock() = Some(view);
         if let Some(version) = version {
             self.epochs

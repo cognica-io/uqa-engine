@@ -604,6 +604,29 @@ impl ManagedConnection {
         })
     }
 
+    pub(crate) fn completed_commit(&self) -> Option<uqa_storage::mvcc::CommitReceipt> {
+        // An optional cache hint must not consume the next operation's cleanup diagnostic.
+        if self.session.cleanup_failure.lock().is_some() {
+            return None;
+        }
+        let _gate = self.session.gate.read();
+        self.session.logical.get()?.completed_commit()
+    }
+
+    pub(crate) fn committed_data_revision(
+        &self,
+    ) -> Result<Option<uqa_storage::CommittedDataRevision>> {
+        if self.session.cleanup_failure.lock().is_some() {
+            return Ok(None);
+        }
+        let _gate = self.session.gate.read();
+        Ok(self
+            .session
+            .logical
+            .get()
+            .and_then(|logical| logical.committed_data_revision()))
+    }
+
     /// Establish the database snapshot for the active transaction without
     /// depending on the caller's first user query. `BEGIN DEFERRED` alone does
     /// not start a read transaction, so a writer could otherwise commit after

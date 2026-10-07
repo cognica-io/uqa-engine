@@ -95,7 +95,7 @@ pub(in crate::mvcc) fn materialize(
     prepared: &PreparedRecordCommit,
     sequence: CommitSequence,
     control: &StorageReadControl,
-) -> PhysicalResult<()> {
+) -> PhysicalResult<bool> {
     let capture = Capture::install(connection, control)?;
     capture.resolve(apply(connection, database, prepared, sequence, control))
 }
@@ -106,7 +106,7 @@ fn apply(
     prepared: &PreparedRecordCommit,
     sequence: CommitSequence,
     control: &StorageReadControl,
-) -> PhysicalResult<()> {
+) -> PhysicalResult<bool> {
     seed_originals(connection, database, prepared, control)?;
     seed_targets(connection, prepared, control)?;
     super::sequences::validate_prepared(connection, prepared, control)?;
@@ -161,7 +161,7 @@ fn apply(
             )?;
         }
     }
-    verify_changes(connection, database, sequence, control)?;
+    let preserves_definitions = verify_changes(connection, database, sequence, control)?;
     connection
         .prepare_cached("DELETE FROM _uqa_mvcc_native_expected")?
         .execute([])?;
@@ -169,16 +169,16 @@ fn apply(
         .prepare_cached("DELETE FROM _uqa_mvcc_native_changes")?
         .execute([])?;
     control.cancellation().check().map_err(VersionError::from)?;
-    Ok(())
+    Ok(preserves_definitions)
 }
 
-/// Verify what publishing the commit's rows changed, and stage the cache generations those changes produced.
+/// Verify and stage the cache generations produced by this commit, retaining whether catalog, registry and graph definitions stayed unchanged. This reuses the changed rows; it never reads the complete generation table.
 fn verify_changes(
     connection: &Connection,
     database: DatabaseId,
     sequence: CommitSequence,
     control: &StorageReadControl,
-) -> PhysicalResult<()> {
+) -> PhysicalResult<bool> {
     // A trigger or cascade may change only rows the commit prepared. The last pass verifies that every prepared row holds its prepared value, so this one only looks for a changed row that was not prepared. Cache generations are provider-owned effects of the changes and are staged at this sequence.
     let unprepared: bool = connection
         .prepare_cached("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_native_changes AS changed WHERE changed.family != ?1 AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_expected AS expected WHERE expected.family = changed.family AND expected.physical_key = changed.physical_key))")?
@@ -186,6 +186,7 @@ fn verify_changes(
     if unprepared {
         return Err(invalid("native trigger or cascade changed an unprepared record").into());
     }
+    let mut preserves_definitions = true;
     queue::visit(
         connection,
         "_uqa_mvcc_native_changes",
@@ -195,6 +196,10 @@ fn verify_changes(
             let row = physical::get(connection, family.layout(), key, control)?
                 .ok_or_else(|| invalid("native trigger deleted a cache generation"))?;
             let values = decode_row(&row, family.layout().columns.len(), control)?;
+            preserves_definitions &= matches!(
+                values.first(),
+                Some(ValueRef::Text(b"data" | b"statistics" | b"maintenance"))
+            );
             let record = NativeRecord::encode(
                 family,
                 NativeRecordOwner::Database(database),
@@ -229,7 +234,7 @@ fn verify_changes(
             }
         },
     )?;
-    Ok(())
+    Ok(preserves_definitions)
 }
 
 /// The families with a physical key the commit removes before it publishes its rows.

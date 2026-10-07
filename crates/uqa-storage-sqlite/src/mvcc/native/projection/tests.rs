@@ -16,6 +16,51 @@ use crate::{Catalog, ManagedConnection, SQLiteRecordStore};
 use uqa_storage::mvcc::{PrivateRecordChanges, RecordWrite, VersionedPersistence};
 
 #[test]
+fn data_commit_evidence_matches_the_exact_receipt_and_rejects_definition_changes() {
+    use crate::mvcc::native::tests::materialization::{initialize, records, replace};
+    use uqa_storage::{
+        mvcc::{VersionedKeyValueStore, VersionedSessionOptions},
+        KeyValueStore,
+    };
+
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    initialize(&connection);
+    let control = StorageReadControl::with_limit(4 << 20);
+    let store = Arc::new(SQLiteRecordStore::for_native(&connection, &control).unwrap());
+    let original = records(&connection, &store, Family::Documents, &control);
+    let updated = replace(&original[0], 2, ValueRef::Text(b"{\"n\":99}"), &control);
+    let session =
+        VersionedKeyValueStore::new(store.clone(), None, VersionedSessionOptions::default());
+    session.put(updated.key(), updated.row()).unwrap();
+    let receipt = session.completed_commit().unwrap();
+    assert!(store.commit_preserves_catalog_definitions(receipt));
+    let reads = crate::mvcc::RECORD_READS.with(std::cell::Cell::get);
+    let revision = session.committed_data_revision().unwrap();
+    assert_eq!(revision.change_version, receipt.sequence.as_u64());
+    assert_eq!(crate::mvcc::RECORD_READS.with(std::cell::Cell::get), reads);
+    let mut wrong = receipt;
+    wrong.fingerprint[0] ^= 1;
+    assert!(!store.commit_preserves_catalog_definitions(wrong));
+
+    let metadata = NativeRecord::encode(
+        Family::Metadata,
+        NativeRecordOwner::Database(store.native_namespace().unwrap()),
+        &[
+            ValueRef::Text(b"definition_probe"),
+            ValueRef::Text(b"changed"),
+        ],
+        &control,
+    )
+    .unwrap();
+    session.put(metadata.key(), metadata.row()).unwrap();
+    assert!(!store.commit_preserves_catalog_definitions(session.completed_commit().unwrap()));
+    assert!(session.committed_data_revision().is_none());
+    session.begin_read_transaction().unwrap();
+    assert!(session.completed_commit().is_none());
+    session.rollback_transaction().unwrap();
+}
+
+#[test]
 fn validated_new_native_records_do_not_read_nonexistent_originals() {
     for count in [32_i64, 128] {
         let connection = ManagedConnection::open_in_memory().unwrap();
