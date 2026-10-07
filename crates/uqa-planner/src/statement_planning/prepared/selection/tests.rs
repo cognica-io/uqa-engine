@@ -234,6 +234,42 @@ fn routine_owned_definition_selects_once_without_the_named_registry() {
 }
 
 #[test]
+fn analyzed_routine_variants_do_not_repeat_input_or_result_analysis() {
+    for mode in ["force_generic_plan", "force_custom_plan"] {
+        let inputs = Inputs {
+            mode,
+            ..Inputs::default()
+        };
+        inputs.fail_binding.set(true);
+        let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
+        for value in 1..=32 {
+            let selected = select_analyzed_entry(
+                &inputs.context(),
+                &entry,
+                &[SQLParam::typed_scalar(
+                    Value::Int(value),
+                    ColumnType::Integer,
+                )],
+            )
+            .unwrap();
+            entry.record_execution(selected.update);
+        }
+        let events = inputs.events.borrow();
+        assert!(!events.contains(&"analysis"));
+        assert!(!events.contains(&"binding"));
+        assert!(!events.contains(&"lookup"));
+        assert!(!events.contains(&"publish"));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.starts_with("optimize."))
+                .count(),
+            if mode == "force_generic_plan" { 1 } else { 32 }
+        );
+    }
+}
+
+#[test]
 fn first_generic_cost_is_rechecked_before_selecting_the_executable_plan() {
     let inputs = Inputs::default();
     let selected = inputs.select().unwrap().unwrap();

@@ -61,30 +61,12 @@ pub struct SQLRoutineInputContext<'a> {
 /// analysis starts a new owner, so an older activation cannot republish its plan.
 pub struct SQLRoutineStatement {
     pub definition: PreparedDefinition,
-    variants: Mutex<PreparedStatementPlan>,
+    variants: super::super::plans::RoutinePlanVariants,
 }
 
 impl SQLRoutineStatement {
     fn new(definition: PreparedDefinition) -> Self {
-        let logical_plan = Arc::new(definition.logical_plan.clone());
-        let variants = Mutex::new(PreparedStatementPlan {
-            source_plan: Arc::clone(&logical_plan),
-            logical_plan,
-            needs_analysis: false,
-            effective_search_path: definition.effective_search_path.clone(),
-            dependencies: definition.dependencies.clone(),
-            dependency_snapshot: definition.dependency_snapshot.clone(),
-            plan: None,
-            parameter_types: definition.parameter_types.clone(),
-            result_schema: definition.result_schema.clone(),
-            source_sql: None,
-            prepared_at_micros: 0,
-            from_sql: false,
-            generic_plans: 0,
-            custom_plans: 0,
-            generic_cost: None,
-            total_custom_cost: 0.0,
-        });
+        let variants = super::super::plans::RoutinePlanVariants::new(&definition);
         Self {
             definition,
             variants,
@@ -98,13 +80,7 @@ impl SQLRoutineStatement {
         )
             -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError>,
     ) -> Result<uqa_sql::plan::UnifiedPlan, SQLError> {
-        let entry = self.variants.lock().clone();
-        let selected = select(&entry)?;
-        let mut current = self.variants.lock();
-        if Arc::ptr_eq(&current.logical_plan, &entry.logical_plan) {
-            current.record_execution(selected.update);
-        }
-        Ok(selected.plan)
+        self.variants.select(select)
     }
 }
 
@@ -112,14 +88,7 @@ impl SQLRoutineInputs {
     pub(crate) fn invalidate_execution_plans(&self) {
         for routine in self.routines.lock().values() {
             for statement in &routine.statements {
-                let mut entry = statement.statement.variants.lock();
-                if !entry.has_tracked_executable_dependencies() {
-                    entry.plan = None;
-                    // An optimizer callback may publish a catalog change. Give
-                    // the surviving analysis a fresh publication identity so
-                    // that callback cannot restore a discarded executable.
-                    entry.logical_plan = Arc::new((*entry.logical_plan).clone());
-                }
+                statement.statement.variants.invalidate();
             }
         }
     }

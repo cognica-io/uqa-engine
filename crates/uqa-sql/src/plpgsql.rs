@@ -527,7 +527,8 @@ pub use fragments::{
 
 mod parameters;
 pub use parameters::{
-    parameterize_statement_variables, PLpgSQLVariableBindings, PLpgSQLVariableReference,
+    parameter_type_mismatch, parameterize_statement_variables, PLpgSQLVariableBindings,
+    PLpgSQLVariableReference,
 };
 
 mod blocks;

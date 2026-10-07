@@ -9,17 +9,22 @@ use crate::statement::prepared::invalidation::{PreparedCatalogChange, PreparedIn
 use std::sync::atomic::{AtomicUsize, Ordering};
 fn fragment() -> PreparedFragment {
     let syntax = uqa_sql::compile("SELECT 1").unwrap().remove(0);
+    let analysis = ProceduralPlanAnalysis {
+        result: uqa_sql::binding::statements::AnalyzedResult::Rows(vec![Some(
+            uqa_sql::ColumnType::Integer,
+        )]),
+        dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default(),
+        effective_search_path: None,
+        dependency_snapshot: None,
+    };
+    let definition = analysis
+        .prepared_definition(&UnifiedPlan::lower(syntax.clone()), &[])
+        .unwrap();
     PreparedFragment {
-        plan: UnifiedPlan::lower(syntax.clone()),
         syntax,
-        analysis: ProceduralPlanAnalysis {
-            result: uqa_sql::binding::statements::AnalyzedResult::Rows(vec![Some(
-                uqa_sql::ColumnType::Integer,
-            )]),
-            dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default(),
-            effective_search_path: None,
-            dependency_snapshot: None,
-        },
+        analysis,
+        parameter_types: definition.parameter_types.clone(),
+        variants: super::super::plans::RoutinePlanVariants::new(&definition),
         valid: AtomicBool::new(true),
         variables: Vec::new(),
     }
@@ -196,4 +201,64 @@ fn invalidated_recursive_preparation_keeps_the_newer_published_analysis() {
         .unwrap();
     assert!(Arc::ptr_eq(&outer, inner.as_ref().unwrap()));
     assert!(!Arc::ptr_eq(&outer, &old));
+}
+
+#[test]
+fn executable_invalidation_reaches_procedural_owners_and_fences_recursive_publication() {
+    use crate::statement::prepared::invalidation::CatalogRegistryChange;
+    let bodies = crate::routines::invocation::bodies::SessionRoutineBodies::default();
+    let owner = bodies.procedural.register();
+    let prepared = owner
+        .get_or_prepare(
+            1,
+            |_| Ok(true),
+            |_| {
+                let mut value = fragment();
+                value.syntax = uqa_sql::compile("SELECT catalog_value()")
+                    .unwrap()
+                    .remove(0);
+                value.analysis.dependencies.routines.insert([7; 16]);
+                value.variants = super::super::plans::RoutinePlanVariants::new(
+                    &value
+                        .analysis
+                        .prepared_definition(&UnifiedPlan::lower(value.syntax.clone()), &[])?,
+                );
+                Ok(value)
+            },
+        )
+        .unwrap();
+    let selected = |entry: &uqa_sql::prepared::entry::PreparedStatementPlan| {
+        let plan = entry
+            .plan
+            .clone()
+            .unwrap_or_else(|| (*entry.logical_plan).clone());
+        uqa_sql::prepared::planning::PreparedPlanSelection {
+            plan: plan.clone(),
+            update: uqa_sql::prepared::planning::PreparedPlanUpdate {
+                reanalyzed: None,
+                generic_plan: Some(plan),
+                generic_cost: Some(1.0),
+                custom_cost: None,
+            },
+        }
+    };
+    prepared
+        .variants
+        .select(|entry| Ok(selected(entry)))
+        .unwrap();
+    assert!(prepared.variants.snapshot().plan.is_some());
+    prepared
+        .variants
+        .select(|entry| {
+            CatalogRegistryChange::Definitions
+                .invalidate_with_routines(std::iter::empty(), &bodies);
+            Ok(selected(entry))
+        })
+        .unwrap();
+    assert!(
+        prepared.valid.load(Ordering::Acquire),
+        "input constants survive execution-only invalidation"
+    );
+    assert!(prepared.variants.snapshot().plan.is_none());
+    assert_eq!(prepared.variants.snapshot().generic_plans, 1);
 }

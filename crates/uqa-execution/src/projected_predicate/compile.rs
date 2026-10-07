@@ -324,9 +324,9 @@ fn require_all(
 fn parameter(index: usize, params: &[SQLParam]) -> Result<Value, SQLError> {
     match index.checked_sub(1).and_then(|offset| params.get(offset)) {
         Some(SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. }) => Ok(value.clone()),
-        Some(SQLParam::Vector(_) | SQLParam::Tensor(_)) => Err(SQLError::Unsupported(
-            "vector parameters require canonical predicate evaluation".into(),
-        )),
+        Some(SQLParam::Vector(_) | SQLParam::Tensor(_) | SQLParam::DeferredError { .. }) => Err(
+            SQLError::Unsupported("parameter requires canonical predicate evaluation".into()),
+        ),
         None => Err(SQLError::MissingParam(index)),
     }
 }

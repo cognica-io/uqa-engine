@@ -146,7 +146,7 @@ impl RoutineStatements for Engine {
             ),
         }
         .enter();
-        uqa_planner::statement_planning::prepared::selection::select_entry(
+        uqa_planner::statement_planning::prepared::selection::select_analyzed_entry(
             &uqa_planner::statement_planning::prepared::selection::PreparedPlanningContext {
                 session: self,
                 analysis: self.prepared_definition_context(),

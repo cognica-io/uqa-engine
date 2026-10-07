@@ -54,6 +54,8 @@ mod dynamic_recursion;
 mod exceptions;
 #[path = "sql_plpgsql/misc_semantics.rs"]
 mod misc_semantics;
+#[path = "sql_plpgsql/plan_reuse.rs"]
+mod plan_reuse;
 #[path = "sql_plpgsql/procedures.rs"]
 mod procedures;
 #[path = "sql_plpgsql/scalar_and_resolution.rs"]

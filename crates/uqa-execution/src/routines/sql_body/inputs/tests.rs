@@ -199,7 +199,7 @@ fn successful_plan_selection_is_retained_but_failed_selection_does_not_change_us
     assert!(statement
         .select(|_| Err(SQLError::Internal("planning failed".into())))
         .is_err());
-    let current = statement.variants.lock();
+    let current = statement.variants.snapshot();
     assert_eq!(current.generic_plans, 32);
     assert!(current.plan.is_some());
 }
@@ -219,7 +219,7 @@ fn execution_invalidation_preserves_inputs_and_rejects_reentrant_plan_publicatio
     statement.select(|entry| Ok(selected(entry))).unwrap();
     CatalogRegistryChange::BuiltinRoutinePrivileges
         .invalidate_with_routines(std::iter::empty(), &bodies);
-    assert!(statement.variants.lock().plan.is_some());
+    assert!(statement.variants.snapshot().plan.is_some());
     statement
         .select(|entry| {
             CatalogRegistryChange::Definitions
@@ -227,7 +227,7 @@ fn execution_invalidation_preserves_inputs_and_rejects_reentrant_plan_publicatio
             Ok(selected(entry))
         })
         .unwrap();
-    let current = statement.variants.lock();
+    let current = statement.variants.snapshot();
     assert!(current.plan.is_none());
     assert_eq!(current.generic_plans, 1);
     drop(current);

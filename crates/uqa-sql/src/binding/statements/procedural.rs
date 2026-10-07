@@ -23,6 +23,41 @@ pub struct ProceduralPlanAnalysis {
     pub dependency_snapshot: Option<PreparedDependencySnapshot>,
 }
 
+impl ProceduralPlanAnalysis {
+    /// Publish executable variants from the already successful procedural analysis.
+    pub fn prepared_definition(
+        &self,
+        plan: &UnifiedPlan,
+        params: &[SQLParam],
+    ) -> Result<crate::prepared::definition::PreparedDefinition, SQLError> {
+        let parameter_types = (1..=params.len())
+            .map(|index| {
+                crate::type_resolution::scalar_type(
+                    &crate::ScalarExpr::Param(index),
+                    &crate::RowSchema::new(Vec::new()),
+                    params,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let result_schema = match &self.result {
+            AnalyzedResult::Command => None,
+            AnalyzedResult::Schema(schema) => Some(schema.clone()),
+            AnalyzedResult::Rows(types) => Some(crate::RowSchema::with_types(
+                vec![String::new(); types.len()],
+                types.clone(),
+            )),
+        };
+        Ok(crate::prepared::definition::PreparedDefinition {
+            logical_plan: plan.clone(),
+            parameter_types,
+            result_schema,
+            effective_search_path: self.effective_search_path.clone(),
+            dependencies: self.dependencies.clone(),
+            dependency_snapshot: self.dependency_snapshot.clone(),
+        })
+    }
+}
+
 /// Analyze a reached SQL occurrence once in its retained catalog scope. CALL
 /// resolves and converts its selected inputs before successful publication too.
 pub fn analyze_procedural_plan(

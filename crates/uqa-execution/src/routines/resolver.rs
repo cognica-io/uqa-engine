@@ -10,6 +10,23 @@ use super::{DatumResolver, PLpgSQLDatum, ResolvedVariable, SQLError, Value, Vari
 use uqa_sql::ast::ColumnType;
 
 impl DatumResolver<'_> {
+    pub(super) fn parameter_number(
+        &self,
+        reference: &uqa_sql::plpgsql::PLpgSQLVariableReference,
+    ) -> Option<usize> {
+        use uqa_sql::plpgsql::PLpgSQLVariableReference;
+        match reference {
+            PLpgSQLVariableReference::Name(name) => self.lookup(name).map(|index| index + 1),
+            PLpgSQLVariableReference::Parameter(index) => Some(*index),
+            PLpgSQLVariableReference::Qualified { qualifier, column } => {
+                let index = self.lookup(qualifier)?;
+                self.datums.iter().position(|datum| matches!(datum,
+                    PLpgSQLDatum::RecField { parent, field } if *parent == index && field == column
+                )).map(|index| index + 1)
+            }
+        }
+    }
+
     pub(super) fn lookup(&self, name: &str) -> Option<usize> {
         if let Some(stack) = self.bindings.get(name) {
             return stack.last().copied();

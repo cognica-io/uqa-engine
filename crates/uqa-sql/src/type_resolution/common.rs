@@ -234,7 +234,9 @@ pub(super) fn parameter_type_with_control(
     control.check()?;
     let scalar = match parameter {
         SQLParam::Scalar(value) => return value_type_with_control(value, control),
-        SQLParam::TypedScalar { ty, .. } => return Ok(Some(ty.clone_with_control(control)?)),
+        SQLParam::TypedScalar { ty, .. } | SQLParam::DeferredError { ty, .. } => {
+            return Ok(Some(ty.clone_with_control(control)?))
+        }
         SQLParam::Vector(values) => u32::try_from(values.len()).ok().map(ColumnType::Vector),
         SQLParam::Tensor(values) => values
             .first()

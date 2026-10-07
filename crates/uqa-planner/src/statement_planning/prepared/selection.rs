@@ -79,8 +79,28 @@ pub fn select_entry(
     entry: &PreparedStatementPlan,
     parameters: &[SQLParam],
 ) -> Result<PreparedPlanSelection, SQLError> {
+    select(context, entry, parameters, true)
+}
+
+/// A routine's owner has already checked or rebuilt its analyzed inputs and
+/// result contract. Reuse only the plan policy here; named PREPARE descriptor
+/// checks do not apply to procedural CALL and utility statements.
+pub fn select_analyzed_entry(
+    context: &PreparedPlanningContext<'_>,
+    entry: &PreparedStatementPlan,
+    parameters: &[SQLParam],
+) -> Result<PreparedPlanSelection, SQLError> {
+    select(context, entry, parameters, false)
+}
+
+fn select(
+    context: &PreparedPlanningContext<'_>,
+    entry: &PreparedStatementPlan,
+    parameters: &[SQLParam],
+    check_analysis: bool,
+) -> Result<PreparedPlanSelection, SQLError> {
     let mode = context.session.plan_cache_mode()?;
-    let needs_analysis = needs_analysis(&context.analysis, entry)?;
+    let needs_analysis = check_analysis && needs_analysis(&context.analysis, entry)?;
     let mut generic_plan = if needs_analysis {
         None
     } else {
@@ -113,7 +133,7 @@ pub fn select_entry(
         total_custom_cost: entry.total_custom_cost,
     };
     let mut custom = super::choose_custom_plan(usage, &mode, generic_cost);
-    if custom || generic_plan.is_none() || reanalyzed.is_some() {
+    if check_analysis && (custom || generic_plan.is_none() || reanalyzed.is_some()) {
         let result_schema = match &reanalyzed {
             Some(definition) => definition.result_schema.clone(),
             None => uqa_sql::prepared::definition::analyze_result_schema(

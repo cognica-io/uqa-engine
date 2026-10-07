@@ -23,6 +23,13 @@ pub enum SQLParam {
         value: Value,
         ty: ColumnType,
     },
+    /// A procedural parameter whose retained type is known but whose current
+    /// value is invalid. Raise only if execution evaluates this parameter.
+    #[doc(hidden)]
+    DeferredError {
+        ty: ColumnType,
+        error: crate::ast::DeferredSQLError,
+    },
     Vector(Vec<f32>),
     Tensor(Vec<Vec<f32>>),
 }
@@ -42,15 +49,15 @@ impl SQLParam {
     pub fn scalar_value(&self) -> Option<&Value> {
         match self {
             Self::Scalar(value) | Self::TypedScalar { value, .. } => Some(value),
-            Self::Vector(_) | Self::Tensor(_) => None,
+            Self::Vector(_) | Self::Tensor(_) | Self::DeferredError { .. } => None,
         }
     }
 
-    /// Return the explicit SQL type carried only by [`SQLParam::TypedScalar`].
+    /// Return an explicit scalar type, including a deferred procedural error's retained type.
     #[must_use]
     pub fn declared_scalar_type(&self) -> Option<&ColumnType> {
         match self {
-            Self::TypedScalar { ty, .. } => Some(ty),
+            Self::TypedScalar { ty, .. } | Self::DeferredError { ty, .. } => Some(ty),
             Self::Scalar(_) | Self::Vector(_) | Self::Tensor(_) => None,
         }
     }
@@ -68,6 +75,7 @@ impl SQLParam {
     ) -> Result<Produced<Value>, SQLError> {
         control.check()?;
         match self {
+            Self::DeferredError { error, .. } => Err(error.clone().into()),
             Self::Scalar(value) | Self::TypedScalar { value, .. } => Ok(control.copy_value(value)?),
             Self::Vector(values) => vector_value(values, control),
             Self::Tensor(vectors) => {
