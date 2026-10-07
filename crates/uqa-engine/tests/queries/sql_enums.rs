@@ -73,6 +73,16 @@ fn enum_partition_key_catalog_output_matches_postgresql(#[case] open: Option<fn(
     ))
     .unwrap();
     crate::pg18_oracle::verify(&engine, &reference.to_string());
+    assert_partition_expression_label(&engine, "neutral");
+    engine
+        .sql(
+            "BEGIN; ALTER TYPE current_partition_mood RENAME VALUE 'neutral' TO 'temporary'",
+            &[],
+        )
+        .unwrap();
+    assert_partition_expression_label(&engine, "temporary");
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert_partition_expression_label(&engine, "neutral");
     drop(engine);
     if let Some(open) = open {
         let ids = reference["reopen_ids"].as_array().unwrap().clone();
@@ -80,8 +90,19 @@ fn enum_partition_key_catalog_output_matches_postgresql(#[case] open: Option<fn(
             .as_array_mut()
             .unwrap()
             .retain(|case| ids.contains(&case["id"]));
-        crate::pg18_oracle::verify(&open(&path), &reference.to_string());
+        let reopened = open(&path);
+        crate::pg18_oracle::verify(&reopened, &reference.to_string());
+        assert_partition_expression_label(&reopened, "neutral");
     }
+}
+
+fn assert_partition_expression_label(engine: &Engine, label: &str) {
+    let rows = text_rows(engine, "SELECT partexprs::text FROM pg_partitioned_table WHERE partrelid = 'enum_partition_rows'::regclass");
+    let expression = rows[0][0].as_ref().unwrap();
+    assert!(
+        expression.contains(&format!("'{label}'::current_partition_mood")),
+        "partition expression uses stale type or label metadata: {expression}"
+    );
 }
 
 /// Every result row of one statement as `PostgreSQL` text, NULL as `None`.

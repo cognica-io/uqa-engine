@@ -14,6 +14,7 @@ use super::helpers::type_metadata::{
     pg_type_by_value, pg_type_collation_oid, pg_type_len, pg_type_modifier, pg_type_oid,
 };
 use super::pg_catalog::table_relation_oid_from;
+use super::view_definition::stored_expression_definition;
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::Value;
@@ -65,7 +66,7 @@ pub fn build_pg_partitioned_table(
             .iter()
             .filter(|key| !matches!(key, Expr::Column(_)))
             .map(|expression| {
-                super::stored_expression_definition(
+                stored_expression_definition(
                     Some(&super::CatalogOutput(*context)),
                     catalog,
                     resolution,
@@ -374,7 +375,7 @@ pub fn partition_key_expression(
     context: &CatalogContext<'_>,
     expression: &Expr,
 ) -> Result<String, SQLError> {
-    super::stored_expression_definition(
+    stored_expression_definition(
         Some(&super::CatalogOutput(*context)),
         &context.catalog_read_view(),
         &context.session_execution_view().relation_name_resolution(),
