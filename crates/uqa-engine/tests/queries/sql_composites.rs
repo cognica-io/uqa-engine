@@ -8,6 +8,9 @@
 
 use uqa_engine::Engine;
 
+#[path = "sql_composites/addition.rs"]
+mod addition;
+
 fn verify_composite_types(engine: &Engine) {
     crate::pg18_oracle::verify(
         engine,

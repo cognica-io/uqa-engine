@@ -6,14 +6,83 @@
 
 //! Composite type declarations.
 
-use pg_query::protobuf::CompositeTypeStmt;
+use pg_query::protobuf::{AlterTableStmt, AlterTableType, ColumnDef, CompositeTypeStmt};
 use pg_query::NodeEnum;
 
 use super::{
     domains::qualified_name, names::range_var_name, types::compile_pg_type_reference, Result,
     SQLError,
 };
-use crate::ast::{CompositeAttributeDefinition, CreateCompositeType};
+use crate::ast::{
+    AlterTypeObject, AlterTypeObjectAction, CompositeAttributeAddition,
+    CompositeAttributeDefinition, CreateCompositeType, Statement, TypeObjectKind,
+};
+
+pub(super) fn compile_composite_additions(statement: &AlterTableStmt) -> Result<Statement> {
+    let relation = statement
+        .relation
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("composite attribute change has no relation".into()))?;
+    let mut attributes = Vec::new();
+    for node in &statement.cmds {
+        let Some(NodeEnum::AlterTableCmd(command)) = node.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "composite attribute change has no command".into(),
+            ));
+        };
+        if command.subtype() != AlterTableType::AtAddColumn {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER TYPE attribute action {:?} is not supported",
+                command.subtype()
+            )));
+        }
+        let Some(NodeEnum::ColumnDef(column)) =
+            command.def.as_ref().and_then(|node| node.node.as_ref())
+        else {
+            return Err(SQLError::Internal(
+                "composite attribute change has no declaration".into(),
+            ));
+        };
+        let declaration = super::tree::compile_column_declaration(column)?;
+        let mut attribute = compile_attribute(column, true)?;
+        if declaration.serial {
+            attribute.ty = super::types::preserve_alter_type_declaration(
+                column.type_name.as_ref().expect("compiled attribute type"),
+                &column.colname,
+            )?;
+        }
+        attributes.push(CompositeAttributeAddition {
+            attribute,
+            declaration,
+        });
+    }
+    Ok(Statement::AlterTypeObject(AlterTypeObject {
+        kind: TypeObjectKind::Type,
+        name: range_var_name(relation),
+        action: AlterTypeObjectAction::AddAttributes(attributes),
+    }))
+}
+
+fn compile_attribute(column: &ColumnDef, retained: bool) -> Result<CompositeAttributeDefinition> {
+    let type_name = column
+        .type_name
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal(format!("attribute `{}` has no type", column.colname)))?;
+    Ok(CompositeAttributeDefinition {
+        name: column.colname.clone(),
+        ty: if retained && !type_name.typmods.is_empty() {
+            super::types::preserve_alter_type_declaration(type_name, &column.colname)?
+        } else {
+            compile_pg_type_reference(type_name, &column.colname)?
+        },
+        collation: column
+            .coll_clause
+            .as_ref()
+            .map(|clause| qualified_name(&clause.collname))
+            .transpose()?,
+        setof: type_name.setof,
+    })
+}
 
 /// `CREATE TYPE name AS (...)`. A catalog-qualified name must name the current database, as `RangeVarGetCreationNamespace` requires.
 pub(super) fn compile_create_composite_type(
@@ -41,25 +110,7 @@ pub(super) fn compile_create_composite_type(
                     "composite type declaration contains a malformed attribute".into(),
                 ));
             };
-            Ok(CompositeAttributeDefinition {
-                name: column.colname.clone(),
-                // Serial types exist only in table column declarations, so a composite attribute resolves the name as an ordinary type.
-                ty: compile_pg_type_reference(
-                    column.type_name.as_ref().ok_or_else(|| {
-                        SQLError::Internal(format!("attribute `{}` has no type", column.colname))
-                    })?,
-                    &column.colname,
-                )?,
-                collation: column
-                    .coll_clause
-                    .as_ref()
-                    .map(|clause| qualified_name(&clause.collname))
-                    .transpose()?,
-                setof: column
-                    .type_name
-                    .as_ref()
-                    .is_some_and(|type_name| type_name.setof),
-            })
+            compile_attribute(column, false)
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(CreateCompositeType {

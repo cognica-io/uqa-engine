@@ -11,6 +11,69 @@ use crate::catalog::composite_type::StoredCompositeAttribute;
 use crate::type_resolution::{resolve_declared_column_type, FunctionTypeResolver};
 use crate::SQLError;
 
+/// `ATExecAddColumn` for a composite relation, after its owner and kind have been checked.
+pub fn prepare_added_attribute(
+    types: &dyn FunctionTypeResolver,
+    composites: &dyn crate::expr::composites::CompositeTypeCatalog,
+    definition: &crate::catalog::composite_type::StoredComposite,
+    addition: &crate::ast::CompositeAttributeAddition,
+) -> Result<StoredCompositeAttribute, SQLError> {
+    let attribute = &addition.attribute;
+    if definition
+        .live_attributes()
+        .any(|current| current.name == attribute.name)
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42701".into(),
+            message: format!(
+                "column \"{}\" of relation \"{}\" already exists",
+                attribute.name, definition.identity.name
+            ),
+        });
+    }
+    super::table_creation::column_declarations::check_serial_array(&addition.declaration)?;
+    let number = definition.next_attribute_number();
+    if usize::try_from(number).map_or(true, |number| number > MAX_ATTRIBUTES) {
+        return Err(SQLError::Routine {
+            sqlstate: "54011".into(),
+            message: format!("tables can have at most {MAX_ATTRIBUTES} columns"),
+        });
+    }
+    let declared = match &attribute.ty {
+        ColumnType::Named(name) if addition.declaration.serial => {
+            crate::compiler::compile_retained_type_declaration(name)?
+        }
+        ColumnType::Named(name) => crate::compiler::compile_retained_type_reference(name)?,
+        other => other.clone(),
+    };
+    let ty = resolve_declared_column_type(types, &declared)?;
+    types.require_type_usage(&ty)?;
+    let collation = attribute_collation(&ty, attribute.collation.as_deref())?;
+    if attribute.setof {
+        return Err(SQLError::Routine {
+            sqlstate: "42P16".into(),
+            message: format!("column \"{}\" cannot be declared SETOF", attribute.name),
+        });
+    }
+    super::columns::validate_postgres_relation_column_type(&attribute.name, &ty)?;
+    if crate::expr::composites::type_contains_composite(&ty, definition.oid, composites)? {
+        return Err(SQLError::Routine {
+            sqlstate: "42P16".into(),
+            message: format!(
+                "composite type {} cannot be made a member of itself",
+                definition.identity.name
+            ),
+        });
+    }
+    Ok(StoredCompositeAttribute {
+        name: attribute.name.clone(),
+        ty,
+        collation,
+        number,
+        dropped: false,
+    })
+}
+
 /// `MaxHeapAttributeNumber`.
 pub const MAX_ATTRIBUTES: usize = 1600;
 
@@ -134,3 +197,6 @@ pub fn prepare_composite_attributes(
     }
     Ok(prepared)
 }
+
+#[cfg(test)]
+mod tests;

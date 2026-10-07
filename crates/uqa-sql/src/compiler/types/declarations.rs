@@ -66,6 +66,17 @@ fn modifier_sql(modifier: &Node) -> Result<String, SQLError> {
 
 /// Run the ordinary declaration compiler at the admitted ALTER boundary. The type-name parser first excludes SQL outside the declaration, while the cast wrapper retains the original modifier expression nodes for the shared compiler.
 pub(crate) fn compile_retained_type_declaration(name: &str) -> Result<ColumnType, SQLError> {
+    compile_retained_type(name, compile_pg_type_name)
+}
+
+pub(crate) fn compile_retained_type_reference(name: &str) -> Result<ColumnType, SQLError> {
+    compile_retained_type(name, super::compile_pg_type_reference)
+}
+
+fn compile_retained_type(
+    name: &str,
+    compile: fn(&TypeName, &str) -> Result<ColumnType, SQLError>,
+) -> Result<ColumnType, SQLError> {
     if parse_regtype_name(name)?.is_none() {
         return Err(SQLError::TypeMismatch(format!(
             "invalid type declaration `{name}`"
@@ -90,7 +101,7 @@ pub(crate) fn compile_retained_type_declaration(name: &str) -> Result<ColumnType
             _ => None,
         })
         .ok_or_else(|| SQLError::Internal("type declaration lost its parser type name".into()))?;
-    compile_pg_type_name(ty, name)
+    compile(ty, name)
 }
 
 #[cfg(test)]

@@ -34,6 +34,13 @@ pub struct CompositeAttributeDefinition {
     pub setof: bool,
 }
 
+/// One ADD ATTRIBUTE declaration. Unlike CREATE TYPE, ALTER applies column declaration lowering, including SERIAL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompositeAttributeAddition {
+    pub attribute: CompositeAttributeDefinition,
+    pub declaration: super::ColumnDeclaration,
+}
+
 /// A composite type bound by catalog identity: a standalone composite type or the row type of a relation. The schema and name are the catalog's current names; equality compares the type identity only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompositeTypeReference {

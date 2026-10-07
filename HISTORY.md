@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add PostgreSQL composite attributes with ordered validation, stable attribute identities, NULL extension of existing nested values and atomic rollback across supported storage providers.
+
 - Support mutable EXECUTE privileges for builtin catalog routines, including schema-wide targets, aggregate/window identities, grant dependencies, transaction rollback and persistent reopening. Retain analyzed function identities through constant planning, preserve column authorization when pruning unused outputs, and check surviving calls before row production or argument side effects.
 - Reconstruct PostgreSQL routine definitions with `pg_get_functiondef`, preserving stored source, SQL bodies, argument modes, set results, attributes and configuration without executing the routine. Allow equivalent inferred/explicit result declarations during replacement, preserve PostgreSQL result-change diagnostics, and retain host callback precedence during builtin preparation.
 

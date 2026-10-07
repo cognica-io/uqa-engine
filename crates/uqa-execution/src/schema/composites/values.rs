@@ -23,6 +23,8 @@ pub trait CompositeValueTables {
 }
 
 pub struct CompositeValueContext<'a> {
+    pub memory: &'a dyn crate::query::runtime::QueryMemorySettings,
+    pub cancellation: &'a uqa_core::CancellationToken,
     pub tables: &'a dyn CompositeValueTables,
     pub reads: &'a dyn MutationRead,
     pub writes: &'a dyn ColumnRewritePublication,
@@ -37,6 +39,8 @@ pub fn rewrite_composite_values(
     target: u32,
     change: &AttributeChange,
 ) -> Result<(), SQLError> {
+    let memory = uqa_core::memory::MemoryBudget::new(context.memory.work_mem_bytes()?);
+    let control = uqa_storage::read_control::StorageReadControl::new(&memory, context.cancellation);
     for (table, columns) in context.tables.composite_value_tables()? {
         let mut affected = Vec::new();
         for column in columns {
@@ -47,26 +51,32 @@ pub fn rewrite_composite_values(
         if affected.is_empty() {
             continue;
         }
-        for doc_id in context.reads.live_table_doc_ids(&table)? {
-            let Some(document) = context.reads.get_document(&table, doc_id)? else {
-                continue;
-            };
-            let mut updates = BTreeMap::new();
-            for column in &affected {
-                let Some(value) = document.get(&column.name).cloned() else {
-                    continue;
+        crate::schema::columns::rows::visit_document_ids(
+            context.reads,
+            &table,
+            &control,
+            &mut |doc_id| {
+                let Some(document) = context.reads.get_document(&table, doc_id)? else {
+                    return Ok(());
                 };
-                updates.insert(
-                    column.name.clone(),
-                    apply_attribute_change(value, &column.ty, target, change, context.types)?,
-                );
-            }
-            if !updates.is_empty() {
-                context
-                    .writes
-                    .update_fields(&table, doc_id, updates, BTreeMap::new())?;
-            }
-        }
+                let mut updates = BTreeMap::new();
+                for column in &affected {
+                    let Some(value) = document.get(&column.name).cloned() else {
+                        continue;
+                    };
+                    updates.insert(
+                        column.name.clone(),
+                        apply_attribute_change(value, &column.ty, target, change, context.types)?,
+                    );
+                }
+                if !updates.is_empty() {
+                    context
+                        .writes
+                        .update_fields(&table, doc_id, updates, BTreeMap::new())?;
+                }
+                Ok(())
+            },
+        )?;
     }
     crate::schema::view_dependencies::rewrite_materialized_composite_values(
         &context.views,

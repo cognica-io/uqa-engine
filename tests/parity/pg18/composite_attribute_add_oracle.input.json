@@ -83,6 +83,184 @@
     {
       "id": "self",
       "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE recursive ca_pair"
+    },
+    {
+      "id": "missing_before_modifier",
+      "sql": "ALTER TYPE ca_missing ADD ATTRIBUTE x numeric(0)"
+    },
+    {
+      "id": "duplicate_before_modifier",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE a numeric(0)"
+    },
+    {
+      "id": "invalid_modifier",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid numeric(0)"
+    },
+    {
+      "id": "serial_owner_kind",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid serial"
+    },
+    {
+      "id": "serial_array",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid serial[]"
+    },
+    {
+      "id": "qualified_serial",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid pg_catalog.serial"
+    },
+    {
+      "id": "serial_duplicate",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE a serial"
+    },
+    {
+      "id": "serial_array_duplicate",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE a serial[]"
+    },
+    {
+      "id": "serial_then_unknown",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE serial_value serial, ADD ATTRIBUTE invalid ca_missing_type"
+    },
+    {
+      "id": "serial_then_duplicate",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE serial_value serial, ADD ATTRIBUTE a integer"
+    },
+    {
+      "id": "serial_rollback",
+      "sql": "SELECT count(*) FROM pg_class WHERE relname LIKE 'ca_pair_%_seq'"
+    },
+    {
+      "id": "explicit_sequence_owner",
+      "sql": "CREATE SEQUENCE ca_owned_sequence OWNED BY ca_pair.a"
+    },
+    {
+      "id": "setof",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid SETOF integer"
+    },
+    {
+      "id": "domain",
+      "sql": "CREATE DOMAIN ca_required AS integer NOT NULL; CREATE DOMAIN ca_domain AS ca_pair"
+    },
+    {
+      "id": "nested",
+      "sql": "CREATE TYPE ca_outer AS (one ca_pair, many ca_pair[]); CREATE TABLE ca_nested(id integer, p ca_domain, o ca_outer); INSERT INTO ca_nested VALUES (1,ROW(2,'d',NULL,NULL,NULL,NULL), ROW(ROW(3,'n',NULL,NULL,NULL,NULL)::ca_pair, ARRAY[ROW(4,'a',NULL,NULL,NULL,NULL)::ca_pair,NULL::ca_pair])),(2,NULL,NULL)"
+    },
+    {
+      "id": "materialized",
+      "sql": "CREATE MATERIALIZED VIEW ca_materialized AS SELECT v FROM ca_rows"
+    },
+    {
+      "id": "constant_view",
+      "sql": "CREATE VIEW ca_constant AS SELECT ROW(9,'constant',NULL,NULL,NULL,NULL)::ca_pair AS v"
+    },
+    {
+      "id": "prepared",
+      "sql": "PREPARE ca_prepared AS SELECT id,v FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "add_domain",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE required ca_required"
+    },
+    {
+      "id": "read_nested",
+      "sql": "SELECT id,p,o FROM ca_nested ORDER BY id"
+    },
+    {
+      "id": "read_materialized",
+      "sql": "SELECT v FROM ca_materialized ORDER BY v"
+    },
+    {
+      "id": "read_constant",
+      "sql": "SELECT v FROM ca_constant"
+    },
+    {
+      "id": "read_prepared",
+      "sql": "EXECUTE ca_prepared"
+    },
+    {
+      "id": "create_other",
+      "sql": "CREATE ROLE ca_add_other"
+    },
+    {
+      "id": "other_denied",
+      "sql": "SET ROLE ca_add_other; ALTER TYPE ca_pair ADD ATTRIBUTE denied integer"
+    },
+    {
+      "id": "reset_role",
+      "sql": "RESET ROLE"
+    },
+    {
+      "id": "wrong_kind_authority",
+      "sql": "SET ROLE ca_add_other; ALTER TYPE ca_rows ADD ATTRIBUTE denied integer"
+    },
+    {
+      "id": "reset_role_again",
+      "sql": "RESET ROLE"
+    },
+    {
+      "id": "drop_role",
+      "sql": "DROP ROLE ca_add_other"
+    },
+    {
+      "id": "drop_type_setup",
+      "sql": "CREATE TYPE ca_label AS ENUM ('kept'); ALTER TYPE ca_pair ADD ATTRIBUTE obsolete ca_label"
+    },
+    {
+      "id": "drop_type",
+      "sql": "DROP TYPE ca_label CASCADE"
+    },
+    {
+      "id": "after_dropped_slot",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE last_value integer"
+    },
+    {
+      "id": "catalog_final",
+      "sql": "SELECT a.attnum,a.attname,a.atttypid::regtype::text,a.attnotnull,a.attisdropped,a.attcollation FROM pg_attribute a JOIN pg_type t ON t.typrelid=a.attrelid WHERE t.typname='ca_pair' AND a.attnum>0 ORDER BY a.attnum"
+    },
+    {
+      "id": "read_final",
+      "sql": "SELECT id,v FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "read_nested_final",
+      "sql": "SELECT id,p,o FROM ca_nested ORDER BY id"
+    },
+    {
+      "id": "rollback_values",
+      "sql": "BEGIN; ALTER TYPE ca_pair ADD ATTRIBUTE undone text; SELECT id,v FROM ca_rows ORDER BY id; ROLLBACK"
+    },
+    {
+      "id": "after_value_rollback",
+      "sql": "SELECT id,v FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "reopen_rows",
+      "sql": "SELECT id,v FROM ca_rows ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_nested",
+      "sql": "SELECT id,p,o FROM ca_nested ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_view",
+      "sql": "SELECT * FROM ca_view ORDER BY a",
+      "reopen": true
+    },
+    {
+      "id": "reopen_materialized",
+      "sql": "SELECT v FROM ca_materialized ORDER BY v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_constant",
+      "sql": "SELECT v FROM ca_constant",
+      "reopen": true
+    },
+    {
+      "id": "reopen_catalog",
+      "sql": "SELECT a.attnum,a.attname,a.atttypid::regtype::text,a.attnotnull,a.attisdropped,a.attcollation FROM pg_attribute a JOIN pg_type t ON t.typrelid=a.attrelid WHERE t.typname='ca_pair' AND a.attnum>0 ORDER BY a.attnum",
+      "reopen": true
     }
   ]
 }

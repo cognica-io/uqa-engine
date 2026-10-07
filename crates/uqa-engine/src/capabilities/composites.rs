@@ -39,6 +39,8 @@ impl Engine {
 
     pub(crate) fn composite_value_context(&self) -> CompositeValueContext<'_> {
         CompositeValueContext {
+            memory: self.session.as_ref(),
+            cancellation: &self.runtime.cancellation,
             tables: self,
             reads: self,
             writes: self,

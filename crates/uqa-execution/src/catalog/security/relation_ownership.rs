@@ -23,13 +23,23 @@ impl TablePrivilegeContext<'_> {
         relation: &RelationIdentity,
         kind: &str,
     ) -> Result<(), SQLError> {
+        self.ensure_relation_owner_as(relation, kind, kind)
+    }
+
+    /// Some relation commands report table ownership while resolving another relation kind.
+    pub fn ensure_relation_owner_as(
+        &self,
+        relation: &RelationIdentity,
+        kind: &str,
+        diagnostic_kind: &str,
+    ) -> Result<(), SQLError> {
         let owner = self.relation_owner(relation, kind)?;
         let roles = self.roles.role_definitions();
         let owner = RoleReference::from_identity(owner, &roles)?;
         let memberships = self.roles.role_memberships();
         require_relation_ownership(
             &relation.name,
-            kind,
+            diagnostic_kind,
             role_inherits(&roles, &memberships, &self.names.current_role(), &owner),
         )
     }
