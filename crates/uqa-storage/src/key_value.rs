@@ -466,6 +466,16 @@ pub trait KeyValueStore: Send + Sync {
         ))
     }
 
+    /// Stage once and optionally certify the resulting prefix identity before another mutation can intervene. The identity may name private state before a later commit. A provider without this capability performs the ordinary mutation and returns no certificate; opening a later read view cannot certify this mutation's result.
+    fn with_mutation_revision(
+        &self,
+        _prefixes: &[&[u8]],
+        mutate: &mut KeyValueMutation<'_>,
+    ) -> StorageBackendResult<Option<KeyValueReadRevision>> {
+        self.with_mutation(mutate)?;
+        Ok(None)
+    }
+
     /// Evaluate and stage once with the actual durable writer and a non-reused mutation revision. Origins may be persisted alongside canonical values, but do not prove publication or visibility. The callback has the same non-reentrancy rules as `with_mutation`; capable wrappers must preserve the original origin and atomic batch.
     fn with_versioned_mutation(
         &self,

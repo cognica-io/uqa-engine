@@ -18,11 +18,7 @@ use uqa_storage::{ReadOnlySnapshot, StorageBackendError, StorageBackendResult};
 
 impl SQLiteHNSWIndex {
     pub(super) fn initialize_graph(&self) -> StorageBackendResult<()> {
-        if self
-            .persistent
-            .write_native(|read, batch| self.initialize_native(read, batch))?
-            .is_some()
-        {
+        if self.write_native_graph(|read, batch| self.initialize_native(read, batch))? {
             return Ok(());
         }
         let ((graph, revision), identity) =
@@ -60,21 +56,17 @@ impl SQLiteHNSWIndex {
     ) -> StorageBackendResult<()> {
         let (encoded_doc_id, encoded_vectors) =
             self.persistent.stage_doc_vectors(doc_id, &vectors)?;
-        if self
-            .persistent
-            .write_native(|read, batch| {
-                self.mutate_native(
-                    read,
-                    batch,
-                    HNSWMutation::Replace {
-                        document: doc_id,
-                        vectors: &vectors,
-                    },
-                    |read, batch| read.replace(batch, encoded_doc_id, &encoded_vectors),
-                )
-            })?
-            .is_some()
-        {
+        if self.write_native_graph(|read, batch| {
+            self.mutate_native(
+                read,
+                batch,
+                HNSWMutation::Replace {
+                    document: doc_id,
+                    vectors: &vectors,
+                },
+                |read, batch| read.replace(batch, encoded_doc_id, &encoded_vectors),
+            )
+        })? {
             return Ok(());
         }
         self.mutate_graph(
@@ -85,15 +77,11 @@ impl SQLiteHNSWIndex {
 
     pub(super) fn delete_document(&self, doc_id: DocId) -> StorageBackendResult<()> {
         let encoded = encode_doc_id(doc_id)?;
-        if self
-            .persistent
-            .write_native(|read, batch| {
-                self.mutate_native(read, batch, HNSWMutation::Delete(doc_id), |read, batch| {
-                    read.delete(batch, encoded)
-                })
-            })?
-            .is_some()
-        {
+        if self.write_native_graph(|read, batch| {
+            self.mutate_native(read, batch, HNSWMutation::Delete(doc_id), |read, batch| {
+                read.delete(batch, encoded)
+            })
+        })? {
             return Ok(());
         }
         self.mutate_graph(
@@ -109,15 +97,11 @@ impl SQLiteHNSWIndex {
     }
 
     pub(super) fn clear_graph(&self) -> StorageBackendResult<()> {
-        if self
-            .persistent
-            .write_native(|read, batch| {
-                self.mutate_native(read, batch, HNSWMutation::Clear, |read, batch| {
-                    read.clear_family(batch, crate::mvcc::native::NativeRecordFamily::Vectors)
-                })
-            })?
-            .is_some()
-        {
+        if self.write_native_graph(|read, batch| {
+            self.mutate_native(read, batch, HNSWMutation::Clear, |read, batch| {
+                read.clear_family(batch, crate::mvcc::native::NativeRecordFamily::Vectors)
+            })
+        })? {
             return Ok(());
         }
         self.mutate_graph(HNSWIndex::clear, |connection| {

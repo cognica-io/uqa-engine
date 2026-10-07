@@ -22,6 +22,11 @@ use crate::Result;
 
 type Meta = (u32, HNSWIndexParams, HNSWGraphMeta, u64);
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static RESTORED_GRAPHS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(in crate::vector_index::hnsw) fn load_meta(
     read: &NativeVectorRead<'_>,
 ) -> Result<Option<Meta>> {
@@ -53,6 +58,8 @@ pub(in crate::vector_index::hnsw) fn load_meta(
 }
 
 pub(super) fn load_graph(read: &NativeVectorRead<'_>, meta: Meta) -> Result<Budgeted<HNSWIndex>> {
+    #[cfg(test)]
+    RESTORED_GRAPHS.set(RESTORED_GRAPHS.get() + 1);
     let control = &read.snapshot.control;
     let mut builder = HNSWRestoreBuilder::new(meta.0, meta.1, meta.2, control)?;
     if let Some(owner) = read.owner {

@@ -14,6 +14,11 @@ use super::logical::BoundRecordSession;
 use super::{Arc, KeyValueStore, ManagedConnection, Result, SQLiteError, VersionedKeyValueStore};
 use crate::mvcc::native::NativeSnapshot;
 
+pub(crate) struct NativeWriteSnapshot {
+    pub(crate) snapshot: NativeSnapshot,
+    pub(crate) committed: Option<uqa_storage::mvcc::CommitSequence>,
+}
+
 impl ManagedConnection {
     /// Prune one bounded `DiskANN` journal page in this connection's evaluated transaction. The captured source guards the catalog; the current committed canonical view and selected physical coverage determine deletion. Advance the returned cursor only after committing the caller's transaction.
     pub fn prune_diskann_changes(
@@ -201,6 +206,23 @@ impl ManagedConnection {
         &self,
         operation: impl FnOnce(&NativeSnapshot, &mut dyn KeyValueBatch) -> Result<R>,
     ) -> Result<Option<R>> {
+        self.native_write_result(operation, false)
+            .map(|result| result.map(|(value, _)| value))
+    }
+
+    /// Retain the successfully staged boundary while the session gate is still held, before autocommit can rebase onto a peer's data. A later read cannot certify the evaluated candidate.
+    pub(crate) fn with_native_write_snapshot<R>(
+        &self,
+        operation: impl FnOnce(&NativeSnapshot, &mut dyn KeyValueBatch) -> Result<R>,
+    ) -> Result<Option<(R, Option<NativeWriteSnapshot>)>> {
+        self.native_write_result(operation, true)
+    }
+
+    fn native_write_result<R>(
+        &self,
+        operation: impl FnOnce(&NativeSnapshot, &mut dyn KeyValueBatch) -> Result<R>,
+        retain_snapshot: bool,
+    ) -> Result<Option<(R, Option<NativeWriteSnapshot>)>> {
         self.surface_cleanup_failure()?;
         // This gate covers read/evaluate/stage, not just each individual byte-store call.
         let _gate = self.session.gate.write();
@@ -221,12 +243,28 @@ impl ManagedConnection {
         let mut batch = logical.batch();
         let result = operation(&snapshot, &mut *batch)?;
         batch.commit()?;
+        // This capture is advisory cache evidence; failure must not turn an already staged mutation into an error.
+        let staged = retain_snapshot
+            .then(|| NativeSnapshot::capture(logical, database).ok())
+            .flatten();
         // A failed publication keeps its evaluated attempt for explicit receipt resolution.
         scope.rollback = false;
         if own_transaction {
             logical.commit_transaction()?;
         }
-        Ok(Some(result))
+        let staged = staged.map(|snapshot| {
+            // Session serialization is still held. Only the immediately following committed sequence proves no peer changed the candidate's inputs during publication.
+            let committed = own_transaction
+                .then(|| logical.completed_commit())
+                .flatten()
+                .map(|receipt| receipt.sequence)
+                .filter(|sequence| snapshot.view.sequence().successor().ok() == Some(*sequence));
+            NativeWriteSnapshot {
+                snapshot,
+                committed,
+            }
+        });
+        Ok(Some((result, staged)))
     }
 
     /// Evaluate native records through the common origin scope. Its supplied snapshot avoids reentering the session and preserves common autocommit, abort-only cleanup and exact receipt retry.

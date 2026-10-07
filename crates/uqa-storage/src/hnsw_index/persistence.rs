@@ -19,6 +19,12 @@ pub struct HNSWGraphDelta {
 }
 
 impl HNSWGraphDelta {
+    /// Transfer the successfully staged candidate without retaining its already persisted dirty-node set.
+    pub fn into_graph(mut self) -> HNSWIndex {
+        self.graph.dirty_nodes.clear();
+        self.graph.full_rewrite = false;
+        self.graph
+    }
     pub fn nodes(&self) -> HNSWDeltaNodes<'_> {
         HNSWDeltaNodes {
             delta: self,

@@ -42,6 +42,31 @@ impl MemoryKeyValueStore {
     pub fn new() -> Self {
         Self::default()
     }
+
+    fn evaluate_mutation(
+        &self,
+        mutate: &mut super::KeyValueMutation<'_>,
+        certify: bool,
+    ) -> StorageBackendResult<Option<super::KeyValueReadRevision>> {
+        self.control.check()?;
+        let mut state = self.inner.lock();
+        self.control.check()?;
+        check_write(&state)?;
+        let mut batch = MemoryKeyValueBatch {
+            store: self,
+            operations: Vec::new(),
+        };
+        mutate(
+            &view::MemoryRead {
+                state: &state,
+                control: &self.control,
+            },
+            &mut batch,
+        )?;
+        self.control.check()?;
+        apply_operations(&mut state, batch.operations)?;
+        Ok(certify.then(|| super::KeyValueReadRevision::memory(&state.read_revision)))
+    }
 }
 
 impl Default for MemoryKeyValueStore {
@@ -66,23 +91,15 @@ impl KeyValueStore for MemoryKeyValueStore {
     }
 
     fn with_mutation(&self, mutate: &mut super::KeyValueMutation<'_>) -> StorageBackendResult<()> {
-        self.control.check()?;
-        let mut state = self.inner.lock();
-        self.control.check()?;
-        check_write(&state)?;
-        let mut batch = MemoryKeyValueBatch {
-            store: self,
-            operations: Vec::new(),
-        };
-        mutate(
-            &view::MemoryRead {
-                state: &state,
-                control: &self.control,
-            },
-            &mut batch,
-        )?;
-        self.control.check()?;
-        apply_operations(&mut state, batch.operations)
+        self.evaluate_mutation(mutate, false).map(|_| ())
+    }
+
+    fn with_mutation_revision(
+        &self,
+        _prefixes: &[&[u8]],
+        mutate: &mut super::KeyValueMutation<'_>,
+    ) -> StorageBackendResult<Option<super::KeyValueReadRevision>> {
+        self.evaluate_mutation(mutate, true)
     }
 
     fn visit_value(

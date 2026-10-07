@@ -17,6 +17,38 @@ use crate::Result;
 pub(in crate::vector_index) use crate::vector_index::native::identity::VectorIdentity as GraphIdentity;
 
 impl SQLiteHNSWIndex {
+    pub(super) fn retain_native_candidate(
+        &self,
+        candidate: Option<super::Candidate>,
+        snapshot: Option<&crate::mvcc::native::NativeSnapshot>,
+        committed: Option<uqa_storage::mvcc::CommitSequence>,
+    ) {
+        *self.graph.write() = None;
+        let retained = (|| {
+            let (candidate, revision) = candidate?;
+            let read = NativeVectorRead::new(snapshot?, &self.persistent).ok()?;
+            let mut identity = crate::vector_index::native::identity::identity(
+                &read,
+                &[
+                    Family::Vectors,
+                    Family::HNSWIndexes,
+                    Family::HNSWNodes,
+                    Family::HNSWEdges,
+                ],
+            )
+            .ok()??;
+            if let Some(committed) = committed {
+                identity = identity.after_uncontended_commit(committed);
+            }
+            Some(CachedGraph {
+                revision,
+                identity: CacheIdentity::Native(identity),
+                graph: ReadOnlySnapshot::from_budgeted(candidate).ok()?,
+            })
+        })();
+        *self.graph.write() = retained;
+    }
+
     pub(in crate::vector_index::hnsw) fn cached_native_graph(
         &self,
         read: &NativeVectorRead<'_>,
