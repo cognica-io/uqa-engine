@@ -6,7 +6,11 @@
 
 //! Atomic conversion of keyed payloads to stable physical addresses.
 
-use super::*;
+use super::{
+    create_triggers, remove_metadata, schema, Connection, PhysicalResult, TABLE, VERSIONS_TABLE,
+};
+#[cfg(test)]
+use super::{PREVIOUS_TABLE, PREVIOUS_TRIGGERS, PREVIOUS_VERSIONS_TABLE};
 
 pub(in crate::mvcc) fn upgrade(connection: &Connection, has_metadata: bool) -> PhysicalResult<()> {
     if has_metadata {
