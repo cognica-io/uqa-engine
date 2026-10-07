@@ -12,6 +12,39 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use uqa_storage::mvcc::VersionedSessionOptions;
 
 #[test]
+fn native_document_count_workspace_does_not_grow_with_the_corpus() {
+    for count in [32, 128] {
+        let mut index = idx_with_analyzer(uqa_analysis::whitespace_analyzer());
+        index
+            .conn
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        index.conn.begin_transaction().unwrap();
+        for id in 1..=count {
+            // Native text order and length-prefixed occurrence order disagree.
+            index
+                .add_document(id, fields([("a_long_name", ""), ("z", "")]))
+                .unwrap();
+        }
+        index.conn.commit_transaction().unwrap();
+        let retained = index.snapshot().unwrap();
+        let control = index.conn.retention_control().unwrap();
+        let available = 16 * 1024;
+        let occupied = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used() - available)
+            .unwrap();
+        assert_eq!(
+            retained.doc_count().unwrap(),
+            count,
+            "{count} documents must fit the same {available}-byte workspace"
+        );
+        drop(occupied);
+        assert_eq!(index.doc_count().unwrap(), count);
+    }
+}
+
+#[test]
 fn native_document_counts_do_not_fetch_each_field_length() {
     for count in [32, 128] {
         let mut index = idx_with_analyzer(uqa_analysis::whitespace_analyzer());

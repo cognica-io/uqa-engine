@@ -17,6 +17,8 @@ use uqa_storage::key_value::{
 use uqa_storage::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
 use uqa_storage::{mvcc::VersionError, StorageBackendResult};
 
+mod document_keys;
+
 pub(super) struct NativeRead {
     pub(super) snapshot: NativeSnapshot,
     pub(super) table: String,
@@ -241,6 +243,9 @@ impl KeyValueRead for NativeRead {
         control: &StorageReadControl,
         visit: &mut uqa_storage::read_control::KeyReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
+        if self.visit_document_keys(prefix, after, limit, control, visit)? {
+            return Ok(());
+        }
         for key in self.keys(prefix, after, limit, control)?.iter() {
             self.control().check()?;
             control.check()?;
