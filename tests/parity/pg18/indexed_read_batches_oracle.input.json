@@ -1,0 +1,129 @@
+{
+  "description": "PostgreSQL 18 row/count reference. uqa_sql substitutes the equivalent UQA lexical predicate and index definition; ranking scores are deliberately not compared to PostgreSQL ts_rank.",
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TABLE indexed_reads(id integer PRIMARY KEY, qty integer, body text, title text); CREATE INDEX indexed_qty ON indexed_reads(qty); INSERT INTO indexed_reads SELECT i,i,CASE WHEN i=5 THEN '' WHEN i=7 THEN NULL WHEN i%2=0 THEN 'alpha beta' ELSE 'alpha gamma' END,CASE WHEN i%3=0 THEN 'beta' ELSE NULL END FROM generate_series(1,32) g(i)"
+    },
+    {
+      "id": "gin",
+      "sql": "CREATE INDEX indexed_body ON indexed_reads USING gin(to_tsvector('simple',body)); CREATE INDEX indexed_title ON indexed_reads USING gin(to_tsvector('simple',title))",
+      "uqa_sql": "CREATE INDEX indexed_body ON indexed_reads USING gin(body); CREATE INDEX indexed_title ON indexed_reads USING gin(title)"
+    },
+    {
+      "id": "initial_term",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',body) @@ to_tsquery('simple','alpha')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE text_match(body,'alpha')"
+    },
+    {
+      "id": "initial_and",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',body) @@ to_tsquery('simple','alpha & beta')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE fts_match(body,'alpha AND beta')"
+    },
+    {
+      "id": "initial_range",
+      "sql": "SELECT id,qty,length(body) AS bytes FROM indexed_reads WHERE qty BETWEEN 8 AND 24 ORDER BY id"
+    },
+    {
+      "id": "initial_title",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',title) @@ to_tsquery('simple','beta')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE text_match(title,'beta')"
+    },
+    {
+      "id": "begin",
+      "sql": "BEGIN; SAVEPOINT before_change"
+    },
+    {
+      "id": "change",
+      "sql": "DELETE FROM indexed_reads WHERE id IN (8,10,12); UPDATE indexed_reads SET body='beta',qty=200 WHERE id=9; INSERT INTO indexed_reads VALUES(33,15,'alpha beta','beta')"
+    },
+    {
+      "id": "private_term",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',body) @@ to_tsquery('simple','alpha')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE text_match(body,'alpha')"
+    },
+    {
+      "id": "private_and",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',body) @@ to_tsquery('simple','alpha & beta')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE fts_match(body,'alpha AND beta')"
+    },
+    {
+      "id": "private_range",
+      "sql": "SELECT id,qty,length(body) AS bytes FROM indexed_reads WHERE qty BETWEEN 8 AND 24 ORDER BY id"
+    },
+    {
+      "id": "private_title",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',title) @@ to_tsquery('simple','beta')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE text_match(title,'beta')"
+    },
+    {
+      "id": "cursor",
+      "sql": "DECLARE selected_rows CURSOR FOR SELECT id,length(body) AS bytes FROM indexed_reads WHERE qty BETWEEN 8 AND 24 ORDER BY id; DECLARE counted_rows CURSOR FOR SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',body) @@ to_tsquery('simple','alpha & beta')",
+      "uqa_sql": "DECLARE selected_rows CURSOR FOR SELECT id,length(body) AS bytes FROM indexed_reads WHERE qty BETWEEN 8 AND 24 ORDER BY id; DECLARE counted_rows CURSOR FOR SELECT count(*) AS n FROM indexed_reads WHERE fts_match(body,'alpha AND beta')"
+    },
+    {
+      "id": "later_change",
+      "sql": "UPDATE indexed_reads SET body='gamma',qty=300 WHERE id BETWEEN 14 AND 22"
+    },
+    {
+      "id": "fetch",
+      "sql": "FETCH ALL FROM selected_rows; FETCH ALL FROM counted_rows; CLOSE selected_rows; CLOSE counted_rows"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK TO before_change"
+    },
+    {
+      "id": "restored_term",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',body) @@ to_tsquery('simple','alpha')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE text_match(body,'alpha')"
+    },
+    {
+      "id": "restored_and",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',body) @@ to_tsquery('simple','alpha & beta')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE fts_match(body,'alpha AND beta')"
+    },
+    {
+      "id": "restored_range",
+      "sql": "SELECT id,qty,length(body) AS bytes FROM indexed_reads WHERE qty BETWEEN 8 AND 24 ORDER BY id"
+    },
+    {
+      "id": "restored_title",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',title) @@ to_tsquery('simple','beta')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE text_match(title,'beta')"
+    },
+    {
+      "id": "commit",
+      "sql": "COMMIT"
+    },
+    {
+      "id": "final_term",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',body) @@ to_tsquery('simple','alpha')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE text_match(body,'alpha')"
+    },
+    {
+      "id": "final_and",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',body) @@ to_tsquery('simple','alpha & beta')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE fts_match(body,'alpha AND beta')"
+    },
+    {
+      "id": "final_range",
+      "sql": "SELECT id,qty,length(body) AS bytes FROM indexed_reads WHERE qty BETWEEN 8 AND 24 ORDER BY id"
+    },
+    {
+      "id": "final_title",
+      "sql": "SELECT count(*) AS n FROM indexed_reads WHERE to_tsvector('simple',title) @@ to_tsquery('simple','beta')",
+      "uqa_sql": "SELECT count(*) AS n FROM indexed_reads WHERE text_match(title,'beta')"
+    }
+  ],
+  "reopen_ids": [
+    "final_term",
+    "final_and",
+    "final_range",
+    "final_title"
+  ]
+}
