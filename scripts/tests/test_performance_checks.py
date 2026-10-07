@@ -10,6 +10,7 @@ import copy
 import importlib.util
 import json
 import pathlib
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -143,6 +144,46 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertEqual(json.loads((output / "summary.json").read_text()), result)
         self.assertIn("**failed**", (output / "summary.md").read_text())
         self.assertIn("missing provider case", (self.root / "step.md").read_text())
+
+    def run_main(self, *, listing=None, failure=None):
+        self.write_inventory()
+        output = self.root / "run-output"
+        junit = self.root / "target/nextest/ci/junit.xml"
+        junit.parent.mkdir(parents=True, exist_ok=True)
+        junit.write_text("stale result")
+        with (
+            mock.patch.object(runner, "MANIFEST", self.manifest),
+            mock.patch.object(runner, "inventory", return_value=[self.check]),
+            mock.patch.object(runner, "capture", side_effect=["a" * 40, "rustc", "nextest", json.dumps(self.listing if listing is None else listing)]) as capture,
+            mock.patch.object(runner.subprocess, "run", side_effect=failure) as run,
+            mock.patch("sys.argv", ["run-performance-checks", "--output", str(output)]),
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch("sys.stderr"),
+        ):
+            status = runner.main()
+        self.assertFalse(junit.exists())
+        return status, json.loads((output / "summary.json").read_text()), capture, run
+
+    def test_success_runs_exactly_the_validated_selection(self):
+        status, result, capture, run = self.run_main()
+        self.assertEqual(status, 0)
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["checks"][0]["selected_cases"], 2)
+        self.assertEqual(list(capture.call_args.args[5:]), runner.arguments([self.check]))
+        self.assertEqual(run.call_args.args[0][5:], runner.arguments([self.check]))
+        self.assertTrue(run.call_args.kwargs["check"])
+
+    def test_test_process_failure_stays_failed_and_retains_summary(self):
+        status, result, _, _ = self.run_main(failure=subprocess.CalledProcessError(100, ["cargo", "nextest", "run"]))
+        self.assertEqual(status, 1)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("100", result["error"])
+
+    def test_selection_failure_never_runs_a_partial_suite(self):
+        status, result, _, run = self.run_main(listing={"rust-suites": {}})
+        self.assertEqual(status, 1)
+        self.assertEqual(result["status"], "failed")
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

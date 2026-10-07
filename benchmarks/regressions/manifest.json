@@ -38,8 +38,8 @@
       "cases": 1,
       "source": "crates/uqa-engine/tests/sql_function_bodies/plan_reuse.rs",
       "capability": "SQL routine planning",
-      "workload": "32 calls under custom, generic and auto plan selection, then DISCARD.",
-      "invariant": "Generic preparation folds once, auto folds six times, custom folds 32 times; result and invalidation assertions remain enabled."
+      "workload": "32 generic calls, DISCARD, 32 auto calls, four custom calls and routine replacement.",
+      "invariant": "Generic preparation folds once, auto adds six evaluations and four custom calls add four; DISCARD and replacement refresh output correctly."
     },
     {
       "package": "uqa-engine",
