@@ -96,6 +96,8 @@ pub(in crate::row_locks) struct FileLockCoordinator {
     transaction_xids: Mutex<xids::TransactionXids>,
     temporary_role_slots: Mutex<temporary_roles::Slots>,
     state: Mutex<CoordinatorState>,
+    #[cfg(test)]
+    pub(in crate::row_locks) row_claim_table_locks: std::sync::atomic::AtomicUsize,
 }
 
 mod claims;
@@ -179,6 +181,8 @@ impl FileLockCoordinator {
         let mut relation_path = database_path.as_os_str().to_owned();
         relation_path.push(".uqa-relation-identities");
         let coordinator = Self {
+            #[cfg(test)]
+            row_claim_table_locks: std::sync::atomic::AtomicUsize::new(0),
             file,
             change_path,
             change_readers,

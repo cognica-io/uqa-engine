@@ -136,16 +136,19 @@ pub fn lock_document_key_dependencies(
 
     let has_reservations = !lock_keys.is_empty();
     let mut acquisitions = Vec::new();
-    for lock_key in lock_keys {
-        match context.transactions.lock_key_reservation(lock_key, table)? {
-            crate::row_locks::LockAcquire::Granted { acquisition, .. } => {
-                acquisitions.extend(acquisition);
-            }
-            crate::row_locks::LockAcquire::Skipped => {
-                return Err(SQLError::Internal(
-                    "blocking key reservation unexpectedly skipped a key".into(),
-                ));
-            }
+    let mut keys = lock_keys.into_iter();
+    while let Some(first) = keys.next() {
+        if keys.len() == 0 {
+            acquisitions.extend(key_acquisition(
+                context.transactions.lock_key_reservation(first, table)?,
+            )?);
+            continue;
+        }
+        let chunk = std::iter::once(first)
+            .chain(keys.by_ref().take(63))
+            .collect::<Vec<_>>();
+        for result in context.transactions.lock_key_reservations(&chunk, table)? {
+            acquisitions.extend(key_acquisition(result)?);
         }
     }
     if has_reservations {
@@ -153,6 +156,17 @@ pub fn lock_document_key_dependencies(
         context.transactions.refresh_explicit_statement_snapshot()?;
     }
     Ok(acquisitions)
+}
+
+fn key_acquisition(
+    result: crate::row_locks::LockAcquire,
+) -> Result<Option<crate::row_locks::RowLockAcquisition>, SQLError> {
+    match result {
+        crate::row_locks::LockAcquire::Granted { acquisition, .. } => Ok(acquisition),
+        crate::row_locks::LockAcquire::Skipped => Err(SQLError::Internal(
+            "blocking key reservation unexpectedly skipped a key".into(),
+        )),
+    }
 }
 
 fn update_key_lock_digest(digest: &mut Sha256, part: &[u8]) -> Result<(), SQLError> {
