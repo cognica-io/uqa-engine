@@ -384,9 +384,9 @@ pub(super) const INLINE_PAYLOAD_BYTES: u16 = 16 * 1024;
 pub(super) const POINT_VALUE_SQL: &str = concat!(
     "SELECT m.head, m.compacted, m.sequence, m.payload_length, ",
     "CASE WHEN m.payload_length <= ?3 THEN ",
-    "(SELECT value FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence = m.sequence) END ",
+    "(SELECT value FROM _uqa_mvcc_versions WHERE version_id = m.version_id AND key = ?1 AND sequence = m.sequence) END ",
     "FROM (SELECT h.sequence AS head, h.compacted AS compacted, v.sequence AS sequence, ",
-    "v.payload_length AS payload_length ",
+    "v.payload_length AS payload_length, v.version_id AS version_id ",
     "FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_version_metadata v ",
     "ON v.key = h.key AND v.sequence <= ?2 WHERE h.key = ?1 ",
     "ORDER BY v.sequence DESC LIMIT 1) m"
@@ -588,7 +588,7 @@ fn value_from_info(
         .reserve(length.unwrap_or(0))
         .map_err(VersionError::from)?;
     let mut statement = connection
-        .prepare_cached("SELECT value FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence = ?2")?;
+        .prepare_cached("SELECT v.value FROM _uqa_mvcc_version_metadata m JOIN _uqa_mvcc_versions v ON v.version_id = m.version_id AND v.key = m.key AND v.sequence = m.sequence WHERE m.key = ?1 AND m.sequence = ?2")?;
     let revision_bytes = revision.to_be_bytes();
     let mut rows = statement.query(params![key, revision_bytes.as_slice()])?;
     let row = rows.next()?.ok_or(VersionError::InvalidEncoding(

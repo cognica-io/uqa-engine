@@ -26,9 +26,9 @@ pub(super) fn reclaim(
     let mut removed = 0_u64;
     {
         let mut anchor = transaction.prepare(
-            "SELECT max(sequence) FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2",
+            "SELECT max(sequence) FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence <= ?2",
         )?;
-        let mut delete = transaction.prepare("DELETE FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence IN (SELECT sequence FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence < ?2 ORDER BY sequence LIMIT 128)")?;
+        let mut delete = transaction.prepare("DELETE FROM _uqa_mvcc_versions WHERE version_id IN (SELECT version_id FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence < ?2 ORDER BY sequence LIMIT 128)")?;
         read::point_keys(&transaction, b"", None, usize::MAX, control, &mut |key| {
             let (head, compacted) = codec::head_state(&transaction, key)?.ok_or(
                 VersionError::InvalidEncoding("reclamation head disappeared"),
@@ -84,10 +84,10 @@ fn compact_tombstone(
     sequence: CommitSequence,
 ) -> PhysicalResult<()> {
     let sequence = sequence.as_u64().to_be_bytes();
-    let changed = connection.execute("UPDATE _uqa_mvcc_heads SET compacted = 1 WHERE key = ?1 AND sequence = ?2 AND EXISTS(SELECT 1 FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence = ?2 AND value IS NULL)", params![key, sequence.as_slice()])?;
+    let changed = connection.execute("UPDATE _uqa_mvcc_heads SET compacted = 1 WHERE key = ?1 AND sequence = ?2 AND EXISTS(SELECT 1 FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence = ?2 AND payload_length IS NULL)", params![key, sequence.as_slice()])?;
     if changed != 0 {
         connection.execute(
-            "DELETE FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence = ?2 AND value IS NULL",
+            "DELETE FROM _uqa_mvcc_versions WHERE version_id = (SELECT version_id FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence = ?2 AND payload_length IS NULL)",
             params![key, sequence.as_slice()],
         )?;
     }

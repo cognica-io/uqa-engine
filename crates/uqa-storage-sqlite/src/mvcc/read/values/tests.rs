@@ -13,8 +13,9 @@ use std::sync::{
 };
 
 const PREDECESSOR: &str = "SELECT h.key, CASE WHEN h.sequence <= ?3 AND h.compacted = 1 THEN NULL
-     ELSE (SELECT value FROM _uqa_mvcc_versions WHERE key = h.key
-     AND sequence <= ?3 ORDER BY sequence DESC LIMIT 1) END
+     ELSE (SELECT v.value FROM _uqa_mvcc_version_metadata m JOIN _uqa_mvcc_versions v
+     ON v.version_id = m.version_id AND v.key = m.key AND v.sequence = m.sequence
+     WHERE m.key = h.key AND m.sequence <= ?3 ORDER BY m.sequence DESC LIMIT 1) END
      FROM _uqa_mvcc_heads h WHERE h.key >= ?1 AND (?2 IS NULL) ORDER BY h.key";
 
 #[test]
@@ -22,8 +23,12 @@ fn latest_payload_join_matches_predecessors_with_less_sqlite_work() {
     let connection = Connection::open_in_memory().unwrap();
     connection.execute_batch(
         "CREATE TABLE _uqa_mvcc_heads(key BLOB PRIMARY KEY, sequence BLOB, compacted INTEGER) WITHOUT ROWID;
-         CREATE TABLE _uqa_mvcc_versions(key BLOB, sequence BLOB, value BLOB, PRIMARY KEY(key,sequence)) WITHOUT ROWID"
+         CREATE TABLE _uqa_mvcc_versions(key BLOB, sequence BLOB, value BLOB, version_id INTEGER PRIMARY KEY)"
     ).unwrap();
+    connection
+        .execute_batch(crate::mvcc::version_metadata::TABLE.1)
+        .unwrap();
+    crate::mvcc::version_metadata::create_triggers(&connection).unwrap();
     let sequence = 1_u64.to_be_bytes();
     let mut expected = Vec::new();
     for id in 0_u64..1024 {
@@ -37,7 +42,7 @@ fn latest_payload_join_matches_predecessors_with_less_sqlite_work() {
             .unwrap();
         connection
             .execute(
-                "INSERT INTO _uqa_mvcc_versions VALUES(?1,?2,?3)",
+                "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES(?1,?2,?3)",
                 params![key.as_slice(), sequence.as_slice(), value.as_deref()],
             )
             .unwrap();

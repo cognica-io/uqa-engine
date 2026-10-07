@@ -64,7 +64,7 @@ fn require_history_heads(
     let _bindings = crate::read_control::reserve_bindings(control, &[prefix, &upper])?;
     control.cancellation().check().map_err(VersionError::from)?;
     let orphaned: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_versions AS v WHERE v.key >= ?1 AND v.key < ?2 AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_heads AS h WHERE h.key = v.key))",
+        "SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_version_metadata AS v WHERE v.key >= ?1 AND v.key < ?2 AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_heads AS h WHERE h.key = v.key))",
         params![prefix, &upper[..]],
         |row| row.get(0),
     )?;
@@ -89,8 +89,9 @@ fn backfill_key(
     }
     let _bindings = crate::read_control::reserve_bindings(control, &[key])?;
     let head = codec::head(connection, key)?;
-    let mut statement = connection
-        .prepare("SELECT sequence FROM _uqa_mvcc_versions WHERE key = ?1 ORDER BY sequence")?;
+    let mut statement = connection.prepare(
+        "SELECT sequence FROM _uqa_mvcc_version_metadata WHERE key = ?1 ORDER BY sequence",
+    )?;
     let mut versions = statement.query(params![key])?;
     let mut previous: [Option<NativeRecord>; 3] = [None, None, None];
     let mut last = None;

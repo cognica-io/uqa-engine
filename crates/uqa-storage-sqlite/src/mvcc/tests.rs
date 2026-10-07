@@ -167,10 +167,8 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
     store.with(|connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
-        assert!(definition.contains("CHECK(format = 58)"));
-        if format < 55 {
-            super::version_metadata::remove_for_predecessor(connection)?;
-        }
+        assert!(definition.contains("CHECK(format = 59)"));
+        super::version_metadata::install_predecessor(connection, format)?;
         let definition = if format < 43 { definition.split(", restore_target BLOB").next().unwrap().to_owned() + ")" } else if format < 44 { definition.split(", receipt_limit INTEGER").next().unwrap().to_owned() + ")" } else { definition };
         if format < 29 {
             assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_runs", [], |row| row.get::<_, i64>(0))?, 0);
@@ -184,7 +182,7 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
             connection.execute_batch("DROP TABLE _uqa_mvcc_identifiers")?;
         }
         connection.execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO saved_metadata")?;
-        connection.execute_batch(&definition.replace("CHECK(format = 58)", &format!("CHECK(format = {format})")))?;
+        connection.execute_batch(&definition.replace("CHECK(format = 59)", &format!("CHECK(format = {format})")))?;
         let restore = if format < 43 { "" } else if format < 44 { ", restore_target" } else { ", restore_target, receipt_limit" };
         connection.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, {format}, database_id, allocated, sequence, mapping{restore} FROM saved_metadata; DROP TABLE saved_metadata;"))?;
         if format < 44 {
@@ -278,7 +276,9 @@ fn reject_predecessor_access(
 #[test]
 fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
     let control = control();
-    for (mode, format) in (0..3).flat_map(|mode| (1..=55).map(move |format| (mode, format))) {
+    for (mode, format) in
+        (0..3).flat_map(|mode| (1..schema::RECORD_FORMAT).map(move |format| (mode, format)))
+    {
         let connection = ManagedConnection::open_in_memory().unwrap();
         if mode == 2 {
             crate::Catalog::open(connection.clone()).unwrap();
@@ -363,7 +363,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
                 assert_eq!(
                     connection.query_row("SELECT format FROM _uqa_mvcc_metadata", [], |row| row
                         .get::<_, i64>(0))?,
-                    58
+                    schema::RECORD_FORMAT
                 );
                 Ok(())
             })
@@ -374,7 +374,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
 
 #[test]
 fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
-    for format in 1..=56 {
+    for format in 1..schema::RECORD_FORMAT {
         let connection = ManagedConnection::open_in_memory().unwrap();
         let store = SQLiteRecordStore::new(&connection).unwrap();
         downgrade_record_format(&store, format);
@@ -465,7 +465,7 @@ fn closed_record_format_files_upgrade_in_every_sqlite_mode(
 #[rstest::rstest]
 fn latest_record_format_files_upgrade_in_every_sqlite_mode(
     #[values(0, 1, 2, 3)] mode: usize,
-    #[values(46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57)] format: i64,
+    #[values(46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58)] format: i64,
 ) {
     closed_record_formats_upgrade(mode, format);
 }

@@ -17,7 +17,7 @@ fn point_metadata_preserves_historical_tombstones_and_head_diagnostics() {
             let _permit = schema::WritePermit::acquire(sqlite)?;
             sqlite.execute_batch(
                 "INSERT INTO _uqa_mvcc_heads VALUES (x'61', x'0000000000000009', 0);
-                 INSERT INTO _uqa_mvcc_versions VALUES
+                 INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES
                  (x'61', x'0000000000000002', x'010203'),
                  (x'61', x'0000000000000005', NULL),
                  (x'61', x'0000000000000009', x'0102030405');",
@@ -40,7 +40,7 @@ fn point_metadata_preserves_historical_tombstones_and_head_diagnostics() {
             }
             // A still-present matching head must not hide a newer orphan version.
             sqlite.execute_batch(
-                "INSERT INTO _uqa_mvcc_versions VALUES (x'61', x'000000000000000b', x'01');",
+                "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (x'61', x'000000000000000b', x'01');",
             )?;
             assert!(read::info(sqlite, b"a", CommitSequence::from_u64(11))
                 .err()
@@ -77,7 +77,7 @@ fn point_values_read_small_payloads_with_their_metadata_in_one_bounded_statement
             sqlite.execute_batch(
                 "INSERT INTO _uqa_mvcc_heads VALUES (x'61', x'0000000000000005', 0), (x'62', x'0000000000000002', 0);",
             )?;
-            let mut insert = sqlite.prepare("INSERT INTO _uqa_mvcc_versions VALUES (?1, ?2, ?3)")?;
+            let mut insert = sqlite.prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)")?;
             for (key, sequence, value) in [
                 (b"a", 2_u64, Some(small.as_slice())),
                 (b"a", 5, None),
@@ -140,7 +140,7 @@ fn point_metadata_uses_bounded_instructions_for_long_version_histories() {
                 "INSERT INTO _uqa_mvcc_heads VALUES (x'61', x'0000000000001000', 0);",
             )?;
             let mut insert = sqlite
-                .prepare("INSERT INTO _uqa_mvcc_versions VALUES (x'61', ?1, zeroblob(16))")?;
+                .prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (x'61', ?1, zeroblob(16))")?;
             for sequence in 1_u64..=4096 {
                 insert.execute([sequence.to_be_bytes().as_slice()])?;
             }
@@ -190,7 +190,7 @@ fn ordered_reads_reject_a_newer_orphan_without_invalidating_the_historical_view(
         .with(|sqlite| {
             let _permit = schema::WritePermit::acquire(sqlite)?;
             sqlite.execute(
-                "INSERT INTO _uqa_mvcc_versions VALUES (?1, ?2, x'00')",
+                "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, x'00')",
                 params![
                     b"ordered/a",
                     current.sequence().as_u64().to_be_bytes().as_slice()
