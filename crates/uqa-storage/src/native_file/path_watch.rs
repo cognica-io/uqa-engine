@@ -42,8 +42,16 @@ impl PathChangeWatch {
                 .parent()
                 .filter(|_| path.is_absolute())
                 .ok_or_else(unsupported)?;
+            let watch = platform::Watch::new(parent)?;
+            // A replaced leaf may be a symlink to the original inode outside
+            // this directory tree. Its target can change without a watched
+            // directory event. Check after subscribing so a concurrent leaf
+            // replacement still invalidates the watch.
+            if path.symlink_metadata()?.file_type().is_symlink() {
+                return Err(unsupported());
+            }
             Ok(Self {
-                watch: platform::Watch::new(parent)?,
+                watch,
                 process: std::process::id(),
                 changed: false,
             })

@@ -116,3 +116,34 @@ fn failed_path_resolution_does_not_authorize_reuse_of_an_unchecked_identity() {
     std::fs::rename(&saved, &path).unwrap();
     source.check().unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn symlink_to_original_inode_keeps_checking_its_unwatched_target() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    std::fs::create_dir(root.join("watched")).unwrap();
+    std::fs::create_dir(root.join("elsewhere")).unwrap();
+    let path = root.join("watched/source.db");
+    let connection = Connection::open(&path).unwrap();
+    let mut spec = ConnectionSpec::File {
+        path: path.clone(),
+        key: None,
+    };
+    let source = DatabaseSource::capture(&mut spec, &connection)
+        .unwrap()
+        .unwrap();
+    drop(connection);
+    let target = root.join("elsewhere/original.db");
+    std::fs::rename(&path, &target).unwrap();
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+    source.check().unwrap();
+    assert!(source.watch.lock().is_none());
+    // Keep the original inode alive so inode reuse cannot mask replacement.
+    std::fs::rename(&target, target.with_extension("saved")).unwrap();
+    std::fs::write(&target, b"replacement").unwrap();
+    assert!(matches!(
+        source.check(),
+        Err(SQLiteError::DatabaseSourceChanged)
+    ));
+}
