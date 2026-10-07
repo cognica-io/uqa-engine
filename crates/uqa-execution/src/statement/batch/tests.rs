@@ -181,10 +181,16 @@ impl StatementCache for Inputs {
     fn cache_sql_statement(
         &self,
         _: String,
-        _: Arc<Statement>,
+        statement: Arc<Statement>,
         _: Arc<UnifiedPlan>,
         _: uqa_sql::parser::ParserMetadata,
     ) {
+        if let Some((cached, _)) = &self.cached {
+            assert!(
+                Arc::ptr_eq(cached, &statement),
+                "snapshot planning recopied the parsed statement"
+            );
+        }
         self.record(format!("cache.write.{}", self.snapshot.get()));
     }
     fn cache_optimized_sql_plan(&self, _: &str, _: Arc<UnifiedPlan>) {

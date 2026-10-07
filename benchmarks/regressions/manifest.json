@@ -89,6 +89,22 @@
     },
     {
       "package": "uqa-engine",
+      "kind": "lib",
+      "test": "parsed_mutations_survive_data_changes_but_preserve_rollback_and_schema_checks",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/cache.rs",
+      "capability": "Repeated SQL parsing",
+      "workload": "Four providers; repeated parameterized INSERT, rollback, duplicate-key failure and column rename.",
+      "invariant": "Data changes retain the identical parsed statement; returned rows, rollback, unique violations and fresh schema errors match PostgreSQL.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
       "kind": "test",
       "test": "sql_body_generic_plan_folds_immutable_work_once_and_rebuilds_after_discard",
       "cases": 1,
