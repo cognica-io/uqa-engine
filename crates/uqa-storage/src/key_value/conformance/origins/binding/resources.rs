@@ -28,7 +28,7 @@ mod queries;
 
 const DIMENSIONS: u32 = 128;
 const DOCUMENTS: u64 = 512;
-const REJECTED_PUBLICATION_BYTES: usize = 128 << 10;
+const REBUILD_REJECTION_BYTES: usize = 128 << 10;
 const OWNER_BYTES: usize = 2 << 20;
 const TEMPORARY_BYTES: u64 = 16 << 20;
 
@@ -86,7 +86,7 @@ fn metadata(
     })
 }
 
-/// Populate real provider vectors, reject publication under an insufficient original allowance, then construct under the same two-MiB allowance used for retained runtime queries. The caller must close all provider owners before invoking the paired reopen check.
+/// Populate real provider vectors, reject a rebuild with an exhausted original allowance, then construct under the same two-MiB allowance used for retained runtime queries. The caller must close all provider owners before invoking the paired reopen check.
 pub fn verify_diskann_resource_source(
     backend: &dyn PersistentStorageBackend,
 ) -> StorageBackendResult<DiskANNGeneration> {
@@ -111,7 +111,7 @@ pub fn verify_diskann_resource_source(
         }
         session.backend.commit_transaction()?;
     }
-    rejected_publication(backend, &temporary)?;
+    rejected_rebuild(backend, &temporary)?;
     let build = StorageReadControl::with_limit(OWNER_BYTES);
     let generation = {
         let session = backend.open_controlled_session(&build)?;
@@ -147,11 +147,11 @@ pub fn verify_diskann_resource_source(
     Ok(generation)
 }
 
-fn rejected_publication(
+fn rejected_rebuild(
     backend: &dyn PersistentStorageBackend,
     temporary: &DiskANNTemporaryBudget,
 ) -> StorageBackendResult<()> {
-    let control = StorageReadControl::with_limit(REJECTED_PUBLICATION_BYTES);
+    let control = StorageReadControl::with_limit(REBUILD_REJECTION_BYTES);
     {
         let session = backend.open_controlled_session(&control)?;
         let mut index = open(
@@ -162,36 +162,44 @@ fn rejected_publication(
         )?;
         let before = metadata(&*index, &control)?;
         session.backend.begin_transaction()?;
+        // Coexisting workspace consumes the original allowance. A fixed small ceiling alone may permit a bounded build and does not establish exhaustion.
+        let occupied = control.memory().reserve(control.memory().available())?;
         let result = index.initialize();
-        expect(
-            matches!(result, Err(crate::StorageBackendError::Memory(_))),
-            "undersized publication allowance rejects complete population reconciliation",
-        )?;
+        drop(occupied);
         session.backend.rollback_transaction()?;
+        expect(
+            matches!(
+                result,
+                Err(crate::StorageBackendError::Memory(
+                    uqa_core::memory::MemoryError::Limit { .. }
+                ))
+            ),
+            &format!("exhausted original allowance rejects rebuild: {result:?}"),
+        )?;
         expect_eq(
             &metadata(&*index, &control)?.manifest,
             &before.manifest,
-            "rejected publication preserves selected generation",
+            "rejected rebuild preserves selected generation",
         )?;
         expect_eq(
             &index.count()?,
             &(DOCUMENTS as usize),
-            "rejected publication preserves all canonical vectors",
+            "rejected rebuild preserves all canonical vectors",
         )?;
     }
     expect_eq(
         &control.memory().used(),
         &0,
-        "failed publication releases retained workspace",
+        "failed rebuild releases retained workspace",
     )?;
     expect(
-        control.memory().peak() <= REJECTED_PUBLICATION_BYTES,
+        control.memory().peak() <= REBUILD_REJECTION_BYTES,
         "rejection never exceeds its original bound",
     )?;
     expect_eq(
         &temporary.used(),
         &0,
-        "failed publication releases temporary input",
+        "failed rebuild releases temporary input",
     )
 }
 
