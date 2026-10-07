@@ -11,6 +11,7 @@
 //! An entry holds the modes one session of one process claims on the two bytes of a row. Sessions of one process arbitrate in the in-process lock table, so a claim conflicts only with entries of other processes. Each attached process holds one record lock, its liveness byte, until it exits; an entry whose owner no longer holds that byte is removed by whoever meets it.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{fence, Ordering};
 
 use uqa_storage::native_file::{lock_byte, try_lock_byte, unlock_byte};
 
@@ -18,6 +19,8 @@ use super::super::{row_claim, row_claim_address, RowByte, PROCESS_LIVENESS_BASE}
 use super::waits::HolderSlot;
 use super::{lock_would_block, ByteClaim, CoordinatorState, FileLockCoordinator};
 
+mod mapping;
+pub(super) use mapping::Mapping;
 mod table;
 use table::{Entry, Header, Mode, Owner, Slot, Table};
 
@@ -171,6 +174,7 @@ struct TableLockByte<'a>(&'a FileLockCoordinator);
 
 impl Drop for TableLockByte<'_> {
     fn drop(&mut self) {
+        fence(Ordering::Release);
         let _ = unlock_byte(&self.0.file, TABLE_LOCK_BYTE);
     }
 }
@@ -179,11 +183,12 @@ impl Drop for TableLockByte<'_> {
 struct TableLock<'a> {
     byte: TableLockByte<'a>,
     header: Header,
+    mapping: parking_lot::MutexGuard<'a, Mapping>,
 }
 
 impl TableLock<'_> {
     fn table(&self) -> Table<'_> {
-        Table::new(&self.byte.0.claim_file, &self.header)
+        Table::with_mapping(&self.byte.0.claim_file, &self.header, &self.mapping)
     }
 }
 
@@ -227,9 +232,13 @@ impl FileLockCoordinator {
         lock_byte(&self.file, TABLE_LOCK_BYTE, true)
             .map_err(|error| table_error("lock", &error))?;
         let byte = TableLockByte(self);
-        let stored = table::read_header(&self.claim_file);
+        fence(Ordering::Acquire);
+        let mut mapping = self.claim_mapping.lock();
+        mapping.refresh(&self.claim_file);
+        let stored = table::read_mapped_header(&self.claim_file, &mapping);
         if rows.owner.is_none() && self.attach_row_claims(rows)? {
             // No other process is attached, so nothing in the table is claimed.
+            mapping.clear();
             let header =
                 table::initialize(&self.claim_file, stored.ok().flatten()).map_err(|error| {
                     // Without a table this process is not attached; its next claim attaches again.
@@ -238,14 +247,27 @@ impl FileLockCoordinator {
                     }
                     table_error("initialize", &error)
                 })?;
-            return Ok(TableLock { byte, header });
+            mapping.refresh(&self.claim_file);
+            return Ok(TableLock {
+                byte,
+                header,
+                mapping,
+            });
         }
         let mut header = stored
             .map_err(|error| table_error("read", &error))?
             .ok_or_else(|| "the cross-process row claim table has no header".to_string())?;
-        table::recover(&self.claim_file, &mut header)
-            .map_err(|error| table_error("recover", &error))?;
-        Ok(TableLock { byte, header })
+        if header.rebuild.is_some() {
+            mapping.clear();
+            table::recover(&self.claim_file, &mut header)
+                .map_err(|error| table_error("recover", &error))?;
+            mapping.refresh(&self.claim_file);
+        }
+        Ok(TableLock {
+            byte,
+            header,
+            mapping,
+        })
     }
 
     /// Attach this process to the claim table if it is not attached yet.
@@ -442,7 +464,10 @@ impl FileLockCoordinator {
             }
             Ok(())
         })?;
-        table::rebuild(&self.claim_file, &mut lock.header, entries, additional)
+        lock.mapping.clear();
+        table::rebuild(&self.claim_file, &mut lock.header, entries, additional)?;
+        lock.mapping.refresh(&self.claim_file);
+        Ok(())
     }
 
     /// Write `session`'s entry for a row after `change`.
@@ -619,7 +644,9 @@ impl FileLockCoordinator {
         if self.other_row_claim_processes(own)? {
             return Ok(());
         }
+        lock.mapping.clear();
         lock.header = table::initialize(&self.claim_file, Some(lock.header))?;
+        lock.mapping.refresh(&self.claim_file);
         rows.dead.clear();
         Ok(())
     }

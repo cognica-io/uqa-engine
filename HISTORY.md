@@ -23,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Replace repeated native row/key claim header and slot I/O with bounded shared file mappings on supported local filesystems. Preserve exact lock conflicts, cross-process publication, interrupted-writer recovery, bounded fallback and post-reservation snapshot freshness.
+
 - Reuse native SQLite file identity while supported local filesystem watches report no path or mount change, avoiding a pathname lookup on every connection checkout. Preserve immediate replacement rejection, including ancestor renames, and direct checks on unsupported filesystems.
 
 - Avoid repeated historical reads of newly inserted native SQLite records during COMMIT and skip unrelated spilled values during original-row and retired-owner validation, preserving conflict checks, physical-key ownership, atomic publication and receipt retry.

@@ -14,12 +14,14 @@ use std::io::{Error, ErrorKind, Result};
 use uqa_storage::native_file::read_zero_extended_at;
 
 use super::super::{read_exact_at, write_all_at};
+use super::Mapping;
 
 pub(super) const PROCESS_SLOT_COUNT: u16 = 4096;
 const PROCESS_SLOT_BASE: u64 = 64;
 const PROCESS_SLOT_SIZE: u64 = 8;
 const TABLE_BASE: u64 = 64 * 1024;
-const ENTRY_SIZE: u64 = 32;
+pub(super) const ENTRY_SIZE: u64 = 32;
+pub(super) const STATE_OFFSET: usize = 22;
 pub(super) const INITIAL_CAPACITY_LOG2: u32 = 12;
 const MAXIMUM_CAPACITY_LOG2: u32 = 40;
 /// Slots after the last home slot, which end a run of claims near the end of the table without wrapping.
@@ -33,7 +35,44 @@ const HEADER_MAGIC: u32 = 0x5551_5243;
 const HEADER_VERSION: u32 = 1;
 const STATE_EMPTY: u8 = 0;
 const STATE_LIVE: u8 = 1;
-const STATE_TOMBSTONE: u8 = 2;
+pub(super) const STATE_TOMBSTONE: u8 = 2;
+
+#[cfg(test)]
+thread_local! {
+    static POSITIONED_IO: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+#[cfg(test)]
+pub(super) fn take_positioned_io() -> (usize, usize) {
+    POSITIONED_IO.replace((0, 0))
+}
+
+fn read_bytes(file: &File, bytes: &mut [u8], offset: u64) -> Result<()> {
+    #[cfg(test)]
+    {
+        let (reads, writes) = POSITIONED_IO.get();
+        POSITIONED_IO.set((reads + 1, writes));
+    }
+    read_exact_at(file, bytes, offset)
+}
+
+fn read_zero_extended(file: &File, bytes: &mut [u8], offset: u64) -> Result<()> {
+    #[cfg(test)]
+    {
+        let (reads, writes) = POSITIONED_IO.get();
+        POSITIONED_IO.set((reads + 1, writes));
+    }
+    read_zero_extended_at(file, bytes, offset)
+}
+
+fn write_bytes(file: &File, bytes: &[u8], offset: u64) -> Result<()> {
+    #[cfg(test)]
+    {
+        let (reads, writes) = POSITIONED_IO.get();
+        POSITIONED_IO.set((reads, writes + 1));
+    }
+    write_all_at(file, bytes, offset)
+}
 
 /// One attachment of a process. A slot's generation advances with every attachment, so an owner is never named twice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -81,7 +120,7 @@ pub(super) enum Slot {
 
 impl Slot {
     fn decode(bytes: &[u8]) -> Result<Self> {
-        match bytes[22] {
+        match bytes[STATE_OFFSET] {
             STATE_EMPTY => Ok(Self::Empty),
             STATE_TOMBSTONE => Ok(Self::Tombstone),
             STATE_LIVE => {
@@ -111,13 +150,13 @@ impl Slot {
         let mut bytes = [0_u8; ENTRY_SIZE as usize];
         match self {
             Self::Empty => {}
-            Self::Tombstone => bytes[22] = STATE_TOMBSTONE,
+            Self::Tombstone => bytes[STATE_OFFSET] = STATE_TOMBSTONE,
             Self::Live(entry) => {
                 bytes[0..8].copy_from_slice(&entry.identity.to_be_bytes());
                 bytes[8..16].copy_from_slice(&entry.session.to_be_bytes());
                 bytes[16..20].copy_from_slice(&entry.owner.generation.to_be_bytes());
                 bytes[20..22].copy_from_slice(&entry.owner.slot.to_be_bytes());
-                bytes[22] = STATE_LIVE;
+                bytes[STATE_OFFSET] = STATE_LIVE;
                 bytes[23] = entry.key as u8;
                 bytes[24] = entry.row as u8;
             }
@@ -207,7 +246,19 @@ fn slot_offset(index: u64) -> u64 {
 /// The header, or `None` for a sidecar that was never initialized.
 pub(super) fn read_header(file: &File) -> Result<Option<Header>> {
     let mut bytes = [0_u8; HEADER_SIZE];
-    read_zero_extended_at(file, &mut bytes, 0)?;
+    read_zero_extended(file, &mut bytes, 0)?;
+    if bytes == [0_u8; HEADER_SIZE] {
+        return Ok(None);
+    }
+    Header::decode(&bytes).map(Some)
+}
+
+/// Read the header from the extent validated under the claim-table lock.
+pub(super) fn read_mapped_header(file: &File, mapping: &Mapping) -> Result<Option<Header>> {
+    let mut bytes = [0_u8; HEADER_SIZE];
+    if !mapping.read(0, &mut bytes) {
+        return read_header(file);
+    }
     if bytes == [0_u8; HEADER_SIZE] {
         return Ok(None);
     }
@@ -215,13 +266,13 @@ pub(super) fn read_header(file: &File) -> Result<Option<Header>> {
 }
 
 fn write_header(file: &File, header: &Header) -> Result<()> {
-    write_all_at(file, &header.encode(), 0)
+    write_bytes(file, &header.encode(), 0)
 }
 
 /// The generation and process ID recorded for every process slot.
 pub(super) fn read_processes(file: &File) -> Result<Vec<(u32, u32)>> {
     let mut bytes = vec![0_u8; usize::from(PROCESS_SLOT_COUNT) * PROCESS_SLOT_SIZE as usize];
-    read_zero_extended_at(file, &mut bytes, PROCESS_SLOT_BASE)?;
+    read_zero_extended(file, &mut bytes, PROCESS_SLOT_BASE)?;
     Ok(bytes
         .chunks_exact(PROCESS_SLOT_SIZE as usize)
         .map(|record| {
@@ -235,7 +286,7 @@ pub(super) fn read_processes(file: &File) -> Result<Vec<(u32, u32)>> {
 
 pub(super) fn read_process(file: &File, slot: u16) -> Result<(u32, u32)> {
     let mut record = [0_u8; PROCESS_SLOT_SIZE as usize];
-    read_zero_extended_at(
+    read_zero_extended(
         file,
         &mut record,
         PROCESS_SLOT_BASE + u64::from(slot) * PROCESS_SLOT_SIZE,
@@ -250,7 +301,7 @@ pub(super) fn write_process(file: &File, slot: u16, generation: u32, process: u3
     let mut record = [0_u8; PROCESS_SLOT_SIZE as usize];
     record[0..4].copy_from_slice(&generation.to_be_bytes());
     record[4..8].copy_from_slice(&process.to_be_bytes());
-    write_all_at(
+    write_bytes(
         file,
         &record,
         PROCESS_SLOT_BASE + u64::from(slot) * PROCESS_SLOT_SIZE,
@@ -282,14 +333,45 @@ pub(super) struct Probe {
 pub(super) struct Table<'a> {
     file: &'a File,
     capacity_log2: u32,
+    mapping: Option<&'a Mapping>,
 }
 
 impl<'a> Table<'a> {
+    #[cfg(test)]
     pub(super) fn new(file: &'a File, header: &Header) -> Self {
         Self {
             file,
             capacity_log2: header.capacity_log2,
+            mapping: None,
         }
+    }
+
+    pub(super) fn with_mapping(file: &'a File, header: &Header, mapping: &'a Mapping) -> Self {
+        Self {
+            file,
+            capacity_log2: header.capacity_log2,
+            mapping: Some(mapping),
+        }
+    }
+
+    fn read(&self, bytes: &mut [u8], offset: u64) -> Result<()> {
+        if self
+            .mapping
+            .is_some_and(|mapping| mapping.read(offset, bytes))
+        {
+            return Ok(());
+        }
+        read_bytes(self.file, bytes, offset)
+    }
+
+    fn write_bytes(&self, bytes: &[u8], offset: u64) -> Result<()> {
+        if self
+            .mapping
+            .is_some_and(|mapping| mapping.write(offset, bytes))
+        {
+            return Ok(());
+        }
+        write_bytes(self.file, bytes, offset)
     }
 
     /// Read at most a window of slots from `first` into `bytes` and return how many were read. Every slot of the table lies inside the file.
@@ -300,8 +382,7 @@ impl<'a> Table<'a> {
         bytes: &mut [u8; (WINDOW * ENTRY_SIZE) as usize],
     ) -> Result<usize> {
         let count = WINDOW.min(count) as usize;
-        read_exact_at(
-            self.file,
+        self.read(
             &mut bytes[..count * ENTRY_SIZE as usize],
             slot_offset(first),
         )?;
@@ -310,12 +391,12 @@ impl<'a> Table<'a> {
 
     fn read_slot(&self, index: u64) -> Result<Slot> {
         let mut bytes = [0_u8; ENTRY_SIZE as usize];
-        read_exact_at(self.file, &mut bytes, slot_offset(index))?;
+        self.read(&mut bytes, slot_offset(index))?;
         Slot::decode(&bytes)
     }
 
     pub(super) fn write(&self, index: u64, slot: &Slot) -> Result<()> {
-        write_all_at(self.file, &slot.encode(), slot_offset(index))
+        self.write_bytes(&slot.encode(), slot_offset(index))
     }
 
     /// Visit every occupied slot of the run that starts at the home slot of `identity`. Every claim of `identity` is in that run.
@@ -367,7 +448,7 @@ impl<'a> Table<'a> {
             }
         }
         let zeros = vec![0_u8; ((index - first + 1) * ENTRY_SIZE) as usize];
-        write_all_at(self.file, &zeros, slot_offset(first))
+        self.write_bytes(&zeros, slot_offset(first))
     }
 
     /// Visit every claim of the table.
@@ -378,7 +459,7 @@ impl<'a> Table<'a> {
         while index < end {
             let count = CHUNK.min(end - index);
             bytes.resize((count * ENTRY_SIZE) as usize, 0);
-            read_exact_at(self.file, &mut bytes, slot_offset(index))?;
+            self.read(&mut bytes, slot_offset(index))?;
             for slot in bytes.chunks_exact(ENTRY_SIZE as usize) {
                 if let Slot::Live(entry) = Slot::decode(slot)? {
                     visit(entry)?;
@@ -452,7 +533,7 @@ fn journal(file: &File, header: &mut Header, entries: &mut [Entry], additional: 
         for entry in chunk {
             bytes.extend_from_slice(&Slot::Live(*entry).encode());
         }
-        write_all_at(file, &bytes, offset)?;
+        write_bytes(file, &bytes, offset)?;
         offset += bytes.len() as u64;
     }
     header.epoch = header.epoch.wrapping_add(1);
@@ -474,7 +555,7 @@ pub(super) fn recover(file: &File, header: &mut Header) -> Result<()> {
     while read < rebuild.entries {
         let count = CHUNK.min(rebuild.entries - read);
         let mut bytes = vec![0_u8; (count * ENTRY_SIZE) as usize];
-        read_exact_at(file, &mut bytes, rebuild.journal + read * ENTRY_SIZE)?;
+        read_bytes(file, &mut bytes, rebuild.journal + read * ENTRY_SIZE)?;
         for slot in bytes.chunks_exact(ENTRY_SIZE as usize) {
             let Slot::Live(entry) = Slot::decode(slot)? else {
                 return Err(invalid("row claim rebuild journal"));
@@ -506,7 +587,7 @@ fn apply(file: &File, header: &mut Header, entries: &mut [Entry]) -> Result<()> 
                 .copy_from_slice(&Slot::Live(entries[placed]).encode());
             placed += 1;
         }
-        write_all_at(file, &bytes, slot_offset(first))?;
+        write_bytes(file, &bytes, slot_offset(first))?;
         first += count;
     }
     header.capacity_log2 = rebuild.capacity_log2;

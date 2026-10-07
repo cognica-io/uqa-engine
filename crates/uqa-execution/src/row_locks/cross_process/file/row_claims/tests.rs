@@ -23,6 +23,44 @@ const STRENGTHS: [LockStrength; 4] = [
     LockStrength::ForUpdate,
 ];
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn warm_row_claims_do_not_issue_positioned_io_per_row() {
+    for fallback in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let coordinator = FileLockCoordinator::open(&directory.path().join("database")).unwrap();
+        if fallback {
+            coordinator.claim_mapping.lock().disable();
+        }
+        claim(&coordinator, PARENT_SESSION, 1, LockStrength::ForUpdate);
+        let mapped = coordinator.claim_mapping.lock().active();
+        table::take_positioned_io();
+        for id in 2..=65 {
+            claim(&coordinator, PARENT_SESSION, id, LockStrength::ForUpdate);
+        }
+        let operations = table::take_positioned_io();
+        eprintln!("64 claims: mapped={mapped}, positioned reads/writes={operations:?}");
+        assert_eq!(operations, if mapped { (0, 0) } else { (128, 64) });
+        assert_eq!(stored(&coordinator).1.len(), 65);
+    }
+}
+
+#[test]
+fn a_truncated_claim_file_returns_an_error_without_using_the_old_extent() {
+    let directory = tempfile::tempdir().unwrap();
+    let coordinator = FileLockCoordinator::open(&directory.path().join("truncated.db")).unwrap();
+    claim(&coordinator, PARENT_SESSION, 1, LockStrength::ForUpdate);
+    {
+        let mut state = coordinator.state.lock();
+        let _lock = coordinator.lock_row_claim_table(&mut state.rows).unwrap();
+        // Simulate a damaged sidecar between operations, retaining its header.
+        coordinator.claim_file.set_len(64).unwrap();
+    }
+    assert!(coordinator
+        .try_claim(PARENT_SESSION, &claims(2, LockStrength::ForUpdate))
+        .is_err());
+}
+
 fn claims(doc_id: u64, strength: LockStrength) -> Vec<ByteClaim> {
     row_byte_claims(RELATION, doc_id, strength)
 }

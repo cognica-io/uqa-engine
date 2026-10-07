@@ -23,6 +23,10 @@ struct Peer {
 
 impl Peer {
     fn start(path: &std::path::Path) -> Self {
+        Self::start_with_mapping(path, true)
+    }
+
+    fn start_with_mapping(path: &std::path::Path, mapping: bool) -> Self {
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--ignored",
@@ -32,6 +36,10 @@ impl Peer {
                 "--test-threads=1",
             ])
             .env("UQA_ROW_CLAIM_TEST_PATH", path)
+            .env(
+                "UQA_ROW_CLAIM_TEST_MAPPING",
+                if mapping { "1" } else { "0" },
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -103,6 +111,9 @@ fn respond(value: impl std::fmt::Display) {
 fn row_claim_peer() {
     let path = std::env::var_os("UQA_ROW_CLAIM_TEST_PATH").unwrap();
     let coordinator = FileLockCoordinator::open(std::path::Path::new(&path)).unwrap();
+    if std::env::var("UQA_ROW_CLAIM_TEST_MAPPING").as_deref() == Ok("0") {
+        coordinator.claim_mapping.lock().disable();
+    }
     respond("ready");
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
@@ -143,6 +154,32 @@ fn index(strength: LockStrength) -> usize {
         .iter()
         .position(|candidate| *candidate == strength)
         .unwrap()
+}
+
+#[test]
+fn mapped_and_positioned_processes_share_claim_publication_and_release() {
+    for parent_mapped in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mixed.db");
+        let coordinator = FileLockCoordinator::open(&path).unwrap();
+        if !parent_mapped {
+            coordinator.claim_mapping.lock().disable();
+        }
+        let mut peer = Peer::start_with_mapping(&path, !parent_mapped);
+        claim(&coordinator, PARENT_SESSION, 1, LockStrength::ForUpdate);
+        assert_eq!(peer.request("claim 3 2"), "granted");
+        assert!(peer.request("claim 3 1").starts_with("conflict "));
+        assert!(coordinator
+            .try_claim(PARENT_SESSION, &claims(2, LockStrength::ForUpdate))
+            .unwrap()
+            .is_err());
+        coordinator.release(PARENT_SESSION, &claims(1, LockStrength::ForUpdate));
+        assert_eq!(peer.request("claim 3 1"), "granted");
+        assert_eq!(peer.request("release 3 2"), "released");
+        claim(&coordinator, PARENT_SESSION, 2, LockStrength::ForUpdate);
+        peer.terminate();
+        claim(&coordinator, PARENT_SESSION, 1, LockStrength::ForUpdate);
+    }
 }
 
 #[test]
