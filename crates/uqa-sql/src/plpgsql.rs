@@ -412,6 +412,7 @@ pub enum PLpgSQLStmt {
         condition: Option<String>,
         message: Option<String>,
         params: Vec<PLpgSQLExpression>,
+        options: Vec<RaiseOption>,
     },
     /// `ASSERT condition [, message]`.
     Assert {
@@ -530,3 +531,5 @@ pub use parameters::{
 };
 
 mod blocks;
+mod raise;
+pub use raise::{RaiseDiagnostic, RaiseOption, RaiseOptionKind};

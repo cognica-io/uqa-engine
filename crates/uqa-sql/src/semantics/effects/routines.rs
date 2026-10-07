@@ -468,9 +468,13 @@ fn plpgsql_statement_may_mutate_engine(
             classification,
         ),
         PLpgSQLStmt::ReturnQueryExecute { .. } | PLpgSQLStmt::DynExecute { .. } => Ok(true),
-        PLpgSQLStmt::Raise { params, .. } => plpgsql_expressions_may_mutate_engine(
+        PLpgSQLStmt::Raise {
+            params, options, ..
+        } => plpgsql_expressions_may_mutate_engine(
             context,
-            params,
+            params
+                .iter()
+                .chain(options.iter().map(|option| &option.value)),
             visiting_views,
             visiting_routines,
             classification,

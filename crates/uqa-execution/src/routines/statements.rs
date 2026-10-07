@@ -182,7 +182,14 @@ impl Interpreter<'_> {
                 condition,
                 message,
                 params,
-            } => self.exec_raise(*level, condition.as_deref(), message.as_deref(), params),
+                options,
+            } => self.exec_raise(
+                *level,
+                condition.as_deref(),
+                message.as_deref(),
+                params,
+                options,
+            ),
             PLpgSQLStmt::Assert { condition, message } => {
                 self.exec_assert(condition, message.as_ref())
             }
