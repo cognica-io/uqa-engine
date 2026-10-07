@@ -15,7 +15,7 @@ pub(super) struct FieldSet {
     _memory: MemoryReservation,
 }
 
-/// Physical expression names and user columns occupy distinct index namespaces.
+/// Physical tuple names and user columns occupy distinct index namespaces.
 #[derive(Clone, Copy)]
 pub(super) enum KeyKind {
     Columns,
@@ -26,9 +26,10 @@ impl KeyKind {
     pub(super) fn document(self, row: &CommandStoredDocument) -> Result<&Document, SQLError> {
         match self {
             Self::Columns => Ok(row.fields.as_ref()),
-            Self::Expressions => row.index_values.as_deref().ok_or_else(|| {
-                SQLError::Internal("staged row lacks evaluated expression keys".into())
-            }),
+            Self::Expressions => row
+                .index_values
+                .as_deref()
+                .ok_or_else(|| SQLError::Internal("staged row lacks evaluated index keys".into())),
         }
     }
 }

@@ -272,3 +272,52 @@ fn every_plain_key_column_is_searched_and_included_columns_are_carried() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn composite_unique_keys_retain_the_same_complete_tuple_in_storage_and_commands() {
+    for predicate in [None, Some(true), Some(false)] {
+        let mut row = btree(
+            "unique_pair",
+            4,
+            vec![IndexKey::Column("a".into()), IndexKey::Column("b".into())],
+            &["payload"],
+        );
+        let mut definition = super::super::index_definition(&row).unwrap();
+        definition.unique = true;
+        definition.predicate = predicate.map(|value| Box::new(Expr::Literal(Value::Bool(value))));
+        row.definition_json = Some(serde_json::to_string(&definition).unwrap());
+        let definitions =
+            PhysicalIndexDefinitions::prepare(&BTreeMap::from([(row.relation.clone(), row)]))
+                .unwrap();
+        let physical = ValueIndexKey::Index("opaque:4".into());
+        assert!(definitions
+            .search_fields("public.t", &[], &[])
+            .contains(&physical));
+        let context = IndexExpressionContext {
+            catalog: &Context,
+            expressions: &Context,
+        };
+        let document = Document::from([
+            ("a".into(), Value::Int(7)),
+            ("payload".into(), Value::Str("not part of the key".into())),
+        ]);
+        let expected = if predicate == Some(false) {
+            Value::Null
+        } else {
+            Value::Row(vec![Value::Int(7), Value::Null].into())
+        };
+        let stored = definitions
+            .document_values(
+                context,
+                "public.t",
+                std::slice::from_ref(&physical),
+                &document,
+            )
+            .unwrap();
+        let staged = definitions
+            .command_expression_values(context, "public.t", &document)
+            .unwrap();
+        assert_eq!(stored[&physical], expected);
+        assert_eq!(staged["opaque:4"], expected);
+    }
+}

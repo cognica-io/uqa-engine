@@ -11,7 +11,7 @@ use uqa_storage::mvcc::{IdentifierRequest, RecordWrite};
 
 #[test]
 fn predecessor_format_upgrade_preserves_records_allocations_and_receipts() {
-    for predecessor in 29_u64..=53 {
+    for predecessor in 29_u64..=55 {
         let database = Arc::new(
             Database::builder()
                 .create_with_backend(InMemoryBackend::new())
@@ -77,7 +77,7 @@ fn predecessor_format_upgrade_preserves_records_allocations_and_receipts() {
         let transaction = database.begin_read().unwrap();
         assert_eq!(
             read_u64(&transaction.open_table(METADATA).unwrap(), "format").unwrap(),
-            54
+            56
         );
     }
 }
@@ -133,6 +133,9 @@ fn retained_records_and_snapshots_revalidate_format_and_incarnation_before_acces
         ("format", 50_u64.to_be_bytes().to_vec()),
         ("format", 51_u64.to_be_bytes().to_vec()),
         ("format", 52_u64.to_be_bytes().to_vec()),
+        ("format", 53_u64.to_be_bytes().to_vec()),
+        ("format", 54_u64.to_be_bytes().to_vec()),
+        ("format", 55_u64.to_be_bytes().to_vec()),
         ("format", 99_u64.to_be_bytes().to_vec()),
         ("database", vec![0x7f; 16]),
     ] {

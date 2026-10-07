@@ -130,7 +130,7 @@ impl PhysicalIndexDefinitions {
         Ok(fields.into_iter().collect())
     }
 
-    /// Fields whose accelerators answer predicates: the columns of declared keys, every plain key column of a btree index, and each btree index with an expression key.
+    /// Fields whose accelerators answer predicates: the columns of declared keys, every plain btree key column, and complete tuples for expression indexes and composite unique indexes.
     pub fn search_fields(
         &self,
         table: &str,
@@ -154,7 +154,9 @@ impl PhysicalIndexDefinitions {
             );
         }
         for (physical_key, index) in self.btree_indexes(table) {
-            if index.keys.iter().any(|key| key.column().is_none()) {
+            if index.keys.iter().any(|key| key.column().is_none())
+                || (index.definition.unique && index.keys.len() > 1)
+            {
                 fields.insert(ValueIndexKey::Index(physical_key.clone()));
             }
             fields.extend(
@@ -233,7 +235,7 @@ impl PhysicalIndexDefinitions {
             .collect()
     }
 
-    /// UNIQUE expression keys of a command-visible row. A rejected partial-index predicate keeps a NULL marker distinct from every row-valued key.
+    /// Complete UNIQUE expression and composite keys of a command-visible row. A rejected partial-index predicate keeps a NULL marker distinct from every row-valued key.
     pub fn command_expression_values(
         &self,
         expressions: IndexExpressionContext<'_>,
@@ -242,7 +244,8 @@ impl PhysicalIndexDefinitions {
     ) -> Result<Document, SQLError> {
         self.btree_indexes(table)
             .filter(|(_, index)| {
-                index.definition.unique && index.keys.iter().any(|key| key.column().is_none())
+                index.definition.unique
+                    && (index.keys.len() > 1 || index.keys.iter().any(|key| key.column().is_none()))
             })
             .map(|(key, index)| {
                 expression_value(index, expressions, table, document)

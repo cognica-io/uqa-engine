@@ -53,7 +53,7 @@ pub trait MutationIndexRead {
         columns: &[String],
         values: &[Value],
     ) -> Result<Vec<DocId>, SQLError>;
-    /// Probe already evaluated expression keys and retain only the command rows that mask the mutation-visible stored index.
+    /// Probe already evaluated physical tuple keys and retain only the command rows that mask the mutation-visible stored index.
     fn staged_expression_matches(
         &self,
         table: &str,
