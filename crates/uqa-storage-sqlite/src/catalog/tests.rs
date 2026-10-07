@@ -227,7 +227,7 @@ fn save_load_round_trip() {
     assert_eq!(loaded[0].vector_fields.len(), 1);
     assert_eq!(loaded[0].vector_fields[0].field, "embedding");
     assert_eq!(loaded[0].vector_fields[0].dimensions, 768);
-    assert!(loaded[0].columns_json.is_empty());
+    assert_eq!(loaded[0].columns_json, "");
     assert_eq!(loaded[0].constraints_json, schema.constraints_json);
 }
 
@@ -698,5 +698,5 @@ fn graph_ids_beyond_sqlite_integer_range_are_rejected_before_write() {
         Err(SQLiteError::StorageBackend(message))
             if message.contains("exceeds the SQLite INTEGER range")
     ));
-    assert!(cat.load_vertices().unwrap().is_empty());
+    assert_eq!(cat.load_vertices().unwrap().len(), 0);
 }

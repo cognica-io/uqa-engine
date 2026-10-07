@@ -140,7 +140,7 @@ fn a_new_sidecar_has_no_header_and_an_initialized_one_is_empty() {
         file.metadata().unwrap().len(),
         slot_offset(slots(INITIAL_CAPACITY_LOG2))
     );
-    assert!(live(&Table::new(&file, &header)).is_empty());
+    assert_eq!(live(&Table::new(&file, &header)).len(), 0);
     assert_eq!(read_process(&file, 5).unwrap(), (2, 4242));
     assert_eq!(
         initialize(&file, Some(header)).unwrap().epoch,
@@ -183,7 +183,7 @@ fn a_run_empties_once_every_claim_in_it_is_removed() {
     table.remove(102).unwrap();
     let probe = find(&table, identities[2]).1;
     assert_eq!((probe.empty, probe.length), (Some(100), 0));
-    assert!(live(&table).is_empty());
+    assert_eq!(live(&table).len(), 0);
 }
 
 #[test]

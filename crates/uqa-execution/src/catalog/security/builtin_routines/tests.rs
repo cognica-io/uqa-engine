@@ -24,7 +24,7 @@ fn builtin_acl_round_trip_preserves_revoke_and_independent_tuple_revisions() {
     let expected = BTreeMap::from([(lower.oid, lower.entry), (aggregate.oid, aggregate.entry)]);
     let restored = restore(&catalog, &roles()).unwrap();
     assert_eq!(restored, expected);
-    assert!(restored[&870].execute_acl.is_empty());
+    assert_eq!(restored[&870].execute_acl.len(), 0);
     let same = BuiltinRoutinePrivilegeUpdate::new(870, vec![]).unwrap();
     assert_ne!(same.entry.revision, restored[&870].revision);
     same.persist(Some(&catalog)).unwrap();

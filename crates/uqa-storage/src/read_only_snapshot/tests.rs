@@ -74,7 +74,7 @@ fn document_adapter_preserves_shared_projections_and_rejects_writes() {
     assert_eq!(
         second
             .for_each_next_fields(None, 2, &[], &mut |id, values| {
-                assert!(values.is_empty());
+                assert_eq!(values.len(), 0);
                 ids.push(id);
                 false
             })

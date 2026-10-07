@@ -141,9 +141,12 @@ fn schema_expansion_retains_written_order_repetitions_and_catalog_order() {
             .len(),
         3
     );
-    assert!(selected(&names, &["empty"], AlterRoutineKind::Routine)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        selected(&names, &["empty"], AlterRoutineKind::Routine)
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]

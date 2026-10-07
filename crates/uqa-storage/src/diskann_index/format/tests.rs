@@ -159,7 +159,7 @@ fn a_high_dimensional_node_round_trips_through_every_fragment() {
     assert_eq!(node.vector().len(), 1024);
     assert_eq!(node.vector()[1023].to_bits(), 0x8000_0000);
     assert_eq!(node.raw_norm().to_bits(), 1.0_f32.to_bits());
-    assert!(node.neighbors().is_empty());
+    assert_eq!(node.neighbors().len(), 0);
     drop((node, encoded, assembled));
     assert_eq!(control.memory().used(), 0);
 }

@@ -59,14 +59,17 @@ fn lost_partition_parent_retains_constraints_and_catalog_addresses_and_restores_
     assert!(columns[0].auto_increment.is_none());
     assert!(!constraints.hierarchy.is_partition());
     assert_eq!(constraints.hierarchy.local_columns, ["v"]);
-    assert!(constraints
-        .hierarchy
-        .partition_inherited_key_constraints
-        .is_empty());
-    assert!(constraints
-        .hierarchy
-        .partition_inherited_foreign_keys
-        .is_empty());
+    assert_eq!(
+        constraints
+            .hierarchy
+            .partition_inherited_key_constraints
+            .len(),
+        0
+    );
+    assert_eq!(
+        constraints.hierarchy.partition_inherited_foreign_keys.len(),
+        0
+    );
     assert!(
         !repair_parent_edges(&mut columns, &mut constraints, &BTreeSet::new())
             .unwrap()

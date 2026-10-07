@@ -122,7 +122,7 @@ fn cascade_deduplicates_multiple_parent_paths_and_preserves_requested_roots() {
             "public.z_root"
         ]
     );
-    assert!(blockers.is_empty());
+    assert_eq!(blockers.len(), 0);
     assert_eq!(roots, ["public.z_root", "public.z_root"]);
     assert!(!catalog.held.get());
 }
@@ -135,7 +135,7 @@ fn cyclic_loaded_metadata_terminates_at_a_sorted_fixed_point() {
     ]);
     let (targets, blockers) = hierarchy_drop_targets(&catalog, &["public.b".into()], true);
     assert_eq!(targets, ["public.a", "public.b"]);
-    assert!(blockers.is_empty());
+    assert_eq!(blockers.len(), 0);
     assert_eq!(catalog.reads.get(), 2);
     assert!(!catalog.held.get());
 }
@@ -157,6 +157,9 @@ fn surviving_partition_ancestors_follow_partitions_past_dropped_parents_only() {
         surviving_partition_ancestors(&catalog, &["public.middle".into(), "public.leaf".into()]),
         ["public.root"]
     );
-    assert!(surviving_partition_ancestors(&catalog, &["public.child".into()]).is_empty());
+    assert_eq!(
+        surviving_partition_ancestors(&catalog, &["public.child".into()]).len(),
+        0
+    );
     assert!(!catalog.held.get());
 }

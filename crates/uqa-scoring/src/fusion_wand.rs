@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn returns_empty_for_no_signals() {
         let s = ConfidenceScaledPoolWANDScorer::new(vec![], vec![], 0.5, 10).unwrap();
-        assert!(s.score_top_k().unwrap().is_empty());
+        assert_eq!(s.score_top_k().unwrap().len(), 0);
     }
 
     #[test]

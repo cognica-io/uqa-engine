@@ -137,7 +137,7 @@ fn empty_destinations_acquire_explicit_bounds_and_keep_error_precedence() {
         let result = original
             .assign_slice_with_control(&[(Some(3), Some(2))], &array(&[1]), &control)
             .unwrap();
-        assert!(result.dimensions().is_empty());
+        assert_eq!(result.dimensions().len(), 0);
         assert!(matches!(
             original.assign_slice_with_control(&[(Some(3), Some(1))], &array(&[1]), &control),
             Err(ArrayAssignmentError::SizeLimit)

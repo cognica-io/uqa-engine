@@ -598,7 +598,7 @@ mod tests {
         }];
         let (sql, params) = build_where_clause(&preds).unwrap();
         assert_eq!(sql, "\"deleted_at\" IS NULL");
-        assert!(params.is_empty());
+        assert_eq!(params.len(), 0);
     }
 
     #[test]

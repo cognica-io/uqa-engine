@@ -92,7 +92,7 @@ fn dropped_registry_transaction_discards_prepared_queue_changes() {
         transaction.queue_state().unwrap(),
         NotificationQueueState::default()
     );
-    assert!(transaction.entries_from(0).unwrap().is_empty());
+    assert_eq!(transaction.entries_from(0).unwrap().len(), 0);
     transaction.commit().unwrap();
 }
 

@@ -404,10 +404,13 @@ fn routine_identity_and_call_parameters_are_distinct() {
         .as_object_mut()
         .unwrap()
         .remove("creation_search_path");
-    assert!(serde_json::from_value::<CreateFunction>(legacy)
-        .unwrap()
-        .creation_search_path
-        .is_empty());
+    assert_eq!(
+        serde_json::from_value::<CreateFunction>(legacy)
+            .unwrap()
+            .creation_search_path
+            .len(),
+        0
+    );
     let mut persisted = function;
     persisted.creation_search_path = vec!["app".into(), "public".into()];
     assert_eq!(
@@ -431,7 +434,7 @@ fn create_table_as_reads_legacy_statements_without_optional_fields() {
     else {
         panic!("expected CREATE TABLE AS");
     };
-    assert!(column_names.is_empty());
+    assert_eq!(column_names.len(), 0);
     assert!(!with_no_data);
 
     let Statement::CreateTableAs {
@@ -457,7 +460,7 @@ fn create_table_as_reads_legacy_statements_without_optional_fields() {
     else {
         panic!("expected CREATE TABLE AS");
     };
-    assert!(column_names.is_empty());
+    assert_eq!(column_names.len(), 0);
     assert!(!with_no_data);
 }
 

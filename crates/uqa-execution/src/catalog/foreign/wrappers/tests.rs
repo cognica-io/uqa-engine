@@ -48,10 +48,10 @@ fn initial_conversion_defers_writes_and_binds_each_server_once() {
     assert!(restore(&catalog, &roles(), &mut servers.clone(), false).is_err());
     let restored = restore(&catalog, &roles(), &mut servers, true).unwrap();
     assert_eq!(restored.definitions, native_wrappers());
-    assert!(catalog
-        .metadata_with_prefix(RECORD_PREFIX)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        catalog.metadata_with_prefix(RECORD_PREFIX).unwrap().len(),
+        0
+    );
     assert!(catalog.get_metadata(FORMAT_KEY).unwrap().is_none());
     assert_eq!(
         servers["source"]
@@ -64,7 +64,7 @@ fn initial_conversion_defers_writes_and_binds_each_server_once() {
     let again = restore(&catalog, &roles(), &mut servers.clone(), false).unwrap();
     assert_eq!(again.definitions, restored.definitions);
     assert!(!again.initialize);
-    assert!(again.server_migrations.is_empty());
+    assert_eq!(again.server_migrations.len(), 0);
     servers
         .get_mut("source")
         .unwrap()

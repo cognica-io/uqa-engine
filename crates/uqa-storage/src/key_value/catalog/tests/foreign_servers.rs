@@ -35,5 +35,5 @@ fn foreign_server_rows_decode_legacy_values_and_preserve_metadata_on_legacy_upda
     catalog.save_foreign_server_row(&row).unwrap();
     assert_eq!(catalog.load_foreign_server_rows().unwrap(), [row]);
     catalog.drop_foreign_server("legacy").unwrap();
-    assert!(catalog.load_foreign_server_rows().unwrap().is_empty());
+    assert_eq!(catalog.load_foreign_server_rows().unwrap().len(), 0);
 }

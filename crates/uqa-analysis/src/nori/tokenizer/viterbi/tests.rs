@@ -112,7 +112,7 @@ fn eos_connection_cost_can_select_the_more_expensive_partial_path() {
         &mut || Ok(()),
     )
     .unwrap();
-    assert!(output.tokens.is_empty());
+    assert_eq!(output.tokens.len(), 0);
     assert_eq!(output.final_offset_utf16, 1);
     assert_eq!(output.final_position_increment, 0);
 }

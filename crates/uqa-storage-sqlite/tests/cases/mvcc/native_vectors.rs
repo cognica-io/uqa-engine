@@ -179,7 +179,7 @@ fn native_exact_writers_commit_independent_tensors_before_the_other_transaction_
             };
             assert_eq!(ids(&*a, &X), expected);
             assert_eq!(ids(&*baseline, &X), vec![1]);
-            assert!(ids(&*first, &X).is_empty());
+            assert_eq!(ids(&*first, &X).len(), 0);
             assert_eq!(ids(&*second, &X), vec![1]);
             assert_eq!(baseline.count().unwrap(), 2);
             assert_eq!(second.count().unwrap(), 3);
@@ -307,7 +307,7 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         assert_eq!(empty.count().unwrap(), 0);
         assert_eq!(old.count().unwrap(), 3);
         assert_eq!(private.count().unwrap(), 4);
-        assert!(ids(&*private, &X).is_empty());
+        assert_eq!(ids(&*private, &X).len(), 0);
         assert_eq!(ids(&*old, &X), vec![1]);
         drop((vectors, empty, old, private, observer, connection));
         let reopened = open(mode, &path);
@@ -533,7 +533,7 @@ fn native_same_document_conflicts_preserve_committed_and_retained_vector_generat
         assert_eq!(ids(&*b, &Z), vec![1]);
         connection.rollback_transaction().unwrap();
         assert_eq!(a.count().unwrap(), 1);
-        assert!(ids(&*a, &Y).is_empty());
+        assert_eq!(ids(&*a, &Y).len(), 0);
         assert_eq!(private.count().unwrap(), 2);
         assert_eq!(ids(&*private, &Y), vec![1]);
     }

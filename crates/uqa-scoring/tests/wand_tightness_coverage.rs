@@ -175,7 +175,7 @@ fn tightened_fusion_wand() {
     .unwrap();
     let result = scorer.score_top_k().unwrap();
     assert!(result.len() <= 2);
-    assert!(!result.is_empty());
+    assert_ne!(result.len(), 0);
 }
 
 #[test]

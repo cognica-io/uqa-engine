@@ -159,7 +159,7 @@ fn native_reads_projections_cursors_and_retained_views_share_typed_document_sema
         documents.next_doc_id(Some(0)).unwrap(),
         Some(i64::MAX as u64)
     );
-    assert!(documents.next_doc_ids(None, 0).unwrap().is_empty());
+    assert_eq!(documents.next_doc_ids(None, 0).unwrap().len(), 0);
     assert_eq!(documents.max_doc_id().unwrap(), i64::MAX as u64);
     assert!(documents.contains_doc_id(0).unwrap());
     assert!(!documents.contains_doc_id(1).unwrap());

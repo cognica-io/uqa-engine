@@ -345,7 +345,7 @@ fn syntax_calls_preserve_polymorphic_builtin_identity() {
         assert_eq!(name, expected_name);
         assert_eq!(binding.name, expected_name);
         assert!(binding.builtin);
-        assert!(binding.argument_types.is_empty());
+        assert_eq!(binding.argument_types.len(), 0);
     }
     for (projection, expected_name) in select.projections[4..]
         .iter()

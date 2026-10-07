@@ -659,18 +659,24 @@ mod tests {
                     .unwrap(),
                 vec![b"apple/1".to_vec(), b"apple/2".to_vec()]
             );
-            assert!(store
-                .scan_prefix_keys_after(b"apple/", Some(b"z"), 2)
-                .unwrap()
-                .is_empty());
+            assert_eq!(
+                store
+                    .scan_prefix_keys_after(b"apple/", Some(b"z"), 2)
+                    .unwrap()
+                    .len(),
+                0
+            );
             assert_eq!(
                 store.first_prefix_after(b"apple/", Some(b"a")).unwrap(),
                 Some((b"apple/1".to_vec(), b"red".to_vec()))
             );
-            assert!(store
-                .scan_prefix_keys_after(b"apple/", None, 0)
-                .unwrap()
-                .is_empty());
+            assert_eq!(
+                store
+                    .scan_prefix_keys_after(b"apple/", None, 0)
+                    .unwrap()
+                    .len(),
+                0
+            );
             assert_eq!(store.scan_prefix(&[0x10, 0xff]).unwrap().len(), 1);
             store.delete_prefix(&[0x10, 0xff]).unwrap();
             assert_eq!(

@@ -155,7 +155,7 @@ fn main() {
         for (case_index, case) in cases.iter().enumerate() {
             let text = case["text"].as_str().unwrap();
             let query = analyze_query_graph(&revision, text).unwrap();
-            assert!(!query.is_empty());
+            assert_ne!(query.len(), 0);
             for analysis in [false, true] {
                 let stage = if analysis {
                     "analysis_and_match"

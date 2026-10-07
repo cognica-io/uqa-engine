@@ -91,8 +91,8 @@ fn deletion_while_untrained_keeps_training_metadata_empty() {
     assert_eq!(snapshot.state, IVFState::Untrained);
     assert_eq!(snapshot.trained_size, 0);
     assert_eq!(snapshot.deletes_since_train, 0);
-    assert!(snapshot.centroids.is_empty());
-    assert!(snapshot.assignments.is_empty());
+    assert_eq!(snapshot.centroids.len(), 0);
+    assert_eq!(snapshot.assignments.len(), 0);
 }
 
 #[test]

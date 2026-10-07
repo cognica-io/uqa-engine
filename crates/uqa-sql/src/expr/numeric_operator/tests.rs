@@ -341,7 +341,7 @@ fn bound_operator_retains_subquery_and_routine_types_without_a_runtime_resolver(
         else {
             panic!("numeric operator")
         };
-        assert!(binding.argument_types.is_empty());
+        assert_eq!(binding.argument_types.len(), 0);
         for (ty, state) in [
             (ColumnType::SmallInteger, "22003"),
             (ColumnType::Text, "42883"),

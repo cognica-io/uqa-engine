@@ -86,7 +86,7 @@ fn migration_16_adds_backward_compatible_table_constraints() {
     let schemas = upgraded.load_tables().unwrap();
     assert_eq!(schemas.len(), 1);
     assert_eq!(schemas[0].relation.qualified_name(), "public.legacy");
-    assert!(schemas[0].constraints_json.is_empty());
+    assert_eq!(schemas[0].constraints_json, "");
 }
 
 #[test]

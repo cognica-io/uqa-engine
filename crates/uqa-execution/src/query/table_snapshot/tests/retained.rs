@@ -275,8 +275,8 @@ fn retained_private_views_capture_no_base_rows_and_project_in_requested_order() 
     );
     assert_eq!(nested.doc_ids().unwrap(), vec![1, 2, 3, u64::MAX]);
     assert_eq!(nested.next_doc_ids(Some(1), 2).unwrap(), vec![2, 3]);
-    assert!(nested.next_doc_ids(Some(u64::MAX), 2).unwrap().is_empty());
-    assert!(nested.next_doc_ids(None, 0).unwrap().is_empty());
+    assert_eq!(nested.next_doc_ids(Some(u64::MAX), 2).unwrap().len(), 0);
+    assert_eq!(nested.next_doc_ids(None, 0).unwrap().len(), 0);
     assert!(!nested.contains_doc_id(5).unwrap());
     assert!(nested.writable_snapshot().is_err());
 }

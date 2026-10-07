@@ -242,10 +242,13 @@ mod tests {
         let catalog = KeyValueCatalog::new(Arc::clone(&store));
         let mut filter = GraphEntityFilter::new(GraphEntityKind::Vertex, None);
         filter.label = Some("Item");
-        assert!(catalog
-            .graph_entity_ids_impl(filter, None, 1)
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            catalog
+                .graph_entity_ids_impl(filter, None, 1)
+                .unwrap()
+                .len(),
+            0
+        );
         let row = StoredVertex {
             label: "Item".into(),
             properties_json: "{}".into(),

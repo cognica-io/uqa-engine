@@ -159,10 +159,13 @@ fn standalone_graph_scopes_preserve_sqlite_case_identity_and_transaction_rollbac
             "g",
         )
         .unwrap();
-        assert!(original
-            .neighbors(1, Some("rel"), Direction::Out, "g")
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            original
+                .neighbors(1, Some("rel"), Direction::Out, "g")
+                .unwrap()
+                .len(),
+            0
+        );
         assert_eq!(
             original
                 .neighbors(3, Some("reversed"), Direction::Out, "g")
@@ -222,7 +225,7 @@ fn standalone_same_entity_conflicts_keep_committed_selectors_and_discard_private
     connection.rollback_transaction().unwrap();
     assert_eq!(a.get_vertex(1).unwrap(), Some(right));
     assert_eq!(a.vertex_ids_by_label("right", "g").unwrap(), vec![1]);
-    assert!(a.vertex_ids_by_label("left", "g").unwrap().is_empty());
+    assert_eq!(a.vertex_ids_by_label("left", "g").unwrap().len(), 0);
 }
 
 #[test]

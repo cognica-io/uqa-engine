@@ -70,7 +70,7 @@ fn ordinary_planning_reparses_source_but_retained_replacements_keep_their_values
         value(&changed.expression),
         Some(&Value::Str(r"a\nb".into()))
     );
-    assert!(catalog.take_notices().is_empty());
+    assert_eq!(catalog.take_notices().len(), 0);
     assert_eq!(value(&first.expression), Some(&Value::Str("a\nb".into())));
     assert_eq!(catalog.evaluations.load(Ordering::SeqCst), 0);
 }
@@ -91,7 +91,7 @@ fn metadata_exclusions_precede_source_parse_but_multiple_statements_are_parsed()
             .unwrap()
             .is_none());
     }
-    assert!(catalog.take_notices().is_empty());
+    assert_eq!(catalog.take_notices().len(), 0);
     for _ in 0..2 {
         assert!(catalog
             .context()
@@ -127,7 +127,7 @@ fn authority_recursion_and_strict_null_do_not_parse_source() {
         .prepare(&binding, &[integer(1)], &[binding.object_id.unwrap()])
         .unwrap()
         .is_none());
-    assert!(catalog.take_notices().is_empty());
+    assert_eq!(catalog.take_notices().len(), 0);
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn immutable_constant_calls_use_existing_executor_before_inline_attempts() {
         .unwrap();
     assert_eq!(value(&folded.expression), Some(&Value::Int(37)));
     assert_eq!(catalog.evaluations.load(Ordering::SeqCst), 1);
-    assert!(catalog.take_notices().is_empty());
+    assert_eq!(catalog.take_notices().len(), 0);
 }
 
 #[test]

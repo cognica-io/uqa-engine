@@ -160,8 +160,7 @@ fn verify(snapshot: &dyn CommittedRecordSnapshot, records: &Records, sequence: C
     ] {
         let expected = records
             .iter()
-            .filter(|(key, _)| before.is_none_or(|before| key.as_slice() < before))
-            .next_back();
+            .rfind(|(key, _)| before.is_none_or(|before| key.as_slice() < before));
         let mut found = None;
         snapshot
             .visit_last_key(b"", before, &control, &mut |key, record| {
@@ -219,13 +218,9 @@ fn descending_run_seeks_match_ordered_oracle_across_prefixes_and_history() {
                 Some(newest_key.as_slice()),
                 Some(b"\xff\xff\xff"),
             ] {
-                let expected = records
-                    .iter()
-                    .filter(|(key, _)| {
-                        key.starts_with(prefix)
-                            && before.is_none_or(|before| key.as_slice() < before)
-                    })
-                    .next_back();
+                let expected = records.iter().rfind(|(key, _)| {
+                    key.starts_with(prefix) && before.is_none_or(|before| key.as_slice() < before)
+                });
                 let mut found = None;
                 snapshot
                     .visit_last_key(prefix, before, &control(), &mut |key, record| {

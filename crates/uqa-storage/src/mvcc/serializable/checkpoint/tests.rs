@@ -530,7 +530,7 @@ fn cancellation_stops_streaming_without_changing_the_live_graph() {
     control.cancellation().cancel();
     let mut output = Vec::new();
     assert!(graph.write_checkpoint(&mut output, &control).is_err());
-    assert!(output.is_empty());
+    assert_eq!(output.len(), 0);
     graph.check_active(actor).unwrap();
     let decode = StorageReadControl::with_limit(128 * 1024);
     decode.cancellation().cancel();

@@ -226,7 +226,7 @@ fn negative_persisted_cluster_ids_are_rejected_by_every_posting_reader() {
     assert!(visit_error
         .to_string()
         .contains("negative posting cluster -1"));
-    assert!(visited.is_empty());
+    assert_eq!(visited.len(), 0);
 
     let scoring_error = idx
         .get_scoring_inputs_bulk(&[1], "title", &terms)

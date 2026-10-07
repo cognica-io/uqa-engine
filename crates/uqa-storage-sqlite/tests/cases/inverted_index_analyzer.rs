@@ -138,7 +138,7 @@ fn memory_get_field_analyzer_falls_back_to_default() {
     let a = idx.get_field_analyzer("missing");
     // default analyzer is the constructor's; analyzing a stop word
     // returns an empty token list.
-    assert!(a.analyze("the").unwrap().is_empty());
+    assert_eq!(a.analyze("the").unwrap().len(), 0);
 }
 
 #[test]
@@ -149,14 +149,14 @@ fn memory_index_assignment_preserves_default_search_revision() {
         .unwrap();
     // An index-only change preserves the previous default search revision.
     let search = idx.get_search_analyzer("body");
-    assert!(search.analyze("the").unwrap().is_empty());
+    assert_eq!(search.analyze("the").unwrap().len(), 0);
 }
 
 #[test]
 fn memory_search_falls_back_to_default_when_no_field_analyzer() {
     let idx = MemoryInvertedIndex::new(standard_analyzer("english"));
     let search = idx.get_search_analyzer("body");
-    assert!(search.analyze("the").unwrap().is_empty());
+    assert_eq!(search.analyze("the").unwrap().len(), 0);
 }
 
 #[test]
@@ -166,8 +166,8 @@ fn memory_phase_both_sets_both() {
         .unwrap();
     let index_a = idx.get_field_analyzer("body");
     let search_a = idx.get_search_analyzer("body");
-    assert!(index_a.analyze("the").unwrap().is_empty());
-    assert!(search_a.analyze("the").unwrap().is_empty());
+    assert_eq!(index_a.analyze("the").unwrap().len(), 0);
+    assert_eq!(search_a.analyze("the").unwrap().len(), 0);
 }
 
 #[test]
@@ -360,8 +360,8 @@ fn sqlite_backward_compat_no_phase_arg_uses_both() {
         .unwrap();
     let i = idx.get_field_analyzer("body");
     let s = idx.get_search_analyzer("body");
-    assert!(i.analyze("the").unwrap().is_empty());
-    assert!(s.analyze("the").unwrap().is_empty());
+    assert_eq!(i.analyze("the").unwrap().len(), 0);
+    assert_eq!(s.analyze("the").unwrap().len(), 0);
 }
 
 #[test]

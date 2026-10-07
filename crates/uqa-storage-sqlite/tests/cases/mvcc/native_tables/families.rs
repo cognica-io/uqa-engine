@@ -362,7 +362,7 @@ fn table_rename_and_generation_transfer_preserve_every_native_owned_payload_and_
             "{}",
             family.layout().table
         );
-        assert!(rows(&connection, family, "public.docs").is_empty());
+        assert_eq!(rows(&connection, family, "public.docs").len(), 0);
         for (before, after) in before.iter().zip(&expected) {
             let record = NativeRecord::encode(
                 family,
@@ -413,7 +413,7 @@ fn table_rename_and_generation_transfer_preserve_every_native_owned_payload_and_
     catalog.drop_table_and_data("public.renamed").unwrap();
     assert_ivf_guard_history(&*old, &*store.snapshot(&control).unwrap(), &control);
     for family in families() {
-        assert!(rows(&connection, family, "public.renamed").is_empty());
+        assert_eq!(rows(&connection, family, "public.renamed").len(), 0);
     }
     assert_value(&connection, &catalog, "untouched", Some(9));
 }

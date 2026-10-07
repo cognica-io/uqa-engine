@@ -152,8 +152,8 @@ fn legacy_conversion_joins_the_owning_transaction_and_source_rebuild_retires_all
             fields("actual source"),
         )]))
         .unwrap();
-    for tag in [b'p', b'r', b'k', b'o', b'x', b'l', b'f'] {
-        assert!(store.scan_prefix(&[tag]).unwrap().is_empty());
+    for tag in *b"prkoxlf" {
+        assert_eq!(store.scan_prefix(&[tag]).unwrap().len(), 0);
     }
     assert!(!index.source_rebuild_required().unwrap());
 }

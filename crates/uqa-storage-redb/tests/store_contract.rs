@@ -245,12 +245,12 @@ fn redb_migrates_legacy_postings_and_rebuilds_lossless_occurrences() {
     drop(storage);
     let reopened = RedbStorage::open(&path).unwrap();
     let store = reopened.store();
-    assert!(store.scan_prefix(b"p").unwrap().is_empty());
-    assert!(store.scan_prefix(b"r").unwrap().is_empty());
+    assert_eq!(store.scan_prefix(b"p").unwrap().len(), 0);
+    assert_eq!(store.scan_prefix(b"r").unwrap().len(), 0);
     for prefix in [b"k", b"o", b"x", b"l", b"f"] {
-        assert!(store.scan_prefix(prefix).unwrap().is_empty());
+        assert_eq!(store.scan_prefix(prefix).unwrap().len(), 0);
     }
-    assert!(!store.scan_prefix(b"e").unwrap().is_empty());
+    assert_ne!(store.scan_prefix(b"e").unwrap().len(), 0);
     let reopened_index = reopened
         .open_session()
         .unwrap()
@@ -290,9 +290,9 @@ fn redb_rolls_back_legacy_posting_migration_after_staged_writes() {
     assert_eq!(store.get(&posting_key).unwrap(), Some(vec![0, 0, 0, 0]));
     assert_eq!(store.get(&reverse_key).unwrap(), Some(Vec::new()));
     assert_eq!(store.get(&extra_reverse_key).unwrap(), Some(Vec::new()));
-    assert!(store.scan_prefix(b"k").unwrap().is_empty());
-    assert!(store.scan_prefix(b"o").unwrap().is_empty());
-    assert!(store.scan_prefix(b"x").unwrap().is_empty());
+    assert_eq!(store.scan_prefix(b"k").unwrap().len(), 0);
+    assert_eq!(store.scan_prefix(b"o").unwrap().len(), 0);
+    assert_eq!(store.scan_prefix(b"x").unwrap().len(), 0);
 }
 #[path = "store_contract/controlled.rs"]
 mod controlled;

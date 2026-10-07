@@ -183,10 +183,10 @@ fn native_analyzer_binding_replacement_and_legacy_writes_preserve_other_phases()
     catalog
         .save_table_field_analyzer("z", "text", "search", "searcher")
         .unwrap();
-    assert!(catalog
-        .load_table_field_analyzer_bindings()
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        catalog.load_table_field_analyzer_bindings().unwrap().len(),
+        0
+    );
     assert_eq!(
         catalog.load_table_field_analyzers().unwrap(),
         vec![

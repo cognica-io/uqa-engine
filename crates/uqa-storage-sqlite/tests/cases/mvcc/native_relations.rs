@@ -328,7 +328,7 @@ fn native_and_legacy_relation_lifecycle_preserve_claims_security_and_sorted_read
         for (name, _, _) in catalog.load_foreign_servers().unwrap() {
             catalog.drop_foreign_server(&name).unwrap();
         }
-        assert!(catalog.load_foreign_servers().unwrap().is_empty());
+        assert_eq!(catalog.load_foreign_servers().unwrap().len(), 0);
         catalog.drop_schema("app").unwrap();
         assert!(catalog
             .save_view(&view("missing_schema", "failure"))

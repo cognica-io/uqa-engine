@@ -260,10 +260,13 @@ fn role_migration_validates_memberships_before_replacing_legacy_metadata() {
         catalog.get_metadata(ROLES_METADATA_KEY).unwrap().as_deref(),
         Some("{}")
     );
-    assert!(catalog
-        .metadata_with_prefix(records::ROLE_PREFIX)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        catalog
+            .metadata_with_prefix(records::ROLE_PREFIX)
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -279,10 +282,13 @@ fn read_only_role_restoration_requires_completed_initial_migration() {
         catalog.get_metadata(ROLES_METADATA_KEY).unwrap().as_deref(),
         Some("{}")
     );
-    assert!(catalog
-        .metadata_with_prefix(records::ROLE_PREFIX)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        catalog
+            .metadata_with_prefix(records::ROLE_PREFIX)
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]

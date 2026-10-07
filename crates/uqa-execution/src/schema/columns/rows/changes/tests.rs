@@ -203,7 +203,7 @@ fn an_unchanged_generation_needs_no_record_allocation() {
     let rows = capture_since(&owner, 0, TABLE, &memory, &CancellationToken::new()).unwrap();
     assert!(rows.is_empty());
     assert_eq!(rows.get(1).unwrap(), None);
-    assert!(entries(&rows).is_empty());
+    assert_eq!(entries(&rows).len(), 0);
     assert_eq!(memory.used(), 0);
 }
 

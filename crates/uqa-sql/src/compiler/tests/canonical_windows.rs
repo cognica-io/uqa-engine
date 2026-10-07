@@ -49,7 +49,7 @@ fn canonical_windows_preserve_own_clauses_and_postgresql_raw_matching() {
         [1, 0, 5, 3, 3]
     );
     assert_eq!(statement.windows[3].inherited, Some(2));
-    assert!(statement.windows[3].spec.partition_by.is_empty());
+    assert_eq!(statement.windows[3].spec.partition_by.len(), 0);
     assert!(statement
         .windows
         .iter()
@@ -111,7 +111,7 @@ fn legacy_window_json_without_definitions_keeps_inline_execution_specs() {
         .unwrap()
         .remove("definition");
     let statement: crate::ast::SelectStmt = serde_json::from_value(value).unwrap();
-    assert!(statement.windows.is_empty());
+    assert_eq!(statement.windows.len(), 0);
     let Expr::WindowCall { spec, .. } = &statement.projections[0].expr else {
         panic!("window")
     };

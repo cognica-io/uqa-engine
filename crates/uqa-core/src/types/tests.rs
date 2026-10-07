@@ -52,7 +52,7 @@ fn value_deserializer_does_not_trust_sequence_size_hints() {
 fn payload_default_is_zero_score_and_empty() {
     let p = Payload::default();
     assert_eq!(p.score, 0.0);
-    assert!(p.positions.is_empty());
+    assert_eq!(p.positions.len(), 0);
     assert!(p.fields.is_empty());
 }
 

@@ -110,7 +110,7 @@ fn fail_frame(frame: &[u8], error: ProtocolError, after_ready: bool) {
     };
     let mut output = Vec::new();
     assert_eq!(feed(&mut decoder, frame, &mut output), Err(error));
-    assert!(output.is_empty());
+    assert_eq!(output.len(), 0);
     assert!(decoder.is_terminal());
     assert_eq!(
         decoder.decode(fixture().ready.as_bytes()).unwrap_err(),

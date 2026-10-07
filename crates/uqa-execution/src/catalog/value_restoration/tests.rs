@@ -175,8 +175,8 @@ impl ValueRestorationSession for Rebuild<'_> {
         &self,
         table: &str,
     ) -> StorageBackendResult<()> {
-        assert!(self.fixture.backend.btree_index_fields(table)?.is_empty());
-        assert!(self.fixture.catalog.load_column_stats(table)?.is_empty());
+        assert_eq!(self.fixture.backend.btree_index_fields(table)?.len(), 0);
+        assert_eq!(self.fixture.catalog.load_column_stats(table)?.len(), 0);
         self.calls.borrow_mut().push(table.into());
         if self.fail {
             return Err(invalid("injected physical rebuild failure"));
@@ -241,7 +241,7 @@ fn restoration_preserves_paged_rows_metadata_and_index_identity() {
     let current = fixture.catalog.load_catalog_indexes().unwrap().remove(0);
     assert_eq!(current.relation, index.relation);
     assert_eq!(current.definition_json, index.definition_json);
-    assert!(fixture.catalog.load_column_stats(TABLE).unwrap().is_empty());
+    assert_eq!(fixture.catalog.load_column_stats(TABLE).unwrap().len(), 0);
     fixture.backend.begin_transaction().unwrap();
     normalize_legacy_vectors(&fixture.catalog, &fixture.backend, &restore).unwrap();
     assert!(!fixture.store.transaction_has_written().unwrap());

@@ -103,9 +103,12 @@ fn reused_identity_slots_exclude_stale_holders_and_waiters_even_with_a_live_pid(
         .try_slot_claim(41, second.slot(), RelationLockMode::AccessExclusive)
         .unwrap()
         .unwrap();
-    assert!(coordinator
-        .local_holders_conflicting(wait, generation)
-        .is_empty());
+    assert_eq!(
+        coordinator
+            .local_holders_conflicting(wait, generation)
+            .len(),
+        0
+    );
     assert_eq!(
         coordinator.local_holders_conflicting(wait, current),
         vec![41]

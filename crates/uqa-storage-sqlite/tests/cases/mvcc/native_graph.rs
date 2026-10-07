@@ -259,10 +259,13 @@ fn native_graph_replacement_and_removal_match_legacy_and_restore_savepoints() {
         assert!(!catalog
             .path_index_data_is_current("other::paths", "[]")
             .unwrap());
-        assert!(catalog
-            .path_index_pairs("g::paths", "[]", None, 4)
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            catalog
+                .path_index_pairs("g::paths", "[]", None, 4)
+                .unwrap()
+                .len(),
+            0
+        );
         connection.rollback_to_savepoint("original").unwrap();
         let restored = catalog.load_named_graph_snapshot("g").unwrap().unwrap();
         let rows = |snapshot: &GraphSnapshot| {
@@ -304,7 +307,7 @@ fn native_graph_replacement_and_removal_match_legacy_and_restore_savepoints() {
         assert!(catalog.graph_edge(11).unwrap().is_none());
         catalog.delete_graph_membership_for_graph("other").unwrap();
         catalog.purge_orphan_graph_entities().unwrap();
-        assert!(catalog.load_vertices().unwrap().is_empty());
+        assert_eq!(catalog.load_vertices().unwrap().len(), 0);
     }
 }
 
@@ -415,10 +418,13 @@ fn native_graph_mutations_select_dependencies_before_loading_unrelated_payloads(
     assert!(catalog
         .save_path_index_pairs("paths", "[]", &[(1, 1), (1, u64::MAX)])
         .is_err());
-    assert!(catalog
-        .path_index_pairs("paths", "[]", None, 4)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        catalog
+            .path_index_pairs("paths", "[]", None, 4)
+            .unwrap()
+            .len(),
+        0
+    );
     catalog.clear_path_index_data("paths").unwrap();
     catalog.finish_path_index_data("paths", "g", "[]").unwrap();
     assert!(catalog.path_index_data_is_current("paths", "[]").unwrap());

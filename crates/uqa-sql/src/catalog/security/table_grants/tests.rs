@@ -128,7 +128,7 @@ fn table_and_column_grants_preserve_input_security_and_grant_options() {
     )
     .unwrap();
     assert_eq!(count, 2);
-    assert!(notices.is_empty());
+    assert_eq!(notices.len(), 0);
     assert_eq!(current, TableSecurity::owner("uqa"));
     assert!(role_has_privilege(
         &next,
@@ -531,7 +531,7 @@ fn table_revoke_removes_implied_column_grants_and_checks_their_dependent_paths()
     )
     .unwrap();
     assert_eq!(granted, 1);
-    assert!(notices.is_empty());
+    assert_eq!(notices.len(), 0);
     assert!(revoked.column_acls.is_empty());
 }
 

@@ -63,7 +63,7 @@ fn exact_cache_keeps_committed_private_and_rolled_back_vector_generations() {
     assert_eq!(nearest(&index, &[-1.0, 0.0]), [1]);
     assert_eq!(nearest(&index, &[1.0, 0.0]), [1]);
     writer.clear().unwrap();
-    assert!(nearest(&index, &[1.0, 0.0]).is_empty());
+    assert_eq!(nearest(&index, &[1.0, 0.0]).len(), 0);
 }
 
 #[test]

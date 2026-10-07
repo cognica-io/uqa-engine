@@ -444,7 +444,7 @@ fn set_constraints_preserves_all_named_qualified_and_mode_shapes() {
     else {
         panic!("expected SET CONSTRAINTS");
     };
-    assert!(constraints.is_empty());
+    assert_eq!(constraints.len(), 0);
     assert!(deferred);
 
     let Statement::SetConstraints {
@@ -718,7 +718,7 @@ fn select_into_lowers_to_the_create_table_as_contract() {
     };
     assert_eq!(name, "app.\"Copied\"");
     assert!(!if_not_exists);
-    assert!(column_names.is_empty());
+    assert_eq!(column_names.len(), 0);
     assert!(!with_no_data);
     assert_eq!(body.projections.len(), 1);
     assert_eq!(body.projections[0].alias.as_deref(), Some("value"));

@@ -166,7 +166,7 @@ fn cancellation_interrupts_scans_emission_projection_and_final_position_validati
             drop(other);
             assert_eq!(budget.used(), 0);
         }
-        assert!(!expected.tokens().is_empty());
+        assert_ne!(expected.tokens().len(), 0);
     }
 }
 

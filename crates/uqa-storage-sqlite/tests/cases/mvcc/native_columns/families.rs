@@ -220,7 +220,7 @@ fn column_rename_keeps_existing_btree_targets_and_expression_namespaces_and_move
                 EXPRESSION_KEYS
             );
             catalog.drop_column_data(TABLE, "renamed").unwrap();
-            assert!(btree.repairs().unwrap().is_empty());
+            assert_eq!(btree.repairs().unwrap().len(), 0);
             assert_eq!(
                 btree
                     .load(TABLE, &ValueIndexKey::Index("n".into()))

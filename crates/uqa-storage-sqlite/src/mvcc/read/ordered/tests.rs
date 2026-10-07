@@ -108,7 +108,7 @@ fn ordered_payloads_align_invisible_heads_tombstones_and_compacted_records() {
         )
         .unwrap();
     let control = StorageReadControl::with_limit(4096);
-    let expected = vec![
+    let expected = [
         (b"b".to_vec(), 2, None),
         (b"c".to_vec(), 1, Some(b"c".to_vec())),
         (b"d".to_vec(), 2, None),

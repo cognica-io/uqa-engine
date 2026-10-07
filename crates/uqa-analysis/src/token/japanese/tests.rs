@@ -207,7 +207,7 @@ fn mapped_width_edits_and_rewritten_tokens_keep_covering_original_spans() {
     }
     .filter_analyzed_budgeted(expanded, || Ok(()))
     .unwrap();
-    assert!(empty.tokens().is_empty());
+    assert_eq!(empty.tokens().len(), 0);
     assert_eq!(
         empty.batch.terminal.as_ref().unwrap().japanese_morphology(),
         Some(&morphology)

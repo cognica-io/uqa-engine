@@ -110,7 +110,7 @@ fn vectors_remain_atomic_array_elements_with_zero_based_empty_views() {
         assert_eq!(decoded.elements(), values);
     }
     let ordinary_empty = ArrayValue::try_new(Vec::new()).unwrap();
-    assert!(ordinary_empty.dimensions().is_empty());
+    assert_eq!(ordinary_empty.dimensions().len(), 0);
     assert_eq!(ordinary_empty.upper_bound(0), None);
     let bounded_empty = ArrayValue::with_lower_bounds(Vec::new(), vec![0]).unwrap();
     assert_eq!(bounded_empty.dimensions(), &[0]);

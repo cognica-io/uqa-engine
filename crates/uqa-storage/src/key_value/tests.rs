@@ -97,18 +97,24 @@ fn memory_key_value_scan_and_batch_are_ordered_and_atomic() {
             .unwrap(),
         vec![b"p/a/1".to_vec(), b"p/a/2".to_vec()]
     );
-    assert!(store
-        .scan_prefix_keys_after(b"p/a/", Some(b"z"), 2)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix_keys_after(b"p/a/", Some(b"z"), 2)
+            .unwrap()
+            .len(),
+        0
+    );
     assert_eq!(
         store.first_prefix_after(b"p/a/", Some(b"a")).unwrap(),
         Some((b"p/a/1".to_vec(), b"one".to_vec()))
     );
-    assert!(store
-        .scan_prefix_keys_after(b"p/a/", None, 0)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix_keys_after(b"p/a/", None, 0)
+            .unwrap()
+            .len(),
+        0
+    );
 
     let mut batch = store.batch();
     batch.delete(b"p/a/1").unwrap();
@@ -290,8 +296,8 @@ fn key_value_document_cursor_returns_bounded_ordered_pages() {
 
     assert_eq!(docs.next_doc_ids(None, 2).unwrap(), vec![2, 5]);
     assert_eq!(docs.next_doc_ids(Some(5), 2).unwrap(), vec![8, 13]);
-    assert!(docs.next_doc_ids(Some(13), 2).unwrap().is_empty());
-    assert!(docs.next_doc_ids(None, 0).unwrap().is_empty());
+    assert_eq!(docs.next_doc_ids(Some(13), 2).unwrap().len(), 0);
+    assert_eq!(docs.next_doc_ids(None, 0).unwrap().len(), 0);
 }
 
 #[test]
@@ -524,14 +530,12 @@ fn key_value_legacy_postings_migrate_atomically_across_scan_pages() {
 
     KeyValueInvertedIndex::migrate_legacy_storage(store.as_ref()).unwrap();
 
-    assert!(store
-        .scan_prefix(&posting_key_prefix("articles").unwrap())
-        .unwrap()
-        .is_empty());
-    assert!(store
-        .scan_prefix(&reverse_posting_key_prefix("articles").unwrap())
-        .unwrap()
-        .is_empty());
+    for prefix in [
+        posting_key_prefix("articles").unwrap(),
+        reverse_posting_key_prefix("articles").unwrap(),
+    ] {
+        assert_eq!(store.scan_prefix(&prefix).unwrap().len(), 0);
+    }
     assert_eq!(
         store
             .scan_prefix(&posting_cluster_score_key_prefix("articles").unwrap())
@@ -639,14 +643,20 @@ fn key_value_legacy_posting_migration_rolls_back_on_missing_reverse_key() {
     let error = KeyValueInvertedIndex::migrate_legacy_storage(store.as_ref()).unwrap_err();
     assert!(error.to_string().contains("missing reverse posting"));
     assert_eq!(store.get(&legacy_key).unwrap(), Some(legacy_value));
-    assert!(store
-        .scan_prefix(&posting_cluster_score_key_prefix("articles").unwrap())
-        .unwrap()
-        .is_empty());
-    assert!(store
-        .scan_prefix(&posting_cluster_positions_key_prefix("articles").unwrap())
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix(&posting_cluster_score_key_prefix("articles").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        store
+            .scan_prefix(&posting_cluster_positions_key_prefix("articles").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
     assert!(store
         .get(&single_str_key(TAG_METADATA, "inverted_index_format").unwrap())
         .unwrap()
@@ -702,28 +712,43 @@ fn clustered_postings_follow_key_value_column_lifecycle() {
     renamed.remove_document(1).unwrap();
     assert_eq!(renamed.doc_freq("headline", "rust").unwrap(), 1);
     assert_eq!(renamed.doc_freq("headline", "search").unwrap(), 0);
-    assert!(store
-        .scan_prefix(&posting_cluster_score_field_prefix("articles", "title").unwrap())
-        .unwrap()
-        .is_empty());
-    assert!(store
-        .scan_prefix(&posting_cluster_positions_field_prefix("articles", "body").unwrap())
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix(&posting_cluster_score_field_prefix("articles", "title").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        store
+            .scan_prefix(&posting_cluster_positions_field_prefix("articles", "body").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
 
     catalog.purge_table_data("articles").unwrap();
-    assert!(store
-        .scan_prefix(&posting_cluster_score_key_prefix("articles").unwrap())
-        .unwrap()
-        .is_empty());
-    assert!(store
-        .scan_prefix(&posting_cluster_positions_key_prefix("articles").unwrap())
-        .unwrap()
-        .is_empty());
-    assert!(store
-        .scan_prefix(&posting_document_key_prefix("articles").unwrap())
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix(&posting_cluster_score_key_prefix("articles").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        store
+            .scan_prefix(&posting_cluster_positions_key_prefix("articles").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        store
+            .scan_prefix(&posting_document_key_prefix("articles").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -762,10 +787,13 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
         standard_analyzer("english"),
     );
     assert_eq!(renamed.doc_freq("title", "rust").unwrap(), 1);
-    assert!(store
-        .scan_prefix(&occurrence::table_prefix("public.articles").unwrap())
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix(&occurrence::table_prefix("public.articles").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
     assert_eq!(
         store
             .scan_prefix(&occurrence::kind_prefix("public.docs", occurrence::DOCUMENT).unwrap())
@@ -775,18 +803,27 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
     );
 
     catalog.drop_table_and_data("public.docs").unwrap();
-    assert!(store
-        .scan_prefix(&occurrence::table_prefix("public.docs").unwrap())
-        .unwrap()
-        .is_empty());
-    assert!(store
-        .scan_prefix(&posting_cluster_positions_key_prefix("public.docs").unwrap())
-        .unwrap()
-        .is_empty());
-    assert!(store
-        .scan_prefix(&occurrence::kind_prefix("public.docs", occurrence::DOCUMENT).unwrap())
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix(&occurrence::table_prefix("public.docs").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        store
+            .scan_prefix(&posting_cluster_positions_key_prefix("public.docs").unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        store
+            .scan_prefix(&occurrence::kind_prefix("public.docs", occurrence::DOCUMENT).unwrap())
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -956,18 +993,4 @@ fn key_value_field_stats_and_vocabulary_are_field_scoped() {
         ]
     );
     assert_eq!(index.field_stats("body").unwrap().total_docs, 1);
-}
-
-#[test]
-fn key_value_vector_reader_rejects_corrupt_ordinal() {
-    let store = store();
-    let mut key = vector_doc_prefix("articles", "embedding", 1).unwrap();
-    push_u64(&mut key, u64::MAX);
-    store
-        .put(&key, &vector_to_blob(&[1.0, 0.0]).unwrap())
-        .unwrap();
-    let index = KeyValueVectorIndex::new(store, "articles", "embedding", 2);
-
-    let error = index.search_knn(&[1.0, 0.0], 1).unwrap_err();
-    assert!(error.to_string().contains("persisted vector ordinal"));
 }

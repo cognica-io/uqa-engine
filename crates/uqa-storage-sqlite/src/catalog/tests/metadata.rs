@@ -94,7 +94,7 @@ fn metadata_prefix_reads_preserve_literal_nul_unicode_and_wildcards() {
             catalog.metadata_with_prefix("acl:%_\0").unwrap(),
             vec![("acl:%_\0日本語".into(), "literal".into())]
         );
-        assert!(catalog.metadata_with_prefix("absent").unwrap().is_empty());
+        assert_eq!(catalog.metadata_with_prefix("absent").unwrap().len(), 0);
     }
 }
 

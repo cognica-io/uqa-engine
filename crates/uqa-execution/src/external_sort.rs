@@ -982,10 +982,10 @@ mod tests {
     #[test]
     fn empty_input_and_zero_keep_are_empty() {
         let mut empty = sort(Vec::new(), 1, None);
-        assert!(run_to_rows(&mut empty).unwrap().1.is_empty());
+        assert_eq!(run_to_rows(&mut empty).unwrap().1.len(), 0);
 
         let rows = (0..10).map(|value| row(value, value)).collect();
         let mut zero = sort(rows, 1, Some(0));
-        assert!(run_to_rows(&mut zero).unwrap().1.is_empty());
+        assert_eq!(run_to_rows(&mut zero).unwrap().1.len(), 0);
     }
 }

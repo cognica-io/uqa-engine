@@ -153,7 +153,7 @@ fn retained_sessions_reject_all_publication_paths_before_evaluating_a_mutation()
     }
     assert_eq!(persistence.state.lock().next, 0);
     assert!(persistence.state.lock().identifiers.is_empty());
-    assert!(source.scan_prefix(b"").unwrap().is_empty());
+    assert_eq!(source.scan_prefix(b"").unwrap().len(), 0);
 }
 
 #[test]

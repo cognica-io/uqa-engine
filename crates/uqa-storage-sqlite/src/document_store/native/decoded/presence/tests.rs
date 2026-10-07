@@ -55,7 +55,7 @@ fn dense_document_presence_uses_bounded_selects_and_releases_reservations() {
     snapshot
         .for_each_fields_multi_ref_with_presence(&ids, &[], &mut |id, present, fields| {
             assert_eq!(present, (1..=1024).contains(&id));
-            assert!(fields.is_empty());
+            assert_eq!(fields.len(), 0);
             seen.push(id);
             true
         })

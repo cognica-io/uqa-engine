@@ -202,8 +202,8 @@ fn empty_enum_array_output_uses_its_declared_element_type() {
     let Value::Array(output) = output else {
         panic!("array output");
     };
-    assert!(output.elements().is_empty());
-    assert!(output.dimensions().is_empty());
+    assert_eq!(output.elements().len(), 0);
+    assert_eq!(output.dimensions().len(), 0);
 }
 
 #[test]

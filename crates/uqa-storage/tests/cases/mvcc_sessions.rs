@@ -129,7 +129,7 @@ fn paired_handles_require_the_same_reported_transaction_context() {
         }
     }
     assert!(!a.in_transaction());
-    assert!(a.scan_prefix(b"").unwrap().is_empty());
+    assert_eq!(a.scan_prefix(b"").unwrap().len(), 0);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

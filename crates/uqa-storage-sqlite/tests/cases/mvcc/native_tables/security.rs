@@ -25,7 +25,7 @@ fn native_table_security_preserves_nullable_migrations_and_retained_privileges()
         .unwrap();
     bind(&connection);
     let mut row = catalog.load_tables().unwrap().remove(0);
-    assert!(row.columns_json.is_empty());
+    assert_eq!(row.columns_json, "");
     assert_eq!(row.security, RelationSecurityRow::legacy("owner"));
     let other = connection.new_session();
     let old = Catalog::open(other.clone()).unwrap();

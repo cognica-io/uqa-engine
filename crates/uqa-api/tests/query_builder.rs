@@ -94,7 +94,7 @@ fn engine_with_vectors() -> Engine {
 }
 
 fn assert_probability_scores(result: &uqa_sql::SQLResult) {
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         match row.get("_score") {
             Some(Value::Float(score)) => assert!(*score > 0.0 && *score < 1.0),
@@ -220,7 +220,7 @@ fn multi_field_match_through_builder() {
         .order_by_desc("_score")
         .execute()
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]
@@ -484,7 +484,7 @@ fn vector_compatibility_builder_emits_registered_knn_query() {
         .vector(&[0.9, 0.1], 3, "embedding")
         .unwrap();
     assert!(query.to_sql().contains(" WHERE knn_match("));
-    assert!(!query.execute().unwrap().rows.is_empty());
+    assert_ne!(query.execute().unwrap().rows.len(), 0);
 }
 
 #[test]
@@ -548,7 +548,7 @@ fn all_field_term_and_facet_builders_execute_their_generated_sql() {
     assert!(all_fields
         .to_sql()
         .contains("fts_match('_all', 'attention')"));
-    assert!(!all_fields.execute().unwrap().rows.is_empty());
+    assert_ne!(all_fields.execute().unwrap().rows.len(), 0);
 
     let notes = engine_with_corpus();
     let facet = QueryBuilder::new(&notes, "notes").facet("qty");
@@ -790,7 +790,7 @@ fn fluent_api_with_authority_prior() {
         .unwrap()
         .execute()
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]

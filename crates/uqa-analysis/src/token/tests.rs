@@ -143,7 +143,7 @@ fn trailing_removal_retains_exhaustion_attributes_across_later_filters() {
         }
         .filter_analyzed(filtered)
         .unwrap();
-        assert!(removed.tokens().is_empty());
+        assert_eq!(removed.tokens().len(), 0);
         assert_eq!(removed.batch.terminal.as_ref().unwrap().term(), "AND");
         assert_eq!(removed.final_position_increment(), 2);
     }

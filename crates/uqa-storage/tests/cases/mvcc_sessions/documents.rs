@@ -237,7 +237,7 @@ fn failed_identifier_observation_preserves_private_rows_and_table_owner_state() 
     persistence.state.lock().identifier_fault = true;
     assert!(documents.put(99, fields(99)).is_err());
     assert!(documents.is_empty().unwrap());
-    assert!(store.scan_prefix(b"O").unwrap().is_empty());
+    assert_eq!(store.scan_prefix(b"O").unwrap().len(), 0);
     assert_eq!(
         store.get(b"prior").unwrap().as_deref(),
         Some(b"kept".as_slice())

@@ -168,7 +168,7 @@ fn borrowed_scored_scan_advances_rejected_pages_and_preserves_metadata() {
         None,
         Some(predicate()),
     );
-    assert!(source.next_physical_batch(0).unwrap().is_empty());
+    assert_eq!(source.next_physical_batch(0).unwrap().len(), 0);
     let rows = source.next_physical_batch(2).unwrap();
     assert_eq!(rows.len(), 2);
     for (row, id) in rows.iter().zip([7, 9]) {
@@ -176,7 +176,7 @@ fn borrowed_scored_scan_advances_rejected_pages_and_preserves_metadata() {
         assert_eq!(row.value(1), Some(&Value::Null));
         assert_eq!(row.value(2), Some(&Value::Int(id)));
     }
-    assert!(source.next_physical_batch(2).unwrap().is_empty());
+    assert_eq!(source.next_physical_batch(2).unwrap().len(), 0);
 }
 
 #[test]
@@ -203,7 +203,7 @@ fn borrowed_local_scan_preserves_lock_identity_and_cancellation() {
             candidates: None,
             command_changes: None,
         });
-        assert!(source.next_physical_batch(0).unwrap().is_empty());
+        assert_eq!(source.next_physical_batch(0).unwrap().len(), 0);
         let rows = source.next_physical_batch(2).unwrap();
         assert_eq!(rows.len(), 2);
         for (row, id) in rows.iter().zip([7, 9]) {
@@ -211,7 +211,7 @@ fn borrowed_local_scan_preserves_lock_identity_and_cancellation() {
             assert_eq!(row.value(1), Some(&Value::Null));
             assert_eq!(row.lock_origins()[0].doc_id, id as u64);
         }
-        assert!(source.next_physical_batch(1).unwrap().is_empty());
+        assert_eq!(source.next_physical_batch(1).unwrap().len(), 0);
         cancellation.cancel();
         assert!(source.next_physical_batch(1).is_err());
     }

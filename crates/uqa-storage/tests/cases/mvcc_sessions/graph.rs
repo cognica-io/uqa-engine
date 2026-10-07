@@ -219,7 +219,7 @@ fn graph_lookup_mutation_keeps_original_preconditions_without_replaying() {
         let mut filter =
             uqa_storage::GraphEntityFilter::new(uqa_storage::GraphEntityKind::Vertex, None);
         filter.label = Some(label);
-        assert!(first.graph_entity_ids(filter, None, 10).unwrap().is_empty());
+        assert_eq!(first.graph_entity_ids(filter, None, 10).unwrap().len(), 0);
     }
 }
 
@@ -255,7 +255,7 @@ fn graph_replacement_uses_only_the_final_duplicate_entity_rows() {
     for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
         let mut filter = GraphEntityFilter::new(kind, None);
         filter.label = Some("discarded");
-        assert!(first.graph_entity_ids(filter, None, 10).unwrap().is_empty());
+        assert_eq!(first.graph_entity_ids(filter, None, 10).unwrap().len(), 0);
     }
     assert!(!a.in_transaction());
 }

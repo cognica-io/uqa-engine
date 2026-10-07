@@ -129,7 +129,7 @@ fn borrowed_native_identity_pages_keep_their_lease_during_reentrant_writes() {
     assert_eq!(
         snapshot
             .for_each_next_fields(None, 3, &[], &mut |id, values| {
-                assert!(values.is_empty());
+                assert_eq!(values.len(), 0);
                 assert!(
                     control.memory().used() > retained,
                     "native ID buffers must remain charged through callbacks"
@@ -220,7 +220,7 @@ fn native_identity_page_buffers_share_the_read_allowance() {
     assert_eq!(read.ids(Some(4095), 1).unwrap(), [4096]);
     let full = control.memory().reserve(control.memory().limit()).unwrap();
     assert!(matches!(read.ids(None, 1), Err(SQLiteError::Memory(_))));
-    assert!(read.ids(None, 0).unwrap().is_empty());
+    assert_eq!(read.ids(None, 0).unwrap().len(), 0);
     drop(full);
     assert_eq!(read.ids(None, 1).unwrap(), [1]);
     control.cancellation().cancel();

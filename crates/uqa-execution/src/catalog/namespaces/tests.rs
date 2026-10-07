@@ -86,7 +86,10 @@ fn namespace_selection_respects_usage_and_keeps_empty_and_temporary_results() {
     );
     let path = resolution(&["missing", "private"]);
     assert_eq!(current_schema_name(&catalog, &path, "reader"), None);
-    assert!(current_schema_names(&catalog, &path, "reader", false).is_empty());
+    assert_eq!(
+        current_schema_names(&catalog, &path, "reader", false).len(),
+        0
+    );
     assert_eq!(
         current_schema_names(&catalog, &path, "reader", true),
         ["pg_catalog"]

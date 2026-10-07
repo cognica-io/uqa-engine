@@ -167,7 +167,7 @@ fn drop_table_removes_schema_and_documents() {
     cat.drop_table("t1").unwrap();
     cat.purge_table_data("t1").unwrap();
     assert!(cat.load_tables().unwrap().is_empty());
-    assert!(store.doc_ids().unwrap().is_empty());
+    assert_eq!(store.doc_ids().unwrap().len(), 0);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn drop_table_cascades_postings_and_stats() {
     cat.purge_table_data("t1").unwrap();
     assert_eq!(idx.get_posting_list("x", "hello").unwrap().len(), 0);
     assert_eq!(idx.get_doc_length(1, "x").unwrap(), 0);
-    assert!(cat.load_column_stats("t1").unwrap().is_empty());
+    assert_eq!(cat.load_column_stats("t1").unwrap().len(), 0);
 }
 
 #[test]
@@ -219,8 +219,8 @@ fn drop_table_data_atomically_cleans_only_its_legacy_public_alias() {
     .unwrap();
     cat.drop_table_and_data("public.docs").unwrap();
 
-    assert!(cat.load_column_stats("public.docs").unwrap().is_empty());
-    assert!(cat.load_column_stats("docs").unwrap().is_empty());
+    assert_eq!(cat.load_column_stats("public.docs").unwrap().len(), 0);
+    assert_eq!(cat.load_column_stats("docs").unwrap().len(), 0);
     assert_eq!(cat.load_column_stats("app.docs").unwrap().len(), 1);
     assert_eq!(
         cat.load_tables().unwrap()[0].relation.qualified_name(),
@@ -635,7 +635,7 @@ fn column_stats_delete() {
     cat.save_column_stats(column_stats("t1", "x", 5, 0, Some("1"), Some("10"), 20))
         .unwrap();
     cat.delete_column_stats("t1").unwrap();
-    assert!(cat.load_column_stats("t1").unwrap().is_empty());
+    assert_eq!(cat.load_column_stats("t1").unwrap().len(), 0);
 }
 
 #[test]

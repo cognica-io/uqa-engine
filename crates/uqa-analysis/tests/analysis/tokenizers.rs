@@ -28,7 +28,7 @@ fn whitespace_tokenizer_multiple_spaces() {
 #[test]
 fn whitespace_tokenizer_empty() {
     let t = Tokenizer::Whitespace;
-    assert!(t.tokenize("").unwrap().is_empty());
+    assert_eq!(t.tokenize("").unwrap().len(), 0);
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn letter_tokenizer_basic() {
 #[test]
 fn letter_tokenizer_only_letters() {
     let t = Tokenizer::Letter;
-    assert!(t.tokenize("42!!").unwrap().is_empty());
+    assert_eq!(t.tokenize("42!!").unwrap().len(), 0);
 }
 
 #[test]
@@ -148,5 +148,5 @@ fn keyword_tokenizer_single_token() {
 #[test]
 fn keyword_tokenizer_empty() {
     let t = Tokenizer::Keyword;
-    assert!(t.tokenize("").unwrap().is_empty());
+    assert_eq!(t.tokenize("").unwrap().len(), 0);
 }

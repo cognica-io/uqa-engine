@@ -222,7 +222,7 @@ fn diskann_complete_selection_masks_unselected_base_and_journal_documents() {
         .snapshot_with_diskann_changes(&empty_changes, &control)
         .unwrap()
         .unwrap();
-    assert!(scores(&*empty).is_empty());
+    assert_eq!(scores(&*empty).len(), 0);
     assert_eq!(empty.count().unwrap(), 0);
     assert_eq!(populations(&*empty), (0, 0));
     let retained = projected.snapshot().unwrap();

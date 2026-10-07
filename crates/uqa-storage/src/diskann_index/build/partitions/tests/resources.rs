@@ -19,7 +19,7 @@ fn partition_admission_failures_preserve_capture_and_release_every_new_owner() {
         let before = temporary.used();
         match input.build_partitions(directory.path(), parameters(32), options(16, 0)) {
             Ok(runs) => {
-                assert!(!edges(&runs).is_empty());
+                assert_ne!(edges(&runs).len(), 0);
                 successes += 1;
             }
             Err(StorageBackendError::Memory(_)) => failures += 1,

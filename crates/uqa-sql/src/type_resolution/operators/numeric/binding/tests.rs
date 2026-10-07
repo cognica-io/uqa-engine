@@ -36,7 +36,7 @@ impl Root {
     }
 
     fn unchanged(&self) {
-        assert!(self.binding.argument_types.is_empty());
+        assert_eq!(self.binding.argument_types.len(), 0);
         assert!(self.binding.resolution_error.is_none());
     }
 }

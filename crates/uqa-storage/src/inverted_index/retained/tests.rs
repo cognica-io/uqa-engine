@@ -333,7 +333,7 @@ fn reconstructed_morphology_keeps_lossless_terms_and_graphs_when_enabled() {
         let retained = index.finish().unwrap();
         let captured = ordinary.snapshot_with_control(&control).unwrap();
         let keys = ordinary.vocabulary_keys("body").unwrap();
-        assert!(!keys.is_empty());
+        assert_ne!(keys.len(), 0);
         assert_eq!(retained.vocabulary_keys("body").unwrap(), keys);
         let mut long_edge = false;
         for key in &keys {

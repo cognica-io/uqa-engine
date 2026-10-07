@@ -49,7 +49,7 @@ fn metadata_tracks_revisions_tombstones_rekeys_and_rollback() {
         .unwrap();
     assert_eq!(lengths(&transaction), expected);
     transaction.rollback().unwrap();
-    assert!(lengths(&connection).is_empty());
+    assert_eq!(lengths(&connection).len(), 0);
 }
 
 #[test]
@@ -68,5 +68,5 @@ fn version_metadata_failure_rolls_back_the_source_statement() {
             .unwrap(),
         0
     );
-    assert!(lengths(&connection).is_empty());
+    assert_eq!(lengths(&connection).len(), 0);
 }

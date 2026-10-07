@@ -108,7 +108,7 @@ fn path_aliases_share_one_descriptor_and_cannot_hide_live_leases() {
     let _admission = file.admit(&control).unwrap();
     assert_eq!(tags(&file, &control), [81]);
     drop(retained);
-    assert!(tags(&file, &control).is_empty());
+    assert_eq!(tags(&file, &control).len(), 0);
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn reusing_a_released_slot_keeps_only_the_new_tag_and_live_peers() {
         .unwrap();
     assert_eq!(tags(&second, &control), [33]);
     drop(replacement);
-    assert!(tags(&second, &control).is_empty());
+    assert_eq!(tags(&second, &control).len(), 0);
     assert_eq!(control.memory().used(), 0);
 }
 
@@ -159,9 +159,9 @@ fn a_new_incarnation_cannot_replace_a_live_namespace_or_inherit_old_tags() {
     drop(retained);
     let replacement = NativeLeaseFile::open(&path, namespace(2)).unwrap();
     let _admission = replacement.admit(&control).unwrap();
-    assert!(tags(&replacement, &control).is_empty());
+    assert_eq!(tags(&replacement, &control).len(), 0);
     let retained = replacement.retain(11, &control).unwrap();
     assert_eq!(tags(&replacement, &control), [11]);
     drop(retained);
-    assert!(tags(&replacement, &control).is_empty());
+    assert_eq!(tags(&replacement, &control).len(), 0);
 }

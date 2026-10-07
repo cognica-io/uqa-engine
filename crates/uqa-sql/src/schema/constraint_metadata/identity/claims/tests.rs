@@ -108,10 +108,13 @@ fn legacy_key_and_check_conversion_preserves_existing_public_addresses_once() {
     );
     validate_constraint_identities(&columns, &constraints).unwrap();
     let current = super::super::legacy::LegacyIdentities::capture(&columns, &constraints);
-    assert!(current
-        .preserve_oids(&relation, &mut columns, &mut constraints)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        current
+            .preserve_oids(&relation, &mut columns, &mut constraints)
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -154,10 +157,7 @@ fn attached_key_provenance_tracks_local_incarnation_through_renaming() {
     crate::schema::inheritance::alter::clear_partition_constraint_provenance(&mut child);
     assert_eq!(child.key_constraints.len(), 2);
     assert_eq!(child.key_constraints[1], replacement);
-    assert!(child
-        .hierarchy
-        .partition_inherited_key_constraints
-        .is_empty());
+    assert_eq!(child.hierarchy.partition_inherited_key_constraints.len(), 0);
 }
 
 #[test]

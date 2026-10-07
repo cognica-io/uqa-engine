@@ -58,8 +58,8 @@ struct HeldOutCalibrationGateFixture {
 fn fixture() -> CalibrationFixture {
     let fixture: CalibrationFixture = serde_json::from_str(FIXTURE_JSON).unwrap();
     assert_eq!(fixture.version, 1);
-    assert!(!fixture.fixture_id.is_empty());
-    assert!(!fixture.target_population.is_empty());
+    assert_ne!(fixture.fixture_id.len(), 0);
+    assert_ne!(fixture.target_population.len(), 0);
     fixture
 }
 

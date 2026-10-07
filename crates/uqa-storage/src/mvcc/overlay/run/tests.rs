@@ -139,7 +139,7 @@ fn cursors_and_last_before_honor_their_bounds() {
     assert_eq!(keys(Bound::Included(&key(1000))), all[500..].to_vec());
     assert_eq!(keys(Bound::Excluded(&key(1000))), all[501..].to_vec());
     assert_eq!(keys(Bound::Included(&key(1001))), all[501..].to_vec());
-    assert!(keys(Bound::Excluded(&key(3998))).is_empty());
+    assert_eq!(keys(Bound::Excluded(&key(3998))).len(), 0);
     let last = |end: Bound<&[u8]>| {
         run.last_before(end, &control)
             .unwrap()

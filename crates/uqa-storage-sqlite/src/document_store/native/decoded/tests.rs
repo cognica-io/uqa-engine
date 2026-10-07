@@ -110,7 +110,7 @@ fn requested_projections_keep_spilled_rows_through_reentrant_writes_and_rollback
     // Sparse metadata requests keep the captured deletions and duplicates after undo.
     let mut seen = Vec::new();
     read.visit_projection(&ids, &[], &mut |id, present, values| {
-        assert!(values.is_empty());
+        assert_eq!(values.len(), 0);
         seen.push((id, present));
         true
     })

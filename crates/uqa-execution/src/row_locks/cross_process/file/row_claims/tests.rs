@@ -198,7 +198,7 @@ fn a_session_keeps_one_entry_with_its_strongest_modes() {
     );
     coordinator.release(PARENT_SESSION, &claims(1, LockStrength::ForShare));
     coordinator.release(PARENT_SESSION, &claims(1, LockStrength::ForKeyShare));
-    assert!(modes(&coordinator).is_empty());
+    assert_eq!(modes(&coordinator).len(), 0);
     let state = coordinator.state.lock();
     assert!(state.rows.identities.is_empty());
     assert_eq!(state.rows.entries, 0);
@@ -219,11 +219,11 @@ fn a_claim_made_twice_is_released_twice() {
         [(PARENT_SESSION, Mode::None, Mode::Shared)]
     );
     coordinator.release(PARENT_SESSION, &claims(1, LockStrength::ForShare));
-    assert!(modes(&coordinator).is_empty());
+    assert_eq!(modes(&coordinator).len(), 0);
     // Releasing a claim that is not held changes nothing.
     coordinator.release(PARENT_SESSION, &claims(1, LockStrength::ForShare));
     coordinator.release(PARENT_SESSION, &claims(2, LockStrength::ForUpdate));
-    assert!(modes(&coordinator).is_empty());
+    assert_eq!(modes(&coordinator).len(), 0);
 }
 
 #[test]
@@ -246,14 +246,20 @@ fn sessions_of_one_process_keep_their_own_entries() {
     let mut row = state.rows.holders(wanted[1]);
     row.sort_unstable();
     assert_eq!(row, [17, 23]);
-    assert!(state
-        .rows
-        .holders(claims(1, LockStrength::ForShare)[0])
-        .is_empty());
-    assert!(state
-        .rows
-        .holders(claims(2, LockStrength::ForUpdate)[0])
-        .is_empty());
+    assert_eq!(
+        state
+            .rows
+            .holders(claims(1, LockStrength::ForShare)[0])
+            .len(),
+        0
+    );
+    assert_eq!(
+        state
+            .rows
+            .holders(claims(2, LockStrength::ForUpdate)[0])
+            .len(),
+        0
+    );
     drop(state);
     // The sessions of this process are not foreign holders.
     assert!(coordinator.foreign_row_holders(wanted[1]).is_empty());
@@ -289,7 +295,7 @@ fn a_bulk_claim_grows_the_table_and_its_release_returns_it() {
         .collect::<Vec<_>>();
     coordinator.release(PARENT_SESSION, &all);
     let (released, entries) = stored(&coordinator);
-    assert!(entries.is_empty());
+    assert_eq!(entries.len(), 0);
     assert_eq!(released.capacity_log2, table::INITIAL_CAPACITY_LOG2);
     assert!(released.epoch > header.epoch);
     let state = coordinator.state.lock();
@@ -392,7 +398,7 @@ fn a_process_attaching_alone_starts_from_an_empty_table() {
     // The coordinator closed with its claims in the table, as a process that exits inside a transaction leaves them.
     let coordinator = FileLockCoordinator::open(&path).unwrap();
     let (header, entries) = stored(&coordinator);
-    assert!(entries.is_empty());
+    assert_eq!(entries.len(), 0);
     assert_eq!(header.capacity_log2, table::INITIAL_CAPACITY_LOG2);
     assert!(header.epoch > first.0.epoch);
     let owner = coordinator.state.lock().rows.owner.unwrap();

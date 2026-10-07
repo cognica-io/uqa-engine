@@ -51,10 +51,10 @@ fn catalog_replacement_and_legacy_writes_keep_descriptors_and_labels_coherent() 
         catalog
             .save_table_field_analyzer("public.docs", "body", "search", "standard")
             .unwrap();
-        assert!(catalog
-            .load_table_field_analyzer_bindings()
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            catalog.load_table_field_analyzer_bindings().unwrap().len(),
+            0
+        );
         assert_eq!(catalog.load_table_field_analyzers().unwrap().len(), 2);
         catalog
             .replace_table_field_analyzer_binding("public.docs", "body", "both", "whole", &binding)
@@ -73,21 +73,21 @@ fn catalog_replacement_and_legacy_writes_keep_descriptors_and_labels_coherent() 
             )]
         );
         catalog.save_analyzer("whole", &config).unwrap();
-        assert!(catalog.load_analyzer_descriptors().unwrap().is_empty());
+        assert_eq!(catalog.load_analyzer_descriptors().unwrap().len(), 0);
         catalog
             .save_analyzer_revision("whole", &config, descriptor)
             .unwrap();
         catalog.drop_analyzer("whole").unwrap();
-        assert!(catalog.load_analyzer_descriptors().unwrap().is_empty());
-        assert!(catalog.load_analyzers().unwrap().is_empty());
+        assert_eq!(catalog.load_analyzer_descriptors().unwrap().len(), 0);
+        assert_eq!(catalog.load_analyzers().unwrap().len(), 0);
         catalog
             .drop_table_field_analyzer_field("public.docs", "body")
             .unwrap();
-        assert!(catalog
-            .load_table_field_analyzer_bindings()
-            .unwrap()
-            .is_empty());
-        assert!(catalog.load_table_field_analyzers().unwrap().is_empty());
+        assert_eq!(
+            catalog.load_table_field_analyzer_bindings().unwrap().len(),
+            0
+        );
+        assert_eq!(catalog.load_table_field_analyzers().unwrap().len(), 0);
     }
 }
 

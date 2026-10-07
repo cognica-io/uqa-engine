@@ -451,7 +451,7 @@ fn a_preparation_checkpoint_failure_never_attempts_main_publication() {
         write(&session, b"x");
         persistence.checkpoint_fault(1, fault);
         session.commit_transaction().unwrap_err();
-        assert!(persistence.state.lock().attempts.is_empty());
+        assert_eq!(persistence.state.lock().attempts.len(), 0);
         assert_eq!(persistence.session(1 << 20).get(b"x").unwrap(), None);
         session.rollback_transaction().unwrap();
         assert_eq!(
@@ -570,7 +570,7 @@ fn cancelled_preparation_keeps_typed_cancellation_and_uncancelled_rollback() {
         matches!(error, StorageBackendError::Cancelled(_)),
         "{error}"
     );
-    assert!(persistence.state.lock().attempts.is_empty());
+    assert_eq!(persistence.state.lock().attempts.len(), 0);
     session.rollback_transaction().unwrap();
     assert_eq!(
         persistence.actor_status(actor.id()).unwrap(),

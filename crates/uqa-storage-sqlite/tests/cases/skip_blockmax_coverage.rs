@@ -256,10 +256,12 @@ fn test_get_block_max_nonexistent_field() {
         idx.get_block_max_score("nonexistent", "alpha", 0).unwrap(),
         0.0
     );
-    assert!(idx
-        .get_all_block_max_scores("nonexistent", "alpha")
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        idx.get_all_block_max_scores("nonexistent", "alpha")
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]

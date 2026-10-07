@@ -171,7 +171,7 @@ fn common_filters_preserve_deferred_japanese_attribute_failures_until_public_emi
         custom_words: vec!["東京".into()],
     });
     let compiled = config.compile().unwrap();
-    assert!(compiled.analyze_tokens("東京").unwrap().tokens().is_empty());
+    assert_eq!(compiled.analyze_tokens("東京").unwrap().tokens().len(), 0);
     assert_eq!(
         config.analyze_tokens("東京").unwrap(),
         compiled.analyze_tokens("東京").unwrap()

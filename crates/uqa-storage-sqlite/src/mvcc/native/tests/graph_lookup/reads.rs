@@ -69,10 +69,7 @@ fn check_catalog(catalog: &Catalog) {
     assert_eq!(catalog.graph_entity_max_id(Vertex).unwrap(), Some(2));
     assert_eq!(catalog.graph_entity_max_id(Edge).unwrap(), Some(10));
     assert_eq!(catalog.graph_entity_memberships(Edge, 9).unwrap(), ["g"]);
-    assert!(catalog
-        .graph_entity_memberships(Edge, 10)
-        .unwrap()
-        .is_empty());
+    assert_eq!(catalog.graph_entity_memberships(Edge, 10).unwrap().len(), 0);
     assert!(catalog.graph_has_membership(Vertex, 1, "g").unwrap());
     assert!(!catalog.graph_has_membership(Vertex, 2, "g").unwrap());
     let snapshot = catalog.load_named_graph_snapshot("g").unwrap().unwrap();
@@ -153,10 +150,13 @@ fn check_filters(catalog: &Catalog) {
             .unwrap(),
         [10]
     );
-    assert!(catalog
-        .graph_entity_ids(filter(Edge, None), Some(10), 1)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        catalog
+            .graph_entity_ids(filter(Edge, None), Some(10), 1)
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]

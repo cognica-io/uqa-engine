@@ -163,7 +163,7 @@ fn detach_delete_removes_vertex_and_edges() {
     let (_, vrows) = run_read(&g, "MATCH (n:Person) RETURN id(n) AS i");
     assert_eq!(vrows.len(), 1);
     let (_, erows) = run_read(&g, "MATCH (a)-[r:KNOWS]->(b) RETURN id(r) AS i");
-    assert!(erows.is_empty());
+    assert_eq!(erows.len(), 0);
 }
 
 #[test]

@@ -140,7 +140,7 @@ fn empty_projections_probe_presence_without_decoding_and_snapshots_forward_lease
     documents
         .for_each_fields_multi_ref_with_presence(&[3, 4, 3], &[], &mut |id, present, values| {
             calls.push((id, present));
-            assert!(values.is_empty());
+            assert_eq!(values.len(), 0);
             true
         })
         .unwrap();

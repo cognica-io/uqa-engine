@@ -70,7 +70,7 @@ fn distinct_is_a_row_lock_identity_barrier() {
     let mut distinct = Distinct::all_with_work_mem(Box::new(scan), 1);
 
     let batches = crate::physical::run_to_batches(&mut distinct).unwrap();
-    assert!(batches[0].rows[0].lock_origins().is_empty());
+    assert_eq!(batches[0].rows[0].lock_origins().len(), 0);
 }
 
 #[test]

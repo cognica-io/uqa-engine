@@ -80,7 +80,7 @@ fn appending_projection_only_propagates_unmodified_ordering_prefix() {
         vec![("id".into(), ScalarExpr::Literal(Value::Int(0)))],
         vec![],
     );
-    assert!(overwritten.output_ordering().is_empty());
+    assert_eq!(overwritten.output_ordering().len(), 0);
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn zero_limit_does_not_open_a_blocking_child() {
         let mut source = Limit::new(Box::new(sort), 0, Some(limit));
         let result = run_to_rows(&mut source);
         if limit == 0 {
-            assert!(result.unwrap().1.is_empty());
+            assert_eq!(result.unwrap().1.len(), 0);
         } else {
             assert!(result.unwrap_err().to_string().contains("division by zero"));
         }

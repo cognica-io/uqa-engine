@@ -85,7 +85,7 @@ fn reliability_diagram_returns_list() {
         10,
     )
     .unwrap();
-    assert!(!diagram.is_empty());
+    assert_ne!(diagram.len(), 0);
 }
 
 #[test]

@@ -29,7 +29,7 @@ fn descriptors_keep_overloaded_aliases_named_defaults_and_signature_order() {
     );
     assert_eq!(nulls[0].return_type, ColumnType::JsonB);
     let (_, random) = lookup("random").unwrap();
-    assert!(random[0].argument_types.is_empty());
+    assert_eq!(random[0].argument_types.len(), 0);
     assert_eq!(random[1].argument_names, &["min", "max"]);
     assert_eq!(
         random[1].argument_types,

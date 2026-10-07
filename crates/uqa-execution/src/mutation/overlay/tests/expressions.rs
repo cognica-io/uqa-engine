@@ -67,22 +67,25 @@ fn expression_and_column_names_do_not_alias_and_newer_rows_mask_old_keys() {
         .unwrap(),
         Some(1)
     );
-    assert!(candidates(
-        &mut overlays,
-        &[Value::Str("tail".into()), Value::Int(7)],
-        &control
-    )
-    .unwrap()
-    .is_empty());
+    assert_eq!(
+        candidates(
+            &mut overlays,
+            &[Value::Str("tail".into()), Value::Int(7)],
+            &control
+        )
+        .unwrap()
+        .len(),
+        0
+    );
     overlays[1]
         .stage_evaluated("items", 1, Some(row(key(8), &control)), &control)
         .unwrap();
-    assert!(matches(&mut overlays, 7, &control).is_empty());
+    assert_eq!(matches(&mut overlays, 7, &control).len(), 0);
     assert_eq!(matches(&mut overlays, 8, &control), [1]);
     overlays[1]
         .stage_evaluated("items", 1, None, &control)
         .unwrap();
-    assert!(matches(&mut overlays, 8, &control).is_empty());
+    assert_eq!(matches(&mut overlays, 8, &control).len(), 0);
     drop(overlays);
     assert_eq!(control.memory().used(), 0);
 }
@@ -140,13 +143,16 @@ fn expression_keys_keep_predicate_null_and_versions_through_spill_publication_an
         .spill(&control)
         .unwrap();
     assert_eq!(matches(&mut overlays, 9, &control), [1]);
-    assert!(candidates(&mut overlays, &[Value::Null], &control)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        candidates(&mut overlays, &[Value::Null], &control)
+            .unwrap()
+            .len(),
+        0
+    );
     assert!(staged(&overlays[0], 1).published);
     overlays[0].restore(&checkpoint);
     assert_eq!(matches(&mut overlays, 7, &control), [1]);
-    assert!(matches(&mut overlays, 9, &control).is_empty());
+    assert_eq!(matches(&mut overlays, 9, &control).len(), 0);
     assert_eq!(
         candidates(&mut overlays, &[Value::Null], &control).unwrap(),
         [3]
@@ -228,10 +234,11 @@ fn fallible_expression_keys_compare_only_visible_rows_in_key_order() {
             &control,
         )
         .unwrap();
-    assert!(
+    assert_eq!(
         candidates(&mut overlays, &[Value::Int(2), invalid.clone()], &control)
             .unwrap()
-            .is_empty()
+            .len(),
+        0
     );
     assert_eq!(
         candidates(&mut overlays, &[Value::Int(1), invalid.clone()], &control)
@@ -242,9 +249,10 @@ fn fallible_expression_keys_compare_only_visible_rows_in_key_order() {
     overlays[1]
         .stage_evaluated("items", 1, None, &control)
         .unwrap();
-    assert!(
+    assert_eq!(
         candidates(&mut overlays, &[Value::Int(1), invalid], &control)
             .unwrap()
-            .is_empty()
+            .len(),
+        0
     );
 }
