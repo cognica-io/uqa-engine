@@ -5,7 +5,7 @@
 //
 
 use super::{Arc, CommandOverlayDocument, DocId, Document, Engine, SQLError, Value};
-use uqa_execution::mutation::overlay::CommandMutationOverlay;
+use uqa_execution::mutation::overlay::{CommandMutationOverlay, CommandStoredDocument};
 use uqa_execution::query::document_changes::{DocumentChanges, DocumentSelection};
 use uqa_execution::storage_errors::storage_error;
 use uqa_storage::{DocumentMetadata, StoredDocument};
@@ -40,7 +40,12 @@ impl Engine {
                 let metadata = document.metadata();
                 (Arc::new(document.into_fields()), metadata)
             });
-        CommandMutationOverlay::published(
+        let document = document
+            .map(|(fields, metadata)| {
+                self.command_indexed_document(&table, fields, metadata, &control)
+            })
+            .transpose()?;
+        CommandMutationOverlay::published_evaluated(
             &mut self.session.command_mutation_overlays.lock(),
             &table,
             doc_id,
@@ -49,7 +54,7 @@ impl Engine {
         )
     }
 
-    pub(super) fn command_overlay_table_name(&self, table: &str) -> Result<String, SQLError> {
+    pub(crate) fn command_overlay_table_name(&self, table: &str) -> Result<String, SQLError> {
         self.try_resolve_table_name(table)
             .map_err(|error| {
                 SQLError::Internal(format!("resolve command-overlay table `{table}`: {error}"))
@@ -127,17 +132,39 @@ impl Engine {
         let control = self.query_retention_control()?;
         let document = document
             .map(|fields| -> Result<_, SQLError> {
-                Ok((
+                self.command_indexed_document(
+                    &table,
                     fields,
                     DocumentMetadata::with_tuple_xmin(self.tuple_version_xid()?),
-                ))
+                    &control,
+                )
             })
             .transpose()?;
         let mut overlays = self.session.command_mutation_overlays.lock();
         let overlay = overlays.last_mut().ok_or_else(|| {
             SQLError::Internal("stage document without an active command overlay".into())
         })?;
-        overlay.stage(&table, doc_id, document, &control)
+        overlay.stage_evaluated(&table, doc_id, document, &control)
+    }
+
+    fn command_indexed_document(
+        &self,
+        table: &str,
+        fields: Arc<Document>,
+        metadata: DocumentMetadata,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<CommandStoredDocument, SQLError> {
+        let indexes = self
+            .physical_index_definitions()
+            .map_err(|error| storage_error("command index definitions", &error))?;
+        CommandStoredDocument::indexed(
+            fields,
+            metadata,
+            table,
+            &indexes,
+            self.constraint_execution_context().index_expressions(),
+            control,
+        )
     }
 
     pub(super) fn command_overlay_document(

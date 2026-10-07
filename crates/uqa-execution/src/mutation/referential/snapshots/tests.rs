@@ -71,6 +71,14 @@ impl MutationIndexRead for Source {
     fn staged_matches(&self, _: &str, _: &[String], _: &[Value]) -> Result<Vec<DocId>, SQLError> {
         Ok(self.staged.clone())
     }
+    fn staged_expression_matches(
+        &self,
+        _: &str,
+        _: &str,
+        _: &[Value],
+    ) -> Result<crate::mutation::overlay::CommandIndexProbe, SQLError> {
+        unreachable!()
+    }
     fn value_index_scan_key(
         &self,
         _: &str,

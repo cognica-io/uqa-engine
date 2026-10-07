@@ -164,33 +164,28 @@ impl EnforcedKeyExecution for EnforcedKey {
                     &uqa_core::Predicate::Equals(Value::Row(values.to_vec().into())),
                 )?
                 .ok_or_else(|| SQLError::Internal(format!("missing physical index {key:?}")))?;
-            let changes = context
-                .reads
-                .command_overlay_changes(table)?
-                .unwrap_or_default();
+            let uqa_storage::ValueIndexKey::Index(physical_key) = &key else {
+                unreachable!("expression index has a physical identity")
+            };
+            let staged = context
+                .indexes
+                .staged_expression_matches(table, physical_key, values)?;
             for entry in indexed.entries() {
                 let id = entry.doc_id;
-                if Some(id) == ignored || changes.contains_change(id).map_err(changes_error)? {
+                if Some(id) == ignored
+                    || staged.changes.contains_change(id).map_err(changes_error)?
+                {
                     continue;
                 }
                 if context.reads.get_document(table, id)?.is_some() {
                     return Ok(Some(id));
                 }
             }
-            for change in changes.changes() {
-                let (id, present) = change.map_err(changes_error)?;
-                if !present || Some(id) == ignored {
-                    continue;
-                }
-                if let Some(document) = context.reads.get_document(table, id)? {
-                    if let Some(actual) = self.values(context, table, &document)? {
-                        if key_values_equal(&actual, values)? {
-                            return Ok(Some(id));
-                        }
-                    }
-                }
-            }
-            return Ok(None);
+            return Ok(staged
+                .matches
+                .iter()
+                .copied()
+                .find(|id| Some(*id) != ignored));
         }
         if self.predicate.is_none() {
             return context
