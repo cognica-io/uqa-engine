@@ -11,7 +11,8 @@
 # new-crate rate limits.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+scripts="$(cd "$(dirname "$0")" && pwd)"
+root="${UQA_RELEASE_SOURCE_ROOT:-$(cd "$scripts/.." && pwd)}"
 cd "$root"
 
 live=0
@@ -128,11 +129,7 @@ publish_live() {
   local publish_log
   local publish_status
   local retry_at
-
-  if (( ! retry_rate_limits )); then
-    cargo publish -p "$crate" --locked "${cargo_args[@]+"${cargo_args[@]}"}"
-    return
-  fi
+  local index_retries=0
 
   publish_log="$(mktemp "${TMPDIR:-/tmp}/uqa-publish.XXXXXX")"
   while :; do
@@ -143,7 +140,17 @@ publish_live() {
       publish_status=$?
     fi
 
-    if ! grep -Fq "published too many new crates" "$publish_log"; then
+    # Upload acknowledgement and sparse-index visibility can reach different
+    # registry edges at different times. Retry only a missing exact-version
+    # UQA dependency whose successful publication can be independently verified.
+    if (( index_retries < 6 )) && python3 "$scripts/check-published-crate.py" "$crate" "$version" --dependency-error-log "$publish_log"; then
+      index_retries=$((index_retries + 1))
+      echo "Retrying $crate after dependency index propagation ($index_retries/6)" >&2
+      sleep "$((10 * (1 << (index_retries - 1))))"
+      continue
+    fi
+
+    if (( ! retry_rate_limits )) || ! grep -Fq "published too many new crates" "$publish_log"; then
       rm -f "$publish_log"
       return "$publish_status"
     fi
@@ -179,7 +186,7 @@ if (( live )); then
   fi
   # This includes crates before --start-at: resuming publication cannot bypass
   # complete archive verification or leave a late build error after an upload.
-  bash scripts/package-publishable-crates.sh
+  bash "$scripts/package-publishable-crates.sh"
   publishing=0
   if [[ -z "$start_at" ]]; then
     publishing=1
@@ -191,8 +198,9 @@ if (( live )); then
       fi
       publishing=1
     fi
-    if python3 scripts/check-published-crate.py "$crate" "$version"; then
+    if python3 "$scripts/check-published-crate.py" "$crate" "$version"; then
       echo "Already published: $crate@$version" >&2
+      python3 "$scripts/check-published-crate.py" "$crate" "$version" --wait-index
       continue
     else
       crate_status=$?
@@ -201,13 +209,15 @@ if (( live )); then
       fi
     fi
     if publish_live "$crate"; then
+      python3 "$scripts/check-published-crate.py" "$crate" "$version" --wait-index
       continue
     else
       crate_status=$?
     fi
     # A concurrent publisher may have completed this exact immutable version.
-    if python3 scripts/check-published-crate.py "$crate" "$version"; then
+    if python3 "$scripts/check-published-crate.py" "$crate" "$version"; then
       echo "Publication confirmed: $crate@$version" >&2
+      python3 "$scripts/check-published-crate.py" "$crate" "$version" --wait-index
     else
       exit "$crate_status"
     fi

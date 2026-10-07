@@ -30,13 +30,16 @@ SPEC.loader.exec_module(CHECKER)
 
 class CratePublicationTest(unittest.TestCase):
     def run_publisher(self, registry_statuses: list[int], publish_status: int = 0,
-                      package_status: int = 0, license_status: int = 0) -> tuple[subprocess.CompletedProcess, str]:
+                      package_status: int = 0, license_status: int = 0,
+                      index_failures: int = 0, separate_source: bool = False) -> tuple[subprocess.CompletedProcess, str]:
         with tempfile.TemporaryDirectory() as temporary:
             directory = pathlib.Path(temporary)
+            source = directory / "release-source" if separate_source else directory
+            source.mkdir(exist_ok=True)
             (directory / "scripts").mkdir()
             for name in ("publish-crates.sh", "package-publishable-crates.sh"):
                 shutil.copyfile(ROOT / "scripts" / name, directory / "scripts" / name)
-            (directory / "Cargo.toml").write_text('[workspace.package]\nversion = "0.5.1"\n')
+            (source / "Cargo.toml").write_text('[workspace.package]\nversion = "0.5.1"\n')
             checker = directory / "python3"
             checker.write_text(f"#!{sys.executable}\n" + """import json, os, pathlib, sys
 root = pathlib.Path(os.environ['UQA_TEST_COMMANDS'])
@@ -52,10 +55,14 @@ if sys.argv[1] == 'scripts/check-release-licenses.py':
         (root / 'archives-verified').touch()
     sys.exit(status)
 assert (root / 'archives-verified').exists(), 'registry access before all archives build and pass validation'
+assert pathlib.Path(sys.argv[1]).name == 'check-published-crate.py'
+if '--wait-index' in sys.argv:
+    sys.exit(0)
+if '--dependency-error-log' in sys.argv:
+    sys.exit(0 if int(os.environ['UQA_TEST_INDEX_FAILURES']) else 1)
 count = root / 'probes'
 attempt = int(count.read_text()) if count.exists() else 0
 count.write_text(str(attempt + 1))
-assert sys.argv[1] == 'scripts/check-published-crate.py'
 assert sys.argv[2] == 'uqa'
 sys.exit(json.loads(os.environ['UQA_TEST_REGISTRY'])[attempt])
 """)
@@ -79,19 +86,30 @@ if sys.argv[1] == 'package':
 assert sys.argv[1] == 'publish'
 assert (root / 'archives-verified').exists(), 'upload before every archive is verified'
 (root / 'cargo-args').write_text(' '.join(sys.argv[1:]))
+attempts = root / 'publish-attempts'
+attempt = int(attempts.read_text()) if attempts.exists() else 0
+attempts.write_text(str(attempt + 1))
+if attempt < int(os.environ['UQA_TEST_INDEX_FAILURES']):
+    print('failed to select a version for the requirement `uqa-engine = "^0.5.1"`')
+    print('location searched: crates.io index')
+    sys.exit(101)
 sys.exit(int(os.environ['UQA_TEST_PUBLISH']))
 """)
+            sleep = directory / "sleep"
+            sleep.write_text("#!/bin/sh\nexit 0\n")
+            sleep.chmod(0o755)
             checker.chmod(0o755)
             cargo.chmod(0o755)
             result = subprocess.run(
                 ["bash", "scripts/publish-crates.sh", "--live", "--start-at", "uqa"],
                 cwd=directory, text=True, capture_output=True,
                 env={**os.environ, "PATH": str(directory) + os.pathsep + os.environ["PATH"],
-                     "UQA_TEST_COMMANDS": temporary, "UQA_TEST_REGISTRY": json.dumps(registry_statuses),
+                     "UQA_RELEASE_SOURCE_ROOT": str(source),
+                     "UQA_TEST_COMMANDS": str(source), "UQA_TEST_REGISTRY": json.dumps(registry_statuses),
                      "UQA_TEST_PUBLISH": str(publish_status), "UQA_TEST_PACKAGE": str(package_status),
-                     "UQA_TEST_LICENSE": str(license_status)},
+                     "UQA_TEST_LICENSE": str(license_status), "UQA_TEST_INDEX_FAILURES": str(index_failures)},
             )
-            calls = directory / "cargo-args"
+            calls = source / "cargo-args"
             return result, calls.read_text() if calls.exists() else ""
 
     def test_any_archive_build_failure_prevents_the_first_upload(self) -> None:
@@ -113,6 +131,22 @@ sys.exit(int(os.environ['UQA_TEST_PUBLISH']))
         result, calls = self.run_publisher([1])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, "publish -p uqa --locked")
+
+    def test_recovery_builds_the_separate_original_source_tree(self) -> None:
+        result, calls = self.run_publisher([1], separate_source=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, "publish -p uqa --locked")
+
+    def test_dependency_index_propagation_retries_only_after_all_archives_build(self) -> None:
+        result, calls = self.run_publisher([1], index_failures=2)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, "publish -p uqa --locked")
+        self.assertEqual(result.stderr.count("after dependency index propagation"), 2)
+
+    def test_dependency_index_retries_have_a_fixed_bound(self) -> None:
+        result, _ = self.run_publisher([1, 1], index_failures=7)
+        self.assertEqual(result.returncode, 101, result.stderr)
+        self.assertEqual(result.stderr.count("after dependency index propagation"), 6)
 
     def test_registry_failure_does_not_start_publication(self) -> None:
         result, calls = self.run_publisher([2])
@@ -163,6 +197,49 @@ sys.exit(int(os.environ['UQA_TEST_PUBLISH']))
                 with self.assertRaises(RuntimeError):
                     CHECKER.published("uqa-core", "0.4.5")
 
+    def test_index_requires_the_exact_visible_non_yanked_version(self) -> None:
+        old = {"name": "uqa-engine", "vers": "0.5.0", "yanked": False}
+        current = {**old, "vers": "0.5.1"}
+        for entries, expected in (([old], False), ([old, current], True)):
+            data = b"\n".join(json.dumps(entry).encode() for entry in entries)
+            with mock.patch.object(CHECKER.urllib.request, "urlopen", return_value=io.BytesIO(data)) as request:
+                self.assertEqual(CHECKER.indexed("uqa-engine", "0.5.1"), expected)
+                self.assertEqual(request.call_args.args[0].full_url, "https://index.crates.io/uq/a-/uqa-engine")
+        for entry in ({**current, "yanked": True}, {**current, "name": "other"}, {}):
+            with mock.patch.object(CHECKER.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(entry).encode())):
+                with self.assertRaises(RuntimeError):
+                    CHECKER.indexed("uqa-engine", "0.5.1")
+
+    def test_index_wait_stops_when_visible_and_times_out_when_missing(self) -> None:
+        with mock.patch.object(CHECKER, "indexed", side_effect=[False, True]), mock.patch.object(CHECKER.time, "sleep") as sleep:
+            CHECKER.wait_indexed("uqa-engine", "0.5.1")
+        sleep.assert_called_once()
+        with mock.patch.object(CHECKER, "indexed", return_value=False), mock.patch.object(CHECKER.time, "monotonic", side_effect=[0, 20]), mock.patch.object(CHECKER.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "did not expose"):
+                CHECKER.wait_indexed("uqa-engine", "0.5.1", timeout=10)
+        sleep.assert_not_called()
+
+    def test_only_exact_uqa_dependency_resolution_is_retryable(self) -> None:
+        log = 'failed to select a version for the requirement `uqa-engine = "^0.5.1"`\nlocation searched: crates.io index'
+        self.assertEqual(CHECKER.missing_dependency(log, "0.5.1"), "uqa-engine")
+        for rejected in (log.replace("0.5.1", "0.5.0"), log.replace("uqa-engine", "third-party"), log.replace("crates.io index", "another registry"), "error[E0308]: mismatched types"):
+            self.assertIsNone(CHECKER.missing_dependency(rejected, "0.5.1"))
+
+    def test_dependency_retry_requires_confirmed_publication_and_index_visibility(self) -> None:
+        arguments = ["check", "uqa-api", "0.5.1", "--dependency-error-log", "error.log"]
+        log = 'failed to select a version for the requirement `uqa-engine = "^0.5.1"`\nlocation searched: crates.io index'
+        for available in (False, True):
+            with mock.patch.object(sys, "argv", arguments), \
+                 mock.patch.object(CHECKER.pathlib.Path, "read_text", return_value=log), \
+                 mock.patch.object(CHECKER, "published", return_value=available) as published, \
+                 mock.patch.object(CHECKER, "wait_indexed") as wait:
+                self.assertEqual(CHECKER.main(), 0 if available else 1)
+                published.assert_called_once_with("uqa-engine", "0.5.1")
+                if available:
+                    wait.assert_called_once_with("uqa-engine", "0.5.1")
+                else:
+                    wait.assert_not_called()
+
 
 class ReleaseAssetRetentionTest(unittest.TestCase):
     def test_registry_publication_waits_for_all_package_checks(self) -> None:
@@ -181,7 +258,7 @@ class ReleaseAssetRetentionTest(unittest.TestCase):
                                   "Publication must retain GitHub's default successful-needs gate")
 
     def test_completion_keeps_published_bytes_and_uploads_only_missing_assets(self) -> None:
-        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        workflow = (ROOT / ".github/workflows/release-assets.yml").read_text()
 
         def command(name: str) -> str:
             step = workflow.split(f"      - name: {name}\n", 1)[1].split("\n      - ", 1)[0]

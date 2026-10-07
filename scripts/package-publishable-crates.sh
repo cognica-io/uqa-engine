@@ -10,7 +10,7 @@
 # unpublished workspace packages together while verifying the extracted crates.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="${UQA_RELEASE_SOURCE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$root"
 
 cargo_package_args=(--locked)
