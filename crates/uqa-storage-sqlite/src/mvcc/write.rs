@@ -55,59 +55,93 @@ pub(super) fn allocate_with_owner(
     control: &StorageReadControl,
     retain: impl FnOnce(StorageTransactionId) -> VersionResult<()>,
 ) -> PhysicalResult<StorageTransactionId> {
+    let mut retain = Some(retain);
+    allocate_batch(connection, identity, native, managed, 1, control, |id| {
+        retain.take().expect("one allocation")(id)
+    })
+    .map(|(first, _)| first)
+}
+
+/// Every allocation and its liveness lease is installed before one fully
+/// synchronized commit. No identifier escapes before its Pending receipt is
+/// durable, including identifiers retained for later managed transactions.
+pub(super) fn allocate_batch(
+    connection: &Connection,
+    identity: DatabaseId,
+    native: Option<native::NativeRecordNamespace>,
+    managed: bool,
+    requested: u64,
+    control: &StorageReadControl,
+    mut retain: impl FnMut(StorageTransactionId) -> VersionResult<()>,
+) -> PhysicalResult<(StorageTransactionId, u64)> {
     let _permit = admission::permit(connection, control)?;
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     let current = codec::header(&transaction, identity)?;
-    if receipts_reach_limit(&transaction, &current)? {
+    let requested = requested.min((current.receipt_limit / 4).max(1));
+    let count =
+        available_receipts(&transaction, &current, requested)?.min(u64::MAX - current.allocated);
+    if count == 0 {
+        if current.allocated == u64::MAX {
+            return Err(VersionError::TransactionIdsExhausted.into());
+        }
         return Err(VersionError::ReceiptRetentionExhausted {
             limit: current.receipt_limit,
         }
         .into());
     }
-    let id = StorageTransactionId::new(
-        identity,
-        current
-            .allocated
-            .checked_add(1)
-            .ok_or(VersionError::TransactionIdsExhausted)?,
-    )?;
-    let bytes = id.allocation().to_be_bytes();
-    retain(id)?;
+    let first = StorageTransactionId::new(identity, current.allocated + 1)?;
+    let last = current.allocated + count;
     transaction
         .prepare_cached("UPDATE _uqa_mvcc_metadata SET allocated = ?1 WHERE singleton = 1")?
-        .execute(params![bytes.as_slice()])?;
-    transaction.prepare_cached("INSERT INTO _uqa_mvcc_transactions (allocation, status, sequence, fingerprint, managed) VALUES (?1, 0, NULL, NULL, ?2)")?.execute(params![bytes.as_slice(), i64::from(managed)])?;
+        .execute(params![last.to_be_bytes().as_slice()])?;
+    {
+        let mut statement = transaction.prepare_cached("INSERT INTO _uqa_mvcc_transactions (allocation, status, sequence, fingerprint, managed) VALUES (?1, 0, NULL, NULL, ?2)")?;
+        for allocation in first.allocation()..=last {
+            let id = StorageTransactionId::new(identity, allocation)?;
+            retain(id)?;
+            statement.execute(params![
+                allocation.to_be_bytes().as_slice(),
+                i64::from(managed)
+            ])?;
+        }
+    }
     control.cancellation().check().map_err(VersionError::from)?;
     admission::commit(transaction, control)?;
-    Ok(id)
+    Ok((first, count))
 }
 
-/// Whether the retained receipts have reached the retention limit. Every retained receipt lies between the oldest one and the last allocation, so their distance bounds the count without visiting a row. Counting is linear in the receipts kept, which are deleted only when the limit is reached, so they are counted only when the bound does not settle the answer.
-fn receipts_reach_limit(connection: &Connection, current: &codec::Header) -> PhysicalResult<bool> {
+/// The allocation watermark bounds retained receipts without counting every
+/// row. Holes only reduce a batch; count when the bound cannot admit even one.
+fn available_receipts(
+    connection: &Connection,
+    current: &codec::Header,
+    requested: u64,
+) -> PhysicalResult<u64> {
     let oldest = {
         let mut statement = connection.prepare_cached(
             "SELECT allocation FROM _uqa_mvcc_transactions ORDER BY allocation LIMIT 1",
         )?;
         let mut rows = statement.query([])?;
         let Some(row) = rows.next()? else {
-            return Ok(current.receipt_limit == 0);
+            return Ok(requested.min(current.receipt_limit));
         };
         codec::integer(codec::bytes(row, 0)?)?
     };
-    if current
+    if let Some(available) = current
         .allocated
         .checked_sub(oldest)
-        .is_some_and(|span| span.saturating_add(1) < current.receipt_limit)
+        .and_then(|span| current.receipt_limit.checked_sub(span.saturating_add(1)))
+        .filter(|available| *available > 0)
     {
-        return Ok(false);
+        return Ok(requested.min(available));
     }
     let retained: i64 = connection
         .prepare_cached("SELECT count(*) FROM _uqa_mvcc_transactions")?
         .query_row([], |row| row.get(0))?;
     let retained = u64::try_from(retained)
         .map_err(|_| VersionError::InvalidEncoding("negative transaction receipt count"))?;
-    Ok(retained >= current.receipt_limit)
+    Ok(requested.min(current.receipt_limit.saturating_sub(retained)))
 }
 
 pub(super) fn commit(

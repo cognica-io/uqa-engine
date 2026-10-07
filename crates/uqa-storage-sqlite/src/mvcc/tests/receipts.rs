@@ -12,6 +12,8 @@ use uqa_storage::mvcc::{ReceiptAcknowledgement, SerializableCoordinator, Seriali
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;
 
+mod allocations;
+
 fn open(path: &std::path::Path, mode: usize) -> ManagedConnection {
     if mode == 4 {
         ManagedConnection::open_in_memory().unwrap()

@@ -88,6 +88,7 @@ pub struct SQLiteRecordStore {
     identity: DatabaseId,
     native: Option<native::NativeRecordNamespace>,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
+    managed_allocations: receipts::ManagedAllocations,
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     receipt_leases: receipts::ReceiptLeaseFile,
 }
@@ -116,6 +117,7 @@ impl SQLiteRecordStore {
             namespace,
         } = native::initialize_in(transaction, control).map_err(Error::into_version)?;
         Ok(Self {
+            managed_allocations: receipts::ManagedAllocations::default(),
             snapshots: retention::registry(connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -137,6 +139,7 @@ impl SQLiteRecordStore {
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)?;
         Ok(Self {
+            managed_allocations: receipts::ManagedAllocations::default(),
             snapshots: retention::registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -165,6 +168,7 @@ impl SQLiteRecordStore {
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)?;
         Ok(Self {
+            managed_allocations: receipts::ManagedAllocations::default(),
             snapshots: retention::registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -184,6 +188,7 @@ impl SQLiteRecordStore {
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)?;
         Ok(Self {
+            managed_allocations: receipts::ManagedAllocations::default(),
             snapshots: retention::registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),

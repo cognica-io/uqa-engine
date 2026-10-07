@@ -67,6 +67,14 @@ impl SQLiteRecordStore {
         control: &StorageReadControl,
         operation: impl FnOnce(&dyn SerializableLeases) -> VersionResult<T>,
     ) -> VersionResult<T> {
+        self.with_receipt_capacity(control, |leases, _| operation(leases))
+    }
+
+    pub(in crate::mvcc) fn with_receipt_capacity<T>(
+        &self,
+        control: &StorageReadControl,
+        operation: impl FnOnce(&dyn SerializableLeases, usize) -> VersionResult<T>,
+    ) -> VersionResult<T> {
         #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
         if let Some(path) = self.connection.database_path() {
             use uqa_core::memory::BudgetedVec;
@@ -78,21 +86,27 @@ impl SQLiteRecordStore {
                 Ok(())
             })?;
             live.sort_unstable();
-            return operation(&NativeLeases {
-                file,
-                live,
-                store: self,
-            });
+            let capacity = (super::super::leases::SLOT_COUNT as usize).saturating_sub(live.len());
+            return operation(
+                &NativeLeases {
+                    file,
+                    live,
+                    store: self,
+                },
+                capacity,
+            );
         }
         #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
         if let Some(path) = self.connection.database_path() {
             let state = local_file_registry(path)?;
             return self
                 .connection
-                .with_local_receipt_admission(Some(&state), control, operation);
+                .with_local_receipt_admission(Some(&state), control, |leases| {
+                    operation(leases, 1)
+                });
         }
         self.connection
-            .with_local_receipt_admission(None, control, operation)
+            .with_local_receipt_admission(None, control, |leases| operation(leases, 1))
     }
 }
 
