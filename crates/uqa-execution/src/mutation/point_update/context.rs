@@ -25,6 +25,7 @@ pub trait PointMutationStorage {
         field: &str,
         value: &Value,
     ) -> Result<Option<DocId>, SQLError>;
+    /// Patch the same command-visible version as the identity lookup, including an unpublished row; a command tombstone is absent.
     fn patch_document_fields_with_vector_values(
         &self,
         table: &str,

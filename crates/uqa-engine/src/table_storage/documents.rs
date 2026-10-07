@@ -387,8 +387,8 @@ impl Engine {
         Ok(true)
     }
 
-    /// Apply field-level updates without materialising the whole
-    /// document. Callers must only use this path when constraints and
+    /// Apply field-level updates to the current command-visible row.
+    /// Callers must only use this path when constraints and
     /// referential actions do not need the old or complete new row.
     pub fn patch_document_fields(
         &self,
@@ -435,11 +435,9 @@ impl Engine {
         if let Some(read) = self.serializable_table_state_read(&t)? {
             read.observe_row(doc_id)?;
         }
-        let Some(mut document) = t
-            .document_store
-            .read()
-            .get(doc_id)
-            .map_err(|error| document_store_read_error("read document for update", &error))?
+        let Some(mut document) = self
+            .raw_command_visible_document(table, &t, doc_id)?
+            .map(StoredDocument::into_fields)
         else {
             return Ok(false);
         };

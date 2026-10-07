@@ -66,3 +66,61 @@ fn scalar_index_candidates_do_not_scan_unrelated_rows(#[case] sql: &str) {
         }
     }
 }
+
+#[test]
+fn point_patch_uses_the_command_version_and_does_not_revive_tombstones() {
+    let engine = Engine::new();
+    engine.sql("CREATE TABLE staged_patch(id integer PRIMARY KEY, qty integer); INSERT INTO staged_patch VALUES(1,10)", &[]).unwrap();
+    engine
+        .mutation_coordinator()
+        .begin_command_mutation_overlay();
+    engine
+        .stage_command_document(
+            "staged_patch",
+            10,
+            Some(BTreeMap::from([
+                ("id".into(), Value::Int(10)),
+                ("qty".into(), Value::Int(30)),
+            ])),
+        )
+        .unwrap();
+    engine
+        .stage_command_document("staged_patch", 1, None)
+        .unwrap();
+    assert!(engine
+        .patch_document_fields(
+            "staged_patch",
+            10,
+            &BTreeMap::from([("qty".into(), Value::Int(40))]),
+            &BTreeMap::new()
+        )
+        .unwrap());
+    assert!(!engine
+        .patch_document_fields(
+            "staged_patch",
+            1,
+            &BTreeMap::from([("qty".into(), Value::Int(50))]),
+            &BTreeMap::new()
+        )
+        .unwrap());
+    assert_eq!(
+        engine
+            .get_document_for_mutation("staged_patch", 10)
+            .unwrap()
+            .unwrap()["qty"],
+        Value::Int(40)
+    );
+    assert!(engine
+        .get_document_for_mutation("staged_patch", 1)
+        .unwrap()
+        .is_none());
+    let result = engine
+        .sql(
+            "SELECT qty FROM staged_patch WHERE id IN (1,10) ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["qty"], Value::Int(40));
+    engine.mutation_coordinator().end_command_mutation_overlay();
+}
