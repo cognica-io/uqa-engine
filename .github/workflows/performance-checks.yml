@@ -1,0 +1,68 @@
+name: Performance regression checks
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .config/nextest.toml
+      - .github/actions/setup-nextest/**
+      - .github/workflows/performance-checks.yml
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .config/nextest.toml
+      - .github/actions/setup-nextest/**
+      - .github/workflows/performance-checks.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  temporal-histories:
+    name: Temporal histories (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/setup-nextest
+      - name: Run every temporal equality history independently
+        run: >-
+          cargo nextest run --locked -p uqa-engine --test integration
+          --profile ci
+          -E 'test(absent_temporal_unique_updates_keep_postgresql_equality)'
+      - name: Retain functional results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: temporal-histories-${{ matrix.os }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: error
+          retention-days: 7

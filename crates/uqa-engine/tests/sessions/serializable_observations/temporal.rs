@@ -70,72 +70,63 @@ fn empty_temporal_text_ranges_retain_future_matches() {
     }
 }
 
-#[test]
-fn absent_temporal_unique_updates_keep_postgresql_equality() {
-    for (ty, probe, same, different) in [
-        (
-            "DATE",
-            "DATE '2024-01-01'",
-            "DATE '2024-01-01'",
-            "DATE '2024-01-02'",
-        ),
-        (
-            "TIME(6)",
-            "TIME '12:00:00.123456'",
-            "TIME '12:00:00.123456'",
-            "TIME '12:00:00.123457'",
-        ),
-        (
-            "TIME(6)",
-            "TIME '00:00:00'",
-            "TIME '00:00:00'",
-            "TIME '24:00:00'",
-        ),
-        (
-            "TIMETZ(6)",
-            "TIMETZ '12:00:00+00'",
-            "TIMETZ '12:00:00+00:00'",
-            "TIMETZ '13:00:00+01'",
-        ),
-        (
-            "TIMESTAMP(6)",
-            "TIMESTAMP '2024-01-01 12:00:00'",
-            "TIMESTAMP '2024-01-01 12:00:00'",
-            "TIMESTAMP '2024-01-02 12:00:00'",
-        ),
-        (
-            "TIMESTAMPTZ(6)",
-            "TIMESTAMPTZ '2024-01-01 12:00:00+00'",
-            "TIMESTAMPTZ '2024-01-01 13:00:00+01'",
-            "TIMESTAMPTZ '2024-01-02 12:00:00+00'",
-        ),
-        (
-            "INTERVAL",
-            "INTERVAL '1 month'",
-            "INTERVAL '30 days'",
-            "INTERVAL '31 days'",
-        ),
-    ] {
-        for (value, conflict) in [(same, true), (different, false)] {
-            let (_directory, sessions) = fixtures();
-            for seed in sessions {
-                tables(&seed, ty);
-                let a = seed.sibling();
-                let b = seed.sibling();
-                a.begin();
-                b.begin();
-                for (session, table) in [(&a, "left_clock"), (&b, "right_clock")] {
-                    assert_eq!(
-                        session
-                            .sql(&format!("UPDATE {table} SET payload = 1 WHERE k = {probe}"))
-                            .affected_rows,
-                        0
-                    );
-                }
-                a.sql(&format!("INSERT INTO right_clock VALUES (1, {value}, 0)"));
-                b.sql(&format!("INSERT INTO left_clock VALUES (1, {value}, 0)"));
-                finish(&a, &b, conflict);
-            }
-        }
+#[rstest::rstest]
+#[case::date("DATE", "DATE '2024-01-01'", "DATE '2024-01-01'", "DATE '2024-01-02'")]
+#[case::time_precision(
+    "TIME(6)",
+    "TIME '12:00:00.123456'",
+    "TIME '12:00:00.123456'",
+    "TIME '12:00:00.123457'"
+)]
+#[case::time_day_endpoint("TIME(6)", "TIME '00:00:00'", "TIME '00:00:00'", "TIME '24:00:00'")]
+#[case::timetz_zone(
+    "TIMETZ(6)",
+    "TIMETZ '12:00:00+00'",
+    "TIMETZ '12:00:00+00:00'",
+    "TIMETZ '13:00:00+01'"
+)]
+#[case::timestamp(
+    "TIMESTAMP(6)",
+    "TIMESTAMP '2024-01-01 12:00:00'",
+    "TIMESTAMP '2024-01-01 12:00:00'",
+    "TIMESTAMP '2024-01-02 12:00:00'"
+)]
+#[case::timestamptz_instant(
+    "TIMESTAMPTZ(6)",
+    "TIMESTAMPTZ '2024-01-01 12:00:00+00'",
+    "TIMESTAMPTZ '2024-01-01 13:00:00+01'",
+    "TIMESTAMPTZ '2024-01-02 12:00:00+00'"
+)]
+#[case::interval_month(
+    "INTERVAL",
+    "INTERVAL '1 month'",
+    "INTERVAL '30 days'",
+    "INTERVAL '31 days'"
+)]
+fn absent_temporal_unique_updates_keep_postgresql_equality(
+    #[case] ty: &str,
+    #[case] probe: &str,
+    #[case] same: &str,
+    #[case] different: &str,
+    #[values(0, 1, 2)] provider: usize,
+    #[values(true, false)] conflict: bool,
+) {
+    let (_directory, seed) = fixture(provider);
+    let value = if conflict { same } else { different };
+    tables(&seed, ty);
+    let a = seed.sibling();
+    let b = seed.sibling();
+    a.begin();
+    b.begin();
+    for (session, table) in [(&a, "left_clock"), (&b, "right_clock")] {
+        assert_eq!(
+            session
+                .sql(&format!("UPDATE {table} SET payload = 1 WHERE k = {probe}"))
+                .affected_rows,
+            0
+        );
     }
+    a.sql(&format!("INSERT INTO right_clock VALUES (1, {value}, 0)"));
+    b.sql(&format!("INSERT INTO left_clock VALUES (1, {value}, 0)"));
+    finish(&a, &b, conflict);
 }
