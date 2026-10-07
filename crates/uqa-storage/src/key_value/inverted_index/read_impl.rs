@@ -9,10 +9,13 @@
 use super::super::codec::usize_to_u64;
 use super::queries::require_score_version;
 use super::{
-    cluster_id, decode_all_scores, keys, other_error, score_count, BTreeMap, BTreeSet, DocId,
-    FieldName, IndexStats, IndexedFieldMetadata, OccurrencePosting, OccurrenceRead, Payload,
-    PostingCursor, PostingEntry, PostingList, StorageBackendResult, TokenTermKey,
+    cluster_id, decode_all_scores, keys, other_error, score_count, BTreeMap, DocId, FieldName,
+    IndexStats, IndexedFieldMetadata, OccurrencePosting, OccurrenceRead, Payload, PostingCursor,
+    PostingEntry, PostingList, StorageBackendResult, TokenTermKey,
 };
+
+#[cfg(test)]
+mod tests;
 
 impl OccurrenceRead<'_> {
     pub(super) fn visit_score_clusters(
@@ -231,14 +234,28 @@ impl OccurrenceRead<'_> {
 
     pub(super) fn doc_count(&self) -> StorageBackendResult<u64> {
         self.require_graph_format()?;
-        let mut doc_ids = BTreeSet::new();
-        for (key, _) in self
-            .scan_prefix(&keys::kind_prefix(self.table, keys::LENGTH)?)?
-            .iter()
-        {
-            doc_ids.insert(keys::read_document(key, keys::LENGTH)?.0);
-        }
-        usize_to_u64(doc_ids.len(), "document count")
+        let prefix = keys::kind_prefix(self.table, keys::LENGTH)?;
+        let mut previous = None;
+        let mut count = 0_u64;
+        // Length keys group every field of one document under its ordered identity. Counting distinct groups needs neither the values nor a corpus-sized set.
+        self.store.visit_keys_after(
+            &prefix,
+            None,
+            usize::MAX,
+            self.store.control(),
+            &mut |key| {
+                self.store.control().check()?;
+                let doc_id = keys::read_document(key, keys::LENGTH)?.0;
+                if previous != Some(doc_id) {
+                    count = count
+                        .checked_add(1)
+                        .ok_or_else(|| other_error("document count overflow"))?;
+                    previous = Some(doc_id);
+                }
+                Ok(())
+            },
+        )?;
+        Ok(count)
     }
 
     pub(super) fn total_field_length(&self, field: &str) -> StorageBackendResult<u64> {

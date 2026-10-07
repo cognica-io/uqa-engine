@@ -20,6 +20,8 @@ use uqa_storage_sqlite::ManagedConnection;
 
 #[path = "sql_fts_index_lifecycle/deletion_publication.rs"]
 mod deletion_publication;
+#[path = "sql_fts_index_lifecycle/indexed_reads.rs"]
+mod indexed_reads;
 #[path = "sql_fts_index_lifecycle/initial_restore.rs"]
 mod initial_restore;
 #[path = "sql_fts_index_lifecycle/new_rows.rs"]

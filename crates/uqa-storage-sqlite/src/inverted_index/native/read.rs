@@ -233,6 +233,22 @@ impl KeyValueRead for NativeRead {
         }
         control.check()
     }
+    fn visit_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::read_control::KeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        for key in self.keys(prefix, after, limit, control)?.iter() {
+            self.control().check()?;
+            control.check()?;
+            visit(key)?;
+        }
+        self.control().check()?;
+        control.check()
+    }
     fn contains_prefix_budgeted(
         &self,
         prefix: &[u8],
