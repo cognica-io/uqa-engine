@@ -371,14 +371,12 @@ fn visit_stored_row(
                     ValueRef::Text(body),
                     xmin,
                 ])?),
-                _ => {
-                    return Err(VersionError::InvalidEncoding(
-                        "native document body changed within a read",
-                    )
-                    .into())
-                }
+                _ => Err(VersionError::InvalidEncoding(
+                    "native document body changed within a read",
+                )
+                .into()),
             }
         }
-        _ => return Err(VersionError::InvalidEncoding("native document body must be text").into()),
+        _ => Err(VersionError::InvalidEncoding("native document body must be text").into()),
     }
 }

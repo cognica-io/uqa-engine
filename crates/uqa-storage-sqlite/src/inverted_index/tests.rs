@@ -8,6 +8,7 @@ use super::*;
 use crate::catalog::Catalog;
 use uqa_analysis::{standard_analyzer, Analyzer, Tokenizer};
 
+mod counts;
 mod retention;
 mod snapshots;
 

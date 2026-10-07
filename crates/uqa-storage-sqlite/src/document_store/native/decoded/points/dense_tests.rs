@@ -104,44 +104,49 @@ fn consecutive_points_keep_missing_private_and_historical_blob_rows() {
     store.put(8, document(80)).unwrap();
     store.put(17, document(170)).unwrap();
     let private = store.snapshot().unwrap();
+    assert_captured_points(private.as_ref(), 1);
     store.conn.rollback_transaction().unwrap();
     store.put(8, document(800)).unwrap();
     let current = store.snapshot().unwrap();
-    let ids = (0..=18).collect::<Vec<_>>();
     for (view, kind) in [(old, 0), (private, 1), (current, 2)] {
-        let mut visited = 0;
-        assert_eq!(
-            view.for_each_fields_multi_borrowed(
-                &ids,
-                &["value", "absent", "vector", "value"],
-                &mut |id, present, fields| {
-                    assert_eq!(id, ids[visited]);
-                    visited += 1;
-                    let expected = match (kind, id) {
-                        (1, 4) => None,
-                        (1, 8) => Some(80),
-                        (1, 17) => Some(170),
-                        (2, 8) => Some(800),
-                        (_, 1..=16) => Some(id as i64),
-                        _ => None,
-                    };
-                    assert_eq!(present, expected.is_some());
-                    assert_eq!(fields[0], &expected.map_or(Value::Null, Value::Int));
-                    assert_eq!(fields[1], &Value::Null);
-                    assert_eq!(
-                        fields[2],
-                        &expected.map_or(Value::Null, |value| document(value)
-                            .remove("vector")
-                            .unwrap())
-                    );
-                    assert!(std::ptr::eq(fields[0], fields[3]));
-                    true
-                }
-            )
-            .unwrap(),
-            Some(ids.len())
-        );
+        assert_captured_points(view.as_ref(), kind);
     }
+}
+
+fn assert_captured_points(view: &dyn DocumentStore, kind: u8) {
+    let ids = (0..=18).collect::<Vec<_>>();
+    let mut visited = 0;
+    assert_eq!(
+        view.for_each_fields_multi_borrowed(
+            &ids,
+            &["value", "absent", "vector", "value"],
+            &mut |id, present, fields| {
+                assert_eq!(id, ids[visited]);
+                visited += 1;
+                let expected = match (kind, id) {
+                    (1, 4) => None,
+                    (1, 8) => Some(80),
+                    (1, 17) => Some(170),
+                    (2, 8) => Some(800),
+                    (_, 1..=16) => Some(id as i64),
+                    _ => None,
+                };
+                assert_eq!(present, expected.is_some());
+                assert_eq!(fields[0], &expected.map_or(Value::Null, Value::Int));
+                assert_eq!(fields[1], &Value::Null);
+                assert_eq!(
+                    fields[2],
+                    &expected.map_or(Value::Null, |value| document(value)
+                        .remove("vector")
+                        .unwrap())
+                );
+                assert!(std::ptr::eq(fields[0], fields[3]));
+                true
+            }
+        )
+        .unwrap(),
+        Some(ids.len())
+    );
 }
 
 #[test]

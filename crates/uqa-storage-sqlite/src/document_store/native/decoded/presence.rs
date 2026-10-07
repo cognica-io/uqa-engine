@@ -62,6 +62,28 @@ impl NativeDocumentRead<'_> {
         for id in ids {
             encoded.push(*id as i64)?;
         }
+        if let Some(flags) =
+            self.snapshot
+                .read_latest_documents(self.table, owner, self.control, &mut |latest| {
+                    let mut flags = BudgetedVec::new(self.control.memory());
+                    flags.reserve(ids.len())?;
+                    for _ in ids {
+                        flags.push(0)?;
+                    }
+                    let last = encoded[encoded.len() - 1];
+                    latest.visit_ids(encoded[0].checked_sub(1), &mut |id| {
+                        self.snapshot.control.check()?;
+                        self.control.check()?;
+                        if let Ok(position) = encoded.binary_search(&id) {
+                            flags[position] = 1;
+                        }
+                        Ok(id < last)
+                    })?;
+                    Ok(flags)
+                })?
+        {
+            return Ok(Some(flags));
+        }
         self.snapshot
             .dense_identity_presence(Family::Documents, owner, &[], &encoded, self.control)
     }
