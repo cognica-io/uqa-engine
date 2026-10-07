@@ -125,7 +125,7 @@ Product head `d148dd90` passes [JavaScript/WASM](https://github.com/cognica-io/u
 | Data-modifying CTE completion and repeated-row command behavior | [CTE command ordering](../../crates/uqa-engine/tests/queries/sql_cte_command_order.rs) |
 | Triggered modifications and same-process relation-lock hash collisions | [Triggered modifications](../../crates/uqa-engine/tests/catalog/sql_triggers/triggered_modifications.rs), [relation locks](../../crates/uqa-execution/src/row_locks/relation/tests.rs) |
 
-The [unreleased upgrade notes](../manual/reference/10-upgrading.md#unreleased-changes-after-049) describe changed diagnostics and Rust APIs. Complete PostgreSQL settings, routine, constraint, trigger, concurrency and upstream/client coverage remain governed by the existing manifest gates.
+The [0.5.0 upgrade notes](../manual/reference/10-upgrading.md#050) describe changed diagnostics and Rust APIs. Complete PostgreSQL settings, routine, constraint, trigger, concurrency and upstream/client coverage remain governed by the existing manifest gates.
 
 ## Current implementation status and open PostgreSQL 18 bugs
 
