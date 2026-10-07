@@ -86,7 +86,7 @@ fn assert_constraint_object_ids_match(
         }
     }
     let parent_object_id = parent_object_id.unwrap();
-    assert!(!child_object_ids.is_empty());
+    assert_ne!(child_object_ids.len(), 0);
     assert!(child_object_ids
         .iter()
         .all(|object_id| object_id == &parent_object_id));
@@ -340,11 +340,14 @@ fn attach_partition_validates_existing_and_default_rows_then_routes_immediately(
         )
         .unwrap_err();
     assert_eq!(default_conflict.sqlstate(), Some("23514"));
-    assert!(engine
-        .sql("SELECT * FROM ONLY routed_low", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM ONLY routed_low", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     exec(&engine, "UPDATE routed_default SET k = 20");
     exec(
         &engine,
@@ -460,11 +463,14 @@ fn attach_propagates_identity_key_and_foreign_key_then_detach_localizes_schema()
         &engine,
         "ALTER TABLE parent_identity DETACH PARTITION attached_identity",
     );
-    assert!(engine
-        .sql("SELECT * FROM ONLY parent_identity", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM ONLY parent_identity", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         engine
             .sql(
@@ -585,11 +591,14 @@ fn attach_and_detach_edges_survive_reopen() {
         );
     }
     let reopened = Engine::open(&path).unwrap();
-    assert!(reopened
-        .sql("SELECT * FROM durable_parent", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        reopened
+            .sql("SELECT * FROM durable_parent", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         reopened
             .sql("SELECT * FROM durable_child", &[])
@@ -710,14 +719,13 @@ fn reopen_repairs_a_legacy_dangling_hierarchy_parent() {
             .unwrap();
     }
     let reopened = Engine::open(&path).unwrap();
-    assert!(reopened
+    assert_eq!(reopened
         .sql(
             "SELECT * FROM pg_catalog.pg_inherits AS edge JOIN pg_catalog.pg_class AS child ON child.oid = edge.inhrelid WHERE child.relname = 'surviving_child'",
             &[],
         )
         .unwrap()
-        .rows
-        .is_empty());
+        .rows.len(), 0);
     assert_eq!(
         reopened
             .sql("SELECT a FROM surviving_child", &[])
@@ -772,11 +780,14 @@ fn detach_concurrently_enforces_transaction_default_finalize_and_retained_bound_
             .sqlstate(),
         Some("23514")
     );
-    assert!(engine
-        .sql("SELECT * FROM concurrent_parent", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM concurrent_parent", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 
     exec(
         &engine,
@@ -835,11 +846,14 @@ fn attach_and_detach_follow_explicit_transaction_rollback() {
         1
     );
     exec(&engine, "ROLLBACK");
-    assert!(engine
-        .sql("SELECT * FROM tx_parent", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM tx_parent", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         engine
             .sql("SELECT * FROM tx_child", &[])

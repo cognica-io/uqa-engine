@@ -144,14 +144,13 @@ fn partition_retrieval_keeps_table_local_doc_ids_and_global_knn_support() {
     assert_eq!(calibrated.rows[0]["id"], Value::Int(1));
     assert_eq!(calibrated.rows[1]["id"], Value::Int(11));
     assert_eq!(calibrated.rows, flat_calibrated.rows);
-    assert!(engine
+    assert_eq!(engine
         .sql(
             "SELECT id FROM vector_parent WHERE calibrated_vector_match('embedding', ARRAY[1.0, 0.0], 2, 1.0)",
             &[],
         )
         .unwrap()
-        .rows
-        .is_empty());
+        .rows.len(), 0);
 
     assert_eq!(
         integer_column(
@@ -162,14 +161,17 @@ fn partition_retrieval_keeps_table_local_doc_ids_and_global_knn_support() {
         .len(),
         2
     );
-    assert!(engine
-        .sql(
-            "SELECT id FROM ONLY vector_parent WHERE knn_match(embedding, ARRAY[1.0, 0.0], 2)",
-            &[],
-        )
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT id FROM ONLY vector_parent WHERE knn_match(embedding, ARRAY[1.0, 0.0], 2)",
+                &[],
+            )
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

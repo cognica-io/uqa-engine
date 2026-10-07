@@ -273,7 +273,7 @@ fn admitted_unused_text_contexts_and_zero_limits_register_no_data_reads() {
                         "aliased" => "SELECT t.id FROM texts AS t WHERE text_match(t.body, 'alpha') LIMIT 0",
                         _ => "SELECT id FROM texts WHERE text_match(body, 'alpha') LIMIT 0",
                     };
-                    assert!(a.sql(query).rows.is_empty());
+                    assert_eq!(a.sql(query).rows.len(), 0);
                 }
             }
             pivot(&a, &b);

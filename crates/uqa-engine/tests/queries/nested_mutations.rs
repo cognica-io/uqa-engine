@@ -136,7 +136,7 @@ fn nested_changes_and_undo_preserve_later_key_reads(
         .unwrap();
     assert_eq!(pairs(&engine, "SELECT id,v FROM t"), expected);
     engine.sql("ROLLBACK TO before_insert", &[]).unwrap();
-    assert!(pairs(&engine, "SELECT id,v FROM t").is_empty());
+    assert_eq!(pairs(&engine, "SELECT id,v FROM t").len(), 0);
     engine.sql("COMMIT", &[]).unwrap();
 }
 
@@ -179,7 +179,7 @@ fn failed_insert_undoes_nested_publication(
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("23505"));
     engine.sql("ROLLBACK TO before_insert", &[]).unwrap();
-    assert!(pairs(&engine, "SELECT id,v FROM t").is_empty());
+    assert_eq!(pairs(&engine, "SELECT id,v FROM t").len(), 0);
     engine
         .sql(
             "INSERT INTO t VALUES (1,1),(2,coalesce(bump(1),0)); COMMIT",

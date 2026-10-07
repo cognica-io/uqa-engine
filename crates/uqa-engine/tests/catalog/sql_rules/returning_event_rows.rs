@@ -394,12 +394,15 @@ fn event_row_returning_columns_follow_rename_drop_and_reopen() {
         &engine,
         "ALTER TABLE returning_lifecycle_event DROP COLUMN renamed CASCADE",
     );
-    assert!(exec(
-        &engine,
-        "SELECT oid FROM pg_rewrite WHERE rulename = 'returning_lifecycle_provider'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT oid FROM pg_rewrite WHERE rulename = 'returning_lifecycle_provider'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]

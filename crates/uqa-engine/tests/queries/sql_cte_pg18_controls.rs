@@ -19,7 +19,7 @@ struct CountCalls(Arc<AtomicUsize>);
 
 impl SQLScalarFunction for CountCalls {
     fn call(&self, args: &[Value]) -> Result<Value, SQLError> {
-        assert!(args.is_empty());
+        assert_eq!(args.len(), 0);
         Ok(Value::Int(self.0.fetch_add(1, Ordering::SeqCst) as i64 + 1))
     }
 }

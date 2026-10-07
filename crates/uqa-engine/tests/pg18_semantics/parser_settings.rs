@@ -96,7 +96,7 @@ fn independent_sessions_and_api_batches_use_live_message_settings() {
         second.sql(sql, &[]).unwrap().rows[0]["value"],
         Value::Str(r"a\nb".into())
     );
-    assert!(second.take_sql_notices().is_empty());
+    assert_eq!(second.take_sql_notices().len(), 0);
 }
 
 #[test]

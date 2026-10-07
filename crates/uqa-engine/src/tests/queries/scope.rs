@@ -167,11 +167,14 @@ fn consumer_failure_restores_statement_clock_and_depth_after_rollback() {
     );
     assert_eq!(engine.transaction_depth(), 0);
     assert_eq!(uqa_sql::expr::transaction_clock_micros(), Some(17));
-    assert!(engine
-        .sql("SELECT id FROM pending", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM pending", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

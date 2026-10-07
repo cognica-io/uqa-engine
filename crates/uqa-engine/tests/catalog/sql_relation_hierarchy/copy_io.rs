@@ -151,7 +151,10 @@ fn assert_range_copy_output(engine: &Engine) {
         ),
         "1\t1\tone\tone:1\n2\t11\ttwo\ttwo:11\n3\t21\tthree\tthree:21\n"
     );
-    assert!(copy_to_string(engine, "COPY (SELECT * FROM ONLY copy_ranges) TO STDOUT").is_empty());
+    assert_eq!(
+        copy_to_string(engine, "COPY (SELECT * FROM ONLY copy_ranges) TO STDOUT"),
+        ""
+    );
 }
 
 #[test]
@@ -186,14 +189,17 @@ fn range_copy_routes_defaults_generated_identity_and_rolls_back_failures() {
         )
         .unwrap_err();
     assert_eq!(bound.sqlstate(), Some("23514"));
-    assert!(engine
-        .sql(
-            "SELECT * FROM copy_ranges WHERE payload = 'would-rollback'",
-            &[],
-        )
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT * FROM copy_ranges WHERE payload = 'would-rollback'",
+                &[],
+            )
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 
     let parse = engine
         .copy_from(
@@ -202,14 +208,17 @@ fn range_copy_routes_defaults_generated_identity_and_rolls_back_failures() {
         )
         .unwrap_err();
     assert_eq!(parse.sqlstate(), Some("22P02"));
-    assert!(engine
-        .sql(
-            "SELECT * FROM copy_ranges WHERE payload = 'would-rollback'",
-            &[],
-        )
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT * FROM copy_ranges WHERE payload = 'would-rollback'",
+                &[],
+            )
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 
     let extra = engine
         .copy_from(

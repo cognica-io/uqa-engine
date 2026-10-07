@@ -120,7 +120,7 @@ fn ctas_column_names_are_positional_partial_and_case_preserving() {
         .unwrap();
     assert_eq!(empty_created.affected_rows, 0);
     let empty = eng.sql("SELECT renamed FROM empty_copy", &[]).unwrap();
-    assert!(empty.rows.is_empty());
+    assert_eq!(empty.rows.len(), 0);
     assert_eq!(empty.column_types, [Some(ColumnType::SmallInteger)]);
 }
 
@@ -204,7 +204,7 @@ fn ctas_column_names_match_postgresql_validation_order_and_sqlstates() {
     )
     .unwrap();
     let existing = eng.sql("SELECT kept FROM existing", &[]).unwrap();
-    assert!(existing.rows.is_empty());
+    assert_eq!(existing.rows.len(), 0);
     assert_eq!(existing.column_types, [Some(ColumnType::Integer)]);
 }
 
@@ -293,7 +293,7 @@ fn ctas_with_no_data_builds_the_typed_schema_without_executing_the_query() {
             &[],
         )
         .unwrap();
-    assert!(empty.rows.is_empty());
+    assert_eq!(empty.rows.len(), 0);
     assert_eq!(
         empty.column_types,
         [
@@ -400,11 +400,13 @@ fn ctas_with_no_data_matches_postgresql_analysis_and_if_not_exists_order() {
         &[],
     )
     .unwrap();
-    assert!(eng
-        .sql("SELECT value FROM deferred_cast", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        eng.sql("SELECT value FROM deferred_cast", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 
     eng.sql("CREATE TABLE existing (kept INTEGER)", &[])
         .unwrap();
@@ -447,7 +449,7 @@ fn ctas_with_no_data_schema_and_vector_index_survive_reopen() {
     let empty = reopened
         .sql("SELECT renamed, features, label FROM durable", &[])
         .unwrap();
-    assert!(empty.rows.is_empty());
+    assert_eq!(empty.rows.len(), 0);
     assert_eq!(
         empty.column_types,
         [
@@ -536,7 +538,7 @@ fn select_into_materializes_exact_types_without_evaluating_empty_rows() {
     let empty = eng
         .sql("SELECT sequence_value, failure FROM select_into_empty", &[])
         .unwrap();
-    assert!(empty.rows.is_empty());
+    assert_eq!(empty.rows.len(), 0);
     assert_eq!(
         empty.column_types,
         [Some(ColumnType::BigInteger), Some(ColumnType::Integer)]

@@ -28,7 +28,7 @@ fn open(provider: usize, path: &Path) -> Engine {
 fn reference(source: &str, keep: impl Fn(&serde_json::Value) -> bool) -> String {
     let mut value: serde_json::Value = serde_json::from_str(source).unwrap();
     value["cases"].as_array_mut().unwrap().retain(keep);
-    assert!(!value["cases"].as_array().unwrap().is_empty());
+    assert_ne!(value["cases"].as_array().unwrap().len(), 0);
     value.to_string()
 }
 

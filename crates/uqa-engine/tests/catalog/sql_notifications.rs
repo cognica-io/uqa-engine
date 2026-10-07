@@ -45,7 +45,7 @@ fn notifications_follow_outer_transaction_and_savepoint_boundaries() {
         &sender,
         "BEGIN; NOTIFY events, 'a'; NOTIFY events, 'a'; NOTIFY events, 'b'",
     );
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
     exec(&sender, "COMMIT");
     assert_eq!(
         values(listener.take_sql_notifications()),
@@ -54,7 +54,7 @@ fn notifications_follow_outer_transaction_and_savepoint_boundaries() {
 
     exec(&listener, "BEGIN");
     exec(&sender, "NOTIFY events, 'deferred'");
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
     exec(&listener, "ROLLBACK");
     assert_eq!(
         values(listener.take_sql_notifications()),
@@ -85,13 +85,13 @@ fn notifications_follow_outer_transaction_and_savepoint_boundaries() {
     );
 
     exec(&sender, "BEGIN; NOTIFY events, 'rolled back'; ROLLBACK");
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 
     let error = sender
         .sql("NOTIFY events, 'implicit rollback'; SELECT 1 / 0", &[])
         .expect_err("a later statement must roll back the implicit transaction");
     assert_eq!(error.sqlstate(), Some("22012"));
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 
     exec(
         &sender,
@@ -115,7 +115,7 @@ fn listener_changes_are_transactional_and_discard_all_unsubscribes() {
 
     exec(&listener, "BEGIN; LISTEN rolled_back; ROLLBACK");
     exec(&sender, "NOTIFY rolled_back, 'absent'");
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 
     exec(&listener, "LISTEN retained");
     exec(&listener, "BEGIN; UNLISTEN retained; ROLLBACK");
@@ -138,7 +138,7 @@ fn listener_changes_are_transactional_and_discard_all_unsubscribes() {
         &listener,
         "BEGIN; UNLISTEN self_channel; NOTIFY self_channel, 'removed'; COMMIT",
     );
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 
     exec(
         &listener,
@@ -151,7 +151,7 @@ fn listener_changes_are_transactional_and_discard_all_unsubscribes() {
 
     exec(&listener, "UNLISTEN *");
     exec(&sender, "NOTIFY retained, 'unlistened from all'");
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 
     exec(&listener, "LISTEN \"*\"");
     exec(&sender, "NOTIFY \"*\", 'quoted star'");
@@ -161,12 +161,12 @@ fn listener_changes_are_transactional_and_discard_all_unsubscribes() {
     );
     exec(&listener, "UNLISTEN \"*\"");
     exec(&sender, "NOTIFY \"*\", 'removed quoted star'");
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 
     exec(&listener, "LISTEN retained");
     exec(&listener, "DISCARD ALL");
     exec(&sender, "NOTIFY retained, 'discarded'");
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 }
 
 #[test]
@@ -208,7 +208,7 @@ fn listener_commit_uses_the_final_subscription_for_notifications_received_in_fli
     exec(&listener, "BEGIN; LISTEN new_channel");
     exec(&sender, "NOTIFY new_channel, 'before listen commit'");
     exec(&listener, "COMMIT");
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
     exec(&sender, "NOTIFY new_channel, 'after listen commit'");
     assert_eq!(
         values(listener.take_sql_notifications()),
@@ -682,7 +682,7 @@ fn notify_enforces_postgresql_payload_limit() {
         .expect_err("8,000-byte payload must fail");
     assert_eq!(error.sqlstate(), Some("22023"));
     assert_eq!(error.to_string(), "payload string too long");
-    assert!(engine.take_sql_notifications().is_empty());
+    assert_eq!(engine.take_sql_notifications().len(), 0);
 }
 
 #[test]
@@ -715,7 +715,7 @@ fn notify_rule_actions_execute_once_per_statement_and_rollback_atomically() {
         &engine,
         "BEGIN; INSERT INTO rule_notify_items VALUES (3); ROLLBACK",
     );
-    assert!(engine.take_sql_notifications().is_empty());
+    assert_eq!(engine.take_sql_notifications().len(), 0);
 
     let definition = exec(
         &engine,
@@ -749,9 +749,12 @@ fn instead_notify_rule_suppresses_the_original_command() {
     );
     let result = exec(&engine, "INSERT INTO instead_notify_items VALUES (1), (2)");
     assert_eq!(result.affected_rows, 0);
-    assert!(exec(&engine, "SELECT id FROM instead_notify_items")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT id FROM instead_notify_items")
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         values(engine.take_sql_notifications()),
         [("instead_events".into(), "replaced".into())]

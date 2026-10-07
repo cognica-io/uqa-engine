@@ -594,8 +594,8 @@ fn exercise_pg18_read_only_dml_edges(eng: &Engine) {
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("25006"), "{error}");
-    assert!(eng
-        .sql(
+    assert_eq!(
+        eng.sql(
             "SELECT x FROM cypher('readonly_escape', $$
                 MATCH (n) RETURN 1
              $$) AS (x integer)",
@@ -603,7 +603,9 @@ fn exercise_pg18_read_only_dml_edges(eng: &Engine) {
         )
         .unwrap()
         .rows
-        .is_empty());
+        .len(),
+        0
+    );
     eng.sql("DELETE FROM temporary_rows", &[]).unwrap();
     eng.sql(
         "UPDATE temporary_rows SET id = 0 FROM permanent_rows WHERE temporary_rows.id = permanent_rows.id",
@@ -617,11 +619,13 @@ fn exercise_pg18_read_only_dml_edges(eng: &Engine) {
     .unwrap();
     let error = eng.sql("EXECUTE permanent_update", &[]).unwrap_err();
     assert_eq!(error.sqlstate(), Some("25006"));
-    assert!(eng
-        .sql("SELECT * FROM permanent_rows WHERE id IN (99, 314)", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        eng.sql("SELECT * FROM permanent_rows WHERE id IN (99, 314)", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

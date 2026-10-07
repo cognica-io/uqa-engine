@@ -52,14 +52,17 @@ fn native_handler_aliases_select_the_original_adapter_and_keep_their_owner(
     assert!(result.rows[0]
         .values()
         .all(|value| *value == uqa_core::Value::Bool(true)));
-    assert!(engine
-        .sql(
-            "SELECT fdwname FROM pg_foreign_data_wrapper WHERE fdwname='unused_memory'",
-            &[]
-        )
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT fdwname FROM pg_foreign_data_wrapper WHERE fdwname='unused_memory'",
+                &[]
+            )
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     engine.sql("SET ROLE handler_other", &[]).unwrap();
     assert_eq!(
         engine

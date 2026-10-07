@@ -43,9 +43,12 @@ pub(super) fn assert_table_range_aliases_remain_automatically_updatable() {
     );
     assert_eq!(base.rows[0]["key"], Value::Int(1));
     assert_eq!(base.rows[0]["label"], Value::Str("after".into()));
-    assert!(exec(&engine, "SELECT id FROM range_alias_view_base")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT id FROM range_alias_view_base")
+            .rows
+            .len(),
+        0
+    );
 }
 
 pub(super) fn assert_check_option_definition_over_non_updatable_source() {
@@ -419,9 +422,12 @@ fn assert_non_updatable_view_dml(engine: &Engine) {
         "DELETE FROM constant_only_view WHERE computed_id = 2 RETURNING computed_id",
     );
     assert_eq!(deleted.rows[0]["computed_id"], Value::Int(2));
-    assert!(exec(engine, "SELECT * FROM automatic_readonly_base")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(engine, "SELECT * FROM automatic_readonly_base")
+            .rows
+            .len(),
+        0
+    );
     for sql in [
         "INSERT INTO automatic_materialized VALUES (1, 'one')",
         "UPDATE automatic_materialized SET value = 'changed'",

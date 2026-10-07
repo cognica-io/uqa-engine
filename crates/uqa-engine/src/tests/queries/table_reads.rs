@@ -31,7 +31,7 @@ fn pruned_primary_key_is_not_advertised_as_output_ordering() {
         Some("id".into()),
         None,
     );
-    assert!(pruned.output_ordering().is_empty());
+    assert_eq!(pruned.output_ordering().len(), 0);
 
     let retained = ScoredDocumentSource::new(
         "ordered_source",
@@ -73,7 +73,7 @@ fn recheck_pins_clear_primary_key_ordering_when_their_order_is_not_ascending() {
         },
     ])));
 
-    assert!(source.output_ordering().is_empty());
+    assert_eq!(source.output_ordering().len(), 0);
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn physical_cursor_exposes_qualified_alias_without_copying_the_value() {
     assert_eq!(schema.columns(), ["id"]);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].fragment_count(), 1);
-    assert!(rows[0].lock_origins().is_empty());
+    assert_eq!(rows[0].lock_origins().len(), 0);
     assert_eq!(
         schema.view(&rows[0]).qualified_column("a", "id"),
         Some(&Value::Int(7))

@@ -125,11 +125,14 @@ fn pg18_scroll_cursor_preserves_limit_and_sort_directional_boundaries() {
         .unwrap();
     assert_eq!(cursor_pair(&engine, "FETCH NEXT FROM slice_cursor"), (3, 3));
     assert_eq!(cursor_pair(&engine, "FETCH NEXT FROM slice_cursor"), (4, 4));
-    assert!(engine
-        .sql("FETCH NEXT FROM slice_cursor", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("FETCH NEXT FROM slice_cursor", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         cursor_pair(&engine, "FETCH PRIOR FROM slice_cursor"),
         (4, 4)
@@ -198,11 +201,14 @@ fn pg18_scroll_cursor_materializes_plans_without_backwards_execution() {
         cursor_pair(&engine, "FETCH NEXT FROM result_cursor"),
         (1, 1)
     );
-    assert!(engine
-        .sql("FETCH PRIOR FROM result_cursor", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("FETCH PRIOR FROM result_cursor", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         cursor_pair(&engine, "FETCH NEXT FROM result_cursor"),
         (1, 1)
@@ -385,11 +391,14 @@ fn pg18_scroll_cursor_preserves_limit_state_across_union_all_branches() {
         cursor_pair(&engine, "FETCH NEXT FROM union_limit_cursor"),
         (3, 3)
     );
-    assert!(engine
-        .sql("FETCH NEXT FROM union_limit_cursor", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("FETCH NEXT FROM union_limit_cursor", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         cursor_pair(&engine, "FETCH PRIOR FROM union_limit_cursor"),
         (3, 3)

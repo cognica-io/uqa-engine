@@ -150,7 +150,7 @@ fn select_list_set_functions_allow_postgresql_expression_contexts_and_preserve_t
     assert_eq!(unnested.column_types, [Some(ColumnType::BigInteger)]);
 
     let null_step = exec(&eng, "SELECT generate_series(1, 3, NULL) AS value");
-    assert!(null_step.rows.is_empty());
+    assert_eq!(null_step.rows.len(), 0);
 }
 
 #[test]

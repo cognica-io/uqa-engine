@@ -443,7 +443,7 @@ fn pinned_reader_defers_sibling_catalog_epochs_until_transaction_end() {
     assert!(!reader.has_schema("later").unwrap());
     assert!(!reader.has_graph("later_graph").unwrap());
     assert!(!reader.has_table("later.items").unwrap());
-    assert!(reader.table_names().unwrap().is_empty());
+    assert_eq!(reader.table_names().unwrap().len(), 0);
     assert!(reader.describe_table("later.items").unwrap().is_none());
     assert_eq!(reader.transaction_depth(), 0);
     backend.commit_transaction().unwrap();

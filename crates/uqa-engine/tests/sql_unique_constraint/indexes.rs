@@ -92,11 +92,14 @@ fn unique_index_build_failure_does_not_publish_catalog_state() {
         "CREATE UNIQUE INDEX candidate ON items(a)",
         "23505",
     );
-    assert!(engine
-        .sql("SELECT * FROM pg_indexes WHERE indexname='candidate'", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM pg_indexes WHERE indexname='candidate'", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     exec(&engine, "CREATE INDEX candidate ON items(a)");
     exec(
         &engine,
@@ -395,12 +398,12 @@ fn constraint_index_names_respect_relation_collisions() {
         "ALTER TABLE source ADD CONSTRAINT candidate_pkey1 UNIQUE(a)",
         "42P07",
     );
-    assert!(
+    assert_eq!(
         engine
             .sql("SELECT to_regclass('conflicting') AS id", &[])
             .unwrap()
-            .rows[0]["id"]
-            == Value::Null
+            .rows[0]["id"],
+        Value::Null
     );
 }
 

@@ -33,7 +33,7 @@ fn jsonb_extraction_comparison_on_empty_and_populated_text_table() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE probe (basis TEXT)");
     let query = "SELECT * FROM probe WHERE basis::jsonb->'query'='{}'::jsonb";
-    assert!(exec(&engine, query).rows.is_empty());
+    assert_eq!(exec(&engine, query).rows.len(), 0);
     exec(
         &engine,
         r#"INSERT INTO probe VALUES ('{"query":{}}'), ('{"query":{"x":1}}'), ('{}'), ('{"query":null}'), (NULL)"#,
@@ -149,7 +149,7 @@ fn create_table_with_json() {
         &engine,
         "CREATE TABLE t (id INTEGER PRIMARY KEY, data JSON)",
     );
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
     let selected = exec(&engine, "SELECT * FROM t");
     assert!(selected.columns.contains(&"data".to_string()));
 }

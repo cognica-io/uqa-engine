@@ -310,7 +310,7 @@ fn temporary_indexes_never_enter_the_durable_catalog() {
     }
 
     let reopened = Engine::open(&database).unwrap();
-    assert!(index_identities(&reopened).is_empty());
+    assert_eq!(index_identities(&reopened).len(), 0);
     assert_eq!(
         reopened
             .sql(
@@ -391,7 +391,7 @@ fn quoted_index_identity_preserves_component_boundaries() {
     engine
         .sql("DROP INDEX \"index.dot\".\"shared.dot\"", &[])
         .unwrap();
-    assert!(index_identities(&engine).is_empty());
+    assert_eq!(index_identities(&engine).len(), 0);
 }
 
 #[test]
@@ -468,15 +468,18 @@ fn unsupported_access_methods_have_no_current_or_reopen_side_effects() {
         }
 
         assert_eq!(index_identities(&engine), vec!["public.docs_pkey"]);
-        assert!(engine
-            .sql("SELECT * FROM fts_index_stats('docs')", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_eq!(
+            engine
+                .sql("SELECT * FROM fts_index_stats('docs')", &[])
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
         assert_eq!(engine.table_field_analyzer("docs", "body").unwrap(), None);
         assert_no_text_index(&engine, "docs", "body");
         assert_eq!(catalog_index_count(&db, "docs"), 1);
-        assert!(persisted_fts_fields(&db, "docs").is_empty());
+        assert_eq!(persisted_fts_fields(&db, "docs").len(), 0);
         assert_eq!(
             storage_count(&db, "_occurrence_clusters", "docs", "body"),
             0
@@ -488,7 +491,7 @@ fn unsupported_access_methods_have_no_current_or_reopen_side_effects() {
     assert_eq!(reopened.table_field_analyzer("docs", "body").unwrap(), None);
     assert_no_text_index(&reopened, "docs", "body");
     assert_eq!(catalog_index_count(&db, "docs"), 1);
-    assert!(persisted_fts_fields(&db, "docs").is_empty());
+    assert_eq!(persisted_fts_fields(&db, "docs").len(), 0);
 }
 
 #[test]
@@ -549,11 +552,14 @@ fn dropping_shared_gin_cleans_physical_state_only_after_the_last_reference() {
         engine.sql("DROP INDEX docs_body_gin_b", &[]).unwrap();
 
         assert_eq!(index_identities(&engine), vec!["public.docs_pkey"]);
-        assert!(engine
-            .sql("SELECT * FROM fts_index_stats('docs')", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_eq!(
+            engine
+                .sql("SELECT * FROM fts_index_stats('docs')", &[])
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
         assert_eq!(engine.table_field_analyzer("docs", "body").unwrap(), None);
         assert_no_text_index(&engine, "docs", "body");
         for storage_table in [
@@ -568,16 +574,19 @@ fn dropping_shared_gin_cleans_physical_state_only_after_the_last_reference() {
             storage_count(&db, "_table_field_analyzers", "docs", "body"),
             0
         );
-        assert!(persisted_fts_fields(&db, "docs").is_empty());
+        assert_eq!(persisted_fts_fields(&db, "docs").len(), 0);
     }
 
     let reopened = Engine::open(&db).unwrap();
     assert_eq!(index_identities(&reopened), vec!["public.docs_pkey"]);
-    assert!(reopened
-        .sql("SELECT * FROM fts_index_stats('docs')", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        reopened
+            .sql("SELECT * FROM fts_index_stats('docs')", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(reopened.table_field_analyzer("docs", "body").unwrap(), None);
     assert_no_text_index(&reopened, "docs", "body");
 }

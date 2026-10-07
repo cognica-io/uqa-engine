@@ -82,9 +82,12 @@ fn generated_columns_preserve_array_transform_binding_and_comparison_errors() {
         error.to_string(),
         "could not identify a comparison function for type json"
     );
-    assert!(engine
-        .sql("SELECT * FROM generated_json_array_sort", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM generated_json_array_sort", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }

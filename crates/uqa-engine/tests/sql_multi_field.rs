@@ -47,7 +47,7 @@ fn multi_field_match_returns_documents_matching_either_field() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     // Documents 1 and 3 mention `rust` in both fields and should
     // outrank doc 2 which mentions neither.
     let ids: Vec<i64> = result

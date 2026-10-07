@@ -78,7 +78,7 @@ fn test_single_term() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         assert!(get_str(row, "title").contains("database"));
         assert!(get_score(row) > 0.0);
@@ -94,7 +94,7 @@ fn test_phrase() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         assert!(get_score(row) > 0.0);
     }
@@ -105,7 +105,7 @@ fn test_all_column() {
     let result = engine()
         .sql("SELECT title FROM docs WHERE _all @@ 'database'", &[])
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn test_boolean_and() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         let title = get_str(row, "title");
         assert!(title.contains("database"));
@@ -158,7 +158,7 @@ fn test_grouping() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn test_implicit_and() {
     let result = engine()
         .sql("SELECT title FROM docs WHERE title @@ 'full text'", &[])
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn test_field_specific() {
     let result = engine()
         .sql("SELECT title FROM docs WHERE _all @@ 'title:database'", &[])
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn test_hybrid_text_vector() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         let score = get_score(row);
         assert!(score > 0.0 && score < 1.0);
@@ -203,7 +203,7 @@ fn test_score_calibrated() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         let score = get_score(row);
         assert!(score > 0.0 && score < 1.0);
@@ -267,7 +267,7 @@ fn test_vector_only_query() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     assert!(get_score(&result.rows[0]) > 0.0);
 }
 

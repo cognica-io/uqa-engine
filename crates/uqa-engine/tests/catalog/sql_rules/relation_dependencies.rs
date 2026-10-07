@@ -75,12 +75,11 @@ fn rule_relation_dependencies_enforce_restrict_and_cascade() {
         &engine,
         "DROP TABLE condition_source, action_source CASCADE",
     );
-    assert!(exec(
+    assert_eq!(exec(
         &engine,
         "SELECT rulename FROM pg_rewrite WHERE rulename IN ('condition_dependency', 'action_source_dependency')",
     )
-    .rows
-    .is_empty());
+    .rows.len(), 0);
     exec(&engine, "DROP TABLE action_target");
 }
 
@@ -118,12 +117,15 @@ fn rule_relation_dependency_drops_are_atomic_and_transactional() {
 
     exec(&engine, "BEGIN");
     exec(&engine, "DROP TABLE dependency_tx_source CASCADE");
-    assert!(exec(
-        &engine,
-        "SELECT rulename FROM pg_rewrite WHERE rulename = 'dependency_tx_rule'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT rulename FROM pg_rewrite WHERE rulename = 'dependency_tx_rule'",
+        )
+        .rows
+        .len(),
+        0
+    );
     exec(&engine, "ROLLBACK");
     exec(&engine, "INSERT INTO dependency_tx_events VALUES (1)");
     assert_eq!(
@@ -387,12 +389,15 @@ fn assert_reopened_relation_kind_rule_dependencies(
          DROP FOREIGN TABLE renamed_relation_kind_foreign CASCADE;
          DROP VIEW renamed_relation_kind_event_view",
     );
-    assert!(exec(
-        engine,
-        "SELECT rulename FROM pg_rewrite WHERE rulename LIKE 'relation_kind_%_rule'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            engine,
+            "SELECT rulename FROM pg_rewrite WHERE rulename LIKE 'relation_kind_%_rule'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]
@@ -639,12 +644,15 @@ fn rule_relation_dependencies_cover_sequences_and_cascading_views() {
         .expect_err("a sequence row source must be protected by RESTRICT");
     assert_eq!(error.sqlstate(), Some("2BP01"), "{error}");
     exec(&engine, "DROP SEQUENCE renamed_dependency_sequence CASCADE");
-    assert!(exec(
-        &engine,
-        "SELECT rulename FROM pg_rewrite WHERE rulename = 'sequence_dependency_rule'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT rulename FROM pg_rewrite WHERE rulename = 'sequence_dependency_rule'",
+        )
+        .rows
+        .len(),
+        0
+    );
 
     exec(
         &engine,
@@ -660,12 +668,15 @@ fn rule_relation_dependencies_cover_sequences_and_cascading_views() {
         .expect_err("a rule source view must be protected by RESTRICT");
     assert_eq!(error.sqlstate(), Some("2BP01"), "{error}");
     exec(&engine, "DROP VIEW cascading_rule_source CASCADE");
-    assert!(exec(
-        &engine,
-        "SELECT rulename FROM pg_rewrite WHERE rulename = 'cascading_view_rule'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT rulename FROM pg_rewrite WHERE rulename = 'cascading_view_rule'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]
@@ -687,12 +698,15 @@ fn rule_condition_dependencies_respect_sequential_cte_scope() {
         .expect_err("a later CTE must not shadow a relation in an earlier CTE body");
     assert_eq!(error.sqlstate(), Some("2BP01"), "{error}");
     exec(&engine, "DROP TABLE cte_dependency_source CASCADE");
-    assert!(exec(
-        &engine,
-        "SELECT rulename FROM pg_rewrite WHERE rulename = 'cte_dependency_rule'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT rulename FROM pg_rewrite WHERE rulename = 'cte_dependency_rule'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]

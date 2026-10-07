@@ -18,7 +18,7 @@ fn explain_returns_plan_rows() {
         .sql("EXPLAIN SELECT id FROM t WHERE n > 1 LIMIT 10", &[])
         .unwrap();
     assert_eq!(r.columns, vec!["plan".to_string()]);
-    assert!(!r.rows.is_empty());
+    assert_ne!(r.rows.len(), 0);
     // The plan must mention the from clause and limit, at minimum.
     let blob = r
         .rows
@@ -93,7 +93,7 @@ fn explain_only_executes_mutations_when_analyze_is_requested() {
         .unwrap();
     eng.sql("EXPLAIN (ANALYZE false) INSERT INTO t (id) VALUES (2)", &[])
         .unwrap();
-    assert!(eng.sql("SELECT id FROM t", &[]).unwrap().rows.is_empty());
+    assert_eq!(eng.sql("SELECT id FROM t", &[]).unwrap().rows.len(), 0);
 
     let analyzed = eng
         .sql("EXPLAIN ANALYZE INSERT INTO t (id) VALUES (1)", &[])

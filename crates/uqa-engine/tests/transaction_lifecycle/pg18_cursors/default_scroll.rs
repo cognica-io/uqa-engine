@@ -26,11 +26,14 @@ fn pg18_default_cursor_scroll_follows_native_plan_traversal() {
         engine
             .sql(&format!("DECLARE default_scroll CURSOR FOR {query}"), &[])
             .unwrap();
-        assert!(!engine
-            .sql("FETCH ALL FROM default_scroll", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_ne!(
+            engine
+                .sql("FETCH ALL FROM default_scroll", &[])
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
         let backward = engine.sql("FETCH BACKWARD 1 FROM default_scroll", &[]);
         if scrollable {
             assert_eq!(backward.unwrap().rows.len(), 1, "{query}");
@@ -58,11 +61,14 @@ fn pg18_explicit_scroll_preserves_backward_access_for_materialized_plans() {
                 &[],
             )
             .unwrap();
-        assert!(!engine
-            .sql("FETCH ALL FROM explicit_scroll", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_ne!(
+            engine
+                .sql("FETCH ALL FROM explicit_scroll", &[])
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
         assert_eq!(
             engine
                 .sql("FETCH BACKWARD 1 FROM explicit_scroll", &[])

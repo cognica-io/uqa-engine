@@ -320,11 +320,13 @@ fn wrapper_upgrade_preserves_server_metadata_and_rolls_back_the_reader_fence() {
             .get_metadata("foreign-wrapper-catalog-format")
             .unwrap()
             .is_none());
-        assert!(raw
-            .catalog
-            .metadata_with_prefix("foreign-wrapper/")
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            raw.catalog
+                .metadata_with_prefix("foreign-wrapper/")
+                .unwrap()
+                .len(),
+            0
+        );
         raw.catalog.delete_metadata("sql_triggers_json").unwrap();
         let engine = Engine::from_persistent_provider(factory).unwrap();
         assert_eq!(engine.durable.foreign_servers.read()["source"], expected);

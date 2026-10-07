@@ -246,8 +246,8 @@ fn read_documents(path: &Path, dimensions: usize) -> Vec<DocumentCase> {
     let raw: Vec<RawDocument> = read_json_lines(path);
     for (index, document) in raw.iter().enumerate() {
         assert_eq!(document.id, index as u64 + 1, "BEIR document IDs");
-        assert!(!document.source_id.is_empty());
-        assert!(!document.body.is_empty());
+        assert_ne!(document.source_id, "");
+        assert_ne!(document.body, "");
         validate_embedding(&document.embedding, dimensions, "document", index);
     }
     raw.into_iter()
@@ -267,7 +267,7 @@ fn read_queries(path: &Path, dimensions: usize, corpus_count: usize) -> Vec<Quer
         .enumerate()
         .map(|(index, query)| {
             assert!(query_ids.insert(query.id.clone()), "duplicate query ID");
-            assert!(!query.text.is_empty());
+            assert_ne!(query.text, "");
             validate_embedding(&query.embedding, dimensions, "query", index);
             let judgments = query
                 .judgments

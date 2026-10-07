@@ -172,7 +172,7 @@ fn a_rollback_past_the_creation_forgets_the_namespaces_and_their_oids_stay_used(
     );
     run(&engine, "ROLLBACK");
     assert_eq!(int(&engine, "SELECT pg_my_temp_schema()::bigint"), 0);
-    assert!(temporary_namespaces(&engine).is_empty());
+    assert_eq!(temporary_namespaces(&engine).len(), 0);
     run(&engine, "CREATE TEMP TABLE r2 (a integer)");
     assert_eq!(
         int(&engine, "SELECT pg_my_temp_schema()::bigint"),

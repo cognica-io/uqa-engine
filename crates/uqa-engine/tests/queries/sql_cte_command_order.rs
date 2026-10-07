@@ -277,7 +277,7 @@ fn a_later_update_or_delete_skips_a_row_the_statement_already_wrote() {
             &[],
         )
         .unwrap();
-    assert!(returned.rows.is_empty());
+    assert_eq!(returned.rows.len(), 0);
     assert_eq!(state(&engine), vec![row(1, 8), row(2, 0)]);
     exec(
         &engine,

@@ -175,7 +175,7 @@ fn parameter_expression_index_predicates_match_scan_and_prepared_execution() {
                     &[uqa_sql::SQLParam::scalar(Value::Null)],
                 )
                 .unwrap();
-            assert!(result.rows.is_empty());
+            assert_eq!(result.rows.len(), 0);
             assert_eq!(
                 engine
                     .sql(
@@ -209,11 +209,14 @@ fn parameter_expression_index_predicates_match_scan_and_prepared_execution() {
                 ids(&engine.sql(&format!("EXECUTE {plan}(8)"), &[]).unwrap()),
                 [20]
             );
-            assert!(engine
-                .sql(&format!("EXECUTE {plan}(1)"), &[])
-                .unwrap()
-                .rows
-                .is_empty());
+            assert_eq!(
+                engine
+                    .sql(&format!("EXECUTE {plan}(1)"), &[])
+                    .unwrap()
+                    .rows
+                    .len(),
+                0
+            );
         }
     }
 }
@@ -455,7 +458,7 @@ fn assert_repaired_queries(path: &std::path::Path) {
     let deleted = engine
         .sql("SELECT value FROM engine_meta WHERE key = 'key-19'", &[])
         .unwrap();
-    assert!(deleted.rows.is_empty());
+    assert_eq!(deleted.rows.len(), 0);
     for index in [17, 18] {
         let result = engine
             .sql(
@@ -608,10 +611,13 @@ fn persistent_btree_tracks_rollback_savepoint_and_truncate() {
     assert_same(&engine, "qty = 999");
     engine.rollback().unwrap();
     assert_same(&engine, "qty = 999");
-    assert!(ids(&engine
-        .sql("SELECT id FROM indexed WHERE qty = 999", &[])
-        .unwrap())
-    .is_empty());
+    assert_eq!(
+        ids(&engine
+            .sql("SELECT id FROM indexed WHERE qty = 999", &[])
+            .unwrap())
+        .len(),
+        0
+    );
 
     engine.begin().unwrap();
     engine.savepoint("before_update").unwrap();

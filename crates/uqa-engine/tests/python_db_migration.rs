@@ -136,10 +136,10 @@ fn late_python_migration_failure_rolls_back_the_entire_destination() {
     );
 
     let reopened = Engine::open(&destination).unwrap();
-    assert!(reopened.table_names().unwrap().is_empty());
-    assert!(reopened.list_graphs().unwrap().is_empty());
-    assert!(reopened.list_foreign_servers().unwrap().is_empty());
-    assert!(reopened.list_named_analyzers().unwrap().is_empty());
+    assert_eq!(reopened.table_names().unwrap().len(), 0);
+    assert_eq!(reopened.list_graphs().unwrap().len(), 0);
+    assert_eq!(reopened.list_foreign_servers().unwrap().len(), 0);
+    assert_eq!(reopened.list_named_analyzers().unwrap().len(), 0);
     assert!(reopened.load_model("toy").unwrap().is_none());
     assert!(reopened.load_scoring_params("docs.body").unwrap().is_none());
 }

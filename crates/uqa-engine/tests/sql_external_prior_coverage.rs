@@ -41,7 +41,7 @@ fn bayesian_with_prior_sql() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn bayesian_with_prior_in_fuse_attention() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in result.rows {
         let Some(Value::Float(score)) = row.get("_score") else {
             panic!("missing _score");

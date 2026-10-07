@@ -68,7 +68,7 @@ fn an_identity_sequence_in_a_multi_sequence_drop_prevents_removing_an_earlier_se
         engine.sequence_state("items_id_seq").unwrap().unwrap().1,
         identity
     );
-    assert!(engine.take_sql_notices().is_empty());
+    assert_eq!(engine.take_sql_notices().len(), 0);
 }
 struct FailedPublication<'a> {
     engine: &'a Engine,
@@ -150,7 +150,7 @@ fn failed_sequence_publication_rolls_back_prior_native_default_and_view_deletion
         );
         assert!(publication.reached.get());
         assert_restored(&engine);
-        assert!(engine.take_sql_notices().is_empty());
+        assert_eq!(engine.take_sql_notices().len(), 0);
     }
     drop(engine);
     let reopened = Engine::open(&path).unwrap();

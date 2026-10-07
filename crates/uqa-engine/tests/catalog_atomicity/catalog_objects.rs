@@ -28,7 +28,7 @@ fn empty_schema_and_public_are_durable_catalog_objects() {
                 "public"
             ]
         );
-        assert!(reopened.tables_in_schema("empty_app").unwrap().is_empty());
+        assert_eq!(reopened.tables_in_schema("empty_app").unwrap().len(), 0);
     }
 }
 

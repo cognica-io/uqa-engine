@@ -30,7 +30,7 @@ fn costing_index_readers_retain_guards_and_table_generation() {
     {
         let text = retained.text_index();
         let terms = text.analyze("body", "retained").unwrap();
-        assert!(!terms.is_empty());
+        assert_ne!(terms.len(), 0);
         for term in terms {
             assert_eq!(text.doc_freq("body", &term).unwrap(), 1);
         }

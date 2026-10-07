@@ -116,7 +116,7 @@ fn graph_mutation_does_not_resurrect_a_stale_path_index_after_reopen() {
 
     let reopened = Engine::open(&database).unwrap();
     assert!(reopened.get_path_index("k", "g").unwrap().is_none());
-    assert!(reopened.list_path_indexes().unwrap().is_empty());
+    assert_eq!(reopened.list_path_indexes().unwrap().len(), 0);
     let vertices = reopened
         .graph_with("g", |store| store.vertex_ids_in_graph("g").unwrap())
         .unwrap()

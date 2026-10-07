@@ -186,7 +186,7 @@ fn predecessor_vectors_reopen_with_original_tuple_and_index_identities(
     assert_eq!(after.rows, before.rows);
     assert_eq!(after.indexes, before.indexes);
     assert_eq!(after.definitions, before.definitions);
-    assert!(after.statistics.is_empty());
+    assert_eq!(after.statistics.len(), 0);
     assert_eq!(
         restored
             .sql("SELECT last_value FROM vector_checks", &[])

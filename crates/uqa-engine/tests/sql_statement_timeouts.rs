@@ -126,7 +126,7 @@ fn a_handler_that_names_query_canceled_catches_the_timeout_and_continues() {
         "DO $$ BEGIN PERFORM pg_sleep(60); EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'caught'; END $$",
     );
     assert_eq!(error.sqlstate(), Some("57014"));
-    assert!(engine.take_sql_notices().is_empty());
+    assert_eq!(engine.take_sql_notices().len(), 0);
 }
 
 #[test]

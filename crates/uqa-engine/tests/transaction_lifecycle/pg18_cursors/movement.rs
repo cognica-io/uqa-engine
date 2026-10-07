@@ -21,12 +21,15 @@ fn pg18_sql_cursor_zero_movement_rules_match_postgresql() {
         .unwrap();
     assert_eq!(zero.columns, ["x"]);
     assert_eq!(zero.column_types, [Some(ColumnType::Integer)]);
-    assert!(zero.rows.is_empty());
-    assert!(engine
-        .sql("FETCH ABSOLUTE 0 FROM zero_position", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(zero.rows.len(), 0);
+    assert_eq!(
+        engine
+            .sql("FETCH ABSOLUTE 0 FROM zero_position", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         engine
             .sql("MOVE BACKWARD 0 FROM zero_position", &[])
@@ -83,11 +86,14 @@ fn pg18_sql_cursor_no_scroll_and_locking_rules_match_postgresql() {
         )
         .unwrap();
     engine.sql("FETCH 3 FROM exhausted", &[]).unwrap();
-    assert!(engine
-        .sql("FETCH FORWARD 0 FROM exhausted", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("FETCH FORWARD 0 FROM exhausted", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         engine
             .sql("MOVE FORWARD 0 FROM exhausted", &[])

@@ -305,7 +305,7 @@ fn gin_index_backfills_existing_rows_and_does_not_auto_index_other_text_columns(
     let before_stats = eng
         .sql("SELECT * FROM fts_index_stats('messages')", &[])
         .unwrap();
-    assert!(before_stats.rows.is_empty());
+    assert_eq!(before_stats.rows.len(), 0);
     let before_search = eng
         .sql(
             "SELECT id FROM messages WHERE text_match(content, '호텔') ORDER BY id",

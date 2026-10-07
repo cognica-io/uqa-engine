@@ -155,7 +155,7 @@ fn no_handler_catches_a_termination() {
         "DO $$ BEGIN PERFORM pg_sleep(60); EXCEPTION WHEN query_canceled THEN RAISE NOTICE 'canceled'; WHEN OTHERS THEN RAISE NOTICE 'other'; END $$",
     );
     assert_eq!(failure.sqlstate(), Some("25P04"));
-    assert!(engine.take_sql_notices().is_empty());
+    assert_eq!(engine.take_sql_notices().len(), 0);
 }
 
 #[test]

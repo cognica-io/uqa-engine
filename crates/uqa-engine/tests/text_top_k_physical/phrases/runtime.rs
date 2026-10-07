@@ -34,22 +34,25 @@ fn empty_phrase_graph_still_uses_current_session_budget_for_complete_analysis() 
         if limit == "64kB" {
             assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
         } else {
-            assert!(result.unwrap().rows.is_empty());
+            assert_eq!(result.unwrap().rows.len(), 0);
         }
     }
     let observer = engine.new_session().unwrap();
     observer.sql("SET work_mem = '16MB'", &[]).unwrap();
     let sql = "SELECT id FROM phrases WHERE fts_match(body, $1)";
-    assert!(observer.sql(sql, &parameters).unwrap().rows.is_empty());
+    assert_eq!(observer.sql(sql, &parameters).unwrap().rows.len(), 0);
     assert_eq!(
         engine.sql(sql, &parameters).unwrap_err().sqlstate(),
         Some("53200")
     );
-    assert!(engine
-        .sql("EXECUTE ignored_phrase('\"red\"')", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("EXECUTE ignored_phrase('\"red\"')", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

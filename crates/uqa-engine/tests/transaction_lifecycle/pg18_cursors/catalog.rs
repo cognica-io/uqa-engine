@@ -48,7 +48,7 @@ fn pg18_cursor_catalog_retains_declared_metadata_through_transaction_lifecycle()
             Some(uqa_sql::ColumnType::TimestampTz),
         ]
     );
-    assert!(empty.rows.is_empty());
+    assert_eq!(empty.rows.len(), 0);
     engine.sql("BEGIN", &[]).unwrap();
     let declaration = "DECLARE alpha BINARY SCROLL CURSOR WITH HOLD FOR SELECT 1;";
     engine.sql(declaration, &[]).unwrap();
@@ -84,19 +84,19 @@ fn pg18_cursor_catalog_retains_declared_metadata_through_transaction_lifecycle()
         assert_eq!(held.value_at(0, column), metadata.value_at(0, column));
     }
     engine.sql("CLOSE alpha", &[]).unwrap();
-    assert!(names(&engine).is_empty());
+    assert_eq!(names(&engine).len(), 0);
     engine
         .sql(
             "BEGIN; DECLARE rolled_back CURSOR WITH HOLD FOR SELECT 2; ROLLBACK",
             &[],
         )
         .unwrap();
-    assert!(names(&engine).is_empty());
+    assert_eq!(names(&engine).len(), 0);
     engine
         .sql("DECLARE discarded CURSOR WITH HOLD FOR SELECT 2", &[])
         .unwrap();
     engine.sql("DISCARD ALL", &[]).unwrap();
-    assert!(names(&engine).is_empty());
+    assert_eq!(names(&engine).len(), 0);
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn pg18_cursor_catalog_is_live_during_its_own_fetch_and_hold_materialization() {
     engine
         .sql("DECLARE later CURSOR FOR SELECT 1", &[])
         .unwrap();
-    assert!(names(&sibling).is_empty());
+    assert_eq!(names(&sibling).len(), 0);
     let fetched = engine.sql("FETCH ALL FROM self_view", &[]).unwrap();
     assert_eq!(fetched.rows.len(), 2);
     assert_eq!(fetched.value_at(0, 0), Some(&Value::Str("later".into())));
@@ -130,7 +130,7 @@ fn pg18_cursor_catalog_is_live_during_its_own_fetch_and_hold_materialization() {
     assert_eq!(held.rows.len(), 1);
     assert_eq!(held.value_at(0, 0), Some(&Value::Str("held_view".into())));
     engine.sql("CLOSE ALL", &[]).unwrap();
-    assert!(names(&engine).is_empty());
+    assert_eq!(names(&engine).len(), 0);
 }
 
 #[test]
@@ -168,12 +168,15 @@ fn pg18_cursor_catalog_uses_builtin_identity_permissions_and_name_resolution() {
     engine
         .sql("CREATE ROLE cursor_reader; SET ROLE cursor_reader", &[])
         .unwrap();
-    assert!(names(&engine).is_empty());
+    assert_eq!(names(&engine).len(), 0);
     engine.sql("RESET ROLE; CREATE TABLE public.pg_cursors(name text); SET search_path = public, pg_catalog; INSERT INTO pg_cursors VALUES ('ordinary')", &[]).unwrap();
     assert_eq!(names(&engine), ["ordinary"]);
-    assert!(engine
-        .sql("SELECT * FROM pg_catalog.pg_cursors", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM pg_catalog.pg_cursors", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }

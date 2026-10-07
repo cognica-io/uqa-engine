@@ -152,12 +152,15 @@ fn committed_notifications_survive_sender_loss_around_queue_publication(
             &[],
         )
         .unwrap();
-    assert!(listener
-        .sql("SELECT id FROM items", &[])
-        .unwrap()
-        .rows
-        .is_empty());
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(
+        listener
+            .sql("SELECT id FROM items", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 
     let stack = sender.session.transactions.lock();
     let mut guard = sender
@@ -195,7 +198,7 @@ fn committed_notifications_survive_sender_loss_around_queue_publication(
     assert_eq!(delivered[0].channel, "committed_items");
     assert_eq!(delivered[0].payload, "one");
     listener.poll_sql_notifications().unwrap();
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 }
 
 #[rstest::rstest]
@@ -243,7 +246,7 @@ fn registry_commit_failure_preserves_committed_data_and_listener_changes(
     assert_eq!(delivered.len(), 1);
     assert_eq!(delivered[0].payload, "after committed listen");
     listener.poll_sql_notifications().unwrap();
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
 }
 
 #[rstest::rstest]
@@ -287,20 +290,23 @@ fn recovered_publication_preserves_listener_boundaries(
     let original = retain_original_listener.then_some(original);
     later.sql("LISTEN committed_items", &[]).unwrap();
     later.poll_sql_notifications().unwrap();
-    assert!(later.take_sql_notifications().is_empty());
+    assert_eq!(later.take_sql_notifications().len(), 0);
     if let Some(original) = original {
-        assert!(original
-            .sql("SELECT id FROM items", &[])
-            .unwrap()
-            .rows
-            .is_empty());
-        assert!(original.take_sql_notifications().is_empty());
+        assert_eq!(
+            original
+                .sql("SELECT id FROM items", &[])
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
+        assert_eq!(original.take_sql_notifications().len(), 0);
         original.sql("COMMIT", &[]).unwrap();
         let delivered = original.take_sql_notifications();
         assert_eq!(delivered.len(), 1);
         assert_eq!(delivered[0].payload, "historical");
         original.poll_sql_notifications().unwrap();
-        assert!(original.take_sql_notifications().is_empty());
+        assert_eq!(original.take_sql_notifications().len(), 0);
     }
     later.sql("NOTIFY committed_items, 'current'", &[]).unwrap();
     let delivered = later.take_sql_notifications();

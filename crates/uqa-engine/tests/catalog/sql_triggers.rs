@@ -142,7 +142,7 @@ fn insert_select_keeps_the_statement_snapshot_across_before_statement_triggers()
         "INSERT INTO snapshot_target SELECT id, value FROM snapshot_source RETURNING id, value",
     );
     assert_eq!(inserted.affected_rows, 0);
-    assert!(inserted.rows.is_empty());
+    assert_eq!(inserted.rows.len(), 0);
     assert_eq!(
         strings(
             &engine,
@@ -151,9 +151,10 @@ fn insert_select_keeps_the_statement_snapshot_across_before_statement_triggers()
         ),
         vec!["seeded"]
     );
-    assert!(exec(&engine, "SELECT id FROM snapshot_target")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT id FROM snapshot_target").rows.len(),
+        0
+    );
     for sql in [
         "CREATE TABLE snapshot_mutation_target (id INTEGER PRIMARY KEY, value TEXT)",
         "CREATE FUNCTION seed_snapshot_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO snapshot_mutation_target VALUES (2, 'update-seeded'); RETURN NULL; END $$",
@@ -168,7 +169,7 @@ fn insert_select_keeps_the_statement_snapshot_across_before_statement_triggers()
         "UPDATE snapshot_mutation_target SET value = 'updated' RETURNING id, value",
     );
     assert_eq!(updated.affected_rows, 0);
-    assert!(updated.rows.is_empty());
+    assert_eq!(updated.rows.len(), 0);
     assert_eq!(
         strings(
             &engine,
@@ -827,9 +828,12 @@ fn before_insert_trigger_primary_key_change_updates_physical_identity() {
         exec(&engine, "SELECT id FROM identity_items WHERE id = 101").rows[0].get("id"),
         Some(&Value::Int(101))
     );
-    assert!(exec(&engine, "SELECT id FROM identity_items WHERE id = 1")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT id FROM identity_items WHERE id = 1")
+            .rows
+            .len(),
+        0
+    );
 }
 
 fn install_timing_trigger_fixture(engine: &Engine) {

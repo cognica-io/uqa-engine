@@ -97,12 +97,15 @@ fn bare_names_consider_only_routines_of_the_command_kind() {
     );
     // The function in the first schema of the path does not hide the procedure of another signature in a later one.
     engine.sql("DROP PROCEDURE lookup_pick", &[]).unwrap();
-    assert!(engine
-        .sql(
-            "SELECT 1 FROM pg_proc WHERE proname = 'lookup_pick' AND prokind = 'p'",
-            &[],
-        )
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT 1 FROM pg_proc WHERE proname = 'lookup_pick' AND prokind = 'p'",
+                &[],
+            )
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }

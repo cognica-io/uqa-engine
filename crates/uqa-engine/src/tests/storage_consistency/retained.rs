@@ -412,7 +412,7 @@ fn retained_table_keeps_rows_index_kind_and_occurrences_after_source_close() {
             .read()
             .get_occurrences(id, "body", &key)
             .unwrap();
-        assert!(!occurrences.is_empty());
+        assert_ne!(occurrences.len(), 0);
         let metadata = live
             .inverted_index
             .read()

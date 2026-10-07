@@ -743,11 +743,10 @@ fn truncate_waits_for_the_relation_lock_held_by_for_update() {
     truncate_thread.join().unwrap();
     assert!(was_blocked);
     outcome.unwrap();
-    assert!(root
-        .sql("SELECT id FROM accounts", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        root.sql("SELECT id FROM accounts", &[]).unwrap().rows.len(),
+        0
+    );
 }
 
 #[test]

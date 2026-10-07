@@ -40,7 +40,7 @@ fn calibrated_vector_match_returns_unit_scores() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         let Some(Value::Float(score)) = row.get("_score") else {
             panic!("missing _score: {row:?}");
@@ -89,7 +89,7 @@ fn calibrated_vector_match_nests_under_log_odds() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]

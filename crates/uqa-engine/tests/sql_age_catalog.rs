@@ -97,12 +97,12 @@ fn load_accepts_embedded_libraries_and_rejects_others_like_postgres() {
 #[test]
 fn ag_catalog_relations_resolve_qualified_and_through_the_search_path() {
     let engine = Engine::new();
-    assert!(exec(&engine, "SELECT * FROM ag_catalog.ag_graph")
-        .rows
-        .is_empty());
-    assert!(exec(&engine, "SELECT * FROM ag_catalog.ag_label")
-        .rows
-        .is_empty());
+    for query in [
+        "SELECT * FROM ag_catalog.ag_graph",
+        "SELECT * FROM ag_catalog.ag_label",
+    ] {
+        assert_eq!(exec(&engine, query).rows.len(), 0, "{query}");
+    }
     let bare = engine.sql("SELECT * FROM ag_graph", &[]).unwrap_err();
     assert!(
         bare.to_string().contains("ag_graph"),

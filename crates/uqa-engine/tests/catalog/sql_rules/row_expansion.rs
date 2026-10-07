@@ -60,9 +60,12 @@ fn rule_row_stars_expand_values_and_select_in_event_column_order() {
         &engine,
         "INSERT INTO star_redirect_source VALUES (41, 42), (51, DEFAULT)",
     );
-    assert!(exec(&engine, "SELECT * FROM star_redirect_source")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM star_redirect_source")
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         strings(
             &engine,
@@ -141,12 +144,15 @@ fn rule_row_star_expansion_is_creation_time_stable_across_lifecycle_and_reopen()
         &engine,
         "ALTER TABLE star_lifecycle_source DROP COLUMN renamed CASCADE",
     );
-    assert!(exec(
-        &engine,
-        "SELECT oid FROM pg_rewrite WHERE rulename = 'star_lifecycle_rule'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT oid FROM pg_rewrite WHERE rulename = 'star_lifecycle_rule'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]

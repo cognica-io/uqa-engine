@@ -49,10 +49,10 @@ fn empty_graph_label_results_observe_matching_insertions_without_crossing_other_
                         .engine
                         .run_cypher("g", "MATCH (n:Q) RETURN n", BTreeMap::default())
                         .unwrap();
-                    assert!(rows.is_empty());
+                    assert_eq!(rows.len(), 0);
                 } else {
                     read(&a, |store| {
-                        assert!(store.vertex_ids_by_label("Q", "g")?.is_empty());
+                        assert_eq!(store.vertex_ids_by_label("Q", "g")?.len(), 0);
                         Ok(())
                     });
                 }
@@ -82,9 +82,12 @@ fn empty_graph_adjacency_results_keep_graph_label_and_endpoint_filters() {
             a.begin();
             b.begin();
             read(&a, |store| {
-                assert!(store
-                    .neighbors(1, Some("likes"), Direction::Out, "g")?
-                    .is_empty());
+                assert_eq!(
+                    store
+                        .neighbors(1, Some("likes"), Direction::Out, "g")?
+                        .len(),
+                    0
+                );
                 Ok(())
             });
             pivot(&a, &b);
@@ -115,7 +118,7 @@ fn graph_page_suffixes_and_membership_reads_detect_phantoms_at_the_original_iden
             read(&a, |store| {
                 match route {
                     "page" | "earlier id" => {
-                        assert!(store.vertex_id_page("g", Some(2), 8)?.is_empty());
+                        assert_eq!(store.vertex_id_page("g", Some(2), 8)?.len(), 0);
                     }
                     "membership" | "other entity" => assert!(store.vertex_graphs(99)?.is_empty()),
                     "counts" => assert_eq!(store.vertex_label_counts("g")?.get("P"), Some(&2)),
@@ -204,11 +207,9 @@ fn raw_graph_replacement_observes_new_members_using_the_evaluated_entity_fields(
                 b.begin();
                 read(&a, |store| {
                     if edge {
-                        assert!(store
-                            .neighbors(1, Some("Q"), Direction::Out, "g")?
-                            .is_empty());
+                        assert_eq!(store.neighbors(1, Some("Q"), Direction::Out, "g")?.len(), 0);
                     } else {
-                        assert!(store.vertex_ids_by_label("Q", "g")?.is_empty());
+                        assert_eq!(store.vertex_ids_by_label("Q", "g")?.len(), 0);
                     }
                     Ok(())
                 });
@@ -229,7 +230,7 @@ fn graph_clear_reaches_absent_reads_from_the_prior_identifier_generation() {
         a.begin();
         b.begin();
         read(&a, |store| {
-            assert!(store.vertex_ids_by_label("Q", "g")?.is_empty());
+            assert_eq!(store.vertex_ids_by_label("Q", "g")?.len(), 0);
             Ok(())
         });
         pivot(&a, &b);
@@ -260,7 +261,7 @@ fn graph_selector_write_intents_disappear_with_savepoint_undo() {
             .unwrap();
         a.sql("ROLLBACK TO graph_changes");
         read(&b, |store| {
-            assert!(store.vertex_ids_by_label("Q", "g")?.is_empty());
+            assert_eq!(store.vertex_ids_by_label("Q", "g")?.len(), 0);
             Ok(())
         });
         b.sql("UPDATE left_t SET v = 2 WHERE id = 1");

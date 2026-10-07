@@ -101,11 +101,14 @@ fn pending_events_block_relation_rewrites_but_allow_renames() {
         "ALTER TABLE renamed_child ADD COLUMN delete_safe INTEGER",
     );
     exec(&engine, "COMMIT");
-    assert!(engine
-        .sql("SELECT id FROM renamed_child", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM renamed_child", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -138,11 +141,14 @@ fn partition_deferred_events_keep_their_physical_identity_during_unrelated_ddl()
         "23503",
         "violates foreign key constraint \"partitioned_child_parent_fk\"",
     );
-    assert!(engine
-        .sql("SELECT id FROM partitioned_child", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM partitioned_child", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -175,11 +181,14 @@ fn constraint_modes_do_not_transfer_to_cross_session_replacements() {
         "violates foreign key constraint \"child_parent_fk\"",
     );
     exec(&session_a, "ROLLBACK");
-    assert!(session_b
-        .sql("SELECT id FROM child", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        session_b
+            .sql("SELECT id FROM child", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -231,42 +240,42 @@ fn set_constraints_uses_batch_callback_and_temporary_namespace_transaction_conte
         "23505",
         "duplicate key value violates unique constraint",
     );
-    assert!(engine
+    let rows = engine
         .sql("SELECT id FROM parent WHERE id = 303", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
 
     exec(
         &engine,
         "CREATE TABLE batch_control (id INTEGER PRIMARY KEY)",
     );
     exec(&engine, "INSERT INTO batch_control VALUES (1); ROLLBACK");
-    assert!(engine
+    let rows = engine
         .sql("SELECT id FROM batch_control", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
     error(
         &engine,
         "INSERT INTO batch_control VALUES (2); SAVEPOINT batch_savepoint",
         "25P01",
         "SAVEPOINT can only be used in transaction blocks",
     );
-    assert!(engine
+    let rows = engine
         .sql("SELECT id FROM batch_control", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
     exec(
         &engine,
         "INSERT INTO batch_control VALUES (3); BEGIN; INSERT INTO batch_control VALUES (4); ROLLBACK",
     );
-    assert!(engine
+    let rows = engine
         .sql("SELECT id FROM batch_control", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
 
     let callback_engine: Weak<Engine> = Arc::downgrade(&engine);
     engine
@@ -285,7 +294,7 @@ fn set_constraints_uses_batch_callback_and_temporary_namespace_transaction_conte
         .unwrap();
     engine.take_sql_notices();
     exec(&engine, "SELECT insert_child_parent_pair()");
-    assert!(engine.take_sql_notices().is_empty());
+    assert_eq!(engine.take_sql_notices().len(), 0);
 
     engine.take_sql_notices();
     error(

@@ -130,7 +130,7 @@ fn migrated_fts_columns_rename_and_drop_with_retired_legacy_table_shapes() {
         )
         .unwrap()
         .rows;
-    assert!(!before.is_empty());
+    assert_ne!(before.len(), 0);
     engine
         .sql("ALTER TABLE notes RENAME COLUMN content TO caption", &[])
         .unwrap();
@@ -202,14 +202,17 @@ fn default_document_fields_preserve_non_text_columns_through_migration_and_reope
             assert_eq!(result.rows.len(), 1);
             assert_eq!(result.rows[0]["id"], uqa_core::Value::Int(1));
             assert_eq!(result.rows[0]["turn_index"], uqa_core::Value::Int(7));
-            assert!(engine
-                .sql(
-                    "SELECT id FROM notes WHERE text_match(turn_index, '7')",
-                    &[]
-                )
-                .unwrap()
-                .rows
-                .is_empty());
+            assert_eq!(
+                engine
+                    .sql(
+                        "SELECT id FROM notes WHERE text_match(turn_index, '7')",
+                        &[]
+                    )
+                    .unwrap()
+                    .rows
+                    .len(),
+                0
+            );
             let error = engine
                 .set_table_field_analyzer("notes", "turn_index", "standard", "both")
                 .unwrap_err();

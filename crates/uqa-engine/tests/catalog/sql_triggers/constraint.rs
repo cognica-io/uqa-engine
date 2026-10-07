@@ -46,9 +46,12 @@ fn deferred_constraint_triggers_fire_retroactively_and_follow_the_transaction_mo
 
     exec(&engine, "BEGIN");
     exec(&engine, "INSERT INTO guarded_items VALUES (1, 10)");
-    assert!(exec(&engine, "SELECT * FROM constraint_trigger_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM constraint_trigger_log")
+            .rows
+            .len(),
+        0
+    );
     exec(&engine, "SET CONSTRAINTS guarded_items_check IMMEDIATE");
     assert_eq!(
         strings(
@@ -100,9 +103,12 @@ fn deferred_constraint_trigger_events_follow_savepoint_rollback_commit_and_drop(
     exec(&engine, "INSERT INTO guarded_items VALUES (3, 30)");
     exec(&engine, "DROP TRIGGER guarded_items_check ON guarded_items");
     exec(&engine, "COMMIT");
-    assert!(exec(&engine, "SELECT * FROM constraint_trigger_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM constraint_trigger_log")
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -304,9 +310,10 @@ fn deferred_constraint_trigger_failure_rolls_back_the_outer_transaction() {
         .sql("COMMIT", &[])
         .expect_err("commit must fire the trigger");
     assert_eq!(error.sqlstate(), Some("P0001"));
-    assert!(exec(&engine, "SELECT * FROM guarded_failures")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM guarded_failures").rows.len(),
+        0
+    );
 }
 
 #[test]
@@ -378,9 +385,12 @@ fn dropping_a_referenced_relation_cancels_pending_constraint_trigger_events() {
     exec(&engine, "DROP TABLE constraint_trigger_reference");
     exec(&engine, "COMMIT");
 
-    assert!(exec(&engine, "SELECT * FROM constraint_trigger_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM constraint_trigger_log")
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         exec(
             &engine,

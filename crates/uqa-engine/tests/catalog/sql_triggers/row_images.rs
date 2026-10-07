@@ -90,13 +90,13 @@ fn table_triggers_feed_returning_images_and_preserve_original_old_rows() {
         "UPDATE returning_table_images SET value = 300 WHERE id = 3 RETURNING old.value, new.value",
     );
     assert_eq!(suppressed_update.affected_rows, 0);
-    assert!(suppressed_update.rows.is_empty());
+    assert_eq!(suppressed_update.rows.len(), 0);
     let suppressed_delete = exec(
         &engine,
         "DELETE FROM returning_table_images WHERE id = 4 RETURNING old.value, new.value",
     );
     assert_eq!(suppressed_delete.affected_rows, 0);
-    assert!(suppressed_delete.rows.is_empty());
+    assert_eq!(suppressed_delete.rows.len(), 0);
     let remaining = exec(
         &engine,
         "SELECT id, value FROM returning_table_images ORDER BY id",

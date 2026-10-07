@@ -220,8 +220,8 @@ fn admitted_empty_scans_retain_phantom_observations() {
         let b = a.sibling();
         a.begin();
         b.begin();
-        assert!(a.sql("SELECT id FROM left_t WHERE v = 99").rows.is_empty());
-        assert!(b.sql("SELECT id FROM right_t WHERE v = 99").rows.is_empty());
+        assert_eq!(a.sql("SELECT id FROM left_t WHERE v = 99").rows.len(), 0);
+        assert_eq!(b.sql("SELECT id FROM right_t WHERE v = 99").rows.len(), 0);
         a.sql("INSERT INTO right_t VALUES (2, 99)");
         b.sql("INSERT INTO left_t VALUES (2, 99)");
         assert_cycle(&a, &b);
@@ -260,7 +260,7 @@ fn admitted_unused_scans_and_rolled_back_row_intents_do_not_create_cycles() {
             if rollback_write {
                 a.sql("SELECT v FROM left_t");
             } else {
-                assert!(a.sql("SELECT v FROM left_t LIMIT 0").rows.is_empty());
+                assert_eq!(a.sql("SELECT v FROM left_t LIMIT 0").rows.len(), 0);
             }
             if !rollback_write {
                 b.sql("SELECT v FROM right_t");

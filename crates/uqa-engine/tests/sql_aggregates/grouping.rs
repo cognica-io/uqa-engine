@@ -98,7 +98,7 @@ fn having_aggregate_comparison() {
             &[],
         )
         .unwrap();
-    assert!(r.rows.is_empty());
+    assert_eq!(r.rows.len(), 0);
 }
 
 #[test]

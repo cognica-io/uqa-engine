@@ -145,7 +145,7 @@ fn admitted_unrelated_vector_fields_null_candidates_and_unused_searches_can_comm
                     "mixed_limit_zero" => "SELECT id FROM vectors WHERE knn_match(embedding, ARRAY[1.0, 0.0], 2) AND id IN (SELECT id FROM right_t) LIMIT 0",
                     _ => "SELECT id FROM vectors WHERE knn_match(embedding, ARRAY[1.0, 0.0], 2) LIMIT 0",
                 };
-                assert!(a.sql(sql).rows.is_empty());
+                assert_eq!(a.sql(sql).rows.len(), 0);
             } else {
                 let k = if operation == "zero_k" { 0 } else { 2 };
                 assert_eq!(search(&a, "knn", k), usize::from(k != 0));

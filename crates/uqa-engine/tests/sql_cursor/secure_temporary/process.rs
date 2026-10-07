@@ -201,6 +201,6 @@ pub(super) fn verify(mode: usize, kill: bool) {
         process.command("continue");
         process.expect("closed");
         process.finish(false);
-        assert!(files(&temporary).is_empty());
+        assert_eq!(files(&temporary).len(), 0);
     }
 }

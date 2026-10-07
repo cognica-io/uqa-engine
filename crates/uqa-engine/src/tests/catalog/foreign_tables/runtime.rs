@@ -175,14 +175,17 @@ fn foreign_drop_checks_owned_sequence_dependents_before_removing_persisted_state
     assert!(engine.durable.sequences.read().is_empty());
     drop(engine);
     let reopened = Engine::open(&path).unwrap();
-    assert!(reopened.list_foreign_tables().unwrap().is_empty());
-    assert!(reopened
-        .storage
-        .catalog
-        .as_ref()
-        .unwrap()
-        .load_sequence_rows()
-        .unwrap()
-        .is_empty());
+    assert_eq!(reopened.list_foreign_tables().unwrap().len(), 0);
+    assert_eq!(
+        reopened
+            .storage
+            .catalog
+            .as_ref()
+            .unwrap()
+            .load_sequence_rows()
+            .unwrap()
+            .len(),
+        0
+    );
     assert_eq!(reopened.list_foreign_servers().unwrap(), vec!["source"]);
 }

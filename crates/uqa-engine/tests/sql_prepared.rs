@@ -134,7 +134,7 @@ fn user_function_declarations_bind_empty_and_nested_result_types() {
             typed_functions.named(extra => 1::bigint, value => 1::integer) AS named_result
          WHERE FALSE",
     );
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
     assert_eq!(
         result.column_types,
         [

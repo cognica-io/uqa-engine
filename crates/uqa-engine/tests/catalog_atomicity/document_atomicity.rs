@@ -83,12 +83,15 @@ fn failed_commit_clears_engine_transaction_state_and_restores_caches() {
 
     assert_eq!(engine.transaction_depth(), 0);
     assert!(engine.get_document("commit_t", 1).unwrap().is_none());
-    assert!(engine
-        .sql("SELECT id FROM commit_t", &[])
-        .unwrap()
-        .rows
-        .is_empty());
-    assert!(engine.take_sql_notifications().is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM commit_t", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
+    assert_eq!(engine.take_sql_notifications().len(), 0);
 
     engine
         .sql("NOTIFY commit_failure_channel, 'committed'", &[])

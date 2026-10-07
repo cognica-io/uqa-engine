@@ -513,7 +513,7 @@ fn retained_commit_resolves_without_replaying_preparation_and_publishes_once() {
         assert_eq!(notifications.len(), 1);
         assert_eq!(notifications[0].payload, "once");
         listener.poll_sql_notifications().unwrap();
-        assert!(listener.take_sql_notifications().is_empty());
+        assert_eq!(listener.take_sql_notifications().len(), 0);
         assert_eq!(count(&listener, "items"), Value::Int(1));
         let reopened = engine(persistence);
         assert_eq!(count(&reopened, "audit"), Value::Int(1));
@@ -580,7 +580,7 @@ fn rollback_resolves_an_uncommitted_attempt_without_publishing_private_effects()
         assert_eq!(count(&root, "items"), Value::Int(0));
         assert_eq!(count(&listener, "items"), Value::Int(0));
         listener.poll_sql_notifications().unwrap();
-        assert!(listener.take_sql_notifications().is_empty());
+        assert_eq!(listener.take_sql_notifications().len(), 0);
     }
 }
 

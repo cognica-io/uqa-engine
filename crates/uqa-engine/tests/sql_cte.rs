@@ -551,5 +551,5 @@ fn recursive_empty_base() {
             SELECT n + 1 FROM r WHERE n < 5
          ) SELECT n FROM r",
     );
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
 }

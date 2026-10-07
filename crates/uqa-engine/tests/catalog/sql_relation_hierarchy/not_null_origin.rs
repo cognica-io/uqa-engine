@@ -187,14 +187,17 @@ fn no_inherit_constraints_are_not_copied_into_new_descendants() {
         "CREATE TABLE origin_inherited() INHERITS(origin_parent)",
     );
     exec(&engine, "INSERT INTO origin_inherited VALUES(NULL)");
-    assert!(engine
-        .sql(
-            "SELECT conname FROM pg_constraint WHERE conrelid='origin_inherited'::regclass",
-            &[]
-        )
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT conname FROM pg_constraint WHERE conrelid='origin_inherited'::regclass",
+                &[]
+            )
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

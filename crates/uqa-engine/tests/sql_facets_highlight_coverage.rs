@@ -94,7 +94,7 @@ fn sql_highlight_coverage_cases() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         assert!(get_str(row, "snippet").contains("<b>"));
     }
@@ -106,7 +106,7 @@ fn sql_highlight_coverage_cases() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         assert!(get_str(row, "snippet").contains("<em>"));
     }
@@ -231,5 +231,5 @@ fn sql_facets_respect_filters_and_sort_by_value() {
             &[],
         )
         .unwrap();
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
 }

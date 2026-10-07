@@ -125,7 +125,7 @@ fn truncate_wipes_rows_keeping_schema() {
     eng.sql("INSERT INTO t (body) VALUES ('b')", &[]).unwrap();
     eng.sql("TRUNCATE TABLE t", &[]).unwrap();
     let res = eng.sql("SELECT body FROM t", &[]).unwrap();
-    assert!(res.rows.is_empty());
+    assert_eq!(res.rows.len(), 0);
     // Schema still intact: we can still INSERT.
     eng.sql("INSERT INTO t (body) VALUES ('c')", &[]).unwrap();
 }
@@ -155,31 +155,15 @@ fn truncate_honors_foreign_key_boundaries_and_cascade() {
     );
     eng.sql("TRUNCATE parent, public.parent, child", &[])
         .unwrap();
-    assert!(eng
-        .sql("SELECT id FROM parent", &[])
-        .unwrap()
-        .rows
-        .is_empty());
-    assert!(eng
-        .sql("SELECT id FROM child", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(eng.sql("SELECT id FROM parent", &[]).unwrap().rows.len(), 0);
+    assert_eq!(eng.sql("SELECT id FROM child", &[]).unwrap().rows.len(), 0);
 
     eng.sql("INSERT INTO parent (id) VALUES (2)", &[]).unwrap();
     eng.sql("INSERT INTO child (id, parent_id) VALUES (20, 2)", &[])
         .unwrap();
     eng.sql("TRUNCATE parent CASCADE", &[]).unwrap();
-    assert!(eng
-        .sql("SELECT id FROM parent", &[])
-        .unwrap()
-        .rows
-        .is_empty());
-    assert!(eng
-        .sql("SELECT id FROM child", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(eng.sql("SELECT id FROM parent", &[]).unwrap().rows.len(), 0);
+    assert_eq!(eng.sql("SELECT id FROM child", &[]).unwrap().rows.len(), 0);
 }
 
 #[test]
@@ -279,16 +263,22 @@ fn canonical_foreign_keys_and_truncate_cascade_survive_reopen() {
             "truncate cascades to table \"child\""
         )]
     );
-    assert!(reopened
-        .sql("SELECT id FROM app.parent", &[])
-        .unwrap()
-        .rows
-        .is_empty());
-    assert!(reopened
-        .sql("SELECT id FROM app.child", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        reopened
+            .sql("SELECT id FROM app.parent", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
+    assert_eq!(
+        reopened
+            .sql("SELECT id FROM app.child", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -332,7 +322,7 @@ fn explain_runs_inner_statement_silently() {
     eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
     // Plain EXPLAIN plans without executing the body.
     let explained = eng.sql("EXPLAIN SELECT * FROM t", &[]).unwrap();
-    assert!(!explained.rows.is_empty());
+    assert_ne!(explained.rows.len(), 0);
 }
 
 #[test]

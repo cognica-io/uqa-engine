@@ -251,11 +251,14 @@ fn committed_table_data_invalidates_sibling_value_count_and_statistics_caches() 
 
     // Warm every session-local dependency while the durable table is empty:
     // the PK value index, document count, column statistics, and SQL plan.
-    assert!(observer
-        .sql("SELECT id FROM cache_items WHERE id = 1", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        observer
+            .sql("SELECT id FROM cache_items WHERE id = 1", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(observer.document_count("cache_items").unwrap(), 0);
     assert_eq!(
         observer.column_stats("cache_items").unwrap()["id"].row_count,
@@ -270,11 +273,14 @@ fn committed_table_data_invalidates_sibling_value_count_and_statistics_caches() 
         )
         .unwrap();
     // The writer's dirty generation remains private until COMMIT.
-    assert!(observer
-        .sql("SELECT id FROM cache_items WHERE id = 1", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        observer
+            .sql("SELECT id FROM cache_items WHERE id = 1", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(observer.document_count("cache_items").unwrap(), 0);
     writer.commit().unwrap();
 
@@ -298,11 +304,14 @@ fn committed_table_data_invalidates_sibling_value_count_and_statistics_caches() 
         )
         .unwrap();
     writer.rollback().unwrap();
-    assert!(observer
-        .sql("SELECT id FROM cache_items WHERE id = 2", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        observer
+            .sql("SELECT id FROM cache_items WHERE id = 2", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(observer.document_count("cache_items").unwrap(), 1);
 }
 

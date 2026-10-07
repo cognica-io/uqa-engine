@@ -39,7 +39,7 @@ fn analyze_text_returns_jsonb_with_positions_offsets_and_revision() {
     assert!(diagnostic["final_offsets"]["utf8"].is_object());
     assert!(diagnostic["final_offsets"]["utf16"].is_object());
     let tokens = diagnostic["tokens"].as_array().unwrap();
-    assert!(!tokens.is_empty());
+    assert_ne!(tokens.len(), 0);
     assert!(tokens[0]["term"].is_string());
     assert!(tokens[0]["offsets"]["utf8"].is_object());
     assert!(tokens[0]["offsets"]["utf16"].is_object());

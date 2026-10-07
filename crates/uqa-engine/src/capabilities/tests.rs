@@ -181,10 +181,10 @@ fn catalog_read_view_keeps_all_live_projection_families_on_one_snapshot() {
     engine.sql("CREATE ROLE snapshot_role", &[]).unwrap();
     engine.create_graph("snapshot_graph").unwrap();
 
-    assert!(snapshot.sequences().unwrap().is_empty());
+    assert_eq!(snapshot.sequences().unwrap().len(), 0);
     assert!(snapshot.views_of_kind(StoredViewKind::View).is_empty());
     assert!(!snapshot.roles().any(|role| role.name == "snapshot_role"));
-    assert!(snapshot.graph_names().is_empty());
+    assert_eq!(snapshot.graph_names().len(), 0);
 
     let current = engine.catalog_read_view();
     assert!(current

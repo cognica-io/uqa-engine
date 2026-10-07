@@ -230,7 +230,7 @@ fn accelerated_retrieval_materializes_only_relational_dependencies() {
             &[],
         )
         .unwrap();
-    assert!(!facets.rows.is_empty());
+    assert_ne!(facets.rows.len(), 0);
     let recorded = projections.lock();
     assert_no_retrieval_fields(&recorded);
     assert!(recorded

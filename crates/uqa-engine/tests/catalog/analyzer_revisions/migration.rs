@@ -90,11 +90,11 @@ fn failed_legacy_binding_publication_rolls_back_descriptors_and_rebuilt_postings
         error.to_string().contains("forced binding failure"),
         "{error}"
     );
-    assert!(catalog.load_analyzer_descriptors().unwrap().is_empty());
-    assert!(catalog
-        .load_table_field_analyzer_bindings()
-        .unwrap()
-        .is_empty());
+    assert_eq!(catalog.load_analyzer_descriptors().unwrap().len(), 0);
+    assert_eq!(
+        catalog.load_table_field_analyzer_bindings().unwrap().len(),
+        0
+    );
     assert_eq!(catalog.load_table_field_analyzers().unwrap(), before_labels);
     connection
         .with(|db| {
@@ -164,7 +164,7 @@ fn corrupt_binding_is_rejected_before_any_legacy_analyzer_is_migrated() {
         panic!("corrupt descriptor reopened")
     };
     assert!(error.to_string().contains("fingerprint"), "{error}");
-    assert!(catalog.load_analyzer_descriptors().unwrap().is_empty());
+    assert_eq!(catalog.load_analyzer_descriptors().unwrap().len(), 0);
 }
 
 #[cfg(all(feature = "nori", not(target_os = "emscripten")))]

@@ -162,11 +162,14 @@ fn independent_analyzer_revisions_survive_files_names_renames_and_reopen() {
         assert!(reopened.drop_named_analyzer("indexed").unwrap());
         assert!(reopened.drop_named_analyzer("searched").unwrap());
         drop(reopened);
-        assert!(backend
-            .open(&database)
-            .list_named_analyzers()
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            backend
+                .open(&database)
+                .list_named_analyzers()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 }
 
@@ -185,7 +188,7 @@ fn analyzer_bindings_rollback_with_postings_and_refresh_in_sibling_sessions() {
         engine
             .set_table_field_analyzer("docs", "body", "whole", "both")
             .unwrap();
-        assert!(hits(&engine, "docs", "body", "alpha").is_empty());
+        assert_eq!(hits(&engine, "docs", "body", "alpha").len(), 0);
         engine.savepoint("whole_bound").unwrap();
         engine
             .set_table_field_analyzer("docs", "body", "standard", "search")
@@ -204,7 +207,7 @@ fn analyzer_bindings_rollback_with_postings_and_refresh_in_sibling_sessions() {
         engine
             .set_table_field_analyzer("docs", "body", "whole", "both")
             .unwrap();
-        assert!(hits(&observer, "docs", "body", "alpha").is_empty());
+        assert_eq!(hits(&observer, "docs", "body", "alpha").len(), 0);
         assert_eq!(
             observer.table_field_analyzer("docs", "body").unwrap(),
             Some(("whole".into(), "both".into()))
@@ -212,7 +215,7 @@ fn analyzer_bindings_rollback_with_postings_and_refresh_in_sibling_sessions() {
         engine
             .register_named_analyzer("whole", r#"{"tokenizer":{"type":"whitespace"}}"#)
             .unwrap();
-        assert!(hits(&observer, "docs", "body", "alpha").is_empty());
+        assert_eq!(hits(&observer, "docs", "body", "alpha").len(), 0);
         assert_eq!(
             observer.get_table_analyzer("docs", "body", "both").unwrap(),
             engine.get_table_analyzer("docs", "body", "both").unwrap()
@@ -252,13 +255,13 @@ fn gin_analyzer_owner_survives_name_replacement_and_releases_to_remaining_plain_
             drop(engine);
             engine = backend.open(&database);
         }
-        assert!(hits(&engine, "docs", "body", "alpha").is_empty());
+        assert_eq!(hits(&engine, "docs", "body", "alpha").len(), 0);
         engine.begin().unwrap();
         execute(&engine, "DROP INDEX docs_owned");
         assert_eq!(hits(&engine, "docs", "body", "alpha"), [1]);
         assert_eq!(engine.table_field_analyzer("docs", "body").unwrap(), None);
         engine.rollback().unwrap();
-        assert!(hits(&engine, "docs", "body", "alpha").is_empty());
+        assert_eq!(hits(&engine, "docs", "body", "alpha").len(), 0);
         assert!(engine.drop_named_analyzer("whole").is_err());
         execute(&engine, "DROP INDEX docs_owned");
         assert_eq!(hits(&engine, "docs", "body", "alpha"), [1]);

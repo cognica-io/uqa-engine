@@ -70,7 +70,7 @@ fn encrypted_notification_queue_and_listener_metadata_remain_encrypted() {
         exec(&listener, &format!("LISTEN {CHANNEL}"));
         exec(&listener, "BEGIN");
         exec(&sender, &format!("NOTIFY {CHANNEL}, '{PAYLOAD}'"));
-        assert!(listener.take_sql_notifications().is_empty());
+        assert_eq!(listener.take_sql_notifications().len(), 0);
 
         let registry = Connection::open(registry_path(&database)).unwrap();
         assert!(registry
@@ -97,13 +97,13 @@ fn encrypted_notification_queue_and_listener_metadata_remain_encrypted() {
             &sender,
             &format!("BEGIN; NOTIFY {CHANNEL}, 'discarded'; ROLLBACK"),
         );
-        assert!(listener.take_sql_notifications().is_empty());
+        assert_eq!(listener.take_sql_notifications().len(), 0);
         drop(registry);
         drop(sender);
         drop(listener);
         assert_no_plaintext(&database, &[CHANNEL, PAYLOAD, KEY]);
         let reopened = Engine::open_auto(&database, Some(KEY)).unwrap();
-        assert!(reopened.take_sql_notifications().is_empty());
+        assert_eq!(reopened.take_sql_notifications().len(), 0);
     }
 }
 

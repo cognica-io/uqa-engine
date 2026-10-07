@@ -7,7 +7,9 @@
 use super::*;
 
 fn blob_to_vector(blob: &[u8]) -> Vec<f32> {
-    blob.chunks_exact(4)
+    blob.as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect()
 }

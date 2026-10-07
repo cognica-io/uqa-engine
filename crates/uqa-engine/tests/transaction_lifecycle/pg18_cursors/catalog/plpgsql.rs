@@ -44,7 +44,7 @@ fn pg18_cursor_catalog_preserves_static_bound_and_dynamic_query_source() {
         assert_eq!(result.value_at(index, 1), Some(&Value::Str(source.into())));
         assert_eq!(result.value_at(index, 2), Some(&Value::Bool(scrollable)));
     }
-    assert!(names(&engine).is_empty());
+    assert_eq!(names(&engine).len(), 0);
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn pg18_cursor_catalog_keeps_loop_declaration_flags_after_procedural_commit() {
         assert_eq!(result.value_at(index, 1), Some(&Value::Bool(false)));
         assert_eq!(result.value_at(index, 2), Some(&Value::Bool(false)));
     }
-    assert!(names(&engine).is_empty());
+    assert_eq!(names(&engine).len(), 0);
 }
 
 #[test]
@@ -107,5 +107,5 @@ fn pg18_unnamed_cursor_skips_explicit_names_and_exception_cleanup_releases_metad
     engine.sql("DO $body$ DECLARE c refcursor := 'failed'; BEGIN BEGIN OPEN c FOR SELECT 30; RAISE EXCEPTION 'abort scope'; EXCEPTION WHEN OTHERS THEN NULL; END; END $body$", &[]).unwrap();
     assert_eq!(names(&engine), ["<unnamed portal 1>", "<unnamed portal 2>"]);
     engine.sql("ROLLBACK", &[]).unwrap();
-    assert!(names(&engine).is_empty());
+    assert_eq!(names(&engine).len(), 0);
 }

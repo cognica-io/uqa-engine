@@ -283,5 +283,5 @@ fn exact_fusion_rejects_conflicting_implicit_priors() {
             &[],
         )
         .unwrap();
-    assert!(!explicit.rows.is_empty());
+    assert_ne!(explicit.rows.len(), 0);
 }

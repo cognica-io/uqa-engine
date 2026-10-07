@@ -155,7 +155,7 @@ fn engine_open_automatically_migrates_legacy_redb_postings() {
 
     let storage = RedbStorage::open(&path).unwrap();
     let store = storage.store();
-    for tag in [b'k', b'o', b'x', b'e'] {
+    for tag in *b"koxe" {
         store.delete_prefix(&[tag]).unwrap();
     }
     store.delete(&inverted_index_format_key()).unwrap();
@@ -194,10 +194,10 @@ fn engine_open_automatically_migrates_legacy_redb_postings() {
 
     let storage = RedbStorage::open(&path).unwrap();
     let store = storage.store();
-    assert!(store.scan_prefix(b"p").unwrap().is_empty());
-    assert!(store.scan_prefix(b"r").unwrap().is_empty());
-    for tag in [b'k', b'o', b'x', b'l', b'f'] {
-        assert!(store.scan_prefix(&[tag]).unwrap().is_empty());
+    assert_eq!(store.scan_prefix(b"p").unwrap().len(), 0);
+    assert_eq!(store.scan_prefix(b"r").unwrap().len(), 0);
+    for tag in *b"koxlf" {
+        assert_eq!(store.scan_prefix(&[tag]).unwrap().len(), 0);
     }
     let index = uqa_storage::KeyValueInvertedIndex::new(
         Arc::new(store),
@@ -328,11 +328,10 @@ fn sql_begin_promotes_redb_read_transactions_before_writes_and_savepoints() {
     engine.sql("RELEASE SAVEPOINT before_insert", &[]).unwrap();
     engine.sql("COMMIT", &[]).unwrap();
 
-    assert!(engine
-        .sql("SELECT id FROM items", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine.sql("SELECT id FROM items", &[]).unwrap().rows.len(),
+        0
+    );
 
     engine.sql("BEGIN", &[]).unwrap();
     engine.create_sequence("mixed_api", 1, 1, false).unwrap();
@@ -839,11 +838,14 @@ fn lifecycle_hnsw_spec() -> VectorIndexSpec {
 fn assert_table_indexes_are_physically_removed(path: &std::path::Path) {
     let storage = RedbStorage::open(path).unwrap();
     let session = storage.open_session().unwrap();
-    assert!(session
-        .backend
-        .btree_index_fields("public.archived")
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        session
+            .backend
+            .btree_index_fields("public.archived")
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]

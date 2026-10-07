@@ -133,7 +133,7 @@ fn delete_using_empty_source_matches_no_target_rows() {
         )
         .unwrap();
     assert_eq!(deleted.affected_rows, 0);
-    assert!(deleted.rows.is_empty());
+    assert_eq!(deleted.rows.len(), 0);
     assert_eq!(deleted.column_types, [Some(ColumnType::Integer)]);
     let remaining = eng
         .sql("SELECT count(*) AS count FROM accounts", &[])

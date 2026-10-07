@@ -226,7 +226,7 @@ fn update_to_fts_column_refreshes_sqlite_key_value_postings() {
                 &[],
             )
             .unwrap();
-        assert!(old_hits.rows.is_empty());
+        assert_eq!(old_hits.rows.len(), 0);
         let new_hits = engine
             .sql(
                 "SELECT public_id FROM messages WHERE text_match(content, 'gamma')",
@@ -247,7 +247,7 @@ fn update_to_fts_column_refreshes_sqlite_key_value_postings() {
             &[],
         )
         .unwrap();
-    assert!(old_hits.rows.is_empty());
+    assert_eq!(old_hits.rows.len(), 0);
     let new_hits = reopened
         .sql(
             "SELECT public_id FROM messages WHERE text_match(content, 'gamma')",
@@ -308,7 +308,7 @@ fn update_to_fts_column_refreshes_all_non_unique_matches() {
             &[],
         )
         .unwrap();
-    assert!(old_chat_hits.rows.is_empty());
+    assert_eq!(old_chat_hits.rows.len(), 0);
     let new_hits = engine
         .sql(
             "SELECT id FROM messages WHERE text_match(content, 'gamma') ORDER BY id",

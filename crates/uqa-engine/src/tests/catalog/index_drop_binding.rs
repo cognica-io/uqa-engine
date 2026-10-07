@@ -65,7 +65,7 @@ fn dropped_index_rebinds_its_table_and_physical_method_and_preserves_peer_change
             peer_lock(&first, "t", "ACCESS EXCLUSIVE", true);
             peer_lock(&first, target, "ACCESS SHARE", false);
             if !rename_table {
-                assert!(second.fts_fields_for_table("other").unwrap().is_empty());
+                assert_eq!(second.fts_fields_for_table("other").unwrap().len(), 0);
             }
             sql(&second, "ROLLBACK TO before_drop");
             let restored = sql(&second, "SELECT oid FROM pg_class WHERE relname = 'idx'");

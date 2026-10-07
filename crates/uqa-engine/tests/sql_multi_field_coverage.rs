@@ -45,7 +45,7 @@ fn multi_field_match_sql() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn multi_field_match_with_weights() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]

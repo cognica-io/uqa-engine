@@ -87,7 +87,7 @@ fn foreign_channels_do_not_enter_registration_delivery_usage_or_cleanup() {
     assert_eq!(notification.payload, "unchanged");
     assert_eq!(notification.process_id, engine.backend_process_id());
     legacy.poll_sql_notifications().unwrap();
-    assert!(legacy.take_sql_notifications().is_empty());
+    assert_eq!(legacy.take_sql_notifications().len(), 0);
     legacy.commit().unwrap();
     assert_eq!(legacy.take_sql_notifications(), [notification]);
     legacy.sql("UNLISTEN *", &[]).unwrap();
@@ -115,7 +115,7 @@ fn foreign_channels_do_not_enter_registration_delivery_usage_or_cleanup() {
     assert_eq!(engine.notification_hub.usage().unwrap(), 0.0);
     let registry = cross.begin_registry_transaction().unwrap();
     assert!(registry.listener_metadata_after(None).unwrap().is_none());
-    assert!(registry.entries_from(0).unwrap().is_empty());
+    assert_eq!(registry.entries_from(0).unwrap().len(), 0);
     registry.commit().unwrap();
 }
 

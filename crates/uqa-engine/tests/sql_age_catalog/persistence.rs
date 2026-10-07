@@ -15,9 +15,12 @@ fn graph_namespaces_and_schemas_share_one_name_space() {
         duplicate.to_string().contains("already exists"),
         "{duplicate}"
     );
-    assert!(exec(&engine, "CREATE SCHEMA IF NOT EXISTS shared_ns")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "CREATE SCHEMA IF NOT EXISTS shared_ns")
+            .rows
+            .len(),
+        0
+    );
     assert_age_error(
         &engine,
         "DROP SCHEMA shared_ns",
@@ -39,9 +42,12 @@ fn graph_namespaces_and_schemas_share_one_name_space() {
         "{protected}"
     );
     // IF EXISTS keeps skipping unknown names even with CASCADE.
-    assert!(exec(&engine, "DROP SCHEMA IF EXISTS never_created CASCADE")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "DROP SCHEMA IF EXISTS never_created CASCADE")
+            .rows
+            .len(),
+        0
+    );
     exec(&engine, "SELECT create_graph('shared_again')");
     exec(
         &engine,

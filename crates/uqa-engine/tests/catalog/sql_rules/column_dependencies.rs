@@ -104,12 +104,15 @@ fn rule_source_and_action_target_columns_follow_rename_and_reopen() {
         &engine,
         "ALTER TABLE dependency_source DROP COLUMN renamed_predicate_value CASCADE",
     );
-    assert!(exec(
-        &engine,
-        "SELECT rulename FROM pg_rewrite WHERE rulename = 'bound_columns'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT rulename FROM pg_rewrite WHERE rulename = 'bound_columns'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]

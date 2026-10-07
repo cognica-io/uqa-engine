@@ -88,9 +88,12 @@ fn insert_rule_returning_maps_provider_rows_to_the_event_relation() {
     assert_eq!(result.value_at(1, 1), Some(&Value::Int(12)));
     assert_eq!(result.value_at(1, 2), Some(&Value::Int(24)));
     assert_eq!(result.value_at(1, 3), Some(&Value::Str("two!".into())));
-    assert!(exec(&engine, "SELECT * FROM insert_returning_event")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM insert_returning_event")
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         exec(
             &engine,
@@ -260,9 +263,12 @@ fn rule_returning_preserves_update_from_and_delete_using_context() {
         exec(&engine, "SELECT value FROM delete_context_event").value_at(0, 0),
         Some(&Value::Int(10))
     );
-    assert!(exec(&engine, "SELECT * FROM delete_context_action")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM delete_context_action")
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -338,10 +344,12 @@ fn rule_returning_requires_one_active_provider_only_when_instead_can_suppress() 
         .sql("INSERT INTO returning_source VALUES (3) RETURNING id", &[])
         .expect_err("multiple active providers must fail before action execution");
     assert_eq!(multiple.sqlstate(), Some("0A000"));
-    assert!(exec(&engine, "SELECT * FROM returning_action_a")
-        .rows
-        .is_empty());
-    assert!(exec(&engine, "SELECT * FROM returning_action_b")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM returning_action_a").rows.len(),
+        0
+    );
+    assert_eq!(
+        exec(&engine, "SELECT * FROM returning_action_b").rows.len(),
+        0
+    );
 }
