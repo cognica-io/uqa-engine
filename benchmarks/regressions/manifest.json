@@ -403,7 +403,7 @@
       "source": "crates/uqa-execution/src/row_locks/cross_process/file/row_identities/tests.rs",
       "capability": "Exact row reservation ownership",
       "workload": "128 rows of one relation, repeated acquisition, savepoint upgrade and final release.",
-      "invariant": "One registry identity and native relation pin cover all rows; earlier claims survive savepoint undo; final release permits exact generation reuse.",
+      "invariant": "One registry identity and native relation pin cover all rows; earlier claims survive savepoint undo; final release permits slot reuse with a new generation.",
       "case_names": [
         ""
       ]

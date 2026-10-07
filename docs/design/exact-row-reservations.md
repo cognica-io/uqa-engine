@@ -25,10 +25,13 @@ No relation, document, payload, score, or algebraic operator is added. Successfu
 - [x] Verify claim-table encoding, savepoints, process death, mapping fallback, full conflict matrix and deadlock edges.
 - [x] Verify collision separation and bounded registry/native-pin growth with actual acquisition paths.
 - [x] Define and verify live shared-table/registry admission and cold-epoch rebuild; pre-table binaries still require all-owner shutdown.
-- [ ] Run focused checks, review, update the manual and regression inventory, and merge the change.
+- [x] Run focused checks, review, and update the manual and regression inventory.
+- [ ] Merge and remove the task branch.
 
 The remaining performance work is tracked separately: #266 also requires multi-process contention qualification and exclusion of incompatible legacy coordinators; #347 covers autonomous sequence publication; #348 covers bundled SQLite's memory-management flag; #261 covers controlled timing and reviewed baselines; #125 covers macOS loader startup. This change must not close those unverified obligations.
 
 The focused owner suite passes 138 tests. Row-claim entries use 80 bytes instead of 32 to retain the complete identity; the empty table has exactly 413,696 bytes and the mapping remains capped at 64 MiB. Warm mapped claims still issue no positioned read/write per row, and groups of 2/64/65/128 reservations still take exactly $\lceil n/64\rceil$ table arbitrations after coordinator admission. No elapsed-time speedup is claimed.
 
 Admission also exposed #586: temporary dependencies and relation-registry attachments both used byte 15. Temporary dependency admission now uses byte 5; the relation attachment keeps byte 15 so older registry clients cannot reset an active epoch. A separate-process regression holds a relation identity while the peer enters temporary dependency admission and verifies cancellation and process-loss release.
+
+Product commit `b17a5e99f` passes all 85 required deterministic cases on Linux and macOS in [automatic run 37703837838](https://github.com/cognica-io/uqa-engine/actions/runs/37703837838). Local verification also passes strict Execution Clippy, formatting, dependency and Engine ownership policies, harness/file checks and 19 regression-runner unit tests. CodeRabbit reviewed the change and identified one wording correction: slots are reused with new generations; generations are not reused within a live epoch. Copilot could not review because its quota was exhausted.
