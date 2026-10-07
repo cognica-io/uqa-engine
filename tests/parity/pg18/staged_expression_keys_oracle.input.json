@@ -1,0 +1,117 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TABLE indexed_rows(id integer PRIMARY KEY, email text, tenant integer, active boolean, note text); CREATE UNIQUE INDEX folded_active ON indexed_rows(lower(email),tenant) NULLS NOT DISTINCT WHERE active"
+    },
+    {
+      "id": "insert_batch",
+      "sql": "INSERT INTO indexed_rows VALUES (1,'One',1,true,'first'),(2,'one',1,false,'excluded'),(3,NULL,1,true,'null'),(4,'Two',1,true,'second')"
+    },
+    {
+      "id": "duplicate_batch",
+      "sql": "INSERT INTO indexed_rows VALUES (5,'Three',1,true,'a'),(6,'three',1,true,'b')"
+    },
+    {
+      "id": "after_failed_batch",
+      "sql": "SELECT id,email,tenant,active,note FROM indexed_rows ORDER BY id"
+    },
+    {
+      "id": "upsert",
+      "sql": "INSERT INTO indexed_rows VALUES (5,'ONE',1,true,'changed') ON CONFLICT(lower(email),tenant) WHERE active DO UPDATE SET note=excluded.note"
+    },
+    {
+      "id": "upsert_twice",
+      "sql": "INSERT INTO indexed_rows VALUES (5,'ONE',1,true,'a'),(6,'one',1,true,'b') ON CONFLICT(lower(email),tenant) WHERE active DO UPDATE SET note=excluded.note"
+    },
+    {
+      "id": "update_batch_conflict",
+      "sql": "UPDATE indexed_rows SET email='same' WHERE id IN (1,4)"
+    },
+    {
+      "id": "null_conflict",
+      "sql": "INSERT INTO indexed_rows VALUES (7,NULL,1,true,'duplicate')"
+    },
+    {
+      "id": "different_tenant",
+      "sql": "INSERT INTO indexed_rows VALUES (7,NULL,2,true,'other tenant')"
+    },
+    {
+      "id": "fixed_begin",
+      "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ; SAVEPOINT before_change"
+    },
+    {
+      "id": "private_key_move",
+      "sql": "UPDATE indexed_rows SET email='renamed' WHERE id=1; INSERT INTO indexed_rows VALUES (8,'one',1,true,'freed key')"
+    },
+    {
+      "id": "private_duplicate",
+      "sql": "INSERT INTO indexed_rows VALUES (9,'RENAMED',1,true,'duplicate')"
+    },
+    {
+      "id": "undo",
+      "sql": "ROLLBACK TO before_change; COMMIT"
+    },
+    {
+      "id": "after_undo",
+      "sql": "SELECT id,email,tenant,active,note FROM indexed_rows ORDER BY id"
+    },
+    {
+      "id": "nested_setup",
+      "sql": "CREATE FUNCTION move_staged() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id=11 THEN UPDATE indexed_rows SET email='moved' WHERE id=10; END IF; RETURN NEW; END $$; CREATE TRIGGER move_staged BEFORE INSERT ON indexed_rows FOR EACH ROW EXECUTE FUNCTION move_staged()"
+    },
+    {
+      "id": "nested_move",
+      "sql": "INSERT INTO indexed_rows VALUES (10,'Ten',1,true,'outer'),(11,'TEN',1,true,'reused')"
+    },
+    {
+      "id": "nested_rows",
+      "sql": "SELECT id,email,note FROM indexed_rows WHERE id>=10 ORDER BY id"
+    },
+    {
+      "id": "nested_cleanup",
+      "sql": "DROP TRIGGER move_staged ON indexed_rows; DROP FUNCTION move_staged()"
+    },
+    {
+      "id": "predicate_move",
+      "sql": "UPDATE indexed_rows SET active=false WHERE id=1; INSERT INTO indexed_rows VALUES(12,'ONE',1,true,'new active')"
+    },
+    {
+      "id": "predicate_conflict",
+      "sql": "UPDATE indexed_rows SET active=true WHERE id=1"
+    },
+    {
+      "id": "rows",
+      "sql": "SELECT id,email,tenant,active,note FROM indexed_rows ORDER BY id"
+    },
+    {
+      "id": "null_distinct_setup",
+      "sql": "CREATE TABLE ordinary_nulls(email text); CREATE UNIQUE INDEX ordinary_lower ON ordinary_nulls(lower(email)); INSERT INTO ordinary_nulls VALUES(NULL),(NULL)"
+    },
+    {
+      "id": "null_distinct_rows",
+      "sql": "SELECT count(*) AS n FROM ordinary_nulls"
+    },
+    {
+      "id": "expression_setup",
+      "sql": "CREATE FUNCTION stored_key(x integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN x; CREATE TABLE stored_keys(id integer); CREATE UNIQUE INDEX stored_expression ON stored_keys(stored_key(id)); INSERT INTO stored_keys VALUES(1); CREATE OR REPLACE FUNCTION stored_key(x integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN x+10"
+    },
+    {
+      "id": "stored_key_conflict",
+      "sql": "INSERT INTO stored_keys VALUES(-9)"
+    },
+    {
+      "id": "stored_key_rows",
+      "sql": "SELECT id FROM stored_keys ORDER BY id"
+    }
+  ],
+  "reopen_ids": [
+    "rows",
+    "null_distinct_rows",
+    "stored_key_rows"
+  ]
+}

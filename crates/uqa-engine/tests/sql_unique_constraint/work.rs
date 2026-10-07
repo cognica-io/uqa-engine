@@ -64,3 +64,33 @@ fn expression_unique_batch_evaluations_are_linear(#[case] provider: Option<u8>) 
         );
     }
 }
+
+#[rstest::rstest]
+#[case::memory(None)]
+#[case::sqlite(Some(0))]
+#[case::sqlite_key_value(Some(1))]
+#[case::redb(Some(2))]
+fn staged_expression_keys_match_postgresql(#[case] provider: Option<u8>) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("expression-keys.db");
+    let engine = provider.map_or_else(Engine::new, |provider| {
+        super::expressions::open_expression_engine(&path, provider)
+    });
+    let mut reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/parity/pg18/staged_expression_keys_oracle.expected.json"
+    ))
+    .unwrap();
+    crate::pg18_oracle::verify(&engine, &reference.to_string());
+    drop(engine);
+    if let Some(provider) = provider {
+        let ids = reference["reopen_ids"].as_array().unwrap().clone();
+        reference["cases"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|case| ids.contains(&case["id"]));
+        crate::pg18_oracle::verify(
+            &super::expressions::open_expression_engine(&path, provider),
+            &reference.to_string(),
+        );
+    }
+}
