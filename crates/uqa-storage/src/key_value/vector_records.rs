@@ -58,11 +58,9 @@ pub(super) fn vector_bytes(
     }
     let mut output = BudgetedVec::new(control.memory());
     output.reserve(value.len() / 4)?;
-    for bytes in value.chunks_exact(4) {
+    for bytes in value.as_chunks::<4>().0 {
         control.cancellation().check()?;
-        output.push(f32::from_le_bytes(
-            bytes.try_into().expect("four-byte chunk"),
-        ))?;
+        output.push(f32::from_le_bytes(*bytes))?;
     }
     Ok(output)
 }

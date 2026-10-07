@@ -37,7 +37,9 @@ pub(super) fn encode(value: &DecimalValue) -> Result<Vec<u8>, SQLError> {
     );
     let digits = padded
         .as_bytes()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|group| {
             group
                 .iter()
@@ -114,7 +116,9 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<String, SQLError> {
         )
     };
     let digits = bytes[offset..]
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect::<Vec<_>>();
     if digits.iter().any(|digit| *digit >= 10_000) {

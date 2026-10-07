@@ -191,7 +191,7 @@ pub fn decode_codebook(
     let mut centroids = BudgetedVec::new(control.memory());
     centroids.reserve(scalars)?;
     let start = METADATA_BYTES + (chunks + 1) * 4;
-    for (offset, scalar) in body[start..].chunks_exact(8).enumerate() {
+    for (offset, scalar) in body[start..].as_chunks::<8>().0.iter().enumerate() {
         checkpoint(offset, control)?;
         centroids.push(f64::from_bits(u64::from_le_bytes(field(scalar, 0)?)))?;
     }

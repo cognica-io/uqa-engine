@@ -42,7 +42,7 @@ impl MappingKey {
                 "mapping discovery requires a complete catalog identity",
             ));
         }
-        if key[PREFIX..].chunks_exact(16).any(|id| id == [0; 16]) {
+        if key[PREFIX..].as_chunks::<16>().0.contains(&[0; 16]) {
             return Err(invalid("mapping catalog identity must be nonzero"));
         }
         let mut bytes = [0; INDEX_BYTES];

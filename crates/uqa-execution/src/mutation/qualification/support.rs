@@ -59,7 +59,7 @@ pub(super) fn retain_support(
     let mut block = [0_u8; BLOCK];
     for batch in entries.chunks(BLOCK / size_of::<DocId>()) {
         control.cancellation().check()?;
-        for (bytes, entry) in block.chunks_exact_mut(8).zip(batch) {
+        for (bytes, entry) in block.as_chunks_mut::<8>().0.iter_mut().zip(batch) {
             bytes.copy_from_slice(&entry.doc_id.to_be_bytes());
         }
         file.write_all(&block[..batch.len() * 8]).map_err(io)?;

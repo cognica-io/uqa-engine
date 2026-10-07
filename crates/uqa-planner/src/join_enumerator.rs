@@ -308,8 +308,7 @@ impl<'g> DPccp<'g> {
             .enumerate()
             .filter_map(|(idx, mask)| {
                 usize::try_from(mask.count_ones())
-                    .ok()
-                    .is_some_and(|count| count == n - 1)
+                    .is_ok_and(|count| count == n - 1)
                     .then_some(idx)
             })
             .collect();

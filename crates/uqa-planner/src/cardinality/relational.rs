@@ -286,9 +286,7 @@ fn scalar_positive_usize(expression: &ScalarExpr) -> Option<usize> {
 }
 
 fn scalar_named_argument(expression: &ScalarExpr) -> bool {
-    uqa_sql::scalar_call_argument(expression)
-        .ok()
-        .is_some_and(|argument| argument.name.is_some())
+    uqa_sql::scalar_call_argument(expression).is_ok_and(|argument| argument.name.is_some())
 }
 
 fn top_k_selectivity(k: usize, row_count: u64) -> Selectivity {

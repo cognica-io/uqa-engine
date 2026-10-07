@@ -73,13 +73,11 @@ pub fn decode_vector_bytes(
     }
     let mut vector = BudgetedVec::new(control.memory());
     vector.reserve(bytes.len() / 4)?;
-    for (position, bytes) in bytes.chunks_exact(4).enumerate() {
+    for (position, bytes) in bytes.as_chunks::<4>().0.iter().enumerate() {
         if position.is_multiple_of(1024) {
             control.check()?;
         }
-        vector.push(f32::from_le_bytes(
-            bytes.try_into().expect("four-byte float"),
-        ))?;
+        vector.push(f32::from_le_bytes(*bytes))?;
     }
     super::validate_vector_values_controlled(dimensions, &vector, Some(control))?;
     Ok(vector)

@@ -145,8 +145,8 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
         bounds.push(match step {
             AssignmentStep::Index(index) => (slice.then_some(1), Some(bound(index)?)),
             AssignmentStep::Slice { lower, upper } => (
-                lower.as_deref().map(&bound).transpose()?,
-                upper.as_deref().map(&bound).transpose()?,
+                lower.as_deref().map(bound).transpose()?,
+                upper.as_deref().map(bound).transpose()?,
             ),
             AssignmentStep::Field(_) => {
                 unreachable!("typed array target contains no composite fields")
@@ -421,8 +421,8 @@ mod tests {
                 let Value::Array(array) = &*output else {
                     panic!("NULL slice must produce an array");
                 };
-                assert!(array.elements().is_empty());
-                assert!(array.dimensions().is_empty());
+                assert_eq!(array.elements().len(), 0);
+                assert_eq!(array.dimensions().len(), 0);
             } else {
                 assert_eq!(*output, original);
             }

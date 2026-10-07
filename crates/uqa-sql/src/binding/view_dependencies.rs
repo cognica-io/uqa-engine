@@ -167,12 +167,9 @@ fn bind_source_targets<E>(
                 *qualifier = RelationIdentity::parse_reference(name)
                     .map_or_else(|_| name.clone(), |(_, relation)| relation);
             }
-            let is_cte =
-                RelationIdentity::parse_reference(name)
-                    .ok()
-                    .is_some_and(|(schema, relation)| {
-                        schema.is_none() && visible_ctes.contains(&relation)
-                    });
+            let is_cte = RelationIdentity::parse_reference(name).is_ok_and(|(schema, relation)| {
+                schema.is_none() && visible_ctes.contains(&relation)
+            });
             if !is_cte {
                 *name = resolve(name, *include_descendants)?;
             }
@@ -234,8 +231,7 @@ pub fn source_plan_references_relation(
     match source {
         crate::plan::SourcePlan::Table { name, .. } => {
             let is_cte = RelationIdentity::parse_reference(name)
-                .ok()
-                .is_some_and(|(schema, relation)| schema.is_none() && ctes.contains(&relation));
+                .is_ok_and(|(schema, relation)| schema.is_none() && ctes.contains(&relation));
             !is_cte && relation_reference_matches(name, target)
         }
         crate::plan::SourcePlan::Join { left, right, .. } => {

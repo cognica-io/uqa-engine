@@ -218,7 +218,7 @@ impl RowSchema {
             .map(|slot| remap_slot(*slot, &mut source_slots, &mut positions))
             .collect();
         let mut source_aliases = self.index.aliases.iter().collect::<Vec<_>>();
-        source_aliases.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        source_aliases.sort_unstable_by_key(|(left, _)| *left);
         let aliases = source_aliases
             .into_iter()
             .map(|(name, slot)| {

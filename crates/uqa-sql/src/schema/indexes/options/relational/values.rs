@@ -92,7 +92,7 @@ fn sign(text: &str) -> (bool, &str) {
 }
 
 fn hexadecimal(text: &str) -> Option<f64> {
-    let (mantissa, exponent) = text.split_once(['p', 'P']).map_or((text, "0"), |pair| pair);
+    let (mantissa, exponent) = text.split_once(['p', 'P']).unwrap_or((text, "0"));
     let exponent = exponent_value(exponent)?;
     let mut point = false;
     let mut fraction = 0_i64;
@@ -149,7 +149,7 @@ fn hexadecimal(text: &str) -> Option<f64> {
     let lowest_bit = scale
         .checked_add(trailing.checked_mul(4)?)?
         .checked_add(i64::from(low))?;
-    let highest_bit = power.checked_add(i64::from(63 - high.leading_zeros()))?;
+    let highest_bit = power.checked_add(i64::from(high.ilog2()))?;
     if highest_bit < -1022 && lowest_bit < -1074 {
         return None;
     }

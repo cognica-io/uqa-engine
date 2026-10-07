@@ -85,11 +85,9 @@ pub(in crate::vector_index) fn vector(
     }
     let mut output = BudgetedVec::new(control.memory());
     output.reserve(bytes.len() / 4)?;
-    for part in bytes.chunks_exact(4) {
+    for part in bytes.as_chunks::<4>().0 {
         control.cancellation().check()?;
-        output.push(f32::from_le_bytes(
-            part.try_into().expect("four-byte float"),
-        ))?;
+        output.push(f32::from_le_bytes(*part))?;
     }
     Ok(output)
 }

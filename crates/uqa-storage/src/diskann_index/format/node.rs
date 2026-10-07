@@ -116,7 +116,9 @@ impl DiskANNNodeLayout {
         let mut vector = BudgetedVec::new(control.memory());
         vector.reserve(self.dimensions as usize)?;
         for (offset, component) in bytes[NODE_HEADER_BYTES..vector_end]
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .enumerate()
         {
             checkpoint(offset, control)?;
@@ -130,7 +132,12 @@ impl DiskANNNodeLayout {
         zeros(&bytes[neighbor_end..], control)?;
         let mut neighbors = BudgetedVec::new(control.memory());
         neighbors.reserve(degree)?;
-        for (offset, neighbor) in bytes[vector_end..neighbor_end].chunks_exact(8).enumerate() {
+        for (offset, neighbor) in bytes[vector_end..neighbor_end]
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .enumerate()
+        {
             checkpoint(offset, control)?;
             neighbors.push(u64::from_le_bytes(field(neighbor, 0)?))?;
         }

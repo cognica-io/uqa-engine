@@ -167,7 +167,7 @@ pub fn convert_value_to_column_type_with_control(
             } else {
                 Err(SQLError::TypeMismatch(format!(
                     "cannot cast {:?} to anyarray",
-                    &*value
+                    *value
                 )))
             }
         }

@@ -114,18 +114,17 @@ fn md5_compute(input: &[u8], control: &ProductionControl<'_>) -> Result<[u8; 16]
     let mut d0: u32 = 0x1032_5476;
 
     // Full input blocks are borrowed. Only the final one or two padded blocks need storage.
-    let mut chunks = input.chunks_exact(64);
-    let remaining = chunks.remainder();
+    let (chunks, remaining) = input.as_chunks::<64>();
     let mut tail = [0_u8; 128];
     tail[..remaining.len()].copy_from_slice(remaining);
     tail[remaining.len()] = 0x80;
     let tail_len = if remaining.len() < 56 { 64 } else { 128 };
     let bits = (input.len() as u64).wrapping_mul(8);
     tail[tail_len - 8..tail_len].copy_from_slice(&bits.to_le_bytes());
-    for chunk in chunks.by_ref().chain(tail[..tail_len].chunks_exact(64)) {
+    for chunk in chunks.iter().chain(tail[..tail_len].as_chunks::<64>().0) {
         control.check()?;
         let mut m = [0u32; 16];
-        for (i, word) in chunk.chunks_exact(4).enumerate() {
+        for (i, word) in chunk.as_chunks::<4>().0.iter().enumerate() {
             m[i] = u32::from_le_bytes([word[0], word[1], word[2], word[3]]);
         }
         let mut a = a0;

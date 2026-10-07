@@ -100,10 +100,10 @@ impl Record for OwnedVectorMutation {
                     let length = dimensions.checked_mul(4).ok_or(MemoryError::SizeOverflow)?;
                     let raw = take(&mut bytes, length)?;
                     vectors.push(
-                        raw.chunks_exact(4)
-                            .map(|bits| {
-                                f32::from_bits(u32::from_le_bytes(bits.try_into().unwrap()))
-                            })
+                        raw.as_chunks::<4>()
+                            .0
+                            .iter()
+                            .map(|bits| f32::from_bits(u32::from_le_bytes(*bits)))
                             .collect(),
                     );
                 }

@@ -39,7 +39,7 @@ impl Deparser<'_> {
             format!("({array_sql})")
         };
         if dispatch == FunctionDispatch::ArraySlices {
-            for bounds in indices.chunks_exact(2) {
+            for bounds in indices.as_chunks::<2>().0 {
                 let lower = self.slice_bound(&bounds[0], scope, subqueries)?;
                 let upper = self.slice_bound(&bounds[1], scope, subqueries)?;
                 write!(rendered, "[{lower}:{upper}]").expect("writing to a String cannot fail");

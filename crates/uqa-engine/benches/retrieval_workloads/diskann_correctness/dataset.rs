@@ -54,9 +54,11 @@ fn decode(bytes: &[u8], expected: &Json, dimensions: usize) -> Vec<Vec<f32>> {
     bytes
         .chunks_exact(dimensions * 4)
         .map(|row| {
-            row.chunks_exact(4)
+            row.as_chunks::<4>()
+                .0
+                .iter()
                 .map(|chunk| {
-                    let value = f32::from_le_bytes(chunk.try_into().unwrap());
+                    let value = f32::from_le_bytes(*chunk);
                     assert!(value.is_finite());
                     value
                 })

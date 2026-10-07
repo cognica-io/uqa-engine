@@ -62,12 +62,9 @@ pub fn bind_stored_query_relations(
                 return Ok(canonical);
             }
         }
-        if RelationIdentity::parse_reference(reference)
-            .ok()
-            .is_some_and(|(schema, relation)| {
-                schema.is_none() && catalog.transition_relations.contains(&relation)
-            })
-        {
+        if RelationIdentity::parse_reference(reference).is_ok_and(|(schema, relation)| {
+            schema.is_none() && catalog.transition_relations.contains(&relation)
+        }) {
             if reject_transition_relations {
                 return Err(SQLError::Routine {
                     sqlstate: "0A000".into(),

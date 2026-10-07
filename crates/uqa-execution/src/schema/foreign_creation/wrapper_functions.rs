@@ -48,7 +48,7 @@ impl ForeignCreationContext<'_> {
             identities.push(RoutineCatalogIdentity {
                 oid,
                 relation: RelationIdentity::from_legacy_name(&routine.def.name)
-                    .map_err(|e| SQLError::Internal(e.to_string()))?,
+                    .map_err(SQLError::Internal)?,
                 argument_types: oids,
                 kind: if routine.def.is_procedure { 'p' } else { 'f' },
             });

@@ -53,7 +53,7 @@ impl Engine {
         let mut lock_order = std::collections::BTreeSet::new();
         for name in names {
             let Some((table_name, "table")) = self.try_resolve_visible_relation_kind(name)? else {
-                return Err(SQLError::UnknownTable(name.to_string()));
+                return Err(SQLError::UnknownTable(name.clone()));
             };
             if lock_order.insert(table_name.clone()) {
                 ordered.push(table_name);

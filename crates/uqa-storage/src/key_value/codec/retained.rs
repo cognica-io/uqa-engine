@@ -58,15 +58,11 @@ fn current_fields(
             for member in members.iter() {
                 control.check()?;
                 match member.name.as_str() {
-                    "fields" => {
-                        if fields.replace(member.value).is_some() {
-                            return Err(invalid_json("duplicate document fields"));
-                        }
+                    "fields" if fields.replace(member.value).is_some() => {
+                        return Err(invalid_json("duplicate document fields"));
                     }
-                    "tuple_xmin" => {
-                        if xmin.replace(member.value).is_some() {
-                            return Err(invalid_json("duplicate document tuple_xmin"));
-                        }
+                    "tuple_xmin" if xmin.replace(member.value).is_some() => {
+                        return Err(invalid_json("duplicate document tuple_xmin"));
                     }
                     // Unknown envelope fields are structurally validated by the shared reader without choosing a numeric or tagged-value representation.
                     _ => {}

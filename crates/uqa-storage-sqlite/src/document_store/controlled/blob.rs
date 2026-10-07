@@ -90,11 +90,9 @@ fn f64_list(bytes: &[u8], control: &StorageReadControl) -> Result<Budgeted<Value
     }
     let mut output = BudgetedVec::new(control.memory());
     output.reserve(bytes.len() / size_of::<f64>())?;
-    for chunk in bytes.chunks_exact(size_of::<f64>()) {
+    for chunk in bytes.as_chunks::<{ size_of::<f64>() }>().0 {
         control.cancellation().check()?;
-        output.push(Value::Float(f64::from_le_bytes(
-            chunk.try_into().expect("fixed-width float"),
-        )))?;
+        output.push(Value::Float(f64::from_le_bytes(*chunk)))?;
     }
     let (output, memory) = output.into_parts();
     Ok(Budgeted::new(Value::List(output), memory))

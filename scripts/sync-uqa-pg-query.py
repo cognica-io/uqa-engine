@@ -22,7 +22,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEST = ROOT / "crates" / "uqa-pg-query"
 CHECKSUMS = DEST / "SHA256SUMS"
-PG_QUERY_REV = "ee4c1a19615242fc94608b529c4f8968025fde85"
+PG_QUERY_REV = "f4da519be60e717a0e176697353d2838e25c18ab"
 LIBPG_QUERY_REV = "727e274e8943fb2526695c8b72bb4ff90a052c97"
 PG_QUERY_REPO = "https://github.com/jaepil/pg_query.rs"
 LIBPG_QUERY_REPO = "https://github.com/jaepil/libpg_query"

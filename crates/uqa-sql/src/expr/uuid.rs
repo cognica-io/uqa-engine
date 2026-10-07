@@ -145,7 +145,7 @@ fn parse_uuid_bytes_with_control(text: &str, control: &ProductionControl<'_>) ->
         return Err(invalid_uuid(text));
     }
     let mut bytes = [0_u8; 16];
-    for (index, pair) in normalized.chunks_exact(2).enumerate() {
+    for (index, pair) in normalized.as_chunks::<2>().0.iter().enumerate() {
         bytes[index] = (hex_value(pair[0]) << 4) | hex_value(pair[1]);
     }
     Ok(bytes)

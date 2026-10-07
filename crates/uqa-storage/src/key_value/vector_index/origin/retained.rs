@@ -132,12 +132,12 @@ impl RetainedDiskANNCanonical {
                         return Err(invalid("canonical vector width mismatch"));
                     }
                     vector.clear();
-                    for (coordinate, chunk) in value.chunks_exact(4).enumerate() {
+                    for (coordinate, chunk) in value.as_chunks::<4>().0.iter().enumerate() {
                         if coordinate.is_multiple_of(1024) {
                             self.control.check()?;
                             control.check()?;
                         }
-                        vector.push(f32::from_le_bytes(chunk.try_into().expect("fixed chunks")))?;
+                        vector.push(f32::from_le_bytes(*chunk))?;
                     }
                     crate::vector_index::validate_vector_values_controlled(
                         self.dimensions,

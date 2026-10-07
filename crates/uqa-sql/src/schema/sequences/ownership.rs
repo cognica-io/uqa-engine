@@ -87,8 +87,8 @@ pub fn bind_sequence_owner(
             })?;
     let Some(owner_column) = sequence_owner_column_identity(catalog, &table_name, kind, column)?
     else {
-        let relation = RelationIdentity::from_legacy_name(&table_name)
-            .map_err(|error| SQLError::Internal(error.to_string()))?;
+        let relation =
+            RelationIdentity::from_legacy_name(&table_name).map_err(SQLError::Internal)?;
         return Err(SQLError::Diagnostic {
             sqlstate: "42809".into(),
             message: format!("sequence cannot be owned by relation \"{}\"", relation.name),

@@ -184,7 +184,7 @@ impl DiskANNOriginLayout {
             return Err(invalid("origin batch shape or address differs"));
         }
         let mut previous = None;
-        for bytes in entries.chunks_exact(ORIGIN_ENTRY_BYTES) {
+        for bytes in entries.as_chunks::<ORIGIN_ENTRY_BYTES>().0 {
             control.check()?;
             ordered(
                 &mut previous,

@@ -182,7 +182,7 @@ impl DiskANNSideLayout {
             return Err(invalid("side batch count differs"));
         }
         let mut previous = None;
-        for bytes in entries.chunks_exact(ENTRY_BYTES) {
+        for bytes in entries.as_chunks::<ENTRY_BYTES>().0 {
             control.check()?;
             ordered(&mut previous, read_entry(self.dimensions, bytes)?)?;
         }

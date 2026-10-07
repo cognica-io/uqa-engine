@@ -45,8 +45,8 @@ pub(super) fn bind(
         for routine in overloads {
             let oid = u32::try_from(user_routine_catalog_oid(routine)?)
                 .map_err(|error| SQLError::Internal(error.to_string()))?;
-            let relation = uqa_core::RelationIdentity::from_legacy_name(name)
-                .map_err(|error| SQLError::Internal(error.to_string()))?;
+            let relation =
+                uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
             let argument_types = uqa_sql::routines::routine_signature_types(&routine.def)
                 .iter()
                 .map(|ty| {

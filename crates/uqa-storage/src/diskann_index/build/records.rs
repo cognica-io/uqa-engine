@@ -153,11 +153,9 @@ impl Records {
         let version = DiskANNVectorVersion::new(writer, u64::from_le_bytes(field(bytes, 36)?))?;
         let mut raw = BudgetedVec::new(control.memory());
         raw.reserve(self.dimensions as usize)?;
-        for (index, bits) in bytes[HEADER_BYTES..].chunks_exact(4).enumerate() {
+        for (index, bits) in bytes[HEADER_BYTES..].as_chunks::<4>().0.iter().enumerate() {
             checkpoint(index, control)?;
-            raw.push(f32::from_bits(u32::from_le_bytes(
-                bits.try_into().expect("four-byte raw scalar"),
-            )))?;
+            raw.push(f32::from_bits(u32::from_le_bytes(*bits)))?;
         }
         let (norm, _) = norms(self.dimensions, &raw, control)?;
         let exact = exact_reason(norm);

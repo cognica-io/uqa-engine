@@ -731,7 +731,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 rule_published = overlay.finish();
                 (view_rule_returning, rule_returning)
             } else {
-                debug_assert!(pending_updates.is_empty());
+                debug_assert_eq!(pending_updates.len(), 0);
                 (None, None)
             };
             if !prepared_updates.is_empty() {

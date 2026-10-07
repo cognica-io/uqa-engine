@@ -266,7 +266,7 @@ fn prepare_foreign_table_sequence_references(
     crate::schema::dependencies::regclass::bind_schema_regclass_constants(
         references, expression, stored,
     )
-    .map_err(|error| SQLError::Internal(error.to_string()))?;
+    .map_err(SQLError::Internal)?;
     let result = if stored {
         crate::schema::dependencies::regclass::bind_legacy_sequence_regclass_constants(
             references, sequences, expression,
@@ -284,7 +284,7 @@ fn prepare_foreign_table_sequence_references(
             references, expression,
         )
     };
-    result.map_err(|error| SQLError::Internal(error.to_string()))
+    result.map_err(SQLError::Internal)
 }
 
 #[cfg(test)]

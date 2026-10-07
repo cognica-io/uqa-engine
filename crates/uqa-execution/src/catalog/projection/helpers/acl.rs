@@ -36,7 +36,7 @@ pub fn object_acl_items(
     };
     acl.iter()
         .map(|entry| {
-            let grantee = entry.role.map(&name).transpose()?.unwrap_or_default();
+            let grantee = entry.role.map(name).transpose()?.unwrap_or_default();
             let grantor = name(entry.grantor)?;
             Ok(uqa_core::Value::Str(format!(
                 "{grantee}={privilege}{}/{grantor}",
