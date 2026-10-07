@@ -40,6 +40,14 @@ def inventory(path: pathlib.Path = MANIFEST) -> list[dict]:
             raise ValueError("only the existing library and integration harnesses are allowed")
         if type(check["cases"]) is not int or check["cases"] < 1:
             raise ValueError("each check needs a positive exact case count")
+        names = check.get("case_names")
+        if (
+            not isinstance(names, list)
+            or len(names) != check["cases"]
+            or any(not isinstance(name, str) or not re.fullmatch(r"(?:[a-z0-9_]+(?:::[a-z0-9_]+)*)?", name) for name in names)
+            or len(set(names)) != len(names)
+        ):
+            raise ValueError("each check needs every distinct expected case name")
         identity = (package, check["kind"], test)
         if identity in identities:
             raise ValueError(f"duplicate check: {identity}")
@@ -95,6 +103,14 @@ def verify_selection(checks: list[dict], listing: dict) -> list[dict]:
             raise ValueError(
                 f"{check['package']}::{check['test']}: expected {check['cases']} "
                 f"cases, found {len(matches)}"
+            )
+        expected_names = {check["test"] + ("::" + name if name else "") for name in check["case_names"]}
+        actual_names = {pattern.search(name).group().lstrip(":") for name in matches}
+        if actual_names != expected_names:
+            raise ValueError(
+                f"{check['package']}::{check['test']}: case identities differ; "
+                f"missing {sorted(expected_names - actual_names)}, "
+                f"unexpected {sorted(actual_names - expected_names)}"
             )
         results.append({
             **check,

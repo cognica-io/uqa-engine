@@ -9,7 +9,51 @@
       "source": "crates/uqa-engine/tests/sessions/serializable_observations/temporal.rs",
       "capability": "Concurrent temporal indexes",
       "workload": "Seven temporal equality histories, two completion choices, three persistent providers.",
-      "invariant": "PostgreSQL equality, conflict outcomes and committed values; each history remains independently bounded by the CI stall limit."
+      "invariant": "PostgreSQL equality, conflict outcomes and committed values; each history remains independently bounded by the CI stall limit.",
+      "case_names": [
+        "case_1_date::provider_1_0::conflict_1_true",
+        "case_1_date::provider_1_0::conflict_2_false",
+        "case_1_date::provider_2_1::conflict_1_true",
+        "case_1_date::provider_2_1::conflict_2_false",
+        "case_1_date::provider_3_2::conflict_1_true",
+        "case_1_date::provider_3_2::conflict_2_false",
+        "case_2_time_precision::provider_1_0::conflict_1_true",
+        "case_2_time_precision::provider_1_0::conflict_2_false",
+        "case_2_time_precision::provider_2_1::conflict_1_true",
+        "case_2_time_precision::provider_2_1::conflict_2_false",
+        "case_2_time_precision::provider_3_2::conflict_1_true",
+        "case_2_time_precision::provider_3_2::conflict_2_false",
+        "case_3_time_day_endpoint::provider_1_0::conflict_1_true",
+        "case_3_time_day_endpoint::provider_1_0::conflict_2_false",
+        "case_3_time_day_endpoint::provider_2_1::conflict_1_true",
+        "case_3_time_day_endpoint::provider_2_1::conflict_2_false",
+        "case_3_time_day_endpoint::provider_3_2::conflict_1_true",
+        "case_3_time_day_endpoint::provider_3_2::conflict_2_false",
+        "case_4_timetz_zone::provider_1_0::conflict_1_true",
+        "case_4_timetz_zone::provider_1_0::conflict_2_false",
+        "case_4_timetz_zone::provider_2_1::conflict_1_true",
+        "case_4_timetz_zone::provider_2_1::conflict_2_false",
+        "case_4_timetz_zone::provider_3_2::conflict_1_true",
+        "case_4_timetz_zone::provider_3_2::conflict_2_false",
+        "case_5_timestamp::provider_1_0::conflict_1_true",
+        "case_5_timestamp::provider_1_0::conflict_2_false",
+        "case_5_timestamp::provider_2_1::conflict_1_true",
+        "case_5_timestamp::provider_2_1::conflict_2_false",
+        "case_5_timestamp::provider_3_2::conflict_1_true",
+        "case_5_timestamp::provider_3_2::conflict_2_false",
+        "case_6_timestamptz_instant::provider_1_0::conflict_1_true",
+        "case_6_timestamptz_instant::provider_1_0::conflict_2_false",
+        "case_6_timestamptz_instant::provider_2_1::conflict_1_true",
+        "case_6_timestamptz_instant::provider_2_1::conflict_2_false",
+        "case_6_timestamptz_instant::provider_3_2::conflict_1_true",
+        "case_6_timestamptz_instant::provider_3_2::conflict_2_false",
+        "case_7_interval_month::provider_1_0::conflict_1_true",
+        "case_7_interval_month::provider_1_0::conflict_2_false",
+        "case_7_interval_month::provider_2_1::conflict_1_true",
+        "case_7_interval_month::provider_2_1::conflict_2_false",
+        "case_7_interval_month::provider_3_2::conflict_1_true",
+        "case_7_interval_month::provider_3_2::conflict_2_false"
+      ]
     },
     {
       "package": "uqa-engine",
@@ -19,7 +63,13 @@
       "source": "crates/uqa-engine/src/tests/storage_consistency/referential.rs",
       "capability": "Foreign keys",
       "workload": "Four providers; 16/64 unrelated parents, 100/20000-byte child bodies, CASCADE/NO ACTION, zero/two matches.",
-      "invariant": "Zero child enumerations and exactly the matched number of child document reads; SQL effects and errors remain correct."
+      "invariant": "Zero child enumerations and exactly the matched number of child document reads; SQL effects and errors remain correct.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     },
     {
       "package": "uqa-engine",
@@ -29,7 +79,13 @@
       "source": "crates/uqa-engine/tests/sql_referential_actions/indexed.rs",
       "capability": "Foreign key semantics",
       "workload": "Indexed referential-action PostgreSQL reference cases on four providers.",
-      "invariant": "Values, errors, rollback and reopen match the independent PostgreSQL reference."
+      "invariant": "Values, errors, rollback and reopen match the independent PostgreSQL reference.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     },
     {
       "package": "uqa-engine",
@@ -39,7 +95,10 @@
       "source": "crates/uqa-engine/tests/sql_function_bodies/plan_reuse.rs",
       "capability": "SQL routine planning",
       "workload": "32 generic calls, DISCARD, 32 auto calls, four custom calls and routine replacement.",
-      "invariant": "Generic preparation folds once, auto adds six evaluations and four custom calls add four; DISCARD and replacement refresh output correctly."
+      "invariant": "Generic preparation folds once, auto adds six evaluations and four custom calls add four; DISCARD and replacement refresh output correctly.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-engine",
@@ -49,7 +108,10 @@
       "source": "crates/uqa-engine/tests/sql_plpgsql/plan_reuse.rs",
       "capability": "PL/pgSQL planning",
       "workload": "32 loop iterations plus static cursor and dynamic EXECUTE cases.",
-      "invariant": "Static generic plans fold once, two cursor sources twice, dynamic EXECUTE 32 times, with output checks."
+      "invariant": "Static generic plans fold once, two cursor sources twice, dynamic EXECUTE 32 times, with output checks.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -59,7 +121,10 @@
       "source": "crates/uqa-execution/src/external_sort/tests/top_k.rs",
       "capability": "ORDER BY LIMIT",
       "workload": "10000 rows, k=7 and a 4096-byte allowance with an unusable spill directory.",
-      "invariant": "Exact stable top-seven output, one initial run and zero merge passes."
+      "invariant": "Exact stable top-seven output, one initial run and zero merge passes.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -69,7 +134,10 @@
       "source": "crates/uqa-execution/src/external_sort/tests/top_k.rs",
       "capability": "Sort semantics",
       "workload": "73 rows, four budgets, four result limits, both orderings and NULL placements.",
-      "invariant": "Bounded results equal full-sort results in every combination."
+      "invariant": "Bounded results equal full-sort results in every combination.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -79,7 +147,10 @@
       "source": "crates/uqa-storage/src/clustered_postings/tests/allocation.rs",
       "capability": "Text occurrence decoding",
       "workload": "A 260-document occurrence cluster, one selected document and unrelated retained memory.",
-      "invariant": "Peak equals selected output bytes plus seven retained bytes; missing rows and corruption are still checked."
+      "invariant": "Peak equals selected output bytes plus seven retained bytes; missing rows and corruption are still checked.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-operators",
@@ -89,7 +160,10 @@
       "source": "crates/uqa-operators/src/phrase/tests/allocation.rs",
       "capability": "Phrase matching",
       "workload": "Every byte allowance up to successful phrase production with earlier live results.",
-      "invariant": "Quota failures release only failed work; prior results, occurrence semantics and budget ownership survive."
+      "invariant": "Quota failures release only failed work; prior results, occurrence semantics and budget ownership survive.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-scoring",
@@ -99,7 +173,10 @@
       "source": "crates/uqa-scoring/src/wand/tests.rs",
       "capability": "Text top-k scoring",
       "workload": "Score-cursor WAND and block-max WAND versus materialized WAND.",
-      "invariant": "Selected identities and scores match the complete reference path."
+      "invariant": "Selected identities and scores match the complete reference path.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -109,7 +186,10 @@
       "source": "crates/uqa-storage/src/hnsw_index/tests/spill.rs",
       "capability": "HNSW",
       "workload": "20 vectors of 1024 dimensions with a 64-KiB allowance.",
-      "invariant": "Spill preserves resident topology, scores, mutation and retained-reader results under the original allowance."
+      "invariant": "Spill preserves resident topology, scores, mutation and retained-reader results under the original allowance.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -119,7 +199,10 @@
       "source": "crates/uqa-storage/src/ivf_index/spill/tests.rs",
       "capability": "IVF",
       "workload": "400 vectors of 128 dimensions with a 128-KiB allowance and mutation replay.",
-      "invariant": "Centroids and assignments match resident execution; peak never exceeds the original allowance."
+      "invariant": "Centroids and assignments match resident execution; peak never exceeds the original allowance.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -129,7 +212,10 @@
       "source": "crates/uqa-storage/src/diskann_index/pages/tests/statistics.rs",
       "capability": "DiskANN reads",
       "workload": "Graph-page fragments served through counted provider batches.",
-      "invariant": "Reported requests and actual provider batches agree with the deterministic fixture."
+      "invariant": "Reported requests and actual provider batches agree with the deterministic fixture.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -139,7 +225,10 @@
       "source": "crates/uqa-storage/src/diskann_index/build/generation/tests/resources.rs",
       "capability": "DiskANN build",
       "workload": "Generation construction at memory and artifact allowance boundaries.",
-      "invariant": "Admission failures retain neither partial output nor leaked capture reservations."
+      "invariant": "Admission failures retain neither partial output nor leaked capture reservations.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage-sqlite",
@@ -149,7 +238,10 @@
       "source": "crates/uqa-storage-sqlite/src/mvcc/native/tests/graph_lookup/reads.rs",
       "capability": "Graph lookup",
       "workload": "1-MiB unrelated properties and keys under a 16-KiB retained allowance.",
-      "invariant": "Indexed identity/count results remain correct without hydrating unrelated properties; requested corrupt payloads still fail."
+      "invariant": "Indexed identity/count results remain correct without hydrating unrelated properties; requested corrupt payloads still fail.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage-sqlite",
@@ -159,7 +251,10 @@
       "source": "crates/uqa-storage-sqlite/src/mvcc/tests/receipts/allocations.rs",
       "capability": "Durable allocation",
       "workload": "31 reserve warm-up allocations followed by 32 managed allocations.",
-      "invariant": "Exactly two synchronized allocation commits for the final 32 IDs; every receipt is independently visible and IDs are never reused."
+      "invariant": "Exactly two synchronized allocation commits for the final 32 IDs; every receipt is independently visible and IDs are never reused.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage-sqlite",
@@ -169,7 +264,10 @@
       "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests.rs",
       "capability": "Native mutation preparation",
       "workload": "32 and 128 validated new records with SQLite VM-step counting.",
-      "invariant": "Seeding absent originals executes zero SQLite VM steps."
+      "invariant": "Seeding absent originals executes zero SQLite VM steps.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage-sqlite",
@@ -179,7 +277,10 @@
       "source": "crates/uqa-storage-sqlite/src/mvcc/tests/commit_cache.rs",
       "capability": "WAL cache work",
       "workload": "4096 one-KiB records, a rejected conflicting commit and a small commit.",
-      "invariant": "Zero mid-transaction cache spills; persisted output is complete and every completion restores the ordinary cache size."
+      "invariant": "Zero mid-transaction cache spills; persisted output is complete and every completion restores the ordinary cache size.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -33,6 +33,7 @@ class PerformanceChecksTest(unittest.TestCase):
         self.addCleanup(patch.stop)
         self.check = {
             "package": "uqa-example", "kind": "lib", "test": "bounded_work", "cases": 2,
+            "case_names": ["memory", "sqlite"],
             "source": "crates/uqa-example/src/tests.rs", "capability": "lookup",
             "workload": "two provider cases", "invariant": "no unrelated row reads",
         }
@@ -82,6 +83,12 @@ class PerformanceChecksTest(unittest.TestCase):
             with self.subTest(count=count), self.assertRaisesRegex(ValueError, "case count"):
                 self.write_inventory()
 
+    def test_case_names_must_be_complete_distinct_and_valid(self):
+        for names in (None, [], ["memory"], ["memory", "memory"], ["memory", "sqlite/extra"]):
+            self.check["case_names"] = names
+            with self.subTest(names=names), self.assertRaisesRegex(ValueError, "expected case name"):
+                self.write_inventory()
+
     def test_filter_syntax_cannot_be_injected(self):
         for field, value in (("package", "uqa-example) | all("), ("test", "work) | all("), ("kind", "bench")):
             changed = {**self.check, field: value}
@@ -125,6 +132,11 @@ class PerformanceChecksTest(unittest.TestCase):
     def test_similar_name_does_not_replace_a_required_test(self):
         self.suite["testcases"]["tests::bounded_work_extra"] = self.suite["testcases"].pop("tests::bounded_work::sqlite")
         with self.assertRaisesRegex(ValueError, "found 1"):
+            runner.verify_selection([self.check], self.listing)
+
+    def test_replaced_parameter_case_fails_even_with_the_same_count(self):
+        self.suite["testcases"]["tests::bounded_work::different_provider"] = self.suite["testcases"].pop("tests::bounded_work::sqlite")
+        with self.assertRaisesRegex(ValueError, "case identities differ"):
             runner.verify_selection([self.check], self.listing)
 
     def test_arguments_select_only_existing_test_targets(self):
