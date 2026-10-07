@@ -68,6 +68,55 @@ pub struct VersionedKeyValueStore {
 }
 
 impl VersionedKeyValueStore {
+    fn evaluate_mutation(
+        &self,
+        operation: &mut crate::key_value::KeyValueMutation<'_>,
+        prefixes: Option<&[&[u8]]>,
+    ) -> StorageBackendResult<Option<crate::key_value::KeyValueReadRevision>> {
+        self.control.check()?;
+        let ((identity, sequence), receipt) = self.write_with_receipt(|transaction| {
+            let view = transaction.view()?;
+            let read = read::RecordRead {
+                view: &view,
+                database: self.persistence.database_id(),
+                control: &self.control,
+            };
+            let mut batch = batch::Batch::new(
+                self,
+                transaction
+                    .serializable_context()
+                    .map(SerializableReadContext::id),
+            );
+            operation(&read, &mut batch)?;
+            self.control.check()?;
+            batch.apply(transaction)?;
+            // Cache certification is optional and never changes the mutation outcome. The selected root is captured while this transaction is still exclusively borrowed.
+            let identity = prefixes.and_then(|prefixes| {
+                let staged = transaction.view().ok()?;
+                crate::key_value::KeyValueRead::revision(
+                    &read::RecordRead {
+                        view: &staged,
+                        database: self.persistence.database_id(),
+                        control: &self.control,
+                    },
+                    prefixes,
+                )
+                .ok()
+            });
+            Ok((identity, view.sequence()))
+        })?;
+        Ok(match (identity, receipt) {
+            // The immediately following commit cannot have rebased over a peer. This receipt was captured under the same session mutex, never from a later read.
+            (Some(_), Some(receipt)) if sequence.successor().ok() == Some(receipt.sequence) => {
+                Some(crate::key_value::KeyValueReadRevision::records(
+                    self.persistence.database_id(),
+                    receipt.sequence,
+                    None,
+                ))
+            }
+            (identity, _) => identity,
+        })
+    }
     /// Evaluate one provider mutation against the same fixed native record view as its batch. The callback must not reenter this session or complete its batch. Common MVCC owns autocommit, failed-evaluation cleanup and receipt retry; callbacks are never replayed.
     pub fn with_versioned_record_mutation<T>(
         &self,
@@ -412,11 +461,19 @@ impl VersionedKeyValueStore {
         &self,
         operation: impl FnOnce(&mut Transaction) -> VersionResult<T>,
     ) -> StorageBackendResult<T> {
+        self.write_with_receipt(operation).map(|(value, _)| value)
+    }
+
+    fn write_with_receipt<T>(
+        &self,
+        operation: impl FnOnce(&mut Transaction) -> VersionResult<T>,
+    ) -> StorageBackendResult<(T, Option<super::CommitReceipt>)> {
         self.require_mutable_session()?;
         let mut active = self.active.lock();
         if let Some(transaction) = active.as_mut() {
             return transaction
                 .atomic(operation)
+                .map(|value| (value, None))
                 .map_err(VersionError::into_storage_error);
         }
         *self.completed.lock() = None;
@@ -431,9 +488,10 @@ impl VersionedKeyValueStore {
             .as_ref()
             .expect("retained attempt")
             .acknowledge_completion(&*self.persistence, &self.control)?;
-        *self.completed.lock() = active.as_ref().and_then(Transaction::committed_receipt);
+        let receipt = active.as_ref().and_then(Transaction::committed_receipt);
+        *self.completed.lock() = receipt;
         *active = None;
-        Ok(result)
+        Ok((result, receipt))
     }
 
     fn savepoint_action(
@@ -568,24 +626,15 @@ impl KeyValueStore for VersionedKeyValueStore {
         &self,
         operation: &mut crate::key_value::KeyValueMutation<'_>,
     ) -> StorageBackendResult<()> {
-        self.control.check()?;
-        self.write(|transaction| {
-            let view = transaction.view()?;
-            let read = read::RecordRead {
-                view: &view,
-                database: self.persistence.database_id(),
-                control: &self.control,
-            };
-            let mut batch = batch::Batch::new(
-                self,
-                transaction
-                    .serializable_context()
-                    .map(SerializableReadContext::id),
-            );
-            operation(&read, &mut batch)?;
-            self.control.check()?;
-            batch.apply(transaction)
-        })
+        self.evaluate_mutation(operation, None).map(|_| ())
+    }
+
+    fn with_mutation_revision(
+        &self,
+        prefixes: &[&[u8]],
+        operation: &mut crate::key_value::KeyValueMutation<'_>,
+    ) -> StorageBackendResult<Option<crate::key_value::KeyValueReadRevision>> {
+        self.evaluate_mutation(operation, Some(prefixes))
     }
 
     fn with_versioned_mutation(

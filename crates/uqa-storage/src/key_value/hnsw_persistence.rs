@@ -59,6 +59,8 @@ pub(super) fn restore_graph(
     dimensions: u32,
     params: HNSWIndexParams,
 ) -> StorageBackendResult<(Budgeted<HNSWIndex>, u64)> {
+    #[cfg(test)]
+    RESTORED_GRAPHS.set(RESTORED_GRAPHS.get() + 1);
     let metadata = load_metadata(store, table, field)?.ok_or_else(|| {
         other_error(format!(
             "missing persisted HNSW metadata for {table}.{field}"
@@ -81,6 +83,11 @@ pub(super) fn restore_graph(
     })?;
     canonical.finish()?;
     Ok((graph, metadata.revision))
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static RESTORED_GRAPHS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 pub(super) fn load_revision(

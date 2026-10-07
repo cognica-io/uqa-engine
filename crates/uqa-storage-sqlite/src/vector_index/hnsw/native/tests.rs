@@ -13,6 +13,55 @@ use uqa_storage::{ReadOnlySnapshot, VectorIndex};
 
 mod retention;
 
+#[rstest::rstest]
+fn sequential_native_hnsw_mutations_do_not_restore_the_entire_graph(
+    #[values(false, true)] explicit: bool,
+) {
+    let (connection, mut index) = fixture();
+    let mut expected = HNSWIndex::new(2);
+    expected.add(1, vec![1.0, 0.0]).unwrap();
+    expected.add(2, vec![0.0, 1.0]).unwrap();
+    if explicit {
+        connection.begin_transaction().unwrap();
+    }
+    let retained = index.snapshot().unwrap();
+    loading::RESTORED_GRAPHS.set(0);
+    for id in 3..=34 {
+        index.add(id, vec![id as f32, 1.0]).unwrap();
+        expected.add(id, vec![id as f32, 1.0]).unwrap();
+        assert_eq!(
+            index.search_knn(&[id as f32, 1.0], 8).unwrap(),
+            expected.search_knn(&[id as f32, 1.0], 8).unwrap()
+        );
+    }
+    index.add(7, vec![-1.0, 0.0]).unwrap();
+    expected.add(7, vec![-1.0, 0.0]).unwrap();
+    index.delete(19).unwrap();
+    expected.delete(19).unwrap();
+    assert_eq!(
+        index.search_knn(&[-1.0, 0.0], 8).unwrap(),
+        expected.search_knn(&[-1.0, 0.0], 8).unwrap()
+    );
+    assert_eq!(
+        loading::RESTORED_GRAPHS.get(),
+        0,
+        "own mutations must retain their evaluated graph"
+    );
+    assert_eq!(retained.count().unwrap(), 2);
+    index.clear().unwrap();
+    assert_eq!(graph(&index).count().unwrap(), 0);
+    assert_eq!(loading::RESTORED_GRAPHS.get(), 0);
+    if explicit {
+        connection.rollback_transaction().unwrap();
+        assert_eq!(graph(&index).count().unwrap(), 2);
+        assert_eq!(
+            loading::RESTORED_GRAPHS.get(),
+            1,
+            "rollback must restore the original graph"
+        );
+    }
+}
+
 fn fixture() -> (ManagedConnection, SQLiteHNSWIndex) {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();
@@ -169,7 +218,7 @@ fn intervening_native_recreation_rejects_the_obsolete_candidate_without_replayin
     let (connection, index) = fixture();
     let other = connection.new_session();
     let mut calls = 0;
-    let result = index.persistent.write_native(|read, batch| {
+    let result = index.write_native_graph(|read, batch| {
         index.mutate_native(
             read,
             batch,
@@ -215,4 +264,39 @@ fn intervening_native_recreation_rejects_the_obsolete_candidate_without_replayin
     connection.rollback_transaction().unwrap();
     assert_eq!(index.count().unwrap(), 1);
     assert_eq!(nearest(&index, &[-1.0, 0.0]), vec![4]);
+}
+
+#[test]
+fn native_candidate_cannot_hide_an_intervening_committed_graph_mutation() {
+    let (connection, index) = fixture();
+    let other = connection.new_session();
+    let mut peer = SQLiteHNSWIndex::new(other, "docs", "embedding", 2);
+    let retained = index.snapshot().unwrap();
+    let mut calls = 0;
+    assert!(index
+        .write_native_graph(|read, batch| {
+            index.mutate_native(
+                read,
+                batch,
+                HNSWMutation::Replace {
+                    document: 3,
+                    vectors: &[vec![-1.0, 0.0]],
+                },
+                |read, batch| {
+                    calls += 1;
+                    peer.add(4, vec![0.0, -1.0]).unwrap();
+                    read.replace(
+                        batch,
+                        3,
+                        &[(0, crate::vector_index::vector_to_blob(&[-1.0, 0.0])?)],
+                    )
+                },
+            )
+        })
+        .unwrap());
+    assert_eq!(calls, 1);
+    assert_eq!(graph(&index).count().unwrap(), 4);
+    assert_eq!(nearest(&index, &[-1.0, 0.0]), vec![3]);
+    assert_eq!(nearest(&index, &[0.0, -1.0]), vec![4]);
+    assert_eq!(retained.count().unwrap(), 2);
 }

@@ -30,6 +30,8 @@ mod graph_retry;
 pub use graph_retry::verify_graph_admission_retry;
 mod compound;
 pub use compound::{verify_compound_concurrency, verify_compound_mutations};
+mod mutation_revisions;
+pub use mutation_revisions::{verify_mutation_revision_concurrency, verify_mutation_revisions};
 mod origins;
 pub use origins::verify_diskann_canonical_reclamation;
 pub use origins::verify_diskann_publication_ownership;

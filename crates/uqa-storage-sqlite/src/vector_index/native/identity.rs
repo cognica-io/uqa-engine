@@ -20,6 +20,18 @@ pub(in crate::vector_index) struct VectorIdentity {
     private: Option<PrivateRecordRevision>,
 }
 
+impl VectorIdentity {
+    /// The provider must prove that this exact staged view committed immediately after its base sequence, without an intervening commit or later session mutation.
+    pub(in crate::vector_index) fn after_uncontended_commit(
+        mut self,
+        sequence: CommitSequence,
+    ) -> Self {
+        self.committed = Some(sequence);
+        self.private = None;
+        self
+    }
+}
+
 pub(in crate::vector_index) fn identity(
     read: &NativeVectorRead<'_>,
     families: &[Family],

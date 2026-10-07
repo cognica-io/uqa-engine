@@ -11,6 +11,14 @@ use uqa_storage::KeyValueStore;
 use uqa_storage_redb::RedbStorage;
 
 #[test]
+fn mutation_revisions_preserve_redb_undo_and_failed_evaluation() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = RedbStorage::open(directory.path().join("certificates.redb")).unwrap();
+    verify_mutation_revisions(&storage.store()).unwrap();
+    verify_mutation_revision_concurrency(&storage.store(), &storage.store()).unwrap();
+}
+
+#[test]
 fn hnsw_spill_publishes_and_reopens_beyond_the_session_allowance() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("bounded-hnsw.redb");

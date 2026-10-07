@@ -367,6 +367,33 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "sequential_hnsw_mutations_do_not_restore_the_entire_graph",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/hnsw_index/tests.rs",
+      "capability": "HNSW mutation retention",
+      "workload": "32 inserts, replacement, deletion, search and clear; compare complete graph topology to serial construction.",
+      "invariant": "Zero whole-graph restorations after own writes; topology and ranked output match the serial owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sequential_native_hnsw_mutations_do_not_restore_the_entire_graph",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/hnsw/native/tests.rs",
+      "capability": "HNSW mutation retention",
+      "workload": "32 native inserts, replacement, deletion and clear under explicit transactions and autocommit, with a retained reader and rollback.",
+      "invariant": "Zero whole-graph restorations after own writes, correct ranked results and retained data; explicit rollback performs one validated restore.",
+      "case_names": [
+        "explicit_1_false",
+        "explicit_2_true"
+      ]
     }
   ]
 }

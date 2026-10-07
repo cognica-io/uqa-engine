@@ -20,6 +20,9 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 use super::index_view::{read_view, IndexState, IndexView};
 
+#[cfg(test)]
+mod tests;
+
 pub struct KeyValueHNSWIndex {
     store: Arc<dyn KeyValueStore>,
     raw: KeyValueVectorIndex,
@@ -113,20 +116,29 @@ impl KeyValueHNSWIndex {
         mutation: HNSWMutation<'_>,
         canonical: impl FnOnce(&mut dyn KeyValueBatch) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
-        self.view.evaluate(self.store.as_ref(), |read, batch| {
-            let cached = self.graph_at(read)?;
-            let preview = !cached.definition_candidate
-                && cached.revision.is_some()
-                && !matches!(mutation, HNSWMutation::Clear);
-            if preview {
-                // Admit the retained input before constructing its derived graph.
-                batch.hnsw_mutation(&hnsw_metadata_key(&self.table, &self.field)?, mutation)?;
-            }
-            let delta = cached.value.prepare_delta(mutation, read.control())?;
-            canonical(batch)?;
-            // Only a later reader publishes the graph with its actual committed/private identity.
-            self.stage_delta(batch, &delta, next_revision(cached.revision)?, preview)
-        })
+        let metadata = hnsw_metadata_key(&self.table, &self.field)?;
+        let nodes = hnsw_node_prefix(&self.table, &self.field)?;
+        let vectors = vector_field_prefix(&self.table, &self.field)?;
+        self.view.evaluate_candidate(
+            self.store.as_ref(),
+            &[&metadata, &nodes, &vectors],
+            |read, batch| {
+                let cached = self.graph_at(read)?;
+                let preview = !cached.definition_candidate
+                    && cached.revision.is_some()
+                    && !matches!(mutation, HNSWMutation::Clear);
+                if preview {
+                    // Admit the retained input before constructing its derived graph.
+                    batch.hnsw_mutation(&hnsw_metadata_key(&self.table, &self.field)?, mutation)?;
+                }
+                let delta = cached.value.prepare_delta(mutation, read.control())?;
+                canonical(batch)?;
+                let revision = next_revision(cached.revision)?;
+                self.stage_delta(batch, &delta, revision, preview)?;
+                let (delta, memory) = delta.into_parts();
+                Ok((Budgeted::new(delta.into_graph(), memory), revision))
+            },
+        )
     }
 
     fn rebuild_graph(&self) -> StorageBackendResult<()> {

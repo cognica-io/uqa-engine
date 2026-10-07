@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain successfully staged HNSW graphs across own writes on memory, SQLite and redb instead of reconstructing every generation. Certify private and uncontended autocommit boundaries, while preserving refresh after concurrent commits, undo, canonical validation and the original memory allowance.
+
 - Batch already evaluated UNIQUE and PRIMARY KEY reservations under one shared claim-table arbitration per bounded group. Keep single-key acquisition, contention order, snapshot refresh and savepoint release semantics.
 
 - Reuse ordinary statement analysis across data-only commits when the selected snapshot, definitions and parameter types still permit it. Re-optimize against current data on every invocation, preserving fresh parameter values, temporal input lifetimes, rollback and schema diagnostics.

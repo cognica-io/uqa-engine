@@ -193,6 +193,15 @@ impl KeyValueStore for SQLiteKeyValueStore {
             .with_records(|store| store.with_versioned_mutation(mutate))
     }
 
+    fn with_mutation_revision(
+        &self,
+        prefixes: &[&[u8]],
+        mutate: &mut uqa_storage::key_value::KeyValueMutation<'_>,
+    ) -> StorageBackendResult<Option<uqa_storage::key_value::KeyValueReadRevision>> {
+        self.conn
+            .with_records(|store| store.with_mutation_revision(prefixes, mutate))
+    }
+
     fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
         Some(self.records.session_affinity())
     }
@@ -620,6 +629,17 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn mutation_revisions_preserve_sqlite_undo_and_failed_evaluation() {
+        let store = SQLiteKeyValueStore::open_in_memory().unwrap();
+        uqa_storage::key_value::conformance::verify_mutation_revisions(&store).unwrap();
+        uqa_storage::key_value::conformance::verify_mutation_revision_concurrency(
+            &store,
+            &store.new_session(),
+        )
+        .unwrap();
+    }
 
     #[test]
     fn foreign_server_metadata_preserves_snapshots_undo_and_reopen() {

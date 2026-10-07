@@ -7,7 +7,7 @@
 //! Native record adapters keep canonical vectors and HNSW generations on one logical boundary.
 
 use uqa_storage::{
-    hnsw_index::{HNSWCanonicalBuilder, HNSWMutation},
+    hnsw_index::{HNSWCanonicalBuilder, HNSWIndex, HNSWMutation},
     KeyValueBatch,
 };
 
@@ -17,6 +17,9 @@ use super::{
 };
 use crate::vector_index::native::{publication::VectorPublication, NativeVectorRead};
 use crate::Result;
+use uqa_core::memory::Budgeted;
+
+pub(super) type Candidate = (Budgeted<HNSWIndex>, u64);
 
 mod cache;
 mod loading;
@@ -32,6 +35,35 @@ pub(crate) use records::NativeHNSWRecords;
 pub(super) use writing::drop_metadata;
 
 impl SQLiteHNSWIndex {
+    pub(in crate::vector_index::hnsw) fn write_native_graph(
+        &self,
+        operation: impl FnOnce(
+            &NativeVectorRead<'_>,
+            &mut dyn KeyValueBatch,
+        ) -> Result<Option<Candidate>>,
+    ) -> Result<bool> {
+        if self.persistent.retained.is_some() {
+            return Err(crate::SQLiteError::StorageBackend(
+                "a retained vector snapshot is read-only".into(),
+            ));
+        }
+        let result = self
+            .persistent
+            .conn
+            .with_native_write_snapshot(|snapshot, batch| {
+                operation(&NativeVectorRead::new(snapshot, &self.persistent)?, batch)
+            })?;
+        let Some((candidate, snapshot)) = result else {
+            return Ok(false);
+        };
+        self.retain_native_candidate(
+            candidate,
+            snapshot.as_ref().map(|staged| &staged.snapshot),
+            snapshot.as_ref().and_then(|staged| staged.committed),
+        );
+        Ok(true)
+    }
+
     pub(in crate::vector_index::hnsw) fn native_snapshot(&self) -> Result<Option<Self>> {
         Ok(self.persistent.native_snapshot()?.map(|view| {
             let mut snapshot = self.clone();
@@ -44,7 +76,7 @@ impl SQLiteHNSWIndex {
         &self,
         read: &NativeVectorRead<'_>,
         batch: &mut dyn KeyValueBatch,
-    ) -> Result<()> {
+    ) -> Result<Option<Candidate>> {
         let expected = load_meta(read)?.map(|(_, _, _, revision)| revision);
         if expected.is_none() && self.require_persisted_graph {
             return Err(missing_metadata(self).into());
@@ -59,14 +91,17 @@ impl SQLiteHNSWIndex {
             Ok(builder.push(document, ordinal, vector)?)
         })?;
         let delta = builder.finish_delta()?;
+        let revision = next_revision(expected)?;
         writing::persist_delta(
             &read,
             batch,
             self,
             &delta,
-            next_revision(expected)?,
+            revision,
             VectorPublication::Canonical,
-        )
+        )?;
+        let (delta, memory) = delta.into_parts();
+        Ok(Some((Budgeted::new(delta.into_graph(), memory), revision)))
     }
 
     pub(in crate::vector_index::hnsw) fn mutate_native(
@@ -75,12 +110,13 @@ impl SQLiteHNSWIndex {
         batch: &mut dyn KeyValueBatch,
         mutation: HNSWMutation<'_>,
         canonical: impl FnOnce(&NativeVectorRead<'_>, &mut dyn KeyValueBatch) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<Option<Candidate>> {
         let Some((_, _, _, revision)) = load_meta(read)? else {
             if self.require_persisted_graph {
                 return Err(missing_metadata(self).into());
             }
-            return canonical(read, batch);
+            canonical(read, batch)?;
+            return Ok(None);
         };
         let cached = self
             .cached_native_graph(read)?
@@ -100,14 +136,9 @@ impl SQLiteHNSWIndex {
         };
         let delta = cached.prepare_delta(mutation, &read.snapshot.control)?;
         canonical(read, batch)?;
-        // Cache publication is read-side only: a candidate must never be tagged with a later session view.
-        writing::persist_delta(
-            read,
-            batch,
-            self,
-            &delta,
-            next_revision(Some(revision))?,
-            publication,
-        )
+        let revision = next_revision(Some(revision))?;
+        writing::persist_delta(read, batch, self, &delta, revision, publication)?;
+        let (delta, memory) = delta.into_parts();
+        Ok(Some((Budgeted::new(delta.into_graph(), memory), revision)))
     }
 }

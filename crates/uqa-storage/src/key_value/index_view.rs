@@ -120,6 +120,50 @@ impl<T: VectorIndex + crate::vector_index::VectorRead + 'static> IndexView<T> {
         self.preparing_definition.store(false, Ordering::Release);
         Ok(())
     }
+
+    pub(super) fn evaluate_candidate(
+        &self,
+        store: &dyn KeyValueStore,
+        prefixes: &[&[u8]],
+        operation: impl FnOnce(
+            &dyn KeyValueRead,
+            &mut dyn KeyValueBatch,
+        ) -> StorageBackendResult<(Budgeted<T>, u64)>,
+    ) -> StorageBackendResult<()> {
+        let mut identity = None;
+        let (candidate, revision, control) = mutation_scope(
+            |mutate| {
+                identity = store.with_mutation_revision(prefixes, mutate)?;
+                Ok(())
+            },
+            |read, batch| {
+                let (candidate, revision) = operation(read, batch)?;
+                Ok((candidate, revision, read.control().clone()))
+            },
+        )?;
+        self.preparing_definition.store(false, Ordering::Release);
+        // Release stale ownership before admitting the new immutable header; retained readers keep their own roots.
+        *self.cached.lock() = None;
+        let retained = identity.and_then(|identity| {
+            // Cache admission is advisory after successful staging. Failure drops the candidate and leaves the ordinary validated restore path in place.
+            let value = ReadOnlySnapshot::from_budgeted(candidate)
+                .and_then(|value| value.with_canonical_vectors(Some(&control)))
+                .ok()?;
+            let snapshot = value.snapshot().ok()?;
+            Some((
+                identity,
+                IndexState {
+                    value,
+                    snapshot,
+                    revision: Some(revision),
+                    definition_candidate: false,
+                    control: None,
+                },
+            ))
+        });
+        *self.cached.lock() = retained;
+        Ok(())
+    }
 }
 
 pub(super) fn read_view<T>(
