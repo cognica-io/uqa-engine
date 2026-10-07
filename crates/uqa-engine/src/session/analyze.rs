@@ -360,6 +360,22 @@ impl Engine {
         row_count: u64,
         sampled_at: Option<u64>,
     ) -> StorageBackendResult<()> {
+        Self::persist_column_stats_rows(catalog, table_name, stats)?;
+        crate::statistics::MaintenanceState::analyzed_for(
+            catalog,
+            table_name,
+            object_id,
+            row_count,
+            crate::statistics::value_size::FORMAT_VERSION,
+            sampled_at,
+        )
+    }
+
+    fn persist_column_stats_rows(
+        catalog: &dyn CatalogFacade,
+        table_name: &str,
+        stats: &BTreeMap<String, uqa_planner::ColumnStats>,
+    ) -> StorageBackendResult<()> {
         struct EncodedColumnStats {
             column_name: String,
             distinct_count: i64,
@@ -414,15 +430,7 @@ impl Engine {
                 mcv_frequencies_json: &stats.mcv_frequencies_json,
             })
             .collect::<Vec<_>>();
-        catalog.replace_column_stats(table_name, &rows)?;
-        crate::statistics::MaintenanceState::analyzed_for(
-            catalog,
-            table_name,
-            object_id,
-            row_count,
-            crate::statistics::value_size::FORMAT_VERSION,
-            sampled_at,
-        )
+        catalog.replace_column_stats(table_name, &rows)
     }
 
     pub(super) fn u64_to_i64(kind: &str, value: u64) -> StorageBackendResult<i64> {

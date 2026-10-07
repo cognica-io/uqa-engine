@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Publish automatic ANALYZE samples while concurrent row writes continue, retaining changes after the sample for the next refresh. Reject obsolete samples after a newer ANALYZE, column changes or relation replacement across native SQLite, SQLite Key/Value and redb.
+
 ## [0.5.1] - 2026-10-07
 
 ### Fixed
