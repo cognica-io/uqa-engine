@@ -12,7 +12,7 @@ The unit order below follows ownership dependencies. PostgreSQL-native type form
 
 ## Inspected baseline and reuse decisions
 
-The relevant `Cargo.toml` files, the [dependency policy](../../scripts/workspace-dependency-policy.json), the [engine capability policy](../../scripts/engine-capability-policy.json), the harness and file-line checks, and the owning implementations and tests were inspected before defining these units.
+The relevant `Cargo.toml` files, the [dependency policy](../../scripts/workspace-dependency-policy.json), the [engine capability policy](../../scripts/engine-capability-policy.json), the harness and file-line checks, and the owning implementations and tests were inspected before defining these units. The following table records the initial `8a99d4fd` baseline and reuse decisions, not the current feature inventory; completed enum, type-lifecycle and composite work is recorded in the [progress ledger](#dependency-order-and-progress-ledger).
 
 | Existing boundary | Implementation decision |
 | --- | --- |
@@ -87,7 +87,7 @@ Findings outside this unit were fixed where the type lifecycle exposed them: win
 
 ### Composite types
 
-Relation row-type and generated-array catalogs, ordinary `regtype` input/output and their naming lifecycle are verified in [PR #406](https://github.com/cognica-io/uqa-engine/pull/406): 107 independently captured PostgreSQL 18.4 cases pass memory, native SQLite, SQLite Key/Value and redb, with 33 durable-reopen observations, three peer-session refresh checks and six legacy metadata upgrades. Existing standalone-composite regressions also pass. This completes that catalog portion without marking the attribute-alteration or remaining record-ordering obligations below complete. The [preservation argument](0003-postgresql-18-compatibility.md#relation-row-type-preservation-argument) covers immutable projection, namespace changes and initial restoration.
+Relation row-type and generated-array catalogs, ordinary `regtype` input/output and their naming lifecycle are verified in [PR #406](https://github.com/cognica-io/uqa-engine/pull/406): 107 independently captured PostgreSQL 18.4 cases pass memory, native SQLite, SQLite Key/Value and redb, with 33 durable-reopen observations, three peer-session refresh checks and six legacy metadata upgrades. Existing standalone-composite regressions also pass. The [preservation argument](0003-postgresql-18-compatibility.md#relation-row-type-preservation-argument) covers immutable projection, namespace changes and initial restoration. [PR #531](https://github.com/cognica-io/uqa-engine/pull/531), merged as `53c379600`, additionally completes [ADD ATTRIBUTE](#composite-attribute-addition). DROP, ALTER and RENAME ATTRIBUTE and remaining record ordering stay open.
 
 Implement `CREATE TYPE ... AS (...)` with a standalone composite relation row, typed record I/O, field selection, nested composites and arrays, record comparison through each field's order, and `ALTER TYPE ... ADD | DROP | ALTER | RENAME ATTRIBUTE` with dependency checks. Exit evidence: PostgreSQL 18.4 oracle suite and all-provider reopen tests.
 
@@ -141,7 +141,7 @@ PostgreSQL behavior is captured with `tests/parity/pg18/run_routines_stateful.py
 
 ## Composite attribute addition
 
-Continue the inherited composite-type task after PR #530 merged as `02302bb2a`, closed #523 and removed its completed branch. This unit implements `ALTER TYPE ... ADD ATTRIBUTE`, including multiple additions in one atomic statement. DROP, ALTER and RENAME ATTRIBUTE and the remaining record comparison work stay in the original checklist for separate reviewable units. All 75 inherited records and 30 original open tasks remain intact.
+This unit completed the ADD ATTRIBUTE portion of the inherited composite-type task after PR #530. PR #531 merged as `53c379600`, implementing `ALTER TYPE ... ADD ATTRIBUTE`, including multiple additions in one atomic statement, and closed #532 and #533. DROP, ALTER and RENAME ATTRIBUTE and the remaining record comparison work stay in the original checklist for separate reviewable units. All 75 inherited records and 30 original open tasks remain intact.
 
 SQL owns declaration lowering, attribute validation order, bound types, collation checks and recursive-type rejection. Execution owns retained relation/type binding, authority, value transformation and catalog publication. Reuse the existing composite registry, attribute-number allocation, `AttributeChange::Add`, ordinary type-usage checks, transaction rollback and durable restoration. Engine supplies state and retained contexts only. The SQL, Execution and Engine manifests, Cargo features and dependency policy have been inspected; no dependency or feature change is required. Existing table rewrites must iterate bounded document pages rather than materializing all document IDs; materialized views reuse their existing retained-row publication interface.
 
@@ -149,7 +149,8 @@ SQL owns declaration lowering, attribute validation order, bound types, collatio
 - [x] Bind the composite relation and retained owner, lower written additions and implement PostgreSQL declaration checks in SQL.
 - [x] Publish added attributes and rewrite existing values through bounded existing mutation interfaces, retaining field numbers, dependencies and atomic rollback.
 - [x] Finish final static checks, synchronize documentation and push the verified logical commits.
-Automatic required checks, merge and branch cleanup are tracked in [PR #531](https://github.com/cognica-io/uqa-engine/pull/531); they must finish before any successor implementation PR. Work pauses after this PR at the user’s request.
+
+The [automatic required checks](https://github.com/cognica-io/uqa-engine/actions/runs/37564705494) passed on final HEAD `a7171c5d2`; PR #531 is merged, main is updated, and its local/remote branch and temporary worktree are removed. CodeRabbit skipped review because of file-count and usage limits, and Copilot could not review because its requester quota was exhausted; no completed automated code review is claimed. Implementation work is paused after this PR at the user's request.
 
 The 88-case Docker PostgreSQL 18.4 reference establishes successful additions over stored values and views, multiple additions, duplicate-name precedence over type lookup, invalid pseudo-types and collations, recursive types, wrong relation kinds and rollback. It additionally captures SERIAL lowering and deferred ownership failure, nested/domain values, prepared execution, stored constant views and persistent reopen. All cases pass on memory, native SQLite, SQLite Key/Value and redb, including actual reopen on the three persistent providers; expected results come only from PostgreSQL.
 
