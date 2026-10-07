@@ -8,6 +8,9 @@
 
 use super::*;
 
+mod addressing;
+mod wal;
+
 fn lengths(connection: &Connection) -> Vec<(Vec<u8>, Vec<u8>, Option<i64>)> {
     connection
         .prepare("SELECT key, sequence, payload_length FROM _uqa_mvcc_version_metadata ORDER BY key, sequence")
@@ -26,7 +29,7 @@ fn metadata_tracks_revisions_tombstones_rekeys_and_rollback() {
     let transaction = schema::begin(&connection).unwrap();
     transaction
         .execute_batch(
-            "INSERT INTO _uqa_mvcc_versions VALUES
+            "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES
          (x'61', x'0000000000000001', x''),
          (x'61', x'0000000000000002', x'010203'),
          (x'61', x'0000000000000003', NULL);",
@@ -59,7 +62,7 @@ fn version_metadata_failure_rolls_back_the_source_statement() {
     let _permit = schema::WritePermit::acquire(&connection).unwrap();
     connection.execute_batch("CREATE TRIGGER fail_metadata BEFORE INSERT ON _uqa_mvcc_version_metadata BEGIN SELECT RAISE(ABORT, 'metadata write failed'); END").unwrap();
     assert!(connection
-        .execute_batch("INSERT INTO _uqa_mvcc_versions VALUES (x'61', x'0000000000000001', x'ff')")
+        .execute_batch("INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (x'61', x'0000000000000001', x'ff')")
         .is_err());
     assert_eq!(
         connection

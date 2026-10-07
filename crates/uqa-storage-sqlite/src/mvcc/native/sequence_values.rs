@@ -104,8 +104,9 @@ fn backfill_definition(
     let _bindings = crate::read_control::reserve_bindings(control, &[key])?;
     // Every retained revision of the definition becomes an ordinary version row; reclaimed revisions, and a reclaimed deletion, have no counterpart, as readers of a retained snapshot see none of them.
     crate::mvcc::runs::extract(connection, key, control)?;
-    let mut statement = connection
-        .prepare("SELECT sequence FROM _uqa_mvcc_versions WHERE key = ?1 ORDER BY sequence")?;
+    let mut statement = connection.prepare(
+        "SELECT sequence FROM _uqa_mvcc_version_metadata WHERE key = ?1 ORDER BY sequence",
+    )?;
     let mut versions = statement.query(params![key])?;
     while let Some(row) = versions.next()? {
         control.cancellation().check().map_err(VersionError::from)?;

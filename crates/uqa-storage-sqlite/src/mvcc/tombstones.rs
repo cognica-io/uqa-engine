@@ -81,7 +81,7 @@ pub(super) fn reclaim(
             let _bindings = crate::read_control::reserve_bindings(control, &[key])?;
             runs::extract(&transaction, key, control)?;
             transaction
-                .prepare_cached("DELETE FROM _uqa_mvcc_versions WHERE key = ?1")?
+                .prepare_cached("DELETE FROM _uqa_mvcc_versions WHERE version_id IN (SELECT version_id FROM _uqa_mvcc_version_metadata WHERE key = ?1)")?
                 .execute([key])?;
             transaction
                 .prepare_cached("DELETE FROM _uqa_mvcc_heads WHERE key = ?1")?
@@ -133,7 +133,7 @@ fn fully_pruned(
     control: &StorageReadControl,
 ) -> PhysicalResult<bool> {
     let _bindings = crate::read_control::reserve_bindings(control, &[key])?;
-    let mut statement = connection.prepare_cached("SELECT sequence, value IS NULL FROM _uqa_mvcc_versions WHERE key = ?1 ORDER BY sequence LIMIT 2")?;
+    let mut statement = connection.prepare_cached("SELECT sequence, payload_length IS NULL FROM _uqa_mvcc_version_metadata WHERE key = ?1 ORDER BY sequence LIMIT 2")?;
     let mut rows = statement.query([key])?;
     let Some(row) = rows.next()? else {
         return Ok(true);

@@ -16,7 +16,7 @@ fn connection() -> Connection {
     let connection = Connection::open_in_memory().unwrap();
     connection.execute_batch(
         "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY, sequence BLOB, compacted INTEGER) WITHOUT ROWID;
-         CREATE TABLE _uqa_mvcc_versions (key BLOB, sequence BLOB, value BLOB, PRIMARY KEY (key, sequence)) WITHOUT ROWID;
+         CREATE TABLE _uqa_mvcc_versions (key BLOB, sequence BLOB, value BLOB, version_id INTEGER PRIMARY KEY);
          CREATE TABLE _uqa_mvcc_runs (unused INTEGER);"
     ).unwrap();
     connection
@@ -33,7 +33,7 @@ fn ordered_predecessors_do_not_scan_retained_history() {
         .execute_batch("INSERT INTO _uqa_mvcc_heads VALUES (x'61', x'0000000000001000', 0)")
         .unwrap();
     let mut insert = connection
-        .prepare("INSERT INTO _uqa_mvcc_versions VALUES (x'61', ?1, zeroblob(16))")
+        .prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (x'61', ?1, zeroblob(16))")
         .unwrap();
     for sequence in 1_u64..=4096 {
         insert.execute([sequence.to_be_bytes().as_slice()]).unwrap();
@@ -98,7 +98,7 @@ fn ordered_payloads_align_invisible_heads_tombstones_and_compacted_records() {
            (x'64', x'0000000000000002', 1),
            (x'65', x'0000000000000001', 0),
            (x'66', x'0000000000000004', 1);
-         INSERT INTO _uqa_mvcc_versions VALUES
+         INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES
            (x'61', x'0000000000000004', x'61'),
            (x'62', x'0000000000000002', NULL),
            (x'63', x'0000000000000001', x'63'),
@@ -174,7 +174,7 @@ fn ordered_metadata_preserves_sequence_and_payload_corruption_errors() {
     ] {
         connection
             .execute(
-                "INSERT INTO _uqa_mvcc_versions VALUES (x'61', ?1, ?2)",
+                "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (x'61', ?1, ?2)",
                 params![sequence, value],
             )
             .unwrap();
@@ -208,7 +208,7 @@ fn predecessor_reads_do_not_open_payload_pages() {
             let _permit = schema::WritePermit::acquire(connection)?;
             connection.execute_batch(
                 "INSERT INTO _uqa_mvcc_heads VALUES (x'61', x'0000000000000003', 0);
-             INSERT INTO _uqa_mvcc_versions VALUES
+             INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES
              (x'61', x'0000000000000001', zeroblob(1048576)),
              (x'61', x'0000000000000002', NULL),
              (x'61', x'0000000000000003', x'');",

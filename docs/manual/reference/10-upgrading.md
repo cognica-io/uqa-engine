@@ -1,6 +1,10 @@
 # Upgrading UQA Engine
 
-This page describes upgrade requirements for UQA Engine 0.5.1 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.1/docs/manual/reference/10-upgrading.md) when installing the 0.5.1 packages.
+This page describes current-source upgrade requirements and UQA Engine 0.5.1 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.1/docs/manual/reference/10-upgrading.md) when installing the 0.5.1 packages.
+
+## Unreleased source
+
+Current source uses SQLite record format 59. Its version payloads use stable integer addresses, while the existing keyed version metadata stores each address and payload length. Native mapping 15, redb record format 56 and user-visible values are unchanged. Close every database owner and retain a pre-upgrade backup before opening a predecessor file with this source. Initial open converts all retained version rows in one FULL-synchronized transaction; the conversion needs temporary disk space for the old and new version tables and SQLite transaction journals. Failure preserves the complete old schema and data. Older binaries reject the new marker, so return to a pre-upgrade backup to use an older binary. Published 0.5.1 packages continue to use format 58.
 
 ## 0.5.1
 

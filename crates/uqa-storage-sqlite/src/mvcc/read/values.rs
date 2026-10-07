@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Ordered payload cursors avoid a separate B-tree point lookup for each selected version.
+//! Ordered metadata joins locate admitted payloads by their stable physical address.
 
 use uqa_storage::read_control::StorageReadControl;
 
@@ -119,10 +119,14 @@ fn payload_statement(exclusive: bool, bounded: bool) -> &'static str {
             concat!(
                 "SELECT h.key, CASE WHEN h.sequence <= ?3 THEN ",
                 "CASE WHEN h.compacted = 1 THEN NULL ELSE v.value END ",
-                "ELSE (SELECT value FROM _uqa_mvcc_versions WHERE key = h.key ",
-                "AND sequence <= ?3 ORDER BY sequence DESC LIMIT 1) END ",
-                "FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_versions v ",
-                "ON v.key = h.key AND v.sequence = h.sequence WHERE ",
+                "ELSE (SELECT p.value FROM _uqa_mvcc_version_metadata m ",
+                "JOIN _uqa_mvcc_versions p ON p.version_id = m.version_id ",
+                "AND p.key = m.key AND p.sequence = m.sequence WHERE m.key = h.key ",
+                "AND m.sequence <= ?3 ORDER BY m.sequence DESC LIMIT 1) END ",
+                "FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_version_metadata m ",
+                "ON m.key = h.key AND m.sequence = h.sequence ",
+                "LEFT JOIN _uqa_mvcc_versions v ON v.version_id = m.version_id ",
+                "AND v.key = h.key AND v.sequence = h.sequence WHERE ",
                 $predicate,
                 " ORDER BY h.key"
             )

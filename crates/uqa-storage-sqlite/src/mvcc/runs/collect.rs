@@ -135,9 +135,12 @@ fn persist(connection: &Connection, run: &Run, control: &StorageReadControl) -> 
     )?;
     control.cancellation().check().map_err(VersionError::from)?;
     run.insert(connection, run.bounds.first(), run.bounds.last())?;
-    for table in ["_uqa_mvcc_versions", "_uqa_mvcc_heads"] {
+    for sql in [
+        "DELETE FROM _uqa_mvcc_versions WHERE version_id IN (SELECT version_id FROM _uqa_mvcc_version_metadata WHERE key >= ?1 AND key <= ?2 AND length(key) = ?3)",
+        "DELETE FROM _uqa_mvcc_heads WHERE key >= ?1 AND key <= ?2 AND length(key) = ?3",
+    ] {
         connection.execute(
-            &format!("DELETE FROM {table} WHERE key >= ?1 AND key <= ?2 AND length(key) = ?3"),
+            sql,
             params![
                 run.bounds.first(),
                 run.bounds.last(),
