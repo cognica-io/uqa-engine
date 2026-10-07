@@ -232,8 +232,10 @@ fn initial_restore_eagerly_loads_column_statistics() {
     assert_eq!(table.column_stats.read()["val"].row_count, 999);
 }
 
-#[test]
-fn initial_restore_promotes_legacy_column_keys_to_named_constraints() {
+#[rstest::rstest]
+#[case::without_fts(false)]
+#[case::with_legacy_fts(true)]
+fn initial_restore_promotes_legacy_column_keys_to_named_constraints(#[case] legacy_fts: bool) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy-column-keys.db");
     {
@@ -269,6 +271,10 @@ fn initial_restore_promotes_legacy_column_keys_to_named_constraints() {
         assert!(columns.iter().any(|column| column.unique));
         table.constraints_json =
             serde_json::to_string(&uqa_sql::ast::TableConstraintSet::default()).unwrap();
+        if legacy_fts {
+            // Predecessor document fields have no analyzer binding descriptor. Restoring one rebuilds its index and saves the table before owned key names have migrated.
+            table.fts_fields.push("payload".into());
+        }
         catalog.save_table(&table).unwrap();
         // Historical column-only keys predate the owned-index registry as well. Retaining current owner identities would construct a corrupt current catalog instead of the legacy input.
         catalog
@@ -293,6 +299,16 @@ fn initial_restore_promotes_legacy_column_keys_to_named_constraints() {
                 && constraint.columns == ["message_id"]
                 && constraint.name.as_deref() == Some("legacy_jobs_message_id_key")
         }));
+        if legacy_fts {
+            let rows = engine
+                .sql(
+                    "SELECT job_id FROM legacy_jobs WHERE text_match(payload, 'old')",
+                    &[],
+                )
+                .unwrap();
+            assert_eq!(rows.rows.len(), 1);
+            assert_eq!(rows.rows[0]["job_id"], Value::Str("job-1".into()));
+        }
         engine
             .sql(
                 "INSERT INTO legacy_jobs VALUES ('job-2', 'message-1', 'new') \

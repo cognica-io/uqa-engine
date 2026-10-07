@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve legacy key constraint names when initial analyzer restoration saves a table before its owned index registry is converted. Databases combining predecessor column keys and full-text fields now reopen with their constraints, documents and search index intact; converted catalogs continue to store key names only on owned indexes.
+
 ## [0.5.0] - 2026-10-07
 
 ### Added

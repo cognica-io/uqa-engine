@@ -50,10 +50,8 @@ pub(crate) fn rebind_current_key_names<'a>(
 
 impl KeyConstraintNames {
     pub fn load(catalog: &dyn CatalogFacade) -> StorageBackendResult<Self> {
-        match catalog.get_metadata(REGISTRY_VERSION)?.as_deref() {
-            None | Some("1") => return Ok(Self { names: None }),
-            Some("2") => {}
-            _ => return Err(invalid("unsupported index registry format")),
+        if !index_owns_names(catalog)? {
+            return Ok(Self { names: None });
         }
         let mut names = BTreeMap::new();
         for row in catalog.load_catalog_indexes()? {
@@ -160,6 +158,26 @@ impl KeyConstraintNames {
         } else {
             serde_json::to_string(constraints).map_err(Into::into)
         }
+    }
+}
+
+fn index_owns_names(catalog: &dyn CatalogFacade) -> StorageBackendResult<bool> {
+    match catalog.get_metadata(REGISTRY_VERSION)?.as_deref() {
+        None | Some("1") => Ok(false),
+        Some("2") => Ok(true),
+        _ => Err(invalid("unsupported index registry format")),
+    }
+}
+
+/// Initial catalog migrations may save tables before their key names have moved to owned indexes.
+pub fn encode_for_catalog(
+    catalog: &dyn CatalogFacade,
+    constraints: &TableConstraintSet,
+) -> StorageBackendResult<String> {
+    if index_owns_names(catalog)? {
+        encode(constraints)
+    } else {
+        serde_json::to_string(constraints).map_err(Into::into)
     }
 }
 
