@@ -418,7 +418,7 @@ USING expired_users AS e
 WHERE e.user_id = s.user_id;
 ```
 
-Foreign-key actions can update or delete related rows as part of the same transaction.
+Foreign-key actions can update or delete related rows as part of the same transaction. Parent-key checks and cascading actions probe an available child index whose equality matches the foreign-key comparison before loading candidate child rows, including the `parent_id` prefix of `PRIMARY KEY (parent_id, kind)`. Private changes and newly committed references retain the same visibility and locking rules. A NULL parent key does not select NULL child keys for an action.
 
 ### `RETURNING` row images
 

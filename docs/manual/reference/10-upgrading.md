@@ -6,6 +6,8 @@ This page separates unreleased changes on `main` from released upgrade requireme
 
 Custom `uqa_sql::semantics::partition::PartitionExpressions` adapters must implement `expression_text` using the current catalog and the stored expression's retained type and routine identities. Native adapters delegate to Execution's partition-key deparser; context-free value rendering cannot reconstruct enum or composite constants. This interface correction changes no persistent format.
 
+Custom Execution `ReferentialReadSnapshot` adapters must implement `value_index_scan_key` against the same retained generation as their document reads, returning `None` when no compatible index can answer the predicate. SQL's `foreign_key_comparison_types` now also supplies `ForeignKeyComparison::exact_local_lookup`; manually constructed comparisons must set it only when the comparison preserves the child key's declared operand types. These interface changes require no storage migration.
+
 Initial open now registers missing builtin namespace records so user relations in `information_schema` and `ag_catalog` can persist in every storage provider. This joins the existing atomic catalog restoration and preserves stored namespace identities, owner changes and grants. Later catalog refreshes and secondary sessions only load the initialized records. Rust `Engine::list_schemas` consequently includes `pg_catalog`, `information_schema` and `ag_catalog` alongside other registered schemas.
 
 The following changes were merged after the 0.4.9 tag and are not present in that release. They do not change its package versions. The first open rewrites the user-defined type names of stored SQL, as the next section describes.
