@@ -6,8 +6,8 @@
 #
 # Publish public Rust crates in dependency order. The default preflight checks
 # crates that do not depend on unpublished workspace packages. A live registry
-# upload requires an explicit --live flag. Cargo verifies each package before
-# uploading it. Pass --retry-rate-limits to wait for and retry crates.io
+# upload requires an explicit --live flag. Every public package must build from
+# its archive before the first upload. Pass --retry-rate-limits to wait for and retry crates.io
 # new-crate rate limits.
 set -euo pipefail
 
@@ -177,6 +177,9 @@ if (( live )); then
     echo "Expected one workspace release version" >&2
     exit 2
   fi
+  # This includes crates before --start-at: resuming publication cannot bypass
+  # complete archive verification or leave a late build error after an upload.
+  bash scripts/package-publishable-crates.sh
   publishing=0
   if [[ -z "$start_at" ]]; then
     publishing=1

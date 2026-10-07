@@ -163,6 +163,8 @@ jobs:
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
+        env:
+          RUST_MIN_STACK: "16777216"
         with:
           command: build
           maturin-version: v1.11.5
