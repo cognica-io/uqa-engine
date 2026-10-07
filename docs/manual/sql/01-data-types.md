@@ -14,6 +14,7 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `REGTYPE` | Type-catalog OID over the integer carrier; cast to text or use PostgreSQL result formatting for its visible SQL name |
 | User-defined domains | A distinct catalog type over its base value, with [declaration defaults and conversion-time constraints](02-ddl.md#domain-declarations-and-deletion) |
 | User-defined enum types | A distinct catalog type whose values keep an immutable label identity; [labels, their order and renames](#enum-types) come from the [enum declaration](02-ddl.md#enum-types) |
+| User-defined composite types and relation row types | Named records with a durable type identity, ordered attributes and a generated array type; see [composite types](#composite-types) |
 | `REAL`, `FLOAT4` | IEEE 754 single-precision inputs, arithmetic, and sums over a widened floating runtime carrier |
 | `FLOAT8`, `DOUBLE PRECISION` | Double-precision declaration over the floating runtime carrier |
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` | Exact decimal carrier with declared precision and scale checks |
@@ -42,7 +43,7 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 
 Text input to an integer type reads what PostgreSQL's `int2in`, `int4in` and `int8in` read: surrounding whitespace, an optional sign, and decimal digits or `0x`, `0o` and `0b` digits that single underscores may separate, so `'0x1F'::integer` is 31 and `' 1_000 '::bigint` is 1000. A text outside the type's range reports `22003`, `value "40000" is out of range for type smallint`, and any other text `22P02`.
 
-Serial declarations allocate generated integer identities. Sequence functions `nextval`, `currval`, `lastval`, and `setval` are available, and standalone sequences can be created explicitly. Identity-owned sequence syntax is not implemented.
+Serial declarations allocate generated integer values through an owned sequence. `GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY` creates an identity-owned sequence; `ALTER TABLE ... ALTER COLUMN` can add, change, restart or remove that identity declaration. Sequence functions `nextval`, `currval`, `lastval`, and `setval` and standalone sequences are available. See [sequence and identity behavior](02-ddl.md#sequences) for options, write rules and transaction effects.
 
 ## Array dimensions and input
 
@@ -181,6 +182,12 @@ Casts from the string types (`text`, `varchar`, `char`, `name`) convert through 
 `enum_first(anyenum)`, `enum_last(anyenum)` and `enum_range(anyenum)` read only their argument's type, so a typed NULL such as `NULL::ticket_state` selects the type; `enum_range(lower, upper)` returns the labels between two values inclusively, treating a NULL bound as open and returning an empty array when the lower bound follows the upper bound. `enum_first` and `enum_last` of a type without labels report `55000`. `enum_cmp`, `enum_eq`, `enum_ne`, `enum_lt`, `enum_le`, `enum_gt`, `enum_ge`, `enum_smaller` and `enum_larger` compare two values of one type, `hashenum` and `hashenumextended` hash the label's OID, and SQL routines may declare `anyenum` parameters and results. An `anyenum` argument must be an enum type rather than a domain over one, and every `anyenum` argument of a call must have the same type.
 
 A value stores an immutable label key, not its text. `ALTER TYPE ... RENAME VALUE` therefore changes the text of existing values without rewriting them, and `ALTER TYPE ... ADD VALUE ... BEFORE | AFTER` places a new label between existing ones without changing any stored order. A label that a transaction adds to a type the same transaction did not create cannot be read, compared or returned until the transaction commits (`55P04`); labels of a type created in the same transaction are usable at once. `pg_enum.enumsortorder` follows PostgreSQL's float4 midpoint positions, including its renumbering when a midpoint cannot be represented, while value order is unaffected. Embedded clients receive enum values as labels: see [host result labels](../reference/02-rust-engine-api.md#enum-labels-in-results).
+
+## Composite types
+
+[Standalone composite declarations](02-ddl.md#composite-types) and [relation row types](02-ddl.md#relation-row-type-catalogs) give records a durable type identity and ordered, declared attributes. Composite values support typed record input/output, positional ROW coercion, field selection, nested composites and arrays. Type and attribute metadata come from the catalog rather than the record's displayed name.
+
+[ADD ATTRIBUTE](02-ddl.md#adding-composite-attributes) appends NULL fields to existing non-NULL records while preserving outer NULLs, array bounds and existing field identities. Stored ROW constructors, composite input constants and prepared values retain their original fields; fresh inputs use the current descriptor. DROP, ALTER and RENAME ATTRIBUTE and complete record comparison through each field's order remain open compatibility work in the [type implementation plan](../../plans/0018-extension-packages-and-types.md#composite-types).
 
 ## JSON and JSONB
 

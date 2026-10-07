@@ -25,6 +25,9 @@ impl uqa_sql::semantics::conflict::ConflictCatalog for Context {
     }
 }
 impl uqa_sql::semantics::partition::PartitionExpressions for Context {
+    fn expression_text(&self, expression: &Expr) -> Result<String, SQLError> {
+        uqa_sql::catalog::expression_text::schema_expr_text(expression)
+    }
     fn evaluate_bound(&self, _: &Expr, _: &[SQLParam]) -> Result<Value, SQLError> {
         unreachable!()
     }

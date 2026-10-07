@@ -6,8 +6,8 @@
 
 //! Partition key columns as `PostgreSQL` reports them: each key's declared type and the name used by bound coercion errors.
 
+use super::PartitionExpressions;
 use crate::ast::{ColumnDef, ColumnType, Expr, PartitionSpec};
-use crate::catalog::expression_text::schema_expr_text;
 use crate::type_resolution::FunctionTypeResolver;
 use crate::SQLError;
 
@@ -21,6 +21,7 @@ pub(super) struct KeyColumn {
 
 pub(super) fn key_columns(
     resolver: &dyn FunctionTypeResolver,
+    expressions: &dyn PartitionExpressions,
     spec: &PartitionSpec,
     columns: &[ColumnDef],
 ) -> Result<Vec<KeyColumn>, SQLError> {
@@ -35,7 +36,7 @@ pub(super) fn key_columns(
                     ty,
                 },
                 expression => KeyColumn {
-                    name: schema_expr_text(expression)?,
+                    name: expressions.expression_text(expression)?,
                     expression: true,
                     ty,
                 },

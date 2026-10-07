@@ -187,6 +187,9 @@ impl uqa_sql::semantics::conflict::ConflictCatalog for Fixture {
 }
 
 impl uqa_sql::semantics::partition::PartitionExpressions for Fixture {
+    fn expression_text(&self, expression: &uqa_sql::ast::Expr) -> Result<String, SQLError> {
+        uqa_sql::catalog::expression_text::schema_expr_text(expression)
+    }
     fn evaluate_bound(
         &self,
         _: &uqa_sql::ast::Expr,

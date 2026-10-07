@@ -59,6 +59,52 @@ fn enum_semantics_match_postgresql_redb() {
     verify_enums(&open_redb(&directory.path().join("enums.redb")));
 }
 
+#[rstest::rstest]
+#[case::memory(None)]
+#[case::sqlite(Some(open_sqlite as fn(&Path) -> Engine))]
+#[case::sqlite_key_value(Some(open_sqlite_key_value as fn(&Path) -> Engine))]
+#[case::redb(Some(open_redb as fn(&Path) -> Engine))]
+fn enum_partition_key_catalog_output_matches_postgresql(#[case] open: Option<fn(&Path) -> Engine>) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("enum-partition-output.db");
+    let engine = open.map_or_else(Engine::new, |open| open(&path));
+    let mut reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/parity/pg18/enum_partition_key_oracle.expected.json"
+    ))
+    .unwrap();
+    crate::pg18_oracle::verify(&engine, &reference.to_string());
+    assert_partition_expression_label(&engine, "neutral");
+    engine
+        .sql(
+            "BEGIN; ALTER TYPE current_partition_mood RENAME VALUE 'neutral' TO 'temporary'",
+            &[],
+        )
+        .unwrap();
+    assert_partition_expression_label(&engine, "temporary");
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert_partition_expression_label(&engine, "neutral");
+    drop(engine);
+    if let Some(open) = open {
+        let ids = reference["reopen_ids"].as_array().unwrap().clone();
+        reference["cases"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|case| ids.contains(&case["id"]));
+        let reopened = open(&path);
+        crate::pg18_oracle::verify(&reopened, &reference.to_string());
+        assert_partition_expression_label(&reopened, "neutral");
+    }
+}
+
+fn assert_partition_expression_label(engine: &Engine, label: &str) {
+    let rows = text_rows(engine, "SELECT partexprs::text FROM pg_partitioned_table WHERE partrelid = 'enum_partition_rows'::regclass");
+    let expression = rows[0][0].as_ref().unwrap();
+    assert!(
+        expression.contains(&format!("'{label}'::current_partition_mood")),
+        "partition expression uses stale type or label metadata: {expression}"
+    );
+}
+
 /// Every result row of one statement as `PostgreSQL` text, NULL as `None`.
 fn text_rows(engine: &Engine, sql: &str) -> Vec<Vec<Option<String>>> {
     let case = crate::pg18_oracle::run_case(engine, sql);

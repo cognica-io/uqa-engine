@@ -409,7 +409,8 @@ use schema::{resolve_virtual_relation, VirtualRelation};
 pub use schema::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 
 pub use partitioning::{
-    partition_bound_node, partition_key_columns, partition_key_types_for_table,
+    partition_bound_node, partition_key_columns, partition_key_expression,
+    partition_key_types_for_table,
 };
 
 pub use regtypes::relation_oid::lookup_regclass_oid;

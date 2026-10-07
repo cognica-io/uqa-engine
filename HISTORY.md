@@ -36,6 +36,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Render stored partition key expressions with their current type and enum-label metadata during bound validation and catalog projection, preserving partition creation, diagnostics, rename and durable reopen.
+
 - Reject set-valued operands in individual IN comparisons before rewriting, while preserving PostgreSQL scalar-array expansion and ordered analysis errors.
 - Preserve PL/pgSQL RAISE diagnostic options for SQLSTATE, message, detail and hint, including typed output, ordered effects, NULL and duplicate diagnostics and bare rethrow.
 

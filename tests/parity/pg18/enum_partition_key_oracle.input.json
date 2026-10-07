@@ -1,0 +1,80 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "type",
+      "sql": "CREATE TYPE partition_mood AS ENUM ('sad', 'ok', 'happy')"
+    },
+    {
+      "id": "parent",
+      "sql": "CREATE TABLE enum_partition_rows (m partition_mood) PARTITION BY LIST ((enum_cmp(m, 'ok')))"
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT partnatts AS key_count, partattrs::text AS attributes, partexprs IS NOT NULL AS has_expression, pg_get_partkeydef(partrelid) AS definition FROM pg_partitioned_table WHERE partrelid = 'enum_partition_rows'::regclass"
+    },
+    {
+      "id": "zero",
+      "sql": "CREATE TABLE enum_partition_zero PARTITION OF enum_partition_rows FOR VALUES IN (0)"
+    },
+    {
+      "id": "insert_ok",
+      "sql": "INSERT INTO enum_partition_rows VALUES ('ok')"
+    },
+    {
+      "id": "rename_label",
+      "sql": "ALTER TYPE partition_mood RENAME VALUE 'ok' TO 'neutral'"
+    },
+    {
+      "id": "rename_type",
+      "sql": "ALTER TYPE partition_mood RENAME TO current_partition_mood"
+    },
+    {
+      "id": "catalog_renamed",
+      "sql": "SELECT partnatts AS key_count, partattrs::text AS attributes, partexprs IS NOT NULL AS has_expression, pg_get_partkeydef(partrelid) AS definition FROM pg_partitioned_table WHERE partrelid = 'enum_partition_rows'::regclass"
+    },
+    {
+      "id": "wrong_bound",
+      "sql": "CREATE TABLE enum_partition_bad PARTITION OF enum_partition_rows FOR VALUES IN (true)"
+    },
+    {
+      "id": "positive",
+      "sql": "CREATE TABLE enum_partition_positive PARTITION OF enum_partition_rows FOR VALUES IN (1)"
+    },
+    {
+      "id": "insert_happy",
+      "sql": "INSERT INTO enum_partition_rows VALUES ('happy')"
+    },
+    {
+      "id": "begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "temporary_label",
+      "sql": "ALTER TYPE current_partition_mood RENAME VALUE 'neutral' TO 'temporary'"
+    },
+    {
+      "id": "catalog_private",
+      "sql": "SELECT pg_get_partkeydef('enum_partition_rows'::regclass) AS definition"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "catalog_restored",
+      "sql": "SELECT partnatts AS key_count, partattrs::text AS attributes, partexprs IS NOT NULL AS has_expression, pg_get_partkeydef(partrelid) AS definition FROM pg_partitioned_table WHERE partrelid = 'enum_partition_rows'::regclass"
+    },
+    {
+      "id": "rows",
+      "sql": "SELECT tableoid::regclass::text AS partition, m FROM enum_partition_rows ORDER BY m"
+    }
+  ],
+  "reopen_ids": [
+    "catalog_restored",
+    "rows"
+  ]
+}

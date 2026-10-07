@@ -14,7 +14,7 @@ UQA Engine parses PostgreSQL 18 SQL syntax with `libpg_query`, compiles supporte
 | [Retrieval SQL](06-retrieval.md) | Full-text, vector, hybrid, learned, and model retrieval functions |
 | [Graph SQL and Cypher](07-graph.md) | Named graphs, Cypher, RPQ, traversal, and centrality |
 | [Transactions and routines](08-transactions-and-routines.md) | Transactions, prepared statements, session settings, SQL functions, PL/pgSQL, procedures, triggers, and rewrite rules |
-| [Compatibility](09-compatibility.md) | PostgreSQL alignment, deliberate differences, limits, and unsupported syntax |
+| [Compatibility](09-compatibility.md) | Verified PostgreSQL alignment, open compatibility bugs, and UQA-specific extensions |
 
 ## Statement summary
 
@@ -22,11 +22,12 @@ UQA Engine parses PostgreSQL 18 SQL syntax with `libpg_query`, compiles supporte
 | --- | --- |
 | Query | `SELECT`, `VALUES`, `WITH`, `WITH RECURSIVE`, `UNION`, `INTERSECT`, `EXCEPT` |
 | Mutation | `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `TRUNCATE` |
-| Relation DDL | `CREATE TABLE`, `CREATE TABLE AS`, `ALTER TABLE`, `DROP TABLE`, `CREATE VIEW`, `CREATE OR REPLACE VIEW`, `DROP VIEW` |
-| Namespace DDL | `CREATE SCHEMA`, `DROP SCHEMA` |
-| Index DDL | `CREATE INDEX`, `DROP INDEX` for B-tree, GIN, IVF, and HNSW |
-| Sequence DDL | `CREATE SEQUENCE`, `ALTER SEQUENCE` |
-| Foreign data | `CREATE SERVER`, `CREATE FOREIGN TABLE` |
+| Relation DDL | `CREATE TABLE`, `CREATE TABLE AS`, `ALTER TABLE`, `DROP TABLE`; view and materialized-view creation, alteration and deletion; `REFRESH MATERIALIZED VIEW` |
+| Namespace DDL | `CREATE SCHEMA`, `ALTER SCHEMA`, `DROP SCHEMA` |
+| Type DDL | [Enum](02-ddl.md#enum-types) and [composite](02-ddl.md#composite-types) `CREATE TYPE`, `ALTER TYPE`, `DROP TYPE`; `CREATE DOMAIN`, `ALTER DOMAIN`, `DROP DOMAIN` |
+| Index DDL | `CREATE INDEX`, `ALTER INDEX`, `DROP INDEX` for B-tree, GIN, IVF, HNSW, and DiskANN; [immutable B-tree expression keys](02-ddl.md#relational-b-tree-indexes) |
+| Sequence DDL | `CREATE SEQUENCE`, `ALTER SEQUENCE`, `DROP SEQUENCE`; [identity column declarations and alterations](02-ddl.md#sequences) |
+| Foreign data | [Creation, alteration and deletion](02-ddl.md#foreign-servers-and-tables) of foreign-data wrappers, servers, user mappings and foreign tables |
 | Session and diagnostics | `SET`, `SHOW`, `DISCARD`, `LOAD`, `ANALYZE`, `EXPLAIN` |
 | Transactions | `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `ROLLBACK TO SAVEPOINT` |
 | Prepared SQL | `PREPARE`, `EXECUTE`, `DEALLOCATE` |
