@@ -34,15 +34,11 @@ pub fn migrate_implicit_sequence_owners(catalog: &dyn CatalogFacade) -> StorageB
             .map_err(StorageBackendError::Other)?;
         }
     }
+    let reference_format = crate::catalog::foreign::reference::check_format(catalog)?;
     for row in catalog.load_foreign_tables()? {
         let relation_name = row.relation.qualified_name();
-        let options = serde_json::from_str(&row.options_json)?;
-        let (table, _) = crate::catalog::foreign::StoredForeignTable::from_catalog(
-            relation_name.clone(),
-            row.server_name,
-            options,
-            &row.columns_json,
-        )?;
+        let (table, _) =
+            crate::catalog::foreign::StoredForeignTable::from_catalog_row(&row, reference_format)?;
         if table.object_id == [0; 16] {
             return Err(StorageBackendError::Other(format!(
                 "foreign table `{relation_name}` has no object identity during sequence-owner migration"

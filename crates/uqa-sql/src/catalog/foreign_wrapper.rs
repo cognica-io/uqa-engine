@@ -22,6 +22,26 @@ pub enum NativeForeignWrapper {
 }
 
 impl NativeForeignWrapper {
+    pub const ALL: [Self; 3] = [Self::Memory, Self::DuckDB, Self::Arrow];
+
+    pub const fn handler_name(self) -> &'static str {
+        match self {
+            Self::Memory => "memory_fdw_handler",
+            Self::DuckDB => "duckdb_fdw_handler",
+            Self::Arrow => "arrow_fdw_handler",
+        }
+    }
+
+    pub fn handler_oid(self) -> i64 {
+        super::oids::stable_oid("native-fdw-handler", self.handler_name())
+    }
+
+    pub fn for_handler(oid: u32) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|native| native.handler_oid() == i64::from(oid))
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Self::Memory => "memory_fdw",
@@ -179,10 +199,8 @@ pub fn validate_wrappers(
             return Err(invalid(name, "invalid catalog name"));
         }
         let identity = wrapper.identity;
-        let valid_identity = match wrapper.handler {
-            ForeignWrapperHandler::Native(native) => identity == native.reference(),
-            _ => identity.oid >= super::oids::FIRST_NORMAL_OBJECT_ID,
-        };
+        let valid_identity = identity.oid >= super::oids::FIRST_NORMAL_OBJECT_ID
+            || matches!(wrapper.handler, ForeignWrapperHandler::Native(native) if identity == native.reference());
         if !valid_identity
             || !oids.insert(identity.oid)
             || identity.object_id == [0; 16]

@@ -96,6 +96,15 @@ impl ForeignCreationContext<'_> {
             handler: functions
                 .handler
                 .map_or(ForeignWrapperHandler::None, |function| {
+                    if function.binding.builtin {
+                        if let Some(native) =
+                            uqa_sql::catalog::foreign_wrapper::NativeForeignWrapper::for_handler(
+                                function.oid,
+                            )
+                        {
+                            return ForeignWrapperHandler::Native(native);
+                        }
+                    }
                     ForeignWrapperHandler::Function(ForeignWrapperFunction {
                         oid: function.oid,
                         binding: function.binding,

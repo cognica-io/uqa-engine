@@ -84,6 +84,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
         ObjectType::ObjectTable => DropKind::Table,
         ObjectType::ObjectForeignTable => DropKind::ForeignTable,
         ObjectType::ObjectForeignServer => DropKind::ForeignServer,
+        ObjectType::ObjectFdw => DropKind::ForeignWrapper,
         ObjectType::ObjectIndex => DropKind::Index,
         ObjectType::ObjectView => DropKind::View,
         ObjectType::ObjectMatview => DropKind::MaterializedView,

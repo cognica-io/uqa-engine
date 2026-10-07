@@ -4,7 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Bind server lifetimes in written order before deleting their combined dependency closure.
+//! Bind foreign catalog lifetimes in written order before deleting their combined dependency closure.
+
+mod targets;
+use targets::ForeignKind;
 
 use crate::{
     row_locks::{
@@ -21,16 +24,14 @@ use crate::{
 use uqa_sql::{
     ast::DropStmt,
     catalog::{
-        dependencies::{ObjectAddress, FOREIGN_SERVER_CLASS},
-        foreign_server::ForeignServerDefinition,
+        dependencies::ObjectAddress,
         roles::{guards::RoleCatalogGuards, RoleReferenceNames},
     },
-    schema::foreign_servers::{ensure_drop_authority, missing_server, missing_server_notice},
     SQLError,
 };
 use uqa_storage::{CatalogFacade, StorageBackendError};
 
-pub struct ForeignServerRemovalContext<'a> {
+pub struct ForeignCatalogRemovalContext<'a> {
     pub publication: ForeignServerRemovalPublication<'a>,
     pub namespace: &'a dyn ForeignCreationNamespace,
     pub locks: &'a dyn SharedObjectLockSession,
@@ -41,22 +42,32 @@ pub struct ForeignServerRemovalContext<'a> {
     pub notices: &'a crate::query::NoticeQueue,
 }
 
+/// Retain the existing server API name while sharing its transaction and object-binding context.
+pub type ForeignServerRemovalContext<'a> = ForeignCatalogRemovalContext<'a>;
+
 pub struct ForeignServerRemovalPublication<'a> {
     pub registry: &'a dyn ForeignCreationRegistry,
     pub catalog: Option<&'a dyn CatalogFacade>,
     pub changes: &'a dyn CatalogPublicationChanges,
 }
 
-impl ForeignServerRemovalContext<'_> {
+impl ForeignCatalogRemovalContext<'_> {
     pub fn drop_servers(&self, statement: &DropStmt) -> Result<(), SQLError> {
+        self.drop_objects(statement, ForeignKind::Server)
+    }
+
+    pub fn drop_wrappers(&self, statement: &DropStmt) -> Result<(), SQLError> {
+        self.drop_objects(statement, ForeignKind::Wrapper)
+    }
+
+    fn drop_objects(&self, statement: &DropStmt, kind: ForeignKind) -> Result<(), SQLError> {
         self.refresh()?;
         let mut originals = Vec::new();
         for name in &statement.names {
-            let Some(server) = self.bind(name, statement.if_exists)? else {
-                self.notices.push(missing_server_notice(name));
+            let Some(address) = self.bind(name, statement.if_exists, kind)? else {
+                self.notices.push(kind.notice(name));
                 continue;
             };
-            let address = ObjectAddress::whole(FOREIGN_SERVER_CLASS, server.metadata.oid);
             if !originals.contains(&address) {
                 originals.push(address);
             }
@@ -67,16 +78,10 @@ impl ForeignServerRemovalContext<'_> {
     /// The direct API returns false for a missing server and uses the same authority, locks and RESTRICT deletion as SQL.
     pub fn drop_server(&self, name: &str) -> Result<bool, SQLError> {
         self.refresh()?;
-        let Some(server) = self.bind(name, true)? else {
+        let Some(address) = self.bind(name, true, ForeignKind::Server)? else {
             return Ok(false);
         };
-        self.delete(
-            vec![ObjectAddress::whole(
-                FOREIGN_SERVER_CLASS,
-                server.metadata.oid,
-            )],
-            false,
-        )?;
+        self.delete(vec![address], false)?;
         Ok(true)
     }
 
@@ -91,34 +96,35 @@ impl ForeignServerRemovalContext<'_> {
         &self,
         name: &str,
         if_exists: bool,
-    ) -> Result<Option<ForeignServerDefinition>, SQLError> {
+        kind: ForeignKind,
+    ) -> Result<Option<ObjectAddress>, SQLError> {
         loop {
-            let initial = self.publication.registry.servers().get(name).cloned();
+            let initial = kind.lookup(self, name);
             let Some(initial) = initial else {
                 return if if_exists {
                     Ok(None)
                 } else {
-                    Err(missing_server(name))
+                    Err(kind.missing(name))
                 };
             };
             let guard = self.locks.acquire_shared_catalog(
                 SharedCatalogLock::Object {
-                    class_id: FOREIGN_SERVER_CLASS,
-                    oid: initial.metadata.oid,
+                    class_id: initial.address().class_id,
+                    oid: initial.address().object_id,
                 },
                 RelationLockMode::AccessExclusive,
             )?;
             self.locks.refresh_shared_catalog()?;
-            let current = self.publication.registry.servers().get(name).cloned();
+            let current = kind.lookup(self, name);
             let Some(current) = current.filter(|current| {
-                current.metadata.oid == initial.metadata.oid
-                    && current.metadata.object_id == initial.metadata.object_id
+                current.address() == initial.address()
+                    && current.incarnation() == initial.incarnation()
             }) else {
                 continue;
             };
-            ensure_drop_authority(&current, self.session, self.roles)?;
+            current.ensure_authority(self)?;
             guard.retain();
-            return Ok(Some(current));
+            return Ok(Some(current.address()));
         }
     }
 

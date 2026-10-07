@@ -6,16 +6,74 @@
 
 use super::columns::open;
 
-// These independently captured catalog observations remain the next #523 unit's explicit obligation.
-const CATALOG_PROJECTION_CASES: [&str; 7] = [
-    "plain_catalog",
-    "options_catalog",
-    "server_reference",
-    "rollback_catalog",
-    "validated_server_options",
-    "stored_catalog",
-    "stored_reference",
-];
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn foreign_catalog_rows_and_wrapper_deletion_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("foreign-catalog.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/foreign_catalog_oracle.expected.json"),
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn native_handler_aliases_select_the_original_adapter_and_keep_their_owner(
+    #[case] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("native-handler.db");
+    let engine = open(provider, &path);
+    engine.sql("CREATE FOREIGN DATA WRAPPER unused_memory HANDLER memory_fdw_handler; DROP FOREIGN DATA WRAPPER unused_memory", &[]).unwrap();
+    engine.sql("CREATE FOREIGN DATA WRAPPER custom_memory HANDLER memory_fdw_handler; CREATE SERVER custom_source FOREIGN DATA WRAPPER custom_memory; CREATE FOREIGN TABLE custom_rows(id integer) SERVER custom_source OPTIONS (z 'last',a 'first'); CREATE ROLE handler_other", &[]).unwrap();
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        open(provider, &path)
+    };
+    engine
+        .load_memory_foreign_table(
+            "custom_rows",
+            vec![super::row(&[("id", uqa_core::Value::Int(7))])],
+        )
+        .unwrap();
+    let result = engine.sql("SELECT id FROM custom_rows", &[]).unwrap();
+    assert_eq!(result.rows[0]["id"], uqa_core::Value::Int(7));
+    let result = engine.sql("SELECT w.fdwhandler=p.oid AS retained,p.prorettype=3115 AS handler_type,w.fdwacl IS NULL AS owner_only FROM pg_foreign_data_wrapper w JOIN pg_proc p ON p.oid=w.fdwhandler WHERE w.fdwname='custom_memory'", &[]).unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert!(result.rows[0]
+        .values()
+        .all(|value| *value == uqa_core::Value::Bool(true)));
+    assert!(engine
+        .sql(
+            "SELECT fdwname FROM pg_foreign_data_wrapper WHERE fdwname='unused_memory'",
+            &[]
+        )
+        .unwrap()
+        .rows
+        .is_empty());
+    engine.sql("SET ROLE handler_other", &[]).unwrap();
+    assert_eq!(
+        engine
+            .sql(
+                "CREATE SERVER forbidden_custom_source FOREIGN DATA WRAPPER custom_memory",
+                &[]
+            )
+            .unwrap_err()
+            .sqlstate(),
+        Some("42501")
+    );
+    engine.sql("CREATE SERVER public_native_source FOREIGN DATA WRAPPER memory_fdw; RESET ROLE; DROP FOREIGN DATA WRAPPER custom_memory CASCADE", &[]).unwrap();
+    assert!(engine.foreign_table("custom_rows").unwrap().is_none());
+}
 
 #[rstest::rstest]
 #[case::memory(0)]
@@ -32,10 +90,10 @@ fn wrapper_declaration_validation_and_dependencies_match_postgresql(#[case] prov
     .unwrap();
     let transcript = |reopen| {
         let mut selected = reference.clone();
-        selected["cases"].as_array_mut().unwrap().retain(|case| {
-            (case["reopen"] == true) == reopen
-                && !CATALOG_PROJECTION_CASES.contains(&case["id"].as_str().unwrap())
-        });
+        selected["cases"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|case| (case["reopen"] == true) == reopen);
         selected.to_string()
     };
     crate::pg18_oracle::verify(&engine, &transcript(false));

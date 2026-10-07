@@ -91,13 +91,10 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
         let constraints = names.decode(&row)?;
         validate(&columns, &constraints)?;
     }
+    let reference_format = crate::catalog::foreign::reference::check_format(catalog)?;
     for row in catalog.load_foreign_tables()? {
-        let (table, _) = crate::catalog::foreign::StoredForeignTable::from_catalog(
-            row.relation.qualified_name(),
-            row.server_name,
-            serde_json::from_str(&row.options_json)?,
-            &row.columns_json,
-        )?;
+        let (table, _) =
+            crate::catalog::foreign::StoredForeignTable::from_catalog_row(&row, reference_format)?;
         validate(
             &table.columns,
             &uqa_sql::ast::TableConstraintSet {
@@ -132,13 +129,10 @@ pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackend
     )?;
     hierarchy::repair(&mut migrations)?;
     let mut foreign_migrations = Vec::new();
+    let reference_format = crate::catalog::foreign::reference::check_format(catalog)?;
     for row in catalog.load_foreign_tables()? {
-        let (mut table, _) = crate::catalog::foreign::StoredForeignTable::from_catalog(
-            row.relation.qualified_name(),
-            row.server_name.clone(),
-            serde_json::from_str(&row.options_json)?,
-            &row.columns_json,
-        )?;
+        let (mut table, _) =
+            crate::catalog::foreign::StoredForeignTable::from_catalog_row(&row, reference_format)?;
         let mut constraints = uqa_sql::ast::TableConstraintSet {
             checks: std::mem::take(&mut table.checks),
             dropped_attributes: table.dropped_attributes.clone(),

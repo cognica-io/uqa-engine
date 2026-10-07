@@ -48,6 +48,12 @@ pub fn run_drop_statement(
     statement: DropStmt,
 ) -> Result<SQLResult, SQLError> {
     match statement.kind {
+        DropKind::ForeignWrapper => {
+            bindings.with_foreign_server_removal_write(Box::new(move |context| {
+                context.drop_wrappers(&statement)?;
+                Ok(SQLResult::empty())
+            }))
+        }
         DropKind::ForeignServer => {
             bindings.with_foreign_server_removal_write(Box::new(move |context| {
                 context.drop_servers(&statement)?;

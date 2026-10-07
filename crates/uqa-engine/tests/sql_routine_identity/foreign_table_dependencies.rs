@@ -333,7 +333,7 @@ fn foreign_generated_columns_follow_routine_lifecycle() {
     assert_eq!(
         scalar(
             &engine,
-            "SELECT count(*) AS v FROM pg_catalog.pg_attribute AS attribute_row JOIN pg_catalog.pg_class AS relation_row ON relation_row.oid = attribute_row.attrelid WHERE relation_row.relname = 'foreign_generated_items'"
+            "SELECT count(*) AS v FROM pg_catalog.pg_attribute AS attribute_row JOIN pg_catalog.pg_class AS relation_row ON relation_row.oid = attribute_row.attrelid WHERE relation_row.relname = 'foreign_generated_items' AND NOT attribute_row.attisdropped"
         ),
         Value::Int(1)
     );
@@ -460,7 +460,7 @@ fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
         .find(|table| table.relation.name == "migration_foreign_items")
         .unwrap();
     let mut schema: serde_json::Value = serde_json::from_str(&table.columns_json).unwrap();
-    assert_eq!(schema["version"], 2);
+    assert_eq!(schema["version"], 3);
     let server_reference = schema["server_reference"].clone();
     assert!(server_reference.is_object());
     let mut columns = schema["columns"].take();
@@ -517,7 +517,7 @@ fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
         crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let migrated = foreign_schema(&catalog, "migration_foreign_items");
     let migrated: serde_json::Value = serde_json::from_str(&migrated).unwrap();
-    assert_eq!(migrated["version"], 2);
+    assert_eq!(migrated["version"], 3);
     assert_eq!(migrated["server_reference"], server_reference);
     assert!(catalog
         .get_metadata(FOREIGN_SERVER_REFERENCE_FORMAT)
@@ -857,7 +857,7 @@ fn legacy_generated_sequence_fixture(
         .find(|table| table.relation.name == "legacy_foreign_generated_items")
         .unwrap();
     let schema: serde_json::Value = serde_json::from_str(&table.columns_json).unwrap();
-    assert_eq!(schema["version"], 2);
+    assert_eq!(schema["version"], 3);
     let server_reference = schema["server_reference"].clone();
     assert!(server_reference.is_object());
     let mut columns: Vec<uqa_sql::ast::ColumnDef> =
@@ -955,7 +955,7 @@ fn legacy_foreign_generated_sequences_are_migrated_once() {
         crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let migrated_schema = foreign_schema(&catalog, "legacy_foreign_generated_items");
     let schema: serde_json::Value = serde_json::from_str(&migrated_schema).unwrap();
-    assert_eq!(schema["version"], 2);
+    assert_eq!(schema["version"], 3);
     assert_eq!(schema["server_reference"], server_reference);
     assert!(catalog
         .get_metadata(FOREIGN_SERVER_REFERENCE_FORMAT)

@@ -38,6 +38,7 @@ pub fn drop_relation_kind(kind: DropKind) -> &'static str {
         DropKind::Table => "table",
         DropKind::ForeignTable => "foreign table",
         DropKind::ForeignServer => "server",
+        DropKind::ForeignWrapper => "foreign-data wrapper",
         DropKind::View => "view",
         DropKind::MaterializedView => "materialized view",
         DropKind::Sequence => "sequence",

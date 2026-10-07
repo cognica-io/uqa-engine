@@ -23,7 +23,7 @@ pub use definition::pg_get_functiondef_value;
 
 enum Routine {
     User(std::sync::Arc<SQLUserFunction>),
-    Builtin(&'static BuiltinRoutineCatalogEntry),
+    Builtin(BuiltinRoutineCatalogEntry),
 }
 
 /// Preserve the stored default's pseudo-type or unknown input type while
@@ -78,6 +78,8 @@ fn find_routine(context: &CatalogContext<'_>, oid: i64) -> Result<Option<Routine
     Ok(PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
         .flat_map(|group| group.iter())
+        .copied()
+        .chain(super::builtin_routines::native_foreign_handlers())
         .find(|entry| entry.oid == oid)
         .map(Routine::Builtin))
 }
@@ -235,7 +237,7 @@ fn function_arguments(
         Some(Routine::User(function)) => {
             Value::Str(user_arguments(context, &function, false, defaults)?.0)
         }
-        Some(Routine::Builtin(entry)) => Value::Str(builtin_arguments(context, entry, defaults)?),
+        Some(Routine::Builtin(entry)) => Value::Str(builtin_arguments(context, &entry, defaults)?),
         None => Value::Null,
     })
 }

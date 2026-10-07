@@ -238,6 +238,16 @@ impl ForeignCreationContext<'_> {
             ))
         })?;
         let owner_columns = statement.columns.clone();
+        let options: BTreeMap<_, _> = statement.options.iter().cloned().collect();
+        let option_order = if target.sql_options {
+            statement
+                .options
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        } else {
+            options.keys().cloned().collect()
+        };
         let table = StoredForeignTable {
             dropped_attributes: Vec::new(),
             name: name.to_string(),
@@ -253,7 +263,8 @@ impl ForeignCreationContext<'_> {
             server_reference: Some(server_reference),
             columns: statement.columns,
             checks: statement.checks,
-            options: statement.options.into_iter().collect(),
+            options,
+            option_order,
         };
         let security = BoundTableSecurity::owner(target.owner.identity());
         let mut tables = self.publication.tables_write();

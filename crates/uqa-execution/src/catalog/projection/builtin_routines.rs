@@ -30,6 +30,27 @@ pub struct BuiltinRoutineCatalogEntry {
     pub source: &'static str,
 }
 
+/// Host source handlers have ordinary immutable catalog routine identities; their internal result is an FDW dispatch table.
+pub fn native_foreign_handlers() -> impl Iterator<Item = BuiltinRoutineCatalogEntry> {
+    uqa_sql::catalog::foreign_wrapper::NativeForeignWrapper::ALL
+        .into_iter()
+        .map(|native| BuiltinRoutineCatalogEntry {
+            oid: native.handler_oid(),
+            name: native.handler_name(),
+            kind: "f",
+            strict: false,
+            volatility: "v",
+            parallel: "u",
+            leakproof: false,
+            return_type: 3115,
+            argument_types: &[],
+            argument_names: &[],
+            default_arguments: 0,
+            argument_defaults: None,
+            source: native.handler_name(),
+        })
+}
+
 impl BuiltinRoutineCatalogEntry {
     pub const fn language(self) -> i64 {
         match self.oid {
