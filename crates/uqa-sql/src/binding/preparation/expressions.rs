@@ -53,6 +53,10 @@ impl Preparation<'_> {
         Ok(result)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one ordered dispatch covers every scalar expression"
+    )]
     pub(super) fn expression(
         &mut self,
         expression: &ScalarExpr,
@@ -124,6 +128,12 @@ impl Preparation<'_> {
                     .collect::<Result<Vec<_>, _>>()?;
                 self.common(crate::type_resolution::CommonTypeContext::Array, &mut items)?
                     .map(|element| ColumnType::Array(Box::new(element)))
+            }
+            ScalarExpr::CompositeRow { items, binding, .. } => {
+                for item in items {
+                    self.expression(item, input, subqueries)?;
+                }
+                Some(self.type_name(&binding.ty)?)
             }
             ScalarExpr::Row(items) => return self.row_expression(items, input, subqueries),
             ScalarExpr::Between { .. }

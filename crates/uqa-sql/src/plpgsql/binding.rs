@@ -150,6 +150,10 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
         },
         Expr::Array(items) => Expr::Array(bind_exprs(items, r)?),
         Expr::Row(items) => Expr::Row(bind_exprs(items, r)?),
+        Expr::CompositeRow { items, binding } => Expr::CompositeRow {
+            items: bind_exprs(items, r)?,
+            binding: binding.clone(),
+        },
         Expr::Binary { op, lhs, rhs } => Expr::Binary {
             op: *op,
             lhs: Box::new(bind_expr(lhs, r)?),

@@ -44,6 +44,49 @@ fn resolved_order(node: &mut ScalarExpr) {
 }
 
 #[test]
+fn composite_constructor_sites_preserve_children_and_rebinding_is_idempotent() {
+    for sql in [
+        "ROW(1, lower('A'))::pair",
+        "ROW(1, lower('A'))::pair_domain",
+    ] {
+        let mut syntax = expression(sql);
+        let original = ExpressionPlan::lower(syntax.clone());
+        let ScalarExpr::Cast { expr, .. } = &original.scalar else {
+            panic!("cast")
+        };
+        let ScalarExpr::Row(items) = expr.as_ref() else {
+            panic!("row")
+        };
+        let row = ScalarExpr::CompositeRow {
+            bound_type: None,
+            items: items.clone(),
+            binding: crate::ast::CompositeRowBinding {
+                ty: "composite#20001".into(),
+                attributes: vec![1, 3],
+            },
+        };
+        let mut bound = original.clone();
+        bound.scalar = if sql.ends_with("pair_domain") {
+            ScalarExpr::Cast {
+                implicit: false,
+                expr: Box::new(row),
+                ty: "domain#20002".into(),
+            }
+        } else {
+            row
+        };
+        let sites = expression_syntax_sites(&original, &bound).unwrap();
+        assert!(bind_stored_expression_sites(&mut syntax, &sites).unwrap());
+        let restored = ExpressionPlan::lower(syntax.clone());
+        assert_eq!(restored.scalar, bound.scalar);
+        let sites = expression_syntax_sites(&restored, &restored).unwrap();
+        assert!(!bind_stored_expression_sites(&mut syntax, &sites).unwrap());
+        let encoded = serde_json::to_string(&syntax).unwrap();
+        assert_eq!(serde_json::from_str::<Expr>(&encoded).unwrap(), syntax);
+    }
+}
+
+#[test]
 fn stored_expression_receives_function_order_and_typed_inputs_at_their_own_sites() {
     let mut syntax = expression(
         "coalesce(percentile_disc('0.5') WITHIN GROUP (ORDER BY 'ordered'::text), 'fallback')",

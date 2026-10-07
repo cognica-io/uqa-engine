@@ -26,6 +26,13 @@ pub fn alter_type_object(
     context: &TypeLifecycleContext<'_>,
     statement: AlterTypeObject,
 ) -> Result<(), SQLError> {
+    if let AlterTypeObjectAction::AddAttributes(attributes) = &statement.action {
+        return crate::schema::composites::addition::add_attributes(
+            &context.composite_attributes,
+            &statement.name,
+            attributes,
+        );
+    }
     context.writer.prepare_writer()?;
     match statement.action {
         AlterTypeObjectAction::RenameTo(new_name) => {
@@ -36,6 +43,9 @@ pub fn alter_type_object(
         }
         AlterTypeObjectAction::OwnerTo(owner) => {
             set_owner(context, statement.kind, &statement.name, &owner)
+        }
+        AlterTypeObjectAction::AddAttributes(_) => {
+            unreachable!("attribute changes bind before writer admission")
         }
     }
 }

@@ -30,7 +30,15 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         Expr::Default => Err(SQLError::Internal(
             "DEFAULT reached scalar expression evaluation without a mutation target".into(),
         )),
-        Expr::Literal(v) | Expr::TypedLiteral { value: v, .. } => Ok(v.clone()),
+        Expr::Literal(v) => Ok(v.clone()),
+        Expr::TypedLiteral { value, ty } => Ok(super::composites::literal::evaluate_with_control(
+            value,
+            ty,
+            ctx.engine,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .into_uncontrolled()
+        .expect("ordinary constant result")),
         Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
             Some(parameter) => parameter.to_value(),
             None => Err(SQLError::MissingParam(*i)),
@@ -80,6 +88,22 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                     "multidimensional arrays must have matching dimensions".into(),
                 )
             })
+        }
+        Expr::CompositeRow { items, binding } => {
+            let control = uqa_core::memory::ProductionControl::uncontrolled();
+            Ok(super::composites::constructor::evaluate_with_control(
+                binding,
+                items.len(),
+                ctx.engine,
+                &control,
+                |index| {
+                    control
+                        .finish(eval(&items[index], ctx)?, None)
+                        .map_err(Into::into)
+                },
+            )?
+            .into_uncontrolled()
+            .expect("ordinary composite constructor"))
         }
         Expr::Row(elements) => {
             let mut out = Vec::with_capacity(elements.len());
@@ -277,7 +301,12 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
 
 fn explicit_expr_type(expr: &Expr) -> Option<&str> {
     match expr {
-        Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. } => Some(ty),
+        Expr::Cast { ty, .. }
+        | Expr::TypedLiteral { ty, .. }
+        | Expr::CompositeRow {
+            binding: crate::ast::CompositeRowBinding { ty, .. },
+            ..
+        } => Some(ty),
         Expr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
         Expr::Literal(Value::Int(_)) => Some("bigint"),
         Expr::Literal(Value::Bytes(_)) => Some("bytea"),

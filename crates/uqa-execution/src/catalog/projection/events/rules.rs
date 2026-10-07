@@ -14,6 +14,7 @@ use uqa_core::RelationIdentity;
 
 /// `pg_get_ruledef`: the rule as `make_ruledef` prints it, naming its relation qualified unless pretty output finds it visible.
 pub fn render_rule_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     definition: &CreateRule,
@@ -21,7 +22,7 @@ pub fn render_rule_definition(
 ) -> Result<String, SQLError> {
     let relation = render_rule_relation(catalog, resolution, &definition.table, pretty)?;
     super::super::view_definition::rule_definition(
-        catalog, resolution, definition, &relation, pretty,
+        output, catalog, resolution, definition, &relation, pretty,
     )
 }
 

@@ -67,6 +67,7 @@ fn expression_binding(expression: &ScalarExpr, schema: &RowSchema) -> (bool, boo
         ),
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => combine_bindings(items, schema),
         ScalarExpr::Binary { lhs, rhs, .. } => {

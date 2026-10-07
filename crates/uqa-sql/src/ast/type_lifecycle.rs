@@ -33,4 +33,6 @@ pub enum AlterTypeObjectAction {
     /// The destination schema.
     SetSchema(String),
     OwnerTo(RoleSpecification),
+    /// Append attributes to a standalone composite relation in written order.
+    AddAttributes(Vec<super::CompositeAttributeAddition>),
 }

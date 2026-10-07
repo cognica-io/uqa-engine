@@ -51,8 +51,8 @@ impl Preparation<'_> {
                                 "42846",
                                 format!(
                                     "cannot cast type {} to {}",
-                                    source.sql_name(),
-                                    element.sql_name()
+                                    source.display_name(),
+                                    element.display_name()
                                 ),
                             ));
                         }
@@ -70,8 +70,8 @@ impl Preparation<'_> {
                 "42846",
                 format!(
                     "cannot cast type {} to {}",
-                    source.ty.as_ref().expect("known source").sql_name(),
-                    target.sql_name()
+                    source.ty.as_ref().expect("known source").display_name(),
+                    target.display_name()
                 ),
             ));
         }

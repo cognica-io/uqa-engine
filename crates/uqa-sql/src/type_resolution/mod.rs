@@ -358,4 +358,5 @@ mod declaration;
 pub use declaration::{resolve_alter_column_type, resolve_declared_column_type};
 
 mod coercion;
+pub mod composite_rows;
 pub use coercion::coerce_common_context_value;

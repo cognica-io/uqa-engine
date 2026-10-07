@@ -188,6 +188,9 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
     if stmt.cmds.is_empty() {
         return Err(SQLError::Internal("ALTER TABLE without command".into()));
     }
+    if stmt.objtype() == ObjectType::ObjectType {
+        return super::composites::compile_composite_additions(stmt);
+    }
     if stmt.objtype() == ObjectType::ObjectSequence {
         let [command] = stmt.cmds.as_slice() else {
             return Err(SQLError::Unsupported(

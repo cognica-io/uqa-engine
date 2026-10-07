@@ -133,6 +133,15 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
                 .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
+        Expr::CompositeRow { items, binding } => format!(
+            "ROW({})::{}",
+            items
+                .iter()
+                .map(schema_expr_text)
+                .collect::<Result<Vec<_>, SQLError>>()?
+                .join(", "),
+            binding.ty
+        ),
         Expr::Row(items) => format!(
             "ROW({})",
             items

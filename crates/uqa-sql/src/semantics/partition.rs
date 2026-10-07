@@ -54,6 +54,7 @@ mod bounds;
 mod datum_text;
 mod hash;
 mod key;
+pub use key::key_type as partition_key_type;
 
 pub use admission::validate_new_partition_bound;
 pub use bounds::transform_partition_bound;

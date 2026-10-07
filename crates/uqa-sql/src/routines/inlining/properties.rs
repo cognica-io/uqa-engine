@@ -135,6 +135,7 @@ fn inspect_node(
         }
         ScalarExpr::Array(_)
         | ScalarExpr::Row(_)
+        | ScalarExpr::CompositeRow { .. }
         | ScalarExpr::And(_)
         | ScalarExpr::Or(_)
         | ScalarExpr::IsNull { .. }

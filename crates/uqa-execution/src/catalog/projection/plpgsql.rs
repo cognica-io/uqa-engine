@@ -21,7 +21,7 @@ pub fn plpgsql_catalog(
         .iter()
         .map(|row| Ok((text(row, "nspname")?.to_string(), oid(row, "oid")?)))
         .collect::<Result<_, SQLError>>()?;
-    let types = super::build_pg_type(catalog, resolution)?
+    let types = super::pg_catalog::build_pg_type_without_defaults(catalog, resolution)?
         .iter()
         .map(|row| {
             Ok(PlpgsqlType {

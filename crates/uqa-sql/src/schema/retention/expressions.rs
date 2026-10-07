@@ -8,6 +8,10 @@ use super::{CatalogRetentionError, Node, Result, Walker};
 use crate::ast::{Expr, FrameBound, OrderBy, WindowFrame, WindowReference, WindowSpec};
 
 impl<'a> Walker<'a> {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one dispatch accounts for every retained expression field"
+    )]
     pub(super) fn expr(&mut self, expr: &'a Expr) -> Result<()> {
         match expr {
             Expr::Star | Expr::Default | Expr::InternalColumn(_) | Expr::Param(_) => {}
@@ -37,6 +41,11 @@ impl<'a> Walker<'a> {
                 self.children(args, Node::Expr)?;
                 self.orders(order_by)?;
                 self.optional_boxed_expr(filter.as_deref())?;
+            }
+            Expr::CompositeRow { items, binding } => {
+                self.text(&binding.ty)?;
+                self.buffer::<i16>(binding.attributes.capacity())?;
+                self.children(items, Node::Expr)?;
             }
             Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
                 self.children(items, Node::Expr)?;

@@ -356,6 +356,7 @@ fn references_external_row(
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items.iter().any(nested),
         ScalarExpr::Binary { lhs, rhs, .. } => nested(lhs) || nested(rhs),

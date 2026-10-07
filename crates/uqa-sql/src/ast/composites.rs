@@ -34,6 +34,21 @@ pub struct CompositeAttributeDefinition {
     pub setof: bool,
 }
 
+/// One ADD ATTRIBUTE declaration. Unlike CREATE TYPE, ALTER applies column declaration lowering, including SERIAL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompositeAttributeAddition {
+    pub attribute: CompositeAttributeDefinition,
+    pub declaration: super::ColumnDeclaration,
+}
+
+/// Creation-time positional binding of a stored ROW constructor. Type references use the same canonical-name lifecycle as stored casts; attribute numbers survive additions and dropped slots.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompositeRowBinding {
+    pub ty: String,
+    pub attributes: Vec<i16>,
+}
+
 /// A composite type bound by catalog identity: a standalone composite type or the row type of a relation. The schema and name are the catalog's current names; equality compares the type identity only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompositeTypeReference {

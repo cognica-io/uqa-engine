@@ -143,6 +143,7 @@ fn removable(expression: &ScalarExpr, aggregates: &dyn AggregateClassifier) -> b
             removable = false;
         }
         ScalarExpr::WindowCall { .. }
+        | ScalarExpr::CompositeRow { .. }
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => removable = false,

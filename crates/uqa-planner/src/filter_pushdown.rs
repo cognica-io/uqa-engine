@@ -371,6 +371,7 @@ fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet
         ScalarExpr::InSubquery { expr, .. } => collect_pushdown_outer_columns(expr, output),
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items
             .iter()
@@ -704,6 +705,18 @@ pub fn rewrite_output_filter(
                 .map(|item| recur(item, used))
                 .collect::<Option<Vec<_>>>()?,
         ),
+        ScalarExpr::CompositeRow {
+            items,
+            binding,
+            bound_type,
+        } => ScalarExpr::CompositeRow {
+            items: items
+                .iter()
+                .map(|item| recur(item, used))
+                .collect::<Option<Vec<_>>>()?,
+            binding: binding.clone(),
+            bound_type: bound_type.clone(),
+        },
         ScalarExpr::Func {
             order_syntax,
             name,

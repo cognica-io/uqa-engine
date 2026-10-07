@@ -91,6 +91,10 @@ pub(super) enum Node<'a> {
     },
     Array(Items<'a, Expr>),
     Row(Items<'a, Expr>),
+    CompositeRow {
+        items: Items<'a, Expr>,
+        binding: Source<'a, crate::ast::CompositeRowBinding>,
+    },
     Binary {
         op: BinaryOp,
         lhs: Source<'a, Box<Expr>>,
@@ -188,6 +192,10 @@ fn owned(expression: Expr) -> Node<'static> {
         },
         Expr::Array(value) => Node::Array(Items::Owned(value.into_iter())),
         Expr::Row(value) => Node::Row(Items::Owned(value.into_iter())),
+        Expr::CompositeRow { items, binding } => Node::CompositeRow {
+            items: Items::Owned(items.into_iter()),
+            binding: Source::Owned(binding),
+        },
         Expr::Binary { op, lhs, rhs } => Node::Binary {
             op,
             lhs: Source::Owned(lhs),
@@ -283,6 +291,10 @@ fn borrowed(expression: &Expr) -> Node<'_> {
         },
         Expr::Array(value) => Node::Array(Items::Borrowed(value.iter())),
         Expr::Row(value) => Node::Row(Items::Borrowed(value.iter())),
+        Expr::CompositeRow { items, binding } => Node::CompositeRow {
+            items: Items::Borrowed(items.iter()),
+            binding: Source::Borrowed(binding),
+        },
         Expr::Binary { op, lhs, rhs } => Node::Binary {
             op: *op,
             lhs: Source::Borrowed(lhs),

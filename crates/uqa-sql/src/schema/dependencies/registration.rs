@@ -63,8 +63,17 @@ pub fn rewrite_schema_routine_references(
 }
 
 fn schema_expr_may_require_routine_identity_binding(
+    context: &SchemaDependencyBindingContext<'_>,
     expression: &crate::ast::Expr,
 ) -> Result<bool, String> {
+    if crate::type_resolution::composite_rows::expression_requires_binding(
+        expression,
+        context.schema,
+    )
+    .map_err(|error| error.to_string())?
+    {
+        return Ok(true);
+    }
     let mut expression = expression.clone();
     let mut legacy = false;
     walk_schema_expr_mut(&mut expression, &mut |node| {
@@ -136,7 +145,7 @@ pub fn bind_table_schema_routine_identities_with_check_columns(
             changed |= bind_default_routine_identities(context, table_name, &column.name, default)?;
         }
         if let Some(check) = &mut column.check {
-            if schema_expr_may_require_routine_identity_binding(check)? {
+            if schema_expr_may_require_routine_identity_binding(context, check)? {
                 changed |=
                     bind_check_routines(context, table_name, table_name, check_columns, check)
                         .map_err(|error| {
@@ -149,7 +158,7 @@ pub fn bind_table_schema_routine_identities_with_check_columns(
         }
     }
     for check in checks {
-        if schema_expr_may_require_routine_identity_binding(&check.expr)? {
+        if schema_expr_may_require_routine_identity_binding(context, &check.expr)? {
             changed |= bind_check_routines(
                 context,
                 table_name,
@@ -173,7 +182,7 @@ pub fn bind_default_routine_identities(
 ) -> Result<bool, String> {
     let changed =
         super::regclass::bind_schema_regclass_constants(context.references, default, false)?;
-    if !schema_expr_may_require_routine_identity_binding(default)? {
+    if !schema_expr_may_require_routine_identity_binding(context, default)? {
         return Ok(changed);
     }
     let bound = bind_default_routines(context, default, default.clone()).map_err(|error| {

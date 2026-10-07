@@ -38,7 +38,8 @@ fn named_call_reconstruction_preserves_notation_and_keyword_quoting() {
         };
         for pretty in [false, true] {
             assert_eq!(
-                index_key_definition(&catalog, &resolution, &index.columns[0], pretty).unwrap(),
+                index_key_definition(None, &catalog, &resolution, &index.columns[0], pretty)
+                    .unwrap(),
                 expected,
             );
         }

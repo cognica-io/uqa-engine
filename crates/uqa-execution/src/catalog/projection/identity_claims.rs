@@ -73,11 +73,9 @@ pub fn catalog_oid_in_use(
         CatalogOidClass::Procedure => {
             super::routine_oid_in_use(&catalog.snapshot().definitions.sql_user_functions, oid)
         }
-        CatalogOidClass::AttributeDefault => Ok(super::pg_catalog::build_pg_attrdef(
-            catalog, resolution,
-        )?
-        .iter()
-        .any(|row| matches!(row.get("oid"), Some(uqa_core::Value::Int(existing)) if *existing == oid))),
+        CatalogOidClass::AttributeDefault => {
+            Ok(super::pg_catalog::attribute_default_oids(catalog).contains(&oid))
+        }
         CatalogOidClass::Trigger => {
             for (trigger, _) in super::events::catalog_triggers(catalog, resolution)? {
                 if super::events::trigger_catalog_oid(catalog, resolution, &trigger)? == oid {
@@ -164,15 +162,11 @@ pub fn largest_catalog_oid(
     oids.extend(row_oids(super::pg_catalog::build_pg_constraint(
         catalog, resolution,
     )?));
-    oids.extend(row_oids(super::pg_catalog::build_pg_attrdef(
-        catalog, resolution,
-    )?));
+    oids.extend(super::pg_catalog::attribute_default_oids(catalog));
     oids.extend(row_oids(super::pg_catalog::build_pg_enum(catalog)));
     oids.extend(row_oids(super::pg_catalog::build_pg_authid(catalog)));
     oids.extend(row_oids(super::pg_catalog::build_pg_auth_members(catalog)?));
-    oids.extend(row_oids(super::events::build_pg_rewrite(
-        catalog, resolution,
-    )?));
+    oids.extend(super::events::rewrite_catalog_oids(catalog));
     for (trigger, _) in super::events::catalog_triggers(catalog, resolution)? {
         oids.push(super::events::trigger_catalog_oid(
             catalog, resolution, &trigger,
@@ -225,7 +219,7 @@ fn type_oid_in_use(
     resolution: &RelationNameResolution,
     oid: i64,
 ) -> Result<bool, SQLError> {
-    if super::pg_catalog::build_pg_type(catalog, resolution)?.iter().any(
+    if super::pg_catalog::build_pg_type_without_defaults(catalog, resolution)?.iter().any(
         |row| matches!(row.get("oid"), Some(uqa_core::Value::Int(existing)) if *existing == oid),
     ) {
         return Ok(true);

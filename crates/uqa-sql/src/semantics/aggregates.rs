@@ -190,6 +190,7 @@ pub fn collect_aggregate_exprs<'a>(
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => {
             for item in items {
@@ -274,6 +275,7 @@ pub fn expr_references_columns(expr: &ScalarExpr) -> bool {
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items.iter().any(expr_references_columns),
         ScalarExpr::Binary { lhs, rhs, .. } => {

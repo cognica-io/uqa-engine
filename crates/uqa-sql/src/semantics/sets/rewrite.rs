@@ -78,6 +78,7 @@ pub fn rewrite_set_calls(
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => {
             for item in items {
@@ -418,6 +419,7 @@ fn replace_group_set_expression(
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => {
             for item in items {
@@ -658,6 +660,18 @@ fn rewrite_aggregate_dependencies(
                 .map(|item| rewrite_aggregate_dependencies(engine, group_by, item, dependencies))
                 .collect(),
         ),
+        ScalarExpr::CompositeRow {
+            items,
+            binding,
+            bound_type,
+        } => ScalarExpr::CompositeRow {
+            items: items
+                .iter()
+                .map(|item| rewrite_aggregate_dependencies(engine, group_by, item, dependencies))
+                .collect(),
+            binding: binding.clone(),
+            bound_type: bound_type.clone(),
+        },
         ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
             op: *op,
             lhs: Box::new(rewrite_aggregate_dependencies(

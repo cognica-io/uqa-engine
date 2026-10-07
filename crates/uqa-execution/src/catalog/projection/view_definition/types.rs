@@ -17,6 +17,42 @@ use crate::catalog::projection::regtypes::{
 };
 
 impl Deparser<'_> {
+    pub(super) fn composite_row(
+        &self,
+        items: &[ScalarExpr],
+        binding: &uqa_sql::ast::CompositeRowBinding,
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+        show_type: bool,
+    ) -> Result<String, SQLError> {
+        let Some(ColumnType::Composite(reference)) = self.resolved_type(&binding.ty) else {
+            return Err(SQLError::Internal(
+                "stored constructor has no composite type".into(),
+            ));
+        };
+        let numbers =
+            crate::catalog::composite_type::relations::attribute_numbers(self.catalog, &reference)?;
+        let values = numbers
+            .iter()
+            .map(|number| match binding.attributes.binary_search(number) {
+                Ok(index) => self.expression(
+                    items.get(index).ok_or_else(|| {
+                        SQLError::Internal("invalid stored constructor positions".into())
+                    })?,
+                    scope,
+                    subqueries,
+                ),
+                Err(_) => Ok("NULL".into()),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let row = format!("ROW({})", values.join(", "));
+        Ok(if show_type {
+            format!("{row}::{}", self.type_display(&binding.ty))
+        } else {
+            row
+        })
+    }
+
     /// The type a stored type name denotes: an identity resolves through the catalog, a built-in name by itself.
     pub(super) fn resolved_type(&self, ty: &str) -> Option<ColumnType> {
         match UserTypeIdentity::parse(ty) {
@@ -146,7 +182,7 @@ impl Deparser<'_> {
             if bare {
                 return super::expressions::literal(value);
             }
-            let text = uqa_sql::result::format_postgres_text(value, &resolved, None)?;
+            let text = uqa_sql::result::format_postgres_text(value, &resolved, self.output)?;
             return Ok(format!("'{}'::{display}", text.replace('\'', "''")));
         }
         if matches!(value, Value::Null) {
@@ -160,7 +196,7 @@ impl Deparser<'_> {
         let resolved = self
             .resolved_type(ty)
             .ok_or_else(|| SQLError::Internal(format!("stored constant type {ty} disappeared")))?;
-        let text = uqa_sql::result::format_postgres_text(&text, &resolved, None)?;
+        let text = uqa_sql::result::format_postgres_text(&text, &resolved, self.output)?;
         Ok(format!("'{}'::{display}", text.replace('\'', "''")))
     }
 
@@ -293,6 +329,7 @@ mod tests {
             lookup_mode: RelationLookupMode::Dynamic,
         };
         let deparser = Deparser {
+            output: None,
             catalog: &catalog,
             dynamic: resolution.clone(),
             bound: resolution,
@@ -356,6 +393,7 @@ mod tests {
             for pretty in [false, true] {
                 assert_eq!(
                     super::super::stored_expression_definition(
+                        None,
                         &catalog,
                         &resolution,
                         &expression,

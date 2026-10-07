@@ -86,6 +86,18 @@ pub fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> Scalar
                 .map(|item| qualify_unqualified_columns(item, qualifier))
                 .collect(),
         ),
+        ScalarExpr::CompositeRow {
+            items,
+            binding,
+            bound_type,
+        } => ScalarExpr::CompositeRow {
+            items: items
+                .iter()
+                .map(|item| qualify_unqualified_columns(item, qualifier))
+                .collect(),
+            binding: binding.clone(),
+            bound_type: bound_type.clone(),
+        },
         ScalarExpr::And(items) => ScalarExpr::And(
             items
                 .iter()

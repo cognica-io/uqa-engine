@@ -119,6 +119,19 @@ impl Lowering<'_> {
         Ok(output)
     }
 
+    pub(super) fn composite_binding(
+        &mut self,
+        binding: Source<'_, crate::ast::CompositeRowBinding>,
+    ) -> Result<crate::ast::CompositeRowBinding> {
+        match binding {
+            Source::Owned(binding) => Ok(binding),
+            Source::Borrowed(binding) => Ok(crate::ast::CompositeRowBinding {
+                ty: self.copy_text(&binding.ty)?,
+                attributes: self.map(binding.attributes.iter(), |_, number| Ok(*number))?,
+            }),
+        }
+    }
+
     pub(super) fn value(&mut self, source: Source<'_, Value>) -> Result<Value> {
         self.check()?;
         match source {

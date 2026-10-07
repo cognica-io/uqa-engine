@@ -163,7 +163,11 @@ pub(in crate::compiler) fn resolve_named_windows_in_expr(
                 resolve_named_windows_in_expr(filter, windows)?;
             }
         }
-        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items)
+        | Expr::Row(items)
+        | Expr::CompositeRow { items, .. }
+        | Expr::And(items)
+        | Expr::Or(items) => {
             resolve_named_windows_in_exprs(items, windows)?;
         }
         Expr::Binary { lhs, rhs, .. } => {

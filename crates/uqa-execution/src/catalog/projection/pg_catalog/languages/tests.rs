@@ -121,7 +121,7 @@ fn user_sql_and_procedural_routines_join_the_same_language_identities() {
         lookup_mode: RelationLookupMode::Bound,
     };
     let languages = build_pg_language();
-    let mut rows = build_pg_proc(&catalog, &resolution)
+    let mut rows = build_pg_proc(None, &catalog, &resolution)
         .unwrap()
         .into_iter()
         .filter_map(|mut routine| {

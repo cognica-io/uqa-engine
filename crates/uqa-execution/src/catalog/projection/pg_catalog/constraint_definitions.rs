@@ -52,14 +52,27 @@ pub fn pg_get_constraintdef_value(
         .into_iter()
         .find(|constraint| constraint_row_oid(constraint) == *oid)
     {
-        return relation_constraint_definition(&catalog, &resolution, &constraint, *pretty)
-            .map(Value::Str);
+        return relation_constraint_definition(
+            Some(&crate::catalog::projection::CatalogOutput(*context)),
+            &catalog,
+            &resolution,
+            &constraint,
+            *pretty,
+        )
+        .map(Value::Str);
     }
-    domain_constraint_definition(&catalog, &resolution, *oid, *pretty)
-        .map(|definition| definition.map_or(Value::Null, Value::Str))
+    domain_constraint_definition(
+        Some(&crate::catalog::projection::CatalogOutput(*context)),
+        &catalog,
+        &resolution,
+        *oid,
+        *pretty,
+    )
+    .map(|definition| definition.map_or(Value::Null, Value::Str))
 }
 
 fn relation_constraint_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     constraint: &ConstraintCatalogRow,
@@ -80,7 +93,7 @@ fn relation_constraint_definition(
                 format!(
                     "CHECK ({})",
                     super::super::view_definition::stored_expression_definition(
-                        catalog, resolution, expression, pretty,
+                        output, catalog, resolution, expression, pretty,
                     )?
                 )
             }
@@ -245,6 +258,7 @@ fn relation_display_name(
 }
 
 fn domain_constraint_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     oid: i64,
@@ -266,6 +280,7 @@ fn domain_constraint_definition(
                 .is_some_and(|identity| identity.oid == oid)
         }) {
             return super::super::view_definition::stored_domain_expression_definition(
+                output,
                 catalog,
                 resolution,
                 &check.expression,

@@ -45,7 +45,7 @@ pub(super) fn key_columns(
 }
 
 /// Declared type of one partition key: a column's type, or the resolved type of a key expression over the partitioned table's columns.
-pub(super) fn key_type(
+pub fn key_type(
     resolver: &dyn FunctionTypeResolver,
     expression: &Expr,
     columns: &[ColumnDef],

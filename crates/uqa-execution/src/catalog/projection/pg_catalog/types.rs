@@ -24,10 +24,11 @@ use super::super::helpers::type_metadata::{
 };
 
 pub fn build_pg_type(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
 ) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
-    build_pg_type_rows(catalog, resolution, true)
+    build_pg_type_rows(output, catalog, resolution, true)
 }
 
 /// The `pg_type` rows with `typdefault` left NULL, for the `reg*` output catalog: printing a domain default may print a `reg*` constant, whose output function reads that catalog.
@@ -35,7 +36,7 @@ pub fn build_pg_type_without_defaults(
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
 ) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
-    build_pg_type_rows(catalog, resolution, false)
+    build_pg_type_rows(None, catalog, resolution, false)
 }
 
 #[expect(
@@ -43,6 +44,7 @@ pub fn build_pg_type_without_defaults(
     reason = "preserves catalog column and OID order"
 )]
 fn build_pg_type_rows(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
     with_defaults: bool,
@@ -424,7 +426,7 @@ fn build_pg_type_rows(
         // `typdefaultbin` is the stored default, which `pg_get_expr` prints; `typdefault` its text.
         let default = match domain.definition.default.as_ref().filter(|_| with_defaults) {
             Some(default) => str_value(super::super::view_definition::stored_expression_text(
-                catalog, resolution, default,
+                output, catalog, resolution, default,
             )?),
             None => Value::Null,
         };

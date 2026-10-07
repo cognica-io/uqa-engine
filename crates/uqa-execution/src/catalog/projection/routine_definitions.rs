@@ -29,6 +29,7 @@ enum Routine {
 /// Preserve the stored default's pseudo-type or unknown input type while
 /// reconstructing its expression, without turning it into a concrete carrier.
 pub(super) fn routine_parameter_default_text(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     parameter: &uqa_sql::ast::FunctionParam,
@@ -53,7 +54,8 @@ pub(super) fn routine_parameter_default_text(
     } else {
         default
     };
-    super::view_definition::stored_expression_text(catalog, resolution, expression).map(Some)
+    super::view_definition::stored_expression_text(output, catalog, resolution, expression)
+        .map(Some)
 }
 
 fn routine_oid_argument(name: &str, arguments: &[Value]) -> Result<Option<i64>, SQLError> {
@@ -134,8 +136,12 @@ fn user_arguments(
         }
         argument.push_str(&declared_type_display(context, &parameter.type_name)?);
         if defaults && input {
-            if let Some(default) = routine_parameter_default_text(&catalog, &resolution, parameter)?
-            {
+            if let Some(default) = routine_parameter_default_text(
+                Some(&crate::catalog::projection::CatalogOutput(*context)),
+                &catalog,
+                &resolution,
+                parameter,
+            )? {
                 argument.push_str(" DEFAULT ");
                 argument.push_str(&default);
             }
@@ -323,6 +329,7 @@ fn routine_sqlbody(context: &CatalogContext<'_>, routine: &Routine) -> Result<Va
         .sql_body_form
         .unwrap_or_else(|| legacy_body_form(statements));
     super::view_definition::routine_body_definition(
+        Some(&crate::catalog::projection::CatalogOutput(*context)),
         &catalog,
         &resolution,
         &function.def,

@@ -30,7 +30,11 @@ impl EngineHook for Context {
         unreachable!()
     }
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, String> {
-        Ok((name == "public.legacy_items").then(|| self.domain.column_type()))
+        Ok(if name == self.domain.definition.base.catalog_name() {
+            Some(self.domain.definition.base.clone())
+        } else {
+            (name == "public.legacy_items").then(|| self.domain.column_type())
+        })
     }
 }
 impl DomainCatalog for Context {
@@ -184,4 +188,29 @@ fn predecessor_vectors_and_nested_arrays_normalize_once_under_the_original_allow
         Some("57014")
     );
     assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn assignment_to_a_domain_preserves_a_typed_composite_base_and_checks_only_the_outer_domain() {
+    let pair = ColumnType::Composite(crate::ast::CompositeTypeReference {
+        schema: "public".into(),
+        name: "pair".into(),
+        oid: 20_001,
+        array_oid: 20_002,
+        relation_oid: 20_003,
+    });
+    let context = context(pair.clone());
+    let value = Value::Record(vec![
+        ("a".into(), Value::Int(4)),
+        ("added".into(), Value::Null),
+    ]);
+    let result = crate::assignment::conversion::coerce_assignment_value(
+        &context,
+        value.clone(),
+        &context.domain.column_type(),
+        Some(&pair),
+    )
+    .unwrap();
+    assert_eq!(result, value);
+    assert_eq!(context.checks.get(), 1);
 }

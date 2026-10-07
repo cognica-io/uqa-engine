@@ -19,6 +19,75 @@ fn domain(base: ColumnType) -> ColumnType {
 }
 
 #[test]
+fn constructor_result_inference_retains_catalog_identity_without_a_resolver() {
+    let ty = ColumnType::Composite(crate::ast::CompositeTypeReference {
+        schema: "app".repeat(100),
+        name: "pair".repeat(100),
+        oid: 20_001,
+        array_oid: 20_002,
+        relation_oid: 20_003,
+    });
+    let row = ScalarExpr::CompositeRow {
+        items: vec![ScalarExpr::Literal(Value::Int(1))],
+        binding: crate::ast::CompositeRowBinding {
+            ty: "composite#20001".into(),
+            attributes: vec![1],
+        },
+        bound_type: Some(ty.clone()),
+    };
+    let token = CancellationToken::new();
+    let schema = RowSchema::default();
+    let budget = MemoryBudget::new(2048);
+    let control = ProductionControl::new(&budget, &token, &token);
+    let inferred = crate::scalar_type_with_control(&row, &schema, &[], &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(*inferred, ty);
+    assert!(budget.used() >= 700);
+    drop(inferred);
+    assert_eq!(budget.used(), 0);
+    let small = MemoryBudget::new(32);
+    let control = ProductionControl::new(&small, &token, &token);
+    assert_eq!(
+        crate::scalar_type_with_control(&row, &schema, &[], &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(small.used(), 0);
+    token.cancel();
+    assert_eq!(
+        crate::scalar_type_with_control(&row, &schema, &[], &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+}
+
+#[test]
+fn constructor_cast_sources_keep_their_catalog_identity_under_the_output_budget() {
+    let budget = MemoryBudget::new(128);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let row = ScalarExpr::CompositeRow {
+        bound_type: None,
+        items: vec![ScalarExpr::Literal(Value::Int(1))],
+        binding: crate::ast::CompositeRowBinding {
+            ty: "composite#20001".into(),
+            attributes: vec![1],
+        },
+    };
+    let name =
+        scalar_cast_source_type_name_with_control(&row, &RowSchema::default(), &[], &control)
+            .unwrap()
+            .unwrap();
+    assert_eq!(&*name, "composite#20001");
+    assert_eq!(budget.used(), name.reserved_bytes());
+    drop(name);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn legacy_vector_cast_sources_retain_domain_identity_without_changing_operators() {
     let budget = MemoryBudget::new(65_536);
     let token = CancellationToken::new();

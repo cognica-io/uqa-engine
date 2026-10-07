@@ -52,8 +52,14 @@ pub(in crate::optimizer) fn immutable_cast_type(ty: &ColumnType) -> bool {
 fn is_constant(expression: &ScalarExpr) -> bool {
     match expression {
         ScalarExpr::Literal(_) => true,
-        ScalarExpr::TypedLiteral { ty, bound_type, .. } => {
-            bound_type.is_some() || ColumnType::from_sql_name(ty).is_ok()
+        ScalarExpr::TypedLiteral {
+            value,
+            ty,
+            bound_type,
+            ..
+        } => {
+            !uqa_sql::expr::composites::literal::contains_records(value)
+                && (bound_type.is_some() || ColumnType::from_sql_name(ty).is_ok())
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
@@ -71,6 +77,8 @@ fn is_constant(expression: &ScalarExpr) -> bool {
                         })
                 })
         }
+        // A named ROW constructor reads its current catalog descriptor even when every argument is a constant.
+        ScalarExpr::CompositeRow { .. } => false,
         ScalarExpr::Binary { lhs, rhs, .. } => is_constant(lhs) && is_constant(rhs),
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)

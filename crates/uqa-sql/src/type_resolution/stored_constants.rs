@@ -105,6 +105,10 @@ struct OperatorCoercions<'a> {
 
 impl Folding for OperatorCoercions<'_> {
     fn array_domain_input(&mut self, stored: &mut ScalarExpr) -> Result<bool, SQLError> {
+        if super::composite_rows::bind_stored_row(stored, self.schema, self.params, self.resolver)?
+        {
+            return Ok(true);
+        }
         if !matches!(stored, ScalarExpr::Cast { expr, .. } if matches!(**expr, ScalarExpr::Array(_)))
         {
             return Ok(false);
@@ -144,8 +148,11 @@ impl Folding for OperatorCoercions<'_> {
         else {
             return Ok(false);
         };
-        // Enum constants are stored by label identity, and a catalog input type keeps its cast.
-        if is_enum_bearing(target) || super::catalog_input_type(target) {
+        // Enum constants are stored by label identity. Composite and domain-array input datums retain the definition-time result.
+        if is_enum_bearing(target)
+            || (super::catalog_input_type(target)
+                && !crate::expr::requires_catalog_constant_input(target))
+        {
             return Ok(false);
         }
         *stored = ScalarExpr::TypedLiteral {
@@ -172,7 +179,11 @@ impl Folding for OperatorCoercions<'_> {
                 .ok()
                 .map(|ty| ty.without_type_modifiers());
             // Runtime binding annotates erased carrier widths with identity casts. The catalog retains actual analysis conversions, including domain-to-base relabels, without inventing those annotations in stored SQL.
-            if source.is_none() || source != target {
+            let record_carrier = matches!(
+                (&source, &target),
+                (Some(ColumnType::Composite(_)), Some(ColumnType::Record))
+            );
+            if !record_carrier && (source.is_none() || source != target) {
                 changed |= store_casts(stored, std::slice::from_ref(ty));
             }
             source = target;
@@ -304,6 +315,7 @@ fn transfer_children(
         }
         (ScalarExpr::Array(items), ScalarExpr::Array(bound))
         | (ScalarExpr::Row(items), ScalarExpr::Row(bound))
+        | (ScalarExpr::CompositeRow { items, .. }, ScalarExpr::CompositeRow { items: bound, .. })
         | (ScalarExpr::And(items), ScalarExpr::And(bound))
         | (ScalarExpr::Or(items), ScalarExpr::Or(bound)) => transfer_all(items, bound, folding)?,
         (

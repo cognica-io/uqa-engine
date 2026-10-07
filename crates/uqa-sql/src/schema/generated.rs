@@ -255,7 +255,11 @@ fn validate_generation_expression(
             }
             Ok(())
         }
-        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items)
+        | Expr::Row(items)
+        | Expr::CompositeRow { items, .. }
+        | Expr::And(items)
+        | Expr::Or(items) => {
             for item in items {
                 validate_generation_expression(qualifier, columns, item)?;
             }
@@ -351,7 +355,11 @@ pub fn bind_schema_column_references(expression: &mut Expr, qualifier: &str) {
                 bind_schema_column_references(filter, qualifier);
             }
         }
-        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items)
+        | Expr::Row(items)
+        | Expr::CompositeRow { items, .. }
+        | Expr::And(items)
+        | Expr::Or(items) => {
             for item in items {
                 bind_schema_column_references(item, qualifier);
             }

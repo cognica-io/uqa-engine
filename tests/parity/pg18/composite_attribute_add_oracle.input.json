@@ -1,0 +1,368 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "missing",
+      "sql": "ALTER TYPE ca_missing ADD ATTRIBUTE v integer"
+    },
+    {
+      "id": "scalar",
+      "sql": "ALTER TYPE integer ADD ATTRIBUTE v integer"
+    },
+    {
+      "id": "create",
+      "sql": "CREATE TYPE ca_pair AS (a integer,b text)"
+    },
+    {
+      "id": "rows",
+      "sql": "CREATE TABLE ca_rows(id integer,v ca_pair); INSERT INTO ca_rows VALUES (1,(1,'x')),(2,NULL)"
+    },
+    {
+      "id": "view",
+      "sql": "CREATE VIEW ca_view AS SELECT v,(v).a AS a FROM ca_rows"
+    },
+    {
+      "id": "add",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE c bigint"
+    },
+    {
+      "id": "read_added",
+      "sql": "SELECT id,v,(v).c FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "view_added",
+      "sql": "SELECT * FROM ca_view ORDER BY a"
+    },
+    {
+      "id": "duplicate_missing_type",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE a ca_missing"
+    },
+    {
+      "id": "missing_type",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE d ca_missing"
+    },
+    {
+      "id": "void",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE d void"
+    },
+    {
+      "id": "collation",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE d integer COLLATE \"C\""
+    },
+    {
+      "id": "add_text",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE label text COLLATE \"C\""
+    },
+    {
+      "id": "multiple",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE e integer, ADD ATTRIBUTE f text"
+    },
+    {
+      "id": "multiple_failure",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE g integer, ADD ATTRIBUTE h ca_missing"
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT a.attnum,a.attname,a.atttypid::regtype::text,a.attnotnull,a.attisdropped,a.attcollation FROM pg_attribute a JOIN pg_type t ON t.typrelid=a.attrelid WHERE t.typname='ca_pair' AND a.attnum>0 ORDER BY a.attnum"
+    },
+    {
+      "id": "rollback",
+      "sql": "BEGIN; ALTER TYPE ca_pair ADD ATTRIBUTE temporary integer; ROLLBACK"
+    },
+    {
+      "id": "after_rollback",
+      "sql": "SELECT id,v FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "table_kind",
+      "sql": "ALTER TYPE ca_rows ADD ATTRIBUTE invalid integer"
+    },
+    {
+      "id": "self",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE recursive ca_pair"
+    },
+    {
+      "id": "missing_before_modifier",
+      "sql": "ALTER TYPE ca_missing ADD ATTRIBUTE x numeric(0)"
+    },
+    {
+      "id": "duplicate_before_modifier",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE a numeric(0)"
+    },
+    {
+      "id": "invalid_modifier",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid numeric(0)"
+    },
+    {
+      "id": "serial_owner_kind",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid serial"
+    },
+    {
+      "id": "serial_array",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid serial[]"
+    },
+    {
+      "id": "qualified_serial",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid pg_catalog.serial"
+    },
+    {
+      "id": "serial_duplicate",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE a serial"
+    },
+    {
+      "id": "serial_array_duplicate",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE a serial[]"
+    },
+    {
+      "id": "serial_then_unknown",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE serial_value serial, ADD ATTRIBUTE invalid ca_missing_type"
+    },
+    {
+      "id": "serial_then_duplicate",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE serial_value serial, ADD ATTRIBUTE a integer"
+    },
+    {
+      "id": "serial_rollback",
+      "sql": "SELECT count(*) FROM pg_class WHERE relname LIKE 'ca_pair_%_seq'"
+    },
+    {
+      "id": "explicit_sequence_owner",
+      "sql": "CREATE SEQUENCE ca_owned_sequence OWNED BY ca_pair.a"
+    },
+    {
+      "id": "setof",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE invalid SETOF integer"
+    },
+    {
+      "id": "domain",
+      "sql": "CREATE DOMAIN ca_required AS integer NOT NULL; CREATE DOMAIN ca_domain AS ca_pair"
+    },
+    {
+      "id": "nested",
+      "sql": "CREATE TYPE ca_outer AS (one ca_pair, many ca_pair[]); CREATE TABLE ca_nested(id integer, p ca_domain, o ca_outer); INSERT INTO ca_nested VALUES (1,ROW(2,'d',NULL,NULL,NULL,NULL), ROW(ROW(3,'n',NULL,NULL,NULL,NULL)::ca_pair, ARRAY[ROW(4,'a',NULL,NULL,NULL,NULL)::ca_pair,NULL::ca_pair])),(2,NULL,NULL)"
+    },
+    {
+      "id": "materialized",
+      "sql": "CREATE MATERIALIZED VIEW ca_materialized AS SELECT v FROM ca_rows"
+    },
+    {
+      "id": "constant_view",
+      "sql": "CREATE VIEW ca_constant AS SELECT ROW(9,'constant',NULL,NULL,NULL,NULL)::ca_pair AS v"
+    },
+    {
+      "id": "dynamic_view",
+      "sql": "CREATE VIEW ca_dynamic AS SELECT id,ROW(id,'dynamic',NULL,NULL,NULL,NULL)::ca_pair AS v FROM ca_rows"
+    },
+    {
+      "id": "domain_view",
+      "sql": "CREATE VIEW ca_domain_view AS SELECT ROW(8,'domain',NULL,NULL,NULL,NULL)::ca_domain AS v"
+    },
+    {
+      "id": "stored_row_routine",
+      "sql": "CREATE FUNCTION ca_constructor() RETURNS ca_pair LANGUAGE SQL RETURN ROW(7,'routine',NULL,NULL,NULL,NULL)::ca_pair"
+    },
+    {
+      "id": "stored_row_default",
+      "sql": "CREATE TABLE ca_defaults (v ca_pair DEFAULT ROW(6,'default',NULL,NULL,NULL,NULL)::ca_pair)"
+    },
+    {
+      "id": "prepared",
+      "sql": "PREPARE ca_prepared AS SELECT id,v FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "add_domain",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE required ca_required"
+    },
+    {
+      "id": "read_nested",
+      "sql": "SELECT id,p,o FROM ca_nested ORDER BY id"
+    },
+    {
+      "id": "read_materialized",
+      "sql": "SELECT v FROM ca_materialized ORDER BY v"
+    },
+    {
+      "id": "read_constant",
+      "sql": "SELECT v FROM ca_constant"
+    },
+    {
+      "id": "read_dynamic",
+      "sql": "SELECT id,v FROM ca_dynamic ORDER BY id"
+    },
+    {
+      "id": "read_domain_view",
+      "sql": "SELECT v FROM ca_domain_view"
+    },
+    {
+      "id": "read_row_routine",
+      "sql": "SELECT ca_constructor()"
+    },
+    {
+      "id": "read_row_default",
+      "sql": "INSERT INTO ca_defaults DEFAULT VALUES; SELECT v FROM ca_defaults"
+    },
+    {
+      "id": "constructor_deparse",
+      "sql": "SELECT pg_get_viewdef('ca_constant'::regclass),pg_get_viewdef('ca_domain_view'::regclass)"
+    },
+    {
+      "id": "read_prepared",
+      "sql": "EXECUTE ca_prepared"
+    },
+    {
+      "id": "create_other",
+      "sql": "CREATE ROLE ca_add_other"
+    },
+    {
+      "id": "other_denied",
+      "sql": "SET ROLE ca_add_other; ALTER TYPE ca_pair ADD ATTRIBUTE denied integer"
+    },
+    {
+      "id": "reset_role",
+      "sql": "RESET ROLE"
+    },
+    {
+      "id": "wrong_kind_authority",
+      "sql": "SET ROLE ca_add_other; ALTER TYPE ca_rows ADD ATTRIBUTE denied integer"
+    },
+    {
+      "id": "reset_role_again",
+      "sql": "RESET ROLE"
+    },
+    {
+      "id": "drop_role",
+      "sql": "DROP ROLE ca_add_other"
+    },
+    {
+      "id": "drop_type_setup",
+      "sql": "CREATE TYPE ca_label AS ENUM ('kept'); ALTER TYPE ca_pair ADD ATTRIBUTE obsolete ca_label"
+    },
+    {
+      "id": "drop_type",
+      "sql": "DROP TYPE ca_label CASCADE"
+    },
+    {
+      "id": "after_dropped_slot",
+      "sql": "ALTER TYPE ca_pair ADD ATTRIBUTE last_value integer"
+    },
+    {
+      "id": "catalog_final",
+      "sql": "SELECT a.attnum,a.attname,a.atttypid::regtype::text,a.attnotnull,a.attisdropped,a.attcollation FROM pg_attribute a JOIN pg_type t ON t.typrelid=a.attrelid WHERE t.typname='ca_pair' AND a.attnum>0 ORDER BY a.attnum"
+    },
+    {
+      "id": "read_final",
+      "sql": "SELECT id,v FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "read_nested_final",
+      "sql": "SELECT id,p,o FROM ca_nested ORDER BY id"
+    },
+    {
+      "id": "rollback_values",
+      "sql": "BEGIN; ALTER TYPE ca_pair ADD ATTRIBUTE undone text; SELECT id,v FROM ca_rows ORDER BY id; ROLLBACK"
+    },
+    {
+      "id": "after_value_rollback",
+      "sql": "SELECT id,v FROM ca_rows ORDER BY id"
+    },
+    {
+      "id": "constant_setup",
+      "sql": "CREATE TYPE cv_pair AS(a integer,b text); CREATE DOMAIN cv_added AS integer NOT NULL; CREATE VIEW cv_v AS SELECT '(1,constant)'::cv_pair AS p; CREATE VIEW cv_bound AS SELECT '(4,bound)'::cv_pair AS p; CREATE VIEW cv_arr AS SELECT '[0:1]={\"(1,a)\",\"(2,b)\"}'::cv_pair[] AS p; CREATE FUNCTION cv_function() RETURNS cv_pair LANGUAGE SQL RETURN '(3,function)'::cv_pair; CREATE DOMAIN cv_domain AS cv_pair DEFAULT '(6,domain)'::cv_pair; CREATE TABLE cv_domains(p cv_domain); CREATE TABLE cv_rows(id integer,p cv_pair DEFAULT '(2,default)'::cv_pair); CREATE TABLE cv_list(p cv_pair) PARTITION BY LIST(p); CREATE TABLE cv_child PARTITION OF cv_list FOR VALUES IN (ROW(4,'bound')::cv_pair); CREATE TABLE cv_log(p cv_pair); CREATE RULE cv_rule AS ON INSERT TO cv_rows DO ALSO INSERT INTO cv_log VALUES ('(7,rule)'::cv_pair); CREATE INDEX cv_index ON cv_rows (((('(8,index)'::cv_pair).a) + id)); PREPARE cv_stmt AS SELECT '(5,prepared)'::cv_pair AS p"
+    },
+    {
+      "id": "constant_before",
+      "sql": "SELECT pg_get_viewdef('cv_v'::regclass); SELECT p FROM cv_v; SELECT cv_function(); EXECUTE cv_stmt"
+    },
+    {
+      "id": "constant_rollback",
+      "sql": "BEGIN; ALTER TYPE cv_pair ADD ATTRIBUTE undone integer; SELECT p FROM cv_v; ROLLBACK; SELECT p FROM cv_v"
+    },
+    {
+      "id": "constant_add",
+      "sql": "ALTER TYPE cv_pair ADD ATTRIBUTE c cv_added"
+    },
+    {
+      "id": "constant_reads",
+      "sql": "SELECT p,(p).a,(p).c FROM cv_v; SELECT array_lower(p,1),array_upper(p,1),p FROM cv_arr; SELECT cv_function(); EXECUTE cv_stmt"
+    },
+    {
+      "id": "constant_defaults",
+      "sql": "INSERT INTO cv_rows(id) VALUES (1) RETURNING p; INSERT INTO cv_domains DEFAULT VALUES RETURNING p; SELECT p FROM cv_log"
+    },
+    {
+      "id": "constant_partition",
+      "sql": "INSERT INTO cv_list SELECT p FROM cv_bound RETURNING p"
+    },
+    {
+      "id": "constant_deparse",
+      "sql": "SELECT pg_get_viewdef('cv_v'::regclass); SELECT pg_get_function_sqlbody('cv_function'::regproc); SELECT column_default FROM information_schema.columns WHERE table_name='cv_rows' AND column_name='p'; SELECT pg_get_ruledef(oid) FROM pg_rewrite WHERE rulename='cv_rule'; SELECT pg_get_indexdef('cv_index'::regclass)"
+    },
+    {
+      "id": "relation_constant_output",
+      "sql": "CREATE VIEW cv_relation AS SELECT 1 a,1.2::real b; CREATE VIEW cv_relation_const AS SELECT '(4,1.2)'::cv_relation AS p; SELECT pg_get_viewdef('cv_relation_const'::regclass); SELECT p FROM cv_relation_const"
+    },
+    {
+      "id": "reopen_rows",
+      "sql": "SELECT id,v FROM ca_rows ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_nested",
+      "sql": "SELECT id,p,o FROM ca_nested ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_view",
+      "sql": "SELECT * FROM ca_view ORDER BY a",
+      "reopen": true
+    },
+    {
+      "id": "reopen_materialized",
+      "sql": "SELECT v FROM ca_materialized ORDER BY v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_constant",
+      "sql": "SELECT v FROM ca_constant",
+      "reopen": true
+    },
+    {
+      "id": "reopen_catalog",
+      "sql": "SELECT a.attnum,a.attname,a.atttypid::regtype::text,a.attnotnull,a.attisdropped,a.attcollation FROM pg_attribute a JOIN pg_type t ON t.typrelid=a.attrelid WHERE t.typname='ca_pair' AND a.attnum>0 ORDER BY a.attnum",
+      "reopen": true
+    },
+    {
+      "id": "reopen_read_dynamic",
+      "sql": "SELECT id,v FROM ca_dynamic ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_read_domain_view",
+      "sql": "SELECT v FROM ca_domain_view",
+      "reopen": true
+    },
+    {
+      "id": "reopen_read_row_routine",
+      "sql": "SELECT ca_constructor()",
+      "reopen": true
+    },
+    {
+      "id": "reopen_constructor_deparse",
+      "sql": "SELECT pg_get_viewdef('ca_constant'::regclass),pg_get_viewdef('ca_domain_view'::regclass)",
+      "reopen": true
+    },
+    {
+      "id": "reopen_row_default",
+      "sql": "SELECT v FROM ca_defaults",
+      "reopen": true
+    },
+    {
+      "id": "constant_reopen",
+      "reopen": true,
+      "sql": "SELECT p FROM cv_v; SELECT p FROM cv_arr; SELECT cv_function(); INSERT INTO cv_rows(id) VALUES (2) RETURNING p; INSERT INTO cv_domains DEFAULT VALUES RETURNING p; SELECT p FROM cv_log ORDER BY p; INSERT INTO cv_list SELECT p FROM cv_bound RETURNING p; SELECT pg_get_viewdef('cv_v'::regclass); SELECT pg_get_viewdef('cv_relation_const'::regclass)"
+    }
+  ]
+}

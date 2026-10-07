@@ -162,7 +162,13 @@ pub fn restore_views_from_catalog(
         if upgrade_legacy_view_dispatches(&mut view.query) {
             revised_rows.insert(row.relation.clone());
         }
-        if query_plan_has_legacy_routine_identity(&view.query) {
+        if query_plan_has_legacy_routine_identity(&view.query)
+            || uqa_sql::type_resolution::composite_rows::query_requires_binding(
+                &mut view.query,
+                context.types,
+            )
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?
+        {
             routine_binding_migrations.insert(row.relation.clone());
         }
         bind_stored_view_relations(&mut view.query, &relations).map_err(|error| {

@@ -55,8 +55,17 @@ impl EventRestoreContext<'_> {
             .collect::<BTreeMap<_, _>>();
         let mut rules = temporary_rules;
         let mut recorded_oids = false;
+        let mut rebound_constructors = false;
         for mut rule in stored.rules {
-            let persisted_definition = if migrating_catalog {
+            let constructor_migration =
+                rule_constructor_migration(&mut rule.definition, self.analysis.routines)?;
+            if constructor_migration && !allows_migration {
+                return Err(StorageBackendError::Other(
+                    "rule constructors require an initial-open migration".into(),
+                ));
+            }
+            rebound_constructors |= constructor_migration;
+            let persisted_definition = if migrating_catalog || constructor_migration {
                 None
             } else {
                 Some(serde_json::to_string(&rule.definition)?)
@@ -116,7 +125,7 @@ impl EventRestoreContext<'_> {
             }
         }
         **self.catalog.registry.rules() = rules;
-        if migrating_catalog || recorded_oids {
+        if migrating_catalog || recorded_oids || rebound_constructors {
             let rules = self.reads.read_rules();
             self.catalog
                 .publication
@@ -226,6 +235,25 @@ impl EventRestoreContext<'_> {
         }
         Ok(())
     }
+}
+
+fn rule_constructor_migration(
+    definition: &mut uqa_sql::ast::CreateRule,
+    types: &dyn uqa_sql::FunctionTypeResolver,
+) -> StorageBackendResult<bool> {
+    use uqa_sql::type_resolution::composite_rows;
+    let mut found = definition
+        .condition
+        .as_ref()
+        .map(|condition| composite_rows::expression_requires_binding(condition, types))
+        .transpose()
+        .map_err(|error| StorageBackendError::Other(error.to_string()))?
+        .unwrap_or(false);
+    for action in &mut definition.actions {
+        found |= composite_rows::statement_requires_binding(action, types)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+    }
+    Ok(found)
 }
 
 fn legacy_trigger_object_id(definition: &uqa_sql::ast::CreateTrigger) -> [u8; 16] {

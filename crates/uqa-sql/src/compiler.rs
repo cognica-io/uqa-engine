@@ -51,6 +51,7 @@ pub use dispatch::{
 };
 pub use foreign_tables::resolve_deferred_create_foreign_table;
 pub(crate) use types::compile_retained_type_declaration;
+pub(crate) use types::compile_retained_type_reference;
 pub use types::{
     parse_regobject_name, parse_regprocedure_name, parse_regtype_name, ParsedRegprocedureName,
     ParsedRegtypeName,

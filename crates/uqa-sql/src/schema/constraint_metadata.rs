@@ -577,6 +577,10 @@ fn constraint_column_component(
     Ok(columns.join("_"))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one traversal covers every constraint expression child"
+)]
 fn collect_constraint_columns(expression: &crate::ast::Expr, output: &mut Vec<String>) {
     use crate::ast::{Expr, FrameBound};
     match expression {
@@ -601,7 +605,11 @@ fn collect_constraint_columns(expression: &crate::ast::Expr, output: &mut Vec<St
                 collect_constraint_columns(filter, output);
             }
         }
-        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items)
+        | Expr::Row(items)
+        | Expr::CompositeRow { items, .. }
+        | Expr::And(items)
+        | Expr::Or(items) => {
             for item in items {
                 collect_constraint_columns(item, output);
             }

@@ -276,6 +276,7 @@ pub fn pg_class_catalog_row(
 }
 
 pub fn build_pg_views(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -283,7 +284,7 @@ pub fn build_pg_views(
     for (name, stored) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::View) {
         let (schema, view) = split_schema_name(&name)?;
         let definition = crate::catalog::projection::view_definition::view_definition(
-            catalog, resolution, &stored, false, 0,
+            output, catalog, resolution, &stored, false, 0,
         )?;
         rows.push(row([
             ("schemaname", str_value(schema)),
@@ -303,6 +304,7 @@ pub fn build_pg_views(
 }
 
 pub fn build_pg_matviews(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -328,7 +330,7 @@ pub fn build_pg_matviews(
                 "definition",
                 str_value(
                     crate::catalog::projection::view_definition::view_definition(
-                        catalog, resolution, &stored, false, 0,
+                        output, catalog, resolution, &stored, false, 0,
                     )?,
                 ),
             ),

@@ -165,6 +165,18 @@ fn rewrite_selected(
                 .map(|item| rewrite_selected(item, replace))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
+        ScalarExpr::CompositeRow {
+            items,
+            binding,
+            bound_type,
+        } => Ok(ScalarExpr::CompositeRow {
+            items: items
+                .iter()
+                .map(|item| rewrite_selected(item, replace))
+                .collect::<Result<Vec<_>, _>>()?,
+            binding: binding.clone(),
+            bound_type: bound_type.clone(),
+        }),
         ScalarExpr::Binary { op, lhs, rhs } => Ok(ScalarExpr::Binary {
             op: *op,
             lhs: Box::new(rewrite_selected(lhs, replace)?),

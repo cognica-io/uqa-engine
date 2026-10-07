@@ -16,7 +16,10 @@ use super::{EngineHook, Result, SQLError};
 use crate::ast::ColumnType;
 
 mod changes;
+pub mod constants;
+pub mod constructor;
 mod input;
+pub mod literal;
 pub use changes::{apply_attribute_change, type_contains_composite, AttributeChange};
 pub use input::parse_record_fields;
 

@@ -22,6 +22,20 @@ fn admitted_scalar_copy_preserves_window_frames_bindings_and_typed_payloads() {
             bound_type: Some(ColumnType::Array(Box::new(ColumnType::Varchar(Some(32))))),
             parameter_index: Some(1),
         },
+        ScalarExpr::CompositeRow {
+            items: vec![ScalarExpr::Literal(Value::Int(1))],
+            binding: crate::ast::CompositeRowBinding {
+                ty: "composite#20001".into(),
+                attributes: vec![1],
+            },
+            bound_type: Some(ColumnType::Composite(crate::ast::CompositeTypeReference {
+                schema: "catalog_schema".repeat(100),
+                name: "pair".repeat(100),
+                oid: 20_001,
+                array_oid: 20_002,
+                relation_oid: 20_003,
+            })),
+        },
         ScalarExpr::ScalarSubquery(7),
     ]);
     let token = CancellationToken::new();

@@ -36,6 +36,7 @@ pub fn query_references(
     let mut bound = resolution.clone();
     bound.set_lookup_mode(RelationLookupMode::Bound);
     let deparser = Deparser {
+        output: None,
         catalog,
         dynamic,
         bound,
@@ -282,7 +283,11 @@ fn reference_expression(expression: &ScalarExpr, scope: &Scope, references: &mut
                 references.constants.push((ty.clone(), *oid));
             }
         }
-        ScalarExpr::Cast { ty, .. } => references.types.push(ty.clone()),
+        ScalarExpr::Cast { ty, .. }
+        | ScalarExpr::CompositeRow {
+            binding: uqa_sql::ast::CompositeRowBinding { ty, .. },
+            ..
+        } => references.types.push(ty.clone()),
         ScalarExpr::Func {
             name,
             binding,

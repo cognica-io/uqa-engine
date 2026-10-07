@@ -35,6 +35,7 @@ pub trait TypeReferenceDependents {
 }
 
 pub struct TypeLifecycleContext<'a> {
+    pub composite_attributes: super::composites::addition::CompositeAdditionContext<'a>,
     pub creation: RelationCreationContext<'a>,
     pub identities: CatalogIdentityReservationContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,

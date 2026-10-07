@@ -172,6 +172,7 @@ fn index_key_ordinals(
 }
 
 pub fn build_pg_index(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -191,7 +192,7 @@ pub fn build_pg_index(
             })
             .map(|expression| {
                 super::super::view_definition::stored_expression_definition(
-                    catalog, resolution, expression, false,
+                    output, catalog, resolution, expression, false,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -252,7 +253,7 @@ pub fn build_pg_index(
                     .as_deref()
                     .map(|predicate| {
                         super::super::view_definition::stored_expression_definition(
-                            catalog, resolution, predicate, false,
+                            output, catalog, resolution, predicate, false,
                         )
                     })
                     .transpose()?
@@ -281,6 +282,7 @@ fn index_options(index: &CatalogIndexRelation) -> Result<Value, SQLError> {
 }
 
 pub fn build_pg_indexes(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -308,7 +310,14 @@ pub fn build_pg_indexes(
             ("tablespace", Value::Null),
             (
                 "indexdef",
-                str_value(indexdef(catalog, resolution, &index, &index_target, false)?),
+                str_value(indexdef(
+                    output,
+                    catalog,
+                    resolution,
+                    &index,
+                    &index_target,
+                    false,
+                )?),
             ),
         ]));
     }

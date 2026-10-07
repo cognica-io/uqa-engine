@@ -56,4 +56,5 @@ pub struct ViewRestoreContext<'a> {
     pub bindings: &'a dyn ViewPlanBinding,
     pub schemas: &'a dyn ViewRestoreSchemas,
     pub sequences: &'a dyn ViewRestoreSequences,
+    pub types: &'a dyn uqa_sql::FunctionTypeResolver,
 }

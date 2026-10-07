@@ -156,6 +156,22 @@ pub fn capture(
     control: &uqa_storage::read_control::StorageReadControl,
 ) -> Result<RewriteRows, SQLError> {
     let mut result = RewriteRows::new(memory);
+    visit_document_ids(reads, table, control, &mut |id| {
+        if let Some(document) = reads.get_document(table, id)? {
+            result.push(id, document)?;
+        }
+        Ok(())
+    })?;
+    Ok(result)
+}
+
+/// Visit current document identities one budgeted page at a time; consumers may rewrite rows without retaining all identities.
+pub fn visit_document_ids(
+    reads: &dyn crate::mutation::constraints::context::MutationRead,
+    table: &str,
+    control: &uqa_storage::read_control::StorageReadControl,
+    visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
     let mut after = None;
     let limit = (control.memory().limit() / (4 * std::mem::size_of::<DocId>()))
         .clamp(1, crate::DEFAULT_BATCH_SIZE);
@@ -168,12 +184,10 @@ pub fn capture(
         after = Some(last);
         for id in ids.iter().copied() {
             control.cancellation().check()?;
-            if let Some(document) = reads.get_document(table, id)? {
-                result.push(id, document)?;
-            }
+            visit(id)?;
         }
     }
-    Ok(result)
+    Ok(())
 }
 
 fn decode_identity(value: Option<Value>) -> Result<DocId, SQLError> {

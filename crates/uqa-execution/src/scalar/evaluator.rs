@@ -97,9 +97,15 @@ pub(super) fn eval_scalar_inner(
         ScalarExpr::QualifiedColumn { qualifier, column } => context
             .sql_context()
             .qualified_column_value_with_control(qualifier, column, control),
-        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
-            control.copy_value(value).map_err(Into::into)
+        ScalarExpr::TypedLiteral { value, ty, .. } => {
+            uqa_sql::expr::composites::literal::evaluate_with_control(
+                value,
+                ty,
+                context.function_hook(),
+                control,
+            )
         }
+        ScalarExpr::Literal(value) => control.copy_value(value).map_err(Into::into),
         ScalarExpr::Param(index) => eval_parameter(*index, context.params(), control),
         ScalarExpr::Func {
             name,
@@ -118,6 +124,15 @@ pub(super) fn eval_scalar_inner(
             control
                 .finish(Value::Array(array), memory)
                 .map_err(Into::into)
+        }
+        ScalarExpr::CompositeRow { items, binding, .. } => {
+            uqa_sql::expr::composites::constructor::evaluate_with_control(
+                binding,
+                items.len(),
+                context.function_hook(),
+                control,
+                |index| eval_scalar_inner(&items[index], context, control),
+            )
         }
         ScalarExpr::Row(items) => {
             let mut fields = ProductionVec::new(*control);

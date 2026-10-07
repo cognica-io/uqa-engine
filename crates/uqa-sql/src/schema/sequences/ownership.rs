@@ -87,9 +87,13 @@ pub fn bind_sequence_owner(
             })?;
     let Some(owner_column) = sequence_owner_column_identity(catalog, &table_name, kind, column)?
     else {
-        return Err(SQLError::Routine {
+        let relation = RelationIdentity::from_legacy_name(&table_name)
+            .map_err(|error| SQLError::Internal(error.to_string()))?;
+        return Err(SQLError::Diagnostic {
             sqlstate: "42809".into(),
-            message: format!("sequence cannot be owned by relation \"{table_name}\""),
+            message: format!("sequence cannot be owned by relation \"{}\"", relation.name),
+            detail: crate::catalog::analysis::relkind_not_supported_detail(kind),
+            hint: None,
         });
     };
     let sequence_relation = RelationIdentity::from_legacy_name(sequence_name).map_err(|error| {

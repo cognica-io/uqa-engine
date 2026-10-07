@@ -347,7 +347,10 @@ fn pg_trigger_row(
             "tgqual",
             match definition.when.as_ref() {
                 Some(condition) => str_value(super::view_definition::stored_expression_text(
-                    catalog, resolution, condition,
+                    Some(&crate::catalog::projection::CatalogOutput(*context)),
+                    catalog,
+                    resolution,
+                    condition,
                 )?),
                 None => Value::Null,
             },
@@ -435,7 +438,18 @@ fn resolve_trigger_function(
     Ok(function)
 }
 
+/// Rule addresses without rendering stored conditions or serializing actions.
+pub(super) fn rewrite_catalog_oids(catalog: &CatalogReadView) -> Vec<i64> {
+    catalog
+        .rules()
+        .iter()
+        .map(rule_catalog_oid)
+        .chain(catalog_view_rules(catalog).map(|(_, view)| view_rule_oid(&view)))
+        .collect()
+}
+
 pub fn build_pg_rewrite(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -463,7 +477,7 @@ pub fn build_pg_rewrite(
                     match definition.condition.as_ref() {
                         Some(condition) => {
                             str_value(super::view_definition::stored_expression_text(
-                                catalog, resolution, condition,
+                                output, catalog, resolution, condition,
                             )?)
                         }
                         None => str_value("<>"),
@@ -497,6 +511,7 @@ pub fn build_pg_rewrite(
 }
 
 pub fn build_pg_rules(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -514,7 +529,7 @@ pub fn build_pg_rules(
                 (
                     "definition",
                     str_value(render_rule_definition(
-                        catalog, resolution, definition, false,
+                        output, catalog, resolution, definition, false,
                     )?),
                 ),
             ]))
@@ -543,6 +558,7 @@ pub fn pg_get_triggerdef_value(
         return Ok(Value::Null);
     };
     Ok(str_value(render_trigger_definition(
+        Some(&crate::catalog::projection::CatalogOutput(*context)),
         &catalog,
         &resolution,
         &trigger.definition,
@@ -566,6 +582,7 @@ pub fn pg_get_ruledef_value(
         .find(|rule| rule_catalog_oid(rule) == oid)
     {
         return Ok(str_value(render_rule_definition(
+            Some(&crate::catalog::projection::CatalogOutput(*context)),
             &catalog,
             &resolution,
             &rule.definition,
@@ -574,8 +591,14 @@ pub fn pg_get_ruledef_value(
     }
     for (name, view) in catalog_view_rules(&catalog) {
         if view_rule_oid(&view) == oid {
-            let query =
-                super::view_definition::view_definition(&catalog, &resolution, &view, pretty, 0)?;
+            let query = super::view_definition::view_definition(
+                Some(&crate::catalog::projection::CatalogOutput(*context)),
+                &catalog,
+                &resolution,
+                &view,
+                pretty,
+                0,
+            )?;
             return Ok(str_value(format!(
                 "CREATE RULE \"_RETURN\" AS\n    ON SELECT TO {} DO INSTEAD {query}",
                 render_rule_relation(&catalog, &resolution, &name, pretty)?
@@ -667,6 +690,7 @@ const fn rule_event_code(event: RuleEvent) -> &'static str {
     reason = "preserves catalog column and OID order"
 )]
 fn render_trigger_definition(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     definition: &CreateTrigger,
@@ -772,7 +796,7 @@ fn render_trigger_definition(
     if let Some(condition) = &definition.when {
         rendered.push_str(" WHEN (");
         rendered.push_str(&super::view_definition::trigger_condition_definition(
-            catalog, resolution, condition, pretty,
+            output, catalog, resolution, condition, pretty,
         )?);
         rendered.push(')');
     }

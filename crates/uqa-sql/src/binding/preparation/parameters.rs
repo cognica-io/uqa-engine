@@ -319,7 +319,7 @@ impl<'a> ParameterTypes<'a> {
     }
 
     fn input_value(&self, text: &str, input_type: &ColumnType) -> Result<Option<Value>, SQLError> {
-        if crate::expr::requires_domain_array_input(input_type) {
+        if crate::expr::requires_catalog_constant_input(input_type) {
             if self.input_constants.is_none() {
                 return Ok(None);
             }

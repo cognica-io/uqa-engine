@@ -150,6 +150,15 @@ fn normalize_expression(
             ScalarExpr::Array(normalize_items(engine, items, schema, params)?)
         }
         ScalarExpr::Row(items) => ScalarExpr::Row(normalize_items(engine, items, schema, params)?),
+        ScalarExpr::CompositeRow {
+            items,
+            binding,
+            bound_type,
+        } => ScalarExpr::CompositeRow {
+            items: normalize_items(engine, items, schema, params)?,
+            binding: binding.clone(),
+            bound_type: bound_type.clone(),
+        },
         ScalarExpr::Binary { op, lhs, rhs } => {
             let left_type = expression_type(engine, &lhs, schema, params)?;
             let right_type = expression_type(engine, &rhs, schema, params)?;

@@ -39,11 +39,26 @@ impl Engine {
 
     pub(crate) fn composite_value_context(&self) -> CompositeValueContext<'_> {
         CompositeValueContext {
+            memory: self.session.as_ref(),
+            cancellation: &self.runtime.cancellation,
             tables: self,
             reads: self,
             writes: self,
             views: self.view_dependency_context(),
             types: self,
+            catalogs:
+                uqa_execution::schema::composites::catalog_values::CompositeCatalogValueContext {
+                    schema: self.schema_dependency_publication_context(),
+                    domains: self,
+                    events: self.event_catalog_context(),
+                    routines: self.routine_mutation_context(),
+                    indexes: uqa_execution::schema::indexes::routines::IndexRoutineContext {
+                        registry: self,
+                        catalog: self.storage.catalog.as_deref(),
+                    },
+                    index_publication: self,
+                    types: self,
+                },
         }
     }
 

@@ -340,6 +340,7 @@ fn dropped_attribute_row(
 }
 
 pub fn build_pg_attrdef(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -352,6 +353,7 @@ pub fn build_pg_attrdef(
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?
             .columns;
         append_pg_attrdef_rows(
+            output,
             (catalog, resolution),
             &mut out,
             &table_name,
@@ -363,6 +365,7 @@ pub fn build_pg_attrdef(
     for (table_name, table) in catalog.foreign_tables() {
         let (_, local_name) = split_schema_name(&table_name)?;
         append_pg_attrdef_rows(
+            output,
             (catalog, resolution),
             &mut out,
             &table_name,
@@ -374,6 +377,37 @@ pub fn build_pg_attrdef(
     Ok(out)
 }
 
+/// Default-expression addresses without rendering or evaluating their expressions.
+pub fn attribute_default_oids(catalog: &CatalogReadView) -> Vec<i64> {
+    let snapshot = catalog.snapshot();
+    snapshot
+        .tables
+        .iter()
+        .map(|(name, table)| (name, table.columns.as_slice()))
+        .chain(
+            snapshot
+                .definitions
+                .foreign_tables
+                .iter()
+                .map(|(name, table)| (name, table.columns.as_slice())),
+        )
+        .flat_map(|(name, columns)| {
+            let name = name.qualified_name();
+            columns
+                .iter()
+                .filter(|column| {
+                    column.default.is_some()
+                        || column.generated.is_some()
+                        || column
+                            .auto_increment
+                            .as_ref()
+                            .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy)
+                })
+                .map(move |column| attrdef_catalog_oid(&name, column))
+        })
+        .collect()
+}
+
 /// The `pg_attrdef` OID of a column's default or generation expression: the recorded one, or for an expression set before OIDs were recorded, the one derived from the qualified names of its table and column.
 pub fn attrdef_catalog_oid(table_name: &str, column: &SQLColumnDef) -> i64 {
     column
@@ -383,6 +417,7 @@ pub fn attrdef_catalog_oid(table_name: &str, column: &SQLColumnDef) -> i64 {
 
 /// `adbin` holds the expression as `pg_get_expr` prints it for the relation.
 fn append_pg_attrdef_rows(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
     (catalog, resolution): (&CatalogReadView, &RelationNameResolution),
     out: &mut Vec<ResultRow>,
     table_name: &str,
@@ -406,7 +441,9 @@ fn append_pg_attrdef_rows(
             .map(|generated| generated.expression.as_ref())
             .or(col.default.as_ref())
         {
-            super::super::view_definition::stored_expression_text(catalog, resolution, expression)?
+            super::super::view_definition::stored_expression_text(
+                output, catalog, resolution, expression,
+            )?
         } else {
             continue;
         };

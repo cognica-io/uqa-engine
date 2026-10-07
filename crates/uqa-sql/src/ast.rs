@@ -27,6 +27,7 @@ mod function_binding;
 mod identity_sequence;
 mod indexes;
 mod interval;
+mod legacy_dispatch;
 mod locking;
 mod namespaces;
 mod object_acl;

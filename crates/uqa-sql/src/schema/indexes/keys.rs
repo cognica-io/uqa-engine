@@ -65,7 +65,7 @@ fn expression_name(expression: &Expr) -> Option<(String, bool)> {
             )
         }
         Expr::Array(_) => Some(("array".into(), true)),
-        Expr::Row(_) => Some(("row".into(), true)),
+        Expr::Row(_) | Expr::CompositeRow { .. } => Some(("row".into(), true)),
         _ => None,
     }
 }

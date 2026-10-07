@@ -302,8 +302,15 @@ fn partition_key_detail(
         .catalog
         .session_execution_view()
         .relation_name_resolution();
-    let names =
-        crate::catalog::projection::partition_key_columns(&catalog, &resolution, spec, true)?;
+    let names = crate::catalog::projection::partition_key_columns(
+        Some(&crate::catalog::projection::CatalogOutput(
+            diagnostics.catalog,
+        )),
+        &catalog,
+        &resolution,
+        spec,
+        true,
+    )?;
     let types = crate::catalog::projection::partition_key_types_for_table(
         &diagnostics.catalog,
         &catalog,

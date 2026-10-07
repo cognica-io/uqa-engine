@@ -29,6 +29,19 @@ impl ScalarExpr {
 }
 
 impl Lowering<'_> {
+    fn scalar_type_copy(
+        &mut self,
+        ty: Option<&crate::ast::ColumnType>,
+    ) -> Result<Option<crate::ast::ColumnType>> {
+        ty.map(|ty| {
+            let control = self.control.as_mut().expect("controlled scalar copy");
+            let (ty, memory) = ty.clone_with_control(&control.production)?.into_parts();
+            control.memory.absorb(memory.expect("controlled type copy"));
+            Ok(ty)
+        })
+        .transpose()
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "exhaustive scalar copying shares the lowerer's destination admission"
@@ -53,15 +66,7 @@ impl Lowering<'_> {
                 bound_type,
                 parameter_index,
             } => {
-                let bound_type = bound_type
-                    .as_ref()
-                    .map(|ty| {
-                        let control = self.control.as_mut().expect("controlled scalar copy");
-                        let (ty, memory) = ty.clone_with_control(&control.production)?.into_parts();
-                        control.memory.absorb(memory.expect("controlled type copy"));
-                        Ok::<_, crate::schema::retention::CatalogRetentionError>(ty)
-                    })
-                    .transpose()?;
+                let bound_type = self.scalar_type_copy(bound_type.as_ref())?;
                 ScalarExpr::TypedLiteral {
                     value: self.value(Source::Borrowed(value))?,
                     ty: self.copy_text(ty)?,
@@ -93,6 +98,15 @@ impl Lowering<'_> {
             ScalarExpr::Array(items) => {
                 ScalarExpr::Array(self.map(items.iter(), Self::scalar_copy)?)
             }
+            ScalarExpr::CompositeRow {
+                items,
+                binding,
+                bound_type,
+            } => ScalarExpr::CompositeRow {
+                bound_type: self.scalar_type_copy(bound_type.as_ref())?,
+                items: self.map(items.iter(), Self::scalar_copy)?,
+                binding: self.composite_binding(Source::Borrowed(binding))?,
+            },
             ScalarExpr::Row(items) => ScalarExpr::Row(self.map(items.iter(), Self::scalar_copy)?),
             ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
                 op: *op,
