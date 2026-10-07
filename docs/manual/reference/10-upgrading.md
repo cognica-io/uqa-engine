@@ -1,8 +1,10 @@
 # Upgrading UQA Engine
 
-This page separates unreleased changes on `main` from released upgrade requirements. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.4.9/docs/manual/reference/10-upgrading.md) when installing the published 0.4.9 packages.
+This page describes upgrade requirements for UQA Engine 0.5.0 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.0/docs/manual/reference/10-upgrading.md) when installing the 0.5.0 packages.
 
-## Unreleased changes after 0.4.9
+## 0.5.0
+
+Version 0.5.0 adds PostgreSQL type and catalog behavior, corrects SQL analysis and mutation semantics, and reduces indexed foreign-key, private-write and native SQLite read/commit costs. It upgrades persistent catalog records and shared coordination protocols. Close every database owner, retain a pre-upgrade backup, and update all owners together before reopening. The current storage markers are SQLite record format 57, native mapping 15 and redb record format 55; see [foreign-server metadata](#foreign-server-identities-and-owners), [row-change journals](#row-change-journal-retention) and [relation locks](#exact-relation-locks-across-processes). See the [release history](../../../HISTORY.md#050---2026-10-07) for the complete changes.
 
 Custom Execution `QueryTableAccess` and `RetrievalIndexes` adapters now implement the shared `QueryIndexRead` interface. Its stored value-index scan must retain the selected query generation and serializable predicate observation; its command probe must return matches and masks from the same frame view. `CommandMutationOverlay::column_matches` supplies that bounded command probe. The full change view still includes retained portal or transaction versions below those command frames. No persistent format changes are involved.
 
@@ -14,7 +16,7 @@ Custom Execution `ReferentialReadSnapshot` adapters must implement `value_index_
 
 Initial open now registers missing builtin namespace records so user relations in `information_schema` and `ag_catalog` can persist in every storage provider. This joins the existing atomic catalog restoration and preserves stored namespace identities, owner changes and grants. Later catalog refreshes and secondary sessions only load the initialized records. Rust `Engine::list_schemas` consequently includes `pg_catalog`, `information_schema` and `ag_catalog` alongside other registered schemas.
 
-The following changes were merged after the 0.4.9 tag and are not present in that release. They do not change its package versions. The first open rewrites the user-defined type names of stored SQL, as the next section describes.
+The following changes require attention when upgrading from 0.4.9 or earlier. Initial open converts retained catalog and expression metadata atomically; subsequent sessions require completed conversion. Restore the pre-upgrade backup before returning to an older binary.
 
 ### Retained composite expressions
 
@@ -46,7 +48,7 @@ UPDATE, ON CONFLICT DO UPDATE and MERGE assignment lists now use `AssignmentTarg
 
 ### Stored user-defined type names
 
-Databases written by 0.4.9 and earlier record a user-defined domain in stored SQL by its name: in casts and typed constants, in routine parameter and result types, and in the argument and result types of bound routine calls inside views, column defaults, CHECK constraints, generation expressions, index expressions and predicates, partition keys and bounds, domain defaults and checks, routine defaults and SQL-standard bodies, trigger conditions and rules. Later releases record the domain's OID instead, as PostgreSQL does, so renaming or moving a domain no longer changes what a stored reference means. The first open by a later release rewrites every such name to the OID of the domain it named, reading an unqualified name in the `public` schema, or for a routine along the search path it was created under, in the initial catalog transaction; a name that denotes no domain keeps its spelling. A version marker records the completed upgrade, and later opens skip it. Without this upgrade a bound call on a domain-typed routine could not be resolved when the database opened.
+Databases written by 0.4.9 and earlier record a user-defined domain in stored SQL by its name: in casts and typed constants, in routine parameter and result types, and in the argument and result types of bound routine calls inside views, column defaults, CHECK constraints, generation expressions, index expressions and predicates, partition keys and bounds, domain defaults and checks, routine defaults and SQL-standard bodies, trigger conditions and rules. Version 0.5.0 records the domain's OID instead, as PostgreSQL does, so renaming or moving a domain no longer changes what a stored reference means. The first open by 0.5.0 rewrites every such name to the OID of the domain it named, reading an unqualified name in the `public` schema, or for a routine along the search path it was created under, in the initial catalog transaction; a name that denotes no domain keeps its spelling. A version marker records the completed upgrade, and later opens skip it. Without this upgrade a bound call on a domain-typed routine could not be resolved when the database opened.
 
 ### Function ordering syntax
 
@@ -620,20 +622,20 @@ SQLite catalogs advance to version 46 for durable cache revisions, graph access 
 
 ## Package versions
 
-Update the UQA packages used by one application together. Rust's `0.1`, `0.2` and `0.3` dependency requirements do not select `0.4.9`; change the requirement explicitly and regenerate the application's lockfile.
+Update the UQA packages used by one application together. Rust's `0.1`, `0.2`, `0.3` and `0.4` dependency requirements do not select `0.5.0`; change the requirement explicitly and regenerate the application's lockfile.
 
 | Environment | Versioned installation |
 | --- | --- |
-| Embedded Rust | `cargo add uqa@0.4.9` |
-| Rust HTTP client | `cargo add uqa-client@0.4.9` |
-| Python and `usql` | `python -m pip install --upgrade uqa==0.4.9` |
-| Embedded Node.js | `npm install @cognica-io/uqa@0.4.9` |
-| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.4.9` |
-| Browser WASM | `npm install @cognica-io/uqa-wasm@0.4.9` |
+| Embedded Rust | `cargo add uqa@0.5.0` |
+| Rust HTTP client | `cargo add uqa-client@0.5.0` |
+| Python and `usql` | `python -m pip install --upgrade uqa==0.5.0` |
+| Embedded Node.js | `npm install @cognica-io/uqa@0.5.0` |
+| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.5.0` |
+| Browser WASM | `npm install @cognica-io/uqa-wasm@0.5.0` |
 
 The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
-The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.4.9) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.4.9"` consistently for every UQA dependency.
+The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.5.0) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.5.0"` consistently for every UQA dependency.
 
 ## Automatic statistics and session caches
 
@@ -702,10 +704,10 @@ Default document-API FTS registrations preserve their field list and analyzer re
 Existing native catalogs may retain the Python-era `_graph_catalog(graph_name)` alias alongside `_named_graphs` and native graph membership. Migration validates this exact representation and merges its names into `_named_graphs` before restoring graph metadata, then retires the alias in the same transaction. Catalog vertices, edges and memberships remain in their original namespace; Rust standalone graph catalogs use a different schema and keep their independent conversion. Historical FTS accelerator tables may declare their term column as `TEXT`: empty tables retire normally and canonical BLOB keys preserve their bytes; populated text-valued keys are rejected rather than coerced into another token representation.
 
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
-2. Open a copy with the exact 0.4.9 application and its selected provider, encryption key, and compression configuration.
+2. Open a copy with the exact 0.5.0 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
 4. Update every process sharing the database before reopening the original file. Register process-local runtime callbacks again when the application starts.
-5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.4.9.
+5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.5.0.
 
 Keep migration failures visible and resolve them before admitting writes. Retain encryption keys and any external rollback anchor according to the [storage and security contract](04-storage-and-security.md).
 
