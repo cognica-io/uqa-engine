@@ -26,6 +26,7 @@ pub(crate) struct CachedSQLStatement {
     pub(crate) statement: Arc<uqa_sql::ast::Statement>,
     pub(crate) logical_plan: Arc<uqa_planner::UnifiedPlan>,
     pub(crate) optimized_plan: Option<Arc<uqa_planner::UnifiedPlan>>,
+    pub(crate) analyzed_plan: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
     catalog_epochs: CatalogEpochs,
     pub(crate) parser: uqa_sql::parser::ParserMetadata,
 }
@@ -46,10 +47,21 @@ impl SQLStatementCache {
         catalog_epochs: CatalogEpochs,
         parser: uqa_sql::parser::ParserMetadata,
     ) {
+        let analyzed_plan = self
+            .entries
+            .get(&sql)
+            .filter(|entry| {
+                Arc::ptr_eq(&entry.statement, &statement)
+                    && entry.catalog_epochs.table_catalog == catalog_epochs.table_catalog
+                    && entry.catalog_epochs.catalog_registry == catalog_epochs.catalog_registry
+                    && entry.parser.settings == parser.settings
+            })
+            .and_then(|entry| entry.analyzed_plan.clone());
         let cached = CachedSQLStatement {
             statement,
             logical_plan,
             optimized_plan: None,
+            analyzed_plan,
             catalog_epochs,
             parser,
         };
@@ -100,6 +112,41 @@ impl SQLStatementCache {
 }
 
 impl Engine {
+    pub(crate) fn cached_sql_analysis(
+        &self,
+        sql: &str,
+    ) -> Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>> {
+        if self.analysis_catalog_is_dirty() {
+            return None;
+        }
+        self.cached_sql_statement(sql)?.analyzed_plan
+    }
+
+    pub(crate) fn cache_sql_analysis(
+        &self,
+        sql: &str,
+        analysis: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+    ) {
+        if !self.analysis_catalog_is_dirty() {
+            if let Some(entry) = self
+                .session
+                .state
+                .write()
+                .sql_statement_cache
+                .entries
+                .get_mut(sql)
+            {
+                entry.analyzed_plan = analysis;
+            }
+        }
+    }
+
+    fn analysis_catalog_is_dirty(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.epochs.table_catalog.dirty.load(Ordering::Acquire)
+            || self.epochs.catalog_registry.dirty.load(Ordering::Acquire)
+    }
+
     pub(crate) fn cached_sql_statement(&self, sql: &str) -> Option<CachedSQLStatement> {
         let mut cached = self.session.state.read().sql_statement_cache.get(sql)?;
         let epochs = self.catalog_epochs();

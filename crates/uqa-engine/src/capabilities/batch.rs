@@ -36,6 +36,20 @@ impl Engine {
 }
 
 impl StatementCache for Engine {
+    fn cached_sql_analysis(
+        &self,
+        sql: &str,
+    ) -> Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>> {
+        Engine::cached_sql_analysis(self, sql)
+    }
+    fn cache_sql_analysis(
+        &self,
+        sql: &str,
+        analysis: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+    ) {
+        Engine::cache_sql_analysis(self, sql, analysis);
+    }
+
     fn cached_sql_statement(&self, sql: &str) -> Option<CachedStatement> {
         Engine::cached_sql_statement(self, sql).map(|cached| CachedStatement {
             statement: cached.statement,

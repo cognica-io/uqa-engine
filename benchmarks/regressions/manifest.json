@@ -338,6 +338,22 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "statement_analysis_survives_data_commits_and_rechecks_types_and_definitions",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/cache.rs",
+      "capability": "Ordinary statement analysis reuse",
+      "workload": "Eight parameterized INSERT commits on four providers followed by rollback, parameter type mismatch, private DDL and external definition changes.",
+      "invariant": "One retained analyzed owner across data-only commits, fresh argument results, preserved rollback and PostgreSQL schema diagnostics.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

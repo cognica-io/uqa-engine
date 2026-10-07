@@ -20,6 +20,26 @@ use uqa_planner::{
 use uqa_sql::{ast::OperatorJoinRelations, SQLError, ScalarExpr};
 
 impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
+    fn plan_with_cached_analysis(
+        &self,
+        plan: uqa_sql::plan::UnifiedPlan,
+        params: &[uqa_sql::SQLParam],
+        cached: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+    ) -> Result<
+        (
+            uqa_sql::plan::UnifiedPlan,
+            Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+        ),
+        SQLError,
+    > {
+        uqa_sql::plan::ExecutablePlanOptimizer::plan_with_cached_analysis(
+            &self.statement_planning_context(),
+            plan,
+            params,
+            cached,
+        )
+    }
+
     fn plan_for_statement_cache(
         &self,
         plan: uqa_sql::plan::UnifiedPlan,

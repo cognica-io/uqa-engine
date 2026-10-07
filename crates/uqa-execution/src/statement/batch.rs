@@ -24,6 +24,7 @@ use uqa_sql::{
     SQLError, SQLParam, SQLResult,
 };
 
+mod analysis;
 pub mod context;
 
 #[cfg(test)]
@@ -464,7 +465,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         );
                     }
                 }
-                let optimized = match context.planning.plan_for_execution(plan, params) {
+                let optimized = match analysis::plan(
+                    context,
+                    sql,
+                    plan,
+                    params,
+                    is_single_statement && !nested_statement,
+                ) {
                     Ok(plan) => plan,
                     Err(error) => {
                         return Err(context.transactions.abort_after_error(error));
@@ -625,7 +632,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         }
                     }
                 }
-                let optimized = match context.planning.plan_for_execution(plan, params) {
+                let optimized = match analysis::plan(
+                    context,
+                    sql,
+                    plan,
+                    params,
+                    is_single_statement && !nested_statement,
+                ) {
                     Ok(plan) => plan,
                     Err(error) => {
                         return rollback_after_statement_error(context.transactions, error)
