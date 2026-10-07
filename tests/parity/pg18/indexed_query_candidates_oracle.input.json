@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TABLE query_rows(id integer PRIMARY KEY, qty integer, body text); CREATE INDEX query_qty ON query_rows(qty); INSERT INTO query_rows VALUES(1,10,'a'),(2,20,'b'),(3,10,'c'),(4,NULL,'d'); CREATE TABLE joined_rows(id integer PRIMARY KEY, tag text); INSERT INTO joined_rows VALUES(1,'one'),(3,'three'),(9,'nine')"
+    },
+    {
+      "id": "plain",
+      "sql": "SELECT id,body FROM query_rows WHERE qty=10 ORDER BY id"
+    },
+    {
+      "id": "alias",
+      "sql": "SELECT p.id,p.body FROM query_rows p WHERE p.qty=10 ORDER BY p.id"
+    },
+    {
+      "id": "column_alias",
+      "sql": "SELECT p.i,p.b FROM query_rows p(i,q,b) WHERE p.q=10 ORDER BY p.i"
+    },
+    {
+      "id": "join",
+      "sql": "SELECT p.id,p.body,j.tag FROM query_rows p JOIN joined_rows j ON p.id=j.id WHERE p.qty=10 ORDER BY p.id"
+    },
+    {
+      "id": "left_join",
+      "sql": "SELECT j.id,p.body FROM joined_rows j LEFT JOIN query_rows p ON p.id=j.id AND p.qty=10 ORDER BY j.id"
+    },
+    {
+      "id": "parameter_setup",
+      "sql": "SET plan_cache_mode=force_generic_plan; PREPARE q(integer) AS SELECT p.id,p.body FROM query_rows p WHERE p.qty=$1+1 ORDER BY p.id"
+    },
+    {
+      "id": "parameter_hit",
+      "sql": "EXECUTE q(9)"
+    },
+    {
+      "id": "parameter_miss",
+      "sql": "EXECUTE q(99)"
+    },
+    {
+      "id": "parameter_null",
+      "sql": "EXECUTE q(NULL)"
+    },
+    {
+      "id": "range",
+      "sql": "SELECT p.id,p.body FROM query_rows p WHERE p.qty>=10 AND p.qty<20 ORDER BY p.id"
+    },
+    {
+      "id": "membership",
+      "sql": "SELECT p.id,p.body FROM query_rows p WHERE p.qty IN (10,NULL,20) ORDER BY p.id"
+    },
+    {
+      "id": "null",
+      "sql": "SELECT p.id,p.body FROM query_rows p WHERE p.qty IS NULL ORDER BY p.id"
+    },
+    {
+      "id": "not_null",
+      "sql": "SELECT p.id,p.body FROM query_rows p WHERE NOT(p.qty=10) ORDER BY p.id"
+    },
+    {
+      "id": "or",
+      "sql": "SELECT p.id,p.body FROM query_rows p WHERE p.qty=10 OR p.body='d' ORDER BY p.id"
+    },
+    {
+      "id": "begin",
+      "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ; SAVEPOINT before_change"
+    },
+    {
+      "id": "private_change",
+      "sql": "UPDATE query_rows SET qty=30 WHERE id=1; DELETE FROM query_rows WHERE id=3; INSERT INTO query_rows VALUES(5,10,'e')"
+    },
+    {
+      "id": "private_old",
+      "sql": "SELECT p.id,p.body FROM query_rows p WHERE p.qty=10 ORDER BY p.id"
+    },
+    {
+      "id": "private_new",
+      "sql": "SELECT p.id,p.body FROM query_rows p WHERE p.qty=30 ORDER BY p.id"
+    },
+    {
+      "id": "cursor",
+      "sql": "DECLARE c CURSOR FOR SELECT p.id,p.body FROM query_rows p WHERE p.qty=10 ORDER BY p.id; UPDATE query_rows SET qty=40 WHERE id=5; FETCH ALL FROM c; CLOSE c"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK TO before_change; COMMIT"
+    },
+    {
+      "id": "restored",
+      "sql": "SELECT p.id,p.body FROM query_rows p WHERE p.qty=10 ORDER BY p.id"
+    },
+    {
+      "id": "trigger_setup",
+      "sql": "CREATE FUNCTION observe_prefix() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE n bigint; BEGIN SELECT count(*) INTO n FROM query_rows p WHERE p.qty=NEW.qty; NEW.body:=n::text; IF NEW.id=12 THEN UPDATE query_rows SET qty=20 WHERE id=10; DELETE FROM query_rows WHERE id=11; END IF; RETURN NEW; END $$; CREATE TRIGGER observe_prefix BEFORE INSERT ON query_rows FOR EACH ROW EXECUTE FUNCTION observe_prefix()"
+    },
+    {
+      "id": "trigger_batch",
+      "sql": "INSERT INTO query_rows(id,qty) VALUES(10,50),(11,50),(12,50),(13,50)"
+    },
+    {
+      "id": "trigger_results",
+      "sql": "SELECT id,qty,body FROM query_rows WHERE id>=10 ORDER BY id"
+    },
+    {
+      "id": "snapshot_cte",
+      "sql": "WITH added AS (INSERT INTO query_rows(id,qty) VALUES(20,70) RETURNING id) SELECT a.id,(SELECT count(*) FROM query_rows p WHERE p.qty=70) AS snapshot_rows FROM added a"
+    },
+    {
+      "id": "final_rows",
+      "sql": "SELECT id,qty,body FROM query_rows ORDER BY id"
+    }
+  ]
+}

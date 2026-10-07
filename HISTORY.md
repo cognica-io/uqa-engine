@@ -36,6 +36,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Use scalar index candidates through table aliases, column aliases and join inputs, and reconcile indexed equality reads with cached command keys instead of scanning every staged row. Retain fixed query views, private replacements, tombstones and serializable predicate observations.
+
+- Let point UPDATE modify a row staged by an enclosing command, and honor staged replacements and tombstones in integer-key reads. Preserve nested-trigger effects when the outer batch publishes.
+
 - Cache staged UNIQUE expression keys so batch checks do not reevaluate every preceding row. Preserve partial predicates, composite and NULL keys, nested triggers, encrypted spill and statement rollback across all storage providers.
 
 - Use child indexes for foreign-key parent checks and referential actions, avoiding reads of unrelated child payloads while preserving private writes, latest-committed references and partition behavior. Deleting a NULL parent key now leaves NULL child keys unchanged, matching PostgreSQL.
