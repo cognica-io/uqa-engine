@@ -10,7 +10,7 @@ use crate::{Catalog, ManagedConnection, SQLiteDocumentStore};
 use uqa_core::Value;
 use uqa_storage::{mvcc::VersionedSessionOptions, DocumentStore, StorageBackendError};
 
-fn fixture() -> SQLiteDocumentStore {
+pub(super) fn fixture() -> SQLiteDocumentStore {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();
     connection

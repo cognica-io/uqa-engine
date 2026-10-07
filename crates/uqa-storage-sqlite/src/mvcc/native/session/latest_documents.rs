@@ -8,7 +8,7 @@
 //!
 //! At a snapshot that is the latest commit, the projection holds the snapshot's committed records (see [`NativeSnapshot::read_latest_projection`]). Commit validation binds every document row's table name to its owner, and a name is retired only after its rows are gone, so the rows under a table's name are the records of the owner bound to that name. When that owner has no other bound name, the physical rows in document order stand in for the record scan, one sequential cursor instead of a version lookup per record. Private records of other tables are not among these rows. The session's private document records of the owner, which the projection does not hold, are merged into them in document order: a private record before a row inserts a document, one at a row replaces or deletes it, and the work is that of the private records rather than a version lookup for every row.
 
-use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
+use rusqlite::{params, types::ValueRef, Connection, OptionalExtension, Row, Statement};
 use uqa_core::memory::{MemoryError, MemoryReservation};
 use uqa_storage::mvcc::{MergedRecordSnapshot, VersionError};
 use uqa_storage::read_control::StorageReadControl;
@@ -18,6 +18,8 @@ use super::{owners, Family, NativeRecordIdentity, NativeRecordOwner, NativeSnaps
 use crate::connection::Result;
 use crate::mvcc::PhysicalResult;
 use crate::read_control::{payload_length, reserve_bindings};
+
+mod points;
 
 /// Bodies of at most this many bytes are read with their row. The selected byte length bounds `SQLite`'s copy before the body is evaluated; a larger body is admitted and then read by itself.
 const INLINE_BODY_BYTES: u16 = 16 * 1024;
@@ -242,52 +244,8 @@ fn visit_rows(
         if replaced {
             continue;
         }
-        let length = payload_length(row.get(1)?)?;
-        admitted = Some(
-            control
-                .memory()
-                .reserve(
-                    length
-                        .checked_add(table.len())
-                        .ok_or(MemoryError::SizeOverflow)
-                        .map_err(VersionError::from)?,
-                )
-                .map_err(VersionError::from)?,
-        );
-        let xmin = row.get_ref(3)?;
-        let more = match row.get_ref(2)? {
-            ValueRef::Text(body) if body.len() == length => visit(&[
-                ValueRef::Text(table.as_bytes()),
-                ValueRef::Integer(id),
-                ValueRef::Text(body),
-                xmin,
-            ])?,
-            ValueRef::Null if length > usize::from(INLINE_BODY_BYTES) => {
-                let mut body_rows = body_statement.query(params![table, id])?;
-                let body_row = body_rows.next()?.ok_or(VersionError::InvalidEncoding(
-                    "native document disappeared within a read",
-                ))?;
-                match body_row.get_ref(0)? {
-                    ValueRef::Text(body) if body.len() == length => visit(&[
-                        ValueRef::Text(table.as_bytes()),
-                        ValueRef::Integer(id),
-                        ValueRef::Text(body),
-                        xmin,
-                    ])?,
-                    _ => {
-                        return Err(VersionError::InvalidEncoding(
-                            "native document body changed within a read",
-                        )
-                        .into())
-                    }
-                }
-            }
-            _ => {
-                return Err(
-                    VersionError::InvalidEncoding("native document body must be text").into(),
-                )
-            }
-        };
+        admitted = Some(admit_row(row, table, control)?);
+        let more = visit_stored_row(row, table, &mut body_statement, visit)?;
         if !more {
             stopped = true;
             break;
@@ -366,4 +324,61 @@ fn visit_ids(
     }
     control.check().map_err(VersionError::from)?;
     Ok(())
+}
+
+fn admit_row(
+    row: &Row<'_>,
+    table: &str,
+    control: &StorageReadControl,
+) -> PhysicalResult<MemoryReservation> {
+    let length = payload_length(row.get(1)?)?;
+    Ok(control
+        .memory()
+        .reserve(
+            length
+                .checked_add(table.len())
+                .ok_or(MemoryError::SizeOverflow)
+                .map_err(VersionError::from)?,
+        )
+        .map_err(VersionError::from)?)
+}
+
+fn visit_stored_row(
+    row: &Row<'_>,
+    table: &str,
+    body_statement: &mut Statement<'_>,
+    visit: &mut dyn FnMut(&[ValueRef<'_>]) -> Result<bool>,
+) -> PhysicalResult<bool> {
+    let id: i64 = row.get(0)?;
+    let length = payload_length(row.get(1)?)?;
+    let xmin = row.get_ref(3)?;
+    match row.get_ref(2)? {
+        ValueRef::Text(body) if body.len() == length => Ok(visit(&[
+            ValueRef::Text(table.as_bytes()),
+            ValueRef::Integer(id),
+            ValueRef::Text(body),
+            xmin,
+        ])?),
+        ValueRef::Null if length > usize::from(INLINE_BODY_BYTES) => {
+            let mut body_rows = body_statement.query(params![table, id])?;
+            let body_row = body_rows.next()?.ok_or(VersionError::InvalidEncoding(
+                "native document disappeared within a read",
+            ))?;
+            match body_row.get_ref(0)? {
+                ValueRef::Text(body) if body.len() == length => Ok(visit(&[
+                    ValueRef::Text(table.as_bytes()),
+                    ValueRef::Integer(id),
+                    ValueRef::Text(body),
+                    xmin,
+                ])?),
+                _ => {
+                    return Err(VersionError::InvalidEncoding(
+                        "native document body changed within a read",
+                    )
+                    .into())
+                }
+            }
+        }
+        _ => return Err(VersionError::InvalidEncoding("native document body must be text").into()),
+    }
 }
