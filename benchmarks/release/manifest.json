@@ -16,8 +16,10 @@
   ],
   "suites": [
     {
-      "target": "query_matrix",
-      "env": {},
+      "target": "release_inventory",
+      "env": {
+        "UQA_RELEASE_BENCH_SUITE": "query_matrix"
+      },
       "cases": [
         "unified_read/query_block_constant",
         "unified_read/query_block_row",
@@ -54,9 +56,10 @@
       "name": "query_matrix"
     },
     {
-      "target": "sql_sqlite_e2e",
+      "target": "release_inventory",
       "env": {
-        "UQA_STORAGE_BENCH_PROVIDER": "sqlite"
+        "UQA_STORAGE_BENCH_PROVIDER": "sqlite",
+        "UQA_RELEASE_BENCH_SUITE": "sql_sqlite_e2e"
       },
       "cases": [
         "sqlite_e2e/count_star_10k",
@@ -75,9 +78,10 @@
     },
     {
       "name": "sql_sqlite_kv",
-      "target": "sql_sqlite_e2e",
+      "target": "release_inventory",
       "env": {
-        "UQA_STORAGE_BENCH_PROVIDER": "sqlite_kv"
+        "UQA_STORAGE_BENCH_PROVIDER": "sqlite_kv",
+        "UQA_RELEASE_BENCH_SUITE": "sql_sqlite_e2e"
       },
       "cases": [
         "sqlite_kv_e2e/count_star_10k",
@@ -94,9 +98,10 @@
     },
     {
       "name": "sql_redb",
-      "target": "sql_sqlite_e2e",
+      "target": "release_inventory",
       "env": {
-        "UQA_STORAGE_BENCH_PROVIDER": "redb"
+        "UQA_STORAGE_BENCH_PROVIDER": "redb",
+        "UQA_RELEASE_BENCH_SUITE": "sql_sqlite_e2e"
       },
       "cases": [
         "redb_e2e/count_star_10k",
@@ -112,9 +117,10 @@
       ]
     },
     {
-      "target": "retrieval_workloads",
+      "target": "release_inventory",
       "env": {
-        "UQA_RETRIEVAL_BENCH_SUITE": "core"
+        "UQA_RETRIEVAL_BENCH_SUITE": "core",
+        "UQA_RELEASE_BENCH_SUITE": "retrieval_workloads"
       },
       "cases": [
         "retrieval_index_build/text_gin_2k",

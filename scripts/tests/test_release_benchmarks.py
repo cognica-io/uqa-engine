@@ -165,7 +165,12 @@ class ReleaseRunTest(unittest.TestCase):
             self.assertEqual(statuses["sql_sqlite_kv"], "failed")
             self.assertEqual(statuses["sql_redb"], "complete")
             self.assertEqual(len(commands), 6)
-            self.assertEqual(commands[0][0].count("--bench"), 3)
+            self.assertEqual(commands[0][0].count("--bench"), 1)
+            self.assertEqual(commands[0][0][-1], "release_inventory")
+            self.assertEqual(
+                [env["UQA_RELEASE_BENCH_SUITE"] for _, env in commands[1:]],
+                ["query_matrix", "sql_sqlite_e2e", "sql_sqlite_e2e", "sql_sqlite_e2e", "retrieval_workloads"],
+            )
             homes = [env["CRITERION_HOME"] for _, env in commands[1:]]
             self.assertEqual(len(set(homes)), 5)
             summary = next((root / "output/reports").glob("*.md")).read_text()

@@ -102,6 +102,10 @@
       "tokens": ["bench_relevance"]
     },
     {
+      "path": "crates/uqa-engine/benches/release_inventory.rs",
+      "tokens": ["UQA_RELEASE_BENCH_SUITE", "query_matrix::benches", "sql_sqlite_e2e::benches", "retrieval_workloads::retrieval_benches"]
+    },
+    {
       "path": "crates/uqa-engine/benches/retrieval_workloads.rs",
       "tokens": [
         "beir_hybrid_search::bench_beir_hybrid_search",
