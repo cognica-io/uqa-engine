@@ -284,22 +284,28 @@ fn nullable_vector_and_tensor_values_have_no_index_entries() {
         .unwrap();
     assert_eq!(row.get("embedding"), Some(&Value::Null));
     assert_eq!(row.get("chunks"), Some(&Value::Null));
-    assert!(engine
-        .sql(
-            "SELECT id FROM docs WHERE knn_match(embedding, ARRAY[1.0, 0.0], 1)",
-            &[],
-        )
-        .unwrap()
-        .rows
-        .is_empty());
-    assert!(engine
-        .sql(
-            "SELECT id FROM docs WHERE knn_match(chunks, ARRAY[0.0, 1.0], 1)",
-            &[],
-        )
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT id FROM docs WHERE knn_match(embedding, ARRAY[1.0, 0.0], 1)",
+                &[],
+            )
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT id FROM docs WHERE knn_match(chunks, ARRAY[0.0, 1.0], 1)",
+                &[],
+            )
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

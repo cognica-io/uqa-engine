@@ -214,7 +214,7 @@ fn set_config_assigns_for_the_session_or_the_transaction() {
     assert_eq!(result.rows[0]["assigned"], Value::Str("z".into()));
     assert_eq!(result.rows[0]["seen"], Value::Str("z".into()));
     assert_eq!(show(&engine, "my.var").1, "y");
-    assert!(engine.take_sql_notices().is_empty());
+    assert_eq!(engine.take_sql_notices().len(), 0);
     sql(&engine, "BEGIN");
     sql(&engine, "SELECT set_config('my.var2', 'local', true)");
     assert_eq!(show(&engine, "my.var2").1, "local");
@@ -499,7 +499,7 @@ fn client_min_messages_withholds_notices_as_they_are_raised() {
     );
     sql(&engine, "SET client_min_messages = warning");
     sql(&engine, "DROP TABLE IF EXISTS no_such_table");
-    assert!(levels(&engine).is_empty());
+    assert_eq!(levels(&engine).len(), 0);
 }
 
 #[test]

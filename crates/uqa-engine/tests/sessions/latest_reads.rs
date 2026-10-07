@@ -80,7 +80,7 @@ fn a_truncation_in_the_transaction_rebinds_the_table_away_from_its_committed_row
         .unwrap();
     engine.sql("TRUNCATE items", &[]).unwrap();
     assert_eq!(totals(&engine), (Value::Int(0), Value::Null));
-    assert!(first_rows(&engine).is_empty());
+    assert_eq!(first_rows(&engine).len(), 0);
     engine.sql("INSERT INTO items VALUES (7, 70)", &[]).unwrap();
     assert_eq!(totals(&engine), (Value::Int(1), Value::Int(70)));
     engine.sql("ROLLBACK", &[]).unwrap();

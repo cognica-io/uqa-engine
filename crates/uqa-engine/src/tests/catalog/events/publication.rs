@@ -208,11 +208,14 @@ fn relation_event_publication_releases_guards_before_forgetting_pending_events_a
         ]
     );
     engine.sql("COMMIT", &[]).unwrap();
-    assert!(engine
-        .sql("SELECT id FROM dependency_audit", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM dependency_audit", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

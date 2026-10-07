@@ -104,7 +104,7 @@ fn partition_owned_indexes_preserve_addresses_on_detach_and_reuse_only_owned_key
         );
         assert_eq!(definition(&first, name), attached);
         sql(&first, "ALTER TABLE p DROP CONSTRAINT root_key");
-        assert!(first.key_constraints("c").unwrap().is_empty());
+        assert_eq!(first.key_constraints("c").unwrap().len(), 0);
         assert!(first.catalog_index(name).unwrap().is_none());
         assert!(first.catalog_index("local_idx").unwrap().is_some());
     }
@@ -141,7 +141,7 @@ fn independent_partition_index_can_reuse_a_primary_key_and_requires_cascade_to_r
         assert!(first.drop_catalog_index("root_idx").is_err());
         assert_eq!(definition(&first, "local_key").catalog, before);
         sql(&first, "DROP INDEX root_idx CASCADE");
-        assert!(first.key_constraints("c").unwrap().is_empty());
+        assert_eq!(first.key_constraints("c").unwrap().len(), 0);
         assert!(first.catalog_index("local_key").unwrap().is_none());
     }
 }
@@ -207,8 +207,8 @@ fn adding_partition_key_materializes_descendants_and_renamed_foreign_key_depende
         );
         error(&first, "ALTER TABLE p DROP CONSTRAINT renamed", "2BP01");
         sql(&first, "ALTER TABLE p DROP CONSTRAINT renamed CASCADE");
-        assert!(first.key_constraints("c").unwrap().is_empty());
-        assert!(first.foreign_keys("ref").unwrap().is_empty());
+        assert_eq!(first.key_constraints("c").unwrap().len(), 0);
+        assert_eq!(first.foreign_keys("ref").unwrap().len(), 0);
     }
 }
 
@@ -229,6 +229,6 @@ fn equivalent_owned_parents_and_an_independent_parent_keep_distinct_child_indexe
             &reopened,
             "ALTER TABLE p DROP CONSTRAINT owned_b; DROP INDEX independent CASCADE",
         );
-        assert!(reopened.key_constraints("c").unwrap().is_empty());
+        assert_eq!(reopened.key_constraints("c").unwrap().len(), 0);
     }
 }

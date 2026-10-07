@@ -118,7 +118,7 @@ fn information_schema_sequences_uses_state_dependency_and_privilege_visibility()
     engine
         .sql("SET ROLE sequence_information_reader", &[])
         .unwrap();
-    assert!(information_sequence_rows(&engine).is_empty());
+    assert_eq!(information_sequence_rows(&engine).len(), 0);
     engine.sql("RESET ROLE", &[]).unwrap();
 
     engine

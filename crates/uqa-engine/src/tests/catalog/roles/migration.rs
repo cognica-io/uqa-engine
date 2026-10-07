@@ -49,7 +49,7 @@ fn role_record_migration_preserves_legacy_oids_and_rolls_back_on_later_restore_f
             Some(legacy)
         );
         for prefix in ["uqa.sql.role.v1:", "uqa.sql.role_oid.v1:"] {
-            assert!(raw.catalog.metadata_with_prefix(prefix).unwrap().is_empty());
+            assert_eq!(raw.catalog.metadata_with_prefix(prefix).unwrap().len(), 0);
         }
         raw.catalog.delete_metadata("sql_functions_json").unwrap();
         let reopened = Engine::from_persistent_provider(factory).unwrap();

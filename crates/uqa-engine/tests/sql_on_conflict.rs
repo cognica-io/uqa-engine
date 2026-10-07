@@ -617,11 +617,10 @@ fn conflict_update_rejects_a_row_inserted_earlier_even_when_its_predicate_is_fal
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("21000"));
-    assert!(eng
-        .sql("SELECT * FROM counters", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        eng.sql("SELECT * FROM counters", &[]).unwrap().rows.len(),
+        0
+    );
 }
 
 #[test]
@@ -686,11 +685,10 @@ fn insert_select_conflict_cardinality_state_is_disk_backed() {
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("21000"));
-    assert!(eng
-        .sql("SELECT * FROM counters", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        eng.sql("SELECT * FROM counters", &[]).unwrap().rows.len(),
+        0
+    );
 }
 
 #[test]
@@ -707,7 +705,7 @@ fn serial_identity_is_allocated_before_conflict_resolution() {
             &[],
         )
         .unwrap();
-    assert!(skipped.rows.is_empty());
+    assert_eq!(skipped.rows.len(), 0);
     let inserted = eng
         .sql(
             "INSERT INTO serial_conflicts (slug) VALUES ('free') RETURNING id",

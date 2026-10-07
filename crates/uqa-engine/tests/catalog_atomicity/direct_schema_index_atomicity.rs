@@ -56,13 +56,13 @@ fn direct_constraint_replacement_publishes_only_after_catalog_success() {
     assert!(engine
         .register_table_constraints("constrained", vec![], vec![], vec![constraint])
         .is_err());
-    assert!(engine.key_constraints("constrained").unwrap().is_empty());
+    assert_eq!(engine.key_constraints("constrained").unwrap().len(), 0);
     clear_failure(&connection);
     drop(engine);
     drop(connection);
 
     let reopened = Engine::open(&dir.path().join("catalog.db")).unwrap();
-    assert!(reopened.key_constraints("constrained").unwrap().is_empty());
+    assert_eq!(reopened.key_constraints("constrained").unwrap().len(), 0);
 }
 
 #[test]

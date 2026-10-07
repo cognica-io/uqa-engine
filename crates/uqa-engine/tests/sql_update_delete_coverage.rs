@@ -183,7 +183,7 @@ fn delete_basic_where_and_text_index() {
             &[],
         )
         .unwrap();
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn update_returning_variants() {
         .sql("UPDATE users SET age = 0 WHERE id = 999 RETURNING id", &[])
         .unwrap();
     assert_eq!(result.columns, vec!["id"]);
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
 }
 
 #[test]

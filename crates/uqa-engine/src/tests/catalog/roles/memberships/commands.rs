@@ -28,7 +28,7 @@ fn named_keywords_and_duplicate_grants_preserve_membership_identity_and_notice_o
             &first,
             "REVOKE target FROM \"CURRENT_USER\", \"CURRENT_USER\"",
         );
-        assert!(first.take_sql_notices().is_empty());
+        assert_eq!(first.take_sql_notices().len(), 0);
         sql(&first, "REVOKE target FROM \"SESSION_USER\"");
         assert_eq!(first.take_sql_notices(), vec![crate::SQLNotice::warning("role \"SESSION_USER\" has not been granted membership in role \"target\" by role \"uqa\"")]);
         let remaining = membership_rows(&first);

@@ -79,9 +79,12 @@ fn assert_update_from_rule_action_cardinality(engine: &Engine) {
         .affected_rows,
         0
     );
-    assert!(exec(engine, "SELECT * FROM cardinality_update_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(engine, "SELECT * FROM cardinality_update_log")
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         exec(
             engine,
@@ -189,9 +192,12 @@ fn assert_plain_delete_rule_action_cardinality(engine: &Engine) {
         exec(engine, "DELETE FROM cardinality_delete_base WHERE false").affected_rows,
         0
     );
-    assert!(exec(engine, "SELECT * FROM cardinality_delete_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(engine, "SELECT * FROM cardinality_delete_log")
+            .rows
+            .len(),
+        0
+    );
 }
 
 fn assert_delete_using_rule_action_cardinality(engine: &Engine) {
@@ -473,7 +479,7 @@ pub(super) fn assert_view_rules_precede_automatic_rewrite() {
 
 fn assert_view_insert_rules(engine: &Engine) {
     exec(engine, "INSERT INTO view_rule_instead VALUES (1, 10)");
-    assert!(exec(engine, "SELECT * FROM view_rule_base").rows.is_empty());
+    assert_eq!(exec(engine, "SELECT * FROM view_rule_base").rows.len(), 0);
     let insert_log = exec(
         engine,
         "SELECT event, id, value FROM view_rule_log ORDER BY event",
@@ -567,9 +573,12 @@ fn assert_view_update_and_delete_rules(engine: &Engine) {
         Value::Int(1)
     );
     exec(engine, "DELETE FROM view_rule_also WHERE id = 2");
-    assert!(exec(engine, "SELECT * FROM view_rule_base WHERE id = 2")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(engine, "SELECT * FROM view_rule_base WHERE id = 2")
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         exec(
             engine,
@@ -595,9 +604,12 @@ fn assert_view_rule_returning(engine: &Engine) {
     );
     assert_eq!(returned.rows[0]["id"], Value::Int(4));
     assert_eq!(returned.rows[0]["value"], Value::Int(40));
-    assert!(exec(engine, "SELECT * FROM view_rule_base WHERE id = 4")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(engine, "SELECT * FROM view_rule_base WHERE id = 4")
+            .rows
+            .len(),
+        0
+    );
 }
 
 pub(super) fn assert_nested_view_rules_run_at_each_rewrite_layer() {
@@ -645,9 +657,10 @@ pub(super) fn assert_nested_view_rules_run_at_each_rewrite_layer() {
             Value::Str("inner-delete".into()),
         ]
     );
-    assert!(exec(&engine, "SELECT * FROM nested_rule_base")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM nested_rule_base").rows.len(),
+        0
+    );
 }
 
 pub(super) fn assert_rule_and_trigger_rewrite_order() {

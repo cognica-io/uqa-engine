@@ -495,20 +495,29 @@ fn catalog_workers_keep_the_parent_snapshot_without_reentering_its_statement() {
                 assert!(RetrievalIndexes::catalog_index(source, "t_v")
                     .unwrap()
                     .is_some());
-                assert!(!ConstraintCatalog::try_unique_columns(source, "t")
-                    .unwrap()
-                    .is_empty());
+                assert_ne!(
+                    ConstraintCatalog::try_unique_columns(source, "t")
+                        .unwrap()
+                        .len(),
+                    0
+                );
                 assert!(
                     !ConstraintCatalog::try_check_constraint_definitions(source, "t")
                         .unwrap()
                         .is_empty()
                 );
-                assert!(ConstraintCatalog::try_foreign_keys(source, "t")
-                    .unwrap()
-                    .is_empty());
-                assert!(AnalyzerTableFunctions::list_named_analyzers(source)
-                    .unwrap()
-                    .is_empty());
+                assert_eq!(
+                    ConstraintCatalog::try_foreign_keys(source, "t")
+                        .unwrap()
+                        .len(),
+                    0
+                );
+                assert_eq!(
+                    AnalyzerTableFunctions::list_named_analyzers(source)
+                        .unwrap()
+                        .len(),
+                    0
+                );
                 assert!(RetrievalModels::load_model(source, "missing_model")
                     .unwrap()
                     .is_none());

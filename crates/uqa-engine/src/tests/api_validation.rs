@@ -104,7 +104,7 @@ fn table_introspection_distinguishes_unknown_tables_from_missing_columns() {
     }
 
     engine.create_default_table("docs", Vec::new()).unwrap();
-    assert!(engine.try_table_columns("docs").unwrap().is_empty());
+    assert_eq!(engine.try_table_columns("docs").unwrap().len(), 0);
     assert!(!engine.try_table_has_column("docs", "value").unwrap());
     assert_eq!(engine.column_type("docs", "value").unwrap(), None);
 
@@ -227,11 +227,11 @@ fn table_metadata_getters_reject_unknown_relations() {
 
     engine.create_default_table("docs", Vec::new()).unwrap();
     assert_eq!(engine.auto_increment_column("docs").unwrap(), None);
-    assert!(engine.try_check_constraints("docs").unwrap().is_empty());
-    assert!(engine.try_foreign_keys("docs").unwrap().is_empty());
-    assert!(engine.try_unique_columns("docs").unwrap().is_empty());
-    assert!(engine.try_key_constraints("docs").unwrap().is_empty());
-    assert!(engine.try_referrers_to("docs").unwrap().is_empty());
+    assert_eq!(engine.try_check_constraints("docs").unwrap().len(), 0);
+    assert_eq!(engine.try_foreign_keys("docs").unwrap().len(), 0);
+    assert_eq!(engine.try_unique_columns("docs").unwrap().len(), 0);
+    assert_eq!(engine.try_key_constraints("docs").unwrap().len(), 0);
+    assert_eq!(engine.try_referrers_to("docs").unwrap().len(), 0);
     assert!(engine.try_column_stats("docs").unwrap().is_empty());
 }
 

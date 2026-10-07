@@ -109,7 +109,7 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
                     .as_array_mut()
                     .unwrap()
                     .retain(|entry| entry["role"] != owner);
-                assert!(definition["execute_acl"].as_array().unwrap().is_empty());
+                assert_eq!(definition["execute_acl"].as_array().unwrap().len(), 0);
                 definition["owner"] = "acl_owner".into();
             }
         }

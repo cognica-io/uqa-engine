@@ -282,7 +282,7 @@ fn idle_poll_reconciles_an_interrupted_notification_commit_marker() {
         &sender,
         "NOTIFY recovery_events, 'after interrupted commit'",
     );
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
     assert_eq!(listener.poll_sql_notifications().unwrap(), 1);
     assert_eq!(
         values(listener.take_sql_notifications()),

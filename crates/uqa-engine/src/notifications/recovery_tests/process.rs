@@ -170,7 +170,7 @@ fn idle_listener_recovers_an_exited_process_without_a_sender_wakeup(
         Some(&Value::Int(1))
     );
     listener.poll_sql_notifications().unwrap();
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
     if provider >= 4 {
         assert_encrypted_files(&path);
     }

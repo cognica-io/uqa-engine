@@ -24,9 +24,10 @@ fn recursive_rules_and_rule_incompatible_dml_fail_atomically() {
     assert!(recursive
         .to_string()
         .contains("infinite recursion detected in rules for relation \"recursive_items\""));
-    assert!(exec(&engine, "SELECT id FROM recursive_items")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT id FROM recursive_items").rows.len(),
+        0
+    );
 
     let conflict = engine
         .sql(
@@ -103,12 +104,15 @@ fn rule_column_dependencies_follow_rename_restrict_and_cascade() {
         &engine,
         "ALTER TABLE rule_items DROP COLUMN disposable CASCADE",
     );
-    assert!(exec(
-        &engine,
-        "SELECT oid FROM pg_rewrite WHERE rulename = 'disposable_rule'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT oid FROM pg_rewrite WHERE rulename = 'disposable_rule'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]
@@ -191,7 +195,7 @@ fn rule_catalog_enable_rename_drop_and_reopen_are_durable() {
         Some(&Value::Bool(true))
     );
     exec(&engine, "INSERT INTO rule_items VALUES (1)");
-    assert!(exec(&engine, "SELECT id FROM rule_log").rows.is_empty());
+    assert_eq!(exec(&engine, "SELECT id FROM rule_log").rows.len(), 0);
     exec(
         &engine,
         "ALTER RULE catalog_rule ON rule_items RENAME TO renamed_rule",
@@ -236,12 +240,12 @@ fn rule_catalog_enable_rename_drop_and_reopen_are_durable() {
         Some(&Value::Bool(true))
     );
     exec(&engine, "DROP RULE renamed_rule ON rule_items");
-    assert!(exec(
+    let rows = exec(
         &engine,
-        "SELECT oid FROM pg_rewrite WHERE rulename = 'renamed_rule'"
+        "SELECT oid FROM pg_rewrite WHERE rulename = 'renamed_rule'",
     )
-    .rows
-    .is_empty());
+    .rows;
+    assert_eq!(rows.len(), 0);
 }
 
 #[test]
@@ -476,9 +480,12 @@ fn rule_action_targets_follow_search_path_before_public_views() {
         exec(&engine, "SELECT id FROM rule_path_first.rule_path_target").value_at(0, 0),
         Some(&Value::Int(7))
     );
-    assert!(exec(&engine, "SELECT id FROM public.rule_path_view_base")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT id FROM public.rule_path_view_base")
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

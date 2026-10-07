@@ -424,9 +424,10 @@ fn empty_event_sets_preserve_rule_action_statement_semantics() {
         ),
         ["ran", "true"]
     );
-    assert!(exec(&engine, "SELECT id FROM empty_rule_rows")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT id FROM empty_rule_rows").rows.len(),
+        0
+    );
     assert_eq!(
         exec(&engine, "SELECT event FROM empty_rule_statements").value_at(0, 0),
         Some(&Value::Str("INSERT".into()))
@@ -616,9 +617,10 @@ fn rule_pseudo_relations_yield_to_local_sql_scopes() {
     );
     exec(&engine, "INSERT INTO shadow_rule_event VALUES (1)");
     exec(&engine, "INSERT INTO shadow_rule_event VALUES (1)");
-    assert!(exec(&engine, "SELECT id FROM shadow_rule_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT id FROM shadow_rule_log").rows.len(),
+        0
+    );
     assert_eq!(
         exec(&engine, "SELECT value FROM shadow_conflict_target").value_at(0, 0),
         Some(&Value::Int(2))
@@ -680,12 +682,14 @@ fn rule_action_query_scope_restrictions_match_postgresql() {
         .sql("INSERT INTO scoped_rule_event VALUES (1), (2)", &[])
         .expect_err("INSERT rewrite makes a set-operation action conditional");
     assert_eq!(rewritten_set_operation.sqlstate(), Some("0A000"));
-    assert!(exec(&engine, "SELECT * FROM scoped_rule_event")
-        .rows
-        .is_empty());
-    assert!(exec(&engine, "SELECT * FROM scoped_rule_target")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM scoped_rule_event").rows.len(),
+        0
+    );
+    assert_eq!(
+        exec(&engine, "SELECT * FROM scoped_rule_target").rows.len(),
+        0
+    );
 
     let cte = engine
         .sql(

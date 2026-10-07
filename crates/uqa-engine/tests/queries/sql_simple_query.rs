@@ -133,11 +133,10 @@ fn simple_query_withholds_final_completion_after_deferred_constraint_failure() {
     assert_eq!(error.sqlstate(), Some("23503"));
     assert_eq!(seen, vec![Some("INSERT 0 1".into())]);
     assert_eq!(engine.transaction_depth(), 0);
-    assert!(engine
-        .sql("SELECT * FROM child", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine.sql("SELECT * FROM child", &[]).unwrap().rows.len(),
+        0
+    );
 }
 
 #[test]
@@ -160,11 +159,14 @@ fn simple_query_consumer_failure_rolls_back_implicit_segment() {
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("57014"));
     assert_eq!(engine.transaction_depth(), 0);
-    assert!(engine
-        .sql("SELECT * FROM consumer_values", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM consumer_values", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

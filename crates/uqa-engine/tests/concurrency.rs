@@ -59,7 +59,7 @@ fn concurrent_text_match_readers_see_consistent_results() {
             _ => None,
         })
         .collect();
-    assert!(!baseline_ids.is_empty());
+    assert_ne!(baseline_ids.len(), 0);
 
     let mut handles = Vec::with_capacity(READERS);
     for _ in 0..READERS {

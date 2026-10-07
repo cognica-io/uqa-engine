@@ -80,11 +80,10 @@ fn query_and_autonomous_sequence_writes_share_cancellation_but_cleanup_and_sibli
         ));
         engine.rollback().unwrap();
         engine.reset_cancellation();
-        assert!(engine
-            .sql("SELECT * FROM items", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_eq!(
+            engine.sql("SELECT * FROM items", &[]).unwrap().rows.len(),
+            0
+        );
         assert_eq!(engine.nextval("ids").unwrap(), 1);
         sibling
             .sql("INSERT INTO items VALUES ('kept')", &[])

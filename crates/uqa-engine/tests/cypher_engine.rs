@@ -48,7 +48,7 @@ fn apache_age_style_cypher_table_function_round_trips() {
         )
         .unwrap();
     assert_eq!(created.columns, vec!["ignored".to_string()]);
-    assert!(created.rows.is_empty());
+    assert_eq!(created.rows.len(), 0);
 
     // agtype columns carry canonical AGE text: strings render
     // JSON-quoted, integers bare.

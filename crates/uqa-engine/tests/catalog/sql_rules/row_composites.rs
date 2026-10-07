@@ -334,12 +334,15 @@ fn action_target_returning_stars_are_creation_bound_and_column_dependent() {
         &engine,
         "ALTER TABLE target_star_action DROP COLUMN renamed CASCADE",
     );
-    assert!(exec(
-        &engine,
-        "SELECT oid FROM pg_rewrite WHERE rulename = 'target_star_provider'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT oid FROM pg_rewrite WHERE rulename = 'target_star_provider'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]

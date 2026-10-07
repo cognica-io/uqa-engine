@@ -90,7 +90,7 @@ fn hierarchy_inputs_retain_the_actual_registry_and_table_metadata_guards() {
         .table_removal_context()
         .hierarchy_drop_targets(&["public.parent".into()], true);
     assert_eq!(targets, ["public.child", "public.parent"]);
-    assert!(blockers.is_empty());
+    assert_eq!(blockers.len(), 0);
 }
 /// Fails the table's own removal, which follows the removal of every object that depends on it, as `deleteObjectsInList` orders them.
 struct FailedRemoval<'a> {
@@ -102,7 +102,7 @@ impl TableRemovalPublication for FailedRemoval<'_> {
     fn remove_state(&self, name: &str, _: &RelationIdentity) -> StorageBackendResult<()> {
         assert_eq!(name, "public.parent");
         for child in self.children {
-            assert!(self.engine.try_foreign_keys(child).unwrap().is_empty());
+            assert_eq!(self.engine.try_foreign_keys(child).unwrap().len(), 0);
         }
         assert!(!self
             .engine
@@ -180,7 +180,7 @@ fn failed_table_removal_rolls_back_every_object_removed_before_it() {
             .contains("injected physical table removal failure"));
         assert!(publication.reached.get());
         assert_parent_restored(&engine, children);
-        assert!(engine.take_sql_notices().is_empty());
+        assert_eq!(engine.take_sql_notices().len(), 0);
         drop(engine);
         assert_parent_restored(&Engine::open(&path).unwrap(), children);
     }

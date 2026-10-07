@@ -206,8 +206,8 @@ fn analyze_persists_stats_only_under_the_canonical_relation_name() {
 
     let conn = ManagedConnection::open(&db_path).unwrap();
     let catalog = crate::native_storage::catalog(conn).unwrap();
-    assert!(catalog.load_column_stats("t").unwrap().is_empty());
-    assert!(catalog.load_column_stats("public.t").unwrap().is_empty());
+    assert_eq!(catalog.load_column_stats("t").unwrap().len(), 0);
+    assert_eq!(catalog.load_column_stats("public.t").unwrap().len(), 0);
     let stats = catalog.load_column_stats("app.t").unwrap();
     assert_eq!(stats.len(), 2);
     assert_eq!(stats[0].row_count, 2);
@@ -331,7 +331,7 @@ fn drop_table_removes_persisted_column_stats() {
 
     let conn = ManagedConnection::open(&db_path).unwrap();
     let catalog = crate::native_storage::catalog(conn).unwrap();
-    assert!(catalog.load_column_stats("public.t").unwrap().is_empty());
+    assert_eq!(catalog.load_column_stats("public.t").unwrap().len(), 0);
 }
 
 #[test]

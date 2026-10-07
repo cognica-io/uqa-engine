@@ -97,11 +97,14 @@ fn insert_and_assert_measurement_partition_rows(engine: &Engine) {
     assert_eq!(rows.rows.len(), 2);
     assert_eq!(rows.rows[0]["id"], Value::Int(1));
     assert_eq!(rows.rows[1]["id"], Value::Int(11));
-    assert!(engine
-        .sql("SELECT * FROM ONLY measurements", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM ONLY measurements", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         engine
             .sql("SELECT id FROM measurements_low", &[])
@@ -141,11 +144,14 @@ fn assert_range_partition_mutations(engine: &Engine) {
     assert_eq!(moved.rows[0]["new_id"], Value::Int(12));
     assert_eq!(moved.rows[0]["old_doubled"], Value::Int(6));
     assert_eq!(moved.rows[0]["new_doubled"], Value::Int(10));
-    assert!(engine
-        .sql("SELECT * FROM measurements_low", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM measurements_low", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         engine
             .sql("SELECT id FROM measurements_high ORDER BY id", &[])
@@ -186,11 +192,14 @@ fn update_from_and_delete_using_measurement_partitions(engine: &Engine) {
     assert_eq!(moved_from.rows[0]["old_id"], Value::Int(12));
     assert_eq!(moved_from.rows[0]["new_id"], Value::Int(2));
     assert_eq!(moved_from.rows[0]["new_doubled"], Value::Int(12));
-    assert!(engine
-        .sql("SELECT * FROM measurements_high", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM measurements_high", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     let deleted_using = engine
         .sql(
             "DELETE FROM measurements AS m USING measurement_adjustments AS a WHERE m.id = a.new_id RETURNING old.id AS old_id",
@@ -214,11 +223,14 @@ fn assert_measurement_partition_lifecycle(engine: &Engine) {
     assert_eq!(truncate_only.sqlstate(), Some("42809"));
     exec(engine, "INSERT INTO measurements VALUES (1, 1), (11, 1)");
     exec(engine, "TRUNCATE measurements");
-    assert!(engine
-        .sql("SELECT * FROM measurements", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM measurements", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     exec(engine, "DROP TABLE measurements");
     assert!(!engine.has_table("measurements").unwrap());
     assert!(!engine.has_table("measurements_low").unwrap());
@@ -320,11 +332,14 @@ fn inherited_generated_columns_scan_children_and_survive_reopen() {
         assert_eq!(rows.rows.len(), 1);
         assert_eq!(rows.rows[0]["a"], Value::Int(7));
         assert_eq!(rows.rows[0]["b"], Value::Int(8));
-        assert!(engine
-            .sql("SELECT * FROM ONLY parent_values", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_eq!(
+            engine
+                .sql("SELECT * FROM ONLY parent_values", &[])
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
         let updated = engine
             .sql(
                 "UPDATE parent_values SET a = 8 RETURNING old.a AS old_a, new.b AS new_b",
@@ -345,11 +360,14 @@ fn inherited_generated_columns_scan_children_and_survive_reopen() {
             1
         );
         exec(&engine, "TRUNCATE parent_values");
-        assert!(engine
-            .sql("SELECT a FROM parent_values", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_eq!(
+            engine
+                .sql("SELECT a FROM parent_values", &[])
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
         exec(
             &engine,
             "INSERT INTO child_values (a, label) VALUES (8, 'child')",

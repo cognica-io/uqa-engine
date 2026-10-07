@@ -164,11 +164,13 @@ fn typed_writes_are_rejected_inside_an_aborted_transaction() {
     let error = root.add_document("accounts", 42, document).unwrap_err();
     assert_eq!(sqlstate(&error), "25P02");
     root.rollback().unwrap();
-    assert!(root
-        .sql("SELECT id FROM accounts WHERE id = 42", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        root.sql("SELECT id FROM accounts WHERE id = 42", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         root.sql("SELECT balance FROM accounts WHERE id = 1", &[])
             .unwrap()

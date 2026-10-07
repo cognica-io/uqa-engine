@@ -59,17 +59,15 @@ fn manually_paired_handles_are_checked_for_all_persistent_layouts() {
         engine
             .sql("BEGIN; INSERT INTO items VALUES (1); ROLLBACK", &[])
             .unwrap();
-        assert!(engine
-            .sql("SELECT * FROM items", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_eq!(
+            engine.sql("SELECT * FROM items", &[]).unwrap().rows.len(),
+            0
+        );
         let sibling = engine.new_session().unwrap();
-        assert!(sibling
-            .sql("SELECT * FROM items", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_eq!(
+            sibling.sql("SELECT * FROM items", &[]).unwrap().rows.len(),
+            0
+        );
     }
 }
 
@@ -96,9 +94,12 @@ fn provider_pairs_are_checked_during_initial_restore_and_shared_catalog_attachme
     });
     let store = provider.storage.store();
     expect_mismatch(Engine::from_persistent_provider(provider.clone()));
-    assert!(uqa_storage::KeyValueStore::scan_prefix(&*store, b"")
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        uqa_storage::KeyValueStore::scan_prefix(&*store, b"")
+            .unwrap()
+            .len(),
+        0
+    );
 
     provider.mismatch.store(false, Ordering::Release);
     let engine = Engine::from_persistent_provider(provider.clone()).unwrap();

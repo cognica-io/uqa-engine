@@ -90,7 +90,7 @@ fn test_fusion_result_scores() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in result.rows {
         match row.get("_score") {
             Some(Value::Float(score)) => assert!(*score > 0.0 && *score < 1.0),
@@ -116,7 +116,7 @@ fn test_positive_evidence_pool_fusion_with_default_alpha_and_filter() {
         )
         .unwrap();
 
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in result.rows {
         assert_eq!(row.get("kind"), Some(&Value::Str("chat".into())));
         match row.get("_score") {
@@ -143,7 +143,7 @@ fn test_positive_evidence_pool_fusion_inside_derived_table() {
         )
         .unwrap();
 
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in result.rows {
         match row.get("_score") {
             Some(Value::Float(score)) => assert!(*score > 0.0 && *score < 1.0),
@@ -175,7 +175,7 @@ fn test_positive_evidence_pool_fusion_inside_union_branch() {
         )
         .unwrap();
 
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     let sources: Vec<_> = result
         .rows
         .iter()
@@ -211,7 +211,7 @@ fn test_positive_evidence_pool_fusion_preserves_parameter_projection_inside_unio
         )
         .unwrap();
 
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     let sources: Vec<_> = result
         .rows
         .iter()
@@ -297,7 +297,7 @@ fn test_positive_evidence_pool_fusion_inside_join_filter() {
             &[],
         )
         .unwrap();
-    assert!(!single_table.rows.is_empty());
+    assert_ne!(single_table.rows.len(), 0);
 
     let plain_join = engine
         .sql(
@@ -326,7 +326,7 @@ fn test_positive_evidence_pool_fusion_inside_join_filter() {
             &[],
         )
         .unwrap();
-    assert!(!derived_join.rows.is_empty());
+    assert_ne!(derived_join.rows.len(), 0);
 
     let result = engine
         .sql(
@@ -343,7 +343,7 @@ fn test_positive_evidence_pool_fusion_inside_join_filter() {
         )
         .unwrap();
 
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     assert_eq!(
         result.rows[0].get("attached_message_id"),
         Some(&Value::Str("msg-1".into()))
@@ -409,7 +409,7 @@ fn test_positive_evidence_pool_with_gating_relu() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 #[test]
@@ -422,7 +422,7 @@ fn test_positive_evidence_pool_with_gating_swish() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
 }
 
 /// Resolve the calibration the engine auto-estimated for a field and

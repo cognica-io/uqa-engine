@@ -71,7 +71,7 @@ fn drop_preflight_rejects_special_targets_without_partial_role_publication() {
         );
         sql(&first, "ROLLBACK TO keep");
         error(&first, "DROP ROLE absent, CURRENT_USER", "42704");
-        assert!(first.take_sql_notices().is_empty());
+        assert_eq!(first.take_sql_notices().len(), 0);
         sql(&first, "ROLLBACK TO keep; COMMIT");
         assert_eq!(*first.durable.roles.read(), original);
         sql(&second, "SELECT rolname FROM pg_roles");

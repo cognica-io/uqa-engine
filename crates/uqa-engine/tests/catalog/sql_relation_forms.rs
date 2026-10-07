@@ -128,7 +128,7 @@ fn temporary_tables_apply_on_commit_actions_and_rollback_creation() {
         );
     }
     assert!(engine.has_table("cascade_child").unwrap());
-    assert!(engine.foreign_keys("cascade_child").unwrap().is_empty());
+    assert_eq!(engine.foreign_keys("cascade_child").unwrap().len(), 0);
 
     exec(&engine, "BEGIN");
     exec(&engine, "CREATE TEMP TABLE rolled_back (id INTEGER)");

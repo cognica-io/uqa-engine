@@ -644,7 +644,7 @@ fn fuse_log_odds_calibrated_scores_lie_in_unit_interval() {
             &[],
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         let Some(uqa_core::Value::Float(s)) = row.get("s") else {
             panic!("expected Float score, got {:?}", row.get("s"));

@@ -160,7 +160,7 @@ fn table_functions_with_ordinality_append_a_typed_aliased_column() {
         empty.column_types,
         [Some(ColumnType::Integer), Some(ColumnType::BigInteger)]
     );
-    assert!(empty.rows.is_empty());
+    assert_eq!(empty.rows.len(), 0);
 
     let error = eng
         .sql(
@@ -273,7 +273,7 @@ fn generate_series_empty_range() {
     let r = eng
         .sql("SELECT n FROM generate_series(5, 1) AS t(n)", &[])
         .unwrap();
-    assert!(r.rows.is_empty());
+    assert_eq!(r.rows.len(), 0);
 }
 
 #[test]

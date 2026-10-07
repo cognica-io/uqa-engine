@@ -97,9 +97,12 @@ pub(super) fn assert_base_triggers_replace_view_statement_triggers() {
     assert_eq!(suppressed.rows[0]["visible"], Value::Null);
     assert_eq!(suppressed.rows[0]["doubled"], Value::Null);
     exec(&engine, "RESET session_replication_role");
-    assert!(exec(&engine, "SELECT * FROM automatic_base WHERE id = 99")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM automatic_base WHERE id = 99")
+            .rows
+            .len(),
+        0
+    );
     assert_persistent_batch_can_create_check_trigger_after_routine_write();
 }
 
@@ -127,9 +130,12 @@ fn assert_check_options_after_before_triggers(engine: &Engine) {
         )
         .unwrap_err();
     assert_eq!(before_insert.sqlstate(), Some("44000"));
-    assert!(exec(engine, "SELECT * FROM automatic_base WHERE id = 11")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(engine, "SELECT * FROM automatic_base WHERE id = 11")
+            .rows
+            .len(),
+        0
+    );
     let multirow = engine
         .sql(
             "INSERT INTO automatic_local (id, value, visible)
@@ -189,9 +195,12 @@ pub(super) fn assert_local_and_cascaded_check_options() {
         )
         .unwrap_err();
     assert_eq!(rejected_insert.sqlstate(), Some("44000"));
-    assert!(exec(&engine, "SELECT * FROM automatic_base WHERE id = 10")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM automatic_base WHERE id = 10")
+            .rows
+            .len(),
+        0
+    );
 
     exec(
         &engine,
@@ -325,7 +334,8 @@ fn assert_persistent_batch_can_create_check_trigger_after_routine_write() {
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("44000"));
-    assert!(exec(&engine, "SELECT * FROM checked.base_items")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM checked.base_items").rows.len(),
+        0
+    );
 }

@@ -53,12 +53,15 @@ fn private_domain_authority_survives_refresh_savepoint_and_reopen() {
                     .rows[0]["typowner"],
                     Value::Int(owner.oid)
                 );
-                assert!(sql(
-                    &second,
-                    "SELECT typowner FROM pg_type WHERE typname = 'private_domain'"
-                )
-                .rows
-                .is_empty());
+                assert_eq!(
+                    sql(
+                        &second,
+                        "SELECT typowner FROM pg_type WHERE typname = 'private_domain'"
+                    )
+                    .rows
+                    .len(),
+                    0
+                );
                 sql(&first, finish);
                 assert_eq!(
                     sql(
@@ -163,11 +166,13 @@ fn domain_conversion_is_initial_only_and_later_failure_restores_the_legacy_catal
                     .unwrap(),
                 legacy
             );
-            assert!(raw
-                .catalog
-                .metadata_with_prefix("uqa.sql.domain")
-                .unwrap()
-                .is_empty());
+            assert_eq!(
+                raw.catalog
+                    .metadata_with_prefix("uqa.sql.domain")
+                    .unwrap()
+                    .len(),
+                0
+            );
             raw.catalog.delete_metadata("sql_triggers_json").unwrap();
             let restored = Engine::from_persistent_provider(factory).unwrap();
             assert_eq!(

@@ -302,7 +302,7 @@ fn discard_plans_preserves_prepared_definitions() {
     assert!(eng.lookup_prepared("p1").is_some());
     eng.discard(DiscardTarget::Plans).unwrap();
     assert!(eng.lookup_prepared("p1").is_some());
-    assert!(eng.sql("EXECUTE p1", &[]).unwrap().rows.is_empty());
+    assert_eq!(eng.sql("EXECUTE p1", &[]).unwrap().rows.len(), 0);
 }
 
 #[test]

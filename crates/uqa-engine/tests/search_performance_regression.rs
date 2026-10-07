@@ -297,7 +297,7 @@ fn profile_text_search_paths(engine: &Engine, query: &SQLParam) {
             .unwrap()
     });
     println!("bayesian_hits={}", text.rows.len());
-    assert!(!text.rows.is_empty());
+    assert_ne!(text.rows.len(), 0);
 
     let warm_text = profile("bayesian_sql_warm", || {
         engine
@@ -312,7 +312,7 @@ fn profile_text_search_paths(engine: &Engine, query: &SQLParam) {
             .unwrap()
     });
     println!("bayesian_warm_hits={}", warm_text.rows.len());
-    assert!(!warm_text.rows.is_empty());
+    assert_ne!(warm_text.rows.len(), 0);
 
     let api_text = profile("bayesian_api", || {
         engine
@@ -348,7 +348,7 @@ fn profile_vector_hybrid_paths(
             .unwrap()
     });
     println!("knn_hits={}", knn.rows.len());
-    assert!(!knn.rows.is_empty());
+    assert_ne!(knn.rows.len(), 0);
 
     let fused = profile("hybrid_sql", || {
         engine
@@ -365,7 +365,7 @@ fn profile_vector_hybrid_paths(
             .unwrap()
     });
     println!("fuse_hits={}", fused.rows.len());
-    assert!(!fused.rows.is_empty());
+    assert_ne!(fused.rows.len(), 0);
 
     let hybrid = profile("hybrid_api", || {
         engine
@@ -401,7 +401,7 @@ fn profile_vector_hybrid_paths(
             .unwrap()
     });
     println!("derived_fuse_hits={}", derived.rows.len());
-    assert!(!derived.rows.is_empty());
+    assert_ne!(derived.rows.len(), 0);
 }
 
 #[test]

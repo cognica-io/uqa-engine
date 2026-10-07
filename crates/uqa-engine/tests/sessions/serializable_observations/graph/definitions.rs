@@ -137,18 +137,18 @@ fn graph_definition_undo_removes_intents_and_retains_observed_dependencies_acros
             b.begin();
             if read_before_rollback {
                 assert!(!a.engine.has_graph("new").unwrap());
-                assert!(a.engine.list_path_indexes().unwrap().is_empty());
+                assert_eq!(a.engine.list_path_indexes().unwrap().len(), 0);
             }
             pivot(&a, &b);
             b.sql("SAVEPOINT undo_definitions");
             b.catalog.save_named_graph("new").unwrap();
             b.catalog.save_path_index("new::p", "[]").unwrap();
             b.sql("ROLLBACK TO SAVEPOINT undo_definitions");
-            assert!(b.catalog.load_named_graphs().unwrap().is_empty());
-            assert!(b.catalog.load_path_indexes().unwrap().is_empty());
+            assert_eq!(b.catalog.load_named_graphs().unwrap().len(), 0);
+            assert_eq!(b.catalog.load_path_indexes().unwrap().len(), 0);
             if !read_before_rollback {
                 assert!(!a.engine.has_graph("new").unwrap());
-                assert!(a.engine.list_path_indexes().unwrap().is_empty());
+                assert_eq!(a.engine.list_path_indexes().unwrap().len(), 0);
             }
             b.sql("UPDATE left_t SET v = 2 WHERE id = 1");
             finish(&a, &b, read_before_rollback);

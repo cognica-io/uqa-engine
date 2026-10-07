@@ -60,7 +60,7 @@ fn assert_noinherit_member_cannot_manage_owned_routines(engine: &Engine) {
     assert!(error
         .to_string()
         .contains("permission denied for function owner_grant_probe"));
-    assert!(engine.take_sql_notices().is_empty());
+    assert_eq!(engine.take_sql_notices().len(), 0);
     assert_eq!(
         sqlstate(engine, "DROP FUNCTION owner_drop_probe()"),
         "42501"

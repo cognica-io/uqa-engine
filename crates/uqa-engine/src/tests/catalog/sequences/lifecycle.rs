@@ -237,7 +237,7 @@ fn sequence_drop_waits_for_alterations_and_rebinds_the_requested_name() {
 fn direct_sequence_drop_uses_a_memory_transaction_and_retains_sql_diagnostics() {
     let engine = Engine::new();
     assert!(!engine.drop_sequence("missing").unwrap());
-    assert!(engine.take_sql_notices().is_empty());
+    assert_eq!(engine.take_sql_notices().len(), 0);
     sql(&engine, "CREATE SEQUENCE child");
     assert!(engine.drop_sequence("child").unwrap());
     assert!(!engine.drop_sequence("child").unwrap());

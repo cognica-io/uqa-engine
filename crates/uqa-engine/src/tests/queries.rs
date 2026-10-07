@@ -617,14 +617,17 @@ mod unified_plan_tests {
             version_before_query,
             "a read-only statement persisted an alias-scoped value index"
         );
-        assert!(observer
-            .storage
-            .backend
-            .as_ref()
-            .expect("persistent observer")
-            .btree_index_fields("items")
-            .expect("read unqualified value-index fields")
-            .is_empty());
+        assert_eq!(
+            observer
+                .storage
+                .backend
+                .as_ref()
+                .expect("persistent observer")
+                .btree_index_fields("items")
+                .expect("read unqualified value-index fields")
+                .len(),
+            0
+        );
         assert_eq!(
             observer
                 .storage

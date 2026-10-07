@@ -48,9 +48,12 @@ fn notification_policy_rejects_direct_and_cached_commands_but_not_payload_text()
                 .unwrap_err(),
         );
     }
-    assert!(exec(&engine, "SELECT * FROM pg_listening_channels()")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM pg_listening_channels()")
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         scalar(&engine, "SELECT 'LISTEN events; UNLISTEN *'"),
         Value::Str("LISTEN events; UNLISTEN *".into())
@@ -118,7 +121,7 @@ fn notification_policy_rolls_back_nested_static_dynamic_and_rethrown_commands() 
         let sql = format!("DO $$ BEGIN INSERT INTO effects VALUES (1); NOTIFY events, 'rolled back'; {body} END $$");
         rejected(&engine.sql(&sql, &[]).unwrap_err());
         assert_eq!(scalar(&engine, "SELECT count(*) FROM effects"), Value::Int(0));
-        assert!(exec(&engine, "SELECT * FROM pg_listening_channels()").rows.is_empty());
+        assert_eq!(exec(&engine, "SELECT * FROM pg_listening_channels()").rows.len(), 0);
     }
     // A deliberate SQL exception handler retains normal subtransaction semantics.
     exec(&engine, "DO $$ BEGIN BEGIN INSERT INTO effects VALUES (1); LISTEN events; EXCEPTION WHEN feature_not_supported THEN INSERT INTO effects VALUES (2); END; END $$");
@@ -174,7 +177,7 @@ fn notification_policy_keeps_publication_deduplication_and_rollback_transactiona
     exec(&listener, "LISTEN events");
     sender.require_notification_subscriptions().unwrap();
     exec(&sender, "BEGIN; NOTIFY events, 'one'; SELECT pg_notify('events', 'one'); SELECT pg_notify('events', 'two')");
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
     exec(&sender, "COMMIT");
     assert_eq!(
         values(listener.take_sql_notifications()),
@@ -194,7 +197,7 @@ fn notification_policy_keeps_publication_deduplication_and_rollback_transactiona
         Some("25P02")
     );
     exec(&sender, "ROLLBACK");
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
     rejected(
         &sender
             .sql_batch(&[
@@ -203,7 +206,7 @@ fn notification_policy_keeps_publication_deduplication_and_rollback_transactiona
             ])
             .unwrap_err(),
     );
-    assert!(listener.take_sql_notifications().is_empty());
+    assert_eq!(listener.take_sql_notifications().len(), 0);
     exec(&sender, "NOTIFY events, 'retained'");
     assert_eq!(
         values(listener.take_sql_notifications()),

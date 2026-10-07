@@ -72,9 +72,12 @@ fn insert_rule_condition_subqueries_observe_action_time_state() {
            DO ALSO INSERT INTO condition_timing_also_log VALUES (NEW.id)",
     );
     exec(&engine, "INSERT INTO condition_timing_also VALUES (1)");
-    assert!(exec(&engine, "SELECT * FROM condition_timing_also_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM condition_timing_also_log")
+            .rows
+            .len(),
+        0
+    );
 
     exec(
         &engine,
@@ -114,12 +117,18 @@ fn scalar_rule_condition_subquery_failure_is_statement_atomic() {
         .sql("INSERT INTO condition_cardinality_items VALUES (1)", &[])
         .expect_err("a scalar subquery must return at most one row");
     assert_eq!(error.sqlstate(), Some("21000"), "{error}");
-    assert!(exec(&engine, "SELECT * FROM condition_cardinality_items")
-        .rows
-        .is_empty());
-    assert!(exec(&engine, "SELECT * FROM condition_cardinality_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM condition_cardinality_items")
+            .rows
+            .len(),
+        0
+    );
+    assert_eq!(
+        exec(&engine, "SELECT * FROM condition_cardinality_log")
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -397,18 +406,24 @@ fn rule_condition_subquery_relations_use_the_rule_owner_for_privileges() {
         ),
         ["caller-function:1", "owner:1"]
     );
-    assert!(exec(
-        &engine,
-        "SELECT * FROM condition_subquery_security.caller_event",
-    )
-    .rows
-    .is_empty());
-    assert!(exec(
-        &engine,
-        "SELECT * FROM condition_subquery_security.owner_function_event",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT * FROM condition_subquery_security.caller_event",
+        )
+        .rows
+        .len(),
+        0
+    );
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT * FROM condition_subquery_security.owner_function_event",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]

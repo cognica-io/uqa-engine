@@ -52,12 +52,15 @@ fn partition_search_indexes_build_existing_and_new_children_and_drop_shared_fiel
         );
         sql(&reopened, "DROP INDEX root_text, another_text, root_vector");
         for table in ["p", "c", "d"] {
-            assert!(sql(
-                &reopened,
-                &format!("SELECT * FROM fts_index_stats('{table}')")
-            )
-            .rows
-            .is_empty());
+            assert_eq!(
+                sql(
+                    &reopened,
+                    &format!("SELECT * FROM fts_index_stats('{table}')")
+                )
+                .rows
+                .len(),
+                0
+            );
             assert!(reopened
                 .storage
                 .backend
@@ -95,7 +98,7 @@ fn partition_column_changes_preserve_then_remove_the_complete_owned_and_expressi
         );
         sql(&first, "ALTER TABLE p DROP COLUMN body");
         assert!(first.list_catalog_indexes().unwrap().is_empty());
-        assert!(first.key_constraints("c").unwrap().is_empty());
+        assert_eq!(first.key_constraints("c").unwrap().len(), 0);
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         drop((first, second));
         let reopened = Engine::from_persistent_provider(factory).unwrap();

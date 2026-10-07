@@ -117,7 +117,7 @@ fn index_rename_keeps_partition_names_local_and_preserves_search_fields() {
         assert_eq!(definition(&reopened, "local_child"), child);
         error(&reopened, "INSERT INTO p(k) VALUES(1)", "23505");
         sql(&reopened, "DROP INDEX moved_text, moved_vector");
-        assert!(reopened.fts_fields_for_table("c").unwrap().is_empty());
+        assert_eq!(reopened.fts_fields_for_table("c").unwrap().len(), 0);
     }
 }
 

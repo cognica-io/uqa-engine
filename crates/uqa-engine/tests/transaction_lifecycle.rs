@@ -254,7 +254,7 @@ fn set_local_and_set_transaction_outside_a_transaction_block_warn_and_last_one_s
         .unwrap();
     assert_eq!(shown(&eng, "search_path"), "pg_catalog");
     eng.sql("COMMIT", &[]).unwrap();
-    assert!(eng.take_sql_notices().is_empty());
+    assert_eq!(eng.take_sql_notices().len(), 0);
     assert_eq!(shown(&eng, "search_path"), search_path);
 }
 
@@ -271,7 +271,7 @@ fn side_effecting_selects_use_statement_rollback_in_memory() {
             &[],
         )
         .unwrap_err();
-    assert!(!graph_error.to_string().is_empty());
+    assert_ne!(graph_error.to_string(), "");
     assert!(!eng.has_graph("transient_graph").unwrap());
 
     // Mutating table functions live in SourcePlan rather than ScalarExpr.
@@ -310,7 +310,7 @@ fn side_effecting_selects_use_statement_rollback_in_memory() {
             &[],
         )
         .unwrap_err();
-    assert!(!nested_error.to_string().is_empty());
+    assert_ne!(nested_error.to_string(), "");
     assert!(!eng.has_graph("nested_graph").unwrap());
 
     // A registered routine can hide DML behind an ordinary Func node. The
@@ -354,7 +354,7 @@ fn side_effecting_selects_use_statement_rollback_in_memory() {
             &[],
         )
         .unwrap();
-    assert!(cypher_rows.rows.is_empty());
+    assert_eq!(cypher_rows.rows.len(), 0);
 
     // PostgreSQL's per-session RNG is nontransactional. A failed outer
     // expression leaves each draw consumed even though SQL mutations roll back.
@@ -477,7 +477,7 @@ fn explicit_memory_rollback_restores_every_sql_owned_registry() {
         .list_foreign_tables()
         .unwrap()
         .contains(&"tx_remote".into()));
-    assert!(eng.list_path_indexes().unwrap().is_empty());
+    assert_eq!(eng.list_path_indexes().unwrap().len(), 0);
     assert!(eng.load_scoring_params("tx_score").unwrap().is_none());
     assert!(eng.load_model("tx_model").unwrap().is_none());
     assert!(eng.sql("SELECT tx_function()", &[]).is_err());
@@ -628,11 +628,14 @@ fn persistent_rollback_rebinds_physical_analyzers_from_durable_registry() {
     engine
         .set_table_field_analyzer("docs", "body", "whole_value", "both")
         .unwrap();
-    assert!(engine
-        .sql("SELECT id FROM docs WHERE text_match(body, 'hello')", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM docs WHERE text_match(body, 'hello')", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     engine.rollback().unwrap();
 
     assert_eq!(engine.table_field_analyzer("docs", "body").unwrap(), None);

@@ -32,7 +32,7 @@ fn open(provider: usize, path: &Path) -> Engine {
 fn selected_reference(keep: impl Fn(&serde_json::Value) -> bool) -> String {
     let mut reference: serde_json::Value = serde_json::from_str(ORACLE).unwrap();
     reference["cases"].as_array_mut().unwrap().retain(keep);
-    assert!(!reference["cases"].as_array().unwrap().is_empty());
+    assert_ne!(reference["cases"].as_array().unwrap().len(), 0);
     reference.to_string()
 }
 

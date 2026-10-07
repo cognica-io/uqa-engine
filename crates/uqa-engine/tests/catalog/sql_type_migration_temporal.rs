@@ -368,7 +368,7 @@ fn failed_temporal_constraint_additions_are_atomic_and_leave_no_catalog_rows() {
             &[],
         )
         .unwrap();
-    assert!(absent_key.rows.is_empty());
+    assert_eq!(absent_key.rows.len(), 0);
     exec(
         &engine,
         "INSERT INTO overlap_existing VALUES (1, '[2024-01-06,2024-01-07)')",
@@ -405,7 +405,7 @@ fn failed_temporal_constraint_additions_are_atomic_and_leave_no_catalog_rows() {
             &[],
         )
         .unwrap();
-    assert!(absent_foreign_key.rows.is_empty());
+    assert_eq!(absent_foreign_key.rows.len(), 0);
     exec(
         &engine,
         "INSERT INTO uncovered_existing VALUES (2, 1, '[2024-02-01,2024-02-02)')",
@@ -458,7 +458,7 @@ fn period_foreign_keys_require_matching_range_types_and_temporal_target_keys() {
             &[],
         )
         .unwrap();
-    assert!(absent_tables.rows.is_empty());
+    assert_eq!(absent_tables.rows.len(), 0);
 }
 
 #[test]

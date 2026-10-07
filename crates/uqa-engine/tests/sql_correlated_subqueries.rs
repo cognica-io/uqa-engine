@@ -342,7 +342,7 @@ fn non_correlated_scalar_subquery_runs_once_per_statement() {
             "count_subquery_calls",
             SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
             move |args: &[Value]| {
-                assert!(args.is_empty());
+                assert_eq!(args.len(), 0);
                 Ok(Value::Int(
                     observed.fetch_add(1, Ordering::SeqCst) as i64 + 1,
                 ))
@@ -377,7 +377,7 @@ fn correlated_scalar_subquery_still_runs_for_each_outer_row() {
             "count_correlated_calls",
             SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
             move |args: &[Value]| {
-                assert!(args.is_empty());
+                assert_eq!(args.len(), 0);
                 Ok(Value::Int(
                     observed.fetch_add(1, Ordering::SeqCst) as i64 + 1,
                 ))

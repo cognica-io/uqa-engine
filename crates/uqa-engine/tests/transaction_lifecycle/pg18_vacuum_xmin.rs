@@ -394,11 +394,11 @@ fn pg18_xmin_tracks_top_level_and_savepoint_tuple_versions() {
         )
         .unwrap();
     assert_eq!(restarted.rows[0]["same"], uqa_core::Value::Bool(false));
-    assert!(eng
+    let rows = eng
         .sql("SELECT a FROM xacttest WHERE a = 10", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
 }
 
 #[test]

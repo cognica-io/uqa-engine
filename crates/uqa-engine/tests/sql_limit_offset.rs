@@ -64,7 +64,7 @@ fn plain_limit_no_order_truncates() {
 #[test]
 fn limit_zero_returns_empty() {
     let eng = engine();
-    assert!(ids(&eng, "SELECT id FROM notes LIMIT 0", &[]).is_empty());
+    assert_eq!(ids(&eng, "SELECT id FROM notes LIMIT 0", &[]).len(), 0);
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn offset_alone_skips() {
 #[test]
 fn offset_larger_than_row_count_empty() {
     let eng = engine();
-    assert!(ids(&eng, "SELECT id FROM notes OFFSET 99", &[]).is_empty());
+    assert_eq!(ids(&eng, "SELECT id FROM notes OFFSET 99", &[]).len(), 0);
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn fetch_with_ties_supports_omitted_and_parameterised_counts() {
             &[],
         )
         .unwrap();
-    assert!(zero.rows.is_empty());
+    assert_eq!(zero.rows.len(), 0);
 
     let numeric_rounding = integers(
         &eng,

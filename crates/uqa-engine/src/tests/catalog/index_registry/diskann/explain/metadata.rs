@@ -96,7 +96,7 @@ fn check(engine: &Engine) {
         &reader,
         "SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY[1.0],1)",
     );
-    assert!(nodes(&invalid).is_empty());
+    assert_eq!(nodes(&invalid).len(), 0);
     assert_eq!(reads.load(Ordering::Relaxed), 0);
 }
 

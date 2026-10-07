@@ -108,11 +108,14 @@ fn hierarchy_foreign_keys_follow_physical_rows_and_route_referential_actions() {
         &engine,
         "UPDATE hierarchy_accounts SET region = 12 WHERE region = 1 AND account_id = 7",
     );
-    assert!(engine
-        .sql("SELECT * FROM hierarchy_accounts_low", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM hierarchy_accounts_low", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     let cascaded = engine
         .sql(
             "SELECT region, account_id, marker FROM hierarchy_cascade_refs_high ORDER BY marker",
@@ -139,11 +142,14 @@ fn hierarchy_foreign_keys_follow_physical_rows_and_route_referential_actions() {
         &engine,
         "DELETE FROM hierarchy_accounts WHERE region = 11 AND account_id = 7",
     );
-    assert!(engine
-        .sql("SELECT * FROM hierarchy_cascade_refs", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM hierarchy_cascade_refs", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     let set_row = engine
         .sql(
             "SELECT region, account_id, marker FROM hierarchy_set_refs_default",

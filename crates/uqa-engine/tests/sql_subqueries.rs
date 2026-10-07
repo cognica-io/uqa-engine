@@ -91,7 +91,7 @@ fn in_subquery_no_match() {
         "SELECT name FROM employees \
          WHERE dept_id IN (SELECT id FROM departments WHERE name = 'HR')",
     );
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn exists_false() {
         "SELECT name FROM employees \
          WHERE EXISTS (SELECT 1 FROM departments WHERE name = 'HR')",
     );
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn not_exists_with_results() {
         &engine,
         "SELECT name FROM employees WHERE NOT EXISTS (SELECT 1 FROM departments)",
     );
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
 }
 
 #[test]

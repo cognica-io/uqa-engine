@@ -307,7 +307,7 @@ fn persistent_listener_survives_caller_and_scans_every_bounded_prefix(
         "first",
         sender.backend_process_id(),
     );
-    assert!(engine.take_sql_notifications().is_empty());
+    assert_eq!(engine.take_sql_notifications().len(), 0);
     drop(engine);
     take(
         &subscription,

@@ -223,7 +223,7 @@ fn row_lock_recheck_keeps_the_original_unmarked_join_partner() {
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn update_from_recheck_keeps_the_original_source_tuple() {
         .unwrap();
     waiting_thread.join().unwrap();
     assert_eq!(result.affected_rows, 0);
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
     let final_row = root
         .sql(
             "SELECT match_key, value FROM epq_update_target WHERE id = 1",
@@ -348,7 +348,7 @@ fn delete_using_recheck_keeps_the_original_source_tuple() {
         .unwrap();
     waiting_thread.join().unwrap();
     assert_eq!(result.affected_rows, 0);
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
     let final_row = root
         .sql("SELECT match_key FROM epq_delete_target WHERE id = 1", &[])
         .unwrap();

@@ -52,7 +52,7 @@ fn raise_notice_formatting_and_sink() {
             uqa_engine::SQLNotice::warning("v=<NULL>"),
         ]
     );
-    assert!(eng.take_sql_notices().is_empty());
+    assert_eq!(eng.take_sql_notices().len(), 0);
     // PG18: too few parameters specified for RAISE.
     let err = exec_err(&eng, "DO $$ BEGIN RAISE NOTICE 'v=%'; END $$");
     assert!(

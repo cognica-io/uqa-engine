@@ -89,7 +89,7 @@ fn file_notification_publication_retains_its_original_read_only_commit_attempt()
             }
             assert!(root.pending_commit().is_none());
             listener.poll_sql_notifications().unwrap();
-            assert!(listener.take_sql_notifications().is_empty());
+            assert_eq!(listener.take_sql_notifications().len(), 0);
             assert_eq!(calls.load(Ordering::Acquire), 1);
         }
     }
@@ -112,7 +112,7 @@ fn unresolved_uncommitted_notifications_allow_consumers_to_finish_transactions()
             let identity = root.pending_commit().unwrap();
             listener.sql("BEGIN; SELECT 1; COMMIT", &[]).unwrap();
             listener.poll_sql_notifications().unwrap();
-            assert!(listener.take_sql_notifications().is_empty());
+            assert_eq!(listener.take_sql_notifications().len(), 0);
             assert_unknown(&root.commit().unwrap_err());
             assert_eq!(root.pending_commit(), Some(identity));
             listener.sql("BEGIN; ROLLBACK", &[]).unwrap();
@@ -127,7 +127,7 @@ fn unresolved_uncommitted_notifications_allow_consumers_to_finish_transactions()
             listener.poll_sql_notifications().unwrap();
             let delivered = listener.take_sql_notifications();
             if resolve_with_rollback {
-                assert!(delivered.is_empty());
+                assert_eq!(delivered.len(), 0);
             } else {
                 assert_eq!(delivered.len(), 1);
                 assert_eq!(delivered[0].payload, "reserved");

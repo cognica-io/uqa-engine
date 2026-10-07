@@ -234,7 +234,7 @@ fn identity_reservation_rechecks_commits_after_the_statement_snapshot() {
                 session
                     .sql(&format!("BEGIN ISOLATION LEVEL {isolation}"), &[])
                     .unwrap();
-                assert!(read_rows(&session).is_empty());
+                assert_eq!(read_rows(&session).len(), 0);
             }
             let writer = thread::spawn(move || {
                 let result = session.sql("INSERT INTO items VALUES ('second', before_identity()) RETURNING key, _doc_id AS doc_id", &[]).unwrap();
@@ -287,7 +287,7 @@ fn failed_and_rolled_back_inserts_preserve_rows_and_durable_identity_progress() 
             )
             .unwrap_err();
         assert!(error.to_string().contains("injected RETURNING failure"));
-        assert!(read_rows(&root).is_empty());
+        assert_eq!(read_rows(&root).len(), 0);
         let rolled_back = session.sql("BEGIN; SAVEPOINT before_insert; INSERT INTO items VALUES ('rolled_back') RETURNING _doc_id AS doc_id", &[]).unwrap();
         let retained_id = if backend == "serialized" { 1 } else { 2 };
         assert_eq!(rolled_back.rows[0]["doc_id"], Value::Int(retained_id));

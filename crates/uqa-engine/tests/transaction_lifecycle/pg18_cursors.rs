@@ -183,11 +183,14 @@ fn pg18_cursor_evaluates_offset_target_rows_and_stops_at_limit() {
         ),
         [3]
     );
-    assert!(engine
-        .sql("FETCH ALL FROM offset_cursor", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("FETCH ALL FROM offset_cursor", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         integer_column(
             &engine
@@ -328,11 +331,14 @@ fn pg18_cursor_keeps_declare_time_relation_bindings_and_forwards_notices() {
     engine
         .sql("ALTER TABLE cursor_child INHERIT cursor_parent", &[])
         .unwrap();
-    assert!(engine
-        .sql("FETCH ALL FROM hierarchy_cursor", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("FETCH ALL FROM hierarchy_cursor", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 
     engine
         .sql(
@@ -513,11 +519,14 @@ fn pg18_sql_cursor_with_hold_rules_match_postgresql() {
         .unwrap();
     let error = engine.sql("COMMIT", &[]).unwrap_err();
     assert_eq!(error.sqlstate(), Some("23503"), "{error}");
-    assert!(engine
-        .sql("SELECT id FROM held_child", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM held_child", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -919,11 +928,14 @@ fn cursor_snapshot_value_indexes_exclude_post_declare_changes() {
         engine
             .sql(&format!("INSERT INTO {table} VALUES (2, 20)"), &[])
             .unwrap();
-        assert!(engine
-            .sql("FETCH ALL FROM absent_index_cursor", &[])
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_eq!(
+            engine
+                .sql("FETCH ALL FROM absent_index_cursor", &[])
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
         engine.sql("ROLLBACK", &[]).unwrap();
     }
 

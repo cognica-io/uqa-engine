@@ -299,7 +299,7 @@ fn returning_preserves_declared_types_for_rows_and_empty_results() {
             &[],
         )
         .unwrap();
-    assert!(updated.rows.is_empty());
+    assert_eq!(updated.rows.len(), 0);
     assert_eq!(
         updated.column_types,
         [Some(ColumnType::Varchar(Some(7))), Some(ColumnType::Real),]
@@ -312,7 +312,7 @@ fn returning_preserves_declared_types_for_rows_and_empty_results() {
             &[],
         )
         .unwrap();
-    assert!(deleted.rows.is_empty());
+    assert_eq!(deleted.rows.len(), 0);
     assert_eq!(
         deleted.column_types,
         [Some(ColumnType::SmallInteger), Some(ColumnType::Boolean),]

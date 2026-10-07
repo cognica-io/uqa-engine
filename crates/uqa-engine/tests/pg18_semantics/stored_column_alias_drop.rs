@@ -282,11 +282,11 @@ fn stored_column_alias_drop_migrates_regclass_constants_before_sequence_rename()
             .find(|table| table.relation.name == "alias_migration_source")
             .unwrap();
         let mut columns: Vec<ColumnDef> = serde_json::from_str(&table.columns_json).unwrap();
-        columns[0].generated.as_mut().unwrap().expression = Box::new(Expr::Cast {
+        *columns[0].generated.as_mut().unwrap().expression = Expr::Cast {
             implicit: false,
             expr: Box::new(Expr::Literal(Value::Str("alias_migration_sequence".into()))),
             ty: "regclass".into(),
-        });
+        };
         table.columns_json = serde_json::to_string(&columns).unwrap();
         catalog.save_table(table).unwrap();
     }

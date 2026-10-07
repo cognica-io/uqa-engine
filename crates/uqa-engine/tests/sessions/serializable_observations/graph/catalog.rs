@@ -113,7 +113,7 @@ fn empty_sql_graph_catalogs_observe_concurrent_creation_across_the_three_provide
             pivot(&a, &b);
             b.engine.create_graph("new").unwrap();
             finish(&a, &b, true);
-            assert!(b.engine.list_graphs().unwrap().is_empty());
+            assert_eq!(b.engine.list_graphs().unwrap().len(), 0);
         }
     }
 }

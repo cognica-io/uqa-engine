@@ -58,11 +58,14 @@ fn parent_update_moves_a_physical_row_and_returning_uses_both_row_images() {
     assert_eq!(returned.rows[0]["new_bucket"], Value::Int(12));
     assert_eq!(returned.rows[0]["old_value"], Value::Str("low".into()));
     assert_eq!(returned.rows[0]["new_value"], Value::Str("moved".into()));
-    assert!(engine
-        .sql("SELECT * FROM movement_targets_low", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM movement_targets_low", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     assert_eq!(
         engine
             .sql(
@@ -246,12 +249,15 @@ fn partition_move_before_delete_and_insert_cancellation_matches_postgresql() {
         )
         .unwrap();
     assert_eq!(insert_cancelled.affected_rows, 0);
-    assert!(insert_cancelled.rows.is_empty());
-    assert!(engine
-        .sql("SELECT * FROM movement_targets", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(insert_cancelled.rows.len(), 0);
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM movement_targets", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     let insert_cancel_messages = engine
         .sql("SELECT message FROM movement_cancel_log ORDER BY seq", &[])
         .unwrap()
@@ -310,12 +316,15 @@ fn cancelled_partition_move_insert_does_not_run_delete_referential_actions() {
         )
         .unwrap();
     assert_eq!(result.affected_rows, 0);
-    assert!(result.rows.is_empty());
-    assert!(engine
-        .sql("SELECT * FROM movement_cancel_parent", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(result.rows.len(), 0);
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM movement_cancel_parent", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     let child = engine
         .sql("SELECT id, bucket FROM movement_cancel_child", &[])
         .unwrap();
@@ -395,11 +404,14 @@ fn merge_partition_movement_uses_physical_triggers_and_empty_update_transitions(
         )
         .unwrap();
     assert_eq!(cancelled.affected_rows, 0);
-    assert!(engine
-        .sql("SELECT * FROM movement_targets WHERE item_key = 2", &[],)
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM movement_targets WHERE item_key = 2", &[],)
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     let cancelled_messages = engine
         .sql("SELECT message FROM movement_merge_log ORDER BY seq", &[])
         .unwrap()
@@ -469,11 +481,14 @@ fn partition_move_destination_trigger_can_modify_values_but_not_the_selected_par
     assert_eq!(unchanged.rows.len(), 1);
     assert_eq!(unchanged.rows[0]["bucket"], Value::Int(2));
     assert_eq!(unchanged.rows[0]["value"], Value::Str("reroute".into()));
-    assert!(engine
-        .sql("SELECT * FROM movement_targets_other", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM movement_targets_other", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -502,11 +517,14 @@ fn direct_leaf_update_rejects_sibling_movement_atomically() {
     assert_eq!(rows.rows[0]["value"], Value::Str("first".into()));
     assert_eq!(rows.rows[1]["bucket"], Value::Int(2));
     assert_eq!(rows.rows[1]["value"], Value::Str("second".into()));
-    assert!(engine
-        .sql("SELECT * FROM movement_targets_high", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM movement_targets_high", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -552,11 +570,14 @@ fn update_from_spill_distinguishes_equal_leaf_doc_ids_and_is_atomic() {
     assert_eq!(high["new_value"], Value::Str("high-moved".into()));
     assert_eq!(low["old_doc_id"], high["old_doc_id"]);
     assert_ne!(high["old_doc_id"], high["new_doc_id"]);
-    assert!(engine
-        .sql("SELECT * FROM movement_targets_high", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM movement_targets_high", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 
     exec(&engine, "TRUNCATE movement_source");
     exec(
@@ -631,11 +652,11 @@ fn nested_partition_updates_route_within_the_target_subtree_only() {
         within_subtree.rows[0]["new_value"],
         Value::Str("middle".into())
     );
-    assert!(engine
+    let rows = engine
         .sql("SELECT * FROM nested_targets_local_low", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
     assert_eq!(
         engine
             .sql("SELECT bucket FROM nested_targets_local_high", &[])
@@ -668,11 +689,11 @@ fn nested_partition_updates_route_within_the_target_subtree_only() {
         through_root.rows[0]["new_value"],
         Value::Str("remote".into())
     );
-    assert!(engine
+    let rows = engine
         .sql("SELECT * FROM nested_targets_local", &[])
         .unwrap()
-        .rows
-        .is_empty());
+        .rows;
+    assert_eq!(rows.len(), 0);
     let remote = engine
         .sql(
             "SELECT id, region, bucket, value FROM nested_targets_remote",
@@ -726,11 +747,13 @@ fn waiting_parent_update_follows_a_row_moved_to_another_partition() {
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0]["bucket"], Value::Int(12));
     assert_eq!(result.rows[0]["value"], Value::Str("waiter".into()));
-    assert!(root
-        .sql("SELECT * FROM movement_targets_low", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        root.sql("SELECT * FROM movement_targets_low", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
     let high = root
         .sql("SELECT bucket, value FROM movement_targets_high", &[])
         .unwrap();
@@ -840,11 +863,13 @@ fn waiting_parent_delete_follows_a_row_moved_to_another_partition() {
     waiting_thread.join().unwrap();
     assert_eq!(result.affected_rows, 1);
     assert_eq!(result.rows[0]["bucket"], Value::Int(12));
-    assert!(root
-        .sql("SELECT * FROM movement_targets", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        root.sql("SELECT * FROM movement_targets", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

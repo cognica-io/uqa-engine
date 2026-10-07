@@ -34,7 +34,7 @@ fn rpq_kleene_star_returns_all_reachable() {
     let r = eng
         .sql("SELECT * FROM rpq('manages*', 1, 'g')", &[])
         .unwrap();
-    assert!(!r.rows.is_empty());
+    assert_ne!(r.rows.len(), 0);
     // The Kleene star matches the empty path too, so the start vertex
     // is included alongside every descendant.
     let count = r.rows.len();

@@ -89,15 +89,15 @@ fn kuromoji_bindings_refresh_sibling_sessions_after_commit_and_rollback() {
             .unwrap();
         execute(&engine, "INSERT INTO docs VALUES (1, '東京大学')");
         let observer = engine.new_session().unwrap();
-        assert!(hits(&observer, "docs", "body", "東京").is_empty());
+        assert_eq!(hits(&observer, "docs", "body", "東京").len(), 0);
         engine.begin().unwrap();
         engine
             .set_table_field_analyzer("docs", "body", "kuromoji", "both")
             .unwrap();
         assert_eq!(hits(&engine, "docs", "body", "東京"), [1]);
-        assert!(hits(&observer, "docs", "body", "東京").is_empty());
+        assert_eq!(hits(&observer, "docs", "body", "東京").len(), 0);
         engine.rollback().unwrap();
-        assert!(hits(&engine, "docs", "body", "東京").is_empty());
+        assert_eq!(hits(&engine, "docs", "body", "東京").len(), 0);
         engine
             .set_table_field_analyzer("docs", "body", "kuromoji", "both")
             .unwrap();
@@ -109,13 +109,13 @@ fn kuromoji_bindings_refresh_sibling_sessions_after_commit_and_rollback() {
         engine
             .set_table_field_analyzer("docs", "body", "keyword", "search")
             .unwrap();
-        assert!(hits(&engine, "docs", "body", "東京大学").is_empty());
+        assert_eq!(hits(&engine, "docs", "body", "東京大学").len(), 0);
         engine.rollback().unwrap();
         assert_eq!(hits(&observer, "docs", "body", "東京大学"), [1]);
         engine
             .set_table_field_analyzer("docs", "body", "keyword", "search")
             .unwrap();
-        assert!(hits(&observer, "docs", "body", "東京大学").is_empty());
+        assert_eq!(hits(&observer, "docs", "body", "東京大学").len(), 0);
         assert_eq!(
             observer
                 .get_table_analyzer("docs", "body", "index")

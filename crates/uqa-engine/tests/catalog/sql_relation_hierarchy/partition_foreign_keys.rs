@@ -118,7 +118,7 @@ fn adding_a_foreign_key_copies_it_to_the_existing_partitions() {
         "insert or update on table \"fk1\" violates foreign key constraint \"fk_a_fkey\"",
     );
     exec(&engine, "ALTER TABLE fk DROP CONSTRAINT fk_a_fkey");
-    assert!(foreign_keys(&engine).is_empty());
+    assert_eq!(foreign_keys(&engine).len(), 0);
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn adding_and_validating_a_foreign_key_read_the_rows_of_every_leaf_partition() {
         "ALTER TABLE fk ADD CONSTRAINT fk_a_fkey FOREIGN KEY (a) REFERENCES pk",
         "insert or update on table \"fk21\" violates foreign key constraint \"fk_a_fkey_1\"",
     );
-    assert!(foreign_keys(&engine).is_empty());
+    assert_eq!(foreign_keys(&engine).len(), 0);
     exec(
         &engine,
         "ALTER TABLE fk ADD CONSTRAINT fk_a_fkey FOREIGN KEY (a) REFERENCES pk NOT VALID",
@@ -192,7 +192,7 @@ fn adding_a_foreign_key_attaches_the_equivalent_foreign_keys_of_partitions() {
     }
     exec(&engine, "ALTER TABLE fk2 DROP CONSTRAINT fk2_deferrable");
     exec(&engine, "ALTER TABLE fk DROP CONSTRAINT fk_a_fkey");
-    assert!(foreign_keys(&engine).is_empty());
+    assert_eq!(foreign_keys(&engine).len(), 0);
 }
 
 #[test]

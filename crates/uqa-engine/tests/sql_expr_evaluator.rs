@@ -110,7 +110,7 @@ fn is_null_combines_with_and() {
 fn is_null_on_non_null_column_yields_zero() {
     let eng = engine();
     let r = rows(&eng, "SELECT id FROM products WHERE name IS NULL");
-    assert!(r.is_empty());
+    assert_eq!(r.len(), 0);
 }
 
 #[test]
@@ -610,7 +610,7 @@ fn where_expression_no_match() {
         &eng,
         "SELECT name FROM products WHERE price * quantity > 99999",
     );
-    assert!(r.is_empty());
+    assert_eq!(r.len(), 0);
 }
 
 // =====================================================================

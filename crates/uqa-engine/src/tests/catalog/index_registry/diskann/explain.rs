@@ -155,9 +155,9 @@ fn diskann_explain_respects_cte_shadowing_and_reachable_relational_children() {
     let engine = Engine::new();
     fixture(&engine);
     let shadow = explain(&engine, "WITH diskann_docs AS (SELECT 1 AS id, ARRAY[1.0,0.0] AS embedding) SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY[1.0,0.0],1)");
-    assert!(nodes(&shadow).is_empty());
+    assert_eq!(nodes(&shadow).len(), 0);
     let unused = explain(&engine, "WITH unused AS (SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY[1.0,0.0],1)) SELECT 1");
-    assert!(nodes(&unused).is_empty());
+    assert_eq!(nodes(&unused).len(), 0);
     let derived = explain(&engine, "WITH picked AS (SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY[1.0,0.0],1)) SELECT id FROM picked UNION ALL SELECT id FROM (SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY[0.0,0.0],1)) q");
     assert_eq!(
         nodes(&derived)

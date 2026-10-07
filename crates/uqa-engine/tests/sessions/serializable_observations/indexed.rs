@@ -53,14 +53,18 @@ fn indexed_sql_empty_ranges_conflict_only_with_matching_future_keys() {
                 if cached {
                     warm(&a, &b);
                 }
-                assert!(a
-                    .sql("SELECT v FROM left_t WHERE v BETWEEN 90 AND 110")
-                    .rows
-                    .is_empty());
-                assert!(b
-                    .sql("SELECT v FROM right_t WHERE v BETWEEN 90 AND 110")
-                    .rows
-                    .is_empty());
+                assert_eq!(
+                    a.sql("SELECT v FROM left_t WHERE v BETWEEN 90 AND 110")
+                        .rows
+                        .len(),
+                    0
+                );
+                assert_eq!(
+                    b.sql("SELECT v FROM right_t WHERE v BETWEEN 90 AND 110")
+                        .rows
+                        .len(),
+                    0
+                );
                 a.sql(&format!("INSERT INTO right_t VALUES (2, {value})"));
                 b.sql(&format!("INSERT INTO left_t VALUES (2, {value})"));
                 if value == 99 {

@@ -408,7 +408,7 @@ fn temporal_cross_type_foreign_keys_preserve_values_and_referential_actions() {
     let rolled_back = engine
         .sql("SELECT id FROM deferred_timestamp_child WHERE id = 4", &[])
         .unwrap();
-    assert!(rolled_back.rows.is_empty());
+    assert_eq!(rolled_back.rows.len(), 0);
 }
 
 #[test]
@@ -467,11 +467,14 @@ fn initially_deferred_foreign_key_checks_final_commit_state_and_savepoints() {
     assert!(nested_error
         .to_string()
         .contains("violates foreign key constraint \"child_parent_fk\""));
-    assert!(engine
-        .sql("SELECT id FROM child WHERE id = 7", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM child WHERE id = 7", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 
     engine
         .transaction(|outer| {
@@ -695,11 +698,14 @@ fn set_constraints_all_object_lifecycle_and_nested_execution_match_postgresql() 
         "23503",
         "violates foreign key constraint \"child_parent_fk\"",
     );
-    assert!(engine
-        .sql("SELECT id FROM child WHERE id = 5", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM child WHERE id = 5", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -748,11 +754,14 @@ fn deferred_events_retain_their_constraint_identity_and_block_deferrability_chan
         "pending trigger events",
     );
     exec(&engine, "ROLLBACK");
-    assert!(engine
-        .sql("SELECT id FROM child WHERE id = 2", &[])
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM child WHERE id = 2", &[])
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 
     exec(&engine, "BEGIN");
     exec(&engine, "SET CONSTRAINTS child_a_fk DEFERRED");

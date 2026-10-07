@@ -82,7 +82,7 @@ fn offset_past_end() {
         &engine,
         "SELECT id FROM items ORDER BY id LIMIT 5 OFFSET 100",
     );
-    assert!(r.rows.is_empty());
+    assert_eq!(r.rows.len(), 0);
 }
 
 #[test]
@@ -179,14 +179,14 @@ fn like_exact_match() {
 fn like_no_match() {
     let engine = engine();
     let r = exec(&engine, "SELECT name FROM items WHERE name LIKE 'Xyz%'");
-    assert!(r.rows.is_empty());
+    assert_eq!(r.rows.len(), 0);
 }
 
 #[test]
 fn like_case_sensitive() {
     let engine = engine();
     let r = exec(&engine, "SELECT name FROM items WHERE name LIKE 'apple'");
-    assert!(r.rows.is_empty());
+    assert_eq!(r.rows.len(), 0);
 }
 
 #[test]

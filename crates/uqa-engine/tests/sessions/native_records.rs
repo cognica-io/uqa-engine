@@ -129,7 +129,7 @@ fn assert_notifications(engine: &Engine, observer: &Engine, path: &Path, mode: M
     engine
         .sql(&format!("NOTIFY {CHANNEL}, '{PAYLOAD}'"), &[])
         .unwrap();
-    assert!(observer.take_sql_notifications().is_empty());
+    assert_eq!(observer.take_sql_notifications().len(), 0);
     if matches!(mode, Mode::Encrypted | Mode::CompressedEncrypted) {
         let mut registry = path.as_os_str().to_owned();
         registry.push(".uqa-notification-state");
@@ -165,7 +165,7 @@ fn assert_notifications(engine: &Engine, observer: &Engine, path: &Path, mode: M
             &[],
         )
         .unwrap();
-    assert!(observer.take_sql_notifications().is_empty());
+    assert_eq!(observer.take_sql_notifications().len(), 0);
 }
 
 fn restore_legacy_and_reopen_native(mode: Mode) {

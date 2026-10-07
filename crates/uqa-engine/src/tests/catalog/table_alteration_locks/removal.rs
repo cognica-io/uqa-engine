@@ -14,7 +14,7 @@ fn constraints(engine: &Engine, table: &str) -> Vec<(String, bool, i64)> {
             let Value::Str(name) = &row["conname"] else { panic!("constraint name") };
             let Value::Bool(local) = row["conislocal"] else { panic!("constraint origin") };
             let Value::Int(parents) = row["coninhcount"] else { panic!("constraint parents") };
-            (name.to_string(), local, parents)
+            (name.clone(), local, parents)
         }).collect()
 }
 
@@ -71,7 +71,7 @@ fn only_constraint_removal_makes_direct_children_local_without_locking_grandchil
             let (_directory, first, second) = sessions(provider);
             sql(&first, &format!("ALTER TABLE t ADD CONSTRAINT required {declaration}; CREATE TABLE child() INHERITS(t); CREATE TABLE grandchild() INHERITS(child)"));
             sql(&first, "BEGIN; ALTER TABLE ONLY t DROP CONSTRAINT required");
-            assert!(constraints(&first, "t").is_empty());
+            assert_eq!(constraints(&first, "t").len(), 0);
             assert_eq!(constraints(&first, "child"), [("required".into(), true, 0)]);
             assert_eq!(
                 constraints(&first, "grandchild"),
@@ -121,8 +121,8 @@ fn recursive_constraint_removal_preserves_child_identity_across_rename_and_name_
                 "COMMIT",
             );
             result.unwrap();
-            assert!(constraints(&second, "t").is_empty());
-            assert!(constraints(&second, "original").is_empty());
+            assert_eq!(constraints(&second, "t").len(), 0);
+            assert_eq!(constraints(&second, "original").len(), 0);
             assert_eq!(constraints(&second, "child").len(), 1);
             peer_lock(&first, "original", "ACCESS SHARE", false);
             peer_lock(&first, "child", "ACCESS EXCLUSIVE", true);
@@ -139,7 +139,7 @@ fn noninherited_constraint_removal_leaves_children_unlocked() {
             sql(&first, &format!("ALTER TABLE t ADD CONSTRAINT required {declaration} NO INHERIT; CREATE TABLE child() INHERITS(t)"));
             sql(&first, "BEGIN; ALTER TABLE t DROP CONSTRAINT required");
             peer_lock(&second, "child", "ACCESS EXCLUSIVE", true);
-            assert!(constraints(&first, "t").is_empty());
+            assert_eq!(constraints(&first, "t").len(), 0);
             sql(&first, "ROLLBACK");
         }
     }
@@ -203,6 +203,6 @@ fn not_null_removal_preserves_identity_protection_and_serial_columns() {
             &first,
             "ALTER TABLE serials DROP CONSTRAINT required; INSERT INTO serials VALUES(NULL)",
         );
-        assert!(constraints(&first, "serials").is_empty());
+        assert_eq!(constraints(&first, "serials").len(), 0);
     }
 }

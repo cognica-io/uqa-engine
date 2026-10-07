@@ -258,7 +258,7 @@ fn verify_renamed_dependencies_after_reopen(database: &std::path::Path) {
     reopened.sql("DROP TABLE parent_new CASCADE", &[]).unwrap();
     assert!(!reopened.has_table("parent_new").unwrap());
     assert!(reopened.has_table("child").unwrap());
-    assert!(reopened.foreign_keys("child").unwrap().is_empty());
+    assert_eq!(reopened.foreign_keys("child").unwrap().len(), 0);
     reopened.rollback().unwrap();
     assert!(reopened.has_table("parent_new").unwrap());
     let restored_foreign_key = reopened.foreign_keys("child").unwrap().remove(0);
@@ -267,13 +267,13 @@ fn verify_renamed_dependencies_after_reopen(database: &std::path::Path) {
 
     reopened.sql("DROP TABLE parent_new CASCADE", &[]).unwrap();
     assert!(reopened.has_table("child").unwrap());
-    assert!(reopened.foreign_keys("child").unwrap().is_empty());
+    assert_eq!(reopened.foreign_keys("child").unwrap().len(), 0);
     drop(reopened);
 
     let reopened = Engine::open(database).unwrap();
     assert!(!reopened.has_table("parent_new").unwrap());
     assert!(reopened.has_table("child").unwrap());
-    assert!(reopened.foreign_keys("child").unwrap().is_empty());
+    assert_eq!(reopened.foreign_keys("child").unwrap().len(), 0);
 }
 
 #[test]

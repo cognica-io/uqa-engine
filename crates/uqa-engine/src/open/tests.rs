@@ -418,7 +418,7 @@ fn pinned_and_rollback_reload_do_not_consume_late_legacy_sequences() {
             .as_deref(),
         Some(legacy)
     );
-    assert!(catalog.load_sequence_rows().unwrap().is_empty());
+    assert_eq!(catalog.load_sequence_rows().unwrap().len(), 0);
 }
 
 #[test]
@@ -443,7 +443,7 @@ fn new_session_does_not_repeat_open_time_catalog_migrations() {
             .as_deref(),
         Some(legacy)
     );
-    assert!(catalog.load_sequence_rows().unwrap().is_empty());
+    assert_eq!(catalog.load_sequence_rows().unwrap().len(), 0);
 }
 
 #[test]

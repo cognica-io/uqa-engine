@@ -109,7 +109,7 @@ fn analyzer_used_in_text_search() {
             &[],
         )
         .unwrap();
-    assert!(!r.rows.is_empty());
+    assert_ne!(r.rows.len(), 0);
 }
 
 #[test]
@@ -204,11 +204,14 @@ fn installed_analyzer_revision_survives_file_removal_during_update_and_search() 
             .len(),
         1
     );
-    assert!(engine
-        .sql("SELECT id FROM docs WHERE text_match(body, 'new')", &[],)
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM docs WHERE text_match(body, 'new')", &[],)
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -257,14 +260,17 @@ fn posting_failure_rolls_back_a_persistent_copy_batch() {
                 .rows[0]["n"],
             uqa_core::Value::Int(0)
         );
-        assert!(engine
-            .sql(
-                "SELECT id FROM batch_docs WHERE text_match(body, 'first')",
-                &[]
-            )
-            .unwrap()
-            .rows
-            .is_empty());
+        assert_eq!(
+            engine
+                .sql(
+                    "SELECT id FROM batch_docs WHERE text_match(body, 'first')",
+                    &[]
+                )
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
     }
     let reopened = Engine::open(&database).unwrap();
     assert_eq!(
@@ -274,14 +280,17 @@ fn posting_failure_rolls_back_a_persistent_copy_batch() {
             .rows[0]["n"],
         uqa_core::Value::Int(0)
     );
-    assert!(reopened
-        .sql(
-            "SELECT id FROM batch_docs WHERE text_match(body, 'first')",
-            &[]
-        )
-        .unwrap()
-        .rows
-        .is_empty());
+    assert_eq!(
+        reopened
+            .sql(
+                "SELECT id FROM batch_docs WHERE text_match(body, 'first')",
+                &[]
+            )
+            .unwrap()
+            .rows
+            .len(),
+        0
+    );
 }
 
 #[test]

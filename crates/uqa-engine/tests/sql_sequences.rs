@@ -60,7 +60,7 @@ fn default_sequence_reference(engine: &Engine, table: &str, column: &str) -> Str
     else {
         panic!("expected literal sequence reference, got {args:?}");
     };
-    reference.to_string()
+    reference.clone()
 }
 
 #[test]

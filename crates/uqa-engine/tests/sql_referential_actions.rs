@@ -249,7 +249,7 @@ fn self_referential_on_delete_cascade_removes_descendants() {
 
     exec(&engine, "DELETE FROM node WHERE id = 1");
 
-    assert!(query(&engine, "SELECT id FROM node").rows.is_empty());
+    assert_eq!(query(&engine, "SELECT id FROM node").rows.len(), 0);
 }
 
 #[test]
@@ -337,7 +337,7 @@ fn insert_select_rejects_missing_foreign_key_and_rolls_back() {
         "23503",
     );
 
-    assert!(query(&engine, "SELECT id FROM child").rows.is_empty());
+    assert_eq!(query(&engine, "SELECT id FROM child").rows.len(), 0);
 }
 
 #[test]
@@ -415,7 +415,7 @@ fn merge_delete_runs_on_delete_cascade() {
          WHEN MATCHED THEN DELETE",
     );
 
-    assert!(query(&engine, "SELECT id FROM child").rows.is_empty());
+    assert_eq!(query(&engine, "SELECT id FROM child").rows.len(), 0);
 }
 
 #[test]
@@ -446,7 +446,7 @@ fn merge_insert_rejects_missing_foreign_key_and_rolls_back() {
         "23503",
     );
 
-    assert!(query(&engine, "SELECT id FROM child").rows.is_empty());
+    assert_eq!(query(&engine, "SELECT id FROM child").rows.len(), 0);
 }
 
 #[path = "sql_referential_actions/cascade_order.rs"]

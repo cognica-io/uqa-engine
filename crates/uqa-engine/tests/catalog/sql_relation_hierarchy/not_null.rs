@@ -38,7 +38,7 @@ fn only_not_null_preserves_no_inherit_identity_through_rollback_and_reopen() {
             Value::Bool(true)
         );
         exec(&engine, "ROLLBACK TO before_constraint");
-        assert!(constraint(&engine, "nn_parent").is_empty());
+        assert_eq!(constraint(&engine, "nn_parent").len(), 0);
         exec(
             &engine,
             "ALTER TABLE ONLY nn_parent ALTER COLUMN a SET NOT NULL",
@@ -57,7 +57,7 @@ fn only_not_null_preserves_no_inherit_identity_through_rollback_and_reopen() {
     error(&engine, "ALTER TABLE nn_parent ALTER COLUMN a SET NOT NULL", "0A000",
         "cannot change NO INHERIT status of NOT NULL constraint \"nn_parent_a_not_null\" on relation \"nn_parent\"");
     assert_eq!(constraint(&engine, "nn_parent"), saved);
-    assert!(constraint(&engine, "nn_child").is_empty());
+    assert_eq!(constraint(&engine, "nn_child").len(), 0);
     exec(
         &engine,
         "ALTER TABLE ONLY nn_parent ALTER COLUMN a DROP NOT NULL",
@@ -69,8 +69,8 @@ fn only_not_null_preserves_no_inherit_identity_through_rollback_and_reopen() {
             .sqlstate(),
         Some("23502")
     );
-    assert!(constraint(&engine, "nn_parent").is_empty());
-    assert!(constraint(&engine, "nn_child").is_empty());
+    assert_eq!(constraint(&engine, "nn_parent").len(), 0);
+    assert_eq!(constraint(&engine, "nn_child").len(), 0);
     exec(&engine, "DELETE FROM nn_child");
     exec(&engine, "ALTER TABLE nn_parent ALTER COLUMN a SET NOT NULL");
     assert_eq!(
@@ -115,8 +115,8 @@ fn only_not_null_distinguishes_leaf_and_partition_parents() {
         "42P16",
         "constraint must be added to child tables too",
     );
-    assert!(constraint(&engine, "nn_partitioned").is_empty());
-    assert!(constraint(&engine, "nn_partition").is_empty());
+    assert_eq!(constraint(&engine, "nn_partitioned").len(), 0);
+    assert_eq!(constraint(&engine, "nn_partition").len(), 0);
     exec(
         &engine,
         "ALTER TABLE nn_partitioned ALTER COLUMN a SET NOT NULL",
@@ -141,7 +141,7 @@ fn recursive_not_null_rejects_existing_no_inherit_before_mutation() {
     ] {
         error(&engine, &format!("ALTER TABLE nn_parent {action}"), state,
             "cannot change NO INHERIT status of NOT NULL constraint \"child_nn\" on relation \"nn_child\"");
-        assert!(constraint(&engine, "nn_parent").is_empty());
+        assert_eq!(constraint(&engine, "nn_parent").len(), 0);
         assert_eq!(constraint(&engine, "nn_child"), before);
     }
     exec(&engine, "CREATE ROLE nn_owner");
@@ -155,7 +155,7 @@ fn recursive_not_null_rejects_existing_no_inherit_before_mutation() {
         "must be owner of table nn_child",
     );
     exec(&engine, "RESET ROLE");
-    assert!(constraint(&engine, "nn_parent").is_empty());
+    assert_eq!(constraint(&engine, "nn_parent").len(), 0);
     assert_eq!(constraint(&engine, "nn_child"), before);
 }
 
@@ -312,5 +312,5 @@ fn set_not_null_reports_column_and_existing_row_errors_atomically() {
         "23502",
         "column \"a\" of relation \"nn_errors\" contains null values",
     );
-    assert!(constraint(&engine, "nn_errors").is_empty());
+    assert_eq!(constraint(&engine, "nn_errors").len(), 0);
 }

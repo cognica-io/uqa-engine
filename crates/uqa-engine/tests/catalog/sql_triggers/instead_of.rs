@@ -327,7 +327,7 @@ fn instead_of_view_merge_allows_repeated_candidates_and_suppresses_null_results(
          RETURNING merge_action(), source.id, target.id",
     );
     assert_eq!(suppressed.affected_rows, 0);
-    assert!(suppressed.rows.is_empty());
+    assert_eq!(suppressed.rows.len(), 0);
     assert_eq!(
         strings(
             &engine,
@@ -452,9 +452,12 @@ fn view_merge_trigger_definitions_route_even_when_replica_mode_suppresses_them()
         ),
         vec!["one"]
     );
-    assert!(exec(&engine, "SELECT entry FROM view_trigger_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT entry FROM view_trigger_log")
+            .rows
+            .len(),
+        0
+    );
     exec(&engine, "RESET session_replication_role");
 }
 
@@ -718,7 +721,7 @@ fn view_merge_keeps_source_and_target_on_the_pre_statement_trigger_snapshot() {
          RETURNING merge_action(), target.id, target.value",
     );
     assert_eq!(merged.affected_rows, 0);
-    assert!(merged.rows.is_empty());
+    assert_eq!(merged.rows.len(), 0);
     assert_eq!(
         strings(
             &engine,
@@ -869,7 +872,7 @@ fn insert_select_keeps_the_statement_snapshot_across_before_statement_triggers()
         "INSERT INTO snapshot_view SELECT id, value FROM snapshot_source RETURNING id, value",
     );
     assert_eq!(inserted.affected_rows, 0);
-    assert!(inserted.rows.is_empty());
+    assert_eq!(inserted.rows.len(), 0);
     assert_eq!(
         strings(
             &engine,
@@ -878,9 +881,7 @@ fn insert_select_keeps_the_statement_snapshot_across_before_statement_triggers()
         ),
         vec!["seeded"]
     );
-    assert!(exec(&engine, "SELECT id FROM snapshot_base")
-        .rows
-        .is_empty());
+    assert_eq!(exec(&engine, "SELECT id FROM snapshot_base").rows.len(), 0);
     for sql in [
         "CREATE FUNCTION seed_snapshot_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO snapshot_base VALUES (2, 'update-seeded'); RETURN NULL; END $$",
         "CREATE FUNCTION seed_snapshot_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO snapshot_base VALUES (3, 'delete-seeded'); RETURN NULL; END $$",
@@ -896,7 +897,7 @@ fn insert_select_keeps_the_statement_snapshot_across_before_statement_triggers()
         "UPDATE snapshot_view SET value = 'updated' RETURNING id, value",
     );
     assert_eq!(updated.affected_rows, 0);
-    assert!(updated.rows.is_empty());
+    assert_eq!(updated.rows.len(), 0);
     assert_eq!(
         strings(
             &engine,

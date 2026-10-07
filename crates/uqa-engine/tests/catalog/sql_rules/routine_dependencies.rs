@@ -41,12 +41,15 @@ fn bound_rule_condition_routines_enforce_exact_drop_dependencies() {
         &engine,
         "DROP FUNCTION rule_routine_dependency.accepted(INTEGER) CASCADE",
     );
-    assert!(exec(
-        &engine,
-        "SELECT rulename FROM pg_rewrite WHERE rulename = 'condition_routine_dependency'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT rulename FROM pg_rewrite WHERE rulename = 'condition_routine_dependency'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]
@@ -73,12 +76,15 @@ fn bound_rule_action_routines_enforce_exact_drop_dependencies() {
         &engine,
         "DROP FUNCTION rule_action_routine.mapped(INTEGER) CASCADE",
     );
-    assert!(exec(
-        &engine,
-        "SELECT rulename FROM pg_rewrite WHERE rulename = 'action_routine_dependency'",
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT rulename FROM pg_rewrite WHERE rulename = 'action_routine_dependency'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]
@@ -140,19 +146,25 @@ fn function_cascade_drops_rules_that_depend_on_cascading_views() {
            INSERT INTO cascading_rule_view_log SELECT value FROM cascading_rule_view;
          DROP FUNCTION cascading_rule_view_value(INTEGER) CASCADE",
     );
-    assert!(exec(
-        &engine,
-        "SELECT rulename FROM pg_rewrite
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT rulename FROM pg_rewrite
              WHERE rulename = 'cascading_rule_view_dependency'",
-    )
-    .rows
-    .is_empty());
-    assert!(exec(
-        &engine,
-        "SELECT relname FROM pg_class WHERE relname = 'cascading_rule_view'",
-    )
-    .rows
-    .is_empty());
+        )
+        .rows
+        .len(),
+        0
+    );
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT relname FROM pg_class WHERE relname = 'cascading_rule_view'",
+        )
+        .rows
+        .len(),
+        0
+    );
 }
 
 #[test]
@@ -222,10 +234,11 @@ fn scalar_rule_condition_routines_are_creation_bound_and_drop_dependent() {
              SET search_path = scalar_condition_second, public;
              INSERT INTO scalar_condition_first.events VALUES (1)",
         );
-        assert!(
+        assert_eq!(
             exec(&engine, "SELECT id FROM scalar_condition_first.events")
                 .rows
-                .is_empty()
+                .len(),
+            0
         );
     }
     let engine = Engine::open(&path).expect("bound scalar rule condition must restore");
@@ -234,10 +247,11 @@ fn scalar_rule_condition_routines_are_creation_bound_and_drop_dependent() {
         "SET search_path = scalar_condition_second, public;
          INSERT INTO scalar_condition_first.events VALUES (2)",
     );
-    assert!(
+    assert_eq!(
         exec(&engine, "SELECT id FROM scalar_condition_first.events")
             .rows
-            .is_empty()
+            .len(),
+        0
     );
     let error = engine
         .sql(

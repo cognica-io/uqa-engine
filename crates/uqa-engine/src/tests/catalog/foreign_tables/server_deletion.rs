@@ -31,7 +31,7 @@ fn foreign_server_deletion_restores_metadata_and_dependencies_on_undo() {
             original
         );
         assert_eq!(retained.snapshot().definitions.foreign_tables.len(), 1);
-        assert!(engine.list_foreign_tables().unwrap().is_empty());
+        assert_eq!(engine.list_foreign_tables().unwrap().len(), 0);
         if let Some(peer) = &peer {
             assert_eq!(
                 peer.foreign_server("source").unwrap().unwrap().options,
@@ -77,7 +77,7 @@ fn direct_foreign_server_deletion_obeys_authority_restrict_and_read_only_state()
         let directory = tempfile::tempdir().unwrap();
         let engine = open(provider, &directory.path().join("direct-drop.db"));
         assert!(!engine.drop_foreign_server("absent").unwrap());
-        assert!(engine.take_sql_notices().is_empty());
+        assert_eq!(engine.take_sql_notices().len(), 0);
         sql(&engine, "CREATE ROLE server_owner; CREATE ROLE other; SET ROLE server_owner; CREATE SERVER source FOREIGN DATA WRAPPER memory_fdw; RESET ROLE; CREATE FOREIGN TABLE remote(v integer) SERVER source OPTIONS(source 'memory')");
         sql(&engine, "SET ROLE other");
         assert_eq!(

@@ -99,7 +99,7 @@ fn recursive_add_preserves_local_checks_and_rejects_unvalidated_child_conflicts_
         "ALTER TABLE invalid_parent ADD CONSTRAINT positive CHECK(a>0)",
         "42P17",
     );
-    assert!(checks(&engine, "invalid_parent").is_empty());
+    assert_eq!(checks(&engine, "invalid_parent").len(), 0);
     state(&engine, "invalid_child", "positive", true, 0, false);
 }
 
@@ -212,7 +212,7 @@ fn recursive_and_only_drop_preserve_local_or_still_inherited_checks() {
     state(&engine, "check_shared", "positive", false, 1, true);
     state(&engine, "check_local", "positive", true, 0, true);
     exec(&engine, "ALTER TABLE check_right DROP CONSTRAINT positive");
-    assert!(checks(&engine, "check_shared").is_empty());
+    assert_eq!(checks(&engine, "check_shared").len(), 0);
     exec(
         &engine,
         "CREATE TABLE only_parent(a integer, CONSTRAINT positive CHECK(a>0))",
@@ -320,7 +320,7 @@ fn no_inherit_column_and_table_checks_are_excluded_from_new_children() {
         );
         exec(&engine, "CREATE TABLE check_child() INHERITS(check_parent)");
         exec(&engine, "INSERT INTO check_child VALUES(-1)");
-        assert!(checks(&engine, "check_child").is_empty());
+        assert_eq!(checks(&engine, "check_child").len(), 0);
     }
 }
 
@@ -480,7 +480,7 @@ fn column_merge_keeps_check_propagation_independent_and_leaves_legacy_rows_unval
         "23514",
     );
     assert_eq!(engine.sql("SELECT count(*) AS n FROM pg_attribute WHERE attrelid='reject_parent'::regclass AND attname='b'", &[]).unwrap().rows[0]["n"], Value::Int(0));
-    assert!(checks(&engine, "reject_child").is_empty());
+    assert_eq!(checks(&engine, "reject_child").len(), 0);
     assert_eq!(
         engine
             .sql("SELECT b FROM ONLY reject_child", &[])

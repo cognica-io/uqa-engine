@@ -71,7 +71,7 @@ fn empty_pg18_catalog_relations_keep_their_declared_row_types() {
             Some(ColumnType::Text),
         ]
     );
-    assert!(descriptions.rows.is_empty());
+    assert_eq!(descriptions.rows.len(), 0);
 
     let matviews = eng
         .sql("SELECT * FROM pg_catalog.pg_matviews", &[])
@@ -100,7 +100,7 @@ fn empty_pg18_catalog_relations_keep_their_declared_row_types() {
             Some(ColumnType::Text),
         ]
     );
-    assert!(matviews.rows.is_empty());
+    assert_eq!(matviews.rows.len(), 0);
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn information_schema_uses_pg18_domain_type_identities() {
         )
         .unwrap();
 
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
     assert_eq!(
         result.column_types,
         [
@@ -174,7 +174,7 @@ fn information_schema_routines_has_the_pg18_shape() {
         )
         .unwrap();
 
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
     assert_eq!(result.columns.len(), 82);
     assert_eq!(result.columns[0], "specific_catalog");
     assert_eq!(result.columns[54], "created");

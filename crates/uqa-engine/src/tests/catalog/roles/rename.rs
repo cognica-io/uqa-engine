@@ -139,7 +139,7 @@ fn sql_role_rename_preserves_durable_authority_and_reused_names() {
 
 fn assert_authority(engine: &Engine, owner_oid: i64) {
     let result = sql(engine, "SELECT relowner FROM pg_class WHERE relnamespace = (SELECT oid FROM pg_namespace WHERE nspname='owned')");
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in result.rows {
         assert_eq!(row["relowner"], Value::Int(owner_oid));
     }

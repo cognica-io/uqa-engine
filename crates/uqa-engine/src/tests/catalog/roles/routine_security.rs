@@ -139,7 +139,7 @@ fn private_routine_authority_survives_refresh_savepoint_and_reopen() {
                     Value::Str("private_owner".into())
                 );
                 sql(&first, "RESET ROLE");
-                assert!(sql(&second, "SELECT proowner FROM pg_proc WHERE proname IN ('private_routine', 'private_procedure')").rows.is_empty());
+                assert_eq!(sql(&second, "SELECT proowner FROM pg_proc WHERE proname IN ('private_routine', 'private_procedure')").rows.len(), 0);
                 sql(&first, finish);
                 assert_eq!(sql(&second, "SELECT proowner FROM pg_proc WHERE proname IN ('private_routine', 'private_procedure')").rows.len(), if finish == "COMMIT" { 2 } else { 0 });
                 assert_eq!(sql(&second, "SELECT has_function_privilege('delegate', 'changed_acl()', 'EXECUTE') AS allowed").rows[0]["allowed"], Value::Bool(finish != "COMMIT"));
@@ -207,11 +207,12 @@ fn routine_format_one_conversion_preserves_revoked_owner_execute() {
         )
         .unwrap();
         assert_eq!(stored["routine_catalog_format"], 3);
-        assert!(
+        assert_eq!(
             stored["definitions"]["public.stored_routine"][0]["execute_acl"]
                 .as_array()
                 .unwrap()
-                .is_empty()
+                .len(),
+            0
         );
     }
 }

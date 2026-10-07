@@ -161,8 +161,8 @@ fn complete_binding_catalog_still_rebuilds_legacy_positions_from_original_source
         (0, 2, 7)
     );
     assert!(index.indexed_field_metadata(3, "body").unwrap().is_some());
-    for tag in [b'p', b'r', b'k', b'o', b'x', b'l', b'f'] {
-        assert!(store.scan_prefix(&[tag]).unwrap().is_empty());
+    for tag in *b"prkoxlf" {
+        assert_eq!(store.scan_prefix(&[tag]).unwrap().len(), 0);
     }
     let graph_before = store.scan_prefix(b"e").unwrap();
     drop(index);
@@ -199,7 +199,7 @@ fn descriptor_failure_rolls_back_legacy_conversion_before_source_migration() {
     let store = storage.store();
     assert_eq!(store.scan_prefix(b"").unwrap(), before);
     assert!(store.get(&inverted_index_format_key()).unwrap().is_none());
-    assert!(store.scan_prefix(b"e").unwrap().is_empty());
+    assert_eq!(store.scan_prefix(b"e").unwrap().len(), 0);
     store.put(&binding_key, &binding).unwrap();
     drop(store);
     drop(storage);

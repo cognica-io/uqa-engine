@@ -47,7 +47,7 @@ fn deep_model_round_trips_through_sqlite_catalog() {
             .expect("read initial prediction")
             .expect("predict from initial")
     };
-    assert!(!initial_predictions.is_empty());
+    assert_ne!(initial_predictions.len(), 0);
 
     // Drop and reopen the same database; the model must rehydrate from
     // the catalog without `save_model` being called again.

@@ -124,7 +124,7 @@ fn search_revision_controls_complete_phrase_analysis() {
     engine
         .set_table_field_analyzer("phrases", "body", "phrase_keyword", "search")
         .unwrap();
-    assert!(ids(&engine, r#"fts_match(body, '"red fox"')"#).is_empty());
+    assert_eq!(ids(&engine, r#"fts_match(body, '"red fox"')"#).len(), 0);
     engine
         .set_table_field_analyzer("phrases", "body", "phrase_words", "search")
         .unwrap();

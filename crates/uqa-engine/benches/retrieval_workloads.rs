@@ -224,7 +224,7 @@ fn bench_search(c: &mut Criterion) {
         .label("Person")
         .execute(&graph)
         .expect("graph smoke search");
-    assert!(!text_smoke.rows.is_empty());
+    assert_ne!(text_smoke.rows.len(), 0);
     assert_eq!(vector_smoke.rows.len(), LIMIT);
     assert!(!hybrid_smoke.is_empty());
     assert_eq!(graph_smoke.len(), 800);

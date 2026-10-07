@@ -195,10 +195,11 @@ pub(super) fn assert_update_from_delete_using_returning_and_visibility() {
          RETURNING item_id, visible, doubled",
     );
     assert_eq!(hidden.rows[0]["visible"], Value::Bool(false));
-    assert!(
+    assert_eq!(
         exec(&engine, "SELECT * FROM automatic_items WHERE item_id = 2")
             .rows
-            .is_empty()
+            .len(),
+        0
     );
 
     let deleted = exec(
@@ -286,9 +287,12 @@ pub(super) fn assert_view_row_type_is_the_dml_name_boundary() {
     }
     let unchanged = exec(&engine, "SELECT shown FROM row_type_base WHERE id = 1");
     assert_eq!(unchanged.rows[0]["shown"], Value::Str("shown".into()));
-    assert!(exec(&engine, "SELECT * FROM row_type_base WHERE id = 2")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM row_type_base WHERE id = 2")
+            .rows
+            .len(),
+        0
+    );
 
     exec(
         &engine,

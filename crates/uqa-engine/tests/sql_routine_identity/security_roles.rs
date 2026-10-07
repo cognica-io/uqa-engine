@@ -114,7 +114,7 @@ fn pg18_routine_owner_acl_context_and_catalog_move_together() {
             &[],
         )
         .unwrap();
-    assert!(!support_values.rows.is_empty());
+    assert_ne!(support_values.rows.len(), 0);
     assert!(support_values
         .rows
         .iter()
@@ -158,7 +158,7 @@ fn pg18_support_function_validation_precedes_superuser_check() {
             &[],
         )
         .unwrap();
-    assert!(rows.rows.is_empty());
+    assert_eq!(rows.rows.len(), 0);
 }
 
 #[test]

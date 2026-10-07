@@ -86,7 +86,7 @@ fn verify_dml(engine: &Engine) {
     assert_eq!(searches(&plan).len(), 1);
     assert_eq!(sql(engine, "SELECT * FROM picked").rows.len(), 2);
     sql(engine, "ROLLBACK");
-    assert!(sql(engine, "SELECT * FROM picked").rows.is_empty());
+    assert_eq!(sql(engine, "SELECT * FROM picked").rows.len(), 0);
     assert_eq!(
         engine
             .runtime
@@ -231,13 +231,13 @@ fn diskann_analyze_distinguishes_non_finite_norm_and_unexecuted_or_unsupported_l
     assert!(zero.to_string().contains("knn_match.k must be positive"));
     assert!(engine.runtime.diagnostics.capture().is_none());
     let empty = analyze(&engine, &QUERY.replace("WHERE ", "WHERE FALSE AND "));
-    assert!(searches(&empty).is_empty());
+    assert_eq!(searches(&empty).len(), 0);
     assert_eq!(empty["Actual Rows"], 0);
     sql(
         &engine,
         "DROP INDEX diskann_idx; CREATE INDEX hnsw_idx ON diskann_docs USING hnsw(embedding)",
     );
-    assert!(searches(&analyze(&engine, QUERY)).is_empty());
+    assert_eq!(searches(&analyze(&engine, QUERY)).len(), 0);
 }
 
 #[test]

@@ -160,7 +160,7 @@ fn missing_foreign_server_rolls_back_implicit_sequence_creation_before_reopen() 
     assert!(engine.durable.sequences.read().is_empty());
     let catalog = engine.storage.catalog.as_ref().unwrap();
     assert!(catalog.load_foreign_tables().unwrap().is_empty());
-    assert!(catalog.load_sequence_rows().unwrap().is_empty());
+    assert_eq!(catalog.load_sequence_rows().unwrap().len(), 0);
     drop(engine);
     let reopened = Engine::open(&path).unwrap();
     assert!(reopened.durable.foreign_tables.read().is_empty());

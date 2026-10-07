@@ -43,7 +43,7 @@ fn rejected_create_syntax_has_no_current_or_reopened_catalog_side_effects() {
     let reopened = Engine::open(&database).unwrap();
     assert!(!reopened.has_schema("owned").unwrap());
     assert!(!reopened.has_schema("bundled").unwrap());
-    assert!(reopened.table_names().unwrap().is_empty());
-    assert!(reopened.list_views().unwrap().is_empty());
-    assert!(reopened.list_sequences().unwrap().is_empty());
+    assert_eq!(reopened.table_names().unwrap().len(), 0);
+    assert_eq!(reopened.list_views().unwrap().len(), 0);
+    assert_eq!(reopened.list_sequences().unwrap().len(), 0);
 }

@@ -151,11 +151,13 @@ fn foreign_server_initial_open_upgrades_legacy_metadata_once_for_each_persistent
             .get_metadata("foreign-wrapper-catalog-format")
             .unwrap()
             .is_none());
-        assert!(raw
-            .catalog
-            .metadata_with_prefix("foreign-wrapper/")
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            raw.catalog
+                .metadata_with_prefix("foreign-wrapper/")
+                .unwrap()
+                .len(),
+            0
+        );
         raw.catalog.delete_metadata("sql_triggers_json").unwrap();
         let upgraded = Engine::from_persistent_provider(Arc::clone(&factory)).unwrap();
         let expected = server(&upgraded, "legacy");
@@ -277,7 +279,7 @@ fn foreign_server_name_reservations_follow_competing_commit_or_rollback() {
                 );
                 assert_eq!(server(&first, "competing"), original);
             }
-            assert!(second.take_sql_notices().is_empty());
+            assert_eq!(second.take_sql_notices().len(), 0);
             assert_eq!(
                 second.foreign_server("competing").unwrap().unwrap().options["source"],
                 schedule["final_source"]

@@ -308,7 +308,7 @@ fn cross_process_deadlock_child() {
     let outcome = engine.sql("SELECT id FROM accounts WHERE id = 1 FOR UPDATE", &[]);
     let outcome_tag = match &outcome {
         Ok(_) => "granted".to_string(),
-        Err(error) => sqlstate(error).to_string(),
+        Err(error) => sqlstate(error),
     };
     publish_file_contents(&handshake.join("child-outcome"), outcome_tag);
     engine.sql("ROLLBACK", &[]).ok();
@@ -343,7 +343,7 @@ fn separate_processes_detect_lock_cycles() {
     let parent_outcome = engine.sql("SELECT id FROM accounts WHERE id = 2 FOR UPDATE", &[]);
     let parent_tag = match &parent_outcome {
         Ok(_) => "granted".to_string(),
-        Err(error) => sqlstate(error).to_string(),
+        Err(error) => sqlstate(error),
     };
     engine.sql("ROLLBACK", &[]).ok();
     let child_tag = wait_for_file_contents(&directory.path().join("child-outcome"));
@@ -371,7 +371,7 @@ fn mixed_process_deadlock_child() {
     let outcome = engine.sql("SELECT id FROM accounts WHERE id = 1 FOR UPDATE", &[]);
     let outcome_tag = match &outcome {
         Ok(_) => "granted".to_string(),
-        Err(error) => sqlstate(error).to_string(),
+        Err(error) => sqlstate(error),
     };
     publish_file_contents(&handshake.join("mixed-child-outcome"), outcome_tag);
     engine.sql("ROLLBACK", &[]).ok();

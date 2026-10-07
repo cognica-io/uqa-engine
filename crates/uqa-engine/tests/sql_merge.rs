@@ -354,7 +354,7 @@ fn merge_do_nothing_actions_return_no_rows_and_do_not_count() {
         )
         .unwrap();
     assert_eq!(result.affected_rows, 0);
-    assert!(result.rows.is_empty());
+    assert_eq!(result.rows.len(), 0);
     assert_eq!(
         eng.sql("SELECT COUNT(*) AS n FROM inventory", &[])
             .unwrap()

@@ -36,7 +36,7 @@ fn engine() -> Engine {
 }
 
 fn assert_nonempty_unit_scores(result: &uqa_sql::SQLResult) {
-    assert!(!result.rows.is_empty());
+    assert_ne!(result.rows.len(), 0);
     for row in &result.rows {
         match row.get("_score") {
             Some(Value::Float(score)) => assert!(*score > 0.0 && *score < 1.0),

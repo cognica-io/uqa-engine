@@ -235,9 +235,7 @@ pub(super) fn assert_nested_instead_rules_stop_lower_rewrite_layers() {
     let deleted = exec(&engine, "DELETE FROM nested_stop_top WHERE id = 2");
     assert_eq!(updated.affected_rows, 0);
     assert_eq!(deleted.affected_rows, 0);
-    assert!(exec(&engine, "SELECT * FROM nested_stop_log")
-        .rows
-        .is_empty());
+    assert_eq!(exec(&engine, "SELECT * FROM nested_stop_log").rows.len(), 0);
     assert_eq!(
         exec(&engine, "SELECT count(*) AS total FROM nested_stop_base").rows[0]["total"],
         Value::Int(2)
@@ -300,9 +298,10 @@ pub(super) fn assert_rule_insert_images_conflicts_and_lazy_sources() {
     );
     let nested = exec(&engine, "INSERT INTO lazy_select_outer SELECT 1 / 0");
     assert_eq!(nested.affected_rows, 0);
-    assert!(exec(&engine, "SELECT * FROM lazy_select_base")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM lazy_select_base").rows.len(),
+        0
+    );
 
     exec(
         &engine,
@@ -397,9 +396,10 @@ pub(super) fn assert_rule_condition_case_projection_is_lazy() {
         "UPDATE condition_lazy_view SET id = id WHERE id = 1",
     );
     assert_eq!(updated.affected_rows, 1);
-    assert!(exec(&engine, "SELECT * FROM condition_lazy_log")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM condition_lazy_log").rows.len(),
+        0
+    );
 }
 
 pub(super) fn assert_nested_insert_rule_suppression_and_order() {
@@ -425,9 +425,12 @@ pub(super) fn assert_nested_insert_rule_suppression_and_order() {
     );
     assert_eq!(suppressed.rows.len(), 1);
     assert_eq!(suppressed.rows[0]["event"], Value::Str("outer".into()));
-    assert!(exec(&engine, "SELECT * FROM nested_suppression_base")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM nested_suppression_base")
+            .rows
+            .len(),
+        0
+    );
 
     exec(
         &engine,
@@ -656,9 +659,12 @@ pub(super) fn assert_nested_views_preserve_aliases_and_defaults() {
         "DELETE FROM nested_alias WHERE renamed_id = 24 RETURNING renamed_id, renamed_note",
     );
     assert_eq!(deleted.rows[0]["renamed_id"], Value::Int(24));
-    assert!(exec(&engine, "SELECT * FROM nested_base WHERE id = 24")
-        .rows
-        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT * FROM nested_base WHERE id = 24")
+            .rows
+            .len(),
+        0
+    );
 }
 
 pub(super) fn assert_partition_tableoid_uses_the_physical_relation() {

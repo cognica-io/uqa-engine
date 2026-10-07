@@ -103,7 +103,7 @@ fn generated_expression_types_are_resolved_before_catalog_mutation() {
         ),
     ] {
         let error = engine.sql(sql, &[]).unwrap_err().to_string();
-        assert!(!error.is_empty());
+        assert_ne!(error, "");
         assert!(!engine.has_table(table).unwrap(), "{table}: {error}");
     }
 

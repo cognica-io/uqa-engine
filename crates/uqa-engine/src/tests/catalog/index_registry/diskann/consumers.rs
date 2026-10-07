@@ -127,12 +127,15 @@ fn raw_consumers(engine: &Engine) {
             .collect::<Vec<_>>()
     );
     let first = scores(&query(engine, "knn_match(embedding, ARRAY[1.0,0.0], 1)"))[0].0;
-    assert!(query(
-        engine,
-        &format!("knn_match(embedding, ARRAY[1.0,0.0], 1) AND id<>{first}")
-    )
-    .rows
-    .is_empty());
+    assert_eq!(
+        query(
+            engine,
+            &format!("knn_match(embedding, ARRAY[1.0,0.0], 1) AND id<>{first}")
+        )
+        .rows
+        .len(),
+        0
+    );
     assert_eq!(
         direct_scores(
             engine,
@@ -155,7 +158,7 @@ fn diskann_public_scores_counts_thresholds_and_filters_preserve_exact_semantics(
             raw_consumers(engine);
         }
         sql(engine, "DELETE FROM diskann_docs");
-        assert!(query(engine, KNN).rows.is_empty());
+        assert_eq!(query(engine, KNN).rows.len(), 0);
         assert!(engine
             .vector_similarity_search("diskann_docs", "embedding", vec![1.0, 0.0], -1.0)
             .unwrap()
@@ -166,7 +169,7 @@ fn diskann_public_scores_counts_thresholds_and_filters_preserve_exact_semantics(
         );
         assert_eq!(scores(&query(engine, KNN)), [(7, 0.0)]);
         sql(engine, "UPDATE diskann_docs SET embedding=NULL");
-        assert!(query(engine, KNN).rows.is_empty());
+        assert_eq!(query(engine, KNN).rows.len(), 0);
     });
 }
 
