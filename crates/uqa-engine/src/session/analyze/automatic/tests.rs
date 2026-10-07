@@ -9,8 +9,24 @@
 use super::*;
 
 fn sessions() -> (tempfile::TempDir, Engine, Engine) {
+    sessions_for(0)
+}
+
+fn sessions_for(provider: usize) -> (tempfile::TempDir, Engine, Engine) {
     let directory = tempfile::tempdir().unwrap();
-    let writer = Engine::open(&directory.path().join("statistics.db")).unwrap();
+    let path = directory.path().join("statistics.db");
+    let writer = match provider {
+        0 => Engine::open(&path).unwrap(),
+        1 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!("unknown statistics provider"),
+    };
     let worker = writer.new_session().unwrap();
     // These tests drive maintenance themselves; stop every automatic client before creating data that a background worker could analyze first.
     worker.release_automatic_statistics_client();
@@ -94,9 +110,9 @@ fn automatic_statistics_yield_to_a_serialized_writer_before_ddl_upgrade() {
     assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 2);
 }
 
-#[test]
-fn sampling_read_snapshot_allows_writes_and_rejects_obsolete_statistics() {
-    let (_directory, writer, worker) = sessions();
+#[rstest::rstest]
+fn sampling_publishes_while_concurrent_writes_remain_pending(#[values(0, 1, 2)] provider: usize) {
+    let (_directory, writer, worker) = sessions_for(provider);
     let backend = worker.storage.backend.as_ref().unwrap();
     backend.begin_read_transaction().unwrap();
     worker.refresh_pinned_transaction_snapshot().unwrap();
@@ -109,16 +125,26 @@ fn sampling_read_snapshot_allows_writes_and_rejects_obsolete_statistics() {
     // reserve the backend writer or the application's statement gate.
     writer.sql("INSERT INTO t VALUES (2)", &[]).unwrap();
     backend.rollback_transaction().unwrap();
-    assert!(!worker
+    assert!(worker
         .publish_automatic_analysis("public.t", sampled)
         .unwrap());
-    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    let catalog = worker.storage.catalog.as_ref().unwrap();
+    assert_eq!(
+        catalog.load_column_stats("public.t").unwrap()[0].row_count,
+        1
+    );
+    assert!(MaintenanceState::load(catalog.as_ref(), "public.t")
+        .unwrap()
+        .dirty());
+    assert!(!worker.run_automatic_analyze("public.t").unwrap());
     assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 2);
 }
 
-#[test]
-fn a_change_its_session_keeps_still_makes_an_inflight_sample_obsolete() {
-    let (_directory, writer, worker) = sessions();
+#[rstest::rstest]
+fn sampled_statistics_preserve_changes_a_writer_keeps_in_its_session(
+    #[values(0, 1, 2)] provider: usize,
+) {
+    let (_directory, writer, worker) = sessions_for(provider);
     let changes = |engine: &Engine| {
         let json = engine
             .storage
@@ -147,26 +173,29 @@ fn a_change_its_session_keeps_still_makes_an_inflight_sample_obsolete() {
         .unwrap()
         .unwrap();
     assert_eq!(sampled.row_count, 61);
-    // The analysis is due already, so the writer keeps this change to itself: the record stays as the sample saw it, and only the table's data generation tells of the write.
+    // Native SQLite can retain this change in its session because its data
+    // generation records the write. The K/V providers record every change.
     writer.sql("INSERT INTO t VALUES (62)", &[]).unwrap();
     backend.rollback_transaction().unwrap();
-    assert_eq!(changes(&writer), 60);
-    assert!(!worker
+    assert_eq!(changes(&writer), if provider == 0 { 60 } else { 61 });
+    assert!(worker
         .publish_automatic_analysis("public.t", sampled)
         .unwrap());
-    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    assert_eq!(changes(&writer), 1);
+    assert!(!worker.run_automatic_analyze("public.t").unwrap());
     assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 62);
     assert_eq!(changes(&writer), 0);
     // That analysis sampled the change the writer kept, so the writer's next change is recorded alone.
     writer.sql("INSERT INTO t VALUES (63)", &[]).unwrap();
     assert_eq!(changes(&writer), 1);
 
-    // An analysis that sampled before a kept change was committed has not seen it. The writer records it with its next change.
+    // A sample has not seen this later change. Native SQLite retains it until
+    // the writer's next change; K/V publication keeps its already recorded delta.
     worker.sql("BEGIN; ANALYZE t", &[]).unwrap();
     writer.sql("INSERT INTO t VALUES (64)", &[]).unwrap();
-    assert_eq!(changes(&writer), 1);
+    assert_eq!(changes(&writer), if provider == 0 { 1 } else { 2 });
     worker.sql("COMMIT", &[]).unwrap();
-    assert_eq!(changes(&writer), 0);
+    assert_eq!(changes(&writer), u64::from(provider != 0));
     writer.sql("INSERT INTO t VALUES (65)", &[]).unwrap();
     assert_eq!(changes(&writer), 2);
 }
@@ -260,9 +289,9 @@ fn statistics_publication_waits_for_table_retirement_and_rechecks_its_identity()
     }
 }
 
-#[test]
-fn sampling_cannot_publish_into_a_same_name_replacement() {
-    let (_directory, writer, worker) = sessions();
+#[rstest::rstest]
+fn sampling_cannot_publish_into_a_same_name_replacement(#[values(0, 1, 2)] provider: usize) {
+    let (_directory, writer, worker) = sessions_for(provider);
     let backend = worker.storage.backend.as_ref().unwrap();
     backend.begin_read_transaction().unwrap();
     worker.refresh_pinned_transaction_snapshot().unwrap();
@@ -279,9 +308,9 @@ fn sampling_cannot_publish_into_a_same_name_replacement() {
     assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 3);
 }
 
-#[test]
-fn explicit_analysis_supersedes_an_inflight_automatic_sample() {
-    let (_directory, writer, worker) = sessions();
+#[rstest::rstest]
+fn explicit_analysis_supersedes_an_inflight_automatic_sample(#[values(0, 1, 2)] provider: usize) {
+    let (_directory, writer, worker) = sessions_for(provider);
     let backend = worker.storage.backend.as_ref().unwrap();
     backend.begin_read_transaction().unwrap();
     worker.refresh_pinned_transaction_snapshot().unwrap();
@@ -294,6 +323,28 @@ fn explicit_analysis_supersedes_an_inflight_automatic_sample() {
     assert!(!worker
         .publish_automatic_analysis("public.t", sampled)
         .unwrap());
+}
+
+#[rstest::rstest]
+fn column_changes_invalidate_an_inflight_automatic_sample(#[values(0, 1, 2)] provider: usize) {
+    let (_directory, writer, worker) = sessions_for(provider);
+    let backend = worker.storage.backend.as_ref().unwrap();
+    backend.begin_read_transaction().unwrap();
+    worker.refresh_pinned_transaction_snapshot().unwrap();
+    let sampled = worker
+        .collect_automatic_analysis("public.t")
+        .unwrap()
+        .unwrap();
+    backend.rollback_transaction().unwrap();
+    writer
+        .sql("ALTER TABLE t RENAME COLUMN id TO renamed", &[])
+        .unwrap();
+    assert!(!worker
+        .publish_automatic_analysis("public.t", sampled)
+        .unwrap());
+    let statistics = worker.column_stats("t").unwrap();
+    assert_eq!(statistics["renamed"].row_count, 1);
+    assert!(!statistics.contains_key("id"));
 }
 
 #[test]

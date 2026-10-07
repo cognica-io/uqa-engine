@@ -4,6 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+// libtest generates a single descriptor array for the crate's unit tests.
+#![cfg_attr(
+    test,
+    expect(
+        clippy::large_stack_arrays,
+        reason = "the compiler-generated test descriptor array exceeds the stack-array lint threshold"
+    )
+)]
+
 //! Top-level engine: a per-table [`DocumentStore`] + [`InvertedIndex`]
 //! pair, document mutation entry points, and a minimal `search` API for
 //! text-only round trips. Backed either by in-memory stores

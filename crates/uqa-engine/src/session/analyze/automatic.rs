@@ -10,9 +10,9 @@ mod sampling;
 #[cfg(test)]
 mod tests;
 
-use std::sync::atomic::Ordering;
+use std::sync::{atomic::Ordering, Arc};
 
-use uqa_sql::ast::{ColumnType, GeneratedColumnKind};
+use uqa_sql::ast::{ColumnDef, ColumnType, GeneratedColumnKind};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 use crate::statistics::{now_ms, MaintenanceState};
@@ -24,6 +24,9 @@ type DataGenerations = Vec<(String, Option<u64>)>;
 struct AutomaticAnalysis {
     object_id: [u8; 16],
     maintenance: MaintenanceState,
+    columns: Arc<Vec<ColumnDef>>,
+    /// Catalog and statistics identities are independent of ordinary row writes.
+    publication: Option<(u64, u64, Option<u64>)>,
     /// The data generation of every table the sample read, where the provider reports generations. A committed row write advances its table's generation, whether or not it rewrote the maintenance record.
     data_generations: Option<DataGenerations>,
     /// The commit sequence the sample read at, where commits are numbered.
@@ -88,9 +91,8 @@ impl Engine {
         ) {
             return Ok(None);
         }
-        let columns = table
-            .columns
-            .read()
+        let definitions = table.columns.snapshot();
+        let columns = definitions
             .iter()
             .filter(|column| {
                 automatic_column(&column.ty)
@@ -103,15 +105,34 @@ impl Engine {
             .collect::<Vec<_>>();
         // Both are read before the sample: a write that commits in between advances a generation past the recorded one, and the sample reads at the recorded sequence or a later one.
         let data_generations = self.sampled_data_generations(name)?;
+        let publication = self.statistics_publication_identity(name)?;
         let sampled_at = self.statistics_sample_sequence();
         let (statistics, row_count) = sampling::collect(self, name, &columns)?;
         Ok(Some(AutomaticAnalysis {
             object_id: table.object_id(),
             maintenance,
+            columns: definitions,
+            publication,
             data_generations,
             sampled_at,
             row_count,
             statistics,
+        }))
+    }
+
+    fn statistics_publication_identity(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<(u64, u64, Option<u64>)>> {
+        let Some(catalog) = self.storage.catalog.as_deref() else {
+            return Ok(None);
+        };
+        Ok(catalog.cache_revisions()?.map(|revisions| {
+            (
+                revisions.table_catalog,
+                revisions.storage_schema,
+                revisions.column_statistics.get(name).copied(),
+            )
         }))
     }
 
@@ -167,26 +188,46 @@ impl Engine {
             let Some(catalog) = engine.storage.catalog.as_deref() else {
                 return Ok(false);
             };
-            // Identity and generation must still match. A concurrent write,
-            // explicit ANALYZE, or DROP/recreate leaves newer work pending.
+            let current = MaintenanceState::load_for(catalog, name, table.object_id())?;
+            let columns = table.columns.snapshot();
+            let same_columns = columns.len() == analysis.columns.len()
+                && columns.iter().zip(analysis.columns.iter()).all(|(a, b)| {
+                    a.object_id == b.object_id
+                        && a.attribute_number == b.attribute_number
+                        && a.name == b.name
+                        && a.ty == b.ty
+                        && a.generated.as_ref().map(|value| &value.kind)
+                            == b.generated.as_ref().map(|value| &value.kind)
+                });
+            // Row writes may continue while a sample is collected. A schema
+            // replacement or a newer ANALYZE still invalidates its publication.
             if table.object_id() != analysis.object_id
-                || MaintenanceState::load_for(catalog, name, table.object_id())?
-                    != analysis.maintenance
-                || engine.sampled_data_generations(name)? != analysis.data_generations
+                || engine.statistics_publication_identity(name)? != analysis.publication
+                || !current.same_analysis(&analysis.maintenance)
+                || !same_columns
             {
                 return Ok(false);
             }
-            Self::persist_column_stats(
-                catalog,
-                name,
-                &analysis.statistics,
+            let data_changed = engine.sampled_data_generations(name)? != analysis.data_generations;
+            let mut published = analysis.maintenance.clone();
+            published.analyzed(
                 table.object_id(),
                 analysis.row_count,
+                crate::statistics::value_size::FORMAT_VERSION,
                 analysis.sampled_at,
             )?;
+            let Some(published) =
+                published.merge_sample(&analysis.maintenance, &current, data_changed, now_ms())?
+            else {
+                return Ok(false);
+            };
+            Self::persist_column_stats_rows(catalog, name, &analysis.statistics)?;
+            published.save(catalog, name)?;
             *table.column_stats.write() = analysis.statistics;
             table.column_stats_loaded.store(true, Ordering::Release);
-            table.column_stats_dirty.store(false, Ordering::Release);
+            table
+                .column_stats_dirty
+                .store(published.dirty(), Ordering::Release);
             engine.note_table_data_changed();
             Ok(true)
         })

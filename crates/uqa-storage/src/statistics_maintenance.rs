@@ -35,6 +35,10 @@ pub struct StatisticsMaintenance {
     /// The commit sequence the last analysis sampled at, where its provider numbers commits: every commit up to it is in the statistics. A record without it says nothing about what its analysis saw.
     #[serde(skip_serializing_if = "Option::is_none")]
     analyzed_at: Option<u64>,
+    /// Identity of the last analysis, independent of later counter increments.
+    /// Legacy records acquire it on their next completed analysis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    analysis_generation: Option<u64>,
 }
 
 impl StatisticsMaintenance {
@@ -137,6 +141,7 @@ impl StatisticsMaintenance {
     ) -> StorageBackendResult<()> {
         self.object_id = Some(object_id);
         self.advance_generation()?;
+        self.analysis_generation = Some(self.generation);
         self.changes = 0;
         self.dirty_since_ms = 0;
         self.analyzed_rows = Some(rows);
@@ -148,6 +153,40 @@ impl StatisticsMaintenance {
     /// Whether the last analysis sampled every commit up to `through`, so that changes a session kept of commits up to there need no counting.
     pub fn covers(&self, through: Option<u64>) -> bool {
         matches!((self.analyzed_at, through), (Some(at), Some(through)) if through <= at)
+    }
+
+    /// Row changes retain the last statistics publication; another analysis
+    /// replaces it even when the resulting estimates happen to be identical.
+    pub fn same_analysis(&self, other: &Self) -> bool {
+        self.analysis_generation == other.analysis_generation
+            && self.analyzed_at == other.analyzed_at
+            && self.analyzed_rows == other.analyzed_rows
+            && self.statistics_format == other.statistics_format
+    }
+
+    /// Publish this sample's reset over changes recorded since `before`. The caller
+    /// must first verify that the relation and its last statistics publication
+    /// still have the captured identities. A changed data generation can also
+    /// represent writes retained privately by their sessions: keep one pending
+    /// change in that case so their absence from the counter cannot mark the
+    /// sampled statistics current. The counter is a maintenance estimate.
+    pub fn merge_sample(
+        &self,
+        before: &Self,
+        current: &Self,
+        data_changed: bool,
+        now: u64,
+    ) -> StorageBackendResult<Option<Self>> {
+        let Some(mut merged) = Self::merge(before, self, current)
+            .map_err(crate::mvcc::VersionError::into_storage_error)?
+        else {
+            return Ok(None);
+        };
+        if data_changed && !merged.dirty() {
+            merged.changes = 1;
+            merged.dirty_since_ms = now;
+        }
+        Ok(Some(merged))
     }
 
     fn advance_generation(&mut self) -> StorageBackendResult<()> {
@@ -247,6 +286,11 @@ impl StatisticsMaintenance {
                 current.analyzed_at
             } else {
                 after.analyzed_at
+            },
+            analysis_generation: if after.analysis_generation == before.analysis_generation {
+                current.analysis_generation
+            } else {
+                after.analysis_generation
             },
         }))
     }

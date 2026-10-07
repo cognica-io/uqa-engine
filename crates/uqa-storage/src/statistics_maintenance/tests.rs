@@ -111,6 +111,73 @@ fn an_analysis_covers_the_commits_up_to_its_sample() {
 }
 
 #[test]
+fn sampled_analysis_keeps_only_changes_after_its_captured_counter() {
+    let mut before = StatisticsMaintenance::default();
+    before.analyzed([1; 16], 10, 1, Some(4)).unwrap();
+    before.record_changes([1; 16], 60, Some(10), 100).unwrap();
+    let mut sampled = before.clone();
+    sampled.analyzed([1; 16], 70, 1, Some(8)).unwrap();
+    let mut current = before.clone();
+    current.record_changes([1; 16], 7, Some(10), 200).unwrap();
+    let merged = sampled
+        .merge_sample(&before, &current, true, 300)
+        .unwrap()
+        .unwrap();
+    assert_eq!(merged.changes, 7);
+    assert_eq!(merged.analyzed_rows, Some(70));
+    assert!(merged.covers(Some(8)));
+    assert!(!merged.covers(Some(9)));
+    assert!(merged.dirty());
+    assert!(!merged.due(false, 300, 1));
+    assert!(merged.due(false, 60_300, 1));
+    let restored: StatisticsMaintenance =
+        serde_json::from_str(&serde_json::to_string(&merged).unwrap()).unwrap();
+    assert_eq!(merged, restored);
+}
+
+#[test]
+fn sampled_analysis_preserves_unrecorded_writes_without_erasing_known_counts() {
+    let mut before = StatisticsMaintenance::default();
+    before.record_changes([1; 16], 60, Some(10), 100).unwrap();
+    let mut sampled = before.clone();
+    sampled.analyzed([1; 16], 70, 1, Some(8)).unwrap();
+    for changed in [false, true] {
+        let merged = sampled
+            .merge_sample(&before, &before, changed, 300)
+            .unwrap()
+            .unwrap();
+        assert_eq!(merged.dirty(), changed);
+        assert_eq!(merged.changes, u64::from(changed));
+        assert_eq!(merged.dirty_since_ms, if changed { 300 } else { 0 });
+    }
+    let mut replacement = before.clone();
+    replacement.analyzed([2; 16], 70, 1, Some(8)).unwrap();
+    assert!(sampled
+        .merge_sample(&before, &replacement, true, 300)
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn identical_analysis_results_still_replace_the_publication_identity() {
+    let mut before = StatisticsMaintenance::default();
+    before.analyzed([1; 16], 10, 1, None).unwrap();
+    let mut written = before.clone();
+    written.record_changes([1; 16], 1, Some(10), 100).unwrap();
+    assert!(written.same_analysis(&before));
+    let mut analyzed = before.clone();
+    analyzed.analyzed([1; 16], 10, 1, None).unwrap();
+    assert!(!analyzed.same_analysis(&before));
+    for (after, current) in [(&written, &analyzed), (&analyzed, &written)] {
+        let merged = StatisticsMaintenance::merge(&before, after, current)
+            .unwrap()
+            .unwrap();
+        assert!(merged.same_analysis(&analyzed));
+        assert!(!merged.same_analysis(&before));
+    }
+}
+
+#[test]
 fn legacy_statistics_are_refreshed_without_waiting_for_another_write() {
     let old: StatisticsMaintenance =
         serde_json::from_str(r#"{"generation":4,"changes":0,"analyzed_rows":120}"#).unwrap();
